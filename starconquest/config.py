@@ -13,9 +13,10 @@ WORLD_SIZE = 1000.0            # game is laid out in a WORLD_SIZE x WORLD_SIZE b
 WORLD_MARGIN = 80.0            # keep nodes this far from the world edge
 
 LY_PER_WORLD_UNIT = 0.1        # cosmetic: a lane's length in light-years
-SHIP_LY_PER_TURN = 8.0         # how many light-years a fleet crosses per turn
+SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
 #   travel_turns = max(1, ceil(length_ly / SHIP_LY_PER_TURN))
-#   e.g. nodes ~240 units apart -> 24 ly -> 3 turns; ~80 units -> 8 ly -> 1 turn
+#   e.g. nodes ~240 units apart -> 24 ly -> 4 turns; ~60 units -> 6 ly -> 1 turn
+#   lower value == finer granularity, so varied lane lengths read as distinct times
 
 # --------------------------------------------------------------------------- #
 # Map generation
@@ -25,8 +26,10 @@ DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
-MAX_EDGE_LENGTH_FRAC = 0.42    # prune non-MST candidate edges longer than this * WORLD_SIZE
+MAX_EDGE_LENGTH_FRAC = 0.5     # prune non-MST candidate edges longer than this * WORLD_SIZE
 LLOYD_PASSES = 1              # relaxation passes to even out random node placement
+NODE_JITTER = 0.85           # placement spread within a grid cell (0..1); higher == more length variety
+RELAX_MIN_SEP_FRAC = 0.6     # relaxation only pushes apart nodes closer than this * ideal spacing
 
 # Production is "turns per ship": lower == richer. Weighted so rich systems are rare.
 PRODUCTION_WEIGHTS = {2: 1, 3: 3, 4: 4, 5: 2}
@@ -53,6 +56,8 @@ AI_RESERVE_FRACTION = 0.25  # keep this fraction of a system's garrison at home
 AI_RESERVE_FLOOR = 2        # ...but always keep at least this many
 AI_EXPAND_MARGIN = 1.3      # need surplus >= garrison * this to attack a neutral
 AI_ATTACK_MARGIN = 1.5      # need surplus >= enemy   * this to attack a player
+AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more exposed than us
+#   (one-directional + hysteresis: stops two frontier systems swapping ships each turn)
 
 # --------------------------------------------------------------------------- #
 # Palette (RGB).  Player ids index PLAYER_COLORS; id 0 (neutral) uses NEUTRAL.
@@ -87,6 +92,7 @@ SCREEN_W = 1180
 SCREEN_H = 780
 HUD_TOP_H = 40
 HUD_BOTTOM_H = 46
+HUD_RIGHT_W = 240            # reserved right column for the system/lane info panel
 
 NODE_MIN_RADIUS = 12         # for the poorest systems (production == max)
 NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
@@ -97,6 +103,16 @@ FONT_SIZE_SMALL = 14
 FONT_SIZE_BIG = 30
 
 FPS = 60
+
+
+def play_rect() -> tuple[int, int, int, int]:
+    """The map viewport rectangle: full width minus the info panel, between the bars."""
+    return (
+        0,
+        HUD_TOP_H,
+        SCREEN_W - HUD_RIGHT_W,
+        SCREEN_H - HUD_TOP_H - HUD_BOTTOM_H,
+    )
 
 
 def player_color(player_id: int) -> tuple[int, int, int]:

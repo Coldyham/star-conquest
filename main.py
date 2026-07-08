@@ -18,30 +18,46 @@ import pygame
 from starconquest import ai, config, engine, mapgen, render
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
-from starconquest.model import GameState
+from starconquest.model import GameState, Order
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
 
 
 def build_view(state: GameState) -> WorldView:
-    play_rect = (
-        0,
-        config.HUD_TOP_H,
-        config.SCREEN_W,
-        config.SCREEN_H - config.HUD_TOP_H - config.HUD_BOTTOM_H,
-    )
-    return WorldView(mapgen.map_bounds(state), play_rect, padding=50)
+    return WorldView(mapgen.map_bounds(state), config.play_rect(), padding=50)
 
 
 def new_ui(state: GameState, autoplay: bool) -> Ui:
     return Ui(view=build_view(state), human_id=1, autoplay=autoplay)
 
 
+def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
+    """Turn standing auto-forward rules into this turn's orders for the human.
+
+    A rule keeps ``keep`` ships at the source and forwards the surplus onward.
+    We subtract ships already promised by manually-queued orders from the same
+    source so a rule cooperates with (rather than double-counts) manual sends.
+    """
+    orders: list[Order] = []
+    for src, (dest, keep) in ui.auto_forward.items():
+        sys = state.systems.get(src)
+        if sys is None or sys.owner_id != ui.human_id:
+            continue  # dormant while the system isn't ours (may resume if recaptured)
+        if not state.are_adjacent(src, dest):
+            continue
+        send = ui.available(state, src) - keep
+        if send > 0:
+            orders.append(Order(ui.human_id, src, dest, send))
+    return orders
+
+
 def resolve_turn(state: GameState, ui: Ui) -> None:
     """Advance one turn. In autoplay the human seat is also driven by the AI."""
     human_orders = (
-        ai.compute_orders(state, ui.human_id) if ui.autoplay else list(ui.pending)
+        ai.compute_orders(state, ui.human_id)
+        if ui.autoplay
+        else list(ui.pending) + auto_forward_orders(state, ui)
     )
     engine.end_turn(state, human_orders=human_orders, decide=ai.compute_orders)
     ui.clear_pending()

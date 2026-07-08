@@ -20,9 +20,7 @@ from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
 
 
 def _make_ui(state):
-    rect = (0, config.HUD_TOP_H, config.SCREEN_W,
-            config.SCREEN_H - config.HUD_TOP_H - config.HUD_BOTTOM_H)
-    return Ui(view=WorldView(mapgen.map_bounds(state), rect), human_id=1)
+    return Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
 
 
 def test_render_all_ui_states_no_crash():
@@ -35,7 +33,7 @@ def test_render_all_ui_states_no_crash():
         # plain frame
         render.draw(screen, state, ui)
 
-        # a selection + a pending order + fleets in transit
+        # a selection + a pending order + a choosing preview + a standing rule
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         ui.mode = SELECTED
         ui.selected = home
@@ -43,7 +41,9 @@ def test_render_all_ui_states_no_crash():
         ui.mode = CHOOSING
         ui.dest = nbr
         ui.chosen = 3
+        ui.hover = nbr
         ui.pending.append(Order(1, home, nbr, 2))
+        ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
         render.draw(screen, state, ui)
 
         # advance a few turns so fleets exist, then draw

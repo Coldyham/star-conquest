@@ -54,7 +54,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 
     if event.type == pygame.MOUSEBUTTONDOWN:
         if event.button == 1:
-            return _handle_left_click(state, ui, event.pos)
+            shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
+            return _handle_left_click(state, ui, event.pos, shift)
         if event.button == 3:
             _cancel(ui)
     return None
@@ -65,6 +66,10 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
         return "end_turn"
     if event.key == pygame.K_a:
         return "toggle_autoplay"
+    if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
+        if ui.selected is not None:
+            ui.clear_forward(ui.selected)  # drop the selected system's forward rule
+        return None
     if event.key == pygame.K_r:
         return "restart"
     if event.key == pygame.K_ESCAPE:
@@ -75,15 +80,20 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_left_click(state: GameState, ui: Ui, pos) -> Optional[str]:
+def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if ui.autoplay:
         return None
 
-    # Confirm a pending send: any left-click while choosing commits it.
+    # Confirm the current source->dest choice. Shift makes it a standing
+    # auto-forward rule instead of a one-shot send; a plain click sends once.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
-        if ui.chosen > 0:
+        if shift:
+            # keep the un-sent remainder at home; forward the surplus every turn
+            keep = max(0, state.systems[ui.selected].ships - ui.chosen)
+            ui.auto_forward[ui.selected] = (ui.dest, keep)
+        elif ui.chosen > 0:
             ui.pending.append(Order(ui.human_id, ui.selected, ui.dest, ui.chosen))
         # stay on the source so more fleets can be queued from it
         remaining = ui.available(state, ui.selected)

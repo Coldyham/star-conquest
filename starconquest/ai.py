@@ -57,18 +57,22 @@ def compute_orders(state: GameState, pid: int) -> list[Order]:
 def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int):
     sys = state.systems[sid]
     jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
+    self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are
 
     best = None  # (priority, score, target, ships)
-    for nbr in sys.neighbors:
+    for nbr in sorted(sys.neighbors):
         n = state.systems[nbr]
         travel = state.travel_turns(sid, nbr) or 1
 
         if n.owner_id == pid:
-            # reinforce a threatened friendly frontier neighbour
+            # Reinforce a frontier neighbour only if it is meaningfully more
+            # exposed than we are (deficit = threat - ships). Requiring a margin
+            # makes reinforcement one-directional, so two adjacent frontier
+            # systems no longer send ships to each other every turn.
             if _is_frontier(state, nbr, pid):
-                t = _threat(state, nbr, pid)
-                if t >= n.ships:
-                    best = _better(best, (2, t + jitter(), nbr, surplus))
+                nbr_deficit = _threat(state, nbr, pid) - n.ships
+                if nbr_deficit > 0 and nbr_deficit - self_deficit >= config.AI_REINFORCE_MARGIN:
+                    best = _better(best, (2, nbr_deficit + jitter(), nbr, surplus))
             continue
 
         if n.owner_id == 0:  # neutral -> expand
@@ -126,13 +130,18 @@ def _threat(state: GameState, sid: int, pid: int) -> int:
 
 
 def _flow_to_frontier(state: GameState, owned: set[int], frontier: set[int]) -> dict[int, int]:
-    """Multi-source BFS over owned territory; returns rear-node -> next-hop-toward-front."""
+    """Multi-source BFS over owned territory; returns rear-node -> next-hop-toward-front.
+
+    Seeds and neighbours are visited in sorted order so the flow is deterministic:
+    while the frontier is stable, a rear system keeps the same next-hop every turn
+    instead of flip-flopping, which is what made rear ships oscillate.
+    """
     parent: dict[int, int] = {}
     seen = set(frontier)
-    queue = deque(frontier)
+    queue = deque(sorted(frontier))
     while queue:
         cur = queue.popleft()
-        for nbr in state.systems[cur].neighbors:
+        for nbr in sorted(state.systems[cur].neighbors):
             if nbr in owned and nbr not in seen:
                 seen.add(nbr)
                 parent[nbr] = cur  # move from nbr toward cur (closer to the front)

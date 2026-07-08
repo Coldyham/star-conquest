@@ -27,6 +27,10 @@ class Ui:
     dest: Optional[int] = None          # chosen destination system id
     chosen: int = 0                     # ships to send in CHOOSING mode
     pending: list[Order] = field(default_factory=list)
+    # standing auto-forward rules: source_id -> (dest_id, keep). Human-only QoL,
+    # so it lives here rather than in the pure GameState. Each turn a rule
+    # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
+    auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     autoplay: bool = False
     show_help: bool = True
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -49,3 +53,7 @@ class Ui:
 
     def clear_pending(self) -> None:
         self.pending.clear()
+
+    def clear_forward(self, sid: int) -> None:
+        """Remove the standing auto-forward rule out of a system, if any."""
+        self.auto_forward.pop(sid, None)

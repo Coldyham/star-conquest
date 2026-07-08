@@ -11,7 +11,7 @@ import pygame
 
 from . import config
 from .geometry import lerp
-from .model import GameState
+from .model import GameState, lane_key
 from .viewstate import CHOOSING, SELECTED, Ui
 
 _FONTS: dict[str, pygame.font.Font] = {}
@@ -44,7 +44,9 @@ def _text(surface, font, s, color, center=None, topleft=None, midleft=None):
 def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     surface.fill(config.COLOR_BG)
     _draw_lanes(surface, state, ui)
-    _draw_pending(surface, state, ui)
+    _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
+    _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
+    _draw_choosing_preview(surface, state, ui)  # the count you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
     _draw_hud(surface, state, ui)
@@ -59,13 +61,40 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
     for lane in state.lanes.values():
         pa = ui.view.to_screen(state.systems[lane.a].pos)
         pb = ui.view.to_screen(state.systems[lane.b].pos)
+        # width & brightness encode travel time: slow lanes thicker+dimmer,
+        # fast lanes thinner+brighter, so length variety reads at a glance.
+        width, color = _lane_style(lane.travel_turns)
         # brighten the lanes touching the selected source system
-        touches_selected = ui.selected is not None and ui.selected in (lane.a, lane.b)
-        color = config.COLOR_LANE_HILITE if touches_selected else config.COLOR_LANE
-        pygame.draw.line(surface, color, pa, pb, 2)
-        # travel-time label at the midpoint
+        if ui.selected is not None and ui.selected in (lane.a, lane.b):
+            color = config.COLOR_LANE_HILITE
+            width = max(width, 3)
+        pygame.draw.line(surface, color, pa, pb, width)
+        # travel-time label at the midpoint, on a dark pill so it stays legible
         mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
-        _text(surface, _fonts()["small"], str(lane.travel_turns), config.COLOR_TEXT_DIM, center=mid)
+        _label_pill(surface, _fonts()["small"], str(lane.travel_turns),
+                    config.COLOR_TEXT_DIM, mid)
+
+
+def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
+    """Width (px) and colour for a lane from its travel time. Fast = thin+bright.
+
+    Thickness tracks travel time directly (clamped) so the spread reads at a
+    glance; colour brightens the quick lanes and mutes the slow ones.
+    """
+    width = max(2, min(6, travel_turns))       # 2px (fast) .. 6px (slow)
+    f = (min(6, max(1, travel_turns)) - 1) / 5.0  # 0 fast .. 1 slow
+    scale = 1.3 - 0.6 * f                        # 1.3x (bright) .. 0.7x (dim)
+    color = tuple(min(255, int(c * scale)) for c in config.COLOR_LANE)
+    return width, color
+
+
+def _label_pill(surface, font, s: str, color, center) -> None:
+    """Draw text centred on a small dark rounded rect so it reads over any line."""
+    img = font.render(s, True, color)
+    rect = img.get_rect(center=center)
+    pill = rect.inflate(8, 4)
+    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=5)
+    surface.blit(img, rect)
 
 
 def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
@@ -125,6 +154,57 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
               center=((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 - 10))
 
 
+def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
+    """Standing auto-forward rules as persistent dashed arrows (human colour)."""
+    color = config.player_color(ui.human_id)
+    for src, (dest, keep) in ui.auto_forward.items():
+        s = state.systems.get(src)
+        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
+            continue
+        pa = ui.view.to_screen(s.pos)
+        pb = ui.view.to_screen(state.systems[dest].pos)
+        _draw_dashed_line(surface, color, pa, pb, width=2)
+        dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+        length = math.hypot(dx, dy) or 1.0
+        u = (dx / length, dy / length)
+        _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
+        _label_pill(surface, _fonts()["small"], f"keep {keep}", config.COLOR_TEXT_DIM,
+                    ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10))
+
+
+def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
+    """The move being composed right now: a bright arrow with the live count.
+
+    This is what makes the mouse wheel visibly do something — the count here
+    tracks ui.chosen as you scroll.
+    """
+    if ui.mode != CHOOSING or ui.selected is None or ui.dest is None:
+        return
+    pa = ui.view.to_screen(state.systems[ui.selected].pos)
+    pb = ui.view.to_screen(state.systems[ui.dest].pos)
+    color = config.COLOR_SELECT
+    pygame.draw.line(surface, color, pa, pb, 3)
+    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+    length = math.hypot(dx, dy) or 1.0
+    u = (dx / length, dy / length)
+    _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
+    _label_pill(surface, _fonts()["normal"], str(ui.chosen), color,
+                ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 - 12))
+
+
+def _draw_dashed_line(surface, color, a, b, width=2, dash=10, gap=8) -> None:
+    x1, y1 = a
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    s = 0.0
+    while s < length:
+        e = min(s + dash, length)
+        pygame.draw.line(surface, color, (x1 + ux * s, y1 + uy * s),
+                         (x1 + ux * e, y1 + uy * e), width)
+        s += dash + gap
+
+
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:
     valid_dests = set()
     if ui.selected is not None:
@@ -170,6 +250,8 @@ def _brighten(color, amount=60):
 def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
 
+    _draw_side_panel(surface, state, ui)
+
     # top bar
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT,
@@ -208,10 +290,145 @@ def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. Press A to take control, Esc to quit."
     if ui.mode == SELECTED:
-        return "Click a highlighted neighbour to send ships  ·  right-click/Esc to cancel"
+        return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
-        return "Wheel: adjust count  ·  click: confirm  ·  right-click/Esc: back"
+        return "Wheel: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
     return "Click your system to select  ·  End Turn to resolve  ·  A: autoplay"
+
+
+# --------------------------------------------------------------------------- #
+# Info panel (right column)
+# --------------------------------------------------------------------------- #
+_ROW_H = 20
+
+
+def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
+    w, h = surface.get_size()
+    px = w - config.HUD_RIGHT_W
+    py = config.HUD_TOP_H
+    ph = h - config.HUD_TOP_H - config.HUD_BOTTOM_H
+    pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
+    pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), 1)
+
+    x, y = px + 14, py + 14
+    focus = ui.selected if ui.selected is not None else ui.hover
+    if focus is None or focus not in state.systems:
+        _panel_legend(surface, x, y)
+        return
+
+    y = _panel_system(surface, state, ui, x, y, state.systems[focus])
+
+    dest = _panel_lane_target(state, ui, focus)
+    if dest is not None:
+        y = _panel_lane(surface, state, ui, x, y + 8, focus, dest)
+
+    if focus in ui.auto_forward:
+        _panel_rule(surface, ui, x, y + 8, focus)
+
+
+def _row(surface, x, y, text, color) -> int:
+    if text:
+        _text(surface, _fonts()["small"], text, color, topleft=(x, y))
+    return y + _ROW_H
+
+
+def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
+    _text(surface, _fonts()["normal"], f"System {sys.id}",
+          config.player_color(sys.owner_id), topleft=(x, y))
+    y += 26
+    y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}",
+             config.player_color(sys.owner_id))
+    if sys.owner_id == ui.human_id:
+        y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total",
+                 config.COLOR_TEXT)
+    else:
+        y = _row(surface, x, y, f"Ships: {sys.ships}", config.COLOR_TEXT)
+    if sys.production > 0:
+        y = _row(surface, x, y, f"Production: {sys.production} turns/ship", config.COLOR_TEXT_DIM)
+        y = _row(surface, x, y, f"  building: {sys.prod_progress}/{sys.production}",
+                 config.COLOR_TEXT_DIM)
+    else:
+        y = _row(surface, x, y, "Production: none", config.COLOR_TEXT_DIM)
+    y = _row(surface, x, y, f"Threat (adj): {_adjacent_enemy_strength(state, sys.id, sys.owner_id)}",
+             config.COLOR_TEXT_DIM)
+    fin, ein = _inbound_summary(state, sys.id, sys.owner_id)
+    if fin or ein:
+        y = _row(surface, x, y, f"Inbound: +{fin}f / {ein}e", config.COLOR_TEXT_DIM)
+    y = _row(surface, x, y, f"Neighbours: {len(sys.neighbors)}", config.COLOR_TEXT_DIM)
+    return y
+
+
+def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
+    lane = state.lanes.get(lane_key(src, dest))
+    if lane is None:
+        return y
+    _text(surface, _fonts()["normal"], f"Lane -> System {dest}", config.COLOR_TEXT, topleft=(x, y))
+    y += 26
+    y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {lane.travel_turns} turns", config.COLOR_TEXT)
+    d = state.systems[dest]
+    y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh",
+             config.player_color(d.owner_id))
+    if ui.mode == CHOOSING:
+        y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
+    return y
+
+
+def _panel_rule(surface, ui: Ui, x, y, src) -> int:
+    dest, keep = ui.auto_forward[src]
+    _text(surface, _fonts()["normal"], "Auto-forward",
+          config.player_color(ui.human_id), topleft=(x, y))
+    y += 26
+    y = _row(surface, x, y, f"-> System {dest}, keep {keep}", config.COLOR_TEXT)
+    y = _row(surface, x, y, "press X to clear", config.COLOR_TEXT_DIM)
+    return y
+
+
+def _panel_legend(surface, x, y) -> int:
+    _text(surface, _fonts()["normal"], "Star Conquest", config.COLOR_TEXT, topleft=(x, y))
+    y += 28
+    for line in (
+        "Click a system for details.",
+        "",
+        "Select -> click neighbour",
+        "Wheel: set ship count",
+        "Click: send once",
+        "Shift+click: forward rule",
+        "X: clear forward rule",
+        "Enter / Space: end turn",
+    ):
+        y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
+    return y
+
+
+def _panel_lane_target(state: GameState, ui: Ui, focus: int):
+    """Neighbour whose lane stats to show: the chosen dest, or a hovered neighbour."""
+    if ui.mode == CHOOSING and ui.dest is not None:
+        return ui.dest
+    if (ui.selected is not None and ui.hover is not None and ui.hover != ui.selected
+            and state.are_adjacent(ui.selected, ui.hover)):
+        return ui.hover
+    return None
+
+
+def _adjacent_enemy_strength(state: GameState, sid: int, owner: int) -> int:
+    """Largest garrison of a non-friendly, non-neutral neighbour."""
+    best = 0
+    for n in state.systems[sid].neighbors:
+        o = state.systems[n]
+        if o.owner_id not in (owner, 0):
+            best = max(best, o.ships)
+    return best
+
+
+def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
+    """(friendly, enemy) ships currently inbound to a system."""
+    friendly = enemy = 0
+    for f in state.fleets_incoming(sid):
+        if f.owner_id == owner:
+            friendly += f.ships
+        else:
+            enemy += f.ships
+    return friendly, enemy
 
 
 def _draw_win_overlay(surface, state: GameState) -> None:

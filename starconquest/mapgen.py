@@ -196,7 +196,7 @@ def _place_nodes(state: GameState, n: int) -> list[Point]:
     state.rng.shuffle(cells)
     chosen = cells[:n]
 
-    jitter = 0.6  # place within the inner 60% of the cell to preserve spacing
+    jitter = config.NODE_JITTER  # spread within the cell; higher -> more length variety
     points: list[Point] = []
     for c, r in chosen:
         cx = lo_x + (c + 0.5) * cell_w
@@ -214,7 +214,8 @@ def _relax(points: list[Point], state: GameState) -> None:
     lo_x, lo_y, hi_x, hi_y = _play_bounds()
     # target separation ~ average of two cell dimensions
     area = (hi_x - lo_x) * (hi_y - lo_y)
-    min_sep = 0.85 * math.sqrt(area / len(points))
+    # only separate genuinely-close nodes so natural length variety survives
+    min_sep = config.RELAX_MIN_SEP_FRAC * math.sqrt(area / len(points))
     for _ in range(config.LLOYD_PASSES):
         for i in range(len(points)):
             fx = fy = 0.0
