@@ -1,0 +1,18 @@
+[project]
+name = "starconquest"
+version = "0.1.0"
+description = "A minimalist sci-fi turn-based strategy game (graph-node star map conquest)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pygame>=2.6.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
