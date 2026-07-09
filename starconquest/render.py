@@ -235,9 +235,10 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
                 pygame.draw.arc(surface, config.COLOR_TEXT_DIM, rect,
                                 math.pi / 2, math.pi / 2 + 2 * math.pi * frac, 2)
 
-        # ship count (deployable = garrison minus queued commitments)
+        # ship count (deployable = garrison minus queued commitments), drawn in
+        # whichever of dark/light text contrasts best with this owner's colour
         shown = ui.available(state, sys.id) if sys.owner_id == ui.human_id else sys.ships
-        _text(surface, _fonts()["normal"], str(shown), config.COLOR_TEXT, center=pos)
+        _text(surface, _fonts()["normal"], str(shown), config.text_on(color), center=pos)
 
 
 def _brighten(color, amount=60):

@@ -72,6 +72,7 @@ COLOR_LANE = (52, 58, 78)
 COLOR_LANE_HILITE = (120, 140, 190)
 COLOR_TEXT = (225, 230, 240)
 COLOR_TEXT_DIM = (140, 148, 165)
+COLOR_TEXT_DARK = (12, 14, 22)      # for labels sitting on a light player colour
 COLOR_NEUTRAL = (122, 128, 140)
 COLOR_SELECT = (250, 240, 150)
 
@@ -132,6 +133,30 @@ def player_name(player_id: int) -> str:
     if 0 <= player_id < len(PLAYER_NAMES):
         return PLAYER_NAMES[player_id]
     return f"Player {player_id}"
+
+
+def _relative_luminance(color: tuple[int, int, int]) -> float:
+    """WCAG relative luminance of an sRGB colour, in [0, 1]."""
+    def channel(c: int) -> float:
+        c /= 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast_ratio(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    la, lb = _relative_luminance(a), _relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def text_on(bg: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Label colour that reads best on a filled ``bg`` — dark or light, whichever
+    has the higher WCAG contrast ratio. Keeps ship counts legible on light player
+    colours (yellow/green/orange) and works for any future custom palette."""
+    if _contrast_ratio(COLOR_TEXT_DARK, bg) >= _contrast_ratio(COLOR_TEXT, bg):
+        return COLOR_TEXT_DARK
+    return COLOR_TEXT
 
 
 def node_radius(production: int) -> int:
