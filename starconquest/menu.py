@@ -16,12 +16,18 @@ Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
 global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
 tuning with copy/reset-all shortcuts). Sliders are driven by the spec tables
 below so drawing and hit-routing stay data-driven.
+
+A footer row saves/loads the whole ``Settings`` to a named JSON file under the
+gitignored ``saves/`` directory (via ``settings.Settings.save``/``load``); those
+clicks perform file I/O but still return ``None`` to ``main.py``, so the scene
+loop needs no new action.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Optional
 
 import pygame
@@ -41,6 +47,7 @@ _HL_BORDER = (120, 150, 210)
 _START_FILL = (46, 92, 60)
 _START_BORDER = (96, 190, 120)
 _DISABLED_TEXT = (78, 84, 100)
+_STATUS_ERR = (214, 130, 110)
 
 _TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
 
@@ -49,6 +56,11 @@ _ROW_H = 62         # vertical pitch between Basic-tab rows
 _SLIDER_H = 42      # vertical pitch between sliders
 _HEADER_H = 24      # height of a section header
 _SEED_MAX_LEN = 7
+_FILENAME_MAX_LEN = 24
+_DEFAULT_FILENAME = "starconquest_settings"
+# Saved configs live in a gitignored dir beside the repo (not the cwd), so they
+# never litter the tree wherever the game is launched from.
+_SAVE_DIR = Path(__file__).resolve().parent.parent / "saves"
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
@@ -123,6 +135,11 @@ class MenuState:
     seed_text: str = ""                       # edit buffer, live only while editing
     ai_seat: int = 2                          # which seat the AI tab is editing
     drag_key: Optional[str] = None            # slider currently being dragged
+    filename: str = _DEFAULT_FILENAME         # save/load target (no extension)
+    editing_filename: bool = False
+    status: str = ""                          # transient save/load feedback
+    status_ok: bool = True
+    status_until: int = 0                     # ms tick after which status hides
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
 
 
@@ -158,7 +175,11 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     elif ms.tab == "ai":
         _draw_ai(surface, ms, settings, panel)
 
+    _file_control(surface, ms, w, 596)
     _draw_start(surface, ms, w)
+    if ms.status and pygame.time.get_ticks() < ms.status_until:
+        _text(surface, f["small"], ms.status,
+              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 726))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
 
@@ -375,6 +396,30 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     ms.rects["seed_random"] = dice
 
 
+def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
+    """Footer row: 'File [ name ] [Save] [Load]' — mirrors the seed field."""
+    f = _fonts()
+    lx, rx = w // 2 - 280, w // 2 + 280
+    _text(surface, f["small"], "File", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
+
+    load = pygame.Rect(rx - 90, y, 90, _CH)
+    save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
+    fx = lx + 56
+    field = pygame.Rect(fx, y, save.x - 10 - fx, _CH)
+
+    editing = ms.editing_filename
+    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
+    shown = (ms.filename + "|") if editing else (ms.filename or _DEFAULT_FILENAME)
+    _text(surface, f["normal"], shown, config.COLOR_TEXT, midleft=(field.x + 10, field.centery))
+    ms.rects["filename_field"] = field
+
+    _button(surface, ms, "save_settings", save, "Save",
+            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "load_settings", load, "Load",
+            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+
+
 def _draw_die(surface, rect: pygame.Rect) -> None:
     """A small five-pip die face, drawn to signal 'roll a random seed'."""
     face = pygame.Rect(0, 0, 20, 20)
@@ -397,7 +442,7 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 
 
 def _draw_start(surface, ms: MenuState, w: int) -> None:
-    rect = pygame.Rect(w // 2 - 110, 616, 220, 46)
+    rect = pygame.Rect(w // 2 - 110, 654, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER,
             tcol=config.COLOR_TEXT, font=_fonts()["normal"])
 
@@ -435,6 +480,17 @@ def _handle_key(event, ms: MenuState, settings: Settings):
             _apply_seed_text(ms, settings)
         return None
 
+    if ms.editing_filename:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+            ms.editing_filename = False        # commit / cancel are the same here
+            return None
+        if event.key == pygame.K_BACKSPACE:
+            ms.filename = ms.filename[:-1]
+        elif (event.unicode and (event.unicode.isalnum() or event.unicode in "_-.")
+              and len(ms.filename) < _FILENAME_MAX_LEN):
+            ms.filename += event.unicode
+        return None
+
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "start"
     if event.key == pygame.K_ESCAPE:
@@ -446,6 +502,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     hit = next((key for key, rect in ms.rects.items() if rect.collidepoint(pos)), None)
     if hit != "seed_field":
         ms.editing_seed = False
+    if hit != "filename_field":
+        ms.editing_filename = False
 
     if hit == "start":
         return "start"
@@ -487,6 +545,23 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
+    elif hit == "filename_field":
+        ms.editing_filename = True
+    elif hit == "save_settings":
+        path = _settings_path(ms.filename)
+        try:
+            _SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            settings.save(path)
+            _set_status(ms, f"Saved {path.name}", True)
+        except OSError:
+            _set_status(ms, f"Couldn't save {path.name}", False)
+    elif hit == "load_settings":
+        path = _settings_path(ms.filename)
+        try:
+            settings.copy_from(Settings.load(path))
+            _set_status(ms, f"Loaded {path.name}", True)
+        except (OSError, ValueError):
+            _set_status(ms, f"Couldn't load {path.name}", False)
     return None
 
 
@@ -506,6 +581,24 @@ def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
     settings.seed = int(ms.seed_text) if ms.seed_text else None
+
+
+def _settings_path(name: str) -> Path:
+    """The save-file path for ``name`` (blank -> default), under ``_SAVE_DIR``.
+
+    The field's char filter excludes path separators, so the file always stays
+    inside the gitignored ``saves/`` directory.
+    """
+    name = name.strip() or _DEFAULT_FILENAME
+    if not name.endswith(".json"):
+        name += ".json"
+    return _SAVE_DIR / name
+
+
+def _set_status(ms: MenuState, text: str, ok: bool) -> None:
+    ms.status = text
+    ms.status_ok = ok
+    ms.status_until = pygame.time.get_ticks() + 4000
 
 
 def _set_players(settings: Settings, n: int) -> None:

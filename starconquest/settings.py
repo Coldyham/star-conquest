@@ -1,16 +1,18 @@
 """Game-setup values chosen before a match begins.
 
 Pure data — imports no pygame — so it is headlessly testable and serializes
-trivially (see the save/import note in the menu design). The menu edits a
-``Settings`` in place; this module turns one into a fresh ``GameState``. Kept
-distinct from ``viewstate.Ui`` (per-match interaction state) and from
-``GameState`` (the simulation itself).
+trivially: ``to_dict``/``from_dict`` (JSON-friendly) and ``save``/``load`` round
+-trip a whole config to a file, and ``copy_from`` overwrites one in place (the
+menu's Save/Load buttons use these). The menu edits a ``Settings`` in place; this
+module turns one into a fresh ``GameState``. Kept distinct from ``viewstate.Ui``
+(per-match interaction state) and from ``GameState`` (the simulation itself).
 """
 
 from __future__ import annotations
 
+import json
 import random
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Optional
 
 from . import config, mapgen
@@ -96,6 +98,98 @@ class Settings:
         """The AiParams for a 1-based seat id (defaults if out of range)."""
         idx = seat - 1
         return self.ai[idx] if 0 <= idx < len(self.ai) else AiParams()
+
+    # -- save / load (see module docstring) ---------------------------------- #
+    def to_dict(self) -> dict:
+        """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts)."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Settings":
+        """Rebuild from a plain dict (e.g. parsed JSON), tolerantly.
+
+        Unknown keys are ignored, missing keys keep their default, values are
+        coerced to each field's type, and structural fields are clamped to the
+        same bounds the menu enforces — so a hand-edited or older file still
+        loads to a playable config rather than crashing.
+        """
+        if not isinstance(data, dict):
+            return cls()
+        out = cls()
+        for f in fields(cls):                       # scalar fields
+            if f.name in ("ai", "seed") or f.name not in data:
+                continue
+            setattr(out, f.name, _coerce(data[f.name], getattr(out, f.name)))
+
+        if out.mode not in MODES:
+            out.mode = "random"
+        out.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, out.players))
+        out.nodes = max(out.min_nodes(), min(config.MAX_NODES, out.nodes))
+        seed = data.get("seed")
+        out.seed = int(seed) if isinstance(seed, int) and not isinstance(seed, bool) else None
+
+        raw_ai = data.get("ai")
+        if isinstance(raw_ai, list):
+            out.ai = [_ai_from_dict(d) for d in raw_ai[: config.MAX_PLAYERS]]
+        while len(out.ai) < config.MAX_PLAYERS:     # pad short lists
+            out.ai.append(AiParams())
+        return out
+
+    def save(self, path) -> None:
+        """Write this config to ``path`` as indented JSON."""
+        with open(path, "w") as fh:
+            json.dump(self.to_dict(), fh, indent=2)
+
+    @classmethod
+    def load(cls, path) -> "Settings":
+        """Read a config from ``path`` (raises on missing/invalid JSON)."""
+        with open(path) as fh:
+            return cls.from_dict(json.load(fh))
+
+    def copy_from(self, other: "Settings") -> None:
+        """Overwrite every field from ``other`` in place (deep-copying ``ai``).
+
+        Lets a caller holding this instance (e.g. ``main.py``) adopt a loaded
+        config without rebinding its reference.
+        """
+        for f in fields(self):
+            if f.name == "ai":
+                self.ai = [replace(p) for p in other.ai]
+            else:
+                setattr(self, f.name, getattr(other, f.name))
+
+
+def _coerce(value, default):
+    """Best-effort convert a loaded value to the type of ``default``."""
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else default
+    if isinstance(default, int):
+        if isinstance(value, bool):
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    if isinstance(default, float):
+        if isinstance(value, bool):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    if isinstance(default, str):
+        return value if isinstance(value, str) else default
+    return default
+
+
+def _ai_from_dict(d) -> AiParams:
+    """One seat's AiParams from a dict, coercing each field (defaults elsewhere)."""
+    out = AiParams()
+    if isinstance(d, dict):
+        for f in fields(AiParams):
+            if f.name in d:
+                setattr(out, f.name, _coerce(d[f.name], getattr(out, f.name)))
+    return out
 
 
 def resolve_seed(settings: Settings) -> int:

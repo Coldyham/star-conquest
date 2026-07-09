@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import contextlib
 
+import pytest
+
 from starconquest import config
 from starconquest.model import AiParams
 from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state, resolve_seed
@@ -95,3 +97,75 @@ def test_node_jitter_changes_the_map():
         pos_a = {i: s.pos for i, s in grid.systems.items()}
         pos_b = {i: s.pos for i, s in jittered.systems.items()}
         assert pos_a != pos_b
+
+
+# --------------------------------------------------------------------------- #
+# save / load
+# --------------------------------------------------------------------------- #
+def _customised() -> Settings:
+    s = Settings(mode="symmetric", players=5, nodes=30, seed=42, autoplay=True,
+                 home_start_ships=25, combat_jitter=0.3, ship_ly_per_turn=9.5)
+    s.ai[0] = AiParams(reserve_fraction=0.5, reserve_floor=4, attack_margin=2.6)
+    s.ai[3] = AiParams(expand_margin=2.1, reinforce_margin=5)
+    return s
+
+
+def test_to_from_dict_round_trip_defaults():
+    s = Settings.defaults()
+    assert Settings.from_dict(s.to_dict()) == s
+
+
+def test_to_from_dict_round_trip_customised():
+    s = _customised()
+    assert Settings.from_dict(s.to_dict()) == s
+
+
+def test_save_load_round_trip(tmp_path):
+    s = _customised()
+    path = tmp_path / "cfg.json"
+    s.save(path)
+    assert path.exists()
+    assert Settings.load(path) == s
+
+
+def test_from_dict_ignores_unknown_and_fills_missing():
+    loaded = Settings.from_dict({"players": 4, "junk": "ignored"})
+    assert loaded.players == 4
+    assert loaded.nodes == Settings().nodes            # missing -> default
+    assert not hasattr(loaded, "junk")
+
+
+def test_from_dict_clamps_structural_fields():
+    loaded = Settings.from_dict({"players": 99, "nodes": 2, "mode": "bogus"})
+    assert loaded.players == config.MAX_PLAYERS
+    assert loaded.nodes == loaded.min_nodes()          # floored by player count
+    assert loaded.mode == "random"
+
+
+def test_from_dict_normalises_ai_list_length():
+    assert len(Settings.from_dict({"ai": []}).ai) == config.MAX_PLAYERS
+    over = [{"attack_margin": 2.0} for _ in range(config.MAX_PLAYERS + 3)]
+    assert len(Settings.from_dict({"ai": over}).ai) == config.MAX_PLAYERS
+
+
+def test_from_dict_coerces_scalar_types():
+    loaded = Settings.from_dict({"players": "4", "combat_jitter": 1})
+    assert loaded.players == 4
+    assert loaded.combat_jitter == 1.0 and isinstance(loaded.combat_jitter, float)
+
+
+def test_load_raises_on_garbage(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text("not json {{{")
+    with pytest.raises(ValueError):          # JSONDecodeError subclasses ValueError
+        Settings.load(path)
+
+
+def test_copy_from_mutates_in_place_without_aliasing():
+    target = Settings()
+    source = _customised()
+    target.copy_from(source)
+    assert target == source
+    # ai is deep-copied: mutating the source afterwards must not touch target
+    source.ai[0].attack_margin = 9.9
+    assert target.ai[0].attack_margin == _customised().ai[0].attack_margin

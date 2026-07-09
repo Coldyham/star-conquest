@@ -29,7 +29,9 @@ uv run python main.py --no-menu --autoplay     # skip the menu; AI plays every s
 Launch drops you into a **setup menu** with three tabs — **Basic** (players,
 systems, map type, seed, autoplay), **Advanced** (map spread, economy, combat,
 ship speed), and **AI** (per-seat opponent tuning, with copy/reset-all). CLI
-flags pre-fill it; `--no-menu` starts a game straight from them.
+flags pre-fill it; `--no-menu` starts a game straight from them. The footer's
+**Save**/**Load** buttons write the whole configuration to a named `.json` file
+under a gitignored `saves/` folder so a tuned galaxy can be reused.
 
 ## Controls
 
@@ -82,9 +84,9 @@ uv run python -m tests.sim --trials 200   # batch stats (winners, length, timeou
 
 Tech tree & ship-speed upgrades (the intended late-game pacing mechanism),
 race/empire customisation, animations & sound, camera pan/zoom, multi-hop fleet
-routing, fog-of-war. Nearer term: save/load a setup to a file, exposing the
-remaining config knobs, and a documented API + selectable strategies for
-**user-written AIs competing head-to-head** — each seat already routes through a
-pluggable strategy (`ai.register`), so that seam is in place.
+routing, fog-of-war. Nearer term: exposing the remaining config knobs, and a
+documented API + selectable strategies for **user-written AIs competing
+head-to-head** — each seat already routes through a pluggable strategy
+(`ai.register`), so that seam is in place.
 
 Per-seat AI tuning and selectable difficulty via the AI tab are already here.
