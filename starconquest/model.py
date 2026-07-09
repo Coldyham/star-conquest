@@ -11,10 +11,28 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import config
+
 
 def lane_key(a: int, b: int) -> frozenset[int]:
     """Canonical, order-independent key for the lane between systems a and b."""
     return frozenset((a, b))
+
+
+@dataclass
+class AiParams:
+    """Per-seat tuning for the built-in heuristic AI.
+
+    Defaults mirror the global ``config.AI_*`` constants, so a player left
+    untuned behaves exactly as the AI always has. The menu edits these per seat;
+    a custom strategy is free to ignore them (see ``ai.STRATEGIES``).
+    """
+
+    reserve_fraction: float = config.AI_RESERVE_FRACTION
+    reserve_floor: int = config.AI_RESERVE_FLOOR
+    expand_margin: float = config.AI_EXPAND_MARGIN
+    attack_margin: float = config.AI_ATTACK_MARGIN
+    reinforce_margin: int = config.AI_REINFORCE_MARGIN
 
 
 @dataclass
@@ -25,6 +43,10 @@ class Player:
     is_human: bool = False
     is_neutral: bool = False
     alive: bool = True
+    # Which decision function drives this seat (key into ai.STRATEGIES) and its
+    # tuning. Only used while the seat is AI-driven; ignored for a live human.
+    ai_strategy: str = "heuristic"
+    ai_params: AiParams = field(default_factory=AiParams)
 
 
 @dataclass

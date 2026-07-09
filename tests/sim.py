@@ -76,7 +76,7 @@ def play(
     if verbose:
         print_state(state)
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=ai.compute_orders)
+        engine.end_turn(state, decide=ai.decide)
         check_invariants(state)
         if verbose:
             print_state(state)

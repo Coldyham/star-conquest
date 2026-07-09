@@ -116,12 +116,78 @@ def test_start_via_click_and_enter():
         pygame.quit()
 
 
-def test_disabled_tabs_not_clickable():
+def test_all_tabs_clickable_and_switch():
     screen, ms, settings = _setup()
     try:
-        menu.draw(screen, ms, settings)
-        assert "tab_basic" in ms.rects
-        assert "tab_advanced" not in ms.rects and "tab_ai" not in ms.rects
+        _click_key(screen, ms, settings, "tab_advanced")
+        assert ms.tab == "advanced"
+        _click_key(screen, ms, settings, "tab_ai")
+        assert ms.tab == "ai"
+        _click_key(screen, ms, settings, "tab_basic")
         assert ms.tab == "basic"
+    finally:
+        pygame.quit()
+
+
+def _drag_slider(screen, ms, settings, key, frac):
+    """Draw, then click a slider `frac` of the way along its track (0..1)."""
+    menu.draw(screen, ms, settings)
+    track = ms.rects[key]
+    # clamp inside the rect: pygame collidepoint excludes the right/bottom edge
+    px = min(track.x + int(track.w * frac), track.right - 1)
+    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(px, track.centery), button=1)
+    return menu.handle_event(ev, ms, settings)
+
+
+def test_advanced_slider_sets_setting():
+    screen, ms, settings = _setup()
+    ms.tab = "advanced"
+    try:
+        # node jitter spans 0.0..1.0; clicking the far right pins it near 1.0
+        _drag_slider(screen, ms, settings, "adv_node_jitter", 1.0)
+        assert settings.node_jitter == 1.0
+        _drag_slider(screen, ms, settings, "adv_node_jitter", 0.0)
+        assert settings.node_jitter == 0.0
+        # integer knob quantises to whole ships
+        _drag_slider(screen, ms, settings, "adv_home_ships", 0.5)
+        assert settings.home_start_ships == int(settings.home_start_ships)
+        # neutral-produces checkbox toggles
+        _click_key(screen, ms, settings, "neutral_produces")
+        assert settings.neutral_produces is True
+    finally:
+        pygame.quit()
+
+
+def test_ai_tab_per_seat_and_copy_reset():
+    screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
+    ms.tab = "ai"
+    try:
+        # tune seat 2's reserve fraction to the far left (0.0)
+        _click_key(screen, ms, settings, "seat_2")
+        assert ms.ai_seat == 2
+        _drag_slider(screen, ms, settings, "ai_reserve_frac", 0.0)
+        assert settings.ai[1].reserve_fraction == 0.0
+        # seat 3 is still at its default until we copy
+        assert settings.ai[2].reserve_fraction != 0.0
+        _click_key(screen, ms, settings, "copy_all")
+        assert settings.ai[2].reserve_fraction == 0.0
+        # reset all restores defaults
+        _click_key(screen, ms, settings, "reset_all")
+        assert settings.ai[1].reserve_fraction == menu.AiParams().reserve_fraction
+    finally:
+        pygame.quit()
+
+
+def test_ai_seat_list_respects_autoplay():
+    screen, ms, settings = _setup()
+    settings.players, settings.autoplay = 4, False
+    ms.tab = "ai"
+    try:
+        menu.draw(screen, ms, settings)
+        assert "seat_1" not in ms.rects            # your seat hidden when playing
+        assert {"seat_2", "seat_3", "seat_4"} <= set(ms.rects)
+        settings.autoplay = True
+        menu.draw(screen, ms, settings)
+        assert "seat_1" in ms.rects                # revealed under autoplay
     finally:
         pygame.quit()

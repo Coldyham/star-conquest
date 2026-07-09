@@ -12,23 +12,28 @@ against those rects — the same store-rect-then-test pattern the End-Turn butto
 uses in render/input. Layout is deterministic, so the rects drawn last frame are
 valid for this frame's events.
 
-Pass 1 implements the Basic tab; the Advanced and AI tabs are drawn disabled so
-the scaffold exists for later passes.
+Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
+global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
+tuning with copy/reset-all shortcuts). Sliders are driven by the spec tables
+below so drawing and hit-routing stay data-driven.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Optional
 
 import pygame
 
 from . import config
+from .model import AiParams
 from .settings import Settings
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
 _PANEL_BORDER = (40, 44, 60)
+_TROUGH = (24, 27, 40)
 _BTN_FILL = (30, 34, 48)
 _BTN_BORDER = (70, 78, 100)
 _HL_FILL = (40, 46, 66)
@@ -37,11 +42,51 @@ _START_FILL = (46, 92, 60)
 _START_BORDER = (96, 190, 120)
 _DISABLED_TEXT = (78, 84, 100)
 
-_TABS = (("basic", "Basic", True), ("advanced", "Advanced", False), ("ai", "AI", False))
+_TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
 
-_CH = 34          # control height
-_ROW_H = 62       # vertical pitch between Basic-tab rows
+_CH = 34            # control height
+_ROW_H = 62         # vertical pitch between Basic-tab rows
+_SLIDER_H = 42      # vertical pitch between sliders
+_HEADER_H = 24      # height of a section header
 _SEED_MAX_LEN = 7
+
+# Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
+# Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
+_ADV_MAP = (
+    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
+    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
+    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
+    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
+    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
+)
+_ADV_TRAVEL = (
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, 30.0, 0.5, False),
+)
+_ADV_ECON = (
+    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
+    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
+    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
+    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
+    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
+)
+_ADV_COMBAT = (
+    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
+)
+_AI_PARAMS = (
+    ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
+    ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
+    ("ai_expand", "Expand margin", "expand_margin", 1.0, 3.0, 0.1, False),
+    ("ai_attack", "Attack margin", "attack_margin", 1.0, 3.0, 0.1, False),
+    ("ai_reinforce", "Reinforce margin", "reinforce_margin", 0, 10, 1, True),
+)
+
+# key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
+_SLIDER_SPECS: dict[str, tuple] = {}
+for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT):
+    for _key, _label, _attr, _lo, _hi, _step, _is_int in _grp:
+        _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
+for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
+    _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
 
 _FONTS: dict[str, pygame.font.Font] = {}
 
@@ -76,7 +121,15 @@ class MenuState:
     tab: str = "basic"
     editing_seed: bool = False
     seed_text: str = ""                       # edit buffer, live only while editing
+    ai_seat: int = 2                          # which seat the AI tab is editing
+    drag_key: Optional[str] = None            # slider currently being dragged
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
+
+
+def _ai_seats(settings: Settings) -> list[int]:
+    """Seats the AI tab can tune: opponents 2..N, plus your seat 1 in autoplay."""
+    start = 1 if settings.autoplay else 2
+    return list(range(start, settings.players + 1))
 
 
 # --------------------------------------------------------------------------- #
@@ -100,11 +153,12 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 
     if ms.tab == "basic":
         _draw_basic(surface, ms, settings, panel)
+    elif ms.tab == "advanced":
+        _draw_advanced(surface, ms, settings, panel)
+    elif ms.tab == "ai":
+        _draw_ai(surface, ms, settings, panel)
 
     _draw_start(surface, ms, w)
-
-    _text(surface, f["small"], "Advanced & AI tabs coming soon", config.COLOR_TEXT_DIM,
-          center=(w // 2, panel.bottom + 96))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
 
@@ -159,6 +213,80 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
 
 
+def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
+    pad = 22
+    col_w = (panel.width - pad * 3) // 2
+    lx = panel.x + pad
+    rx = lx + col_w + pad
+
+    y = panel.y + 16                                   # LEFT: Map + Travel
+    y = _section(surface, "Map", lx, y)
+    y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
+    y = _section(surface, "Travel", lx, y)
+    y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+
+    y = panel.y + 16                                   # RIGHT: Economy + Combat
+    y = _section(surface, "Economy", rx, y)
+    y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
+    y = _section(surface, "Combat", rx, y)
+    y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
+    _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM,
+          midleft=(rx, y + _CH // 2))
+    _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
+
+
+def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
+    seats = _ai_seats(settings)
+    if ms.ai_seat not in seats:
+        ms.ai_seat = seats[0]
+    x = panel.x + 24
+
+    # seat selector chips (coloured by player)
+    y = panel.y + 18
+    _text(surface, _fonts()["small"], "Seat", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
+    cx = x + 56
+    for seat in seats:
+        rect = pygame.Rect(cx, y, 44, _CH)
+        base = config.player_color(seat)
+        selected = seat == ms.ai_seat
+        fill = base if selected else tuple(c // 2 + 8 for c in base)
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, config.COLOR_SELECT if selected else _BTN_BORDER,
+                         rect, 2, border_radius=6)
+        _text(surface, _fonts()["normal"], str(seat), config.text_on(fill), center=rect.center)
+        ms.rects[f"seat_{seat}"] = rect
+        cx += 52
+
+    # edit-all shortcuts, pinned near the top
+    y += 46
+    bw = 150
+    _button(surface, ms, "copy_all", pygame.Rect(x, y, bw, _CH), "Copy to all",
+            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "reset_all", pygame.Rect(x + bw + 12, y, bw, _CH), "Reset all",
+            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    name = config.player_name(ms.ai_seat)
+    _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat),
+          midleft=(x + 2 * bw + 32, y + _CH // 2))
+
+    # per-seat param sliders
+    y += 52
+    params = settings.ai[ms.ai_seat - 1]
+    _sliders(surface, ms, params, _AI_PARAMS, x, y, panel.width - 48)
+
+
+def _section(surface, title: str, x: int, y: int) -> int:
+    _text(surface, _fonts()["small"], title.upper(), _HL_BORDER, midleft=(x, y + _HEADER_H // 2))
+    return y + _HEADER_H
+
+
+def _sliders(surface, ms, target, specs, x: int, y: int, width: int) -> int:
+    """Draw a group of sliders reading each value off ``target``; returns next y."""
+    for key, label, attr, lo, hi, step, is_int in specs:
+        _slider(surface, ms, key, label, getattr(target, attr), lo, hi, is_int, x, y, width)
+        y += _SLIDER_H
+    return y
+
+
 # --------------------------------------------------------------------------- #
 # Widgets
 # --------------------------------------------------------------------------- #
@@ -175,6 +303,29 @@ def _button(surface, ms, key, rect, label, *, fill, border, tcol, font=None) -> 
         ms.rects[key] = rect
 
 
+def _fmt(value, is_int: bool) -> str:
+    return str(int(round(value))) if is_int else f"{value:.2f}"
+
+
+def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width) -> None:
+    """Two-line slider: label + value on top, a full-width track below."""
+    f = _fonts()
+    _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + 8))
+    _text(surface, f["small"], _fmt(value, is_int), config.COLOR_TEXT, midright=(x + width, y + 8))
+
+    cy = y + 26
+    pygame.draw.rect(surface, _TROUGH, pygame.Rect(x, cy - 3, width, 6), border_radius=3)
+    t = 0.0 if hi == lo else max(0.0, min(1.0, (value - lo) / (hi - lo)))
+    fill_w = int(width * t)
+    if fill_w > 0:
+        pygame.draw.rect(surface, _HL_BORDER, pygame.Rect(x, cy - 3, fill_w, 6), border_radius=3)
+    hx = x + fill_w
+    pygame.draw.circle(surface, config.COLOR_TEXT, (hx, cy), 7)
+    pygame.draw.circle(surface, _HL_BORDER, (hx, cy), 7, 2)
+    # generous hit rect (taller than the visual track) for easy grabbing
+    ms.rects[key] = pygame.Rect(x, y + 14, width, 24)
+
+
 def _stepper(surface, ms, key, value: str, right: int, y: int) -> None:
     bw, vw = 34, 64
     x = right - (bw + vw + bw)
@@ -182,7 +333,7 @@ def _stepper(surface, ms, key, value: str, right: int, y: int) -> None:
     box = pygame.Rect(x + bw, y, vw, _CH)
     plus = pygame.Rect(x + bw + vw, y, bw, _CH)
     _button(surface, ms, f"{key}_dec", minus, "−", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-    pygame.draw.rect(surface, (24, 27, 40), box, border_radius=6)
+    pygame.draw.rect(surface, _TROUGH, box, border_radius=6)
     _text(surface, _fonts()["normal"], value, config.COLOR_TEXT, center=box.center)
     _button(surface, ms, f"{key}_inc", plus, "+", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
 
@@ -206,7 +357,7 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     field = pygame.Rect(dice.x - 8 - fw, y, fw, _CH)
 
     editing = ms.editing_seed
-    pygame.draw.rect(surface, (24, 27, 40), field, border_radius=6)
+    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
     pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
     if editing:
         shown, color = ms.seed_text + "|", config.COLOR_TEXT
@@ -237,7 +388,7 @@ def _draw_die(surface, rect: pygame.Rect) -> None:
 
 def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
     box = pygame.Rect(right - _CH, y, _CH, _CH)
-    pygame.draw.rect(surface, (24, 27, 40), box, border_radius=6)
+    pygame.draw.rect(surface, _TROUGH, box, border_radius=6)
     pygame.draw.rect(surface, _HL_BORDER if on else _BTN_BORDER, box, 2, border_radius=6)
     if on:
         inner = box.inflate(-14, -14)
@@ -257,6 +408,12 @@ def _draw_start(surface, ms: MenuState, w: int) -> None:
 def handle_event(event, ms: MenuState, settings: Settings):
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
+    if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
+        _apply_slider(ms.drag_key, ms, settings, event.pos)
+        return None
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        ms.drag_key = None
+        return None
     if event.type == pygame.KEYDOWN:
         return _handle_key(event, ms, settings)
     return None
@@ -294,8 +451,22 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         return "start"
     if hit is None:
         return None
-    if hit.startswith("tab_"):
+    if hit in _SLIDER_SPECS:                       # grab + jump the slider
+        ms.drag_key = hit
+        _apply_slider(hit, ms, settings, pos)
+    elif hit.startswith("tab_"):
         ms.tab = hit[len("tab_"):]
+    elif hit.startswith("seat_"):
+        ms.ai_seat = int(hit[len("seat_"):])
+    elif hit == "copy_all":
+        src = settings.ai[ms.ai_seat - 1]
+        for seat in _ai_seats(settings):
+            settings.ai[seat - 1] = replace(src)
+    elif hit == "reset_all":
+        for seat in _ai_seats(settings):
+            settings.ai[seat - 1] = AiParams()
+    elif hit == "neutral_produces":
+        settings.neutral_produces = not settings.neutral_produces
     elif hit == "players_dec":
         _set_players(settings, settings.players - 1)
     elif hit == "players_inc":
@@ -317,6 +488,20 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
     return None
+
+
+def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
+    kind, attr, lo, hi, step, is_int = _SLIDER_SPECS[key]
+    track = ms.rects.get(key)
+    if track is None:
+        return
+    t = 0.0 if track.w == 0 else max(0.0, min(1.0, (pos[0] - track.x) / track.w))
+    raw = lo + t * (hi - lo)
+    snapped = round(raw / step) * step
+    snapped = max(lo, min(hi, snapped))
+    value = int(round(snapped)) if is_int else round(snapped, 4)
+    target = settings if kind == "adv" else settings.ai[ms.ai_seat - 1]
+    setattr(target, attr, value)
 
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:

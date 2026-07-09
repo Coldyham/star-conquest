@@ -15,9 +15,13 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from typing import Callable
 
 from . import config
-from .model import GameState, Order
+from .model import AiParams, GameState, Order
+
+# A seat's decision function: same shape the engine injects as `decide`.
+DecideFn = Callable[[GameState, int], list[Order]]
 
 
 def compute_orders(state: GameState, pid: int) -> list[Order]:
@@ -25,6 +29,7 @@ def compute_orders(state: GameState, pid: int) -> list[Order]:
     if not owned:
         return []
 
+    params = state.players[pid].ai_params
     max_prod = max(config.PRODUCTION_WEIGHTS)
     frontier = {sid for sid in owned if _is_frontier(state, sid, pid)}
     parent = _flow_to_frontier(state, owned, frontier)  # rear -> next hop toward front
@@ -32,7 +37,7 @@ def compute_orders(state: GameState, pid: int) -> list[Order]:
     orders: list[Order] = []
     for sid in owned:
         sys = state.systems[sid]
-        surplus = _surplus(sys.ships)
+        surplus = _surplus(sys.ships, params)
         if surplus <= 0:
             continue
 
@@ -41,7 +46,7 @@ def compute_orders(state: GameState, pid: int) -> list[Order]:
             continue
 
         if sid in frontier:
-            order = _frontier_order(state, pid, sid, surplus, max_prod)
+            order = _frontier_order(state, pid, sid, surplus, max_prod, params)
             if order is not None:
                 orders.append(order)
         else:
@@ -52,9 +57,29 @@ def compute_orders(state: GameState, pid: int) -> list[Order]:
 
 
 # --------------------------------------------------------------------------- #
+# Strategy registry — the seam for user-written AIs. A strategy is any
+# DecideFn; each seat names one via ``Player.ai_strategy`` and `decide` routes
+# to it. The engine still just calls `decide(state, pid)`, unaware of any of it.
+# --------------------------------------------------------------------------- #
+STRATEGIES: dict[str, DecideFn] = {}
+
+
+def register(name: str, fn: DecideFn) -> None:
+    """Make a decision function selectable per seat under ``name``."""
+    STRATEGIES[name] = fn
+
+
+def decide(state: GameState, pid: int) -> list[Order]:
+    """Dispatch a seat to its chosen strategy (falling back to the heuristic)."""
+    strategy = STRATEGIES.get(state.players[pid].ai_strategy, compute_orders)
+    return strategy(state, pid)
+
+
+# --------------------------------------------------------------------------- #
 # Decisions
 # --------------------------------------------------------------------------- #
-def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int):
+def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int,
+                    params: AiParams):
     sys = state.systems[sid]
     jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
     self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are
@@ -71,17 +96,17 @@ def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod
             # systems no longer send ships to each other every turn.
             if _is_frontier(state, nbr, pid):
                 nbr_deficit = _threat(state, nbr, pid) - n.ships
-                if nbr_deficit > 0 and nbr_deficit - self_deficit >= config.AI_REINFORCE_MARGIN:
+                if nbr_deficit > 0 and nbr_deficit - self_deficit >= params.reinforce_margin:
                     best = _better(best, (2, nbr_deficit + jitter(), nbr, surplus))
             continue
 
         if n.owner_id == 0:  # neutral -> expand
-            if surplus >= math.ceil(n.ships * config.AI_EXPAND_MARGIN):
+            if surplus >= math.ceil(n.ships * params.expand_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships) ** 0.5)
                 cand = (1, score + jitter(), nbr, surplus)  # commit fully: concentration wins
                 best = _better(best, cand)
         else:  # enemy -> attack
-            if surplus >= math.ceil(n.ships * config.AI_ATTACK_MARGIN):
+            if surplus >= math.ceil(n.ships * params.attack_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships))
                 cand = (1, score + jitter(), nbr, surplus)  # mass the whole surplus
                 best = _better(best, cand)
@@ -109,8 +134,8 @@ def _desirability(system, max_prod: int) -> float:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _surplus(ships: int) -> int:
-    reserve = max(config.AI_RESERVE_FLOOR, math.ceil(config.AI_RESERVE_FRACTION * ships))
+def _surplus(ships: int, params: AiParams) -> int:
+    reserve = max(params.reserve_floor, math.ceil(params.reserve_fraction * ships))
     return ships - reserve
 
 
@@ -147,3 +172,6 @@ def _flow_to_frontier(state: GameState, owned: set[int], frontier: set[int]) -> 
                 parent[nbr] = cur  # move from nbr toward cur (closer to the front)
                 queue.append(nbr)
     return parent
+
+
+register("heuristic", compute_orders)

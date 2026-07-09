@@ -62,11 +62,11 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
 def resolve_turn(state: GameState, ui: Ui) -> None:
     """Advance one turn. In autoplay the human seat is also driven by the AI."""
     human_orders = (
-        ai.compute_orders(state, ui.human_id)
+        ai.decide(state, ui.human_id)
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    engine.end_turn(state, human_orders=human_orders, decide=ai.compute_orders)
+    engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
     ui.clear_pending()
     ui.reset_selection()
 
