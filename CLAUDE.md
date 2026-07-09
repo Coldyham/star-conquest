@@ -9,10 +9,10 @@ win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 ## Commands
 
 ```sh
-uv run python main.py                 # play (random map, 3 players, you are blue)
-uv run python main.py --mode symmetric --players 4
-uv run python main.py --seed 42 --nodes 24    # reproducible map
-uv run python main.py --autoplay              # AI plays every seat (demo)
+uv run python main.py                          # opens the setup menu
+uv run python main.py --players 4 --mode symmetric   # CLI args pre-fill the menu
+uv run python main.py --seed 42 --nodes 24     # pre-fill a reproducible map
+uv run python main.py --no-menu --autoplay     # skip the menu; AI plays every seat (demo)
 
 uv run pytest                         # full suite
 uv run pytest tests/test_engine.py    # one file
@@ -31,16 +31,21 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`. This is what lets `tests/sim.py` and most of the suite run
-  with no display. Do not add a pygame import to any of these.
-- **Shell — the only pygame modules:** `render`, `input`, and `main`.
+  `engine`, `ai`, `settings`. This is what lets `tests/sim.py` and most of the
+  suite run with no display. Do not add a pygame import to any of these.
+- **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
-    never imports `engine` or `ai`**. Derived display stats (threat, inbound)
-    are computed with local helpers rather than reaching into `ai`.
+    never imports `engine` or `ai`**. Derived display stats (threat, inbound,
+    per-player production rate) are computed with local helpers rather than
+    reaching into `ai`.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
     touches the simulation. It returns a high-level action string
-    (`"end_turn"`, `"restart"`, `"quit"`, `"toggle_autoplay"`) or `None`, and
-    `main.py` decides what to do with it.
+    (`"end_turn"`, `"restart"`, `"quit"`, `"toggle_autoplay"`, `"menu"`) or
+    `None`, and `main.py` decides what to do with it.
+  - `menu.py` is a self-contained pre-game scene with the same draw/mutate split:
+    `draw` only reads `Settings`, `handle_event` mutates `MenuState`/`Settings`
+    and returns `"start"`/`"quit"`/`None`. `main.py` runs a two-scene
+    (`"menu"` ⇄ `"game"`) state machine and builds the `GameState` on `"start"`.
 
 ### Turn resolution (engine.py)
 
@@ -53,9 +58,11 @@ resolved together, launch-order independent) → production (after combat, so a
 system captured this turn produces for its new owner) → win check → `turn += 1`.
 
 **The engine never imports the AI.** The decision function is injected as the
-`decide` parameter to `end_turn` (`main.py` and `tests/sim.py` pass
-`ai.compute_orders`). Keep this inversion — it is why the core has no AI
-dependency.
+`decide` parameter to `end_turn`; `main.py` and `tests/sim.py` pass `ai.decide`,
+a per-seat dispatcher that routes each seat to its named strategy
+(`ai.STRATEGIES`, keyed by `Player.ai_strategy`; only `"heuristic"` is built in).
+Keep this inversion — it is why the core has no AI dependency, and it is the seam
+for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
 
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing
@@ -65,7 +72,18 @@ on outcomes.
 
 - **All balance/aesthetic constants live in `config.py`.** Do not hardcode a
   magic number elsewhere — add a named constant there. Tuning the game means
-  editing that one file.
+  editing that one file. Every module reads `config.X` *live* at call time
+  (nothing is cached at import), so the Advanced menu tunes copies on a
+  `Settings`, and `settings._apply_globals` (called by `build_state` just before
+  generation) is the single writer that pushes them back into `config`.
+- **`settings.Settings` is the pure, serializable pre-game config** (players,
+  map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
+  interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
+  is the one funnel from menu/CLI to a `GameState`.
+- **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
+  into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
+  the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
+  seats can play to different profiles; the menu's AI tab edits them per seat.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given

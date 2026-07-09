@@ -20,11 +20,16 @@ edges**. One ship type. Take every system to win.
 ## Run it
 
 ```sh
-uv run python main.py                          # random map, 3 players (you are blue)
-uv run python main.py --mode symmetric --players 4
-uv run python main.py --seed 42 --nodes 24     # reproducible map
-uv run python main.py --autoplay               # AI plays every seat (a demo)
+uv run python main.py                          # opens the setup menu
+uv run python main.py --players 4 --mode symmetric   # CLI args pre-fill the menu
+uv run python main.py --seed 42 --nodes 24     # pre-fill a reproducible map
+uv run python main.py --no-menu --autoplay     # skip the menu; AI plays every seat
 ```
+
+Launch drops you into a **setup menu** with three tabs — **Basic** (players,
+systems, map type, seed, autoplay), **Advanced** (map spread, economy, combat,
+ship speed), and **AI** (per-seat opponent tuning, with copy/reset-all). CLI
+flags pre-fill it; `--no-menu` starts a game straight from them.
 
 ## Controls
 
@@ -37,10 +42,12 @@ uv run python main.py --autoplay               # AI plays every seat (a demo)
 | Cancel / back | right-click or `Esc` |
 | End the turn (resolve) | `End Turn` button, `Enter`, or `Space` |
 | Toggle autoplay | `A` |
-| New map | `R` |
+| New map (same settings) | `R` |
+| Back to the setup menu | `M` |
 
 Your queued fleets show as arrows; a system's number is the ships you can still
-deploy this turn. Press **End Turn** to resolve everyone's moves at once.
+deploy this turn. The top bar scores each player by systems, ships, and
+production (ships/turn). Press **End Turn** to resolve everyone's moves at once.
 
 ## Development
 
@@ -50,16 +57,18 @@ presentation shell, so the whole game is testable headlessly.
 ```
 starconquest/
   config.py      # every balance/aesthetic constant
-  model.py       # dataclasses (GameState, System, Lane, Fleet, Order, Player)
+  settings.py    # pure pre-game config (Settings) -> build_state
+  model.py       # dataclasses (GameState, System, Lane, Fleet, Order, Player, AiParams)
   geometry.py    # distance, segment-crossing, world->screen transform
   mapgen.py      # random + symmetric generation
   combat.py      # Lanchester-with-jitter resolution
   engine.py      # simultaneous turn resolution (pure)
-  ai.py          # heuristic AI (compute_orders)
+  ai.py          # heuristic AI + per-seat params + strategy registry (decide/register)
   render.py      # drawing (pygame)
   input.py       # event handling (pygame)
-  viewstate.py   # transient UI state
-main.py          # entry point + main loop
+  menu.py        # pre-game setup screen (pygame)
+  viewstate.py   # transient in-game UI state
+main.py          # entry point + menu/game scene loop
 tests/           # pytest suite + sim.py headless AI-vs-AI harness
 ```
 
@@ -69,8 +78,13 @@ uv run python -m tests.sim --verbose   # watch one AI-vs-AI game in the terminal
 uv run python -m tests.sim --trials 200   # batch stats (winners, length, timeouts)
 ```
 
-## Roadmap (not in the MVP)
+## Roadmap (not yet built)
 
 Tech tree & ship-speed upgrades (the intended late-game pacing mechanism),
-race/empire customisation, selectable AI personalities / difficulty sliders,
-animations & sound, camera pan/zoom, multi-hop fleet routing, fog-of-war.
+race/empire customisation, animations & sound, camera pan/zoom, multi-hop fleet
+routing, fog-of-war. Nearer term: save/load a setup to a file, exposing the
+remaining config knobs, and a documented API + selectable strategies for
+**user-written AIs competing head-to-head** — each seat already routes through a
+pluggable strategy (`ai.register`), so that seam is in place.
+
+Per-seat AI tuning and selectable difficulty via the AI tab are already here.
