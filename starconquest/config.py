@@ -24,6 +24,11 @@ SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
 DEFAULT_NODES = 18
 DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
+# Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
+MIN_PLAYERS = 2               # a game needs at least two sides
+MAX_PLAYERS = 6               # == distinct entries in PLAYER_COLORS below
+MAX_NODES = 40                # cap: edge build is O(n^2), keep map-gen responsive
+
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
 MAX_EDGE_LENGTH_FRAC = 0.5     # prune non-MST candidate edges longer than this * WORLD_SIZE

@@ -256,19 +256,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT,
           midleft=(14, config.HUD_TOP_H // 2))
-    x = 130
-    for pid in sorted(state.players):
-        p = state.players[pid]
-        if p.is_neutral:
-            continue
-        systems = sum(1 for s in state.systems.values() if s.owner_id == pid)
-        ships = sum(s.ships for s in state.systems.values() if s.owner_id == pid)
-        ships += sum(f.ships for f in state.fleets if f.owner_id == pid)
-        label = f"{p.name}: {systems}sys {ships}sh"
-        tag = "" if p.alive else " (out)"
-        rect = _text(surface, _fonts()["normal"], label + tag, config.player_color(pid),
-                     midleft=(x, config.HUD_TOP_H // 2))
-        x = rect.right + 24
+    _draw_scoreboard(surface, state, w)
 
     # bottom bar
     by = h - config.HUD_BOTTOM_H
@@ -286,14 +274,67 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=br.center)
 
 
+def _draw_scoreboard(surface, state: GameState, w: int) -> None:
+    """Per-player standings in the top bar: swatch, systems, ships, production.
+
+    Laid out left-to-right by measured width so it never runs off-screen; names
+    are shown when the whole row fits, but a full six-player table drops them in
+    favour of the colour swatch (identity is colour-coded everywhere else too).
+    """
+    seats = [pid for pid in sorted(state.players) if not state.players[pid].is_neutral]
+    if not seats:
+        return
+    font = _fonts()["small"]
+    cy = config.HUD_TOP_H // 2
+    gap, sw_w = 22, 18
+
+    def label(pid: int, with_name: bool) -> str:
+        p = state.players[pid]
+        if not p.alive:
+            return f"{p.name} out" if with_name else "out"
+        systems, ships, prod = _player_stats(state, pid)
+        name = f"{p.name} " if with_name else ""
+        return f"{name}{systems}s {ships}sh {prod:.1f}/t"
+
+    def row_width(with_name: bool) -> int:
+        return sum(sw_w + font.size(label(pid, with_name))[0] + gap for pid in seats)
+
+    with_name = row_width(True) <= (w - 120)
+    x = 120
+    for pid in seats:
+        p = state.players[pid]
+        color = config.player_color(pid) if p.alive else (92, 96, 110)
+        pygame.draw.rect(surface, color, pygame.Rect(x, cy - 6, 12, 12), border_radius=3)
+        txt = label(pid, with_name)
+        _text(surface, font, txt, color, midleft=(x + sw_w, cy))
+        x += sw_w + font.size(txt)[0] + gap
+
+
+def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
+    """(systems owned, ships including in transit, production in ships/turn)."""
+    systems = ships = 0
+    for s in state.systems.values():
+        if s.owner_id == pid:
+            systems += 1
+            ships += s.ships
+    ships += sum(f.ships for f in state.fleets if f.owner_id == pid)
+    return systems, ships, _production_rate(state, pid)
+
+
+def _production_rate(state: GameState, pid: int) -> float:
+    """Long-run ships/turn: each owned system emits one ship per `production` turns."""
+    return sum(1.0 / s.production for s in state.systems.values()
+               if s.owner_id == pid and s.production > 0)
+
+
 def _hint(ui: Ui) -> str:
     if ui.autoplay:
-        return "Autoplay — AI is playing all seats. Press A to take control, Esc to quit."
+        return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.mode == SELECTED:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
         return "Wheel: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
-    return "Click your system to select  ·  End Turn to resolve  ·  A: autoplay"
+    return "Click your system to select  ·  End Turn to resolve  ·  A: autoplay  ·  M: exit to menu"
 
 
 # --------------------------------------------------------------------------- #
@@ -442,5 +483,5 @@ def _draw_win_overlay(surface, state: GameState) -> None:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
     _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - 16))
-    _text(surface, _fonts()["normal"], "Press R for a new map  ·  Esc to quit",
+    _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h // 2 + 24))
