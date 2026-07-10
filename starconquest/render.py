@@ -566,6 +566,34 @@ def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
     return friendly, enemy
 
 
+def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
+    """(quit, cancel) button rects — shared by the drawer and the hit-tester."""
+    w, h = surface.get_size()
+    cx, cy = w // 2, h // 2
+    bw, bh = 200, 42
+    quit_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
+    cancel_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    return quit_r, cancel_r
+
+
+def draw_confirm_quit(surface) -> None:
+    """Modal 'are you sure?' veil, overlaid on whichever scene is beneath it."""
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    _text(surface, _fonts()["big"], "Quit Star Conquest?", config.COLOR_TEXT,
+          center=(w // 2, h // 2 - 36))
+    quit_r, cancel_r = confirm_quit_buttons(surface)
+    for rect, label, fill, edge in (
+        (quit_r, "Quit (Y/⏎)", (120, 46, 52), (200, 96, 104)),
+        (cancel_r, "Cancel (N/Esc)", (46, 92, 60), (96, 190, 120)),
+    ):
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+        _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=rect.center)
+
+
 def _draw_win_overlay(surface, state: GameState) -> None:
     w, h = surface.get_size()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)

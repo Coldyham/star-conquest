@@ -104,6 +104,7 @@ def main() -> None:
         state, ui = start_game(settings, current_seed, settings.autoplay)
 
     running = True
+    confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
     auto_accum = 0
     fullscreen = False
     windowed_size = (config.SCREEN_W, config.SCREEN_H)  # restored when leaving fullscreen
@@ -116,9 +117,26 @@ def main() -> None:
             if state is not None and ui is not None:
                 ui.view = build_view(state)
         for event in pygame.event.get():
+            if confirm_quit:
+                # Modal: swallow all other input until the user answers.
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                        running = False
+                    elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        confirm_quit = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    quit_r, cancel_r = render.confirm_quit_buttons(screen)
+                    if quit_r.collidepoint(event.pos):
+                        running = False
+                    elif cancel_r.collidepoint(event.pos):
+                        confirm_quit = False
+                continue
+
             if event.type == pygame.QUIT:
-                running = False
-                break
+                confirm_quit = True
+                continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
                 fullscreen = not fullscreen
@@ -138,12 +156,12 @@ def main() -> None:
                     scene = "game"
                     auto_accum = 0
                 elif action == "quit":
-                    running = False
+                    confirm_quit = True
                 continue
 
             action = game_input.handle_event(event, state, ui)
             if action == "quit":
-                running = False
+                confirm_quit = True
             elif action == "menu":
                 scene = "menu"
                 state, ui = None, None
@@ -168,6 +186,8 @@ def main() -> None:
             menu.draw(screen, menu_state, settings)
         else:
             render.draw(screen, state, ui)
+        if confirm_quit:
+            render.draw_confirm_quit(screen)
         pygame.display.flip()
 
     pygame.quit()
