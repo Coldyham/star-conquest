@@ -86,7 +86,9 @@ def main() -> None:
     ai.load_models()          # register any drop-in models/ strategies up front
 
     pygame.init()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    # Resizable: pygame grows the surface with the window, so we never re-call
+    # set_mode (a redundant call fights the WM on X11 and snaps the window back).
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), pygame.RESIZABLE)
     pygame.display.set_caption("Star Conquest")
     clock = pygame.time.Clock()
 
@@ -103,12 +105,29 @@ def main() -> None:
 
     running = True
     auto_accum = 0
+    fullscreen = False
+    windowed_size = (config.SCREEN_W, config.SCREEN_H)  # restored when leaving fullscreen
     while running:
         dt = clock.tick(config.FPS)
+        # Reflow to fill the window whenever its size changes.
+        screen = pygame.display.get_surface()
+        if screen.get_size() != (config.SCREEN_W, config.SCREEN_H):
+            config.SCREEN_W, config.SCREEN_H = screen.get_size()
+            if state is not None and ui is not None:
+                ui.view = build_view(state)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
                 break
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                fullscreen = not fullscreen
+                if fullscreen:
+                    windowed_size = (config.SCREEN_W, config.SCREEN_H)
+                    pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                else:
+                    pygame.display.set_mode(windowed_size, pygame.RESIZABLE)
+                continue
 
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
