@@ -27,6 +27,7 @@ class Ui:
     dest: Optional[int] = None          # chosen destination system id
     chosen: int = 0                     # ships to send in CHOOSING mode
     pending: list[Order] = field(default_factory=list)
+    sel_order: Optional[int] = None     # index into `pending` being edited, if any
     # standing auto-forward rules: source_id -> (dest_id, keep). Human-only QoL,
     # so it lives here rather than in the pure GameState. Each turn a rule
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
@@ -34,6 +35,12 @@ class Ui:
     autoplay: bool = False
     show_help: bool = True
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Hit-rects for the queued-orders panel, rebuilt by render each frame and
+    # tested by input (same store-rect-then-test handoff as end_turn_rect).
+    # Parallel to `pending`: entry i is (row_rect, delete_rect), each (x,y,w,h).
+    order_hitboxes: list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = field(
+        default_factory=list
+    )
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
@@ -51,8 +58,18 @@ class Ui:
         self.dest = None
         self.chosen = 0
 
+    def select_order(self, i: int) -> None:
+        """Pick a queued order to edit (scroll adjusts it, X removes it).
+
+        Editing an existing order and composing a new one are mutually
+        exclusive, so this drops any in-progress source/destination selection.
+        """
+        self.reset_selection()
+        self.sel_order = i
+
     def clear_pending(self) -> None:
         self.pending.clear()
+        self.sel_order = None
 
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""

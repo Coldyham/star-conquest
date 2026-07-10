@@ -20,6 +20,22 @@ def lerp(a: Point, b: Point, t: float) -> Point:
     return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
 
 
+def point_segment_dist(p: Point, a: Point, b: Point) -> float:
+    """Shortest distance from point ``p`` to the closed segment ``a``-``b``.
+
+    Used for hit-testing a click against a drawn lane/order arrow.
+    """
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    denom = dx * dx + dy * dy
+    if denom <= 1e-12:            # degenerate segment: fall back to point distance
+        return dist(p, a)
+    t = ((p[0] - ax) * dx + (p[1] - ay) * dy) / denom
+    t = max(0.0, min(1.0, t))     # clamp to the segment
+    return dist(p, (ax + t * dx, ay + t * dy))
+
+
 def _orient(a: Point, b: Point, c: Point) -> float:
     """>0 if c is left of a->b, <0 if right, 0 if collinear (twice signed area)."""
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])

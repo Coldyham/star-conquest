@@ -11,7 +11,7 @@ from typing import Optional
 
 import pygame
 
-from .geometry import dist
+from .geometry import dist, point_segment_dist
 from . import config
 from .model import GameState, Order
 from .viewstate import CHOOSING, IDLE, SELECTED, Ui
@@ -49,9 +49,16 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.type == pygame.KEYDOWN:
         return _handle_key(event, ui)
 
-    if event.type == pygame.MOUSEWHEEL and ui.mode == CHOOSING and ui.selected is not None:
-        avail = ui.available(state, ui.selected)
-        ui.chosen = max(1, min(avail, ui.chosen + event.y))
+    if event.type == pygame.MOUSEWHEEL:
+        if ui.mode == CHOOSING and ui.selected is not None:
+            avail = ui.available(state, ui.selected)
+            ui.chosen = max(1, min(avail, ui.chosen + event.y))
+        elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+            # adjust a queued order in place; its cap is its own ships plus
+            # whatever is still free at the source (available already nets it out)
+            o = ui.pending[ui.sel_order]
+            cap = ui.available(state, o.source_id) + o.ships
+            o.ships = max(1, min(cap, o.ships + event.y))
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
@@ -69,7 +76,10 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key == pygame.K_a:
         return "toggle_autoplay"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
-        if ui.selected is not None:
+        if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+            del ui.pending[ui.sel_order]  # remove the highlighted queued order
+            ui.sel_order = None
+        elif ui.selected is not None:
             ui.clear_forward(ui.selected)  # drop the selected system's forward rule
         return None
     if event.key == pygame.K_r:
@@ -77,7 +87,7 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key == pygame.K_m:
         return "menu"
     if event.key == pygame.K_ESCAPE:
-        if ui.mode != IDLE:
+        if ui.mode != IDLE or ui.sel_order is not None:
             _cancel(ui)
             return None
         return "quit"
@@ -89,6 +99,19 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return "end_turn"
     if ui.autoplay:
         return None
+
+    # Clicks in the queued-orders panel take priority: a delete button removes
+    # its order, a row selects it for editing (scroll adjusts, X removes).
+    for i, (row, delete) in enumerate(ui.order_hitboxes):
+        if i >= len(ui.pending):
+            break
+        if _point_in_rect(pos, delete):
+            del ui.pending[i]
+            ui.sel_order = None
+            return None
+        if _point_in_rect(pos, row):
+            ui.select_order(i)
+            return None
 
     # Confirm the current source->dest choice. Shift makes it a standing
     # auto-forward rule instead of a one-shot send; a plain click sends once.
@@ -109,9 +132,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
 
     node = pick_node(state, ui, pos)
     if node is None:
-        _cancel(ui)
+        # Empty space near a queued order's lane selects that order (else cancel).
+        oi = _pick_pending_lane(state, ui, pos)
+        if oi is not None:
+            ui.select_order(oi)
+        else:
+            _cancel(ui)
         return None
 
+    ui.sel_order = None  # selecting a system is composing, not editing an order
     sys = state.systems[node]
     if ui.mode == SELECTED and ui.selected is not None:
         if node == ui.selected:
@@ -133,8 +162,32 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     return None
 
 
+def _pick_pending_lane(state: GameState, ui: Ui, pos) -> Optional[int]:
+    """Index of a queued order whose lane is under ``pos``, or None.
+
+    Several orders can share one lane (including opposite directions), so when
+    more than one is in range a repeat click cycles through them rather than
+    always grabbing the same one — the list panel can still target any directly.
+    """
+    hits = []
+    for i, o in enumerate(ui.pending):
+        a = ui.view.to_screen(state.systems[o.source_id].pos)
+        b = ui.view.to_screen(state.systems[o.dest_id].pos)
+        d = point_segment_dist(pos, a, b)
+        if d <= config.LANE_PICK_DIST:
+            hits.append((d, i))
+    if not hits:
+        return None
+    order = [i for _, i in sorted(hits)]     # nearest first, then by index
+    if ui.sel_order in order:                # cycle to the next order on this lane
+        return order[(order.index(ui.sel_order) + 1) % len(order)]
+    return order[0]
+
+
 def _cancel(ui: Ui) -> None:
-    if ui.mode == CHOOSING:
+    if ui.sel_order is not None:
+        ui.sel_order = None      # deselect a highlighted queued order
+    elif ui.mode == CHOOSING:
         ui.mode = SELECTED
         ui.dest = None
         ui.chosen = 0
