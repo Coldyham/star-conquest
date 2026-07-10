@@ -155,4 +155,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pygame.quit()
+    print("\nGoodbye!")
