@@ -16,6 +16,8 @@ Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
 global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
 tuning with copy/reset-all shortcuts, plus a **Strategy** dropdown listing the
 built-in heuristic and any drop-in ``models/`` files, via ``ai.load_models``).
+Both slider tabs also carry a die button that rolls their sliders to random
+in-bounds values, for fun — the same roll-the-dice metaphor as the seed control.
 Sliders are driven by the spec tables below so drawing and hit-routing stay
 data-driven.
 
@@ -86,6 +88,8 @@ _ADV_ECON = (
 _ADV_COMBAT = (
     ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
 )
+# Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
+_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT
 _AI_PARAMS = (
     ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
     ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
@@ -251,6 +255,9 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+    _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM,
+          midleft=(lx, y + _CH // 2))
+    _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
     y = panel.y + 16                                   # RIGHT: Economy + Combat
     y = _section(surface, "Economy", rx, y)
@@ -291,9 +298,11 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
     _button(surface, ms, "reset_all", pygame.Rect(x + bw + 12, y, bw, _CH), "Reset all",
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    dice = pygame.Rect(x + 2 * (bw + 12), y, _CH, _CH)
+    _die_button(surface, ms, "randomise_ai", dice)
     name = config.player_name(ms.ai_seat)
     _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat),
-          midleft=(x + 2 * bw + 32, y + _CH // 2))
+          midleft=(dice.right + 12, y + _CH // 2))
 
     # strategy dropdown (built-in heuristic + any drop-in models/)
     y += 44
@@ -336,6 +345,15 @@ def _button(surface, ms, key, rect, label, *, fill, border, tcol, font=None) -> 
     _text(surface, font or _fonts()["normal"], label, tcol, center=rect.center)
     if key is not None:
         ms.rects[key] = rect
+
+
+def _die_button(surface, ms, key, rect: pygame.Rect) -> None:
+    """A button whose face is a die — the 'roll these sliders to random' action,
+    reusing the seed control's roll-the-dice look."""
+    pygame.draw.rect(surface, _BTN_FILL, rect, border_radius=6)
+    pygame.draw.rect(surface, _BTN_BORDER, rect, 2, border_radius=6)
+    _draw_die(surface, rect)
+    ms.rects[key] = rect
 
 
 def _fmt(value, is_int: bool) -> str:
@@ -596,6 +614,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         for seat in _ai_seats(settings):
             settings.ai[seat - 1] = AiParams()
             settings.ai_strategy[seat - 1] = "heuristic"
+    elif hit == "randomise_ai":
+        _randomise_sliders(settings.ai[ms.ai_seat - 1], _AI_PARAMS)
+    elif hit == "randomise_adv":
+        _randomise_sliders(settings, _ADV_ALL)
     elif hit == "neutral_produces":
         settings.neutral_produces = not settings.neutral_produces
     elif hit == "players_dec":
@@ -650,6 +672,16 @@ def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
     value = int(round(snapped)) if is_int else round(snapped, 4)
     target = settings if kind == "adv" else settings.ai[ms.ai_seat - 1]
     setattr(target, attr, value)
+
+
+def _randomise_sliders(target, specs) -> None:
+    """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
+    on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
+    snap-and-clamp logic with ``_apply_slider``."""
+    for _key, _label, attr, lo, hi, step, is_int in specs:
+        snapped = round(random.uniform(lo, hi) / step) * step
+        snapped = max(lo, min(hi, snapped))
+        setattr(target, attr, int(round(snapped)) if is_int else round(snapped, 4))
 
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
