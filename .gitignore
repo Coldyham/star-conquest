@@ -11,3 +11,7 @@ wheels/
 
 # Saved game-setup configs (menu Save/Load)
 saves/
+
+# User-supplied custom AI strategies (drop-in decision functions); keep the docs
+models/*
+!models/README.md

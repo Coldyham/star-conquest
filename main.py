@@ -83,6 +83,7 @@ def main() -> None:
     args = ap.parse_args()
 
     settings = Settings.from_args(args)
+    ai.load_models()          # register any drop-in models/ strategies up front
 
     pygame.init()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -112,6 +113,7 @@ def main() -> None:
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
+                    ai.load_models()   # pick up files added since launch / named by a loaded config
                     current_seed = resolve_seed(settings)
                     state, ui = start_game(settings, current_seed, settings.autoplay)
                     scene = "game"

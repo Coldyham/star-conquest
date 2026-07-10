@@ -70,6 +70,11 @@ class Settings:
     ai: list[AiParams] = field(
         default_factory=lambda: [AiParams() for _ in range(config.MAX_PLAYERS)]
     )
+    # Per-seat strategy name (key into ai.STRATEGIES); "heuristic" is built in,
+    # others come from drop-in files the menu discovers. Same seat-1 indexing.
+    ai_strategy: list[str] = field(
+        default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)]
+    )
 
     @classmethod
     def defaults(cls) -> "Settings":
@@ -99,6 +104,11 @@ class Settings:
         idx = seat - 1
         return self.ai[idx] if 0 <= idx < len(self.ai) else AiParams()
 
+    def seat_strategy(self, seat: int) -> str:
+        """The strategy name for a 1-based seat id (heuristic if out of range)."""
+        idx = seat - 1
+        return self.ai_strategy[idx] if 0 <= idx < len(self.ai_strategy) else "heuristic"
+
     # -- save / load (see module docstring) ---------------------------------- #
     def to_dict(self) -> dict:
         """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts)."""
@@ -117,7 +127,7 @@ class Settings:
             return cls()
         out = cls()
         for f in fields(cls):                       # scalar fields
-            if f.name in ("ai", "seed") or f.name not in data:
+            if f.name in ("ai", "ai_strategy", "seed") or f.name not in data:
                 continue
             setattr(out, f.name, _coerce(data[f.name], getattr(out, f.name)))
 
@@ -133,6 +143,12 @@ class Settings:
             out.ai = [_ai_from_dict(d) for d in raw_ai[: config.MAX_PLAYERS]]
         while len(out.ai) < config.MAX_PLAYERS:     # pad short lists
             out.ai.append(AiParams())
+
+        raw_strat = data.get("ai_strategy")
+        if isinstance(raw_strat, list):
+            out.ai_strategy = [str(s) for s in raw_strat[: config.MAX_PLAYERS]]
+        while len(out.ai_strategy) < config.MAX_PLAYERS:
+            out.ai_strategy.append("heuristic")
         return out
 
     def save(self, path) -> None:
@@ -147,7 +163,7 @@ class Settings:
             return cls.from_dict(json.load(fh))
 
     def copy_from(self, other: "Settings") -> None:
-        """Overwrite every field from ``other`` in place (deep-copying ``ai``).
+        """Overwrite every field from ``other`` in place (copying its lists).
 
         Lets a caller holding this instance (e.g. ``main.py``) adopt a loaded
         config without rebinding its reference.
@@ -155,6 +171,8 @@ class Settings:
         for f in fields(self):
             if f.name == "ai":
                 self.ai = [replace(p) for p in other.ai]
+            elif f.name == "ai_strategy":
+                self.ai_strategy = list(other.ai_strategy)
             else:
                 setattr(self, f.name, getattr(other, f.name))
 
@@ -211,12 +229,13 @@ def build_state(settings: Settings, seed: int) -> GameState:
     """Generate a game from a settings object and a concrete seed.
 
     The single funnel from menu/CLI to a GameState: apply the global knobs, build
-    the map, then stamp each non-neutral seat with its own AI params (a copy, so
-    later menu edits don't reach into a live game).
+    the map, then stamp each non-neutral seat with its own strategy and AI params
+    (params a copy, so later menu edits don't reach into a live game).
     """
     _apply_globals(settings)
     state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
     for player in state.players.values():
         if not player.is_neutral:
+            player.ai_strategy = settings.seat_strategy(player.id)
             player.ai_params = replace(settings.seat_params(player.id))
     return state

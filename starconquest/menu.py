@@ -14,8 +14,10 @@ valid for this frame's events.
 
 Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
 global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
-tuning with copy/reset-all shortcuts). Sliders are driven by the spec tables
-below so drawing and hit-routing stay data-driven.
+tuning with copy/reset-all shortcuts, plus a **Strategy** dropdown listing the
+built-in heuristic and any drop-in ``models/`` files, via ``ai.load_models``).
+Sliders are driven by the spec tables below so drawing and hit-routing stay
+data-driven.
 
 A footer row saves/loads the whole ``Settings`` to a named JSON file under the
 gitignored ``saves/`` directory (via ``settings.Settings.save``/``load``); those
@@ -32,7 +34,7 @@ from typing import Optional
 
 import pygame
 
-from . import config
+from . import ai, config
 from .model import AiParams
 from .settings import Settings
 
@@ -140,6 +142,10 @@ class MenuState:
     status: str = ""                          # transient save/load feedback
     status_ok: bool = True
     status_until: int = 0                     # ms tick after which status hides
+    strategy_open: bool = False               # is the AI-seat strategy dropdown open
+    strategies: list[str] = field(            # dropdown options, refreshed on open
+        default_factory=lambda: ["heuristic"]
+    )
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
 
 
@@ -279,7 +285,7 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
         cx += 52
 
     # edit-all shortcuts, pinned near the top
-    y += 46
+    y += 44
     bw = 150
     _button(surface, ms, "copy_all", pygame.Rect(x, y, bw, _CH), "Copy to all",
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
@@ -289,10 +295,18 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat),
           midleft=(x + 2 * bw + 32, y + _CH // 2))
 
-    # per-seat param sliders
-    y += 52
-    params = settings.ai[ms.ai_seat - 1]
-    _sliders(surface, ms, params, _AI_PARAMS, x, y, panel.width - 48)
+    # strategy dropdown (built-in heuristic + any drop-in models/)
+    y += 44
+    _text(surface, _fonts()["small"], "Strategy", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
+    _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat),
+              ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
+
+    # per-seat param sliders (hidden while the dropdown is open so its options,
+    # which overlay this region, own the hit-test — no slider rect underneath)
+    y += 46
+    if not ms.strategy_open:
+        params = settings.ai[ms.ai_seat - 1]
+        _sliders(surface, ms, params, _AI_PARAMS, x, y, panel.width - 48)
 
 
 def _section(surface, title: str, x: int, y: int) -> int:
@@ -420,6 +434,45 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
 
 
+def _dropdown(surface, ms: MenuState, key, current, options, open_, x, y, width) -> None:
+    """A closed trigger showing ``current``; when ``open_``, a list of options.
+
+    Trigger records ``ms.rects[key]``; each open option records
+    ``ms.rects[f"{key}_opt_{i}"]`` (store-rect-then-test, like every widget here).
+    """
+    f = _fonts()
+    trigger = pygame.Rect(x, y, width, _CH)
+    pygame.draw.rect(surface, _BTN_FILL, trigger, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER if open_ else _BTN_BORDER, trigger, 2, border_radius=6)
+    _text(surface, f["normal"], current, config.COLOR_TEXT, midleft=(trigger.x + 10, trigger.centery))
+    _draw_caret(surface, pygame.Rect(trigger.right - _CH, y, _CH, _CH), open_)
+    ms.rects[key] = trigger
+    if not open_:
+        return
+
+    rh = 30
+    panel = pygame.Rect(x, y + _CH + 2, width, rh * len(options))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER, panel, 1, border_radius=6)
+    for i, opt in enumerate(options):
+        row = pygame.Rect(x, panel.y + i * rh, width, rh)
+        if opt == current:
+            pygame.draw.rect(surface, _HL_FILL, row.inflate(-4, -4), border_radius=4)
+        _text(surface, f["small"], opt, config.COLOR_TEXT, midleft=(row.x + 12, row.centery))
+        ms.rects[f"{key}_opt_{i}"] = row
+
+
+def _draw_caret(surface, rect: pygame.Rect, up: bool) -> None:
+    """A small ▲/▼ triangle (the mono font has no arrow glyph)."""
+    cx, cy = rect.center
+    s = 5
+    if up:
+        pts = [(cx - s, cy + 3), (cx + s, cy + 3), (cx, cy - 4)]
+    else:
+        pts = [(cx - s, cy - 3), (cx + s, cy - 3), (cx, cy + 4)]
+    pygame.draw.polygon(surface, config.COLOR_TEXT_DIM, pts)
+
+
 def _draw_die(surface, rect: pygame.Rect) -> None:
     """A small five-pip die face, drawn to signal 'roll a random seed'."""
     face = pygame.Rect(0, 0, 20, 20)
@@ -491,6 +544,11 @@ def _handle_key(event, ms: MenuState, settings: Settings):
             ms.filename += event.unicode
         return None
 
+    if ms.strategy_open:
+        if event.key == pygame.K_ESCAPE:
+            ms.strategy_open = False
+        return None
+
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "start"
     if event.key == pygame.K_ESCAPE:
@@ -504,6 +562,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.editing_seed = False
     if hit != "filename_field":
         ms.editing_filename = False
+    if not (hit == "strategy" or (hit or "").startswith("strategy_opt_")):
+        ms.strategy_open = False           # click anywhere else closes the dropdown
 
     if hit == "start":
         return "start"
@@ -516,13 +576,26 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.tab = hit[len("tab_"):]
     elif hit.startswith("seat_"):
         ms.ai_seat = int(hit[len("seat_"):])
+    elif hit == "strategy":                        # toggle the dropdown, rescanning models/
+        if not ms.strategy_open:
+            ai.load_models()
+            ms.strategies = ai.available_strategies()
+        ms.strategy_open = not ms.strategy_open
+    elif hit.startswith("strategy_opt_"):
+        idx = int(hit[len("strategy_opt_"):])
+        if 0 <= idx < len(ms.strategies):
+            settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
+        ms.strategy_open = False
     elif hit == "copy_all":
         src = settings.ai[ms.ai_seat - 1]
+        src_strat = settings.ai_strategy[ms.ai_seat - 1]
         for seat in _ai_seats(settings):
             settings.ai[seat - 1] = replace(src)
+            settings.ai_strategy[seat - 1] = src_strat
     elif hit == "reset_all":
         for seat in _ai_seats(settings):
             settings.ai[seat - 1] = AiParams()
+            settings.ai_strategy[seat - 1] = "heuristic"
     elif hit == "neutral_produces":
         settings.neutral_produces = not settings.neutral_produces
     elif hit == "players_dec":

@@ -60,9 +60,18 @@ system captured this turn produces for its new owner) → win check → `turn +=
 **The engine never imports the AI.** The decision function is injected as the
 `decide` parameter to `end_turn`; `main.py` and `tests/sim.py` pass `ai.decide`,
 a per-seat dispatcher that routes each seat to its named strategy
-(`ai.STRATEGIES`, keyed by `Player.ai_strategy`; only `"heuristic"` is built in).
-Keep this inversion — it is why the core has no AI dependency, and it is the seam
-for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
+(`ai.STRATEGIES`, keyed by `Player.ai_strategy`; `ai.decide` falls back to the
+built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
+crashes). Keep this inversion — it is why the core has no AI dependency, and it is
+the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
+
+**Drop-in custom AIs.** `ai.load_models()` imports every `*.py` in the gitignored
+`models/` dir (repo-anchored `ai.MODELS_DIR`, mirroring `menu._SAVE_DIR`) and
+`register`s each file's `decide` under its stem; a file that fails to import or
+lacks `decide` is skipped. `main.py` calls it at startup and on game start;
+`ai.available_strategies()` feeds the menu's per-seat Strategy dropdown. `menu.py`
+is the one shell module that imports `ai` (for discovery) — fine, since `ai` is
+pure core (no pygame); the render/input prohibition on importing `ai` still holds.
 
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing
@@ -84,6 +93,9 @@ on outcomes.
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
   seats can play to different profiles; the menu's AI tab edits them per seat.
+  `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
+  list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
+  `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given

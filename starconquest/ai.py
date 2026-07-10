@@ -13,12 +13,19 @@ All tie-breaks go through ``state.rng`` so multiple AIs don't play identically.
 
 from __future__ import annotations
 
+import importlib.util
 import math
+import sys
 from collections import deque
+from pathlib import Path
 from typing import Callable
 
 from . import config
 from .model import AiParams, GameState, Order
+
+# User-supplied strategies live in a gitignored dir beside the repo (mirrors
+# menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without touching src.
+MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
 # A seat's decision function: same shape the engine injects as `decide`.
 DecideFn = Callable[[GameState, int], list[Order]]
@@ -73,6 +80,42 @@ def decide(state: GameState, pid: int) -> list[Order]:
     """Dispatch a seat to its chosen strategy (falling back to the heuristic)."""
     strategy = STRATEGIES.get(state.players[pid].ai_strategy, compute_orders)
     return strategy(state, pid)
+
+
+def available_strategies() -> list[str]:
+    """Names for the menu dropdown: the built-in heuristic first, then the rest."""
+    return ["heuristic"] + sorted(n for n in STRATEGIES if n != "heuristic")
+
+
+def load_models(directory: Path = MODELS_DIR) -> list[str]:
+    """Import every ``*.py`` in ``directory`` and register its ``decide`` function.
+
+    Each file becomes a strategy named after the file stem. A file that fails to
+    import or lacks a callable ``decide`` is skipped (never crashes discovery), so
+    a broken model simply won't appear. Idempotent: re-running re-imports and
+    overwrites, picking up edits and newly-added files. Returns the sorted names
+    that registered successfully. Trusted local code — importing it is the point.
+    """
+    loaded: list[str] = []
+    if not directory.is_dir():
+        return loaded
+    for path in sorted(directory.glob("*.py")):
+        if path.stem.startswith("_"):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(f"sc_model_{path.stem}", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module          # so dataclasses/typing resolve
+            spec.loader.exec_module(module)
+            fn = getattr(module, "decide", None)
+            if callable(fn):
+                register(path.stem, fn)
+                loaded.append(path.stem)
+        except Exception:                            # noqa: BLE001 — one bad model mustn't break the rest
+            continue
+    return sorted(loaded)
 
 
 # --------------------------------------------------------------------------- #

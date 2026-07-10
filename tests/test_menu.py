@@ -13,7 +13,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame  # noqa: E402
 
-from starconquest import config, menu  # noqa: E402
+from starconquest import ai, config, menu  # noqa: E402
 from starconquest.menu import MenuState  # noqa: E402
 from starconquest.settings import Settings  # noqa: E402
 
@@ -190,4 +190,28 @@ def test_ai_seat_list_respects_autoplay():
         menu.draw(screen, ms, settings)
         assert "seat_1" in ms.rects                # revealed under autoplay
     finally:
+        pygame.quit()
+
+
+def test_ai_tab_strategy_dropdown_select():
+    screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
+    ms.tab = "ai"
+    ai.register("dropdown_test", lambda st, pid: [])
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        # sliders show while closed; opening the dropdown lists the strategies
+        _click_key(screen, ms, settings, "strategy")
+        assert ms.strategy_open
+        assert "dropdown_test" in ms.strategies
+        i = ms.strategies.index("dropdown_test")
+        _click_key(screen, ms, settings, f"strategy_opt_{i}")
+        assert settings.ai_strategy[1] == "dropdown_test"   # seat 2 -> index 1
+        assert not ms.strategy_open                          # selecting closes it
+        # Esc closes an open dropdown instead of quitting
+        _click_key(screen, ms, settings, "strategy")
+        assert ms.strategy_open
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert not ms.strategy_open
+    finally:
+        ai.STRATEGIES.pop("dropdown_test", None)
         pygame.quit()

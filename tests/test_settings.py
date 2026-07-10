@@ -107,6 +107,8 @@ def _customised() -> Settings:
                  home_start_ships=25, combat_jitter=0.3, ship_ly_per_turn=9.5)
     s.ai[0] = AiParams(reserve_fraction=0.5, reserve_floor=4, attack_margin=2.6)
     s.ai[3] = AiParams(expand_margin=2.1, reinforce_margin=5)
+    s.ai_strategy[1] = "rusher"
+    s.ai_strategy[2] = "turtle"
     return s
 
 
@@ -148,6 +150,17 @@ def test_from_dict_normalises_ai_list_length():
     assert len(Settings.from_dict({"ai": over}).ai) == config.MAX_PLAYERS
 
 
+def test_from_dict_normalises_ai_strategy_list():
+    # coerced to str, padded to MAX_PLAYERS, truncated if too long
+    loaded = Settings.from_dict({"ai_strategy": [1, "rusher"]})
+    assert loaded.ai_strategy[:3] == ["1", "rusher", "heuristic"]
+    assert len(loaded.ai_strategy) == config.MAX_PLAYERS
+    over = ["x"] * (config.MAX_PLAYERS + 3)
+    assert len(Settings.from_dict({"ai_strategy": over}).ai_strategy) == config.MAX_PLAYERS
+    # a non-list is ignored -> all default
+    assert Settings.from_dict({"ai_strategy": "nope"}).ai_strategy == ["heuristic"] * config.MAX_PLAYERS
+
+
 def test_from_dict_coerces_scalar_types():
     loaded = Settings.from_dict({"players": "4", "combat_jitter": 1})
     assert loaded.players == 4
@@ -169,3 +182,15 @@ def test_copy_from_mutates_in_place_without_aliasing():
     # ai is deep-copied: mutating the source afterwards must not touch target
     source.ai[0].attack_margin = 9.9
     assert target.ai[0].attack_margin == _customised().ai[0].attack_margin
+    # ai_strategy is copied too (not aliased)
+    source.ai_strategy[1] = "changed"
+    assert target.ai_strategy[1] == "rusher"
+
+
+def test_build_state_stamps_per_seat_strategy():
+    with _preserve_config():
+        s = Settings(players=3, nodes=18)
+        s.ai_strategy[1] = "rusher"                    # seat 2
+        state = build_state(s, 5)
+        assert state.players[2].ai_strategy == "rusher"
+        assert state.players[3].ai_strategy == "heuristic"
