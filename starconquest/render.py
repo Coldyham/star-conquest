@@ -43,17 +43,22 @@ def _text(surface, font, s, color, center=None, topleft=None, midleft=None):
 # --------------------------------------------------------------------------- #
 def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     surface.fill(config.COLOR_BG)
-    # zero the −/+ button rects; whichever count draw runs (if any) re-records them
+    # zero the button rects; whichever count/popup draw runs (if any) re-records them
     ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
+    ui.send_all_rect = ui.send_one_rect = ui.send_capture_rect = (0, 0, 0, 0)
+    ui.forward_toggle_rect = ui.cancel_rect = (0, 0, 0, 0)
     _draw_lanes(surface, state, ui)
     _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
     _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
     _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
-    # the active count + −/+ buttons draw last of the map layer so nodes/fleets
-    # never occlude them (they must stay visible and clickable)
-    _draw_count_controls(surface, state, ui)
+    # the active count + −/+ buttons (and the send popup) draw last of the map
+    # layer so nodes/fleets never occlude them (they must stay visible/clickable)
+    if ui.mode == CHOOSING:
+        _draw_send_popup(surface, state, ui)
+    else:
+        _draw_count_controls(surface, state, ui)
     _draw_hud(surface, state, ui)
     if state.winner is not None:
         _draw_win_overlay(surface, state)
@@ -203,20 +208,113 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
 
 def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
     """Draw the active ship-count label + −/+ buttons on top of the map layer so
-    nodes and fleets never occlude them. Handles both the move being composed
-    (CHOOSING) and the queued order being edited; records the button hit-rects."""
-    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
-        pa = ui.view.to_screen(state.systems[ui.selected].pos)
-        pb = ui.view.to_screen(state.systems[ui.dest].pos)
-        center = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 - 12)
-        _draw_count_stepper(surface, center, ui.chosen, config.COLOR_SELECT, ui)
-    elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+    nodes and fleets never occlude them. Handles the queued order being edited
+    via a lane/list click; records the button hit-rects. (The active send in
+    CHOOSING mode gets the fuller popup instead — see _draw_send_popup.)"""
+    if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
         o = ui.pending[ui.sel_order]
         pa = ui.view.to_screen(state.systems[o.source_id].pos)
         pb = ui.view.to_screen(state.systems[o.dest_id].pos)
         lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
         ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
         _draw_count_stepper(surface, (lx, ly - 10), o.ships, config.COLOR_SELECT, ui)
+
+
+def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
+    """The on-map action panel opened when a destination is picked. The send is
+    already committed (send-all by default); the popup retunes the count (−/+,
+    All, 1, capture = enemy+1), toggles a standing forward rule, or cancels it.
+    Records every button's hit-rect on ``ui`` for input (store-rect-then-test)."""
+    if ui.selected is None or ui.dest is None:
+        return
+    pa = ui.view.to_screen(state.systems[ui.selected].pos)
+    pb = ui.view.to_screen(state.systems[ui.dest].pos)
+    mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
+
+    dest = state.systems[ui.dest]
+    hostile = dest.owner_id != ui.human_id           # show capture preset only vs. others
+    font = _fonts()["small"]
+    pad, gap, bh = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP, config.SEND_POPUP_BTN_H
+    w = config.SEND_POPUP_W
+    rows = 4                                          # title, stepper, presets, actions
+    h = pad * 2 + bh * rows + gap * (rows - 1)
+
+    # anchor above the lane midpoint, clamped to the play area
+    sw, sh = surface.get_size()
+    x = _clamp(mid[0] - w // 2, 0, sw - config.HUD_RIGHT_W - w)
+    y = _clamp(mid[1] - h - 14, config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h)
+
+    panel = pygame.Rect(x, y, w, h)
+    pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=8)
+    pygame.draw.rect(surface, config.COLOR_SELECT, panel, 1, border_radius=8)
+
+    inner = x + pad
+    iw = w - pad * 2
+    cy = y + pad
+
+    # title: verb + destination on the left, its garrison right-aligned
+    verb = "Forward" if ui.forward_armed else "Send"
+    _text(surface, font, f"{verb} -> {ui.dest}", config.COLOR_SELECT,
+          midleft=(inner, cy + bh // 2))
+    ships_lbl = f"{dest.ships}sh"
+    _text(surface, font, ships_lbl, config.player_color(dest.owner_id),
+          midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
+    cy += bh + gap
+
+    # stepper row: [−]  count  [+]
+    s = config.STEPPER_SIZE
+    minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
+    plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
+    _draw_step_button(surface, minus, "-", config.COLOR_SELECT)
+    _draw_step_button(surface, plus, "+", config.COLOR_SELECT)
+    _text(surface, _fonts()["normal"], str(ui.chosen), config.COLOR_TEXT,
+          center=(inner + iw // 2, cy + bh // 2))
+    ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
+    ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
+    cy += bh + gap
+
+    # preset row: All · 1 · Cap (enemy+1); drop Cap for a friendly destination
+    presets = [("All", "all"), ("1", "one")]
+    if hostile:
+        presets.append(("+1", "cap"))
+    bw = (iw - gap * (len(presets) - 1)) // len(presets)
+    for i, (label, tag) in enumerate(presets):
+        r = pygame.Rect(inner + i * (bw + gap), cy, bw, bh)
+        _draw_popup_button(surface, r, label, False)
+        rect = (r.x, r.y, r.w, r.h)
+        if tag == "all":
+            ui.send_all_rect = rect
+        elif tag == "one":
+            ui.send_one_rect = rect
+        else:
+            ui.send_capture_rect = rect
+    cy += bh + gap
+
+    # action row: Cancel · Forward (toggle)
+    cw = (iw - gap) * 1 // 2
+    cancel = pygame.Rect(inner, cy, cw, bh)
+    fwd = pygame.Rect(inner + cw + gap, cy, iw - cw - gap, bh)
+    _draw_popup_button(surface, cancel, "Cancel", False)
+    _draw_popup_button(surface, fwd, "Forward", ui.forward_armed)
+    ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
+    ui.forward_toggle_rect = (fwd.x, fwd.y, fwd.w, fwd.h)
+
+
+def _clamp(v: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, v)) if hi >= lo else lo
+
+
+def _draw_popup_button(surface, rect: pygame.Rect, label: str, active: bool) -> None:
+    """A small labelled button in the send popup; ``active`` fills it (toggles)."""
+    if active:
+        pygame.draw.rect(surface, (70, 92, 58), rect, border_radius=5)
+        pygame.draw.rect(surface, (140, 200, 120), rect, 1, border_radius=5)
+        col = config.COLOR_TEXT
+    else:
+        pygame.draw.rect(surface, (30, 36, 52), rect, border_radius=5)
+        pygame.draw.rect(surface, (70, 80, 104), rect, 1, border_radius=5)
+        col = config.COLOR_TEXT
+    _text(surface, _fonts()["small"], label, col, center=rect.center)
 
 
 def _draw_count_stepper(surface, center, value, color, ui: Ui) -> None:
@@ -414,12 +512,12 @@ def _production_rate(state: GameState, pid: int) -> float:
 def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
+    if ui.mode == CHOOSING:
+        return "Send committed  ·  popup: All / 1 / +1 · −/+ · Forward · Cancel  ·  right-click/Esc: keep & close"
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:
-        return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
-    if ui.mode == CHOOSING:
-        return "Wheel or −/+ buttons: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
+        return "Click a neighbour to send all (Shift: forward rule)  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     return ("Click your system to select  ·  click a queued lane/list row to edit  ·  "
             "End Turn to resolve  ·  A: autoplay  ·  M: menu")
 
@@ -466,7 +564,11 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
 
 
 def _editing_order(ui: Ui):
-    """The queued order currently selected for editing, or None."""
+    """The queued order currently selected for editing, or None. Suppressed in
+    CHOOSING mode: there the send popup (not the side panel) is the editor, and
+    the panel already shows the lane's live 'Sending' count."""
+    if ui.mode == CHOOSING:
+        return None
     if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
         return ui.pending[ui.sel_order]
     return None
@@ -581,7 +683,8 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh",
              config.player_color(d.owner_id))
     if ui.mode == CHOOSING:
-        y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
+        verb = "Forwarding" if ui.forward_armed else "Sending"
+        y = _row(surface, x, y, f"{verb}: {ui.chosen}", config.COLOR_SELECT)
     return y
 
 
@@ -602,10 +705,11 @@ def _panel_legend(surface, x, y) -> int:
         "Click a system for details.",
         "",
         "Select -> click neighbour",
-        "Wheel or −/+ buttons: count",
-        "Click: send once",
-        "Shift+click: forward rule",
-        "X: clear forward rule",
+        "  = sends all at once",
+        "Popup: All / 1 / +1",
+        "  −/+ : adjust  ·  Cancel",
+        "Forward: standing rule",
+        "Shift+click: forward now",
         "Click queued lane: edit",
         "Enter / Space: end turn",
     ):

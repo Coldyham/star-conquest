@@ -13,7 +13,7 @@ import pygame
 
 from .geometry import dist, point_segment_dist
 from . import config
-from .model import GameState, Order
+from .model import GameState
 from .viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
@@ -68,7 +68,9 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key == pygame.K_a:
         return "toggle_autoplay"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
-        if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+        if ui.mode == CHOOSING:
+            ui.cancel_send()  # discard the send being adjusted in the popup
+        elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
             del ui.pending[ui.sel_order]  # remove the highlighted queued order
             ui.sel_order = None
         elif ui.selected is not None:
@@ -93,14 +95,33 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return None
 
     # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
-    # Tested before the CHOOSING confirm below so a button click adjusts rather
-    # than sends. Zero-width rects (no count being adjusted) never match.
+    # Tested before node-picking so a button click adjusts the send rather than
+    # (re)targeting. Zero-width rects (no count being adjusted) never match.
     if ui.minus_rect[2] and _point_in_rect(pos, ui.minus_rect):
         ui.step_count(state, -1)
         return None
     if ui.plus_rect[2] and _point_in_rect(pos, ui.plus_rect):
         ui.step_count(state, 1)
         return None
+
+    # Send popup action buttons (CHOOSING). Presets retune the committed send;
+    # Forward toggles it to a standing rule; Cancel discards it.
+    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
+        if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
+            ui.send_all(state)
+            return None
+        if ui.send_one_rect[2] and _point_in_rect(pos, ui.send_one_rect):
+            ui.set_send_count(state, 1)
+            return None
+        if ui.send_capture_rect[2] and _point_in_rect(pos, ui.send_capture_rect):
+            ui.set_send_count(state, state.systems[ui.dest].ships + 1)
+            return None
+        if ui.forward_toggle_rect[2] and _point_in_rect(pos, ui.forward_toggle_rect):
+            ui.toggle_forward(state)
+            return None
+        if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
+            ui.cancel_send()
+            return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes
     # its order, a row selects it for editing (scroll adjusts, X removes).
@@ -115,23 +136,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.select_order(i)
             return None
 
-    # Confirm the current source->dest choice. Shift makes it a standing
-    # auto-forward rule instead of a one-shot send; a plain click sends once.
-    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
-        if shift:
-            # keep the un-sent remainder at home; forward the surplus every turn
-            keep = max(0, state.systems[ui.selected].ships - ui.chosen)
-            ui.auto_forward[ui.selected] = (ui.dest, keep)
-        elif ui.chosen > 0:
-            ui.pending.append(Order(ui.human_id, ui.selected, ui.dest, ui.chosen))
-        # stay on the source so more fleets can be queued from it
-        remaining = ui.available(state, ui.selected)
-        ui.dest, ui.chosen = None, 0
-        ui.mode = SELECTED if remaining > 0 else IDLE
-        if remaining <= 0:
-            ui.selected = None
-        return None
-
     node = pick_node(state, ui, pos)
     if node is None:
         # Empty space near a queued order's lane selects that order (else cancel).
@@ -142,22 +146,26 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             _cancel(ui)
         return None
 
-    ui.sel_order = None  # selecting a system is composing, not editing an order
     sys = state.systems[node]
-    if ui.mode == SELECTED and ui.selected is not None:
+    if ui.selected is not None and ui.mode in (SELECTED, CHOOSING):
         if node == ui.selected:
-            ui.reset_selection()
+            ui.reset_selection()          # deselect the source
+        elif ui.mode == CHOOSING and node == ui.dest:
+            return None                   # already targeting it; adjust via popup
         elif state.are_adjacent(ui.selected, node) and ui.available(state, ui.selected) > 0:
-            ui.mode = CHOOSING
-            ui.dest = node
-            ui.chosen = ui.available(state, ui.selected)
+            # commit a send-all to this neighbour and open the popup; Shift arms
+            # it as a forward rule from the outset
+            ui.begin_send(state, node, forward=shift)
         elif sys.owner_id == ui.human_id and ui.available(state, node) > 0:
-            ui.selected = node  # reselect a different owned system
+            ui.reset_selection()          # reselect a different owned system
+            ui.selected = node
+            ui.mode = SELECTED
         else:
             ui.reset_selection()
         return None
 
     # IDLE
+    ui.sel_order = None  # selecting a system is composing, not editing an order
     if sys.owner_id == ui.human_id and ui.available(state, node) > 0:
         ui.mode = SELECTED
         ui.selected = node
@@ -187,11 +195,9 @@ def _pick_pending_lane(state: GameState, ui: Ui, pos) -> Optional[int]:
 
 
 def _cancel(ui: Ui) -> None:
-    if ui.sel_order is not None:
+    if ui.mode == CHOOSING:
+        ui.close_send()          # close the popup, keeping the committed send
+    elif ui.sel_order is not None:
         ui.sel_order = None      # deselect a highlighted queued order
-    elif ui.mode == CHOOSING:
-        ui.mode = SELECTED
-        ui.dest = None
-        ui.chosen = 0
     else:
         ui.reset_selection()

@@ -35,7 +35,9 @@ def _click(state, ui, sid, button=1):
     return game_input.handle_event(ev, state, ui)
 
 
-def test_select_choose_confirm_flow():
+def test_select_then_target_commits_send_all():
+    """Clicking a neighbour commits a send-all order immediately — no confirm
+    click — and opens the adjust popup (CHOOSING)."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -46,22 +48,61 @@ def test_select_choose_confirm_flow():
 
         _click(state, ui, nbr)
         assert ui.mode == CHOOSING and ui.dest == nbr
-        assert ui.chosen == state.systems[home].ships  # defaults to all available
-
-        # confirm with a left-click -> a queued order appears
-        pos = ui.view.to_screen(state.systems[nbr].pos)
-        game_input.handle_event(
-            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui
-        )
+        # the order exists already, defaulting to all available
         assert len(ui.pending) == 1
         o = ui.pending[0]
         assert (o.owner_id, o.source_id, o.dest_id) == (1, home, nbr)
+        assert o.ships == state.systems[home].ships == ui.chosen
 
-        # the queued order resolves through the engine: ships leave home as a fleet
+        # the committed order resolves through the engine: ships leave as a fleet
         before = state.systems[home].ships
         engine.end_turn(state, human_orders=list(ui.pending))
         assert state.systems[home].ships < before
         assert any(f.owner_id == 1 and f.dest_id == nbr for f in state.fleets)
+    finally:
+        pygame.quit()
+
+
+def test_popup_presets_retune_committed_order():
+    """The popup's presets and −/+ edit the just-committed order in place."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+
+        ui.send_one_rect = (100, 100, 20, 20)
+        _click_pos(state, ui, (110, 110))
+        assert ui.pending[0].ships == 1 and ui.chosen == 1
+
+        # capture = one more than the destination garrison (clamped to available)
+        ui.send_capture_rect = (200, 100, 20, 20)
+        _click_pos(state, ui, (210, 110))
+        want = min(state.systems[home].ships, state.systems[nbr].ships + 1)
+        assert ui.pending[0].ships == want == ui.chosen
+
+        # All sends the whole garrison again
+        ui.send_all_rect = (300, 100, 20, 20)
+        _click_pos(state, ui, (310, 110))
+        assert ui.pending[0].ships == state.systems[home].ships
+    finally:
+        pygame.quit()
+
+
+def test_popup_cancel_removes_order():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert len(ui.pending) == 1
+
+        ui.cancel_rect = (100, 100, 60, 20)
+        _click_pos(state, ui, (110, 110))
+        assert ui.pending == []              # order discarded
+        assert ui.mode == SELECTED and ui.selected == home  # source stays selected
     finally:
         pygame.quit()
 
@@ -97,28 +138,47 @@ def test_enter_key_requests_end_turn():
         pygame.quit()
 
 
-def test_shift_confirm_creates_forward_rule():
+def test_shift_click_neighbour_arms_forward_rule():
+    """Shift+clicking a neighbour commits it straight as a forward-all rule."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
 
         _click(state, ui, home)   # select source
-        _click(state, ui, nbr)    # pick destination -> CHOOSING
-        assert ui.mode == CHOOSING
-        ui.chosen = 3             # keep the rest at home
-
         pygame.key.set_mods(pygame.KMOD_SHIFT)
         try:
-            pos = ui.view.to_screen(state.systems[nbr].pos)
-            game_input.handle_event(
-                pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui
-            )
+            _click(state, ui, nbr)    # shift+click destination
         finally:
             pygame.key.set_mods(0)
 
-        assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
+        assert ui.mode == CHOOSING and ui.forward_armed is True
+        assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
         assert ui.pending == []   # a rule, not a one-shot send
+    finally:
+        pygame.quit()
+
+
+def test_popup_forward_toggle_converts_order_to_rule():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        ui.set_send_count(state, 3)          # keep the rest at home
+        assert ui.pending[0].ships == 3
+
+        ui.forward_toggle_rect = (100, 100, 70, 20)
+        _click_pos(state, ui, (110, 110))    # arm forward
+        assert ui.forward_armed is True
+        assert ui.pending == []              # one-shot replaced by a rule
+        assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
+
+        _click_pos(state, ui, (110, 110))    # disarm -> back to a one-shot order
+        assert ui.forward_armed is False
+        assert home not in ui.auto_forward
+        assert ui.pending and ui.pending[0].ships == 3
     finally:
         pygame.quit()
 
