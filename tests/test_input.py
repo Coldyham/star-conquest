@@ -85,7 +85,8 @@ def test_popup_presets_retune_committed_order():
 
 
 def test_popup_tabs_switch_between_send_and_forward():
-    """The Send/Forward tabs convert the active send between one-shot and rule."""
+    """The Send/Forward tabs convert the active send between one-shot and rule.
+    Forwarding defaults to keep 0 (forward everything)."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -95,14 +96,40 @@ def test_popup_tabs_switch_between_send_and_forward():
         ui.set_send_count(state, 3)
 
         ui.forward_tab_rect = (100, 100, 60, 20)
-        _click_pos(state, ui, (110, 110))       # -> Forward
+        _click_pos(state, ui, (110, 110))       # -> Forward (keep 0)
         assert ui.forward_armed is True and ui.pending == []
-        assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
+        assert ui.auto_forward.get(home) == (nbr, 0)
 
         ui.send_tab_rect = (200, 100, 60, 20)
-        _click_pos(state, ui, (210, 110))       # -> Send
+        _click_pos(state, ui, (210, 110))       # -> Send (restores the count)
         assert ui.forward_armed is False and home not in ui.auto_forward
         assert ui.pending and ui.pending[0].ships == 3
+    finally:
+        pygame.quit()
+
+
+def test_forward_stepper_adjusts_keep():
+    """On the Forward tab the −/+ controls set how many ships to hold back."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        ui.forward_tab_rect = (100, 100, 60, 20)
+        _click_pos(state, ui, (110, 110))       # arm forwarding, keep 0
+        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
+
+        ui.plus_rect = (100, 130, 20, 20)
+        _click_pos(state, ui, (110, 140))       # +1 -> keep 1
+        _click_pos(state, ui, (110, 140))       # +1 -> keep 2
+        assert ui.keep == 2 and ui.auto_forward[home] == (nbr, 2)
+
+        # keep never drops below 0
+        ui.minus_rect = (200, 130, 20, 20)
+        for _ in range(5):
+            _click_pos(state, ui, (210, 140))
+        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
     finally:
         pygame.quit()
 

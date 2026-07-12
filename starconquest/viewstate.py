@@ -27,10 +27,12 @@ class Ui:
     selected: Optional[int] = None      # source system id
     hover: Optional[int] = None         # system under the cursor
     dest: Optional[int] = None          # chosen destination system id
-    chosen: int = 0                     # ships the active send commits (CHOOSING)
+    chosen: int = 0                     # ships the active one-shot send commits
+    keep: int = 0                       # ships held back by the active forward rule
     # In CHOOSING the send is already committed: as a one-shot order at
-    # `sel_order` (when forward_armed is False) or as the standing rule out of
-    # `selected` in `auto_forward` (when forward_armed is True). The popup edits
+    # `sel_order` (when forward_armed is False, sized by `chosen`) or as the
+    # standing rule out of `selected` in `auto_forward` (when forward_armed is
+    # True, holding back `keep` and forwarding the rest). The popup edits
     # whichever is live.
     forward_armed: bool = False         # active send is a standing forward rule
     pending: list[Order] = field(default_factory=list)
@@ -77,8 +79,10 @@ class Ui:
         """Nudge the ship count being adjusted by ``delta`` — the shared logic
         behind both the mouse wheel and the on-lane −/+ buttons. Applies to the
         active send (CHOOSING) or the queued order being edited."""
-        if self.mode == CHOOSING and self.selected is not None:
-            self.set_send_count(state, self.chosen + delta)
+        if self.mode == CHOOSING and self.forward_armed:
+            self.set_keep(state, self.keep + delta)          # forward: adjust keep
+        elif self.mode == CHOOSING and self.selected is not None:
+            self.set_send_count(state, self.chosen + delta)  # send: adjust count
         elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             # cap is the order's own ships plus whatever is still free at the source
             o = self.pending[self.sel_order]
@@ -111,22 +115,28 @@ class Ui:
         self.mode = CHOOSING
         self.forward_armed = False
         self.chosen = avail
+        self.keep = 0
         self.pending.append(Order(self.human_id, self.selected, dest, avail))
         self.sel_order = len(self.pending) - 1
         if forward:
             self.toggle_forward(state)
 
     def set_send_count(self, state: GameState, count: int) -> None:
-        """Set the active send's ship count (clamped) and write it onto whichever
-        representation is live — the one-shot order or the standing rule."""
-        if self.mode != CHOOSING or self.selected is None or self.dest is None:
+        """Set the active one-shot send's ship count (clamped) on its order.
+        Send-tab only — forwarding is sized by `keep` (see set_keep)."""
+        if self.mode != CHOOSING or self.forward_armed or self.selected is None:
             return
         self.chosen = max(1, min(self._active_cap(state), count))
-        if self.forward_armed:
-            keep = max(0, state.systems[self.selected].ships - self.chosen)
-            self.auto_forward[self.selected] = (self.dest, keep)
-        elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
+        if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             self.pending[self.sel_order].ships = self.chosen
+
+    def set_keep(self, state: GameState, keep: int) -> None:
+        """Set how many ships the active forward rule holds back each turn
+        (0 == forward everything). Forward-tab only."""
+        if self.mode != CHOOSING or not self.forward_armed or self.selected is None:
+            return
+        self.keep = max(0, min(state.systems[self.selected].ships, keep))
+        self.auto_forward[self.selected] = (self.dest, self.keep)
 
     def send_all(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state))
@@ -135,8 +145,9 @@ class Ui:
         self.set_send_count(state, self._active_cap(state) // 2)
 
     def toggle_forward(self, state: GameState) -> None:
-        """Flip the active send between a one-shot order and a standing rule that
-        forwards the surplus each turn, preserving the chosen count."""
+        """Flip the active send between a one-shot order (sized by `chosen`) and
+        a standing rule that holds back `keep` and forwards the rest each turn.
+        Arming defaults to keep 0 (forward everything)."""
         if self.mode != CHOOSING or self.selected is None or self.dest is None:
             return
         self.forward_armed = not self.forward_armed
@@ -144,8 +155,8 @@ class Ui:
             if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
                 del self.pending[self.sel_order]
             self.sel_order = None
-            keep = max(0, state.systems[self.selected].ships - self.chosen)
-            self.auto_forward[self.selected] = (self.dest, keep)
+            self.keep = 0
+            self.auto_forward[self.selected] = (self.dest, self.keep)
         else:
             self.auto_forward.pop(self.selected, None)
             self.chosen = max(1, min(self._active_cap(state), self.chosen))
@@ -186,6 +197,7 @@ class Ui:
         self.forward_armed = False
         self.dest = None
         self.chosen = 0
+        self.keep = 0
         self.mode = SELECTED if self.selected is not None else IDLE
 
     # -- selection helpers -------------------------------------------------- #
@@ -196,6 +208,7 @@ class Ui:
         self.selected = None
         self.dest = None
         self.chosen = 0
+        self.keep = 0
         self.sel_order = None
         self.forward_armed = False
 

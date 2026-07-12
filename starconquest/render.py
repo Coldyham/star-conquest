@@ -237,8 +237,8 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     font = _fonts()["small"]
     pad, gap, bh = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP, config.SEND_POPUP_BTN_H
     w = config.SEND_POPUP_W
-    # rows: tabs, title, stepper, presets (+ stop-forwarding while forwarding)
-    rows = 5 if ui.forward_armed else 4
+    # rows: tabs, title, stepper, then either Half/All (Send) or Stop (Forward)
+    rows = 4
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
     # anchor above the lane midpoint, clamped to the play area
@@ -273,32 +273,31 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
           midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
 
-    # stepper row: [−]  count  [+]
+    # stepper row: [−]  value  [+]  — sends the count, or (Forward) how many to keep
     s = config.STEPPER_SIZE
     minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
     plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
     _draw_step_button(surface, minus, "-", config.COLOR_SELECT)
     _draw_step_button(surface, plus, "+", config.COLOR_SELECT)
-    _text(surface, _fonts()["normal"], str(ui.chosen), config.COLOR_TEXT,
+    label = f"keep {ui.keep}" if ui.forward_armed else str(ui.chosen)
+    _text(surface, _fonts()["normal"], label, config.COLOR_TEXT,
           center=(inner + iw // 2, cy + bh // 2))
     ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
     ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
     cy += bh + gap
 
-    # preset row: Half · All
-    half = pygame.Rect(inner, cy, tw, bh)
-    allr = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-    _draw_popup_button(surface, half, "Half", False)
-    _draw_popup_button(surface, allr, "All", False)
-    ui.send_half_rect = (half.x, half.y, half.w, half.h)
-    ui.send_all_rect = (allr.x, allr.y, allr.w, allr.h)
-    cy += bh + gap
-
-    # forward mode only: a button to stop forwarding out of this source
+    # bottom row: Half/All presets (Send) or Stop forwarding (Forward)
     if ui.forward_armed:
         stop = pygame.Rect(inner, cy, iw, bh)
         _draw_popup_button(surface, stop, "Stop forwarding", False)
         ui.stop_forward_rect = (stop.x, stop.y, stop.w, stop.h)
+    else:
+        half = pygame.Rect(inner, cy, tw, bh)
+        allr = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+        _draw_popup_button(surface, half, "Half", False)
+        _draw_popup_button(surface, allr, "All", False)
+        ui.send_half_rect = (half.x, half.y, half.w, half.h)
+        ui.send_all_rect = (allr.x, allr.y, allr.w, allr.h)
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
@@ -514,7 +513,7 @@ def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.mode == CHOOSING and ui.forward_armed:
-        return "Forwarding each turn  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Stop forwarding  ·  Esc: close"
+        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Stop forwarding  ·  Esc: close"
     if ui.mode == CHOOSING:
         return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  right-click/Esc: keep & close"
     if ui.sel_order is not None:
@@ -701,9 +700,10 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     d = state.systems[dest]
     y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh",
              config.player_color(d.owner_id))
-    if ui.mode == CHOOSING:
-        verb = "Forwarding" if ui.forward_armed else "Sending"
-        y = _row(surface, x, y, f"{verb}: {ui.chosen}", config.COLOR_SELECT)
+    if ui.mode == CHOOSING and ui.forward_armed:
+        y = _row(surface, x, y, f"Forwarding · keep {ui.keep}", config.COLOR_SELECT)
+    elif ui.mode == CHOOSING:
+        y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
     return y
 
 
