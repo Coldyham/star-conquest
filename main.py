@@ -25,6 +25,7 @@ from starconquest.settings import Settings, build_state, resolve_seed
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
+PLAY_MS = 350      # delay between turns while play/pause (P) is running
 
 
 def build_view(state: GameState) -> WorldView:
@@ -140,6 +141,7 @@ def main() -> None:
     running = True
     confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
     auto_accum = 0
+    play_accum = 0
     fullscreen = False
     windowed_size = (config.SCREEN_W, config.SCREEN_H)  # restored when leaving fullscreen
     while running:
@@ -227,8 +229,13 @@ def main() -> None:
                 state, ui, log = None, None, None
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log)
+                play_accum = 0   # re-time the play cadence from this step
+            elif action == "toggle_play":
+                ui.playing = not ui.playing
+                play_accum = 0   # first step after PLAY_MS, then every PLAY_MS
             elif action == "toggle_autoplay":
                 ui.autoplay = not ui.autoplay
+                ui.playing = False
                 ui.reset_selection()
                 ui.clear_pending()
                 auto_accum = 0
@@ -236,11 +243,17 @@ def main() -> None:
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed, ui.autoplay)
 
-        if scene == "game" and ui.autoplay and state.winner is None:
-            auto_accum += dt
-            if auto_accum >= AUTOPLAY_MS:
-                auto_accum = 0
-                resolve_turn(state, ui, log)
+        if scene == "game" and state.winner is None and not confirm_quit:
+            if ui.autoplay:
+                auto_accum += dt
+                if auto_accum >= AUTOPLAY_MS:
+                    auto_accum = 0
+                    resolve_turn(state, ui, log)
+            elif ui.playing:
+                play_accum += dt
+                if play_accum >= PLAY_MS:
+                    play_accum = 0
+                    resolve_turn(state, ui, log)
 
         if scene == "menu":
             menu.draw(screen, menu_state, settings)

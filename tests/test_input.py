@@ -97,6 +97,36 @@ def test_enter_key_requests_end_turn():
         pygame.quit()
 
 
+def test_space_key_requests_end_turn():
+    state, ui = _setup()
+    try:
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE)
+        assert game_input.handle_event(ev, state, ui) == "end_turn"
+        assert ui.playing is False   # Space is not the play toggle
+    finally:
+        pygame.quit()
+
+
+def test_p_key_toggles_play():
+    state, ui = _setup()
+    try:
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+    finally:
+        pygame.quit()
+
+
+def test_play_pause_button_click_toggles_play():
+    state, ui = _setup()
+    try:
+        ui.play_pause_rect = (100, 100, 120, 32)
+        ev = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+    finally:
+        pygame.quit()
+
+
 def test_shift_confirm_creates_forward_rule():
     state, ui = _setup()
     try:
