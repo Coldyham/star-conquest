@@ -55,11 +55,14 @@ class Ui:
     plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the send popup's action buttons (CHOOSING mode), rebuilt by
     # render each frame and zeroed otherwise (same handoff as end_turn_rect).
+    send_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    forward_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     send_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    send_one_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    send_capture_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    forward_toggle_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    send_half_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    stop_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Persistent side-panel button to clear every standing forward rule at once;
+    # drawn (and hit-tested) only while any rule exists.
+    clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
@@ -128,6 +131,9 @@ class Ui:
     def send_all(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state))
 
+    def send_half(self, state: GameState) -> None:
+        self.set_send_count(state, self._active_cap(state) // 2)
+
     def toggle_forward(self, state: GameState) -> None:
         """Flip the active send between a one-shot order and a standing rule that
         forwards the surplus each turn, preserving the chosen count."""
@@ -145,6 +151,22 @@ class Ui:
             self.chosen = max(1, min(self._active_cap(state), self.chosen))
             self.pending.append(Order(self.human_id, self.selected, self.dest, self.chosen))
             self.sel_order = len(self.pending) - 1
+
+    def set_forward_mode(self, state: GameState, armed: bool) -> None:
+        """Switch the popup's Send/Forward tab explicitly (idempotent)."""
+        if self.mode == CHOOSING and self.forward_armed != armed:
+            self.toggle_forward(state)
+
+    def stop_forward(self) -> None:
+        """Stop forwarding out of the current source: drop its standing rule and
+        return to just the source selected (no send left behind)."""
+        if self.selected is not None:
+            self.auto_forward.pop(self.selected, None)
+        self._close_send()
+
+    def clear_all_forward(self) -> None:
+        """Remove every standing forward rule at once."""
+        self.auto_forward.clear()
 
     def cancel_send(self) -> None:
         """Discard the active send entirely, keeping just the source selected."""

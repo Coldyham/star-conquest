@@ -45,8 +45,9 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     surface.fill(config.COLOR_BG)
     # zero the button rects; whichever count/popup draw runs (if any) re-records them
     ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
-    ui.send_all_rect = ui.send_one_rect = ui.send_capture_rect = (0, 0, 0, 0)
-    ui.forward_toggle_rect = ui.cancel_rect = (0, 0, 0, 0)
+    ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
+    ui.send_all_rect = ui.send_half_rect = ui.stop_forward_rect = (0, 0, 0, 0)
+    ui.clear_forward_rect = (0, 0, 0, 0)
     _draw_lanes(surface, state, ui)
     _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
     _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
@@ -221,9 +222,10 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
-    """The on-map action panel opened when a destination is picked. The send is
-    already committed (send-all by default); the popup retunes the count (−/+,
-    All, 1, capture = enemy+1), toggles a standing forward rule, or cancels it.
+    """The on-map action panel opened when a destination is picked. A Send/Forward
+    tab toggle chooses between a one-shot send (auto-committed, default send-all)
+    and a standing forward rule; both share the count controls (−/+, Half, All).
+    The Forward tab adds a Stop-forwarding button that clears this source's rule.
     Records every button's hit-rect on ``ui`` for input (store-rect-then-test)."""
     if ui.selected is None or ui.dest is None:
         return
@@ -232,11 +234,11 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
 
     dest = state.systems[ui.dest]
-    hostile = dest.owner_id != ui.human_id           # show capture preset only vs. others
     font = _fonts()["small"]
     pad, gap, bh = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP, config.SEND_POPUP_BTN_H
     w = config.SEND_POPUP_W
-    rows = 4                                          # title, stepper, presets, actions
+    # rows: tabs, title, stepper, presets (+ stop-forwarding while forwarding)
+    rows = 5 if ui.forward_armed else 4
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
     # anchor above the lane midpoint, clamped to the play area
@@ -250,7 +252,17 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
 
     inner = x + pad
     iw = w - pad * 2
+    tw = (iw - gap) // 2                              # half-width for paired buttons
     cy = y + pad
+
+    # tab row: Send | Forward (the active mode is highlighted)
+    send_tab = pygame.Rect(inner, cy, tw, bh)
+    fwd_tab = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+    _draw_popup_button(surface, send_tab, "Send", not ui.forward_armed)
+    _draw_popup_button(surface, fwd_tab, "Forward", ui.forward_armed)
+    ui.send_tab_rect = (send_tab.x, send_tab.y, send_tab.w, send_tab.h)
+    ui.forward_tab_rect = (fwd_tab.x, fwd_tab.y, fwd_tab.w, fwd_tab.h)
+    cy += bh + gap
 
     # title: verb + destination on the left, its garrison right-aligned
     verb = "Forward" if ui.forward_armed else "Send"
@@ -273,31 +285,20 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
     cy += bh + gap
 
-    # preset row: All · 1 · Cap (enemy+1); drop Cap for a friendly destination
-    presets = [("All", "all"), ("1", "one")]
-    if hostile:
-        presets.append(("+1", "cap"))
-    bw = (iw - gap * (len(presets) - 1)) // len(presets)
-    for i, (label, tag) in enumerate(presets):
-        r = pygame.Rect(inner + i * (bw + gap), cy, bw, bh)
-        _draw_popup_button(surface, r, label, False)
-        rect = (r.x, r.y, r.w, r.h)
-        if tag == "all":
-            ui.send_all_rect = rect
-        elif tag == "one":
-            ui.send_one_rect = rect
-        else:
-            ui.send_capture_rect = rect
+    # preset row: Half · All
+    half = pygame.Rect(inner, cy, tw, bh)
+    allr = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+    _draw_popup_button(surface, half, "Half", False)
+    _draw_popup_button(surface, allr, "All", False)
+    ui.send_half_rect = (half.x, half.y, half.w, half.h)
+    ui.send_all_rect = (allr.x, allr.y, allr.w, allr.h)
     cy += bh + gap
 
-    # action row: Cancel · Forward (toggle)
-    cw = (iw - gap) * 1 // 2
-    cancel = pygame.Rect(inner, cy, cw, bh)
-    fwd = pygame.Rect(inner + cw + gap, cy, iw - cw - gap, bh)
-    _draw_popup_button(surface, cancel, "Cancel", False)
-    _draw_popup_button(surface, fwd, "Forward", ui.forward_armed)
-    ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
-    ui.forward_toggle_rect = (fwd.x, fwd.y, fwd.w, fwd.h)
+    # forward mode only: a button to stop forwarding out of this source
+    if ui.forward_armed:
+        stop = pygame.Rect(inner, cy, iw, bh)
+        _draw_popup_button(surface, stop, "Stop forwarding", False)
+        ui.stop_forward_rect = (stop.x, stop.y, stop.w, stop.h)
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
@@ -512,8 +513,10 @@ def _production_rate(state: GameState, pid: int) -> float:
 def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
+    if ui.mode == CHOOSING and ui.forward_armed:
+        return "Forwarding each turn  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Stop forwarding  ·  Esc: close"
     if ui.mode == CHOOSING:
-        return "Send committed  ·  popup: All / 1 / +1 · −/+ · Forward · Cancel  ·  right-click/Esc: keep & close"
+        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  right-click/Esc: keep & close"
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:
@@ -541,6 +544,9 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     _draw_order_list(surface, state, ui)
 
     x, y = px + 14, py + 14
+    # persistent "clear all forwarding" button, shown whenever any rule exists
+    if ui.auto_forward:
+        y = _draw_clear_forward_button(surface, ui, px, py + 10)
     editing = _editing_order(ui)
     focus = editing.source_id if editing else (ui.selected if ui.selected is not None else ui.hover)
     if focus is None or focus not in state.systems:
@@ -561,6 +567,19 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
 
     if focus in ui.auto_forward:
         _panel_rule(surface, ui, x, y + 8, focus)
+
+
+def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
+    """A slim panel-top button that clears every standing forward rule; records
+    its hit-rect on ``ui``. Returns the y below it for the details that follow."""
+    n = len(ui.auto_forward)
+    r = pygame.Rect(px + 12, y, config.HUD_RIGHT_W - 24, 24)
+    pygame.draw.rect(surface, (58, 38, 42), r, border_radius=5)
+    pygame.draw.rect(surface, (170, 96, 104), r, 1, border_radius=5)
+    _text(surface, _fonts()["small"], f"Clear all forwarding ({n})",
+          config.COLOR_TEXT, center=r.center)
+    ui.clear_forward_rect = (r.x, r.y, r.w, r.h)
+    return y + 24 + 10
 
 
 def _editing_order(ui: Ui):
@@ -706,8 +725,8 @@ def _panel_legend(surface, x, y) -> int:
         "",
         "Select -> click neighbour",
         "  = sends all at once",
-        "Popup: All / 1 / +1",
-        "  −/+ : adjust  ·  Cancel",
+        "Popup tabs: Send / Forward",
+        "  Half / All  ·  −/+ adjust",
         "Forward: standing rule",
         "Shift+click: forward now",
         "Click queued lane: edit",

@@ -64,45 +64,81 @@ def test_select_then_target_commits_send_all():
 
 
 def test_popup_presets_retune_committed_order():
-    """The popup's presets and −/+ edit the just-committed order in place."""
+    """The Half and All presets (and −/+) edit the just-committed order in place."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         _click(state, ui, home)
         _click(state, ui, nbr)
+        total = state.systems[home].ships
 
-        ui.send_one_rect = (100, 100, 20, 20)
+        ui.send_half_rect = (100, 100, 20, 20)
         _click_pos(state, ui, (110, 110))
-        assert ui.pending[0].ships == 1 and ui.chosen == 1
+        assert ui.pending[0].ships == total // 2 == ui.chosen
 
-        # capture = one more than the destination garrison (clamped to available)
-        ui.send_capture_rect = (200, 100, 20, 20)
+        ui.send_all_rect = (200, 100, 20, 20)
         _click_pos(state, ui, (210, 110))
-        want = min(state.systems[home].ships, state.systems[nbr].ships + 1)
-        assert ui.pending[0].ships == want == ui.chosen
-
-        # All sends the whole garrison again
-        ui.send_all_rect = (300, 100, 20, 20)
-        _click_pos(state, ui, (310, 110))
-        assert ui.pending[0].ships == state.systems[home].ships
+        assert ui.pending[0].ships == total == ui.chosen
     finally:
         pygame.quit()
 
 
-def test_popup_cancel_removes_order():
+def test_popup_tabs_switch_between_send_and_forward():
+    """The Send/Forward tabs convert the active send between one-shot and rule."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         _click(state, ui, home)
         _click(state, ui, nbr)
-        assert len(ui.pending) == 1
+        ui.set_send_count(state, 3)
 
-        ui.cancel_rect = (100, 100, 60, 20)
+        ui.forward_tab_rect = (100, 100, 60, 20)
+        _click_pos(state, ui, (110, 110))       # -> Forward
+        assert ui.forward_armed is True and ui.pending == []
+        assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
+
+        ui.send_tab_rect = (200, 100, 60, 20)
+        _click_pos(state, ui, (210, 110))       # -> Send
+        assert ui.forward_armed is False and home not in ui.auto_forward
+        assert ui.pending and ui.pending[0].ships == 3
+    finally:
+        pygame.quit()
+
+
+def test_popup_stop_forwarding_clears_this_rule():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        ui.forward_tab_rect = (100, 100, 60, 20)
+        _click_pos(state, ui, (110, 110))       # arm forwarding
+        assert ui.auto_forward.get(home) is not None
+
+        ui.stop_forward_rect = (100, 130, 90, 20)
+        _click_pos(state, ui, (110, 140))       # Stop forwarding
+        assert home not in ui.auto_forward
+        assert ui.pending == []                 # no send left behind
+        assert ui.mode == SELECTED and ui.selected == home
+    finally:
+        pygame.quit()
+
+
+def test_clear_all_forwarding_button():
+    state, ui = _setup()
+    try:
+        owned = [s.id for s in state.systems.values() if s.owner_id == 1]
+        a = owned[0]
+        b, c = state.systems[a].neighbors[0], state.systems[a].neighbors[-1]
+        ui.auto_forward[a] = (b, 0)
+        ui.auto_forward[b] = (c, 2)
+
+        ui.clear_forward_rect = (100, 100, 120, 24)
         _click_pos(state, ui, (110, 110))
-        assert ui.pending == []              # order discarded
-        assert ui.mode == SELECTED and ui.selected == home  # source stays selected
+        assert ui.auto_forward == {}
     finally:
         pygame.quit()
 
@@ -155,30 +191,6 @@ def test_shift_click_neighbour_arms_forward_rule():
         assert ui.mode == CHOOSING and ui.forward_armed is True
         assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
         assert ui.pending == []   # a rule, not a one-shot send
-    finally:
-        pygame.quit()
-
-
-def test_popup_forward_toggle_converts_order_to_rule():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        _click(state, ui, home)
-        _click(state, ui, nbr)
-        ui.set_send_count(state, 3)          # keep the rest at home
-        assert ui.pending[0].ships == 3
-
-        ui.forward_toggle_rect = (100, 100, 70, 20)
-        _click_pos(state, ui, (110, 110))    # arm forward
-        assert ui.forward_armed is True
-        assert ui.pending == []              # one-shot replaced by a rule
-        assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
-
-        _click_pos(state, ui, (110, 110))    # disarm -> back to a one-shot order
-        assert ui.forward_armed is False
-        assert home not in ui.auto_forward
-        assert ui.pending and ui.pending[0].ships == 3
     finally:
         pygame.quit()
 

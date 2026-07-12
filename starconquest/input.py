@@ -94,6 +94,11 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     if ui.autoplay:
         return None
 
+    # Persistent side-panel button: clear every standing forward rule at once.
+    if ui.clear_forward_rect[2] and _point_in_rect(pos, ui.clear_forward_rect):
+        ui.clear_all_forward()
+        return None
+
     # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
     # Tested before node-picking so a button click adjusts the send rather than
     # (re)targeting. Zero-width rects (no count being adjusted) never match.
@@ -104,23 +109,23 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         ui.step_count(state, 1)
         return None
 
-    # Send popup action buttons (CHOOSING). Presets retune the committed send;
-    # Forward toggles it to a standing rule; Cancel discards it.
+    # Send popup (CHOOSING): Send/Forward tabs pick the mode, Half/All retune the
+    # count, and (in Forward mode) Stop forwarding drops this source's rule.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
+        if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
+            ui.set_forward_mode(state, False)
+            return None
+        if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
+            ui.set_forward_mode(state, True)
+            return None
         if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
             ui.send_all(state)
             return None
-        if ui.send_one_rect[2] and _point_in_rect(pos, ui.send_one_rect):
-            ui.set_send_count(state, 1)
+        if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
+            ui.send_half(state)
             return None
-        if ui.send_capture_rect[2] and _point_in_rect(pos, ui.send_capture_rect):
-            ui.set_send_count(state, state.systems[ui.dest].ships + 1)
-            return None
-        if ui.forward_toggle_rect[2] and _point_in_rect(pos, ui.forward_toggle_rect):
-            ui.toggle_forward(state)
-            return None
-        if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
-            ui.cancel_send()
+        if ui.stop_forward_rect[2] and _point_in_rect(pos, ui.stop_forward_rect):
+            ui.stop_forward()
             return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes
