@@ -50,15 +50,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return _handle_key(event, ui)
 
     if event.type == pygame.MOUSEWHEEL:
-        if ui.mode == CHOOSING and ui.selected is not None:
-            avail = ui.available(state, ui.selected)
-            ui.chosen = max(1, min(avail, ui.chosen + event.y))
-        elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-            # adjust a queued order in place; its cap is its own ships plus
-            # whatever is still free at the source (available already nets it out)
-            o = ui.pending[ui.sel_order]
-            cap = ui.available(state, o.source_id) + o.ships
-            o.ships = max(1, min(cap, o.ships + event.y))
+        ui.step_count(state, event.y)
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
@@ -98,6 +90,16 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if ui.autoplay:
+        return None
+
+    # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
+    # Tested before the CHOOSING confirm below so a button click adjusts rather
+    # than sends. Zero-width rects (no count being adjusted) never match.
+    if ui.minus_rect[2] and _point_in_rect(pos, ui.minus_rect):
+        ui.step_count(state, -1)
+        return None
+    if ui.plus_rect[2] and _point_in_rect(pos, ui.plus_rect):
+        ui.step_count(state, 1)
         return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes

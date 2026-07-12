@@ -43,12 +43,17 @@ def _text(surface, font, s, color, center=None, topleft=None, midleft=None):
 # --------------------------------------------------------------------------- #
 def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     surface.fill(config.COLOR_BG)
+    # zero the −/+ button rects; whichever count draw runs (if any) re-records them
+    ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
     _draw_lanes(surface, state, ui)
     _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
     _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
-    _draw_choosing_preview(surface, state, ui)  # the count you're adjusting now
+    _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    # the active count + −/+ buttons draw last of the map layer so nodes/fleets
+    # never occlude them (they must stay visible and clickable)
+    _draw_count_controls(surface, state, ui)
     _draw_hud(surface, state, ui)
     if state.winner is not None:
         _draw_win_overlay(surface, state)
@@ -154,9 +159,12 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         _draw_triangle(surface, head, u, color)
         # place the count 40% of the way toward the destination, not the midpoint,
         # so two opposite-direction orders on the same lane don't overlap labels
-        lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
-        ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
-        _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT, center=(lx, ly - 10))
+        # the count for the order being edited (selected) is drawn later, on top,
+        # by _draw_count_controls (with −/+ buttons); others get a plain label here
+        if not selected:
+            lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
+            ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
+            _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT, center=(lx, ly - 10))
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
@@ -178,10 +186,8 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
-    """The move being composed right now: a bright arrow with the live count.
-
-    This is what makes the mouse wheel visibly do something — the count here
-    tracks ui.chosen as you scroll.
+    """The move being composed right now: a bright arrow. The live count and its
+    −/+ buttons are drawn separately (on top) by _draw_count_controls.
     """
     if ui.mode != CHOOSING or ui.selected is None or ui.dest is None:
         return
@@ -193,8 +199,70 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
     length = math.hypot(dx, dy) or 1.0
     u = (dx / length, dy / length)
     _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
-    _label_pill(surface, _fonts()["normal"], str(ui.chosen), color,
-                ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 - 12))
+
+
+def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
+    """Draw the active ship-count label + −/+ buttons on top of the map layer so
+    nodes and fleets never occlude them. Handles both the move being composed
+    (CHOOSING) and the queued order being edited; records the button hit-rects."""
+    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
+        pa = ui.view.to_screen(state.systems[ui.selected].pos)
+        pb = ui.view.to_screen(state.systems[ui.dest].pos)
+        center = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 - 12)
+        _draw_count_stepper(surface, center, ui.chosen, config.COLOR_SELECT, ui)
+    elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+        o = ui.pending[ui.sel_order]
+        pa = ui.view.to_screen(state.systems[o.source_id].pos)
+        pb = ui.view.to_screen(state.systems[o.dest_id].pos)
+        lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
+        ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
+        _draw_count_stepper(surface, (lx, ly - 10), o.ships, config.COLOR_SELECT, ui)
+
+
+def _draw_count_stepper(surface, center, value, color, ui: Ui) -> None:
+    """A ship-count label flanked by clickable −/+ buttons, for adjusting the
+    count without a mouse wheel. Records the button rects on ``ui`` so input can
+    hit-test them (same store-rect-then-test handoff as end_turn_rect)."""
+    font = _fonts()["normal"]
+    img = font.render(str(value), True, color)
+    lbl = img.get_rect(center=center)
+    pill = lbl.inflate(10, 4)
+    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=5)
+    surface.blit(img, lbl)
+
+    s = config.STEPPER_SIZE
+    gap = 4
+    top = center[1] - s // 2
+    minus = pygame.Rect(pill.left - gap - s, top, s, s)
+    plus = pygame.Rect(pill.right + gap, top, s, s)
+    _draw_step_button(surface, minus, "-", color)
+    _draw_step_button(surface, plus, "+", color)
+    ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
+    ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
+
+
+def _draw_step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
+    """A small filled −/+ button glyph inside ``rect``."""
+    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=4)
+    pygame.draw.rect(surface, color, rect, 1, border_radius=4)
+    cx, cy = rect.center
+    r = rect.w // 4
+    pygame.draw.line(surface, color, (cx - r, cy), (cx + r, cy), 2)   # − (and +'s bar)
+    if sign == "+":
+        pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), 2)
+
+
+def _draw_return_glyph(surface, rect, color) -> None:
+    """A drawn ⏎ return/enter arrow inside ``rect`` (x, y, w, h). Drawn rather
+    than typed because the monospace font lacks the ⏎ glyph on many platforms."""
+    x, y, w, h = rect
+    by = y + int(h * 0.72)                       # baseline of the horizontal stroke
+    a = max(3, h // 4)                            # arrowhead arm length
+    # down-stroke on the right, then left along the baseline to the arrow tip
+    pygame.draw.lines(surface, color, False, [(x + w, y), (x + w, by), (x, by)], 2)
+    # arrowhead pointing left
+    pygame.draw.lines(surface, color, False,
+                      [(x + a, by - a), (x, by), (x + a, by + a)], 2)
 
 
 def _draw_dashed_line(surface, color, a, b, width=2, dash=10, gap=8) -> None:
@@ -276,8 +344,18 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     ui.end_turn_rect = (br.x, br.y, br.w, br.h)
     pygame.draw.rect(surface, (46, 92, 60), br, border_radius=6)
     pygame.draw.rect(surface, (96, 190, 120), br, 2, border_radius=6)
-    label = "AUTO" if ui.autoplay else "End Turn ⏎"
-    _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=br.center)
+    if ui.autoplay:
+        _text(surface, _fonts()["normal"], "AUTO", config.COLOR_TEXT, center=br.center)
+    else:
+        # "End Turn" + a drawn return-arrow icon: the monospace font has no ⏎
+        # glyph (renders as tofu), so we draw the shortcut hint instead.
+        font = _fonts()["normal"]
+        tw = font.size("End Turn")[0]
+        gw, gap = 15, 8
+        left = br.centerx - (tw + gap + gw) // 2
+        _text(surface, font, "End Turn", config.COLOR_TEXT, midleft=(left, br.centery))
+        _draw_return_glyph(surface, (left + tw + gap, br.centery - 6, gw, 12),
+                           config.COLOR_TEXT)
 
 
 def _draw_scoreboard(surface, state: GameState, w: int) -> None:
@@ -337,11 +415,11 @@ def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.sel_order is not None:
-        return "Editing queued order  ·  wheel: ship count  ·  X: remove  ·  right-click/Esc: done"
+        return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
-        return "Wheel: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
+        return "Wheel or −/+ buttons: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
     return ("Click your system to select  ·  click a queued lane/list row to edit  ·  "
             "End Turn to resolve  ·  A: autoplay  ·  M: menu")
 
@@ -433,7 +511,7 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=4)
         dr = (x + row_w - 18, y + 1, 16, _ORDER_ROW_H - 4)
         _draw_x_button(surface, dr)
-        label = f"{o.source_id}→{o.dest_id}   {o.ships} sh"
+        label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
         _text(surface, _fonts()["small"], label, config.COLOR_SELECT if selected else hcolor,
               midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
         ui.order_hitboxes.append((row, dr))
@@ -456,7 +534,7 @@ def _panel_editing(surface, ui: Ui, x, y, o) -> int:
     _text(surface, _fonts()["normal"], "Editing order", config.COLOR_SELECT, topleft=(x, y))
     y += 26
     y = _row(surface, x, y, f"Sending: {o.ships}", config.COLOR_SELECT)
-    y = _row(surface, x, y, "wheel: count · X: remove", config.COLOR_TEXT_DIM)
+    y = _row(surface, x, y, "wheel or −/+ buttons · X: remove", config.COLOR_TEXT_DIM)
     return y
 
 
@@ -524,7 +602,7 @@ def _panel_legend(surface, x, y) -> int:
         "Click a system for details.",
         "",
         "Select -> click neighbour",
-        "Wheel: set ship count",
+        "Wheel or −/+ buttons: count",
         "Click: send once",
         "Shift+click: forward rule",
         "X: clear forward rule",
@@ -586,7 +664,7 @@ def draw_confirm_quit(surface) -> None:
           center=(w // 2, h // 2 - 36))
     quit_r, cancel_r = confirm_quit_buttons(surface)
     for rect, label, fill, edge in (
-        (quit_r, "Quit (Y/⏎)", (120, 46, 52), (200, 96, 104)),
+        (quit_r, "Quit (Y/Enter)", (120, 46, 52), (200, 96, 104)),
         (cancel_r, "Cancel (N/Esc)", (46, 92, 60), (96, 190, 120)),
     ):
         pygame.draw.rect(surface, fill, rect, border_radius=6)
