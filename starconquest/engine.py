@@ -7,13 +7,15 @@ then resolves one turn deterministically:
     1. AI phase        — each AI player's decisions are applied (injected via
                          ``decide`` so the engine never imports the AI).
     2. Advance fleets  — every in-transit fleet counts down one turn.
-    3. Arrivals+combat — fleets that reach their destination are grouped by node
+    3. Lane battles    — (opt-in) fleets of different owners sharing a lane clash
+                         in transit; only the winning side flies on.
+    4. Arrivals+combat — fleets that reach their destination are grouped by node
                          and resolved together (fair regardless of launch order).
-    4. Production      — systems accrue toward their next ship (after combat, so
+    5. Production      — systems accrue toward their next ship (after combat, so
                          a system captured this turn produces for its new owner).
-    5. Win check       — a player is alive if it holds a system or has a fleet in
+    6. Win check       — a player is alive if it holds a system or has a fleet in
                          transit; the game ends when <= 1 remain.
-    6. turn += 1.
+    7. turn += 1.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from collections import defaultdict
 from typing import Callable, Optional
 
 from . import combat, config
-from .model import Fleet, GameState, Order
+from .model import Fleet, GameState, Order, lane_key
 
 # A decision function: given the state and a player id, return that player's orders.
 DecideFn = Callable[[GameState, int], list[Order]]
@@ -83,6 +85,7 @@ def end_turn(
         apply_order(state, order)
 
     _advance_fleets(state)
+    _resolve_lane_battles(state)
     _resolve_arrivals(state)
     _production(state)
     _check_win(state)
@@ -105,6 +108,37 @@ def _collect_orders(
 def _advance_fleets(state: GameState) -> None:
     for fleet in state.fleets:
         fleet.turns_remaining -= 1
+
+
+def _resolve_lane_battles(state: GameState) -> None:
+    """Fight any lane held by two or more owners (opt-in via IN_LANE_BATTLES).
+
+    Fleets in transit normally never interact; when enabled, every fleet sharing
+    a lane clashes in open space and only the winning side survives. Its most
+    advanced fleet (fewest turns remaining) carries the survivors on toward its
+    destination, so the winner keeps its original heading and arrival time.
+    """
+    if not config.IN_LANE_BATTLES:
+        return
+
+    by_lane: dict[frozenset[int], list[Fleet]] = defaultdict(list)
+    for fleet in state.fleets:
+        by_lane[lane_key(fleet.source_id, fleet.dest_id)].append(fleet)
+
+    kept: list[Fleet] = []
+    for fleets in by_lane.values():
+        if len({f.owner_id for f in fleets}) < 2:
+            kept.extend(fleets)  # no enemy present -> lane untouched
+            continue
+        winner, survivors = combat.resolve_lane_clash(state, fleets)
+        if winner != 0 and survivors > 0:
+            vanguard = min(
+                (f for f in fleets if f.owner_id == winner),
+                key=lambda f: f.turns_remaining,
+            )
+            vanguard.ships = survivors
+            kept.append(vanguard)
+    state.fleets = kept
 
 
 def _resolve_arrivals(state: GameState) -> None:

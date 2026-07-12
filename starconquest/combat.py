@@ -51,6 +51,31 @@ def resolve_fight(
     return w_owner, survivors
 
 
+def resolve_lane_clash(state: GameState, fleets: list[Fleet]) -> tuple[int, int]:
+    """Resolve every fleet sharing one lane against each other in open space.
+
+    No defender exists mid-lane, so this is a plain strongest-first fold of the
+    per-owner totals via ``resolve_fight`` (mirrors the pile-up branch of
+    ``resolve_arrival``). Returns (winning_owner, surviving_ships); (0, 0) on
+    mutual annihilation.
+    """
+    forces: dict[int, int] = defaultdict(int)
+    for f in fleets:
+        forces[f.owner_id] += f.ships
+
+    sides = [(owner, ships) for owner, ships in forces.items() if ships > 0]
+    if not sides:
+        return 0, 0
+    if len(sides) == 1:
+        return sides[0]
+
+    sides.sort(key=lambda s: s[1], reverse=True)
+    cur_owner, cur_ships = sides[0]
+    for owner, ships in sides[1:]:
+        cur_owner, cur_ships = resolve_fight(state.rng, cur_owner, cur_ships, owner, ships)
+    return cur_owner, cur_ships
+
+
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
 

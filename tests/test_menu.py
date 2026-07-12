@@ -154,6 +154,9 @@ def test_advanced_slider_sets_setting():
         # neutral-produces checkbox toggles
         _click_key(screen, ms, settings, "neutral_produces")
         assert settings.neutral_produces is True
+        # in-lane-battles checkbox toggles
+        _click_key(screen, ms, settings, "in_lane_battles")
+        assert settings.in_lane_battles is True
     finally:
         pygame.quit()
 

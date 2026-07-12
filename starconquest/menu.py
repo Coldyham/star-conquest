@@ -174,7 +174,7 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 
     _draw_tabs(surface, ms, w)
 
-    panel = pygame.Rect(w // 2 - 280, 208, 560, 372)
+    panel = pygame.Rect(w // 2 - 280, 208, 560, 400)
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
     pygame.draw.rect(surface, _PANEL_BORDER, panel, 1, border_radius=10)
 
@@ -185,7 +185,7 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     elif ms.tab == "ai":
         _draw_ai(surface, ms, settings, panel)
 
-    _file_control(surface, ms, w, 596)
+    _file_control(surface, ms, w, 612)
     _draw_start(surface, ms, w)
     if ms.status and pygame.time.get_ticks() < ms.status_until:
         _text(surface, f["small"], ms.status,
@@ -264,9 +264,14 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
     y = _section(surface, "Combat", rx, y)
     y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
+
+    ty = panel.bottom - 44                             # full-width toggles row
     _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM,
-          midleft=(rx, y + _CH // 2))
-    _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
+          midleft=(lx, ty + _CH // 2))
+    _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, lx + col_w, ty)
+    _text(surface, _fonts()["small"], "In-lane battles", config.COLOR_TEXT_DIM,
+          midleft=(rx, ty + _CH // 2))
+    _checkbox(surface, ms, "in_lane_battles", settings.in_lane_battles, rx + col_w, ty)
 
 
 def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -620,6 +625,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         _randomise_sliders(settings, _ADV_ALL)
     elif hit == "neutral_produces":
         settings.neutral_produces = not settings.neutral_produces
+    elif hit == "in_lane_battles":
+        settings.in_lane_battles = not settings.in_lane_battles
     elif hit == "players_dec":
         _set_players(settings, settings.players - 1)
     elif hit == "players_inc":

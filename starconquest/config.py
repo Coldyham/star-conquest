@@ -53,6 +53,7 @@ NEUTRAL_PRODUCES = False    # neutrals are static garrisons by default
 # Combat  (Lanchester square law + jitter)
 # --------------------------------------------------------------------------- #
 COMBAT_JITTER = 0.10        # +/- 10% random swing applied to each side's strength
+IN_LANE_BATTLES = False     # opposing fleets sharing a lane fight in transit
 
 # --------------------------------------------------------------------------- #
 # AI heuristic knobs

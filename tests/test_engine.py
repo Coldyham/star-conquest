@@ -18,6 +18,16 @@ def no_jitter():
         config.COMBAT_JITTER = old
 
 
+@contextmanager
+def in_lane_battles():
+    old = config.IN_LANE_BATTLES
+    config.IN_LANE_BATTLES = True
+    try:
+        yield
+    finally:
+        config.IN_LANE_BATTLES = old
+
+
 def make_state(specs, lanes, human=None):
     """specs: (id, owner, ships, production);  lanes: (a, b, travel_turns)."""
     s = GameState.new(0)
@@ -102,6 +112,32 @@ def test_apply_order_validation():
     assert engine.apply_order(s, Order(1, 0, 1, 0)) is None    # zero ships
     fleet = engine.apply_order(s, Order(1, 0, 1, 999))         # clamps to available
     assert fleet is not None and fleet.ships == 10 and s.systems[0].ships == 0
+
+
+def test_in_lane_battle_winner_flies_on():
+    # opposing fleets share a lane; the stronger side survives and keeps heading
+    # to its destination with its remaining travel time.
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 10))   # 0 -> 1
+        engine.apply_order(s, Order(2, 1, 0, 6))    # 1 -> 0 (head-on)
+        engine.end_turn(s)
+    assert len(s.fleets) == 1
+    survivor = s.fleets[0]
+    assert survivor.owner_id == 1
+    assert survivor.dest_id == 1                    # kept its original heading
+    assert survivor.ships == round((10 ** 2 - 6 ** 2) ** 0.5)   # Lanchester: 8
+    assert survivor.turns_remaining == 2            # advanced one turn, not reset
+
+
+def test_lane_battles_off_by_default_fleets_coexist():
+    # with the toggle off, opposing fleets pass each other untouched (default).
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter():
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.apply_order(s, Order(2, 1, 0, 6))
+        engine.end_turn(s)
+    assert len(s.fleets) == 2
 
 
 def test_decide_callback_runs_for_ai_only():

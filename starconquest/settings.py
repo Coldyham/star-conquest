@@ -38,6 +38,7 @@ _GLOBAL_KNOBS = (
     ("garrison_jitter", "GARRISON_JITTER"),
     ("combat_jitter", "COMBAT_JITTER"),
     ("neutral_produces", "NEUTRAL_PRODUCES"),
+    ("in_lane_battles", "IN_LANE_BATTLES"),
 )
 
 
@@ -65,6 +66,7 @@ class Settings:
     garrison_jitter: int = config.GARRISON_JITTER
     combat_jitter: float = config.COMBAT_JITTER
     neutral_produces: bool = config.NEUTRAL_PRODUCES
+    in_lane_battles: bool = config.IN_LANE_BATTLES
 
     # -- AI: per-seat tuning, indexed by seat-1 (seats 1..MAX_PLAYERS) -------- #
     ai: list[AiParams] = field(
