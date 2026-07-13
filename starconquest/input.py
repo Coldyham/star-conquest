@@ -110,7 +110,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return None
 
     # Send popup (CHOOSING): Send/Forward tabs pick the mode, Half/All retune the
-    # count, and (in Forward mode) Stop forwarding drops this source's rule.
+    # count, and Cancel discards the active send/forward rule.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
         if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
             ui.set_forward_mode(state, False)
@@ -118,14 +118,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
             ui.set_forward_mode(state, True)
             return None
-        if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
-            ui.send_all(state)
-            return None
+        # the two preset buttons: Half/All (Send) or Keep-half/Keep-0 (Forward)
         if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
-            ui.send_half(state)
+            ui.keep_half(state) if ui.forward_armed else ui.send_half(state)
             return None
-        if ui.stop_forward_rect[2] and _point_in_rect(pos, ui.stop_forward_rect):
-            ui.stop_forward()
+        if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
+            ui.keep_none(state) if ui.forward_armed else ui.send_all(state)
+            return None
+        if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
+            ui.cancel_send()
             return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes

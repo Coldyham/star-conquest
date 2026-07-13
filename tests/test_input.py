@@ -134,7 +134,26 @@ def test_forward_stepper_adjusts_keep():
         pygame.quit()
 
 
-def test_popup_stop_forwarding_clears_this_rule():
+def test_popup_cancel_discards_send():
+    """Cancel on the Send tab discards the committed one-shot order."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert len(ui.pending) == 1
+
+        ui.cancel_rect = (100, 130, 90, 20)
+        _click_pos(state, ui, (110, 140))       # Cancel
+        assert ui.pending == []
+        assert ui.mode == SELECTED and ui.selected == home
+    finally:
+        pygame.quit()
+
+
+def test_popup_cancel_discards_forward_rule():
+    """Cancel on the Forward tab drops this source's standing rule."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -145,8 +164,8 @@ def test_popup_stop_forwarding_clears_this_rule():
         _click_pos(state, ui, (110, 110))       # arm forwarding
         assert ui.auto_forward.get(home) is not None
 
-        ui.stop_forward_rect = (100, 130, 90, 20)
-        _click_pos(state, ui, (110, 140))       # Stop forwarding
+        ui.cancel_rect = (100, 130, 90, 20)
+        _click_pos(state, ui, (110, 140))       # Cancel
         assert home not in ui.auto_forward
         assert ui.pending == []                 # no send left behind
         assert ui.mode == SELECTED and ui.selected == home

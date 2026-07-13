@@ -46,7 +46,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     # zero the button rects; whichever count/popup draw runs (if any) re-records them
     ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
-    ui.send_all_rect = ui.send_half_rect = ui.stop_forward_rect = (0, 0, 0, 0)
+    ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
     _draw_lanes(surface, state, ui)
     _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
@@ -222,10 +222,10 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
-    """The on-map action panel opened when a destination is picked. A Send/Forward
-    tab toggle chooses between a one-shot send (auto-committed, default send-all)
-    and a standing forward rule; both share the count controls (−/+, Half, All).
-    The Forward tab adds a Stop-forwarding button that clears this source's rule.
+    """The on-map action panel opened when a destination is picked. Send/Forward
+    tabs choose between a one-shot send (auto-committed, default send-all, retuned
+    with −/+, Half, All) and a standing forward rule (−/+ sets ships to keep). A
+    Cancel button at the bottom discards the active send/rule on either tab.
     Records every button's hit-rect on ``ui`` for input (store-rect-then-test)."""
     if ui.selected is None or ui.dest is None:
         return
@@ -234,11 +234,13 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
 
     dest = state.systems[ui.dest]
+    garrison = state.systems[ui.selected].ships
     font = _fonts()["small"]
     pad, gap, bh = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP, config.SEND_POPUP_BTN_H
     w = config.SEND_POPUP_W
-    # rows: tabs, title, stepper, then either Half/All (Send) or Stop (Forward)
-    rows = 4
+    # Fixed layout — the same six rows on either tab so the box never resizes:
+    # tabs, title, effect caption, stepper, two presets, cancel.
+    rows = 6
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
     # anchor above the lane midpoint, clamped to the play area
@@ -248,37 +250,50 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
 
     panel = pygame.Rect(x, y, w, h)
     pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=8)
-    pygame.draw.rect(surface, config.COLOR_SELECT, panel, 1, border_radius=8)
+    accent = _forward_accent() if ui.forward_armed else config.COLOR_SELECT
+    pygame.draw.rect(surface, accent, panel, 1, border_radius=8)
 
     inner = x + pad
     iw = w - pad * 2
     tw = (iw - gap) // 2                              # half-width for paired buttons
     cy = y + pad
 
-    # tab row: Send | Forward (the active mode is highlighted)
+    # tab row: Send | Forward — drawn as tabs (active one blends into the body
+    # below; a separator line under the row is broken beneath the active tab)
     send_tab = pygame.Rect(inner, cy, tw, bh)
     fwd_tab = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-    _draw_popup_button(surface, send_tab, "Send", not ui.forward_armed)
-    _draw_popup_button(surface, fwd_tab, "Forward", ui.forward_armed)
+    _draw_tab(surface, send_tab, "Send", not ui.forward_armed, config.COLOR_SELECT)
+    _draw_tab(surface, fwd_tab, "Forward", ui.forward_armed, _forward_accent())
+    active = send_tab if not ui.forward_armed else fwd_tab
+    line_y = cy + bh
+    pygame.draw.line(surface, (70, 80, 104), (inner, line_y), (inner + iw, line_y), 1)
+    pygame.draw.line(surface, (20, 24, 36), (active.left, line_y), (active.right, line_y), 1)
     ui.send_tab_rect = (send_tab.x, send_tab.y, send_tab.w, send_tab.h)
     ui.forward_tab_rect = (fwd_tab.x, fwd_tab.y, fwd_tab.w, fwd_tab.h)
     cy += bh + gap
 
-    # title: verb + destination on the left, its garrison right-aligned
-    verb = "Forward" if ui.forward_armed else "Send"
-    _text(surface, font, f"{verb} -> {ui.dest}", config.COLOR_SELECT,
+    # title: source -> destination on the left, destination garrison right-aligned
+    _text(surface, font, f"Sys {ui.selected} -> {ui.dest}", accent,
           midleft=(inner, cy + bh // 2))
     ships_lbl = f"{dest.ships}sh"
     _text(surface, font, ships_lbl, config.player_color(dest.owner_id),
           midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
 
-    # stepper row: [−]  value  [+]  — sends the count, or (Forward) how many to keep
+    # effect caption: what this actually does, in plain words (dim)
+    if ui.forward_armed:
+        effect = f"~{max(0, garrison - ui.keep)}/turn  ·  keep {ui.keep}"
+    else:
+        effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
+    _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
+    cy += bh + gap
+
+    # stepper row: [−]  value  [+]  — the send count, or (Forward) how many to keep
     s = config.STEPPER_SIZE
     minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
     plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
-    _draw_step_button(surface, minus, "-", config.COLOR_SELECT)
-    _draw_step_button(surface, plus, "+", config.COLOR_SELECT)
+    _draw_step_button(surface, minus, "-", accent)
+    _draw_step_button(surface, plus, "+", accent)
     label = f"keep {ui.keep}" if ui.forward_armed else str(ui.chosen)
     _text(surface, _fonts()["normal"], label, config.COLOR_TEXT,
           center=(inner + iw // 2, cy + bh // 2))
@@ -286,34 +301,64 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
     cy += bh + gap
 
-    # bottom row: Half/All presets (Send) or Stop forwarding (Forward)
+    # preset row: Half/All (Send) or Keep half/Keep 0 (Forward) — left, right map
+    # to send_half_rect / send_all_rect on both tabs (input reads the mode)
+    left = pygame.Rect(inner, cy, tw, bh)
+    right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
     if ui.forward_armed:
-        stop = pygame.Rect(inner, cy, iw, bh)
-        _draw_popup_button(surface, stop, "Stop forwarding", False)
-        ui.stop_forward_rect = (stop.x, stop.y, stop.w, stop.h)
+        _draw_popup_button(surface, left, "Keep half")
+        _draw_popup_button(surface, right, "Keep 0")
     else:
-        half = pygame.Rect(inner, cy, tw, bh)
-        allr = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-        _draw_popup_button(surface, half, "Half", False)
-        _draw_popup_button(surface, allr, "All", False)
-        ui.send_half_rect = (half.x, half.y, half.w, half.h)
-        ui.send_all_rect = (allr.x, allr.y, allr.w, allr.h)
+        _draw_popup_button(surface, left, "Half")
+        _draw_popup_button(surface, right, "All")
+    ui.send_half_rect = (left.x, left.y, left.w, left.h)
+    ui.send_all_rect = (right.x, right.y, right.w, right.h)
+    cy += bh + gap
+
+    # Cancel row (both tabs): discard the active send / forward rule
+    cancel = pygame.Rect(inner, cy, iw, bh)
+    _draw_popup_button(surface, cancel, "Cancel", danger=True)
+    ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v)) if hi >= lo else lo
 
 
-def _draw_popup_button(surface, rect: pygame.Rect, label: str, active: bool) -> None:
-    """A small labelled button in the send popup; ``active`` fills it (toggles)."""
+def _draw_popup_button(surface, rect: pygame.Rect, label: str,
+                       active: bool = False, danger: bool = False) -> None:
+    """A small labelled button in the send popup; ``active`` fills it (toggles),
+    ``danger`` tints it red (Cancel)."""
     if active:
-        pygame.draw.rect(surface, (70, 92, 58), rect, border_radius=5)
-        pygame.draw.rect(surface, (140, 200, 120), rect, 1, border_radius=5)
-        col = config.COLOR_TEXT
+        fill, edge = (70, 92, 58), (140, 200, 120)
+    elif danger:
+        fill, edge = (58, 38, 42), (170, 96, 104)
     else:
-        pygame.draw.rect(surface, (30, 36, 52), rect, border_radius=5)
-        pygame.draw.rect(surface, (70, 80, 104), rect, 1, border_radius=5)
-        col = config.COLOR_TEXT
+        fill, edge = (30, 36, 52), (70, 80, 104)
+    pygame.draw.rect(surface, fill, rect, border_radius=5)
+    pygame.draw.rect(surface, edge, rect, 1, border_radius=5)
+    _text(surface, _fonts()["small"], label, config.COLOR_TEXT, center=rect.center)
+
+
+def _forward_accent() -> tuple[int, int, int]:
+    """Accent colour for Forward mode — a teal, distinct from the send yellow."""
+    return (110, 205, 195)
+
+
+def _draw_tab(surface, rect: pygame.Rect, label: str, active: bool, accent) -> None:
+    """A tab in the send popup's Send/Forward switcher. The active tab takes the
+    panel-body fill (so it reads as connected to the body) with a bright top
+    accent in its mode colour; inactive tabs are darker and dim-labelled."""
+    if active:
+        pygame.draw.rect(surface, (20, 24, 36), rect,
+                         border_top_left_radius=6, border_top_right_radius=6)
+        pygame.draw.line(surface, accent,
+                         (rect.left + 2, rect.top + 1), (rect.right - 2, rect.top + 1), 2)
+        col = accent
+    else:
+        pygame.draw.rect(surface, (12, 14, 22), rect,
+                         border_top_left_radius=6, border_top_right_radius=6)
+        col = config.COLOR_TEXT_DIM
     _text(surface, _fonts()["small"], label, col, center=rect.center)
 
 
@@ -513,9 +558,9 @@ def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.mode == CHOOSING and ui.forward_armed:
-        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Stop forwarding  ·  Esc: close"
+        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Cancel  ·  right-click/Esc: close"
     if ui.mode == CHOOSING:
-        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  right-click/Esc: keep & close"
+        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Cancel  ·  right-click/Esc: keep & close"
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:

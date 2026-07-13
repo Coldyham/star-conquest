@@ -61,7 +61,7 @@ class Ui:
     forward_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     send_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     send_half_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    stop_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Persistent side-panel button to clear every standing forward rule at once;
     # drawn (and hit-tested) only while any rule exists.
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -144,6 +144,13 @@ class Ui:
     def send_half(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state) // 2)
 
+    def keep_none(self, state: GameState) -> None:
+        self.set_keep(state, 0)                      # forward everything
+
+    def keep_half(self, state: GameState) -> None:
+        if self.selected is not None:
+            self.set_keep(state, state.systems[self.selected].ships // 2)
+
     def toggle_forward(self, state: GameState) -> None:
         """Flip the active send between a one-shot order (sized by `chosen`) and
         a standing rule that holds back `keep` and forwards the rest each turn.
@@ -167,13 +174,6 @@ class Ui:
         """Switch the popup's Send/Forward tab explicitly (idempotent)."""
         if self.mode == CHOOSING and self.forward_armed != armed:
             self.toggle_forward(state)
-
-    def stop_forward(self) -> None:
-        """Stop forwarding out of the current source: drop its standing rule and
-        return to just the source selected (no send left behind)."""
-        if self.selected is not None:
-            self.auto_forward.pop(self.selected, None)
-        self._close_send()
 
     def clear_all_forward(self) -> None:
         """Remove every standing forward rule at once."""

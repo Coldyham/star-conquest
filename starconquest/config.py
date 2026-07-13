@@ -108,7 +108,7 @@ STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the ac
 
 # Send popup: the little action panel that opens on the map when a destination
 # is picked (commit send-all, then retune count / forward / cancel).
-SEND_POPUP_W = 168          # px: panel width
+SEND_POPUP_W = 184          # px: panel width
 SEND_POPUP_BTN_H = 22       # px: height of each button row
 SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
