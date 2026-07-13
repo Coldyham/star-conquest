@@ -66,6 +66,17 @@ def test_select_choose_confirm_flow():
         pygame.quit()
 
 
+def test_can_select_owned_system_with_no_ships():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 0
+        _click(state, ui, home)
+        assert ui.mode == SELECTED and ui.selected == home
+    finally:
+        pygame.quit()
+
+
 def test_cannot_select_foreign_system():
     state, ui = _setup()
     try:

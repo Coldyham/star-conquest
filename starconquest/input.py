@@ -149,14 +149,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.mode = CHOOSING
             ui.dest = node
             ui.chosen = ui.available(state, ui.selected)
-        elif sys.owner_id == ui.human_id and ui.available(state, node) > 0:
-            ui.selected = node  # reselect a different owned system
+        elif sys.owner_id == ui.human_id:
+            ui.selected = node  # reselect a different owned system (even with 0 ships)
         else:
             ui.reset_selection()
         return None
 
-    # IDLE
-    if sys.owner_id == ui.human_id and ui.available(state, node) > 0:
+    # IDLE — any owned system is selectable so its panel can be inspected,
+    # even one with no free ships to send.
+    if sys.owner_id == ui.human_id:
         ui.mode = SELECTED
         ui.selected = node
     return None
