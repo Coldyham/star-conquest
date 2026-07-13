@@ -302,15 +302,18 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     cy += bh + gap
 
     # preset row: Half/All (Send) or Keep half/Keep 0 (Forward) — left, right map
-    # to send_half_rect / send_all_rect on both tabs (input reads the mode)
+    # to send_half_rect / send_all_rect on both tabs (input reads the mode). The
+    # preset matching the current value lights up in the mode accent.
     left = pygame.Rect(inner, cy, tw, bh)
     right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
     if ui.forward_armed:
-        _draw_popup_button(surface, left, "Keep half")
-        _draw_popup_button(surface, right, "Keep 0")
+        half_keep = garrison // 2
+        _draw_popup_button(surface, left, "Keep half", ui.keep == half_keep, accent=accent)
+        _draw_popup_button(surface, right, "Keep 0", ui.keep == 0, accent=accent)
     else:
-        _draw_popup_button(surface, left, "Half")
-        _draw_popup_button(surface, right, "All")
+        cap = ui._active_cap(state)
+        _draw_popup_button(surface, left, "Half", ui.chosen == max(1, cap // 2), accent=accent)
+        _draw_popup_button(surface, right, "All", ui.chosen == cap, accent=accent)
     ui.send_half_rect = (left.x, left.y, left.w, left.h)
     ui.send_all_rect = (right.x, right.y, right.w, right.h)
     cy += bh + gap
@@ -326,18 +329,21 @@ def _clamp(v: int, lo: int, hi: int) -> int:
 
 
 def _draw_popup_button(surface, rect: pygame.Rect, label: str,
-                       active: bool = False, danger: bool = False) -> None:
-    """A small labelled button in the send popup; ``active`` fills it (toggles),
-    ``danger`` tints it red (Cancel)."""
+                       active: bool = False, danger: bool = False,
+                       accent=config.COLOR_SELECT) -> None:
+    """A small labelled button in the send popup. ``active`` lights it up in the
+    mode ``accent`` (the preset matching the current value); ``danger`` tints it
+    red (Cancel); otherwise it's a plain recessed button."""
     if active:
-        fill, edge = (70, 92, 58), (140, 200, 120)
+        fill = tuple(c * 3 // 10 for c in accent)     # darkened accent wash
+        edge, col = accent, config.COLOR_TEXT
     elif danger:
-        fill, edge = (58, 38, 42), (170, 96, 104)
+        fill, edge, col = (58, 38, 42), (170, 96, 104), config.COLOR_TEXT
     else:
-        fill, edge = (30, 36, 52), (70, 80, 104)
+        fill, edge, col = (30, 36, 52), (70, 80, 104), config.COLOR_TEXT_DIM
     pygame.draw.rect(surface, fill, rect, border_radius=5)
     pygame.draw.rect(surface, edge, rect, 1, border_radius=5)
-    _text(surface, _fonts()["small"], label, config.COLOR_TEXT, center=rect.center)
+    _text(surface, _fonts()["small"], label, col, center=rect.center)
 
 
 def _forward_accent() -> tuple[int, int, int]:
