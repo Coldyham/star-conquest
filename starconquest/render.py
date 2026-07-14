@@ -442,8 +442,8 @@ def _hint(ui: Ui) -> str:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
         return "Wheel or −/+ buttons: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
-    return ("Click your system to select  ·  click a queued lane/list row to edit  ·  "
-            "End Turn to resolve  ·  P: play/pause  ·  A: autoplay  ·  M: menu")
+    return ("Click your system to select  ·  click a lane to edit orders  ·  "
+            "Space/Enter: End Turn  ·  P: play/pause  ·  A: autoplay  ·  M: menu")
 
 
 # --------------------------------------------------------------------------- #
