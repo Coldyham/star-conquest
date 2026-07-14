@@ -42,6 +42,11 @@ class Ui:
     order_hitboxes: list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = field(
         default_factory=list
     )
+    # Hit-rects for the −/+ ship-count buttons flanking the active count label on
+    # the map (composing or editing an order). Rebuilt by render each frame; zeroed
+    # when no count is being adjusted (same handoff as end_turn_rect).
+    minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Same idea for auto-forward rule rows, listed below the queued orders:
     # (source_id, row_rect, delete_rect) tuples.
     forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
@@ -56,6 +61,27 @@ class Ui:
     def available(self, state: GameState, sid: int) -> int:
         """Ships still free to deploy from a system this turn."""
         return state.systems[sid].ships - self.committed(sid)
+
+    def step_count(self, state: GameState, delta: int) -> None:
+        """Nudge the ship count being adjusted by ``delta`` — the shared logic
+        behind both the mouse wheel and the on-lane −/+ buttons. Applies to the
+        move being composed (CHOOSING), the queued order being edited, or the
+        standing auto-forward rule being edited."""
+        if self.mode == CHOOSING and self.selected is not None:
+            avail = self.available(state, self.selected)
+            self.chosen = max(1, min(avail, self.chosen + delta))
+        elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
+            # cap is the order's own ships plus whatever is still free at the source
+            o = self.pending[self.sel_order]
+            cap = self.available(state, o.source_id) + o.ships
+            o.ships = max(1, min(cap, o.ships + delta))
+        elif self.sel_forward is not None and self.sel_forward in self.auto_forward:
+            # adjust a standing rule's `keep` in place; it ranges over the
+            # source's whole garrison (0 keeps nothing, all forwards nothing)
+            src = self.sel_forward
+            dest, keep = self.auto_forward[src]
+            cap = state.systems[src].ships if src in state.systems else keep
+            self.auto_forward[src] = (dest, max(0, min(cap, keep + delta)))
 
     # -- selection helpers -------------------------------------------------- #
     def reset_selection(self) -> None:
