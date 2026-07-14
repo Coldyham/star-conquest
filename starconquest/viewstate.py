@@ -32,6 +32,7 @@ class Ui:
     # so it lives here rather than in the pure GameState. Each turn a rule
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
+    sel_forward: Optional[int] = None   # source id of the rule being edited, if any
     autoplay: bool = False
     show_help: bool = True
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -40,6 +41,11 @@ class Ui:
     # Parallel to `pending`: entry i is (row_rect, delete_rect), each (x,y,w,h).
     order_hitboxes: list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = field(
         default_factory=list
+    )
+    # Same idea for auto-forward rule rows, listed below the queued orders:
+    # (source_id, row_rect, delete_rect) tuples.
+    forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
+        field(default_factory=list)
     )
 
     # -- ship accounting ---------------------------------------------------- #
@@ -65,7 +71,16 @@ class Ui:
         exclusive, so this drops any in-progress source/destination selection.
         """
         self.reset_selection()
+        self.sel_forward = None
         self.sel_order = i
+
+    def select_forward(self, sid: int) -> None:
+        """Pick a standing auto-forward rule to edit (scroll adjusts its
+        `keep`, X removes it) — same in-place-edit pattern as `select_order`.
+        """
+        self.reset_selection()
+        self.sel_order = None
+        self.sel_forward = sid
 
     def clear_pending(self) -> None:
         self.pending.clear()
@@ -74,3 +89,5 @@ class Ui:
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""
         self.auto_forward.pop(sid, None)
+        if self.sel_forward == sid:
+            self.sel_forward = None
