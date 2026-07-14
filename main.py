@@ -15,11 +15,12 @@ import argparse
 
 import pygame
 
-from starconquest import ai, config, engine, mapgen, menu, render
+from starconquest import ai, config, engine, mapgen, menu, render, replay
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
+from starconquest.replay import GameLog
 from starconquest.settings import Settings, build_state, resolve_seed
 from starconquest.viewstate import Ui
 
@@ -34,9 +35,21 @@ def new_ui(state: GameState, autoplay: bool) -> Ui:
     return Ui(view=build_view(state), human_id=1, autoplay=autoplay)
 
 
-def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui]:
+def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
+    """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
-    return state, new_ui(state, autoplay)
+    return state, new_ui(state, autoplay), replay.new_log(settings, seed)
+
+
+def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
+    """Rebuild a saved in-progress match and adopt its settings for the menu.
+
+    ``log`` is then reused as the live log, so continued play appends to the very
+    same file the game was resumed from.
+    """
+    state, loaded = replay.reconstruct(log, ai.decide)
+    settings.copy_from(loaded)
+    return state, new_ui(state, loaded.autoplay)
 
 
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
@@ -59,14 +72,27 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     return orders
 
 
-def resolve_turn(state: GameState, ui: Ui) -> None:
-    """Advance one turn. In autoplay the human seat is also driven by the AI."""
+def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
+    """Advance one turn. In autoplay the human seat is also driven by the AI.
+
+    The human orders actually applied are recorded into ``log`` and the file is
+    rewritten, so the on-disk log always matches the live game (and a crash loses
+    at most the turn in progress).
+    """
     human_orders = (
         ai.decide(state, ui.human_id)
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
     engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    if log is not None:
+        log.record_turn(human_orders, human_ai=ui.autoplay)
+        if state.winner is not None:
+            log.mark_finished(state.winner)
+        try:
+            log.save()
+        except OSError:
+            pass  # a save failure must never interrupt play
     ui.clear_pending()
     ui.reset_selection()
 
@@ -97,11 +123,19 @@ def main() -> None:
     menu_state = MenuState()
     state: GameState | None = None
     ui: Ui | None = None
+    log: GameLog | None = None       # replay log of the live match (None while in menu)
     current_seed = 0
     scene = "game" if args.no_menu else "menu"
     if args.no_menu:
         current_seed = resolve_seed(settings)
-        state, ui = start_game(settings, current_seed, settings.autoplay)
+        state, ui, log = start_game(settings, current_seed, settings.autoplay)
+
+    # If the last saved match was left unfinished, offer to resume it on the menu.
+    resume_prompt: GameLog | None = None
+    if not args.no_menu:
+        candidate = replay.latest_log()
+        if candidate is not None and not candidate.finished and candidate.turn_count > 0:
+            resume_prompt = candidate
 
     running = True
     confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
@@ -134,6 +168,32 @@ def main() -> None:
                         confirm_quit = False
                 continue
 
+            if resume_prompt is not None:
+                # Boot modal: resume the last unfinished game, or dismiss to the menu.
+                accept = False
+                if event.type == pygame.QUIT:
+                    confirm_quit = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                        accept = True
+                    elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        resume_prompt = None
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    resume_r, new_r = menu.resume_prompt_buttons(screen)
+                    if resume_r.collidepoint(event.pos):
+                        accept = True
+                    elif new_r.collidepoint(event.pos):
+                        resume_prompt = None
+                if accept:
+                    ai.load_models()   # a resumed game may name a drop-in strategy
+                    state, ui = resume_game(resume_prompt, settings)
+                    current_seed = resume_prompt.seed
+                    log = resume_prompt
+                    scene = "game"
+                    auto_accum = 0
+                    resume_prompt = None
+                continue
+
             if event.type == pygame.QUIT:
                 confirm_quit = True
                 continue
@@ -152,7 +212,7 @@ def main() -> None:
                 if action == "start":
                     ai.load_models()   # pick up files added since launch / named by a loaded config
                     current_seed = resolve_seed(settings)
-                    state, ui = start_game(settings, current_seed, settings.autoplay)
+                    state, ui, log = start_game(settings, current_seed, settings.autoplay)
                     scene = "game"
                     auto_accum = 0
                 elif action == "quit":
@@ -164,9 +224,9 @@ def main() -> None:
                 confirm_quit = True
             elif action == "menu":
                 scene = "menu"
-                state, ui = None, None
+                state, ui, log = None, None, None
             elif action == "end_turn" and not ui.autoplay:
-                resolve_turn(state, ui)
+                resolve_turn(state, ui, log)
             elif action == "toggle_autoplay":
                 ui.autoplay = not ui.autoplay
                 ui.reset_selection()
@@ -174,16 +234,18 @@ def main() -> None:
                 auto_accum = 0
             elif action == "restart":
                 current_seed += 1
-                state, ui = start_game(settings, current_seed, ui.autoplay)
+                state, ui, log = start_game(settings, current_seed, ui.autoplay)
 
         if scene == "game" and ui.autoplay and state.winner is None:
             auto_accum += dt
             if auto_accum >= AUTOPLAY_MS:
                 auto_accum = 0
-                resolve_turn(state, ui)
+                resolve_turn(state, ui, log)
 
         if scene == "menu":
             menu.draw(screen, menu_state, settings)
+            if resume_prompt is not None:
+                menu.draw_resume_prompt(screen, resume_prompt)
         else:
             render.draw(screen, state, ui)
         if confirm_quit:

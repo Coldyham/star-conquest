@@ -519,6 +519,43 @@ def _draw_start(surface, ms: MenuState, w: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Resume prompt — a boot-time modal offered when the last game was left unfinished
+# --------------------------------------------------------------------------- #
+def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
+    """(resume, new-game) button rects — shared by the drawer and the hit-tester."""
+    w, h = surface.get_size()
+    cx, cy = w // 2, h // 2
+    bw, bh = 200, 42
+    resume_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
+    new_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    return resume_r, new_r
+
+
+def draw_resume_prompt(surface, log) -> None:
+    """Modal veil offering to resume ``log`` (an in-progress match), over the menu."""
+    w, h = surface.get_size()
+    f = _fonts()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
+          center=(w // 2, h // 2 - 52))
+    st = log.settings
+    detail = (f"turn {log.turn_count} · {st.get('players', '?')} players · "
+              f"{st.get('mode', 'random')} map")
+    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 18))
+
+    resume_r, new_r = resume_prompt_buttons(surface)
+    for rect, label, fill, edge in (
+        (resume_r, "Resume (Y/Enter)", _START_FILL, _START_BORDER),
+        (new_r, "New game (N/Esc)", _BTN_FILL, _BTN_BORDER),
+    ):
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+        _text(surface, f["normal"], label, config.COLOR_TEXT, center=rect.center)
+
+
+# --------------------------------------------------------------------------- #
 # Input
 # --------------------------------------------------------------------------- #
 def handle_event(event, ms: MenuState, settings: Settings):

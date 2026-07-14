@@ -12,6 +12,9 @@ wheels/
 # Saved game-setup configs (menu Save/Load)
 saves/
 
+# Recorded match logs (settings + per-turn orders; resume-on-boot reads these)
+games/
+
 # User-supplied custom AI strategies (drop-in decision functions); keep the docs
 models/*
 !models/README.md
