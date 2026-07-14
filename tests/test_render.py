@@ -46,6 +46,11 @@ def test_render_all_ui_states_no_crash():
         ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
         render.draw(screen, state, ui)
 
+        # editing the standing rule (selected via the sidebar list)
+        ui.sel_forward = home
+        render.draw(screen, state, ui)
+        ui.sel_forward = None
+
         # advance a few turns so fleets exist, then draw
         for _ in range(6):
             engine.end_turn(state, decide=ai.compute_orders)

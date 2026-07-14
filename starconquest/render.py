@@ -168,15 +168,20 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
-    """Standing auto-forward rules as persistent dashed arrows (human colour)."""
-    color = config.player_color(ui.human_id)
+    """Standing auto-forward rules as persistent dashed arrows (human colour).
+
+    The rule being edited is drawn in the select colour, brighter+thicker —
+    same convention as `_draw_pending`'s selected queued order.
+    """
     for src, (dest, keep) in ui.auto_forward.items():
         s = state.systems.get(src)
         if s is None or s.owner_id != ui.human_id or dest not in state.systems:
             continue
+        selected = src == ui.sel_forward
+        color = config.COLOR_SELECT if selected else config.player_color(ui.human_id)
         pa = ui.view.to_screen(s.pos)
         pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_dashed_line(surface, color, pa, pb, width=2)
+        _draw_dashed_line(surface, color, pa, pb, width=3 if selected else 2)
         dx, dy = pb[0] - pa[0], pb[1] - pa[1]
         length = math.hypot(dx, dy) or 1.0
         u = (dx / length, dy / length)
@@ -431,6 +436,8 @@ def _hint(ui: Ui) -> str:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
+    if ui.sel_forward is not None:
+        return "Editing auto-forward rule  ·  wheel: keep amount  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
@@ -459,7 +466,13 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
 
     x, y = px + 14, py + 14
     editing = _editing_order(ui)
-    focus = editing.source_id if editing else (ui.selected if ui.selected is not None else ui.hover)
+    editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
+    if editing is not None:
+        focus = editing.source_id
+    elif editing_rule is not None:
+        focus = editing_rule
+    else:
+        focus = ui.selected if ui.selected is not None else ui.hover
     if focus is None or focus not in state.systems:
         _panel_legend(surface, x, y)
         return
@@ -491,13 +504,17 @@ _ORDER_ROW_H = 22
 
 
 def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
-    """Bottom-of-panel list of queued orders. Records a (row, delete) hit-rect
-    per order on ``ui.order_hitboxes`` (parallel to ``ui.pending``) for input."""
+    """Bottom-of-panel list of queued orders, followed by standing auto-forward
+    rules. Records a (row, delete) hit-rect per order on ``ui.order_hitboxes``
+    (parallel to ``ui.pending``) and a (source_id, row, delete) hit-rect per
+    rule on ``ui.forward_hitboxes``, both for input to test clicks against."""
     ui.order_hitboxes = []
+    ui.forward_hitboxes = []
     w, h = surface.get_size()
     px = w - config.HUD_RIGHT_W
     bottom = h - config.HUD_BOTTOM_H
-    if not ui.pending:
+    rules = sorted(ui.auto_forward.items())  # stable order across frames
+    if not ui.pending and not rules:
         return
 
     x = px + 12
@@ -506,7 +523,9 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     title_h = 22
     # cap visible rows so a long queue never swallows the whole panel
     max_rows = max(1, (bottom - 8 - top_limit - title_h) // _ORDER_ROW_H)
-    n = len(ui.pending)
+    # orders first, then rules, so existing order_hitboxes indices stay aligned
+    entries = [("order", i) for i in range(len(ui.pending))] + [("rule", src) for src, _ in rules]
+    n = len(entries)
     overflow = n > max_rows
     shown = min(n, max_rows - 1) if overflow else n
 
@@ -514,26 +533,34 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     top = bottom - 8 - block_h
     pygame.draw.line(surface, (40, 44, 60), (px + 8, top - 6),
                      (px + config.HUD_RIGHT_W - 8, top - 6), 1)
-    _text(surface, _fonts()["small"], f"Queued orders ({n})", config.COLOR_TEXT_DIM, topleft=(x, top))
+    _text(surface, _fonts()["small"], f"Queued ({n})", config.COLOR_TEXT_DIM, topleft=(x, top))
 
     y = top + title_h
     hcolor = config.player_color(ui.human_id)
-    for i in range(shown):
-        o = ui.pending[i]
+    for kind, key in entries[:shown]:
         row = (x, y, row_w, _ORDER_ROW_H - 2)
-        selected = i == ui.sel_order
+        if kind == "order":
+            o = ui.pending[key]
+            selected = key == ui.sel_order
+            label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
+        else:
+            dest, keep = ui.auto_forward[key]
+            selected = key == ui.sel_forward
+            label = f"{key}->{dest}   keep {keep}"
         if selected:
             pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=4)
         dr = (x + row_w - 18, y + 1, 16, _ORDER_ROW_H - 4)
         _draw_x_button(surface, dr)
-        label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
         _text(surface, _fonts()["small"], label, config.COLOR_SELECT if selected else hcolor,
               midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
-        ui.order_hitboxes.append((row, dr))
+        if kind == "order":
+            ui.order_hitboxes.append((row, dr))
+        else:
+            ui.forward_hitboxes.append((key, row, dr))
         y += _ORDER_ROW_H
     if overflow:
-        _text(surface, _fonts()["small"], f"+{n - shown} more (edit via lanes)",
-              config.COLOR_TEXT_DIM, midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
+        _text(surface, _fonts()["small"], f"+{n - shown} more", config.COLOR_TEXT_DIM,
+              midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
 
 
 def _draw_x_button(surface, rect) -> None:
@@ -602,11 +629,14 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
 
 def _panel_rule(surface, ui: Ui, x, y, src) -> int:
     dest, keep = ui.auto_forward[src]
-    _text(surface, _fonts()["normal"], "Auto-forward",
-          config.player_color(ui.human_id), topleft=(x, y))
+    editing = src == ui.sel_forward
+    color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
+    _text(surface, _fonts()["normal"], "Auto-forward", color, topleft=(x, y))
     y += 26
-    y = _row(surface, x, y, f"-> System {dest}, keep {keep}", config.COLOR_TEXT)
-    y = _row(surface, x, y, "press X to clear", config.COLOR_TEXT_DIM)
+    y = _row(surface, x, y, f"-> System {dest}, keep {keep}",
+             config.COLOR_SELECT if editing else config.COLOR_TEXT)
+    hint = "wheel: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
+    y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
     return y
 
 
@@ -620,8 +650,8 @@ def _panel_legend(surface, x, y) -> int:
         "Wheel or −/+ buttons: count",
         "Click: send once",
         "Shift+click: forward rule",
+        "Click queued lane/rule: edit",
         "X: clear forward rule",
-        "Click queued lane: edit",
         "Enter / Space: end turn",
         "P: play / pause",
     ):
