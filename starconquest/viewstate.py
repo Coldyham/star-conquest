@@ -34,8 +34,15 @@ class Ui:
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     sel_forward: Optional[int] = None   # source id of the rule being edited, if any
     autoplay: bool = False
+    # Play/pause: while True, main steps turns repeatedly (as if tapping Enter),
+    # toggled by P or the play/pause button. Distinct from autoplay, which hands
+    # the human seat to the AI; here the human's own orders still run each step.
+    playing: bool = False
     show_help: bool = True
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
+    # autoplay drives turns itself); tested by input, like end_turn_rect.
+    play_pause_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the queued-orders panel, rebuilt by render each frame and
     # tested by input (same store-rect-then-test handoff as end_turn_rect).
     # Parallel to `pending`: entry i is (row_rect, delete_rect), each (x,y,w,h).

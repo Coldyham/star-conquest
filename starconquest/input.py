@@ -2,7 +2,7 @@
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'quit',
-'toggle_autoplay', 'menu') or None.
+'toggle_autoplay', 'toggle_play', 'menu') or None.
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "end_turn"
+    if event.key == pygame.K_p:
+        return "toggle_play"
     if event.key == pygame.K_a:
         return "toggle_autoplay"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
@@ -91,6 +93,8 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
+    if _point_in_rect(pos, ui.play_pause_rect):
+        return "toggle_play"
     if ui.autoplay:
         return None
 

@@ -362,6 +362,21 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _draw_return_glyph(surface, (left + tw + gap, br.centery - 6, gw, 12),
                            config.COLOR_TEXT)
 
+    # play/pause button — sits left of End Turn; hidden while autoplay, which
+    # drives turns on its own timer, would make it a no-op.
+    if ui.autoplay:
+        ui.play_pause_rect = (0, 0, 0, 0)
+    else:
+        pw, ph = 120, 32
+        pr = pygame.Rect(br.x - pw - 10, br.y, pw, ph)
+        ui.play_pause_rect = (pr.x, pr.y, pr.w, pr.h)
+        fill = (92, 70, 46) if ui.playing else (40, 52, 78)
+        edge = (190, 150, 96) if ui.playing else (110, 140, 200)
+        pygame.draw.rect(surface, fill, pr, border_radius=6)
+        pygame.draw.rect(surface, edge, pr, 2, border_radius=6)
+        plabel = "Pause (P)" if ui.playing else "Play (P)"
+        _text(surface, _fonts()["normal"], plabel, config.COLOR_TEXT, center=pr.center)
+
 
 def _draw_scoreboard(surface, state: GameState, w: int) -> None:
     """Per-player standings in the top bar: swatch, systems, ships, production.
@@ -427,8 +442,8 @@ def _hint(ui: Ui) -> str:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
         return "Wheel or −/+ buttons: count  ·  click: send once  ·  Shift+click: auto-forward rule  ·  right-click/Esc: back"
-    return ("Click your system to select  ·  click a queued lane/list row to edit  ·  "
-            "End Turn to resolve  ·  A: autoplay  ·  M: menu")
+    return ("Click your system to select  ·  click a lane to edit orders  ·  "
+            "Space/Enter: End Turn  ·  P: play/pause  ·  A: autoplay  ·  M: menu")
 
 
 # --------------------------------------------------------------------------- #
@@ -638,6 +653,7 @@ def _panel_legend(surface, x, y) -> int:
         "Click queued lane/rule: edit",
         "X: clear forward rule",
         "Enter / Space: end turn",
+        "P: play / pause",
     ):
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
     return y
