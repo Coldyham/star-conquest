@@ -213,8 +213,11 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
         length = math.hypot(dx, dy) or 1.0
         u = (dx / length, dy / length)
         _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
-        _label_pill(surface, _fonts()["small"], f"keep {keep}", config.COLOR_TEXT_DIM,
-                    ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10))
+        # the selected rule's keep is drawn later (on top, with −/+ buttons) by
+        # _draw_count_controls; others get a plain dim label here
+        if not selected:
+            _label_pill(surface, _fonts()["small"], f"keep {keep}", config.COLOR_TEXT_DIM,
+                        ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10))
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
@@ -234,9 +237,10 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
-    """Draw the active ship-count label + −/+ buttons on top of the map layer so
-    nodes and fleets never occlude them. Handles both the move being composed
-    (CHOOSING) and the queued order being edited; records the button hit-rects."""
+    """Draw the active count label + −/+ buttons on top of the map layer so nodes
+    and fleets never occlude them. Handles the move being composed (CHOOSING), the
+    queued order being edited, and the standing rule's keep being edited; records
+    the button hit-rects."""
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
         pa = ui.view.to_screen(state.systems[ui.selected].pos)
         pb = ui.view.to_screen(state.systems[ui.dest].pos)
@@ -249,14 +253,25 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
         lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
         ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
         _draw_count_stepper(surface, (lx, ly - 10), o.ships, config.COLOR_SELECT, ui)
+    elif ui.sel_forward is not None and ui.sel_forward in ui.auto_forward:
+        src = ui.sel_forward
+        dest, keep = ui.auto_forward[src]
+        s = state.systems.get(src)
+        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
+            return  # a dormant/unowned rule isn't drawn, so it gets no buttons
+        pa = ui.view.to_screen(s.pos)
+        pb = ui.view.to_screen(state.systems[dest].pos)
+        center = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10)
+        _draw_count_stepper(surface, center, keep, config.COLOR_SELECT, ui, label=f"keep {keep}")
 
 
-def _draw_count_stepper(surface, center, value, color, ui: Ui) -> None:
-    """A ship-count label flanked by clickable −/+ buttons, for adjusting the
-    count without a mouse wheel. Records the button rects on ``ui`` so input can
-    hit-test them (same store-rect-then-test handoff as end_turn_rect)."""
+def _draw_count_stepper(surface, center, value, color, ui: Ui, label: str | None = None) -> None:
+    """A count label flanked by clickable −/+ buttons, for adjusting the count
+    without a mouse wheel. ``label`` overrides the shown text (e.g. "keep 3" for a
+    rule); it defaults to the bare number. Records the button rects on ``ui`` so
+    input can hit-test them (same store-rect-then-test handoff as end_turn_rect)."""
     font = _fonts()["normal"]
-    img = font.render(str(value), True, color)
+    img = font.render(label if label is not None else str(value), True, color)
     lbl = img.get_rect(center=center)
     pill = lbl.inflate(10, 4)
     pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=5)
@@ -521,7 +536,7 @@ def _hint(ui: Ui) -> str:
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.sel_forward is not None:
-        return "Editing auto-forward rule  ·  wheel: keep amount  ·  X: remove  ·  right-click/Esc: done"
+        return "Editing auto-forward rule  ·  wheel or −/+ buttons: keep  ·  X: remove  ·  right-click/Esc: done"
     if ui.mode == SELECTED:
         return "Click a highlighted neighbour to send  ·  X: clear forward rule  ·  right-click/Esc: cancel"
     if ui.mode == CHOOSING:
@@ -731,7 +746,7 @@ def _panel_rule(surface, ui: Ui, x, y, src) -> int:
     y += 26
     y = _row(surface, x, y, f"-> System {dest}, keep {keep}",
              config.COLOR_SELECT if editing else config.COLOR_TEXT)
-    hint = "wheel: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
+    hint = "wheel or −/+ buttons: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
     y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
     return y
 

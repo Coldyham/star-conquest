@@ -50,9 +50,13 @@ def test_render_all_ui_states_no_crash():
         ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
         render.draw(screen, state, ui)
 
-        # editing the standing rule (selected via the sidebar list)
+        # editing the standing rule: the on-map −/+ stepper is drawn, recording
+        # clickable button rects just like a queued order's
+        ui.mode = SELECTED
+        ui.dest = None
         ui.sel_forward = home
         render.draw(screen, state, ui)
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0
         ui.sel_forward = None
 
         # advance a few turns so fleets exist, then draw

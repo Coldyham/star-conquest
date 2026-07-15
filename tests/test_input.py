@@ -179,6 +179,62 @@ def test_shift_click_neighbour_sets_rule_in_one_click():
         pygame.quit()
 
 
+def test_rule_after_queued_order_starts_keep_at_zero():
+    """Shift+click a neighbour to set a rule after already queuing an order from
+    the same system: keep starts at 0 (forward everything free), not the count
+    already committed elsewhere — same as with no queued order."""
+    from starconquest.model import Order  # local import mirrors the section below
+
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 10
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 4))   # 4 of 10 already committed
+
+        _click(state, ui, home)
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            _click(state, ui, nbr)
+        finally:
+            pygame.key.set_mods(0)
+
+        assert ui.auto_forward.get(home) == (nbr, 0)
+    finally:
+        pygame.quit()
+
+
+def test_rule_via_choosing_after_queued_order_starts_keep_at_zero():
+    """Converting a CHOOSING preview to a rule (shift-confirm) after an order is
+    queued from the same system defaults keep to 0 when the count is untouched,
+    rather than inflating it by the committed amount."""
+    from starconquest.model import Order
+
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 10
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 4))   # committed: 4 of 10
+
+        _click(state, ui, home)
+        _click(state, ui, nbr)                       # -> CHOOSING, chosen = available (6)
+        assert ui.mode == CHOOSING and ui.chosen == 6
+
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            pos = ui.view.to_screen(state.systems[nbr].pos)
+            game_input.handle_event(
+                pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui
+            )
+        finally:
+            pygame.key.set_mods(0)
+
+        assert ui.auto_forward.get(home) == (nbr, 0)
+    finally:
+        pygame.quit()
+
+
 def test_can_select_owned_system_with_zero_available_ships():
     state, ui = _setup()
     try:
@@ -354,6 +410,47 @@ def test_click_rule_row_selects_it():
         pygame.quit()
 
 
+def test_click_rule_lane_selects_it():
+    """Clicking a rule's dashed lane selects it for editing, just like a queued
+    order's lane — the panel row is no longer the only way in."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+
+        _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
+        assert ui.sel_forward == home
+        assert ui.sel_order is None
+    finally:
+        pygame.quit()
+
+
+def test_lane_click_cycles_order_and_rule_on_same_lane():
+    """An order and a rule can share one lane; repeat clicks cycle across both
+    (and wrap), the same precedent as two orders sharing a lane."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 2))
+        ui.auto_forward[home] = (nbr, 1)
+        mid = _lane_mid(state, ui, home, nbr)
+
+        def picked():
+            if ui.sel_order is not None:
+                return ("order", ui.sel_order)
+            return ("rule", ui.sel_forward)
+
+        _click_pos(state, ui, mid); first = picked()
+        _click_pos(state, ui, mid); second = picked()
+        _click_pos(state, ui, mid); third = picked()
+        assert {first, second} == {("order", 0), ("rule", home)}
+        assert third == first          # wraps back around
+    finally:
+        pygame.quit()
+
+
 def test_click_rule_delete_button_removes_it():
     state, ui = _setup()
     try:
@@ -386,6 +483,27 @@ def test_wheel_edits_selected_rule_keep_in_place():
         for _ in range(50):
             game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
         assert ui.auto_forward[home] == (nbr, 0)
+    finally:
+        pygame.quit()
+
+
+def test_on_map_step_buttons_adjust_selected_rule_keep():
+    """The on-map −/+ buttons adjust a selected rule's keep, same as for a queued
+    order — a mouse-wheel-free way to edit, for consistency across both."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 10
+        ui.auto_forward[home] = (nbr, 2)
+        ui.sel_forward = home
+        ui.minus_rect = (100, 100, 20, 20)   # normally recorded by render each frame
+        ui.plus_rect = (140, 100, 20, 20)
+
+        _click_pos(state, ui, (150, 110))    # + button
+        assert ui.auto_forward[home] == (nbr, 3)
+        _click_pos(state, ui, (110, 110))    # − button
+        assert ui.auto_forward[home] == (nbr, 2)
     finally:
         pygame.quit()
 

@@ -137,8 +137,11 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     # auto-forward rule instead of a one-shot send; a plain click sends once.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
         if shift:
-            # keep the un-sent remainder at home; forward the surplus every turn
-            keep = max(0, state.systems[ui.selected].ships - ui.chosen)
+            # keep the un-sent remainder at home; forward the surplus every turn.
+            # Measure the surplus against ships still free to deploy (not the raw
+            # garrison) so an already-queued order from here doesn't inflate keep
+            # — an untouched count then yields keep 0, same as with no queued order.
+            keep = max(0, ui.available(state, ui.selected) - ui.chosen)
             ui.auto_forward[ui.selected] = (ui.dest, keep)
         elif ui.chosen > 0:
             ui.pending.append(Order(ui.human_id, ui.selected, ui.dest, ui.chosen))
@@ -147,12 +150,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
 
     node = pick_node(state, ui, pos)
     if node is None:
-        # Empty space near a queued order's lane selects that order (else cancel).
-        oi = _pick_pending_lane(state, ui, pos)
-        if oi is not None:
-            ui.select_order(oi)
-        else:
+        # Empty space near a lane selects the order or rule drawn there; repeat
+        # clicks cycle through everything sharing the lane (else cancel).
+        hit = _pick_lane(state, ui, pos)
+        if hit is None:
             _cancel(ui)
+        elif hit[0] == "order":
+            ui.select_order(hit[1])
+        else:
+            ui.select_forward(hit[1])
         return None
 
     ui.sel_order = None    # selecting a system is composing, not editing an order/rule
@@ -166,8 +172,9 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
                 # shift+click a neighbour sets a standing forward-everything
                 # rule immediately — a plain click instead stages the
                 # CHOOSING preview so the one-shot count can be reviewed/adjusted.
-                keep = max(0, state.systems[ui.selected].ships - ui.available(state, ui.selected))
-                ui.auto_forward[ui.selected] = (node, keep)
+                # keep starts at 0 (forward everything free); a queued order from
+                # here no longer bumps it up — adjust with the wheel/−+ afterwards.
+                ui.auto_forward[ui.selected] = (node, 0)
                 _after_confirm(state, ui)
             else:
                 ui.mode = CHOOSING
@@ -200,25 +207,37 @@ def _after_confirm(state: GameState, ui: Ui) -> None:
         ui.selected = None
 
 
-def _pick_pending_lane(state: GameState, ui: Ui, pos) -> Optional[int]:
-    """Index of a queued order whose lane is under ``pos``, or None.
+def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
+    """The queued order or standing rule whose lane is under ``pos``, tagged as
+    ``("order", index)`` / ``("rule", source_id)`` — or None.
 
-    Several orders can share one lane (including opposite directions), so when
-    more than one is in range a repeat click cycles through them rather than
+    Orders and rules can share one lane (including opposite directions), so when
+    more than one is in range a repeat click cycles through them all rather than
     always grabbing the same one — the list panel can still target any directly.
     """
-    hits = []
+    hits: list[tuple[float, tuple[str, int]]] = []
     for i, o in enumerate(ui.pending):
         a = ui.view.to_screen(state.systems[o.source_id].pos)
         b = ui.view.to_screen(state.systems[o.dest_id].pos)
         d = point_segment_dist(pos, a, b)
         if d <= config.LANE_PICK_DIST:
-            hits.append((d, i))
+            hits.append((d, ("order", i)))
+    for src, (dest, _keep) in ui.auto_forward.items():
+        s = state.systems.get(src)
+        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
+            continue  # only the rules render (and so are pickable)
+        a = ui.view.to_screen(s.pos)
+        b = ui.view.to_screen(state.systems[dest].pos)
+        d = point_segment_dist(pos, a, b)
+        if d <= config.LANE_PICK_DIST:
+            hits.append((d, ("rule", src)))
     if not hits:
         return None
-    order = [i for _, i in sorted(hits)]     # nearest first, then by index
-    if ui.sel_order in order:                # cycle to the next order on this lane
-        return order[(order.index(ui.sel_order) + 1) % len(order)]
+    order = [tag for _, tag in sorted(hits)]     # nearest first, then order-before-rule
+    current = ("order", ui.sel_order) if ui.sel_order is not None else (
+        ("rule", ui.sel_forward) if ui.sel_forward is not None else None)
+    if current in order:                         # cycle to the next item on this lane
+        return order[(order.index(current) + 1) % len(order)]
     return order[0]
 
 
