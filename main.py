@@ -38,6 +38,22 @@ def new_ui(state: GameState, autoplay: bool) -> Ui:
     return ui
 
 
+def _accumulate_fog(state: GameState, human_id: int, seen: set[int],
+                    intel: dict[int, tuple[int, int, float]]) -> set[int]:
+    """Fold one board's sighting into a running `seen` set and rival `intel`, and
+    return the systems currently in full view. Mutates `seen`/`intel` in place so
+    the same helper serves both the live turn loop and replaying a resumed game.
+    """
+    visible, scouted = fog.observe(state, human_id, config.FOG_SIGHT, config.FOG_SCOUT)
+    seen |= visible | scouted      # scouted folds into memory; both render grey-"?"
+    for pid, player in state.players.items():
+        if player.is_neutral or pid == human_id:
+            continue
+        if any(state.systems[s].owner_id == pid for s in visible):   # currently sighted
+            intel[pid] = fog.player_totals(state, pid)
+    return visible
+
+
 def refresh_fog(state: GameState, ui: Ui) -> None:
     """Recompute the human's fog-of-war from the current board.
 
@@ -45,14 +61,7 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
     into the persistent `seen`/`player_intel` memory. A no-op for visibility when
     fog is off (both ranges at max), where `visible` covers the whole map.
     """
-    visible, scouted = fog.observe(state, ui.human_id, config.FOG_SIGHT, config.FOG_SCOUT)
-    ui.visible = visible
-    ui.seen |= visible | scouted   # scouted folds into memory; both render grey-"?"
-    for pid, player in state.players.items():
-        if player.is_neutral or pid == ui.human_id:
-            continue
-        if any(state.systems[s].owner_id == pid for s in visible):   # currently sighted
-            ui.player_intel[pid] = fog.player_totals(state, pid)
+    ui.visible = _accumulate_fog(state, ui.human_id, ui.seen, ui.player_intel)
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -65,11 +74,21 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     """Rebuild a saved in-progress match and adopt its settings for the menu.
 
     ``log`` is then reused as the live log, so continued play appends to the very
-    same file the game was resumed from.
+    same file the game was resumed from. Fog-of-war memory (`seen`/`player_intel`)
+    is rebuilt across every replayed turn so resuming doesn't forget places you
+    explored then lost sight of.
     """
-    state, loaded = replay.reconstruct(log, ai.decide)
+    seen: set[int] = set()
+    intel: dict[int, tuple[int, int, float]] = {}
+    replay_view = replay.reconstruct(
+        log, ai.decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
+    state, loaded = replay_view
     settings.copy_from(loaded)
-    return state, new_ui(state, loaded.autoplay)
+    ui = new_ui(state, loaded.autoplay)   # sets ui.visible from the final board
+    ui.seen |= seen                        # ...plus memory of the whole game
+    intel.update(ui.player_intel)          # final-turn intel wins for live rivals
+    ui.player_intel = intel
+    return state, ui
 
 
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:

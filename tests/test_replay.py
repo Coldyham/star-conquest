@@ -173,6 +173,17 @@ def test_reconstruct_returns_adopted_settings():
     assert settings.nodes == 18 and settings.players == 3
 
 
+def test_reconstruct_on_turn_fires_each_turn():
+    """on_turn is invoked at the opening position and after every replayed turn,
+    with the state's turn counter advancing 0,1,2,... — this is the hook the shell
+    uses to rebuild fog-of-war memory across the whole game, not just the end."""
+    with _preserve_config():
+        state, log = _play(321, policy="autoplay", max_turns=15)
+        seen_turns: list[int] = []
+        replay.reconstruct(log, ai.decide, on_turn=lambda s: seen_turns.append(s.turn))
+    assert seen_turns == list(range(state.turn + 1))   # initial + one per turn
+
+
 # --------------------------------------------------------------------------- #
 # On-disk save / load / discovery (GAMES_DIR redirected to a tmp dir)
 # --------------------------------------------------------------------------- #

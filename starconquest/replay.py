@@ -202,16 +202,26 @@ def latest_log() -> Optional[GameLog]:
     return None
 
 
-def reconstruct(log: GameLog, decide: DecideFn) -> tuple[GameState, Settings]:
+def reconstruct(
+    log: GameLog,
+    decide: DecideFn,
+    on_turn: Optional[Callable[[GameState], None]] = None,
+) -> tuple[GameState, Settings]:
     """Replay a log's inputs through the engine to rebuild its current state.
 
     Returns the state advanced by every recorded turn, plus the ``Settings`` it
     was built from (the menu/CLI want both). Stops early if a win was already
     reached, so a finished log reconstructs to its final position.
+
+    ``on_turn`` (if given) is invoked with the state at the opening position and
+    again after each replayed turn — the shell uses it to rebuild fog-of-war
+    memory across the whole game, not just the final frame.
     """
     settings = Settings.from_dict(log.settings)
     state = build_state(settings, log.seed)
     human = state.human()
+    if on_turn is not None:
+        on_turn(state)
     for i in range(log.turn_count):
         if state.winner is not None:
             break
@@ -222,4 +232,6 @@ def reconstruct(log: GameLog, decide: DecideFn) -> tuple[GameState, Settings]:
         else:
             human_orders = log.orders_for(i)
         engine.end_turn(state, human_orders=human_orders, decide=decide)
+        if on_turn is not None:
+            on_turn(state)
     return state, settings

@@ -94,10 +94,12 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
             color = config.COLOR_LANE_HILITE
             width = max(width, 3)
         pygame.draw.line(surface, color, pa, pb, width)
-        # travel-time label at the midpoint, on a dark pill so it stays legible
-        mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
-        _label_pill(surface, _fonts()["small"], str(lane.travel_turns),
-                    config.COLOR_TEXT_DIM, mid)
+        # travel time is detailed intel — only show it where an endpoint is in
+        # full view; a lane between two fogged systems draws as a bare dim line
+        if sa == "visible" or sb == "visible":
+            mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
+            _label_pill(surface, _fonts()["small"], str(lane.travel_turns),
+                        config.COLOR_TEXT_DIM, mid)
 
 
 def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
@@ -137,9 +139,10 @@ def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     offsets = _lane_offsets(state)
     for i, f in enumerate(state.fleets):
-        # your own fleets always show; enemy fleets only within your sight
-        if (f.owner_id != ui.human_id
-                and f.source_id not in ui.visible and f.dest_id not in ui.visible):
+        # a fleet shows only where at least one end of its lane is in full view
+        # (your own systems always are, so your fleets stay visible while you hold
+        # their endpoints; enemy movements appear only as they near your space)
+        if f.source_id not in ui.visible and f.dest_id not in ui.visible:
             continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
