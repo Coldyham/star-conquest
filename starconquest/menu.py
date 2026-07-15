@@ -88,8 +88,15 @@ _ADV_ECON = (
 _ADV_COMBAT = (
     ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
 )
+# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
+# detail); scout floors at 1 so immediate neighbours stay visible enough to target
+# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
+_ADV_FOG = (
+    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
+    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
+)
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
-_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT
+_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT + _ADV_FOG
 _AI_PARAMS = (
     ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
     ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
@@ -100,7 +107,7 @@ _AI_PARAMS = (
 
 # key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
 _SLIDER_SPECS: dict[str, tuple] = {}
-for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT):
+for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT, _ADV_FOG):
     for _key, _label, _attr, _lo, _hi, _step, _is_int in _grp:
         _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
 for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
@@ -174,7 +181,7 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 
     _draw_tabs(surface, ms, w)
 
-    panel = pygame.Rect(w // 2 - 280, 208, 560, 372)
+    panel = pygame.Rect(w // 2 - 280, 208, 560, 496)
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
     pygame.draw.rect(surface, _PANEL_BORDER, panel, 1, border_radius=10)
 
@@ -185,11 +192,11 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     elif ms.tab == "ai":
         _draw_ai(surface, ms, settings, panel)
 
-    _file_control(surface, ms, w, 596)
+    _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, w)
     if ms.status and pygame.time.get_ticks() < ms.status_until:
         _text(surface, f["small"], ms.status,
-              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 726))
+              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
 
@@ -250,11 +257,13 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     lx = panel.x + pad
     rx = lx + col_w + pad
 
-    y = panel.y + 16                                   # LEFT: Map + Travel
+    y = panel.y + 16                                   # LEFT: Map + Travel + Visibility
     y = _section(surface, "Map", lx, y)
     y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+    y = _section(surface, "Visibility", lx, y)
+    y = _sliders(surface, ms, settings, _ADV_FOG, lx, y, col_w)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM,
           midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
@@ -364,7 +373,9 @@ def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width) -> None
     """Two-line slider: label + value on top, a full-width track below."""
     f = _fonts()
     _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + 8))
-    _text(surface, f["small"], _fmt(value, is_int), config.COLOR_TEXT, midright=(x + width, y + 8))
+    # a fog range at its max means "unlimited" — read it as "All", not a bare number
+    vtext = "All" if key.startswith("adv_fog_") and value >= hi else _fmt(value, is_int)
+    _text(surface, f["small"], vtext, config.COLOR_TEXT, midright=(x + width, y + 8))
 
     cy = y + 26
     pygame.draw.rect(surface, _TROUGH, pygame.Rect(x, cy - 3, width, 6), border_radius=3)
@@ -513,7 +524,7 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 
 
 def _draw_start(surface, ms: MenuState, w: int) -> None:
-    rect = pygame.Rect(w // 2 - 110, 654, 220, 46)
+    rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER,
             tcol=config.COLOR_TEXT, font=_fonts()["normal"])
 

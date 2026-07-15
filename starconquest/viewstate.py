@@ -33,6 +33,16 @@ class Ui:
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     sel_forward: Optional[int] = None   # source id of the rule being edited, if any
+    # Fog of war (human-only, so it lives here not in GameState). Recomputed each
+    # turn by main.refresh_fog from the human's territory; render reads these.
+    #   visible      — systems in full detail this turn (owner + ship counts)
+    #   seen         — every system ever perceived; the rest of `seen` (minus
+    #                  `visible`) renders as a grey "?" silhouette, memory included
+    #   player_intel — last-known (systems, ships, prod) per rival ever sighted,
+    #                  for the fogged scoreboard's frozen rows
+    visible: set[int] = field(default_factory=set)
+    seen: set[int] = field(default_factory=set)
+    player_intel: dict[int, tuple[int, int, float]] = field(default_factory=dict)
     autoplay: bool = False
     # Play/pause: while True, main steps turns repeatedly (as if tapping Enter),
     # toggled by P or the play/pause button. Distinct from autoplay, which hands

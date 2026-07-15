@@ -65,6 +65,14 @@ AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more ex
 #   (one-directional + hysteresis: stops two frontier systems swapping ships each turn)
 
 # --------------------------------------------------------------------------- #
+# Fog of war  (presentation only — the AI always has full information)
+# --------------------------------------------------------------------------- #
+# Visibility from the human viewpoint, in lane hops from an owned system.
+FOG_MAX_HOPS = 8            # slider max; a range >= this means "unlimited" (fog off)
+FOG_SIGHT = FOG_MAX_HOPS    # full-detail radius; 0 == only your own systems, MAX == off
+FOG_SCOUT = FOG_MAX_HOPS    # outer grey-silhouette radius; MAX == whole map greyed
+
+# --------------------------------------------------------------------------- #
 # Palette (RGB).  Player ids index PLAYER_COLORS; id 0 (neutral) uses NEUTRAL.
 # --------------------------------------------------------------------------- #
 COLOR_BG = (10, 12, 20)
@@ -75,6 +83,7 @@ COLOR_TEXT_DIM = (140, 148, 165)
 COLOR_TEXT_DARK = (12, 14, 22)      # for labels sitting on a light player colour
 COLOR_NEUTRAL = (122, 128, 140)
 COLOR_SELECT = (250, 240, 150)
+COLOR_FOG = (58, 62, 82)            # fogged systems/lanes — cool grey, distinct from NEUTRAL
 
 # Index 0 is neutral; 1 is the human by convention; 2+ are AI opponents.
 PLAYER_COLORS = [
@@ -94,8 +103,8 @@ PLAYER_NAMES = [
 # --------------------------------------------------------------------------- #
 # Rendering sizes
 # --------------------------------------------------------------------------- #
-SCREEN_W = 1180
-SCREEN_H = 780
+SCREEN_W = 1440
+SCREEN_H = 960
 HUD_TOP_H = 40
 HUD_BOTTOM_H = 46
 HUD_RIGHT_W = 240            # reserved right column for the system/lane info panel

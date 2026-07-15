@@ -31,8 +31,10 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `settings`. This is what lets `tests/sim.py` and most of the
-  suite run with no display. Do not add a pygame import to any of these.
+  `engine`, `ai`, `settings`, `fog`. This is what lets `tests/sim.py` and most of
+  the suite run with no display. Do not add a pygame import to any of these.
+  (`fog` is presentation-only visibility — pure hop-distance queries the shell
+  reads each turn; the engine and AI never consult it.)
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,

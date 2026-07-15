@@ -9,7 +9,7 @@ import math
 
 import pygame
 
-from . import config
+from . import config, fog
 from .geometry import lerp
 from .model import GameState, lane_key
 from .viewstate import CHOOSING, SELECTED, Ui
@@ -62,13 +62,33 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
 # --------------------------------------------------------------------------- #
 # World layer
 # --------------------------------------------------------------------------- #
+def _fog_state(ui: Ui, sid: int) -> str:
+    """Fog-of-war state of a system from the human's viewpoint: ``"visible"`` (full
+    detail), ``"fogged"`` (grey "?" — currently scouted or remembered), or
+    ``"hidden"`` (never seen, not drawn). With fog off, ``visible`` holds every
+    system so this is always ``"visible"``."""
+    if sid in ui.visible:
+        return "visible"
+    if sid in ui.seen:
+        return "fogged"
+    return "hidden"
+
+
 def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
     for lane in state.lanes.values():
+        sa, sb = _fog_state(ui, lane.a), _fog_state(ui, lane.b)
+        # a lane to a never-seen system is itself unknown — don't draw it
+        if sa == "hidden" or sb == "hidden":
+            continue
         pa = ui.view.to_screen(state.systems[lane.a].pos)
         pb = ui.view.to_screen(state.systems[lane.b].pos)
         # width & brightness encode travel time: slow lanes thicker+dimmer,
         # fast lanes thinner+brighter, so length variety reads at a glance.
         width, color = _lane_style(lane.travel_turns)
+        # a lane touching a fogged system reads as uncertain: mute it to the fog
+        # colour (its travel time — route topology — is still shown below)
+        if sa != "visible" or sb != "visible":
+            color = config.COLOR_FOG
         # brighten the lanes touching the selected source system
         if ui.selected is not None and ui.selected in (lane.a, lane.b):
             color = config.COLOR_LANE_HILITE
@@ -117,6 +137,10 @@ def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     offsets = _lane_offsets(state)
     for i, f in enumerate(state.fleets):
+        # your own fleets always show; enemy fleets only within your sight
+        if (f.owner_id != ui.human_id
+                and f.source_id not in ui.visible and f.dest_id not in ui.visible):
+            continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
         wp = lerp(a, b, f.progress())
@@ -289,11 +313,14 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
         valid_dests = set(state.systems[ui.selected].neighbors)
 
     for sys in state.systems.values():
+        state_fog = _fog_state(ui, sys.id)
+        if state_fog == "hidden":       # never seen — off the map entirely
+            continue
         pos = ui.view.to_screen(sys.pos)
         radius = config.node_radius(sys.production)
-        color = config.player_color(sys.owner_id)
 
-        # selection / targeting rings
+        # selection / targeting rings — drawn even when fogged so a "?" system you
+        # can still route a fleet to reads as selected / a valid destination
         if sys.id == ui.selected:
             pygame.draw.circle(surface, config.COLOR_SELECT, pos, radius + 6, 3)
         elif sys.id in valid_dests:
@@ -301,6 +328,15 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
         elif sys.id == ui.hover:
             pygame.draw.circle(surface, config.COLOR_TEXT_DIM, pos, radius + 4, 2)
 
+        if state_fog == "fogged":       # position known, contents not: hatched "?"
+            pygame.draw.circle(surface, config.COLOR_FOG, pos, radius)
+            pygame.draw.circle(surface, _brighten(config.COLOR_FOG), pos, radius, 2)
+            _draw_hatch(surface, pos, radius, _brighten(config.COLOR_FOG))
+            _text(surface, _fonts()["normal"], "?", config.COLOR_TEXT, center=pos)
+            continue
+
+        # -- visible: full detail --
+        color = config.player_color(sys.owner_id)
         pygame.draw.circle(surface, color, pos, radius)
         pygame.draw.circle(surface, _brighten(color), pos, radius, 2)
 
@@ -323,6 +359,37 @@ def _brighten(color, amount=60):
     return tuple(min(255, c + amount) for c in color)
 
 
+def _draw_hatch(surface, center, radius, color, step=6) -> None:
+    """Fill a node circle with diagonal hatching — marks a fogged system so it
+    reads as 'uncertain' and never looks like a solid neutral disc. Each 45° line
+    is chord-clipped to the disc of ``radius`` about ``center``."""
+    cx, cy = center
+    r = max(1, radius - 1)
+    lim = r * math.sqrt(2)
+    k = -lim
+    while k <= lim:
+        disc = 2 * r * r - k * k
+        if disc > 0:
+            root = math.sqrt(disc) / 2
+            mid = -k / 2
+            u1, u2 = mid - root, mid + root
+            pygame.draw.line(surface, color,
+                             (int(cx + u1), int(cy + u1 + k)),
+                             (int(cx + u2), int(cy + u2 + k)), 1)
+        k += step
+
+
+def _hatch_rect(surface, rect: pygame.Rect, color, step=4) -> None:
+    """Diagonal hatching across a small rect (a stale scoreboard swatch), clipped
+    to the rect so it never bleeds into the neighbouring text."""
+    surface.set_clip(rect)
+    x = rect.left - rect.height
+    while x < rect.right:
+        pygame.draw.line(surface, color, (x, rect.bottom), (x + rect.height, rect.top), 1)
+        x += step
+    surface.set_clip(None)
+
+
 # --------------------------------------------------------------------------- #
 # HUD
 # --------------------------------------------------------------------------- #
@@ -335,7 +402,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT,
           midleft=(14, config.HUD_TOP_H // 2))
-    _draw_scoreboard(surface, state, w)
+    _draw_scoreboard(surface, state, ui, w)
 
     # bottom bar
     by = h - config.HUD_BOTTOM_H
@@ -378,57 +445,71 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _text(surface, _fonts()["normal"], plabel, config.COLOR_TEXT, center=pr.center)
 
 
-def _draw_scoreboard(surface, state: GameState, w: int) -> None:
+_DEAD_COLOR = (92, 96, 110)
+
+
+def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int) -> None:
     """Per-player standings in the top bar: swatch, systems, ships, production.
 
     Laid out left-to-right by measured width so it never runs off-screen; names
     are shown when the whole row fits, but a full six-player table drops them in
     favour of the colour swatch (identity is colour-coded everywhere else too).
+
+    Fogged (per the human's visibility): a rival is **live** while any of its
+    systems is in sight, **frozen** (last-known stats, hatched swatch + "?") once
+    seen but no longer in sight, and **omitted entirely** until first sighted — so
+    with heavy fog you may not even know how many rivals are out there. With fog
+    off every living rival is in sight, so this matches the classic scoreboard.
     """
-    seats = [pid for pid in sorted(state.players) if not state.players[pid].is_neutral]
-    if not seats:
-        return
     font = _fonts()["small"]
     cy = config.HUD_TOP_H // 2
     gap, sw_w = 22, 18
 
-    def label(pid: int, with_name: bool) -> str:
+    def vis(pid: int) -> str:
+        """live | frozen | out | hidden."""
         p = state.players[pid]
+        live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
+        if not (live or pid in ui.player_intel):
+            return "hidden"          # never sighted — you don't know it exists
         if not p.alive:
+            return "out"
+        return "live" if live else "frozen"
+
+    seats = [pid for pid in sorted(state.players)
+             if not state.players[pid].is_neutral and vis(pid) != "hidden"]
+    if not seats:
+        return
+
+    def label(pid: int, v: str, with_name: bool) -> str:
+        p = state.players[pid]
+        if v == "out":
             return f"{p.name} out" if with_name else "out"
-        systems, ships, prod = _player_stats(state, pid)
+        systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
         name = f"{p.name} " if with_name else ""
-        return f"{name}{systems}s {ships}sh {prod:.1f}/t"
+        mark = "" if v == "live" else " ?"        # stale, last-known intel
+        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}"
 
     def row_width(with_name: bool) -> int:
-        return sum(sw_w + font.size(label(pid, with_name))[0] + gap for pid in seats)
+        return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
 
     with_name = row_width(True) <= (w - 120)
     x = 120
     for pid in seats:
-        p = state.players[pid]
-        color = config.player_color(pid) if p.alive else (92, 96, 110)
-        pygame.draw.rect(surface, color, pygame.Rect(x, cy - 6, 12, 12), border_radius=3)
-        txt = label(pid, with_name)
-        _text(surface, font, txt, color, midleft=(x + sw_w, cy))
+        v = vis(pid)
+        color = _DEAD_COLOR if v == "out" else config.player_color(pid)
+        sw = pygame.Rect(x, cy - 6, 12, 12)
+        pygame.draw.rect(surface, color, sw, border_radius=3)
+        if v == "frozen":
+            _hatch_rect(surface, sw, _brighten(color))
+        txt = label(pid, v, with_name)
+        tcolor = config.COLOR_TEXT_DIM if v == "frozen" else color
+        _text(surface, font, txt, tcolor, midleft=(x + sw_w, cy))
         x += sw_w + font.size(txt)[0] + gap
 
 
 def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
     """(systems owned, ships including in transit, production in ships/turn)."""
-    systems = ships = 0
-    for s in state.systems.values():
-        if s.owner_id == pid:
-            systems += 1
-            ships += s.ships
-    ships += sum(f.ships for f in state.fleets if f.owner_id == pid)
-    return systems, ships, _production_rate(state, pid)
-
-
-def _production_rate(state: GameState, pid: int) -> float:
-    """Long-run ships/turn: each owned system emits one ship per `production` turns."""
-    return sum(1.0 / s.production for s in state.systems.values()
-               if s.owner_id == pid and s.production > 0)
+    return fog.player_totals(state, pid)
 
 
 def _hint(ui: Ui) -> str:
@@ -587,6 +668,15 @@ def _row(surface, x, y, text, color) -> int:
 
 
 def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
+    if sys.id not in ui.visible:
+        # fogged system: we know where it is, not who holds it or how strong it is
+        _text(surface, _fonts()["normal"], f"System {sys.id}", config.COLOR_TEXT_DIM,
+              topleft=(x, y))
+        y += 26
+        y = _row(surface, x, y, "Owner: ?", config.COLOR_TEXT_DIM)
+        y = _row(surface, x, y, "Ships: ?", config.COLOR_TEXT_DIM)
+        y = _row(surface, x, y, "(out of sight)", config.COLOR_TEXT_DIM)
+        return y
     _text(surface, _fonts()["normal"], f"System {sys.id}",
           config.player_color(sys.owner_id), topleft=(x, y))
     y += 26
@@ -620,8 +710,11 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     y += 26
     y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {lane.travel_turns} turns", config.COLOR_TEXT)
     d = state.systems[dest]
-    y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh",
-             config.player_color(d.owner_id))
+    if dest in ui.visible:
+        y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh",
+                 config.player_color(d.owner_id))
+    else:
+        y = _row(surface, x, y, "Target: ? · ?sh", config.COLOR_TEXT_DIM)
     if ui.mode == CHOOSING:
         y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
     return y

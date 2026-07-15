@@ -15,7 +15,7 @@ import argparse
 
 import pygame
 
-from starconquest import ai, config, engine, mapgen, menu, render, replay
+from starconquest import ai, config, engine, fog, mapgen, menu, render, replay
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -33,7 +33,26 @@ def build_view(state: GameState) -> WorldView:
 
 
 def new_ui(state: GameState, autoplay: bool) -> Ui:
-    return Ui(view=build_view(state), human_id=1, autoplay=autoplay)
+    ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
+    refresh_fog(state, ui)   # seed visibility from the opening position
+    return ui
+
+
+def refresh_fog(state: GameState, ui: Ui) -> None:
+    """Recompute the human's fog-of-war from the current board.
+
+    Called at game start and after each resolved turn. Folds this turn's sighting
+    into the persistent `seen`/`player_intel` memory. A no-op for visibility when
+    fog is off (both ranges at max), where `visible` covers the whole map.
+    """
+    visible, scouted = fog.observe(state, ui.human_id, config.FOG_SIGHT, config.FOG_SCOUT)
+    ui.visible = visible
+    ui.seen |= visible | scouted   # scouted folds into memory; both render grey-"?"
+    for pid, player in state.players.items():
+        if player.is_neutral or pid == ui.human_id:
+            continue
+        if any(state.systems[s].owner_id == pid for s in visible):   # currently sighted
+            ui.player_intel[pid] = fog.player_totals(state, pid)
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -96,6 +115,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
             pass  # a save failure must never interrupt play
     ui.clear_pending()
     ui.reset_selection()
+    refresh_fog(state, ui)
 
 
 def main() -> None:
