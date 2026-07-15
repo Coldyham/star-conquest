@@ -2,7 +2,7 @@
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'quit',
-'toggle_autoplay', 'menu') or None.
+'toggle_autoplay', 'toggle_play', 'menu') or None.
 """
 
 from __future__ import annotations
@@ -50,15 +50,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return _handle_key(event, ui)
 
     if event.type == pygame.MOUSEWHEEL:
-        if ui.mode == CHOOSING and ui.selected is not None:
-            avail = ui.available(state, ui.selected)
-            ui.chosen = max(1, min(avail, ui.chosen + event.y))
-        elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-            # adjust a queued order in place; its cap is its own ships plus
-            # whatever is still free at the source (available already nets it out)
-            o = ui.pending[ui.sel_order]
-            cap = ui.available(state, o.source_id) + o.ships
-            o.ships = max(1, min(cap, o.ships + event.y))
+        ui.step_count(state, event.y)
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
@@ -73,12 +65,16 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "end_turn"
+    if event.key == pygame.K_p:
+        return "toggle_play"
     if event.key == pygame.K_a:
         return "toggle_autoplay"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
         if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
             del ui.pending[ui.sel_order]  # remove the highlighted queued order
             ui.sel_order = None
+        elif ui.sel_forward is not None:
+            ui.clear_forward(ui.sel_forward)  # drop the highlighted rule
         elif ui.selected is not None:
             ui.clear_forward(ui.selected)  # drop the selected system's forward rule
         return None
@@ -87,7 +83,7 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key == pygame.K_m:
         return "menu"
     if event.key == pygame.K_ESCAPE:
-        if ui.mode != IDLE or ui.sel_order is not None:
+        if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
             return None
         return "quit"
@@ -97,7 +93,19 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
+    if _point_in_rect(pos, ui.play_pause_rect):
+        return "toggle_play"
     if ui.autoplay:
+        return None
+
+    # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
+    # Tested before the CHOOSING confirm below so a button click adjusts rather
+    # than sends. Zero-width rects (no count being adjusted) never match.
+    if ui.minus_rect[2] and _point_in_rect(pos, ui.minus_rect):
+        ui.step_count(state, -1)
+        return None
+    if ui.plus_rect[2] and _point_in_rect(pos, ui.plus_rect):
+        ui.step_count(state, 1)
         return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes
@@ -113,6 +121,18 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.select_order(i)
             return None
 
+    # Same panel, standing auto-forward rules: a delete button clears the
+    # rule, a row selects it for editing (scroll adjusts `keep`, X removes).
+    for src, row, delete in ui.forward_hitboxes:
+        if src not in ui.auto_forward:
+            continue
+        if _point_in_rect(pos, delete):
+            ui.clear_forward(src)
+            return None
+        if _point_in_rect(pos, row):
+            ui.select_forward(src)
+            return None
+
     # Confirm the current source->dest choice. Shift makes it a standing
     # auto-forward rule instead of a one-shot send; a plain click sends once.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
@@ -122,12 +142,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.auto_forward[ui.selected] = (ui.dest, keep)
         elif ui.chosen > 0:
             ui.pending.append(Order(ui.human_id, ui.selected, ui.dest, ui.chosen))
-        # stay on the source so more fleets can be queued from it
-        remaining = ui.available(state, ui.selected)
-        ui.dest, ui.chosen = None, 0
-        ui.mode = SELECTED if remaining > 0 else IDLE
-        if remaining <= 0:
-            ui.selected = None
+        _after_confirm(state, ui)
         return None
 
     node = pick_node(state, ui, pos)
@@ -140,26 +155,49 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             _cancel(ui)
         return None
 
-    ui.sel_order = None  # selecting a system is composing, not editing an order
+    ui.sel_order = None    # selecting a system is composing, not editing an order/rule
+    ui.sel_forward = None
     sys = state.systems[node]
     if ui.mode == SELECTED and ui.selected is not None:
         if node == ui.selected:
             ui.reset_selection()
-        elif state.are_adjacent(ui.selected, node) and ui.available(state, ui.selected) > 0:
-            ui.mode = CHOOSING
-            ui.dest = node
-            ui.chosen = ui.available(state, ui.selected)
-        elif sys.owner_id == ui.human_id and ui.available(state, node) > 0:
-            ui.selected = node  # reselect a different owned system
+        elif state.are_adjacent(ui.selected, node) and (shift or ui.available(state, ui.selected) > 0):
+            if shift:
+                # shift+click a neighbour sets a standing forward-everything
+                # rule immediately — a plain click instead stages the
+                # CHOOSING preview so the one-shot count can be reviewed/adjusted.
+                keep = max(0, state.systems[ui.selected].ships - ui.available(state, ui.selected))
+                ui.auto_forward[ui.selected] = (node, keep)
+                _after_confirm(state, ui)
+            else:
+                ui.mode = CHOOSING
+                ui.dest = node
+                ui.chosen = ui.available(state, ui.selected)
+        elif sys.owner_id == ui.human_id:
+            # reselect a different owned system — even with zero ships right
+            # now, it may still be worth viewing or setting a rule on.
+            ui.selected = node
         else:
             ui.reset_selection()
         return None
 
     # IDLE
-    if sys.owner_id == ui.human_id and ui.available(state, node) > 0:
+    if sys.owner_id == ui.human_id:
         ui.mode = SELECTED
         ui.selected = node
     return None
+
+
+def _after_confirm(state: GameState, ui: Ui) -> None:
+    """Shared post-confirm bookkeeping for both a one-shot send and a rule:
+    stay selected on the source so more fleets/rules can be set from it, but
+    drop the selection once nothing is left to deploy.
+    """
+    remaining = ui.available(state, ui.selected)
+    ui.dest, ui.chosen = None, 0
+    ui.mode = SELECTED if remaining > 0 else IDLE
+    if remaining <= 0:
+        ui.selected = None
 
 
 def _pick_pending_lane(state: GameState, ui: Ui, pos) -> Optional[int]:
@@ -187,6 +225,8 @@ def _pick_pending_lane(state: GameState, ui: Ui, pos) -> Optional[int]:
 def _cancel(ui: Ui) -> None:
     if ui.sel_order is not None:
         ui.sel_order = None      # deselect a highlighted queued order
+    elif ui.sel_forward is not None:
+        ui.sel_forward = None    # deselect a highlighted auto-forward rule
     elif ui.mode == CHOOSING:
         ui.mode = SELECTED
         ui.dest = None

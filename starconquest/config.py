@@ -105,6 +105,7 @@ NODE_MIN_RADIUS = 12         # for the poorest systems (production == max)
 NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
 FLEET_SIZE = 9              # in-transit fleet triangle half-size (pixels)
 LANE_PICK_DIST = 10         # px: click within this of a queued order's lane selects it
+STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
 FONT_SIZE = 18
 FONT_SIZE_SMALL = 14
