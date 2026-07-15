@@ -166,6 +166,14 @@ def _ai_seats(settings: Settings) -> list[int]:
     return list(range(start, settings.players + 1))
 
 
+def _fog_off(settings: Settings) -> bool:
+    """True when both fog ranges sit at max — full visibility. The Basic-tab
+    "Fog of war" checkbox is the inverse of this, derived live from the sliders so
+    editing them on the Advanced tab flips the checkbox automatically."""
+    return (settings.fog_sight >= config.FOG_MAX_HOPS
+            and settings.fog_scout >= config.FOG_MAX_HOPS)
+
+
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
@@ -249,6 +257,12 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
 
     _row_label(surface, "Autoplay", left, y)
     _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
+    y += _ROW_H
+
+    # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
+    # State is derived from the sliders, so it tracks Advanced edits automatically.
+    _row_label(surface, "Fog of war", left, y)
+    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -688,6 +702,12 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
+    elif hit == "fog_of_war":
+        if _fog_off(settings):                     # off -> on: apply the fog preset
+            settings.fog_sight = config.FOG_ON_SIGHT
+            settings.fog_scout = config.FOG_ON_SCOUT
+        else:                                      # on -> off: full visibility
+            settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "filename_field":
         ms.editing_filename = True
     elif hit == "save_settings":

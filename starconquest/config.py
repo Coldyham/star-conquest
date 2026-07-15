@@ -71,6 +71,10 @@ AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more ex
 FOG_MAX_HOPS = 8            # slider max; a range >= this means "unlimited" (fog off)
 FOG_SIGHT = FOG_MAX_HOPS    # full-detail radius; 0 == only your own systems, MAX == off
 FOG_SCOUT = FOG_MAX_HOPS    # outer grey-silhouette radius; MAX == whole map greyed
+# Preset the Basic-menu "Fog of war" checkbox applies when switched on (off sets
+# both ranges back to FOG_MAX_HOPS, i.e. full visibility).
+FOG_ON_SIGHT = 1
+FOG_ON_SCOUT = 3
 
 # --------------------------------------------------------------------------- #
 # Palette (RGB).  Player ids index PLAYER_COLORS; id 0 (neutral) uses NEUTRAL.
