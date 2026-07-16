@@ -338,6 +338,10 @@ def main() -> None:
                 resolve_turn(state, ui, log)
                 play_accum = 0   # re-time the play cadence from this step
             elif action == "toggle_play":
+                # In history mode this drives the replay scrubber; starting it while
+                # parked on the final frame replays from the opening position.
+                if ui.history and not ui.playing and ui.history_turn >= ui.history_max:
+                    ui.history_turn = 0
                 ui.playing = not ui.playing
                 play_accum = 0   # first step after PLAY_MS, then every PLAY_MS
             elif action == "toggle_autoplay":
@@ -355,6 +359,7 @@ def main() -> None:
                     # (the live board is untouched while reviewing, so no recompute).
                     ui.history = False
                     ui.dragging_scrubber = False
+                    ui.playing = False   # replay playback must not carry into live play
                     history_states, history_fog = [], []
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
@@ -386,7 +391,17 @@ def main() -> None:
                 else:
                     confirm_rewind = True   # mid-game rewind is destructive: confirm
 
-        if (scene == "game" and state.winner is None
+        if (scene == "game" and ui.history and ui.playing
+                and not confirm_quit and not confirm_rewind):
+            # Replay playback: step the scrubber one turn per PLAY_MS, stopping when
+            # it reaches the final recorded turn (like a video reaching the end).
+            play_accum += dt
+            if play_accum >= PLAY_MS:
+                play_accum = 0
+                ui.history_turn = min(ui.history_max, ui.history_turn + 1)
+                if ui.history_turn >= ui.history_max:
+                    ui.playing = False
+        elif (scene == "game" and state.winner is None
                 and not confirm_quit and not confirm_rewind and not ui.history):
             if ui.autoplay:
                 auto_accum += dt

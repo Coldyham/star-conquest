@@ -911,6 +911,18 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (110, 140, 200), ex, 2, border_radius=6)
     _text(surface, font, "Exit (Esc)", config.COLOR_TEXT, center=ex.center)
 
+    # Play/pause button — auto-advances the scrubber at sim speed (main's play
+    # timer). Reuses ui.play_pause_rect (the HUD's live play button, zeroed while
+    # in history) and the same "toggle_play" action; colours match it too.
+    pp = pygame.Rect(ex.right + 8, ex.y, 104, 28)
+    ui.play_pause_rect = (pp.x, pp.y, pp.w, pp.h)
+    pfill = (92, 70, 46) if ui.playing else (40, 52, 78)
+    pedge = (190, 150, 96) if ui.playing else (110, 140, 200)
+    pygame.draw.rect(surface, pfill, pp, border_radius=6)
+    pygame.draw.rect(surface, pedge, pp, 2, border_radius=6)
+    _text(surface, font, "Pause (P)" if ui.playing else "Play (P)",
+          config.COLOR_TEXT, center=pp.center)
+
     # Rewind button (far right). Its footprint is reserved even when hidden so the
     # track width and label position stay fixed as you scrub — the button only
     # appears for turns before the latest (when there is something to leave behind).
@@ -933,8 +945,8 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     label_x = right_limit - font.size(widest)[0]
     _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))
 
-    # Track fills the space between the exit button and the label slot.
-    track_x = ex.right + 16
+    # Track fills the space between the play button and the label slot.
+    track_x = pp.right + 16
     track_w = max(1, label_x - 16 - track_x)
     ui.scrubber_rect = (track_x, by + 6, track_w, config.HUD_BOTTOM_H - 12)
     pygame.draw.rect(surface, _SCRUB_TROUGH,

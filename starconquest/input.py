@@ -41,14 +41,20 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_ESCAPE, pygame.K_h):
             return "toggle_history"
+        if event.key == pygame.K_p:
+            return "toggle_play"   # play/pause the replay at sim speed
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
+            ui.playing = False
         elif event.key == pygame.K_RIGHT:
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)
+            ui.playing = False
         elif event.key == pygame.K_HOME:
             ui.history_turn = 0
+            ui.playing = False
         elif event.key == pygame.K_END:
             ui.history_turn = ui.history_max
+            ui.playing = False
         return None
     if event.type == pygame.MOUSEMOTION:
         ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
@@ -58,10 +64,13 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         if ui.exit_history_rect[2] and _point_in_rect(event.pos, ui.exit_history_rect):
             return "toggle_history"
+        if ui.play_pause_rect[2] and _point_in_rect(event.pos, ui.play_pause_rect):
+            return "toggle_play"
         if ui.rewind_button_rect[2] and _point_in_rect(event.pos, ui.rewind_button_rect):
             return "rewind"
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True
+            ui.playing = False   # grabbing the scrubber pauses playback
             _seek_scrubber(ui, event.pos)
         return None
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
