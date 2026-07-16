@@ -31,10 +31,12 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `settings`, `fog`. This is what lets `tests/sim.py` and most of
-  the suite run with no display. Do not add a pygame import to any of these.
-  (`fog` is presentation-only visibility — pure hop-distance queries the shell
-  reads each turn; the engine and AI never consult it.)
+  `engine`, `ai`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
+  and most of the suite run with no display. Do not add a pygame import to any of
+  these. (`fog` is presentation-only visibility — pure hop-distance queries the
+  shell reads each turn; the engine and AI never consult it. `replay` serializes a
+  match to JSON and replays it back through the headless engine — see Persistence
+  & replay below.)
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
@@ -42,8 +44,9 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     reaching into `ai`.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
     touches the simulation. It returns a high-level action string
-    (`"end_turn"`, `"restart"`, `"quit"`, `"toggle_autoplay"`, `"menu"`) or
-    `None`, and `main.py` decides what to do with it.
+    (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`, `"toggle_history"`,
+    `"rewind"`, `"restart"`, `"menu"`, `"quit"`) or `None`, and `main.py` decides
+    what to do with it.
   - `menu.py` is a self-contained pre-game scene with the same draw/mutate split:
     `draw` only reads `Settings`, `handle_event` mutates `MenuState`/`Settings`
     and returns `"start"`/`"quit"`/`None`. `main.py` runs a two-scene
@@ -78,6 +81,31 @@ pure core (no pygame); the render/input prohibition on importing `ai` still hold
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing
 on outcomes.
+
+### Persistence, replay & history (replay.py)
+
+A match is **never snapshotted** — it is recorded as its *inputs*: `Settings`,
+the concrete `seed`, and each turn's human orders (`replay.GameLog`, auto-saved
+after every turn to a gitignored, repo-anchored `games/` dir, mirroring
+`ai.MODELS_DIR` and `menu._SAVE_DIR`). Because all randomness flows through
+`state.rng`, `replay.reconstruct(log, decide, on_turn=…)` replays those inputs
+back through `engine.end_turn` to rebuild the **exact** state at any turn,
+bit-identical (keeping the engine's AI inversion — `decide` is a parameter, not an
+import). Under autoplay the human seat is AI-driven and draws `rng` *before*
+opponents, so those turns are flagged (`"ai": true`) and `reconstruct` re-runs
+`decide` for the human seat to reproduce the draw order. `main.resume_game` uses
+this to offer resuming the last unfinished match from the menu.
+
+**History mode** is a shell-only review scene (`Ui.history`, gated so it never
+enters the pure core). On entry `main.build_history` runs one `reconstruct` whose
+`on_turn` callback deep-copies each turn's board and folds fog (via
+`_accumulate_fog`) into a per-turn snapshot, so the bottom-bar scrubber seeks by
+plain list-indexing. Fog stays a `Ui`-layer concern: mid-game a past turn shows
+fog *as it was then*, while a finished game is fully revealed. **Rewind** resumes
+live play from the viewed turn — mid-game it truncates the same log file
+(`GameLog.truncate`, confirmed first, since it discards later turns); on a
+finished game it forks a new file (`GameLog.fork`) so the completed record stays
+intact.
 
 ### Key conventions
 
