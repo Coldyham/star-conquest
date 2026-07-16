@@ -105,6 +105,33 @@ class GameLog:
         self.finished = True
         self.updated_at = _now_iso()
 
+    def truncate(self, n: int) -> None:
+        """Drop every turn after ``n`` and re-open the match (mid-game rewind).
+
+        Keeps ``turns[:n]`` (turn ``n`` == the board after ``n`` recorded turns,
+        so ``truncate(0)`` rewinds to the opening position) and clears the
+        finished/winner outcome so continued play appends to the same file.
+        """
+        self.turns = self.turns[:n]
+        self.winner = None
+        self.finished = False
+        self.updated_at = _now_iso()
+
+    def fork(self, n: int) -> "GameLog":
+        """A fresh log branching from turn ``n`` (finished-game rewind).
+
+        Same seed and settings, ``turns[:n]``, outcome cleared, and a brand-new
+        file ``path`` (a new timestamp) so the original — typically a finished
+        match one wants to keep — is left untouched. The caller ``save()``s it and
+        continues play into the new file.
+        """
+        return GameLog(
+            seed=self.seed,
+            settings=self.settings,
+            turns=list(self.turns[:n]),
+            path=_game_path(self.seed),
+        )
+
     def turn_is_ai(self, turn_index: int) -> bool:
         """Whether the human seat was AI-driven on ``turn_index`` (autoplay)."""
         entry = self.turns[turn_index]

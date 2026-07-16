@@ -9,6 +9,7 @@ through the engine reproduces the exact GameState — for hand play, for autopla
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 
 import pytest
@@ -182,6 +183,62 @@ def test_reconstruct_on_turn_fires_each_turn():
         seen_turns: list[int] = []
         replay.reconstruct(log, ai.decide, on_turn=lambda s: seen_turns.append(s.turn))
     assert seen_turns == list(range(state.turn + 1))   # initial + one per turn
+
+
+def test_history_snapshots_cover_every_turn_and_match_final():
+    """History mode snapshots one board per turn via the on_turn hook: there is a
+    board for the opening position plus each replayed turn, and the last equals a
+    plain reconstruct (the live board)."""
+    with _preserve_config():
+        original, log = _play(456, policy="mixed", max_turns=40)
+        states: list = []
+        replay.reconstruct(log, ai.decide, on_turn=lambda s: states.append(copy.deepcopy(s)))
+        plain, _ = replay.reconstruct(log, ai.decide)
+    assert len(states) == original.turn + 1
+    assert _snapshot(states[-1]) == _snapshot(plain) == _snapshot(original)
+
+
+# --------------------------------------------------------------------------- #
+# Rewind: truncate (mid-game, same file) and fork (finished, new file)
+# --------------------------------------------------------------------------- #
+def test_truncate_drops_later_turns_and_reopens():
+    """Mid-game rewind: keep turns[:n] and clear the finished/winner outcome so
+    the reconstructed board is exactly the one after n turns."""
+    with _preserve_config():
+        original, log = _play(1234, policy="autoplay", max_turns=30)
+        assert log.finished
+        full = log.turn_count
+        log.truncate(5)
+        assert log.turn_count == 5
+        assert not log.finished and log.winner is None
+        rebuilt, _ = replay.reconstruct(log, ai.decide)
+    assert rebuilt.turn == 5 and full > 5
+
+
+def test_fork_branches_without_mutating_original():
+    """Finished-game rewind: fork a fresh log at turn n, leaving the original
+    (a completed match one wants to keep) untouched."""
+    with _preserve_config():
+        _, log = _play(2468, policy="autoplay", max_turns=30)
+    original_turns = list(log.turns)
+    original_winner, original_finished = log.winner, log.finished
+    forked = log.fork(6)
+    assert forked is not log
+    assert forked.turn_count == 6
+    assert not forked.finished and forked.winner is None
+    assert forked.seed == log.seed and forked.settings == log.settings
+    assert forked.path is not None
+    # the original is completely unmodified
+    assert log.turns == original_turns
+    assert log.winner == original_winner and log.finished == original_finished
+
+
+def test_forked_log_reconstructs_to_branch_point():
+    with _preserve_config():
+        _, log = _play(1357, policy="autoplay", max_turns=30)
+        forked = log.fork(8)
+        rebuilt, _ = replay.reconstruct(forked, ai.decide)
+    assert rebuilt.turn == 8
 
 
 # --------------------------------------------------------------------------- #

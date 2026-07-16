@@ -2,7 +2,7 @@
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'quit',
-'toggle_autoplay', 'toggle_play', 'menu') or None.
+'toggle_autoplay', 'toggle_play', 'toggle_history', 'rewind', 'menu') or None.
 """
 
 from __future__ import annotations
@@ -25,21 +25,77 @@ def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
     return None
 
 
+def _seek_scrubber(ui: Ui, pos) -> None:
+    """Map a click/drag x within the scrubber track to a turn index (0..max)."""
+    x, _y, w, _h = ui.scrubber_rect
+    if w <= 0 or ui.history_max <= 0:
+        ui.history_turn = 0
+        return
+    t = max(0.0, min(1.0, (pos[0] - x) / w))
+    ui.history_turn = round(t * ui.history_max)
+
+
+def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    """Modal history-review input: scrub the turn, rewind, or exit. Mutates only
+    the scrub position / drag flag; enter/exit and rewind are returned to main."""
+    if event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_ESCAPE, pygame.K_h):
+            return "toggle_history"
+        if event.key == pygame.K_LEFT:
+            ui.history_turn = max(0, ui.history_turn - 1)
+        elif event.key == pygame.K_RIGHT:
+            ui.history_turn = min(ui.history_max, ui.history_turn + 1)
+        elif event.key == pygame.K_HOME:
+            ui.history_turn = 0
+        elif event.key == pygame.K_END:
+            ui.history_turn = ui.history_max
+        return None
+    if event.type == pygame.MOUSEMOTION:
+        ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
+        if ui.dragging_scrubber:
+            _seek_scrubber(ui, event.pos)
+        return None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        if ui.exit_history_rect[2] and _point_in_rect(event.pos, ui.exit_history_rect):
+            return "toggle_history"
+        if ui.rewind_button_rect[2] and _point_in_rect(event.pos, ui.rewind_button_rect):
+            return "rewind"
+        if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
+            ui.dragging_scrubber = True
+            _seek_scrubber(ui, event.pos)
+        return None
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        ui.dragging_scrubber = False
+    return None
+
+
 def _point_in_rect(pos, rect) -> bool:
     x, y, w, h = rect
     return x <= pos[0] <= x + w and y <= pos[1] <= y + h
 
 
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
-    # Game over: only restart / back-to-menu / quit.
+    # History mode is a modal review scene (entered mid-game or after a win):
+    # scrub / rewind / exit only, no board interaction. Checked first so it wins
+    # over the game-over branch when reviewing a finished match.
+    if ui.history:
+        return _handle_history_event(event, state, ui)
+
+    # Game over: restart / back-to-menu / quit, plus entering history to review
+    # the finished game behind the fog of war.
     if state.winner is not None:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:
                 return "restart"
             if event.key == pygame.K_m:
                 return "menu"
+            if event.key == pygame.K_h:
+                return "toggle_history"
             if event.key == pygame.K_ESCAPE:
                 return "quit"
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if ui.history_button_rect[2] and _point_in_rect(event.pos, ui.history_button_rect):
+                return "toggle_history"
         return None
 
     if event.type == pygame.MOUSEMOTION:
@@ -82,6 +138,8 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
         return "restart"
     if event.key == pygame.K_m:
         return "menu"
+    if event.key == pygame.K_h:
+        return "toggle_history"
     if event.key == pygame.K_ESCAPE:
         if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
@@ -91,6 +149,9 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 
 
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
+    # Tested before the autoplay early-out so History stays clickable under autoplay.
+    if ui.history_button_rect[2] and _point_in_rect(pos, ui.history_button_rect):
+        return "toggle_history"
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if _point_in_rect(pos, ui.play_pause_rect):

@@ -49,6 +49,19 @@ class Ui:
     # the human seat to the AI; here the human's own orders still run each step.
     playing: bool = False
     show_help: bool = True
+    # History mode: a modal review scene for scrubbing back through the recorded
+    # match. While active, main draws a reconstructed past board (not the live
+    # `state`) and input suppresses board interaction. `history_turn` is the
+    # viewed turn (0 == opening position .. `history_max` == latest recorded);
+    # `history_max` mirrors the log's turn count so input can map a scrubber
+    # click to a turn without needing the log. `history_reveal` lifts fog for a
+    # finished game (see behind the fog of war). `dragging_scrubber` tracks a
+    # held mouse-drag on the scrubber track.
+    history: bool = False
+    history_turn: int = 0
+    history_max: int = 0
+    history_reveal: bool = False
+    dragging_scrubber: bool = False
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -69,6 +82,14 @@ class Ui:
     forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
         field(default_factory=list)
     )
+    # History-mode hit-rects, rebuilt by render each frame and tested by input
+    # (same store-rect-then-test handoff as end_turn_rect). `history_button_rect`
+    # is the bottom-bar (and game-over overlay) toggle; the others are live only
+    # while `history` is on. `scrubber_rect` is the draggable track.
+    history_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

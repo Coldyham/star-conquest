@@ -12,6 +12,7 @@ pure core (engine/combat/mapgen/ai), and all drawing lives in render/menu.
 from __future__ import annotations
 
 import argparse
+import copy
 
 import pygame
 
@@ -89,6 +90,44 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
     return state, ui
+
+
+def build_history(ui: Ui, log: GameLog) -> tuple[
+        list[GameState], list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]]]:
+    """Reconstruct one board (and the human's fog memory) per recorded turn.
+
+    Replays the log once, deep-copying the state at the opening position and after
+    every turn into ``states`` and snapshotting cumulative fog into ``fog`` (both
+    indexed by turn: 0 == opening .. len-1 == latest). History mode then scrubs by
+    plain list indexing — no re-reconstruction per drag. Fog is folded with the
+    same ``_accumulate_fog`` the live loop uses, so a reviewed turn shows exactly
+    what the human had discovered by then; a finished game is revealed in full by
+    the caller instead.
+    """
+    states: list[GameState] = []
+    fog: list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]] = []
+    seen: set[int] = set()
+    intel: dict[int, tuple[int, int, float]] = {}
+
+    def capture(s: GameState) -> None:
+        states.append(copy.deepcopy(s))
+        visible = _accumulate_fog(s, ui.human_id, seen, intel)
+        fog.append((set(visible), set(seen), dict(intel)))
+
+    replay.reconstruct(log, ai.decide, on_turn=capture)
+    return states, fog
+
+
+def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState, Ui]:
+    """Truncate a live match to ``turn`` (discarding later turns), persist it, and
+    rebuild the game from it — the mid-game 'rewind to here'. ``log`` is mutated in
+    place so continued play keeps appending to the same file."""
+    log.truncate(turn)
+    try:
+        log.save()
+    except OSError:
+        pass
+    return resume_game(log, settings)
 
 
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
@@ -179,6 +218,12 @@ def main() -> None:
 
     running = True
     confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
+    confirm_rewind = False  # showing the destructive mid-game rewind confirm modal
+    # History-review snapshots, built on entering history mode and dropped on exit;
+    # `live_fog` stashes the live fog triple so it survives a history visit intact.
+    history_states: list[GameState] = []
+    history_fog: list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]] = []
+    live_fog: tuple[set[int], set[int], dict[int, tuple[int, int, float]]] | None = None
     auto_accum = 0
     play_accum = 0
     fullscreen = False
@@ -207,6 +252,29 @@ def main() -> None:
                         running = False
                     elif cancel_r.collidepoint(event.pos):
                         confirm_quit = False
+                continue
+
+            if confirm_rewind:
+                # Modal: confirm a destructive mid-game rewind (discards later turns).
+                do_rewind = False
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                        do_rewind = True
+                    elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        confirm_rewind = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    rewind_r, cancel_r = render.confirm_rewind_buttons(screen)
+                    if rewind_r.collidepoint(event.pos):
+                        do_rewind = True
+                    elif cancel_r.collidepoint(event.pos):
+                        confirm_rewind = False
+                if do_rewind:
+                    state, ui = apply_rewind(log, settings, ui.history_turn)
+                    history_states, history_fog, live_fog = [], [], None
+                    confirm_rewind = False
+                    auto_accum = 0
                 continue
 
             if resume_prompt is not None:
@@ -281,8 +349,45 @@ def main() -> None:
             elif action == "restart":
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed, ui.autoplay)
+            elif action == "toggle_history":
+                if ui.history:
+                    # leave review: drop snapshots and restore the live fog exactly
+                    # (the live board is untouched while reviewing, so no recompute).
+                    ui.history = False
+                    ui.dragging_scrubber = False
+                    history_states, history_fog = [], []
+                    if live_fog is not None:
+                        ui.visible, ui.seen, ui.player_intel = live_fog
+                        live_fog = None
+                elif log is not None and log.turn_count > 0:
+                    history_states, history_fog = build_history(ui, log)
+                    if history_states:
+                        live_fog = (set(ui.visible), set(ui.seen), dict(ui.player_intel))
+                        ui.history = True
+                        ui.playing = False
+                        ui.reset_selection()
+                        ui.sel_order = ui.sel_forward = None
+                        ui.history_max = len(history_states) - 1
+                        ui.history_turn = ui.history_max
+                        ui.history_reveal = state.winner is not None
+            elif action == "rewind":
+                if ui.history_reveal:
+                    # finished game — fork a new save so the completed record stays
+                    # intact, then resume live play in the new file.
+                    log = log.fork(ui.history_turn)
+                    try:
+                        log.save()
+                    except OSError:
+                        pass
+                    current_seed = log.seed
+                    state, ui = resume_game(log, settings)
+                    history_states, history_fog, live_fog = [], [], None
+                    auto_accum = 0
+                else:
+                    confirm_rewind = True   # mid-game rewind is destructive: confirm
 
-        if scene == "game" and state.winner is None and not confirm_quit:
+        if (scene == "game" and state.winner is None
+                and not confirm_quit and not confirm_rewind and not ui.history):
             if ui.autoplay:
                 auto_accum += dt
                 if auto_accum >= AUTOPLAY_MS:
@@ -298,8 +403,22 @@ def main() -> None:
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
+        elif ui.history and history_states:
+            # Draw the reconstructed past board with the fog for that turn — or, for
+            # a finished game, everything revealed. `render` just draws the state and
+            # fog it's handed; it neither knows nor cares the board is historical.
+            i = max(0, min(ui.history_turn, len(history_states) - 1))
+            view_state = history_states[i]
+            if ui.history_reveal:
+                all_ids = set(view_state.systems)
+                ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
+            else:
+                ui.visible, ui.seen, ui.player_intel = history_fog[i]
+            render.draw(screen, view_state, ui)
         else:
             render.draw(screen, state, ui)
+        if confirm_rewind:
+            render.draw_confirm_rewind(screen, ui.history_turn)
         if confirm_quit:
             render.draw_confirm_quit(screen)
         pygame.display.flip()

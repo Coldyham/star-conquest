@@ -25,7 +25,7 @@ def _fonts() -> dict[str, pygame.font.Font]:
     return _FONTS
 
 
-def _text(surface, font, s, color, center=None, topleft=None, midleft=None):
+def _text(surface, font, s, color, center=None, topleft=None, midleft=None, midright=None):
     img = font.render(s, True, color)
     rect = img.get_rect()
     if center:
@@ -34,6 +34,8 @@ def _text(surface, font, s, color, center=None, topleft=None, midleft=None):
         rect.topleft = topleft
     elif midleft:
         rect.midleft = midleft
+    elif midright:
+        rect.midright = midright
     surface.blit(img, rect)
     return rect
 
@@ -46,17 +48,26 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     # zero the −/+ button rects; whichever count draw runs (if any) re-records them
     ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
     _draw_lanes(surface, state, ui)
-    _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
-    _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
-    _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
+    # History mode reviews a reconstructed past board: skip the live-interaction
+    # overlays (queued/standing orders, the count being composed) — there is no
+    # order entry while scrubbing.
+    if not ui.history:
+        _draw_forward_rules(surface, state, ui)     # standing auto-forward (dashed)
+        _draw_pending(surface, state, ui)           # queued one-shot sends (solid)
+        _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
-    # the active count + −/+ buttons draw last of the map layer so nodes/fleets
-    # never occlude them (they must stay visible and clickable)
-    _draw_count_controls(surface, state, ui)
+    if not ui.history:
+        # the active count + −/+ buttons draw last of the map layer so nodes/fleets
+        # never occlude them (they must stay visible and clickable)
+        _draw_count_controls(surface, state, ui)
     _draw_hud(surface, state, ui)
-    if state.winner is not None:
-        _draw_win_overlay(surface, state)
+    if ui.history:
+        # the scrubber owns the bottom bar; suppress the win overlay so a finished
+        # game's final-turn snapshot doesn't veil the board being reviewed
+        _draw_scrubber(surface, state, ui)
+    elif state.winner is not None:
+        _draw_win_overlay(surface, state, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -425,6 +436,11 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # bottom bar
     by = h - config.HUD_BOTTOM_H
     pygame.draw.rect(surface, (18, 20, 30), (0, by, w, config.HUD_BOTTOM_H))
+    if ui.history:
+        # the scrubber (drawn by _draw_scrubber, after the HUD) owns the bottom
+        # bar in history mode — zero the live buttons so no stale click resolves.
+        ui.end_turn_rect = ui.play_pause_rect = ui.history_button_rect = (0, 0, 0, 0)
+        return
     _text(surface, _fonts()["small"], _hint(ui), config.COLOR_TEXT_DIM,
           midleft=(14, by + config.HUD_BOTTOM_H // 2))
 
@@ -449,6 +465,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # play/pause button — sits left of End Turn; hidden while autoplay, which
     # drives turns on its own timer, would make it a no-op.
+    leftmost = br.x
     if ui.autoplay:
         ui.play_pause_rect = (0, 0, 0, 0)
     else:
@@ -461,6 +478,19 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         pygame.draw.rect(surface, edge, pr, 2, border_radius=6)
         plabel = "Pause (P)" if ui.playing else "Play (P)"
         _text(surface, _fonts()["normal"], plabel, config.COLOR_TEXT, center=pr.center)
+        leftmost = pr.x
+
+    # history button — sits left of Play/Pause (or End Turn under autoplay).
+    # Only meaningful once a turn has been recorded to scrub back through.
+    if state.turn > 0:
+        hw = 118
+        hr = pygame.Rect(leftmost - hw - 10, br.y, hw, 32)
+        ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
+        pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
+        pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
+        _text(surface, _fonts()["normal"], "History (H)", config.COLOR_TEXT, center=hr.center)
+    else:
+        ui.history_button_rect = (0, 0, 0, 0)
 
 
 _DEAD_COLOR = (92, 96, 110)
@@ -560,8 +590,13 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), 1)
 
     # queued-orders list occupies the bottom of the panel (always visible so
-    # orders can be reviewed / removed); details fill the space above it.
-    _draw_order_list(surface, state, ui)
+    # orders can be reviewed / removed); details fill the space above it. Hidden
+    # in history mode — those orders belong to the live turn, not the past board.
+    if ui.history:
+        ui.order_hitboxes = []
+        ui.forward_hitboxes = []
+    else:
+        _draw_order_list(surface, state, ui)
 
     x, y = px + 14, py + 14
     editing = _editing_order(ui)
@@ -829,7 +864,7 @@ def draw_confirm_quit(surface) -> None:
         _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=rect.center)
 
 
-def _draw_win_overlay(surface, state: GameState) -> None:
+def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 180))
@@ -839,6 +874,105 @@ def _draw_win_overlay(surface, state: GameState) -> None:
     else:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
-    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - 16))
+    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - 40))
     _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h // 2 + 24))
+          config.COLOR_TEXT_DIM, center=(w // 2, h // 2))
+    # Review-history button: enter history mode to scrub the finished game with
+    # fog fully lifted (see what was happening behind the fog of war).
+    bw, bh = 260, 40
+    hr = pygame.Rect(w // 2 - bw // 2, h // 2 + 34, bw, bh)
+    ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
+    pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
+    pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
+    _text(surface, _fonts()["normal"], "Review history (H)", config.COLOR_TEXT,
+          center=hr.center)
+
+
+# Scrubber palette — a cool track with a bright fill/knob, echoing the play button.
+_SCRUB_TROUGH = (40, 44, 60)
+_SCRUB_FILL = (110, 140, 200)
+
+
+def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
+    """Bottom-bar turn scrubber for history mode: an Exit button, a draggable
+    track (0 .. ``ui.history_max`` turns), a turn/mode label, and a Rewind button
+    (only when viewing a turn before the latest). Records hit-rects on ``ui`` for
+    input, mirroring the store-rect-then-test handoff used across the HUD."""
+    w, h = surface.get_size()
+    by = h - config.HUD_BOTTOM_H
+    cy = by + config.HUD_BOTTOM_H // 2
+    font = _fonts()["small"]
+
+    # Exit button (far left).
+    ex = pygame.Rect(12, by + (config.HUD_BOTTOM_H - 28) // 2, 92, 28)
+    ui.exit_history_rect = (ex.x, ex.y, ex.w, ex.h)
+    pygame.draw.rect(surface, (40, 52, 78), ex, border_radius=6)
+    pygame.draw.rect(surface, (110, 140, 200), ex, 2, border_radius=6)
+    _text(surface, font, "Exit (Esc)", config.COLOR_TEXT, center=ex.center)
+
+    # Rewind button (far right). Its footprint is reserved even when hidden so the
+    # track width and label position stay fixed as you scrub — the button only
+    # appears for turns before the latest (when there is something to leave behind).
+    rw = pygame.Rect(w - 172 - 12, by + (config.HUD_BOTTOM_H - 28) // 2, 172, 28)
+    right_limit = rw.x - 14
+    if ui.history_turn >= ui.history_max:
+        ui.rewind_button_rect = (0, 0, 0, 0)
+    else:
+        ui.rewind_button_rect = (rw.x, rw.y, rw.w, rw.h)
+        pygame.draw.rect(surface, (120, 86, 46), rw, border_radius=6)
+        pygame.draw.rect(surface, (200, 150, 96), rw, 2, border_radius=6)
+        _text(surface, font, "Rewind to here", config.COLOR_TEXT, center=rw.center)
+
+    # Turn / fog-mode label, right-aligned just left of the rewind button. Its
+    # slot is sized to the widest label this session could show (max digits, the
+    # longer "revealed" tag) so a changing turn number never nudges the track.
+    tag = "revealed" if ui.history_reveal else "as seen"
+    label = f"Turn {state.turn}/{ui.history_max}  ·  {tag}"
+    widest = f"Turn {ui.history_max}/{ui.history_max}  ·  revealed"
+    label_x = right_limit - font.size(widest)[0]
+    _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))
+
+    # Track fills the space between the exit button and the label slot.
+    track_x = ex.right + 16
+    track_w = max(1, label_x - 16 - track_x)
+    ui.scrubber_rect = (track_x, by + 6, track_w, config.HUD_BOTTOM_H - 12)
+    pygame.draw.rect(surface, _SCRUB_TROUGH,
+                     pygame.Rect(track_x, cy - 3, track_w, 6), border_radius=3)
+    t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
+    fill_w = int(track_w * t)
+    if fill_w > 0:
+        pygame.draw.rect(surface, _SCRUB_FILL,
+                         pygame.Rect(track_x, cy - 3, fill_w, 6), border_radius=3)
+    hx = track_x + fill_w
+    pygame.draw.circle(surface, config.COLOR_TEXT, (hx, cy), 7)
+    pygame.draw.circle(surface, _SCRUB_FILL, (hx, cy), 7, 2)
+
+
+def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
+    """(rewind, cancel) button rects — shared by the drawer and the hit-tester."""
+    w, h = surface.get_size()
+    cx, cy = w // 2, h // 2
+    bw, bh = 220, 42
+    rewind_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
+    cancel_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    return rewind_r, cancel_r
+
+
+def draw_confirm_rewind(surface, turn: int) -> None:
+    """Modal confirm for a destructive mid-game rewind (discards later turns)."""
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    _text(surface, _fonts()["big"], f"Rewind to turn {turn}?", config.COLOR_TEXT,
+          center=(w // 2, h // 2 - 40))
+    _text(surface, _fonts()["small"], "All turns after this one will be discarded.",
+          config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 6))
+    rewind_r, cancel_r = confirm_rewind_buttons(surface)
+    for rect, label, fill, edge in (
+        (rewind_r, "Rewind (Y/Enter)", (120, 86, 46), (200, 150, 96)),
+        (cancel_r, "Cancel (N/Esc)", (46, 92, 60), (96, 190, 120)),
+    ):
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+        _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=rect.center)
