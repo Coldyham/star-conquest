@@ -150,10 +150,11 @@ def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     offsets = _lane_offsets(state)
     for i, f in enumerate(state.fleets):
-        # a fleet shows only where at least one end of its lane is in full view
-        # (your own systems always are, so your fleets stay visible while you hold
-        # their endpoints; enemy movements appear only as they near your space)
-        if f.source_id not in ui.visible and f.dest_id not in ui.visible:
+        # your own fleets always show; an enemy fleet shows only where at least
+        # one end of its lane is in full view, so rival movements appear only as
+        # they near your space
+        if (f.owner_id != ui.human_id
+                and f.source_id not in ui.visible and f.dest_id not in ui.visible):
             continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
