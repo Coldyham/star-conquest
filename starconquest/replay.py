@@ -164,10 +164,12 @@ class GameLog:
         """Rebuild from parsed JSON, tolerantly (missing keys keep defaults)."""
         turns_raw = data.get("turns")
         turns = list(turns_raw) if isinstance(turns_raw, list) else []
+        settings_raw = data.get("settings")
+        settings = settings_raw if isinstance(settings_raw, dict) else {}
         winner = data.get("winner")
         return cls(
             seed=int(data.get("seed", 0)),
-            settings=data.get("settings") if isinstance(data.get("settings"), dict) else {},
+            settings=settings,
             turns=turns,
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
@@ -232,7 +234,7 @@ def latest_log() -> Optional[GameLog]:
 def reconstruct(
     log: GameLog,
     decide: DecideFn,
-    on_turn: Optional[Callable[[GameState], None]] = None,
+    on_turn: Optional[Callable[[GameState], object]] = None,
 ) -> tuple[GameState, Settings]:
     """Replay a log's inputs through the engine to rebuild its current state.
 

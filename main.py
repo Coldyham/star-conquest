@@ -271,6 +271,7 @@ def main() -> None:
                     elif cancel_r.collidepoint(event.pos):
                         confirm_rewind = False
                 if do_rewind:
+                    assert log is not None and ui is not None   # confirm_rewind ⇒ in-game
                     state, ui = apply_rewind(log, settings, ui.history_turn)
                     history_states, history_fog, live_fog = [], [], None
                     confirm_rewind = False
@@ -294,6 +295,7 @@ def main() -> None:
                     elif new_r.collidepoint(event.pos):
                         resume_prompt = None
                 if accept:
+                    assert resume_prompt is not None
                     ai.load_models()   # a resumed game may name a drop-in strategy
                     state, ui = resume_game(resume_prompt, settings)
                     current_seed = resume_prompt.seed
@@ -328,6 +330,8 @@ def main() -> None:
                     confirm_quit = True
                 continue
 
+            # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
+            assert state is not None and ui is not None and log is not None
             action = game_input.handle_event(event, state, ui)
             if action == "quit":
                 confirm_quit = True
@@ -391,49 +395,53 @@ def main() -> None:
                 else:
                     confirm_rewind = True   # mid-game rewind is destructive: confirm
 
-        if (scene == "game" and ui.history and ui.playing
-                and not confirm_quit and not confirm_rewind):
-            # Replay playback: step the scrubber one turn per PLAY_MS, stopping when
-            # it reaches the final recorded turn (like a video reaching the end).
-            play_accum += dt
-            if play_accum >= PLAY_MS:
-                play_accum = 0
-                ui.history_turn = min(ui.history_max, ui.history_turn + 1)
-                if ui.history_turn >= ui.history_max:
-                    ui.playing = False
-        elif (scene == "game" and state.winner is None
-                and not confirm_quit and not confirm_rewind and not ui.history):
-            if ui.autoplay:
-                auto_accum += dt
-                if auto_accum >= AUTOPLAY_MS:
-                    auto_accum = 0
-                    resolve_turn(state, ui, log)
-            elif ui.playing:
+        if scene == "game":
+            assert state is not None and ui is not None and log is not None
+            if (ui.history and ui.playing
+                    and not confirm_quit and not confirm_rewind):
+                # Replay playback: step the scrubber one turn per PLAY_MS, stopping when
+                # it reaches the final recorded turn (like a video reaching the end).
                 play_accum += dt
                 if play_accum >= PLAY_MS:
                     play_accum = 0
-                    resolve_turn(state, ui, log)
+                    ui.history_turn = min(ui.history_max, ui.history_turn + 1)
+                    if ui.history_turn >= ui.history_max:
+                        ui.playing = False
+            elif (state.winner is None
+                    and not confirm_quit and not confirm_rewind and not ui.history):
+                if ui.autoplay:
+                    auto_accum += dt
+                    if auto_accum >= AUTOPLAY_MS:
+                        auto_accum = 0
+                        resolve_turn(state, ui, log)
+                elif ui.playing:
+                    play_accum += dt
+                    if play_accum >= PLAY_MS:
+                        play_accum = 0
+                        resolve_turn(state, ui, log)
 
         if scene == "menu":
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
-        elif ui.history and history_states:
-            # Draw the reconstructed past board with the fog for that turn — or, for
-            # a finished game, everything revealed. `render` just draws the state and
-            # fog it's handed; it neither knows nor cares the board is historical.
-            i = max(0, min(ui.history_turn, len(history_states) - 1))
-            view_state = history_states[i]
-            if ui.history_reveal:
-                all_ids = set(view_state.systems)
-                ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
-            else:
-                ui.visible, ui.seen, ui.player_intel = history_fog[i]
-            render.draw(screen, view_state, ui)
         else:
-            render.draw(screen, state, ui)
-        if confirm_rewind:
-            render.draw_confirm_rewind(screen, ui.history_turn)
+            assert state is not None and ui is not None   # scene == "game"
+            if ui.history and history_states:
+                # Draw the reconstructed past board with the fog for that turn — or, for
+                # a finished game, everything revealed. `render` just draws the state and
+                # fog it's handed; it neither knows nor cares the board is historical.
+                i = max(0, min(ui.history_turn, len(history_states) - 1))
+                view_state = history_states[i]
+                if ui.history_reveal:
+                    all_ids = set(view_state.systems)
+                    ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
+                else:
+                    ui.visible, ui.seen, ui.player_intel = history_fog[i]
+                render.draw(screen, view_state, ui)
+            else:
+                render.draw(screen, state, ui)
+            if confirm_rewind:   # only ever set in-game, so ui is live here
+                render.draw_confirm_rewind(screen, ui.history_turn)
         if confirm_quit:
             render.draw_confirm_quit(screen)
         pygame.display.flip()
