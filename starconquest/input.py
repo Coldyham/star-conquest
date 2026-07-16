@@ -213,6 +213,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             # — an untouched count then yields keep 0, same as with no queued order.
             keep = max(0, ui.available(state, ui.selected) - ui.chosen)
             ui.auto_forward[ui.selected] = (ui.dest, keep)
+            ui.sel_forward = ui.selected   # select it so keep adjusts immediately
         elif ui.chosen > 0:
             ui.pending.append(Order(ui.human_id, ui.selected, ui.dest, ui.chosen))
         _after_confirm(state, ui)
@@ -243,8 +244,10 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
                 # rule immediately — a plain click instead stages the
                 # CHOOSING preview so the one-shot count can be reviewed/adjusted.
                 # keep starts at 0 (forward everything free); a queued order from
-                # here no longer bumps it up — adjust with the wheel/−+ afterwards.
+                # here no longer bumps it up. Select the new rule so the wheel/−+
+                # adjust its keep straight away, like a one-shot lands in CHOOSING.
                 ui.auto_forward[ui.selected] = (node, 0)
+                ui.sel_forward = ui.selected
                 _after_confirm(state, ui)
             else:
                 ui.mode = CHOOSING

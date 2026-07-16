@@ -149,6 +149,7 @@ def test_shift_confirm_creates_forward_rule():
 
         assert ui.auto_forward.get(home) == (nbr, state.systems[home].ships - 3)
         assert ui.pending == []   # a rule, not a one-shot send
+        assert ui.sel_forward == home   # selected on creation, keep adjusts at once
     finally:
         pygame.quit()
 
@@ -175,6 +176,32 @@ def test_shift_click_neighbour_sets_rule_in_one_click():
         assert ui.pending == []
         # ships remain at home, so it stays selected for further orders/rules
         assert ui.mode == SELECTED and ui.selected == home
+        # the new rule is selected too, so its keep adjusts straight away
+        assert ui.sel_forward == home
+    finally:
+        pygame.quit()
+
+
+def test_new_rule_is_selected_so_keep_adjusts_immediately():
+    """After creating a rule you can dial the keep at once (wheel/−+), without a
+    separate select step — the "start at 0 but adjustable" behaviour."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 8
+
+        _click(state, ui, home)
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            _click(state, ui, nbr)
+        finally:
+            pygame.key.set_mods(0)
+
+        assert ui.auto_forward[home] == (nbr, 0) and ui.sel_forward == home
+
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == (nbr, 1)   # scroll bumped keep, no extra click
     finally:
         pygame.quit()
 
@@ -266,6 +293,7 @@ def test_shift_click_sets_rule_from_zero_ship_system():
             pygame.key.set_mods(0)
 
         assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.sel_forward == home
     finally:
         pygame.quit()
 
