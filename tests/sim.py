@@ -16,6 +16,11 @@ through all N seatings on each seed, so every bot spends equal time in each star
 location; wins are then tallied per strategy:
     uv run python -m tests.sim --ai rusher heuristic --swap --trials 200
 
+Fog the bots with --fog-sight (and optionally --fog-scout): each seat then decides
+from its own viewpoint, seeing full detail only within `sight` hops and silhouettes
+out to `scout` — the same information a human gets (see fog.fogged_state):
+    uv run python -m tests.sim --ai claudebot heuristic --swap --fog-sight 1 --fog-scout 3
+
 Because the whole simulation core imports no pygame, this is also what the
 pytest suite calls to assert the game actually terminates and never corrupts
 its state.
@@ -26,7 +31,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 
-from starconquest import ai, config, engine, mapgen
+from starconquest import ai, config, engine, fog, mapgen
 from starconquest.model import GameState
 
 
@@ -116,6 +121,8 @@ def play(
     max_turns: int = 600,
     verbose: bool = False,
     strategies: list[str] | None = None,
+    fog_sight: int | None = None,
+    fog_scout: int | None = None,
 ) -> SimResult:
     state = mapgen.generate(seed, mode, nodes, players)
     # AI-vs-AI: drive every slot with the AI, including the human's seat.
@@ -123,28 +130,41 @@ def play(
         p.is_human = False
     if strategies:
         _assign_strategies(state, strategies)
+    # Optionally fog the bots: each then decides from its own viewpoint (the same
+    # visible/scouted tiers a human gets — see fog.fogged_state). Passing either
+    # range turns fog on; scout defaults to sight (no silhouette ring). fog_aware
+    # reads config live, so we stamp the ranges here.
+    decide = ai.decide
+    if fog_sight is not None or fog_scout is not None:
+        config.FOG_SIGHT = fog_sight if fog_sight is not None else 0
+        config.FOG_SCOUT = fog_scout if fog_scout is not None else config.FOG_SIGHT
+        decide = fog.fog_aware(ai.decide)
     check_invariants(state)
     if verbose:
         print_state(state)
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=ai.decide)
+        engine.end_turn(state, decide=decide)
         check_invariants(state)
         if verbose:
             print_state(state)
     return SimResult(seed, state.winner, state.turn, state.winner is None)
 
 
-def run_trials(seeds, mode, nodes, players, max_turns, strategies=None) -> list[SimResult]:
-    return [play(s, mode, nodes, players, max_turns, strategies=strategies) for s in seeds]
+def run_trials(seeds, mode, nodes, players, max_turns, strategies=None,
+               fog_sight=None, fog_scout=None) -> list[SimResult]:
+    return [play(s, mode, nodes, players, max_turns, strategies=strategies,
+                 fog_sight=fog_sight, fog_scout=fog_scout) for s in seeds]
 
 
-def run_swap(seeds, mode, nodes, strategies, max_turns) -> list[SwapGame]:
+def run_swap(seeds, mode, nodes, strategies, max_turns,
+             fog_sight=None, fog_scout=None) -> list[SwapGame]:
     """Play every rotation of the roster on each seed (same map, seats rotated)."""
     n = len(strategies)
     games: list[SwapGame] = []
     for seed in seeds:
         for assignment in _rotations(strategies):
-            r = play(seed, mode, nodes, n, max_turns, strategies=assignment)
+            r = play(seed, mode, nodes, n, max_turns, strategies=assignment,
+                     fog_sight=fog_sight, fog_scout=fog_scout)
             games.append(SwapGame(r, assignment))
     return games
 
@@ -210,8 +230,15 @@ def main() -> None:
     ap.add_argument("--swap", action="store_true", help="rotate the --ai roster through every seat (cancels start bias) and rank by total wins per strategy")
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
+    ap.add_argument("--fog-sight", type=int, default=None, metavar="HOPS",
+                    help="fog the bots: each sees full detail only within this many lane hops of its own systems (0 = own systems only). Omit for full information.")
+    ap.add_argument("--fog-scout", type=int, default=None, metavar="HOPS",
+                    help="silhouette range for fogged bots (position + richness, not owner/ships); defaults to --fog-sight")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
+
+    if args.fog_scout is not None and args.fog_sight is None:
+        args.fog_sight = 0  # scout without sight: own systems in detail, the rest as silhouettes
 
     strategies = args.ai
     if strategies:
@@ -226,7 +253,8 @@ def main() -> None:
         if args.players is not None and args.players != len(strategies):
             ap.error(f"--swap fills every seat from --ai; omit --players (it is forced to {len(strategies)})")
         seeds = range(args.seed, args.seed + args.trials)
-        games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns)
+        games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns,
+                         fog_sight=args.fog_sight, fog_scout=args.fog_scout)
         _summarise_swap(games, strategies, args.trials)
         return
 
@@ -239,10 +267,12 @@ def main() -> None:
 
     if args.trials > 1:
         seeds = range(args.seed, args.seed + args.trials)
-        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies)
+        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies,
+                             fog_sight=args.fog_sight, fog_scout=args.fog_scout)
         _summarise(results, strategies)
     else:
-        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies)
+        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies,
+                 fog_sight=args.fog_sight, fog_scout=args.fog_scout)
         if r.winner == 0:
             winner = "draw"
         elif r.winner is None:

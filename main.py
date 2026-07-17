@@ -28,6 +28,14 @@ from starconquest.viewstate import Ui
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
 PLAY_MS = 350      # delay between turns while play/pause (P) is running
 
+# Bots decide from a fogged view — their own viewpoint under the game's fog
+# setting (transparent when fog is off). ``fog_aware`` reads config live, so this
+# one wrapper follows whatever fog the current game was built with. Using it for
+# every decision — live turns, the autoplay human seat, and replay — is what
+# keeps reconstruction bit-identical: the same seats fog the same way, so the rng
+# draw order matches. It never imports the AI into the engine (see fog.fog_aware).
+_decide = fog.fog_aware(ai.decide)
+
 
 def build_view(state: GameState) -> WorldView:
     return WorldView(mapgen.map_bounds(state), config.play_rect(), padding=50)
@@ -82,7 +90,7 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}
     replay_view = replay.reconstruct(
-        log, ai.decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
+        log, _decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
     ui = new_ui(state, loaded.autoplay)   # sets ui.visible from the final board
@@ -114,7 +122,7 @@ def build_history(ui: Ui, log: GameLog) -> tuple[
         visible = _accumulate_fog(s, ui.human_id, seen, intel)
         fog.append((set(visible), set(seen), dict(intel)))
 
-    replay.reconstruct(log, ai.decide, on_turn=capture)
+    replay.reconstruct(log, _decide, on_turn=capture)
     return states, fog
 
 
@@ -158,11 +166,11 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
     at most the turn in progress).
     """
     human_orders = (
-        ai.decide(state, ui.human_id)
+        _decide(state, ui.human_id)
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    engine.end_turn(state, human_orders=human_orders, decide=_decide)
     if log is not None:
         log.record_turn(human_orders, human_ai=ui.autoplay)
         if state.winner is not None:
