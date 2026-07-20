@@ -1,6 +1,6 @@
 """Exercise the human interaction path (input.py) with synthetic pygame events.
 
-This drives the real select -> choose -> confirm -> end-turn flow headlessly so
+This drives the real select -> target -> adjust -> end-turn flow headlessly so
 the interactive path is covered without a window, and confirms a queued order
 actually resolves through the engine.
 """
@@ -35,6 +35,20 @@ def _click(state, ui, sid, button=1):
     return game_input.handle_event(ev, state, ui)
 
 
+def _click_pos(state, ui, pos, button=1):
+    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=button)
+    return game_input.handle_event(ev, state, ui)
+
+
+def _lane_mid(state, ui, src, dst):
+    a = ui.view.to_screen(state.systems[src].pos)
+    b = ui.view.to_screen(state.systems[dst].pos)
+    return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
+
+
+# --------------------------------------------------------------------------- #
+# Send popup: committing and retuning a one-shot send / forward rule
+# --------------------------------------------------------------------------- #
 def test_select_then_target_commits_send_all():
     """Clicking a neighbour commits a send-all order immediately — no confirm
     click — and opens the adjust popup (CHOOSING)."""
@@ -189,12 +203,99 @@ def test_clear_all_forwarding_button():
         pygame.quit()
 
 
+def test_shift_click_neighbour_arms_forward_rule():
+    """Shift+clicking a neighbour commits it straight as a forward-all rule,
+    opening the popup on the Forward tab (keep 0)."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+
+        _click(state, ui, home)   # select source
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            _click(state, ui, nbr)    # shift+click destination
+        finally:
+            pygame.key.set_mods(0)
+
+        assert ui.mode == CHOOSING and ui.forward_armed is True
+        assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
+        assert ui.pending == []   # a rule, not a one-shot send
+    finally:
+        pygame.quit()
+
+
+def test_shift_click_arms_forward_rule_from_empty_system():
+    """A system with no ships free right now can still get a standing rule set
+    up in advance, so future production forwards automatically. Shift+click arms
+    it on the Forward tab; no bogus one-shot order is created."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 0
+
+        _click(state, ui, home)
+        assert ui.mode == SELECTED
+
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            _click(state, ui, nbr)
+        finally:
+            pygame.key.set_mods(0)
+
+        assert ui.mode == CHOOSING and ui.forward_armed is True
+        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.pending == []
+
+        # switching to the Send tab on an empty source shows 0, not a phantom
+        # 1-ship order
+        ui.set_forward_mode(state, False)
+        assert ui.forward_armed is False and ui.chosen == 0
+        assert ui.pending == [] and home not in ui.auto_forward
+    finally:
+        pygame.quit()
+
+
+def test_plain_click_from_empty_system_does_not_send():
+    """Without shift, an empty source has nothing to send: a neighbour click
+    neither opens the send popup nor queues an order."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = next(n for n in state.systems[home].neighbors
+                   if state.systems[n].owner_id != 1)
+        state.systems[home].ships = 0
+
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert ui.mode != CHOOSING
+        assert ui.pending == [] and home not in ui.auto_forward
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Selection edge cases and top-level keys
+# --------------------------------------------------------------------------- #
 def test_cannot_select_foreign_system():
     state, ui = _setup()
     try:
         enemy = next(s.id for s in state.systems.values() if s.owner_id not in (0, 1))
         _click(state, ui, enemy)
         assert ui.mode == IDLE and ui.selected is None
+    finally:
+        pygame.quit()
+
+
+def test_can_select_owned_system_with_zero_available_ships():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 0
+
+        _click(state, ui, home)
+        assert ui.mode == SELECTED and ui.selected == home
     finally:
         pygame.quit()
 
@@ -220,27 +321,39 @@ def test_enter_key_requests_end_turn():
         pygame.quit()
 
 
-def test_shift_click_neighbour_arms_forward_rule():
-    """Shift+clicking a neighbour commits it straight as a forward-all rule."""
+def test_space_key_requests_end_turn():
     state, ui = _setup()
     try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-
-        _click(state, ui, home)   # select source
-        pygame.key.set_mods(pygame.KMOD_SHIFT)
-        try:
-            _click(state, ui, nbr)    # shift+click destination
-        finally:
-            pygame.key.set_mods(0)
-
-        assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
-        assert ui.pending == []   # a rule, not a one-shot send
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE)
+        assert game_input.handle_event(ev, state, ui) == "end_turn"
+        assert ui.playing is False   # Space is not the play toggle
     finally:
         pygame.quit()
 
 
+def test_p_key_toggles_play():
+    state, ui = _setup()
+    try:
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+    finally:
+        pygame.quit()
+
+
+def test_play_pause_button_click_toggles_play():
+    state, ui = _setup()
+    try:
+        ui.play_pause_rect = (100, 100, 120, 32)
+        ev = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Standing auto-forward rules: expansion into orders, clearing
+# --------------------------------------------------------------------------- #
 def test_forward_rule_expands_into_order():
     state, ui = _setup()
     try:
@@ -281,17 +394,6 @@ def test_x_key_clears_forward_rule():
 # Editing / undoing queued orders
 # --------------------------------------------------------------------------- #
 from starconquest.model import Order  # noqa: E402
-
-
-def _click_pos(state, ui, pos, button=1):
-    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=button)
-    return game_input.handle_event(ev, state, ui)
-
-
-def _lane_mid(state, ui, src, dst):
-    a = ui.view.to_screen(state.systems[src].pos)
-    b = ui.view.to_screen(state.systems[dst].pos)
-    return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
 
 
 def test_click_queued_lane_selects_order():
@@ -359,6 +461,154 @@ def test_lane_click_cycles_orders_on_same_lane():
         _click_pos(state, ui, mid); third = ui.sel_order
         assert {first, second} == {0, 1}
         assert third == first          # wraps back around
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Editing standing auto-forward rules
+# --------------------------------------------------------------------------- #
+def test_click_rule_row_selects_it():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
+
+        _click_pos(state, ui, (110, 105))
+        assert ui.sel_forward == home
+        assert ui.sel_order is None
+    finally:
+        pygame.quit()
+
+
+def test_click_rule_lane_selects_it():
+    """Clicking a rule's dashed lane selects it for editing, just like a queued
+    order's lane — the panel row is no longer the only way in."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+
+        _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
+        assert ui.sel_forward == home
+        assert ui.sel_order is None
+    finally:
+        pygame.quit()
+
+
+def test_lane_click_cycles_order_and_rule_on_same_lane():
+    """An order and a rule can share one lane; repeat clicks cycle across both
+    (and wrap), the same precedent as two orders sharing a lane."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 2))
+        ui.auto_forward[home] = (nbr, 1)
+        mid = _lane_mid(state, ui, home, nbr)
+
+        def picked():
+            if ui.sel_order is not None:
+                return ("order", ui.sel_order)
+            return ("rule", ui.sel_forward)
+
+        _click_pos(state, ui, mid); first = picked()
+        _click_pos(state, ui, mid); second = picked()
+        _click_pos(state, ui, mid); third = picked()
+        assert {first, second} == {("order", 0), ("rule", home)}
+        assert third == first          # wraps back around
+    finally:
+        pygame.quit()
+
+
+def test_click_rule_delete_button_removes_it():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
+
+        _click_pos(state, ui, (145, 105))
+        assert home not in ui.auto_forward
+    finally:
+        pygame.quit()
+
+
+def test_wheel_edits_selected_rule_keep_in_place():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+        ui.sel_forward = home
+
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == (nbr, 3)
+
+        # keep is capped at the source's total garrison, and never drops below 0
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == (nbr, state.systems[home].ships)
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
+        assert ui.auto_forward[home] == (nbr, 0)
+    finally:
+        pygame.quit()
+
+
+def test_on_map_step_buttons_adjust_selected_rule_keep():
+    """The on-map −/+ buttons adjust a selected rule's keep, same as for a queued
+    order — a mouse-wheel-free way to edit, for consistency across both."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 10
+        ui.auto_forward[home] = (nbr, 2)
+        ui.sel_forward = home
+        ui.minus_rect = (100, 100, 20, 20)   # normally recorded by render each frame
+        ui.plus_rect = (140, 100, 20, 20)
+
+        _click_pos(state, ui, (150, 110))    # + button
+        assert ui.auto_forward[home] == (nbr, 3)
+        _click_pos(state, ui, (110, 110))    # − button
+        assert ui.auto_forward[home] == (nbr, 2)
+    finally:
+        pygame.quit()
+
+
+def test_x_key_removes_selected_rule():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+        ui.sel_forward = home
+
+        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
+        assert home not in ui.auto_forward
+        assert ui.sel_forward is None
+    finally:
+        pygame.quit()
+
+
+def test_selecting_order_and_rule_are_mutually_exclusive():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 3))
+        ui.auto_forward[home] = (nbr, 2)
+
+        ui.select_order(0)
+        assert ui.sel_order == 0 and ui.sel_forward is None
+
+        ui.select_forward(home)
+        assert ui.sel_forward == home and ui.sel_order is None
     finally:
         pygame.quit()
 

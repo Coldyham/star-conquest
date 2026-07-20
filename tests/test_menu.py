@@ -129,6 +129,37 @@ def test_all_tabs_clickable_and_switch():
         pygame.quit()
 
 
+def test_basic_fog_checkbox_toggles_preset():
+    """The Basic 'Fog of war' checkbox switches between the fog preset and off."""
+    screen, ms, settings = _setup()
+    try:
+        # defaults are fog off (both ranges at max)
+        assert settings.fog_sight == config.FOG_MAX_HOPS
+        assert settings.fog_scout == config.FOG_MAX_HOPS
+        # click on -> applies the preset ranges
+        _click_key(screen, ms, settings, "fog_of_war")
+        assert (settings.fog_sight, settings.fog_scout) == (config.FOG_ON_SIGHT, config.FOG_ON_SCOUT)
+        # click off -> both back to max (full visibility)
+        _click_key(screen, ms, settings, "fog_of_war")
+        assert settings.fog_sight == config.FOG_MAX_HOPS
+        assert settings.fog_scout == config.FOG_MAX_HOPS
+    finally:
+        pygame.quit()
+
+
+def test_basic_fog_checkbox_reflects_slider_state():
+    """The checkbox is derived from the ranges, so an Advanced edit that leaves fog
+    partially on reads as checked — clicking it then turns fog fully off."""
+    screen, ms, settings = _setup()
+    try:
+        settings.fog_sight, settings.fog_scout = 2, 4   # as if set via Advanced sliders
+        _click_key(screen, ms, settings, "fog_of_war")   # shows checked -> click = off
+        assert settings.fog_sight == config.FOG_MAX_HOPS
+        assert settings.fog_scout == config.FOG_MAX_HOPS
+    finally:
+        pygame.quit()
+
+
 def _drag_slider(screen, ms, settings, key, frac):
     """Draw, then click a slider `frac` of the way along its track (0..1)."""
     menu.draw(screen, ms, settings)

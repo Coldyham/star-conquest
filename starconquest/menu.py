@@ -88,8 +88,15 @@ _ADV_ECON = (
 _ADV_COMBAT = (
     ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
 )
+# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
+# detail); scout floors at 1 so immediate neighbours stay visible enough to target
+# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
+_ADV_FOG = (
+    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
+    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
+)
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
-_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT
+_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT + _ADV_FOG
 _AI_PARAMS = (
     ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
     ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
@@ -100,7 +107,7 @@ _AI_PARAMS = (
 
 # key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
 _SLIDER_SPECS: dict[str, tuple] = {}
-for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT):
+for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT, _ADV_FOG):
     for _key, _label, _attr, _lo, _hi, _step, _is_int in _grp:
         _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
 for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
@@ -159,6 +166,14 @@ def _ai_seats(settings: Settings) -> list[int]:
     return list(range(start, settings.players + 1))
 
 
+def _fog_off(settings: Settings) -> bool:
+    """True when both fog ranges sit at max — full visibility. The Basic-tab
+    "Fog of war" checkbox is the inverse of this, derived live from the sliders so
+    editing them on the Advanced tab flips the checkbox automatically."""
+    return (settings.fog_sight >= config.FOG_MAX_HOPS
+            and settings.fog_scout >= config.FOG_MAX_HOPS)
+
+
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
@@ -174,7 +189,7 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 
     _draw_tabs(surface, ms, w)
 
-    panel = pygame.Rect(w // 2 - 280, 208, 560, 372)
+    panel = pygame.Rect(w // 2 - 280, 208, 560, 496)
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
     pygame.draw.rect(surface, _PANEL_BORDER, panel, 1, border_radius=10)
 
@@ -185,11 +200,11 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     elif ms.tab == "ai":
         _draw_ai(surface, ms, settings, panel)
 
-    _file_control(surface, ms, w, 596)
+    _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, w)
     if ms.status and pygame.time.get_ticks() < ms.status_until:
         _text(surface, f["small"], ms.status,
-              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 726))
+              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
 
@@ -242,6 +257,12 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
 
     _row_label(surface, "Autoplay", left, y)
     _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
+    y += _ROW_H
+
+    # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
+    # State is derived from the sliders, so it tracks Advanced edits automatically.
+    _row_label(surface, "Fog of war", left, y)
+    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -250,11 +271,13 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     lx = panel.x + pad
     rx = lx + col_w + pad
 
-    y = panel.y + 16                                   # LEFT: Map + Travel
+    y = panel.y + 16                                   # LEFT: Map + Travel + Visibility
     y = _section(surface, "Map", lx, y)
     y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+    y = _section(surface, "Visibility", lx, y)
+    y = _sliders(surface, ms, settings, _ADV_FOG, lx, y, col_w)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM,
           midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
@@ -364,7 +387,9 @@ def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width) -> None
     """Two-line slider: label + value on top, a full-width track below."""
     f = _fonts()
     _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + 8))
-    _text(surface, f["small"], _fmt(value, is_int), config.COLOR_TEXT, midright=(x + width, y + 8))
+    # a fog range at its max means "unlimited" — read it as "All", not a bare number
+    vtext = "All" if key.startswith("adv_fog_") and value >= hi else _fmt(value, is_int)
+    _text(surface, f["small"], vtext, config.COLOR_TEXT, midright=(x + width, y + 8))
 
     cy = y + 26
     pygame.draw.rect(surface, _TROUGH, pygame.Rect(x, cy - 3, width, 6), border_radius=3)
@@ -513,9 +538,46 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 
 
 def _draw_start(surface, ms: MenuState, w: int) -> None:
-    rect = pygame.Rect(w // 2 - 110, 654, 220, 46)
+    rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER,
             tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+
+
+# --------------------------------------------------------------------------- #
+# Resume prompt — a boot-time modal offered when the last game was left unfinished
+# --------------------------------------------------------------------------- #
+def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
+    """(resume, new-game) button rects — shared by the drawer and the hit-tester."""
+    w, h = surface.get_size()
+    cx, cy = w // 2, h // 2
+    bw, bh = 200, 42
+    resume_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
+    new_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    return resume_r, new_r
+
+
+def draw_resume_prompt(surface, log) -> None:
+    """Modal veil offering to resume ``log`` (an in-progress match), over the menu."""
+    w, h = surface.get_size()
+    f = _fonts()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
+          center=(w // 2, h // 2 - 52))
+    st = log.settings
+    detail = (f"turn {log.turn_count} · {st.get('players', '?')} players · "
+              f"{st.get('mode', 'random')} map")
+    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 18))
+
+    resume_r, new_r = resume_prompt_buttons(surface)
+    for rect, label, fill, edge in (
+        (resume_r, "Resume (Y/Enter)", _START_FILL, _START_BORDER),
+        (new_r, "New game (N/Esc)", _BTN_FILL, _BTN_BORDER),
+    ):
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+        _text(surface, f["normal"], label, config.COLOR_TEXT, center=rect.center)
 
 
 # --------------------------------------------------------------------------- #
@@ -640,6 +702,12 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
+    elif hit == "fog_of_war":
+        if _fog_off(settings):                     # off -> on: apply the fog preset
+            settings.fog_sight = config.FOG_ON_SIGHT
+            settings.fog_scout = config.FOG_ON_SCOUT
+        else:                                      # on -> off: full visibility
+            settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "filename_field":
         ms.editing_filename = True
     elif hit == "save_settings":

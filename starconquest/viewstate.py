@@ -41,9 +41,40 @@ class Ui:
     # so it lives here rather than in the pure GameState. Each turn a rule
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
+    sel_forward: Optional[int] = None   # source id of the rule being edited, if any
+    # Fog of war (human-only, so it lives here not in GameState). Recomputed each
+    # turn by main.refresh_fog from the human's territory; render reads these.
+    #   visible      — systems in full detail this turn (owner + ship counts)
+    #   seen         — every system ever perceived; the rest of `seen` (minus
+    #                  `visible`) renders as a grey "?" silhouette, memory included
+    #   player_intel — last-known (systems, ships, prod) per rival ever sighted,
+    #                  for the fogged scoreboard's frozen rows
+    visible: set[int] = field(default_factory=set)
+    seen: set[int] = field(default_factory=set)
+    player_intel: dict[int, tuple[int, int, float]] = field(default_factory=dict)
     autoplay: bool = False
+    # Play/pause: while True, main steps turns repeatedly (as if tapping Enter),
+    # toggled by P or the play/pause button. Distinct from autoplay, which hands
+    # the human seat to the AI; here the human's own orders still run each step.
+    playing: bool = False
     show_help: bool = True
+    # History mode: a modal review scene for scrubbing back through the recorded
+    # match. While active, main draws a reconstructed past board (not the live
+    # `state`) and input suppresses board interaction. `history_turn` is the
+    # viewed turn (0 == opening position .. `history_max` == latest recorded);
+    # `history_max` mirrors the log's turn count so input can map a scrubber
+    # click to a turn without needing the log. `history_reveal` lifts fog for a
+    # finished game (see behind the fog of war). `dragging_scrubber` tracks a
+    # held mouse-drag on the scrubber track.
+    history: bool = False
+    history_turn: int = 0
+    history_max: int = 0
+    history_reveal: bool = False
+    dragging_scrubber: bool = False
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
+    # autoplay drives turns itself); tested by input, like end_turn_rect.
+    play_pause_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the queued-orders panel, rebuilt by render each frame and
     # tested by input (same store-rect-then-test handoff as end_turn_rect).
     # Parallel to `pending`: entry i is (row_rect, delete_rect), each (x,y,w,h).
@@ -65,6 +96,19 @@ class Ui:
     # Persistent side-panel button to clear every standing forward rule at once;
     # drawn (and hit-tested) only while any rule exists.
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Hit-rects for auto-forward rule rows, listed below the queued orders:
+    # (source_id, row_rect, delete_rect) tuples.
+    forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
+        field(default_factory=list)
+    )
+    # History-mode hit-rects, rebuilt by render each frame and tested by input
+    # (same store-rect-then-test handoff as end_turn_rect). `history_button_rect`
+    # is the bottom-bar (and game-over overlay) toggle; the others are live only
+    # while `history` is on. `scrubber_rect` is the draggable track.
+    history_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
@@ -78,7 +122,8 @@ class Ui:
     def step_count(self, state: GameState, delta: int) -> None:
         """Nudge the ship count being adjusted by ``delta`` — the shared logic
         behind both the mouse wheel and the on-lane −/+ buttons. Applies to the
-        active send (CHOOSING) or the queued order being edited."""
+        active send (CHOOSING — send count or forward keep), the queued order
+        being edited, or the standing auto-forward rule being edited."""
         if self.mode == CHOOSING and self.forward_armed:
             self.set_keep(state, self.keep + delta)          # forward: adjust keep
         elif self.mode == CHOOSING and self.selected is not None:
@@ -88,6 +133,13 @@ class Ui:
             o = self.pending[self.sel_order]
             cap = self.available(state, o.source_id) + o.ships
             o.ships = max(1, min(cap, o.ships + delta))
+        elif self.sel_forward is not None and self.sel_forward in self.auto_forward:
+            # adjust a standing rule's `keep` in place; it ranges over the
+            # source's whole garrison (0 keeps nothing, all forwards nothing)
+            src = self.sel_forward
+            dest, keep = self.auto_forward[src]
+            cap = state.systems[src].ships if src in state.systems else keep
+            self.auto_forward[src] = (dest, max(0, min(cap, keep + delta)))
 
     # -- active send (CHOOSING) --------------------------------------------- #
     def _active_cap(self, state: GameState) -> int:
@@ -105,19 +157,24 @@ class Ui:
     def begin_send(self, state: GameState, dest: int, forward: bool = False) -> None:
         """Commit a send-all order to ``dest`` and open the adjust popup. No
         confirmation click: the order is live immediately (retune or cancel it
-        via the popup). ``forward`` arms it as a standing rule from the start."""
+        via the popup). ``forward`` arms it as a standing rule from the start —
+        allowed even from an empty system (the rule forwards future production),
+        whereas a one-shot send needs ships free right now."""
         if self.selected is None:
             return
         avail = self.available(state, self.selected)
-        if avail <= 0:
+        if avail <= 0 and not forward:
             return
         self.dest = dest
         self.mode = CHOOSING
         self.forward_armed = False
-        self.chosen = avail
+        self.chosen = max(0, avail)
         self.keep = 0
-        self.pending.append(Order(self.human_id, self.selected, dest, avail))
-        self.sel_order = len(self.pending) - 1
+        if avail > 0:
+            self.pending.append(Order(self.human_id, self.selected, dest, avail))
+            self.sel_order = len(self.pending) - 1
+        else:
+            self.sel_order = None   # nothing to send now; forward-only rule
         if forward:
             self.toggle_forward(state)
 
@@ -126,7 +183,9 @@ class Ui:
         Send-tab only — forwarding is sized by `keep` (see set_keep)."""
         if self.mode != CHOOSING or self.forward_armed or self.selected is None:
             return
-        self.chosen = max(1, min(self._active_cap(state), count))
+        cap = self._active_cap(state)
+        lo = 1 if cap > 0 else 0          # an empty source sends nothing (0), not 1
+        self.chosen = max(lo, min(cap, count))
         if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             self.pending[self.sel_order].ships = self.chosen
 
@@ -166,9 +225,14 @@ class Ui:
             self.auto_forward[self.selected] = (self.dest, self.keep)
         else:
             self.auto_forward.pop(self.selected, None)
-            self.chosen = max(1, min(self._active_cap(state), self.chosen))
-            self.pending.append(Order(self.human_id, self.selected, self.dest, self.chosen))
-            self.sel_order = len(self.pending) - 1
+            cap = self._active_cap(state)
+            if cap > 0:
+                self.chosen = max(1, min(cap, self.chosen))
+                self.pending.append(Order(self.human_id, self.selected, self.dest, self.chosen))
+                self.sel_order = len(self.pending) - 1
+            else:
+                self.chosen = 0          # empty source: no one-shot order to queue
+                self.sel_order = None
 
     def set_forward_mode(self, state: GameState, armed: bool) -> None:
         """Switch the popup's Send/Forward tab explicitly (idempotent)."""
@@ -219,7 +283,16 @@ class Ui:
         exclusive, so this drops any in-progress source/destination selection.
         """
         self.reset_selection()
+        self.sel_forward = None
         self.sel_order = i
+
+    def select_forward(self, sid: int) -> None:
+        """Pick a standing auto-forward rule to edit (scroll adjusts its
+        `keep`, X removes it) — same in-place-edit pattern as `select_order`.
+        """
+        self.reset_selection()
+        self.sel_order = None
+        self.sel_forward = sid
 
     def clear_pending(self) -> None:
         self.pending.clear()
@@ -228,3 +301,5 @@ class Ui:
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""
         self.auto_forward.pop(sid, None)
+        if self.sel_forward == sid:
+            self.sel_forward = None
