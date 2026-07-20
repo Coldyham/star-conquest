@@ -225,6 +225,52 @@ def test_shift_click_neighbour_arms_forward_rule():
         pygame.quit()
 
 
+def test_drag_send_popup_repositions_it():
+    """Grabbing the popup background (not a button) starts a drag; motion moves it
+    and pins popup_pos, and button-up ends the drag."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert ui.mode == CHOOSING and ui.popup_pos is None   # auto-placed
+
+        ui.popup_rect = (100, 100, 120, 200)   # normally recorded by render
+        _click_pos(state, ui, (110, 110))      # grab the background
+        assert ui.dragging_popup is True and ui.popup_drag_off == (10, 10)
+
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(160, 180)), state, ui
+        )
+        assert ui.popup_pos == (150, 170)      # moved by the drag, offset preserved
+
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(160, 180), button=1), state, ui
+        )
+        assert ui.dragging_popup is False
+    finally:
+        pygame.quit()
+
+
+def test_popup_button_click_does_not_start_drag():
+    """A click on a popup button acts on that button and never begins a drag."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+
+        ui.popup_rect = (100, 100, 120, 200)
+        ui.cancel_rect = (110, 260, 100, 20)   # a button inside the popup
+        _click_pos(state, ui, (150, 270))      # click the Cancel button
+        assert ui.dragging_popup is False
+        assert ui.pending == []                # cancelled, not dragged
+    finally:
+        pygame.quit()
+
+
 def test_shift_click_arms_forward_rule_from_empty_system():
     """A system with no ships free right now can still get a standing rule set
     up in advance, so future production forwards automatically. Shift+click arms

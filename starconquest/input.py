@@ -108,7 +108,11 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
 
     if event.type == pygame.MOUSEMOTION:
-        ui.hover = pick_node(state, ui, event.pos)
+        if ui.dragging_popup:            # dragging the send popup by its background
+            ui.popup_pos = (event.pos[0] - ui.popup_drag_off[0],
+                            event.pos[1] - ui.popup_drag_off[1])
+        else:
+            ui.hover = pick_node(state, ui, event.pos)
         return None
 
     if event.type == pygame.KEYDOWN:
@@ -116,6 +120,10 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 
     if event.type == pygame.MOUSEWHEEL:
         ui.step_count(state, event.y)
+        return None
+
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        ui.dragging_popup = False
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
@@ -203,6 +211,14 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             return None
         if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
             ui.cancel_send()
+            return None
+        # a click on the popup background (none of the buttons above) grabs it to
+        # drag — lets the user move it off anything it's covering
+        if ui.popup_rect[2] and _point_in_rect(pos, ui.popup_rect):
+            px, py = ui.popup_rect[0], ui.popup_rect[1]
+            ui.dragging_popup = True
+            ui.popup_drag_off = (pos[0] - px, pos[1] - py)
+            ui.popup_pos = (px, py)
             return None
 
     # Clicks in the queued-orders panel take priority: a delete button removes

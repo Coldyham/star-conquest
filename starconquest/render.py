@@ -279,6 +279,38 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
         _draw_count_stepper(surface, center, keep, config.COLOR_SELECT, ui, label=f"keep {keep}")
 
 
+def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tuple[int, int]:
+    """Auto-place the popup: try the four sides of the lane midpoint (preferring
+    above, then right/left/below), clamp each into the play area, and pick the one
+    covering the fewest system nodes so it stays clear of useful info. The user can
+    still drag it elsewhere (see ui.popup_pos)."""
+    sw, sh = surface.get_size()
+    x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
+    y_lo, y_hi = config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h
+    mx, my = mid
+    m = 14
+    candidates = (
+        (mx - w // 2, my - h - m),    # above (preferred — matches the old anchor)
+        (mx + m, my - h // 2),        # right
+        (mx - w - m, my - h // 2),    # left
+        (mx - w // 2, my + m),        # below
+    )
+    nodes = [(ui.view.to_screen(s.pos), config.node_radius(s.production) + 6)
+             for s in state.systems.values()]
+    best, best_score = (x_lo, y_lo), None
+    for cx, cy in candidates:
+        x = _clamp(cx, x_lo, x_hi)
+        y = _clamp(cy, y_lo, y_hi)
+        rect = pygame.Rect(x, y, w, h)
+        score = sum(1 for (px, py), r in nodes
+                    if rect.inflate(2 * r, 2 * r).collidepoint(px, py))
+        if best_score is None or score < best_score:
+            best, best_score = (x, y), score
+            if score == 0:
+                break                 # a fully clear spot — take it
+    return best
+
+
 def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     """The on-map action panel opened when a destination is picked. Send/Forward
     tabs choose between a one-shot send (auto-committed, default send-all, retuned
@@ -301,10 +333,17 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     rows = 6
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
-    # anchor above the lane midpoint, clamped to the play area
+    # placement: honour a user-dragged position (clamped to stay reachable),
+    # else auto-anchor to whichever side of the lane covers the fewest nodes
     sw, sh = surface.get_size()
-    x = _clamp(mid[0] - w // 2, 0, sw - config.HUD_RIGHT_W - w)
-    y = _clamp(mid[1] - h - 14, config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h)
+    x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
+    y_lo, y_hi = config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h
+    if ui.popup_pos is not None:
+        x = _clamp(ui.popup_pos[0], x_lo, x_hi)
+        y = _clamp(ui.popup_pos[1], y_lo, y_hi)
+    else:
+        x, y = _popup_anchor(surface, state, ui, mid, w, h)
+    ui.popup_rect = (x, y, w, h)
 
     panel = pygame.Rect(x, y, w, h)
     pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=8)
@@ -714,9 +753,9 @@ def _hint(ui: Ui) -> str:
     if ui.autoplay:
         return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
     if ui.mode == CHOOSING and ui.forward_armed:
-        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Cancel  ·  right-click/Esc: close"
+        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Cancel  ·  drag box to move  ·  right-click/Esc: close"
     if ui.mode == CHOOSING:
-        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Cancel  ·  right-click/Esc: keep & close"
+        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Cancel  ·  drag box to move  ·  right-click/Esc: keep & close"
     if ui.sel_order is not None:
         return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
     if ui.sel_forward is not None:

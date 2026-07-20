@@ -93,6 +93,15 @@ class Ui:
     send_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     send_half_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Send-popup placement. By default render auto-anchors it to the side of the
+    # lane that covers the fewest system nodes; once the user drags it, popup_pos
+    # pins the top-left (cleared on a new target so auto-placement resumes).
+    # popup_rect is the full panel rect (render writes it; input hit-tests it to
+    # start a drag on the background — away from the buttons).
+    popup_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    popup_pos: Optional[tuple[int, int]] = None
+    dragging_popup: bool = False
+    popup_drag_off: tuple[int, int] = (0, 0)
     # Persistent side-panel button to clear every standing forward rule at once;
     # drawn (and hit-tested) only while any rule exists.
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -170,6 +179,8 @@ class Ui:
         self.forward_armed = False
         self.chosen = max(0, avail)
         self.keep = 0
+        self.popup_pos = None            # fresh target -> auto-place the popup
+        self.dragging_popup = False
         if avail > 0:
             self.pending.append(Order(self.human_id, self.selected, dest, avail))
             self.sel_order = len(self.pending) - 1
@@ -262,6 +273,8 @@ class Ui:
         self.dest = None
         self.chosen = 0
         self.keep = 0
+        self.popup_pos = None
+        self.dragging_popup = False
         self.mode = SELECTED if self.selected is not None else IDLE
 
     # -- selection helpers -------------------------------------------------- #
@@ -275,6 +288,8 @@ class Ui:
         self.keep = 0
         self.sel_order = None
         self.forward_armed = False
+        self.popup_pos = None
+        self.dragging_popup = False
 
     def select_order(self, i: int) -> None:
         """Pick a queued order to edit (scroll adjusts it, X removes it).
