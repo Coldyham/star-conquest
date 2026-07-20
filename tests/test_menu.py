@@ -40,6 +40,12 @@ def _keydown(ms, settings, k, unicode=""):
     return menu.handle_event(ev, ms, settings)
 
 
+def _textinput(ms, settings, text):
+    """Character entry as the OS / Android soft keyboard delivers it: TEXTINPUT."""
+    ev = pygame.event.Event(pygame.TEXTINPUT, text=text)
+    return menu.handle_event(ev, ms, settings)
+
+
 def test_player_stepper_and_node_floor():
     screen, ms, settings = _setup()
     try:
@@ -99,8 +105,7 @@ def test_seed_random_and_text_entry():
         for _ in range(menu._SEED_MAX_LEN + 1):
             _keydown(ms, settings, pygame.K_BACKSPACE)
         assert ms.seed_text == "" and settings.seed is None
-        for ch in "1234":
-            _keydown(ms, settings, pygame.K_0, unicode=ch)
+        _textinput(ms, settings, "1234")
         assert ms.seed_text == "1234" and settings.seed == 1234
     finally:
         pygame.quit()

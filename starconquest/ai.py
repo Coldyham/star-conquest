@@ -22,10 +22,13 @@ from typing import Callable
 
 from . import config
 from .model import AiParams, GameState, Order
+from .paths import data_dir
 
-# User-supplied strategies live in a gitignored dir beside the repo (mirrors
-# menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without touching src.
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+# User-supplied strategies live in a gitignored dir under the writable data dir
+# (mirrors menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without
+# touching src. On Android this is the app-private dir, a real filesystem, so a
+# strategy dropped in there is still importable by path.
+MODELS_DIR = data_dir() / "models"
 
 # A seat's decision function: same shape the engine injects as `decide`.
 DecideFn = Callable[[GameState, int], list[Order]]

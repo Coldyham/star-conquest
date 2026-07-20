@@ -16,7 +16,7 @@ import copy
 
 import pygame
 
-from starconquest import ai, config, engine, fog, mapgen, menu, render, replay
+from starconquest import ai, config, engine, fog, mapgen, menu, paths, render, replay
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -193,8 +193,18 @@ def main() -> None:
     pygame.init()
     # Resizable: pygame grows the surface with the window, so we never re-call
     # set_mode (a redundant call fights the WM on X11 and snaps the window back).
-    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), pygame.RESIZABLE)
+    # On Android the surface is the whole screen; RESIZABLE is a harmless no-op.
+    flags = pygame.RESIZABLE if not paths.is_android() else 0
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), flags)
     pygame.display.set_caption("Star Conquest")
+    # Scale the whole UI to the real surface before the first frame: fit the
+    # baseline design size into the actual screen, then boost on touch so hit
+    # targets are finger-sized. Fonts are built lazily from these sizes, so this
+    # must run before any draw.
+    sw, sh = pygame.display.get_surface().get_size()
+    fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
+    boost = config.TOUCH_UI_SCALE if paths.is_android() else 1.0
+    config.apply_ui_scale(max(1.0, fit) * boost)
     clock = pygame.time.Clock()
 
     # Two scenes share the one window: the setup menu and the game board. The
@@ -237,6 +247,11 @@ def main() -> None:
             if state is not None and ui is not None:
                 ui.view = build_view(state)
         for event in pygame.event.get():
+            # Android hardware/gesture Back arrives as K_AC_BACK; normalise it to
+            # Esc so every existing "cancel / back out" handler below just works.
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_AC_BACK:
+                event = pygame.event.Event(
+                    pygame.KEYDOWN, key=pygame.K_ESCAPE, unicode="\x1b", mod=0)
             if confirm_quit:
                 # Modal: swallow all other input until the user answers.
                 if event.type == pygame.QUIT:
@@ -309,7 +324,10 @@ def main() -> None:
                 confirm_quit = True
                 continue
 
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+            if (event.type == pygame.KEYDOWN and event.key == pygame.K_F11
+                    and not paths.is_android()):
+                # Desktop-only: mobile is already fullscreen and re-calling
+                # set_mode mid-run is fragile on Android's SDL.
                 fullscreen = not fullscreen
                 if fullscreen:
                     windowed_size = (config.SCREEN_W, config.SCREEN_H)

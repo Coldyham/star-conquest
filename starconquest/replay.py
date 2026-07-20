@@ -40,13 +40,15 @@ from typing import Callable, Optional
 
 from . import engine
 from .model import GameState, Order
+from .paths import data_dir
 from .settings import Settings, build_state
 
 FORMAT_VERSION = 1
 
-# Saved matches live beside the repo, not the cwd, so they never litter the tree
-# wherever the game is launched from (same anchoring as saves/ and models/).
-GAMES_DIR = Path(__file__).resolve().parent.parent / "games"
+# Saved matches live under the writable data dir (repo root on desktop, the
+# app-private dir on Android), not the cwd, so they never litter the tree wherever
+# the game is launched from (same anchoring as saves/ and models/).
+GAMES_DIR = data_dir() / "games"
 
 # A decision function, same shape the engine injects (see engine.DecideFn).
 DecideFn = Callable[[GameState, int], list[Order]]

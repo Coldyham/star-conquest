@@ -118,6 +118,10 @@ class Ui:
     scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Game-over overlay buttons (touch-reachable equivalents of the R/M keys),
+    # rebuilt by render each frame and tested by input like the rects above.
+    restart_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    menu_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

@@ -79,6 +79,9 @@ starconquest/
   input.py       # event handling (pygame)
   menu.py        # pre-game setup screen (pygame)
   viewstate.py   # transient in-game UI state
+  paths.py       # where writable data lives (repo root, or app-private on Android)
+  uifont.py      # bundled-font loader (falls back to a system monospace)
+  assets/        # bundled DejaVu Sans Mono TTF (+ licence)
 main.py          # entry point + menu/game scene loop
 tests/           # pytest suite + sim.py headless AI-vs-AI harness
 ```
@@ -88,6 +91,33 @@ uv run pytest                          # full test suite
 uv run python -m tests.sim --verbose   # watch one AI-vs-AI game in the terminal
 uv run python -m tests.sim --trials 200   # batch stats (winners, length, timeouts)
 ```
+
+## Android (sideload)
+
+The same source builds an Android APK via [Buildozer] (python-for-android). The
+pure core is untouched; only the pygame shell adapts — touch input, a DPI/scale
+layer, a bundled font, and writing saves to app-private storage (see
+[`paths.py`](starconquest/paths.py)). `pygame-ce` is a drop-in for `pygame` with a
+working p4a recipe, so no game code changes between desktop and phone.
+
+```sh
+pipx install buildozer          # or: pip install --user buildozer
+sudo apt install -y openjdk-17-jdk autoconf libtool pkg-config \
+    zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev   # p4a build deps
+buildozer android debug         # first run downloads the Android SDK/NDK (slow)
+adb install -r bin/starconquest-*-debug.apk
+```
+
+The build is configured in [`buildozer.spec`](buildozer.spec) (landscape,
+fullscreen, arm64-v8a + armeabi-v7a, no permissions — saves live in internal
+app-private storage). On-device: tap a system then a neighbour to send (a popup
+tunes the count with −/+ and Half/All), the on-screen **End turn** / **History**
+buttons and the hardware **Back** key replace the keyboard shortcuts, and tapping
+a text field raises the soft keyboard. Drop-in `models/` AIs still work — push a
+`.py` into the app's `models/` dir. The autoplay/demo `tests/sim` harness is
+desktop-only and isn't bundled.
+
+[Buildozer]: https://buildozer.readthedocs.io/
 
 ## Roadmap (not yet built)
 

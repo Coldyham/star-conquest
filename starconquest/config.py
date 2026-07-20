@@ -132,6 +132,53 @@ FONT_SIZE_BIG = 30
 
 FPS = 60
 
+# --------------------------------------------------------------------------- #
+# UI scaling (DPI / touch)
+# --------------------------------------------------------------------------- #
+# The pixel/point constants above are tuned for this baseline resolution. On a
+# higher-resolution or touch display, `apply_ui_scale()` rescales them so text
+# stays legible and hit targets stay finger-sized — without touching any call
+# site, since every module reads `config.X` live at call time.
+BASE_SCREEN_W = 1440
+BASE_SCREEN_H = 960
+TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
+
+ui_scale = 1.0              # current factor; 1.0 == the baseline above
+
+# Pixel/point constants that scale with the UI. Snapshotted at import so repeated
+# `apply_ui_scale()` calls always scale from the baseline and never compound.
+_SCALABLE = (
+    "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W",
+    "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "FLEET_SIZE",
+    "LANE_PICK_DIST", "STEPPER_SIZE",
+    "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
+    "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
+)
+_BASE_VALUES = {name: globals()[name] for name in _SCALABLE}
+
+
+def apply_ui_scale(factor: float) -> None:
+    """Rescale every UI pixel/point constant to ``factor``× its baseline value.
+
+    The result depends only on ``factor``, not on how many times this runs — each
+    constant is recomputed from its import-time baseline. Fonts are built lazily
+    from these sizes, so call this before the first frame is drawn (``main`` does,
+    right after ``set_mode``).
+    """
+    global ui_scale
+    ui_scale = max(0.1, factor)
+    for name, base in _BASE_VALUES.items():
+        globals()[name] = max(1, round(base * ui_scale))
+
+
+def s(px: float) -> int:
+    """Scale a one-off pixel literal by the current UI scale (>= 1px).
+
+    For call-site layout values that don't warrant their own named constant
+    (e.g. the menu's row pitches), so they scale with everything else.
+    """
+    return max(1, round(px * ui_scale))
+
 
 def play_rect() -> tuple[int, int, int, int]:
     """The map viewport rectangle: full width minus the info panel, between the bars."""

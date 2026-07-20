@@ -36,8 +36,9 @@ from typing import Optional
 
 import pygame
 
-from . import ai, config
+from . import ai, config, uifont
 from .model import AiParams
+from .paths import data_dir
 from .settings import Settings
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -62,9 +63,10 @@ _HEADER_H = 24      # height of a section header
 _SEED_MAX_LEN = 7
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
-# Saved configs live in a gitignored dir beside the repo (not the cwd), so they
-# never litter the tree wherever the game is launched from.
-_SAVE_DIR = Path(__file__).resolve().parent.parent / "saves"
+# Saved configs live in a gitignored dir under the writable data dir (repo root
+# on desktop, the app-private dir on Android), not the cwd, so they never litter
+# the tree wherever the game is launched from.
+_SAVE_DIR = data_dir() / "saves"
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
@@ -114,16 +116,32 @@ for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
     _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
 
 _FONTS: dict[str, pygame.font.Font] = {}
+_MODAL_FONTS: dict[str, object] = {}
 
 
 def _fonts() -> dict[str, pygame.font.Font]:
+    # Baseline (design-resolution) sizes: the menu is laid out on a fixed
+    # BASE_SCREEN canvas that `draw` then scales to the real screen, so these must
+    # NOT use the DPI-scaled config.FONT_SIZE* (that would scale twice).
     if not _FONTS:
-        name = "consolas,menlo,monospace"
-        _FONTS["title"] = pygame.font.SysFont(name, 44, bold=True)
-        _FONTS["big"] = pygame.font.SysFont(name, config.FONT_SIZE_BIG, bold=True)
-        _FONTS["normal"] = pygame.font.SysFont(name, config.FONT_SIZE)
-        _FONTS["small"] = pygame.font.SysFont(name, config.FONT_SIZE_SMALL)
+        _FONTS["title"] = uifont.load(44, bold=True)
+        _FONTS["big"] = uifont.load(30, bold=True)
+        _FONTS["normal"] = uifont.load(18)
+        _FONTS["small"] = uifont.load(14)
     return _FONTS
+
+
+def _modal_fonts() -> dict[str, pygame.font.Font]:
+    """Fonts for the real-screen boot modal (resume prompt), which is drawn onto
+    the actual surface rather than the scaled canvas — so these DO use the
+    DPI-scaled sizes to stay legible on a phone. Rebuilt if the scale changes."""
+    if _MODAL_FONTS.get("_scale") != config.ui_scale:
+        _MODAL_FONTS.clear()
+        _MODAL_FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
+        _MODAL_FONTS["normal"] = uifont.load(config.FONT_SIZE)
+        _MODAL_FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
+        _MODAL_FONTS["_scale"] = config.ui_scale
+    return _MODAL_FONTS  # type: ignore[return-value]
 
 
 def _text(surface, font, s, color, center=None, midleft=None, midright=None):
@@ -158,6 +176,10 @@ class MenuState:
         default_factory=lambda: ["heuristic"]
     )
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
+    # Transform from real-screen coords to the fixed menu canvas, set by draw() and
+    # inverted by handle_event so clicks land on the widget rects (in canvas space).
+    canvas_scale: float = 1.0
+    canvas_offset: tuple[int, int] = (0, 0)
 
 
 def _ai_seats(settings: Settings) -> list[int]:
@@ -177,7 +199,39 @@ def _fog_off(settings: Settings) -> bool:
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
+_CANVAS: Optional[pygame.Surface] = None
+
+
+def _get_canvas() -> pygame.Surface:
+    """The fixed-size surface the menu is always laid out on (design resolution)."""
+    global _CANVAS
+    size = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    if _CANVAS is None or _CANVAS.get_size() != size:
+        _CANVAS = pygame.Surface(size)
+    return _CANVAS
+
+
 def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
+    """Render the menu on a fixed design-resolution canvas, then scale it to fit
+    the real surface (letterboxed, aspect-preserved). One transform keeps the whole
+    menu on-screen and correctly proportioned at any resolution/DPI without
+    per-widget scaling; `handle_event` inverts it so clicks hit the right widgets."""
+    canvas = _get_canvas()
+    _draw_menu(canvas, ms, settings)
+    sw, sh = surface.get_size()
+    cw, ch = canvas.get_size()
+    scale = min(sw / cw, sh / ch)
+    dw, dh = round(cw * scale), round(ch * scale)
+    ox, oy = (sw - dw) // 2, (sh - dh) // 2
+    ms.canvas_scale, ms.canvas_offset = scale, (ox, oy)
+    if (dw, dh) == (cw, ch):
+        surface.blit(canvas, (ox, oy))
+    else:
+        surface.fill(config.COLOR_BG)   # letterbox bars
+        surface.blit(pygame.transform.smoothscale(canvas, (dw, dh)), (ox, oy))
+
+
+def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     surface.fill(config.COLOR_BG)
     ms.rects.clear()
     w, h = surface.get_size()
@@ -547,28 +601,30 @@ def _draw_start(surface, ms: MenuState, w: int) -> None:
 # Resume prompt — a boot-time modal offered when the last game was left unfinished
 # --------------------------------------------------------------------------- #
 def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
-    """(resume, new-game) button rects — shared by the drawer and the hit-tester."""
+    """(resume, new-game) button rects — shared by the drawer and the hit-tester.
+    Drawn on the real surface (not the canvas), so sizes scale via config.s."""
     w, h = surface.get_size()
     cx, cy = w // 2, h // 2
-    bw, bh = 200, 42
-    resume_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
-    new_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    bw, bh, gap = config.s(200), config.s(42), config.s(12)
+    resume_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
+    new_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
     return resume_r, new_r
 
 
 def draw_resume_prompt(surface, log) -> None:
     """Modal veil offering to resume ``log`` (an in-progress match), over the menu."""
     w, h = surface.get_size()
-    f = _fonts()
+    f = _modal_fonts()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 200))
     surface.blit(veil, (0, 0))
     _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
-          center=(w // 2, h // 2 - 52))
+          center=(w // 2, h // 2 - config.s(52)))
     st = log.settings
     detail = (f"turn {log.turn_count} · {st.get('players', '?')} players · "
               f"{st.get('mode', 'random')} map")
-    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 18))
+    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM,
+          center=(w // 2, h // 2 - config.s(18)))
 
     resume_r, new_r = resume_prompt_buttons(surface)
     for rect, label, fill, edge in (
@@ -584,6 +640,31 @@ def draw_resume_prompt(surface, log) -> None:
 # Input
 # --------------------------------------------------------------------------- #
 def handle_event(event, ms: MenuState, settings: Settings):
+    # Map pointer coords from the real screen back into canvas space (the widget
+    # rects live in canvas space), then dispatch. Also toggle the Android soft
+    # keyboard as a text field gains/loses focus (a harmless SDL no-op on desktop).
+    event = _to_canvas_event(event, ms)
+    was_editing = ms.editing_seed or ms.editing_filename
+    result = _dispatch(event, ms, settings)
+    _sync_text_input(ms, was_editing)
+    return result
+
+
+def _to_canvas_event(event, ms: MenuState):
+    """Return ``event`` with any pointer position mapped from screen to canvas
+    space (inverse of draw()'s fit transform). Non-pointer events pass through."""
+    if event.type not in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                          pygame.MOUSEMOTION):
+        return event
+    ox, oy = ms.canvas_offset
+    scale = ms.canvas_scale or 1.0
+    x, y = event.pos
+    data = dict(event.dict)
+    data["pos"] = (round((x - ox) / scale), round((y - oy) / scale))
+    return pygame.event.Event(event.type, data)
+
+
+def _dispatch(event, ms: MenuState, settings: Settings):
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -592,8 +673,38 @@ def handle_event(event, ms: MenuState, settings: Settings):
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ms.drag_key = None
         return None
+    if event.type == pygame.TEXTINPUT:      # characters (soft keyboard or physical)
+        return _handle_text_input(event.text, ms, settings)
     if event.type == pygame.KEYDOWN:
         return _handle_key(event, ms, settings)
+    return None
+
+
+def _sync_text_input(ms: MenuState, was_editing: bool) -> None:
+    """Raise/dismiss the on-screen keyboard as a text field gains/loses focus.
+    On Android SDL shows the IME; on desktop it just toggles TEXTINPUT delivery.
+    Guarded so a headless/uninitialised video subsystem never raises."""
+    now_editing = ms.editing_seed or ms.editing_filename
+    if now_editing == was_editing:
+        return
+    try:
+        pygame.key.start_text_input() if now_editing else pygame.key.stop_text_input()
+    except pygame.error:
+        pass
+
+
+def _handle_text_input(text: str, ms: MenuState, settings: Settings):
+    """Character entry from the OS — physical keys and the Android soft keyboard
+    both arrive here as TEXTINPUT. Control keys stay in ``_handle_key``."""
+    if ms.editing_seed:
+        for ch in text:
+            if ch.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
+                ms.seed_text += ch
+        _apply_seed_text(ms, settings)
+    elif ms.editing_filename:
+        for ch in text:
+            if (ch.isalnum() or ch in "_-.") and len(ms.filename) < _FILENAME_MAX_LEN:
+                ms.filename += ch
     return None
 
 
@@ -608,9 +719,6 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         if event.key == pygame.K_BACKSPACE:
             ms.seed_text = ms.seed_text[:-1]
             _apply_seed_text(ms, settings)
-        elif event.unicode.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
-            ms.seed_text += event.unicode
-            _apply_seed_text(ms, settings)
         return None
 
     if ms.editing_filename:
@@ -619,9 +727,6 @@ def _handle_key(event, ms: MenuState, settings: Settings):
             return None
         if event.key == pygame.K_BACKSPACE:
             ms.filename = ms.filename[:-1]
-        elif (event.unicode and (event.unicode.isalnum() or event.unicode in "_-.")
-              and len(ms.filename) < _FILENAME_MAX_LEN):
-            ms.filename += event.unicode
         return None
 
     if ms.strategy_open:

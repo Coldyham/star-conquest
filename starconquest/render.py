@@ -9,7 +9,7 @@ import math
 
 import pygame
 
-from . import config, fog
+from . import config, fog, uifont
 from .geometry import lerp
 from .model import GameState, lane_key
 from .viewstate import CHOOSING, SELECTED, Ui
@@ -19,9 +19,9 @@ _FONTS: dict[str, pygame.font.Font] = {}
 
 def _fonts() -> dict[str, pygame.font.Font]:
     if not _FONTS:
-        _FONTS["small"] = pygame.font.SysFont("consolas,menlo,monospace", config.FONT_SIZE_SMALL)
-        _FONTS["normal"] = pygame.font.SysFont("consolas,menlo,monospace", config.FONT_SIZE)
-        _FONTS["big"] = pygame.font.SysFont("consolas,menlo,monospace", config.FONT_SIZE_BIG, bold=True)
+        _FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
+        _FONTS["normal"] = uifont.load(config.FONT_SIZE)
+        _FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
     return _FONTS
 
 
@@ -1055,9 +1055,9 @@ def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(quit, cancel) button rects — shared by the drawer and the hit-tester."""
     w, h = surface.get_size()
     cx, cy = w // 2, h // 2
-    bw, bh = 200, 42
-    quit_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
-    cancel_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    bw, bh, gap = config.s(200), config.s(42), config.s(12)
+    quit_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
+    cancel_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
     return quit_r, cancel_r
 
 
@@ -1089,13 +1089,26 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     else:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
-    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - 40))
+    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - config.s(60)))
     _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h // 2))
-    # Review-history button: enter history mode to scrub the finished game with
-    # fog fully lifted (see what was happening behind the fog of war).
-    bw, bh = 260, 40
-    hr = pygame.Rect(w // 2 - bw // 2, h // 2 + 34, bw, bh)
+          config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - config.s(24)))
+    # Tappable buttons (touch equivalents of the R/M/H keys). Restart and Menu sit
+    # side by side; Review-history enters history mode to scrub the finished game
+    # with fog fully lifted (see what was happening behind the fog of war).
+    bw, bh, gap = config.s(180), config.s(40), config.s(12)
+    row_y = h // 2 + config.s(8)
+    rr = pygame.Rect(w // 2 - bw - gap // 2, row_y, bw, bh)
+    mr = pygame.Rect(w // 2 + gap // 2, row_y, bw, bh)
+    ui.restart_button_rect = (rr.x, rr.y, rr.w, rr.h)
+    ui.menu_button_rect = (mr.x, mr.y, mr.w, mr.h)
+    pygame.draw.rect(surface, (46, 68, 52), rr, border_radius=6)
+    pygame.draw.rect(surface, (110, 180, 130), rr, 2, border_radius=6)
+    _text(surface, _fonts()["normal"], "New map (R)", config.COLOR_TEXT, center=rr.center)
+    pygame.draw.rect(surface, (40, 52, 78), mr, border_radius=6)
+    pygame.draw.rect(surface, (110, 140, 200), mr, 2, border_radius=6)
+    _text(surface, _fonts()["normal"], "Setup menu (M)", config.COLOR_TEXT, center=mr.center)
+
+    hr = pygame.Rect(w // 2 - bw // 2, row_y + bh + gap, bw, bh)
     ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
     pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
     pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
@@ -1179,9 +1192,9 @@ def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(rewind, cancel) button rects — shared by the drawer and the hit-tester."""
     w, h = surface.get_size()
     cx, cy = w // 2, h // 2
-    bw, bh = 220, 42
-    rewind_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
-    cancel_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
+    bw, bh, gap = config.s(220), config.s(42), config.s(12)
+    rewind_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
+    cancel_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
     return rewind_r, cancel_r
 
 

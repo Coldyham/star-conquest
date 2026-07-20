@@ -103,6 +103,10 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
             if event.key == pygame.K_ESCAPE:
                 return "quit"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if ui.restart_button_rect[2] and _point_in_rect(event.pos, ui.restart_button_rect):
+                return "restart"
+            if ui.menu_button_rect[2] and _point_in_rect(event.pos, ui.menu_button_rect):
+                return "menu"
             if ui.history_button_rect[2] and _point_in_rect(event.pos, ui.history_button_rect):
                 return "toggle_history"
         return None

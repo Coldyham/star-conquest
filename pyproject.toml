@@ -5,7 +5,10 @@ description = "A minimalist sci-fi turn-based strategy game (graph-node star map
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pygame>=2.6.1",
+    # pygame-ce (Community Edition): a drop-in for pygame (same `import pygame`,
+    # same API surface this game uses) that is actively maintained and has a
+    # working python-for-android recipe, so the same source builds an Android APK.
+    "pygame-ce>=2.5",
 ]
 
 [tool.pytest.ini_options]
