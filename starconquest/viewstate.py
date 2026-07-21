@@ -102,6 +102,14 @@ class Ui:
     popup_pos: Optional[tuple[int, int]] = None
     dragging_popup: bool = False
     popup_drag_off: tuple[int, int] = (0, 0)
+    # Drag-to-target gesture (touch-friendly alternative to tap-source-then-tap-
+    # dest): a press on an owned system arms `drag_src`; dragging past a threshold
+    # sets `drag_active` and `drag_pos` follows the finger; releasing over an
+    # adjacent system commits the send/rule. Render draws a line while active.
+    drag_src: Optional[int] = None
+    drag_active: bool = False
+    drag_start: tuple[int, int] = (0, 0)
+    drag_pos: tuple[int, int] = (0, 0)
     # Persistent side-panel button to clear every standing forward rule at once;
     # drawn (and hit-tested) only while any rule exists.
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)

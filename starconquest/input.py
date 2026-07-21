@@ -18,11 +18,19 @@ from .viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
 def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
+    """The system under ``pos`` — the *nearest* one within reach, so overlapping
+    or clustered nodes resolve to the closest rather than whichever draws first.
+    Tiny systems get a minimum tap reach (``config.NODE_TAP_MIN``) so they stay
+    comfortably tappable on touch screens."""
+    best: Optional[int] = None
+    best_d = 0.0
     for sid, sys in state.systems.items():
         sp = ui.view.to_screen(sys.pos)
-        if dist(sp, pos) <= config.node_radius(sys.production) + 2:
-            return sid
-    return None
+        d = dist(sp, pos)
+        reach = max(config.node_radius(sys.production) + 2, config.NODE_TAP_MIN)
+        if d <= reach and (best is None or d < best_d):
+            best, best_d = sid, d
+    return best
 
 
 def _seek_scrubber(ui: Ui, pos) -> None:
@@ -115,6 +123,12 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if ui.dragging_popup:            # dragging the send popup by its background
             ui.popup_pos = (event.pos[0] - ui.popup_drag_off[0],
                             event.pos[1] - ui.popup_drag_off[1])
+        elif ui.drag_src is not None and event.buttons[0]:
+            # a press on an owned system is being dragged toward a target
+            if dist(event.pos, ui.drag_start) > config.DRAG_THRESHOLD:
+                ui.drag_active = True
+            ui.drag_pos = event.pos
+            ui.hover = pick_node(state, ui, event.pos)   # highlight the drag target
         else:
             ui.hover = pick_node(state, ui, event.pos)
         return None
@@ -128,15 +142,55 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ui.dragging_popup = False
+        if ui.drag_active and ui.drag_src is not None:
+            shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
+            _commit_drag(state, ui, event.pos, shift)
+        ui.drag_src = None
+        ui.drag_active = False
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
         if event.button == 1:
             shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
-            return _handle_left_click(state, ui, event.pos, shift)
+            action = _handle_left_click(state, ui, event.pos, shift)
+            _arm_drag(state, ui, event.pos)
+            return action
         if event.button == 3:
             _cancel(ui)
     return None
+
+
+def _arm_drag(state: GameState, ui: Ui, pos) -> None:
+    """After a left-press, arm a drag-to-target if it landed on (and selected) an
+    owned system — the source. A tap that opened the popup (CHOOSING) or hit a UI
+    element doesn't arm one, so drag never fights those interactions."""
+    node = pick_node(state, ui, pos)
+    if (node is not None and ui.mode == SELECTED and ui.selected == node
+            and not ui.dragging_popup and state.systems[node].owner_id == ui.human_id):
+        ui.drag_src = node
+        ui.drag_start = pos
+        ui.drag_pos = pos
+        ui.drag_active = False
+    else:
+        ui.drag_src = None
+        ui.drag_active = False
+
+
+def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
+    """Release of a drag over a system: if it's an adjacent neighbour of the
+    source, open the send/forward popup for that lane (same as tapping it)."""
+    src = ui.drag_src
+    target = pick_node(state, ui, pos)
+    if src is None or target is None or target == src:
+        return
+    if not state.are_adjacent(src, target):
+        return
+    ui.reset_selection()
+    ui.sel_order = ui.sel_forward = None
+    ui.selected = src
+    ui.mode = SELECTED
+    forward = shift or ui.available(state, src) == 0
+    ui.begin_send(state, target, forward=forward)
 
 
 def _handle_key(event, ui: Ui) -> Optional[str]:
@@ -271,11 +325,13 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.reset_selection()          # deselect the source
         elif ui.mode == CHOOSING and node == ui.dest:
             return None                   # already targeting it; adjust via popup
-        elif state.are_adjacent(ui.selected, node) and (shift or ui.available(state, ui.selected) > 0):
-            # commit a send-all to this neighbour and open the popup; Shift arms
-            # it as a forward rule from the outset — allowed even from an empty
-            # system, since a rule forwards future production
-            ui.begin_send(state, node, forward=shift)
+        elif state.are_adjacent(ui.selected, node):
+            # commit a send-all to this neighbour and open the popup. Arm it as a
+            # forward rule when Shift is held (desktop) or when the source has no
+            # ships to send right now — forwarding future production is then the
+            # only useful action, and it's the mobile-friendly default (no Shift).
+            forward = shift or ui.available(state, ui.selected) == 0
+            ui.begin_send(state, node, forward=forward)
         elif sys.owner_id == ui.human_id:
             # reselect a different owned system — even with zero ships right
             # now, it may still be worth viewing.

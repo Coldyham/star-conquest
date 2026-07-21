@@ -115,8 +115,10 @@ HUD_RIGHT_W = 240            # reserved right column for the system/lane info pa
 
 NODE_MIN_RADIUS = 12         # for the poorest systems (production == max)
 NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
+NODE_TAP_MIN = 22            # px: minimum tap/click reach, so tiny systems stay hittable
 FLEET_SIZE = 9              # in-transit fleet triangle half-size (pixels)
 LANE_PICK_DIST = 10         # px: click within this of a queued order's lane selects it
+DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
 # Send popup: the little action panel that opens on the map when a destination
@@ -156,8 +158,8 @@ ui_scale = 1.0              # current factor; 1.0 == the baseline above
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W",
-    "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "FLEET_SIZE",
-    "LANE_PICK_DIST", "STEPPER_SIZE",
+    "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
+    "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )

@@ -46,6 +46,18 @@ def _lane_mid(state, ui, src, dst):
     return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
 
 
+def _drag(state, ui, src, dst):
+    """Press on ``src``, drag past the threshold to ``dst``, release — the
+    touch-friendly way to open a send/forward for that lane."""
+    a = ui.view.to_screen(state.systems[src].pos)
+    b = ui.view.to_screen(state.systems[dst].pos)
+    game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=a, button=1), state, ui)
+    game_input.handle_event(
+        pygame.event.Event(pygame.MOUSEMOTION, pos=b, rel=(b[0] - a[0], b[1] - a[1]),
+                           buttons=(1, 0, 0)), state, ui)
+    game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=b, button=1), state, ui)
+
+
 # --------------------------------------------------------------------------- #
 # Send popup: committing and retuning a one-shot send / forward rule
 # --------------------------------------------------------------------------- #
@@ -303,9 +315,10 @@ def test_shift_click_arms_forward_rule_from_empty_system():
         pygame.quit()
 
 
-def test_plain_click_from_empty_system_does_not_send():
-    """Without shift, an empty source has nothing to send: a neighbour click
-    neither opens the send popup nor queues an order."""
+def test_plain_click_from_empty_system_arms_forward():
+    """An empty source has nothing to send now, so forwarding future production is
+    the only useful action. Since Shift isn't available on touch, a plain neighbour
+    click from an empty source arms the forward rule (no phantom one-shot order)."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -315,8 +328,40 @@ def test_plain_click_from_empty_system_does_not_send():
 
         _click(state, ui, home)
         _click(state, ui, nbr)
-        assert ui.mode != CHOOSING
-        assert ui.pending == [] and home not in ui.auto_forward
+        assert ui.mode == CHOOSING and ui.forward_armed is True
+        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.pending == []
+    finally:
+        pygame.quit()
+
+
+def test_drag_from_source_to_neighbour_commits_send():
+    """Press-drag-release from an owned source onto an adjacent neighbour opens
+    the send popup and queues the send — the touch alternative to two taps."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values()
+                    if s.owner_id == 1 and s.ships > 0)
+        nbr = state.systems[home].neighbors[0]
+        _drag(state, ui, home, nbr)
+        assert ui.mode == CHOOSING
+        assert any(o.source_id == home and o.dest_id == nbr for o in ui.pending)
+        assert ui.drag_src is None and ui.drag_active is False   # gesture cleared
+    finally:
+        pygame.quit()
+
+
+def test_drag_from_empty_source_arms_forward():
+    """Dragging from an empty source arms a forward rule (same as a plain click),
+    since there's nothing to send right now."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 0
+        _drag(state, ui, home, nbr)
+        assert ui.mode == CHOOSING and ui.forward_armed is True
+        assert ui.auto_forward.get(home) == (nbr, 0)
     finally:
         pygame.quit()
 

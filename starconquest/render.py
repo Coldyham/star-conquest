@@ -60,6 +60,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    if not ui.history and ui.drag_active and ui.drag_src is not None:
+        _draw_drag(surface, state, ui)
     if not ui.history:
         # the active count + −/+ buttons (and the send popup) draw last of the map
         # layer so nodes/fleets never occlude them (they must stay visible/clickable)
@@ -89,6 +91,23 @@ def _fog_state(ui: Ui, sid: int) -> str:
     if sid in ui.seen:
         return "fogged"
     return "hidden"
+
+
+def _draw_drag(surface, state: GameState, ui: Ui) -> None:
+    """Rubber-band line while dragging from a source system toward a target, with
+    a ring on a valid adjacent target under the finger."""
+    if ui.drag_src not in state.systems:
+        return
+    a = ui.view.to_screen(state.systems[ui.drag_src].pos)
+    col = config.player_color(ui.human_id)
+    pygame.draw.line(surface, col, a, ui.drag_pos, max(2, config.s(3)))
+    pygame.draw.circle(surface, col, ui.drag_pos, max(3, config.s(5)), 2)
+    tgt = ui.hover
+    if (tgt is not None and tgt != ui.drag_src and tgt in state.systems
+            and state.are_adjacent(ui.drag_src, tgt)):
+        tp = ui.view.to_screen(state.systems[tgt].pos)
+        r = config.node_radius(state.systems[tgt].production) + config.s(4)
+        pygame.draw.circle(surface, config.COLOR_SELECT, tp, r, max(2, config.s(2)))
 
 
 def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
@@ -845,14 +864,17 @@ def _editing_order(ui: Ui):
     return None
 
 
-_ORDER_ROW_H = 22
+_ORDER_ROW_H = 22        # normal row pitch
+_ORDER_ROW_SEL_H = 36    # a selected row grows, so its × delete button is easy to hit
 
 
 def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     """Bottom-of-panel list of queued orders, followed by standing auto-forward
     rules. Records a (row, delete) hit-rect per order on ``ui.order_hitboxes``
     (parallel to ``ui.pending``) and a (source_id, row, delete) hit-rect per
-    rule on ``ui.forward_hitboxes``, both for input to test clicks against."""
+    rule on ``ui.forward_hitboxes``, both for input to test clicks against. The
+    currently-selected row is drawn taller with a bigger delete button, so it can
+    be removed by tap on touch (where the keyboard X shortcut isn't available)."""
     ui.order_hitboxes = []
     ui.forward_hitboxes = []
     w, h = surface.get_size()
@@ -862,59 +884,83 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     if not ui.pending and not rules:
         return
 
-    x = px + 12
-    row_w = config.HUD_RIGHT_W - 24
-    top_limit = config.HUD_TOP_H + 8
-    title_h = 22
-    # cap visible rows so a long queue never swallows the whole panel
-    max_rows = max(1, (bottom - 8 - top_limit - title_h) // _ORDER_ROW_H)
-    # orders first, then rules, so existing order_hitboxes indices stay aligned
+    x = px + config.s(12)
+    row_w = config.HUD_RIGHT_W - config.s(24)
+    top_limit = config.HUD_TOP_H + config.s(8)
+    title_h = config.s(22)
+    gap = config.s(2)
+    rh, rh_sel = config.s(_ORDER_ROW_H), config.s(_ORDER_ROW_SEL_H)
+
+    # orders first, then rules, so order_hitboxes indices stay aligned with pending
     entries = [("order", i) for i in range(len(ui.pending))] + [("rule", src) for src, _ in rules]
     n = len(entries)
-    overflow = n > max_rows
-    shown = min(n, max_rows - 1) if overflow else n
 
-    block_h = title_h + (shown + (1 if overflow else 0)) * _ORDER_ROW_H
-    top = bottom - 8 - block_h
-    pygame.draw.line(surface, (40, 44, 60), (px + 8, top - 6),
-                     (px + config.HUD_RIGHT_W - 8, top - 6), 1)
+    def selected_of(kind, key) -> bool:
+        return key == (ui.sel_order if kind == "order" else ui.sel_forward)
+
+    def row_h(kind, key) -> int:
+        return rh_sel if selected_of(kind, key) else rh
+
+    # Fit rows from the top; reserve one row for a "+N more" line if they overflow.
+    avail = bottom - config.s(8) - top_limit - title_h
+    if sum(row_h(*e) for e in entries) <= avail:
+        shown, overflow = entries, 0
+    else:
+        shown, used = [], 0
+        for e in entries:
+            if used + row_h(*e) + rh > avail:   # keep room for the "+N more" line
+                break
+            shown.append(e)
+            used += row_h(*e)
+        overflow = n - len(shown)
+
+    block_h = title_h + sum(row_h(*e) for e in shown) + (rh if overflow else 0)
+    top = bottom - config.s(8) - block_h
+    pygame.draw.line(surface, (40, 44, 60), (px + config.s(8), top - config.s(6)),
+                     (px + config.HUD_RIGHT_W - config.s(8), top - config.s(6)), 1)
     _text(surface, _fonts()["small"], f"Queued ({n})", config.COLOR_TEXT_DIM, topleft=(x, top))
 
     y = top + title_h
     hcolor = config.player_color(ui.human_id)
-    for kind, key in entries[:shown]:
-        row = (x, y, row_w, _ORDER_ROW_H - 2)
+    for kind, key in shown:
+        selected = selected_of(kind, key)
+        this_h = rh_sel if selected else rh
+        row = (x, y, row_w, this_h - gap)
         if kind == "order":
             o = ui.pending[key]
-            selected = key == ui.sel_order
             label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
         else:
             dest, keep = ui.auto_forward[key]
-            selected = key == ui.sel_forward
             label = f"{key}->{dest}   keep {keep}"
         if selected:
             pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=4)
-        dr = (x + row_w - 18, y + 1, 16, _ORDER_ROW_H - 4)
-        _draw_x_button(surface, dr)
+        dsz = config.s(26) if selected else config.s(16)
+        dr = (x + row_w - dsz - config.s(2), y + (this_h - gap - dsz) // 2, dsz, dsz)
+        _draw_x_button(surface, dr, boxed=selected)
         _text(surface, _fonts()["small"], label, config.COLOR_SELECT if selected else hcolor,
-              midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
+              midleft=(x + config.s(6), y + (this_h - gap) // 2))
         if kind == "order":
             ui.order_hitboxes.append((row, dr))
         else:
             ui.forward_hitboxes.append((key, row, dr))
-        y += _ORDER_ROW_H
+        y += this_h
     if overflow:
-        _text(surface, _fonts()["small"], f"+{n - shown} more", config.COLOR_TEXT_DIM,
-              midleft=(x + 6, y + (_ORDER_ROW_H - 2) // 2))
+        _text(surface, _fonts()["small"], f"+{overflow} more", config.COLOR_TEXT_DIM,
+              midleft=(x + config.s(6), y + rh // 2))
 
 
-def _draw_x_button(surface, rect) -> None:
-    """A small × delete glyph inside ``rect`` (x, y, w, h)."""
+def _draw_x_button(surface, rect, boxed: bool = False) -> None:
+    """A × delete glyph inside ``rect`` (x, y, w, h). ``boxed`` draws a framed
+    background so an enlarged (selected-row) delete target reads as a button."""
     rx, ry, rw, rh = rect
-    pad = 4
-    col = config.COLOR_TEXT_DIM
-    pygame.draw.line(surface, col, (rx + pad, ry + pad), (rx + rw - pad, ry + rh - pad), 2)
-    pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), 2)
+    if boxed:
+        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh), border_radius=4)
+        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh), 1, border_radius=4)
+    pad = max(3, rw // 4)
+    lw = max(2, rw // 8)
+    col = config.COLOR_TEXT if boxed else config.COLOR_TEXT_DIM
+    pygame.draw.line(surface, col, (rx + pad, ry + pad), (rx + rw - pad, ry + rh - pad), lw)
+    pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), lw)
 
 
 def _panel_editing(surface, ui: Ui, x, y, o) -> int:
