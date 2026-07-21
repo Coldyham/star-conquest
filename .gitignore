@@ -22,3 +22,6 @@ games/
 # User-supplied custom AI strategies (drop-in decision functions); keep the docs
 models/*
 !models/README.md
+
+# pygbag web build output (rebuild with tools/build_web.sh)
+/web/

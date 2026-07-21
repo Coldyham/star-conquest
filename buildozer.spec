@@ -4,7 +4,7 @@
 title = Star Conquest
 package.name = starconquest
 package.domain = uk.co.visualwind
-version = 0.1.0
+version = 0.1.1
 
 # --- sources ----------------------------------------------------------------
 # Bundle the entry point (main.py) and the package. Only these extensions are

@@ -12,6 +12,7 @@ pure core (engine/combat/mapgen/ai), and all drawing lives in render/menu.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import copy
 
 import pygame
@@ -176,7 +177,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
     refresh_fog(state, ui)
 
 
-def main() -> None:
+async def main() -> None:
     ap = argparse.ArgumentParser(description="Star Conquest")
     ap.add_argument("--seed", type=int, default=None, help="map seed (random if omitted)")
     ap.add_argument("--mode", choices=["random", "symmetric"], default="random")
@@ -185,22 +186,33 @@ def main() -> None:
     ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")
     ap.add_argument("--no-menu", action="store_true",
                     help="skip the setup menu and start straight away with these args")
-    args = ap.parse_args()
+    # On Android the launcher may pass argv the parser doesn't recognise, and a
+    # parse error would sys.exit() before anything renders. There are no CLI args
+    # on a phone anyway, so force defaults there.
+    args = ap.parse_args([] if paths.is_android() else None)
 
     settings = Settings.from_args(args)
     ai.load_models()          # register any drop-in models/ strategies up front
 
     pygame.init()
-    # Resizable: pygame grows the surface with the window, so we never re-call
-    # set_mode (a redundant call fights the WM on X11 and snaps the window back).
-    # On Android the surface is the whole screen; RESIZABLE is a harmless no-op.
-    flags = pygame.RESIZABLE if not paths.is_android() else 0
-    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), flags)
+    if paths.is_android():
+        # Let SDL create a surface at the real device resolution; passing a fixed
+        # size can misbehave on mobile. The loop reads the actual size below.
+        pygame.display.set_mode((0, 0))
+    elif paths.is_web():
+        # Match pygbag's canvas framebuffer exactly so nothing is clipped; the
+        # browser scales this surface to fill the window/phone.
+        pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+    else:
+        # Resizable: pygame grows the surface with the window, so we never re-call
+        # set_mode (a redundant call fights the WM on X11 and snaps it back).
+        pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), pygame.RESIZABLE)
     pygame.display.set_caption("Star Conquest")
     # Scale the whole UI to the real surface before the first frame: fit the
-    # baseline design size into the actual screen, then boost on touch so hit
-    # targets are finger-sized. Fonts are built lazily from these sizes, so this
-    # must run before any draw.
+    # baseline design size into the actual screen. On Android the surface is the
+    # device pixels, so boost hit targets; on web the browser upscales the whole
+    # framebuffer, so no extra boost is needed. Fonts are built lazily from these
+    # sizes, so this must run before any draw.
     sw, sh = pygame.display.get_surface().get_size()
     fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
     boost = config.TOUCH_UI_SCALE if paths.is_android() else 1.0
@@ -463,13 +475,64 @@ def main() -> None:
         if confirm_quit:
             render.draw_confirm_quit(screen)
         pygame.display.flip()
+        # Yield to the browser event loop each frame (required by pygbag/Emscripten;
+        # a harmless near-instant await on desktop).
+        await asyncio.sleep(0)
 
     pygame.quit()
 
 
-if __name__ == "__main__":
+def _crash_screen(exc_text: str) -> None:
+    """Last-resort on-device error display. A phone has no console or logcat to
+    hand, so on an unhandled exception we draw the traceback to the screen (and
+    save it to the data dir) so it can be read or screenshotted. Best-effort: if
+    the display itself is what failed, this just returns."""
     try:
-        main()
+        (paths.data_dir() / "last_crash.txt").write_text(exc_text)
+    except Exception:
+        pass
+    try:
+        if not pygame.get_init():
+            pygame.init()
+        screen = pygame.display.get_surface() or pygame.display.set_mode((0, 0))
+        w, h = screen.get_size()
+        font = pygame.font.SysFont("monospace", max(14, w // 60))
+        char_w = max(1, font.size("M")[0])
+        margin, line_h = 16, font.get_height() + 2
+        cols = max(20, (w - 2 * margin) // char_w)
+        lines: list[str] = []
+        for raw in exc_text.splitlines():
+            lines.extend([raw[i:i + cols] for i in range(0, len(raw), cols)] or [""])
+        screen.fill((12, 12, 18))
+        for row, ln in enumerate(lines[: (h - 2 * margin) // line_h]):
+            screen.blit(font.render(ln, True, (240, 130, 130)),
+                        (margin, margin + row * line_h))
+        pygame.display.flip()
+        clock = pygame.time.Clock()
+        waiting = True
+        while waiting:
+            for ev in pygame.event.get():
+                if ev.type in (pygame.QUIT, pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                    waiting = False
+            clock.tick(30)
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    # pygbag patches asyncio.run to drive the browser event loop; on desktop this
+    # is the ordinary asyncio entry point. (In the browser, code after this line
+    # may run before the game finishes, so all shutdown lives inside main().)
+    try:
+        asyncio.run(main())
     except KeyboardInterrupt:
+        pygame.quit()
+    except BaseException as exc:   # noqa: BLE001 - surface *anything*, incl. SystemExit
+        if isinstance(exc, SystemExit) and exc.code in (0, None):
+            raise                 # a clean exit is not a crash
+        import traceback
+        traceback.print_exc()     # -> terminal on desktop, browser console on web
+        if not paths.is_web():
+            _crash_screen(traceback.format_exc())
         pygame.quit()
     print("\nGoodbye!")

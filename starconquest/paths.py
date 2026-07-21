@@ -12,6 +12,7 @@ saved games persist and drop-in ``models/`` still be imported by path.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 # The package dir's parent: the repo root on desktop.
@@ -35,6 +36,11 @@ def _android_data_dir() -> Path | None:
 def is_android() -> bool:
     """True when running inside a python-for-android build."""
     return _android_data_dir() is not None
+
+
+def is_web() -> bool:
+    """True when running in the browser (pygbag/Emscripten WebAssembly build)."""
+    return sys.platform == "emscripten"
 
 
 def data_dir() -> Path:
