@@ -9,10 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# Buildozer / python-for-android build artefacts (Android APK build)
-.buildozer/
-bin/
-
 # Saved game-setup configs (menu Save/Load)
 saves/
 

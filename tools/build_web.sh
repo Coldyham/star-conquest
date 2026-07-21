@@ -2,8 +2,8 @@
 # Build the browser (WebAssembly) version of Star Conquest with pygbag into ./web/
 #
 # We stage just main.py + the starconquest package into a clean dir first, so
-# pygbag doesn't pack .venv / bin / .buildozer / games into the bundle. The stage
-# dir is named `starconquest` so the output bundle is starconquest.apk.
+# pygbag doesn't pack .venv / games / web into the bundle. The stage dir is named
+# `starconquest` so the output bundle is starconquest.apk (pygbag's bundle name).
 #
 #   ./tools/build_web.sh          # build into ./web/
 #   uv run pygbag <stage>/main.py # (what the script runs under the hood to serve)

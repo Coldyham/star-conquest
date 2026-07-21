@@ -92,32 +92,26 @@ uv run python -m tests.sim --verbose   # watch one AI-vs-AI game in the terminal
 uv run python -m tests.sim --trials 200   # batch stats (winners, length, timeouts)
 ```
 
-## Android (sideload)
+## Web (browser)
 
-The same source builds an Android APK via [Buildozer] (python-for-android). The
-pure core is untouched; only the pygame shell adapts — touch input, a DPI/scale
-layer, a bundled font, and writing saves to app-private storage (see
-[`paths.py`](starconquest/paths.py)). `pygame-ce` is a drop-in for `pygame` with a
-working p4a recipe, so no game code changes between desktop and phone.
+The same source runs in the browser via [pygbag] (pygame → WebAssembly). The pure
+core is untouched; the pygame shell adapts for touch — a DPI/scale layer, a
+bundled font, tap/drag input, and an async main loop (see
+[`paths.py`](starconquest/paths.py) `is_web()`).
 
 ```sh
-pipx install buildozer          # or: pip install --user buildozer
-sudo apt install -y openjdk-17-jdk autoconf libtool pkg-config \
-    zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev   # p4a build deps
-buildozer android debug         # first run downloads the Android SDK/NDK (slow)
-adb install -r bin/starconquest-*-debug.apk
+./tools/build_web.sh                       # -> ./web/ (staged so .venv isn't bundled)
+cd web && python3 -m http.server 8000 --bind 0.0.0.0   # test at http://localhost:8000
 ```
 
-The build is configured in [`buildozer.spec`](buildozer.spec) (landscape,
-fullscreen, arm64-v8a + armeabi-v7a, no permissions — saves live in internal
-app-private storage). On-device: tap a system then a neighbour to send (a popup
-tunes the count with −/+ and Half/All), the on-screen **End turn** / **History**
-buttons and the hardware **Back** key replace the keyboard shortcuts, and tapping
-a text field raises the soft keyboard. Drop-in `models/` AIs still work — push a
-`.py` into the app's `models/` dir. The autoplay/demo `tests/sim` harness is
-desktop-only and isn't bundled.
+The build is self-contained: [`tools/build_web.sh`](tools/build_web.sh) mirrors the
+pygame-ce WASM wheel into `web/cdn/`, so it works on any static host with no runtime
+CDN dependency. **To deploy, copy the contents of `web/` to any static host.** On a
+phone, tap a system then a neighbour to send (or drag between them); a popup tunes
+the count with −/+ and Half/All; the on-screen **End turn** / **History** buttons
+replace the keyboard shortcuts.
 
-[Buildozer]: https://buildozer.readthedocs.io/
+[pygbag]: https://pygame-web.github.io/
 
 ## Roadmap (not yet built)
 
