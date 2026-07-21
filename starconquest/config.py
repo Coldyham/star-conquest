@@ -145,12 +145,16 @@ BASE_SCREEN_W = 1440
 BASE_SCREEN_H = 960
 TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
 
-# Browser (pygbag) framebuffer size. Must match the pygbag template's fb_width/
-# fb_height so the surface fills the canvas exactly (no clipping); the browser then
-# scales this whole surface to fit the window/phone, which enlarges touch targets
-# for free — so the web build needs no separate touch boost.
-WEB_FB_W = 1280
-WEB_FB_H = 720
+# Browser (pygbag) framebuffer size. Must match the pygbag canvas (--width/--height
+# passed to `pygbag --build` in tools/build_web.sh) so the surface fills the canvas
+# exactly (no clipping); the browser then scales this whole surface to fit the
+# window/phone, which enlarges touch targets for free — so the web build needs no
+# separate touch boost. Rendering at this native resolution (rather than a small
+# framebuffer the browser upscales) is what keeps text and edges crisp; the whole
+# UI scales up to fill it via apply_ui_scale, so keep it a clean multiple of the
+# baseline aspect and bump both these constants and the build flags together.
+WEB_FB_W = 2560
+WEB_FB_H = 1440
 
 ui_scale = 1.0              # current factor; 1.0 == the baseline above
 

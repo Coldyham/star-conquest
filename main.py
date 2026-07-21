@@ -34,6 +34,20 @@ def build_view(state: GameState) -> WorldView:
     return WorldView(mapgen.map_bounds(state), config.play_rect(), padding=50)
 
 
+def _web_is_touch() -> bool:
+    """True on a touch-capable browser (phone/tablet), so the web build gets the
+    same finger-sized hit targets as Android. Desktop browsers report 0 touch
+    points and stay compact. pygbag augments the stdlib ``platform`` module with the
+    JS ``window``; guard everything so a missing attr just means "not a touch device".
+    """
+    import platform as _platform
+
+    try:
+        return int(_platform.window.navigator.maxTouchPoints) > 0
+    except Exception:
+        return False
+
+
 def new_ui(state: GameState, autoplay: bool) -> Ui:
     ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
     refresh_fog(state, ui)   # seed visibility from the opening position
@@ -209,13 +223,16 @@ async def main() -> None:
         pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), pygame.RESIZABLE)
     pygame.display.set_caption("Star Conquest")
     # Scale the whole UI to the real surface before the first frame: fit the
-    # baseline design size into the actual screen. On Android the surface is the
-    # device pixels, so boost hit targets; on web the browser upscales the whole
-    # framebuffer, so no extra boost is needed. Fonts are built lazily from these
+    # baseline design size into the actual screen. Touch devices (Android, and
+    # touch browsers) additionally boost hit targets to stay finger-sized; the web
+    # framebuffer is now high-res (WEB_FB_*), so `fit` already scales the UI up for
+    # crispness and only *touch* browsers need the extra boost — desktop browsers
+    # report no touch points and stay compact. Fonts are built lazily from these
     # sizes, so this must run before any draw.
     sw, sh = pygame.display.get_surface().get_size()
     fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
-    boost = config.TOUCH_UI_SCALE if paths.is_android() else 1.0
+    touch = paths.is_android() or (paths.is_web() and _web_is_touch())
+    boost = config.TOUCH_UI_SCALE if touch else 1.0
     config.apply_ui_scale(max(1.0, fit) * boost)
     clock = pygame.time.Clock()
 
