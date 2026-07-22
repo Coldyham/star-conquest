@@ -70,13 +70,16 @@ built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
 crashes). Keep this inversion — it is why the core has no AI dependency, and it is
 the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
 
-**Drop-in custom AIs.** `ai.load_models()` imports every `*.py` in the gitignored
+**Drop-in custom AIs.** `ai.load_models()` imports every `*.py` in the
 `models/` dir (repo-anchored `ai.MODELS_DIR`, mirroring `menu._SAVE_DIR`) and
 `register`s each file's `decide` under its stem; a file that fails to import or
 lacks `decide` is skipped. `main.py` calls it at startup and on game start;
 `ai.available_strategies()` feeds the menu's per-seat Strategy dropdown. `menu.py`
 is the one shell module that imports `ai` (for discovery) — fine, since `ai` is
 pure core (no pygame); the render/input prohibition on importing `ai` still holds.
+`models/` is committed (not gitignored) precisely so `tools/build_web.sh` can
+stage it alongside `starconquest/` and ship the same bots to the browser/PWA
+build — new bots go in via commit/PR, not local drop-in only.
 
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing

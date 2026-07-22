@@ -5,8 +5,10 @@ Drop a Python file in this folder and it becomes a selectable AI strategy. Each
 dropdown on the menu's **AI** tab); the strategy's name is the filename without
 `.py`. Every seat defaults to the built-in `heuristic`.
 
-Files in this folder are **gitignored** (except this README), so your bots stay
-private and never clash with the repo.
+Files in this folder are **committed to the repo**: `tools/build_web.sh` bundles
+them into the browser/PWA build too, so whatever's here is what's playable on
+the deployed site's Strategy dropdown. To add a bot, commit it (or open a PR)
+rather than just dropping it in locally.
 
 ## The contract
 

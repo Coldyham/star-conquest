@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Build the browser (WebAssembly) version of Star Conquest with pygbag into ./web/
 #
-# We stage just main.py + the starconquest package into a clean dir first, so
-# pygbag doesn't pack .venv / games / web into the bundle. The stage dir is named
-# `starconquest` so the output bundle is starconquest.apk (pygbag's bundle name).
+# We stage just main.py + the starconquest package + models/ into a clean dir
+# first, so pygbag doesn't pack .venv / games / web into the bundle. Bundling
+# models/ ships committed drop-in AI strategies to the browser build too, the
+# same way starconquest/assets/*.ttf already ships the bundled font. The stage
+# dir is named `starconquest` so the output bundle is starconquest.apk
+# (pygbag's bundle name).
 #
 #   ./tools/build_web.sh          # build into ./web/
 #   uv run pygbag <stage>/main.py # (what the script runs under the hood to serve)
@@ -15,6 +18,7 @@ STAGE="$TMP/starconquest"
 mkdir -p "$STAGE"
 cp "$ROOT/main.py" "$STAGE/"
 cp -r "$ROOT/starconquest" "$STAGE/"
+cp -r "$ROOT/models" "$STAGE/"
 find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --width/--height set the canvas framebuffer size: render at a high native
