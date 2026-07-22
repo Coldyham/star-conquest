@@ -33,6 +33,14 @@ def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
     return best
 
 
+def _play_rect_center() -> tuple[float, float]:
+    """Anchor point for the zoom +/- buttons — they have no cursor position to
+    zoom toward the way a wheel scroll does, so they zoom toward the map
+    viewport's centre instead."""
+    x, y, w, h = config.play_rect()
+    return (x + w / 2, y + h / 2)
+
+
 def _seek_scrubber(ui: Ui, pos) -> None:
     """Map a click/drag x within the scrubber track to a turn index (0..max)."""
     x, _y, w, _h = ui.scrubber_rect
@@ -131,6 +139,12 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
                 ui.drag_active = True
             ui.drag_pos = event.pos
             ui.hover = pick_node(state, ui, event.pos)   # highlight the drag target
+        elif ui.pan_active and event.buttons[0]:
+            # a press on empty space is panning the camera
+            dx = event.pos[0] - ui.pan_last[0]
+            dy = event.pos[1] - ui.pan_last[1]
+            ui.view.pan(dx, dy)
+            ui.pan_last = event.pos
         else:
             ui.hover = pick_node(state, ui, event.pos)
         return None
@@ -139,7 +153,12 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return _handle_key(event, ui)
 
     if event.type == pygame.MOUSEWHEEL:
-        ui.step_count(state, event.y)
+        if ui.count_adjust_active():
+            ui.step_count(state, event.y)
+        else:
+            # MOUSEWHEEL carries no position, so ask pygame for the cursor's
+            # current one — same idea as _handle_key reading key mods.
+            ui.view.zoom_at(pygame.mouse.get_pos(), config.ZOOM_WHEEL_STEP ** event.y)
         return None
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -149,6 +168,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
             _commit_drag(state, ui, event.pos, shift)
         ui.drag_src = None
         ui.drag_active = False
+        ui.pan_active = False
         return None
 
     if event.type == pygame.MOUSEBUTTONDOWN:
@@ -176,6 +196,16 @@ def _arm_drag(state: GameState, ui: Ui, pos) -> None:
     else:
         ui.drag_src = None
         ui.drag_active = False
+
+
+def _arm_pan(ui: Ui, pos) -> None:
+    """A press that hits nothing at all (no node, no lane, no button — the
+    same empty-space press ``_cancel`` already claims for deselection) arms a
+    camera-pan drag instead. No competing tap meaning exists there once
+    ``_cancel`` has run, so it's a free gesture, and it works identically for
+    mouse and touch (unlike a modifier-key or alternate-button pan would)."""
+    ui.pan_active = True
+    ui.pan_last = pos
 
 
 def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
@@ -250,6 +280,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return "quit"
     if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
         _clear_selected(ui)
+        return None
+    if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
+        ui.view.reset()
+        return None
+    if ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
+        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)
+        return None
+    if ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
+        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP)
         return None
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
@@ -333,6 +372,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         hit = _pick_lane(state, ui, pos)
         if hit is None:
             _cancel(ui)
+            _arm_pan(ui, pos)
         elif hit[0] == "order":
             ui.select_order(hit[1])
         else:

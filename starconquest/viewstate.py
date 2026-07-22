@@ -141,6 +141,18 @@ class Ui:
     # menu_button_rect above; clear_button_rect is live-play only.
     quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Camera pan: a press on empty space (no node/lane/button under it) arms
+    # this instead of the drag-to-target gesture, so panning and drag-to-send
+    # never fight over the same press. `pan_last` is the previous motion-event
+    # position, used to turn each MOUSEMOTION into a `view.pan()` delta.
+    pan_active: bool = False
+    pan_last: tuple[int, int] = (0, 0)
+    # On-map camera control hit-rects (reset view, zoom +/-), rebuilt by render
+    # each frame and tested by input (same store-rect-then-test handoff as
+    # end_turn_rect); live-play only.
+    reset_view_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    zoom_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
@@ -151,11 +163,24 @@ class Ui:
         """Ships still free to deploy from a system this turn."""
         return state.systems[sid].ships - self.committed(sid)
 
+    def count_adjust_active(self) -> bool:
+        """True while the mouse wheel should nudge a ship count (``step_count``
+        below would do something) rather than zoom the camera — mirrors
+        ``step_count``'s own dispatch conditions exactly, so the two can't
+        drift out of sync."""
+        return (
+            (self.mode == CHOOSING and (self.forward_armed or self.selected is not None))
+            or (self.sel_order is not None and 0 <= self.sel_order < len(self.pending))
+            or (self.sel_forward is not None and self.sel_forward in self.auto_forward)
+        )
+
     def step_count(self, state: GameState, delta: int) -> None:
         """Nudge the ship count being adjusted by ``delta`` — the shared logic
         behind both the mouse wheel and the on-lane −/+ buttons. Applies to the
         active send (CHOOSING — send count or forward keep), the queued order
         being edited, or the standing auto-forward rule being edited."""
+        if not self.count_adjust_active():
+            return
         if self.mode == CHOOSING and self.forward_armed:
             self.set_keep(state, self.keep + delta)          # forward: adjust keep
         elif self.mode == CHOOSING and self.selected is not None:

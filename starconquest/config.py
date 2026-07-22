@@ -134,6 +134,14 @@ SEND_POPUP_BTN_H = 22       # px: height of each button row
 SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
 
+# Map camera (pan/zoom). Ratios, not pixels — relative to WorldView's one-time
+# fit-to-viewport scale (zoom == 1.0), so they don't scale with apply_ui_scale.
+ZOOM_MIN = 1.0              # can't zoom out past the original fit-all view
+ZOOM_MAX = 6.0              # sane cap on zooming in
+ZOOM_WHEEL_STEP = 1.15      # multiplicative zoom factor per wheel notch
+ZOOM_BUTTON_STEP = 1.25     # multiplicative zoom factor per on-map +/- tap
+MAP_ZOOM_BTN_SIZE = 44      # px: on-map zoom +/- / reset button side (touch-sized)
+
 FONT_SIZE = 18
 FONT_SIZE_SMALL = 14
 FONT_SIZE_BIG = 30
@@ -174,7 +182,7 @@ ui_scale = 1.0              # current factor; 1.0 == the baseline above
 _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
-    "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE",
+    "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )

@@ -50,6 +50,12 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
+    # The map layer can now be panned/zoomed past config.play_rect()'s edges
+    # (unlike the old fixed fit-to-bounds view, which always fit inside it by
+    # construction), so clip it to the viewport here rather than let it bleed
+    # into the HUD/side panel — same set_clip/set_clip(None) idiom as
+    # _hatch_rect uses elsewhere in this file.
+    surface.set_clip(config.play_rect())
     _draw_lanes(surface, state, ui)
     # History mode reviews a reconstructed past board: skip the live-interaction
     # overlays (queued/standing orders, the count being composed) — there is no
@@ -69,6 +75,9 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
             _draw_send_popup(surface, state, ui)
         else:
             _draw_count_controls(surface, state, ui)
+    surface.set_clip(None)
+    if not ui.history:
+        _draw_zoom_controls(surface, ui)
     _draw_hud(surface, state, ui)
     if ui.history:
         # the scrubber owns the bottom bar; suppress the win overlay so a finished
@@ -627,6 +636,34 @@ def _hatch_rect(surface, rect: pygame.Rect, color, step=4) -> None:
     surface.set_clip(None)
 
 
+def _draw_zoom_controls(surface, ui: Ui) -> None:
+    """On-map camera cluster — Reset view and zoom −/+, the touch/no-wheel
+    equivalent of scroll-to-zoom. Anchored to the map viewport's bottom-right
+    corner, just above the HUD bottom bar (drawn after the map clip is lifted
+    in ``draw()``, so it's never affected by it)."""
+    px, py, pw, ph = config.play_rect()
+    s = config.MAP_ZOOM_BTN_SIZE
+    gap = config.s(8)
+    inset = config.s(12)
+    y = py + ph - inset - s
+    accent = (110, 140, 200)
+
+    plus = pygame.Rect(px + pw - inset - s, y, s, s)
+    minus = pygame.Rect(plus.x - gap - s, y, s, s)
+    reset_w = config.s(90)
+    reset = pygame.Rect(minus.x - gap - reset_w, y, reset_w, s)
+
+    ui.zoom_plus_rect = (plus.x, plus.y, plus.w, plus.h)
+    ui.zoom_minus_rect = (minus.x, minus.y, minus.w, minus.h)
+    ui.reset_view_rect = (reset.x, reset.y, reset.w, reset.h)
+
+    pygame.draw.rect(surface, (40, 52, 78), reset, border_radius=config.s(6))
+    pygame.draw.rect(surface, accent, reset, config.s(2), border_radius=config.s(6))
+    _text(surface, _fonts()["small"], "Reset", config.COLOR_TEXT, center=reset.center)
+    _draw_step_button(surface, minus, "-", accent)
+    _draw_step_button(surface, plus, "+", accent)
+
+
 # --------------------------------------------------------------------------- #
 # HUD
 # --------------------------------------------------------------------------- #
@@ -650,6 +687,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         ui.end_turn_rect = ui.play_pause_rect = ui.history_button_rect = (0, 0, 0, 0)
         ui.autoplay_button_rect = ui.restart_live_button_rect = ui.menu_button_rect = (0, 0, 0, 0)
         ui.quit_button_rect = ui.clear_button_rect = (0, 0, 0, 0)
+        ui.reset_view_rect = ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
         return
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the

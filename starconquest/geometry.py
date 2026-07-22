@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+from . import config
+
 Point = tuple[float, float]
 
 
@@ -75,10 +77,14 @@ def segments_intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> bool:
 
 
 class WorldView:
-    """Fits a world bounding box into a screen rectangle, preserving aspect.
+    """Fits a world bounding box into a screen rectangle, preserving aspect,
+    with a user-adjustable camera (zoom + pan) on top of that fit.
 
-    Adding pan/zoom later is just an extra offset + scale here; no model or
-    render changes are needed elsewhere.
+    ``zoom == 1.0`` and no pan reproduces the original fit-to-viewport view
+    exactly. ``to_screen``/``to_world`` are the only transform other modules
+    should ever touch; ``scale``/``off_x``/``off_y`` are derived from the fit
+    plus the current zoom/pan and shouldn't be written to directly — use
+    ``zoom_at``/``pan``/``reset`` instead.
     """
 
     def __init__(
@@ -87,16 +93,24 @@ class WorldView:
         screen_rect: tuple[float, float, float, float],
         padding: float = 40.0,
     ) -> None:
+        self._world_bounds = world_bounds
+        self._screen_rect = screen_rect
+        self._padding = padding
         wx0, wy0, wx1, wy1 = world_bounds
         sx, sy, sw, sh = screen_rect
         ww = max(1e-6, wx1 - wx0)
         wh = max(1e-6, wy1 - wy0)
         avail_w = max(1.0, sw - 2 * padding)
         avail_h = max(1.0, sh - 2 * padding)
-        self.scale = min(avail_w / ww, avail_h / wh)
+        self._fit_scale = min(avail_w / ww, avail_h / wh)
+        self.zoom = 1.0
         # centre the scaled world inside the screen rect
-        self.off_x = sx + padding + (avail_w - ww * self.scale) / 2 - wx0 * self.scale
-        self.off_y = sy + padding + (avail_h - wh * self.scale) / 2 - wy0 * self.scale
+        self.off_x = self._center_axis(self.scale, sx, sw, wx0, wx1)
+        self.off_y = self._center_axis(self.scale, sy, sh, wy0, wy1)
+
+    @property
+    def scale(self) -> float:
+        return self._fit_scale * self.zoom
 
     def to_screen(self, pos: Point) -> tuple[int, int]:
         return (
@@ -109,6 +123,61 @@ class WorldView:
             (screen_pos[0] - self.off_x) / self.scale,
             (screen_pos[1] - self.off_y) / self.scale,
         )
+
+    def zoom_at(self, screen_pos: Point, factor: float) -> None:
+        """Multiply the current zoom by ``factor`` (>1 in, <1 out), keeping the
+        world point currently under ``screen_pos`` fixed on screen. Clamped to
+        ``config.ZOOM_MIN``/``ZOOM_MAX``, then re-clamped to keep the map on
+        screen — at the zoomed-all-the-way-out extreme that pan-clamp
+        intentionally wins over "keep the cursor point fixed" and recentres
+        instead, which is expected, not a bug."""
+        old_world = self.to_world(screen_pos)
+        self.zoom = max(config.ZOOM_MIN, min(config.ZOOM_MAX, self.zoom * factor))
+        new_scale = self.scale
+        self.off_x = screen_pos[0] - old_world[0] * new_scale
+        self.off_y = screen_pos[1] - old_world[1] * new_scale
+        self._clamp()
+
+    def pan(self, dx: float, dy: float) -> None:
+        """Translate the view by ``(dx, dy)`` screen pixels, then clamp so the
+        map can never be dragged fully off the viewport."""
+        self.off_x += dx
+        self.off_y += dy
+        self._clamp()
+
+    def reset(self) -> None:
+        """Back to zoom == 1.0, centred exactly as at construction."""
+        self.zoom = 1.0
+        self._clamp()
+
+    def _center_axis(self, scale: float, s0: float, slen: float, w0: float, w1: float) -> float:
+        """The centred offset for one axis at ``scale`` — the same formula the
+        constructor uses, generalised so ``reset``/``_clamp`` can reuse it."""
+        avail = max(1.0, slen - 2 * self._padding)
+        wlen = max(1e-6, w1 - w0)
+        return s0 + self._padding + (avail - wlen * scale) / 2 - w0 * scale
+
+    def _clamp(self) -> None:
+        """Keep the map on screen: centre an axis whose zoomed content is
+        smaller than the viewport (recreating the constructor's fit-centring at
+        zoom == 1.0), else clamp that axis's offset so a content edge can never
+        leave a visible gap."""
+        scale = self.scale
+        wx0, wy0, wx1, wy1 = self._world_bounds
+        sx, sy, sw, sh = self._screen_rect
+        ww, wh = max(1e-6, wx1 - wx0), max(1e-6, wy1 - wy0)
+
+        if ww * scale <= sw:
+            self.off_x = self._center_axis(scale, sx, sw, wx0, wx1)
+        else:
+            lo, hi = sx + sw - wx1 * scale, sx - wx0 * scale
+            self.off_x = max(lo, min(hi, self.off_x))
+
+        if wh * scale <= sh:
+            self.off_y = self._center_axis(scale, sy, sh, wy0, wy1)
+        else:
+            lo, hi = sy + sh - wy1 * scale, sy - wy0 * scale
+            self.off_y = max(lo, min(hi, self.off_y))
 
 
 def bounds_of(points: list[Point]) -> tuple[float, float, float, float]:

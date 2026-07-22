@@ -403,6 +403,108 @@ def test_right_click_cancels():
         pygame.quit()
 
 
+# --------------------------------------------------------------------------- #
+# Camera pan/zoom
+# --------------------------------------------------------------------------- #
+# Inside WorldView's default padding margin at the default fit — no node/lane
+# ever lands here for the seed-1 map _setup() builds, confirmed empty both at
+# the default fit and after a 2x zoom centred elsewhere on the map.
+_EMPTY_POS = (5, 45)
+
+
+def test_empty_space_drag_pans_view():
+    """A press on empty space (no node/lane/button under it) arms a camera pan
+    instead of the drag-to-target gesture — panning is a no-op at the default
+    fit zoom (content already fits the viewport), so zoom in first."""
+    state, ui = _setup()
+    try:
+        ui.view.zoom_at((600, 460), 2.0)
+        off_x, off_y = ui.view.off_x, ui.view.off_y
+
+        _click_pos(state, ui, _EMPTY_POS)
+        assert ui.pan_active
+
+        dst = (_EMPTY_POS[0] + 20, _EMPTY_POS[1] + 15)
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=dst, rel=(20, 15),
+                               buttons=(1, 0, 0)),
+            state, ui,
+        )
+        assert (ui.view.off_x, ui.view.off_y) != (off_x, off_y)
+
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONUP, pos=dst, button=1), state, ui
+        )
+        assert not ui.pan_active
+    finally:
+        pygame.quit()
+
+
+def test_wheel_zooms_when_idle():
+    state, ui = _setup()
+    try:
+        assert ui.view.zoom == 1.0
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui
+        )
+        assert ui.view.zoom > 1.0
+    finally:
+        pygame.quit()
+
+
+def test_wheel_adjusts_count_when_choosing():
+    """Regression guard: an active send/order/forward count still wins the
+    wheel over camera zoom, exactly like before zoom existed."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert ui.mode == CHOOSING
+        chosen_before, zoom_before = ui.chosen, ui.view.zoom
+
+        # wheel down: send-all already commits at the source's full garrison
+        # (the cap), so only a decrement has room to move and prove the wheel
+        # reached step_count rather than being swallowed by camera zoom.
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui
+        )
+        assert ui.chosen == chosen_before - 1
+        assert ui.view.zoom == zoom_before
+    finally:
+        pygame.quit()
+
+
+def test_reset_view_button_click_resets_camera():
+    state, ui = _setup()
+    try:
+        ui.view.zoom_at((600, 460), 2.0)
+        assert ui.view.zoom != 1.0
+
+        ui.reset_view_rect = (100, 100, 120, 24)
+        _click_pos(state, ui, (110, 110))
+        assert ui.view.zoom == 1.0
+    finally:
+        pygame.quit()
+
+
+def test_zoom_button_clicks_change_zoom():
+    state, ui = _setup()
+    try:
+        ui.zoom_plus_rect = (100, 100, 44, 44)
+        _click_pos(state, ui, (110, 110))
+        assert ui.view.zoom > 1.0
+        zoomed_in = ui.view.zoom
+
+        ui.zoom_plus_rect = (0, 0, 0, 0)
+        ui.zoom_minus_rect = (100, 100, 44, 44)
+        _click_pos(state, ui, (110, 110))
+        assert ui.view.zoom < zoomed_in
+    finally:
+        pygame.quit()
+
+
 def test_enter_key_requests_end_turn():
     state, ui = _setup()
     try:

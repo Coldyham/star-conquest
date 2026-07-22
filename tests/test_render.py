@@ -107,6 +107,21 @@ def test_render_fogged_states_no_crash():
         pygame.quit()
 
 
+def test_draw_resets_clip_after_map_layer():
+    """The map layer is clipped to config.play_rect() (now that pan/zoom can
+    push it past the viewport's edges) — guard against a missing
+    set_clip(None) leaking that clip into the HUD/side panel."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        render.draw(screen, state, _make_ui(state))
+        assert screen.get_clip() == screen.get_rect()
+    finally:
+        pygame.quit()
+
+
 def test_production_rate_sums_inverse_production():
     state = mapgen.generate_random(2, num_nodes=18, num_players=3)
     for pid in (1, 2, 3):
