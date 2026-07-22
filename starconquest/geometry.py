@@ -161,22 +161,31 @@ class WorldView:
         """Keep the map on screen: centre an axis whose zoomed content is
         smaller than the viewport (recreating the constructor's fit-centring at
         zoom == 1.0), else clamp that axis's offset so a content edge can never
-        leave a visible gap."""
+        leave a visible gap. Both branches keep ``_padding`` of breathing room
+        past the outermost system's *centre* — without it, a system sitting
+        exactly on the world bounds could be panned flush against the clip
+        edge, slicing its circle (drawn at a fixed pixel radius, not part of
+        the world bounds) clean in half with no margin at all."""
         scale = self.scale
         wx0, wy0, wx1, wy1 = self._world_bounds
         sx, sy, sw, sh = self._screen_rect
         ww, wh = max(1e-6, wx1 - wx0), max(1e-6, wy1 - wy0)
+        pad = self._padding
 
         if ww * scale <= sw:
             self.off_x = self._center_axis(scale, sx, sw, wx0, wx1)
         else:
-            lo, hi = sx + sw - wx1 * scale, sx - wx0 * scale
+            # relative to the old zero-margin bounds (sx+sw-wx1*scale, sx-wx0*scale),
+            # both ends are eased inward by `pad` — content may now stop `pad` px
+            # short of fully covering the viewport, always valid here since
+            # ww*scale > sw already exceeds that slack.
+            lo, hi = sx + sw - pad - wx1 * scale, sx + pad - wx0 * scale
             self.off_x = max(lo, min(hi, self.off_x))
 
         if wh * scale <= sh:
             self.off_y = self._center_axis(scale, sy, sh, wy0, wy1)
         else:
-            lo, hi = sy + sh - wy1 * scale, sy - wy0 * scale
+            lo, hi = sy + sh - pad - wy1 * scale, sy + pad - wy0 * scale
             self.off_y = max(lo, min(hi, self.off_y))
 
 

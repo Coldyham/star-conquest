@@ -47,21 +47,40 @@ def test_zoom_clamped_at_max():
 
 
 def test_pan_clamped_keeps_content_onscreen():
+    """Content can never be dragged past a `padding`-sized gap from either
+    edge — the slack that keeps a boundary system's centre (and its fixed-
+    pixel-radius circle, drawn independently of the world bounds) clear of
+    the clip edge instead of sliced flush against it."""
     v = _view()
     v.zoom_at((400, 300), 3.0)
+    pad = v._padding
+
     v.pan(-100000, -100000)
     sx, sy, sw, sh = SCREEN
     x0, y0 = v.to_screen((BOUNDS[0], BOUNDS[1]))
     x1, y1 = v.to_screen((BOUNDS[2], BOUNDS[3]))
-    # content must still fully cover the viewport on both axes — no gap
-    assert x0 <= sx and x1 >= sx + sw
-    assert y0 <= sy and y1 >= sy + sh
+    assert x0 <= sx + pad and x1 >= sx + sw - pad
+    assert y0 <= sy + pad and y1 >= sy + sh - pad
 
     v.pan(100000, 100000)
     x0, y0 = v.to_screen((BOUNDS[0], BOUNDS[1]))
     x1, y1 = v.to_screen((BOUNDS[2], BOUNDS[3]))
-    assert x0 <= sx and x1 >= sx + sw
-    assert y0 <= sy and y1 >= sy + sh
+    assert x0 <= sx + pad and x1 >= sx + sw - pad
+    assert y0 <= sy + pad and y1 >= sy + sh - pad
+
+
+def test_pan_clamp_leaves_exactly_padding_gap_at_extreme():
+    """The world-bounds corner itself (BOUNDS[0], BOUNDS[1] — where a boundary
+    system typically sits) must land `padding` px *inside* the clip edge at
+    the clamped extreme, not flush against it — the concrete case the padding
+    buffer exists to prevent."""
+    v = _view()
+    v.zoom_at((400, 300), 3.0)
+    v.pan(100000, 100000)  # drag as far as it goes, revealing the left/top edge
+    sx, sy, _, _ = SCREEN
+    x0, y0 = v.to_screen((BOUNDS[0], BOUNDS[1]))
+    assert abs(x0 - (sx + v._padding)) < 1e-6
+    assert abs(y0 - (sy + v._padding)) < 1e-6
 
 
 def test_pan_at_fit_zoom_is_a_noop():
