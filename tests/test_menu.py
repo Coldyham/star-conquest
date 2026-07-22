@@ -121,6 +121,39 @@ def test_start_via_click_and_enter():
         pygame.quit()
 
 
+def test_quit_button_click_returns_quit():
+    """Touch/web equivalent of Esc: there's no keyboard on a phone, so without
+    this a touch user has no way to leave the setup menu at all."""
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "quit") == "quit"
+    finally:
+        pygame.quit()
+
+
+def test_web_scale_boost_enlarges_menu(monkeypatch):
+    """On web the menu's fixed 3:2 canvas pillarboxes against the wider 16:9
+    WEB_FB frame; WEB_MENU_BOOST should noticeably shrink that waste (bigger
+    scale), without ever exceeding the full-width fit."""
+    screen, ms, settings = _setup()
+    try:
+        # A 16:9 frame (like config.WEB_FB_W/H) actually mismatches the menu's
+        # 3:2 canvas, unlike the default SCREEN_W/H == BASE_SCREEN_W/H square
+        # match _setup() uses — otherwise the boost has no pillarbox to reclaim.
+        screen = pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        menu.draw(screen, ms, settings)
+        base_scale = ms.canvas_scale
+
+        monkeypatch.setattr(menu, "is_web", lambda: True)
+        menu.draw(screen, ms, settings)
+        assert ms.canvas_scale > base_scale
+        cw, ch = menu._get_canvas().get_size()
+        sw, _ = screen.get_size()
+        assert ms.canvas_scale <= sw / cw
+    finally:
+        pygame.quit()
+
+
 def test_all_tabs_clickable_and_switch():
     screen, ms, settings = _setup()
     try:

@@ -117,6 +117,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
                 return "menu"
             if ui.history_button_rect[2] and _point_in_rect(event.pos, ui.history_button_rect):
                 return "toggle_history"
+            if ui.quit_button_rect[2] and _point_in_rect(event.pos, ui.quit_button_rect):
+                return "quit"
         return None
 
     if event.type == pygame.MOUSEMOTION:
@@ -193,6 +195,22 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
     ui.begin_send(state, target, forward=forward)
 
 
+def _clear_selected(ui: Ui) -> None:
+    """Context-sensitive cancel/clear — shared by the X/Backspace/Delete keys and
+    their footer button: discard the send being adjusted in the popup, else drop
+    whichever queued order or forward rule is highlighted, else drop the selected
+    system's own forward rule. A no-op when none of those apply."""
+    if ui.mode == CHOOSING:
+        ui.cancel_send()
+    elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
+        del ui.pending[ui.sel_order]
+        ui.sel_order = None
+    elif ui.sel_forward is not None:
+        ui.clear_forward(ui.sel_forward)
+    elif ui.selected is not None:
+        ui.clear_forward(ui.selected)
+
+
 def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "end_turn"
@@ -201,15 +219,7 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key == pygame.K_a:
         return "toggle_autoplay"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
-        if ui.mode == CHOOSING:
-            ui.cancel_send()  # discard the send being adjusted in the popup
-        elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-            del ui.pending[ui.sel_order]  # remove the highlighted queued order
-            ui.sel_order = None
-        elif ui.sel_forward is not None:
-            ui.clear_forward(ui.sel_forward)  # drop the highlighted rule
-        elif ui.selected is not None:
-            ui.clear_forward(ui.selected)  # drop the selected system's forward rule
+        _clear_selected(ui)
         return None
     if event.key == pygame.K_r:
         return "restart"
@@ -236,6 +246,11 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return "restart"
     if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):
         return "menu"
+    if ui.quit_button_rect[2] and _point_in_rect(pos, ui.quit_button_rect):
+        return "quit"
+    if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
+        _clear_selected(ui)
+        return None
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if _point_in_rect(pos, ui.play_pause_rect):

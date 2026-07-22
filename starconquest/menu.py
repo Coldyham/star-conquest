@@ -38,7 +38,7 @@ import pygame
 
 from . import ai, config, uifont
 from .model import AiParams
-from .paths import data_dir
+from .paths import data_dir, is_web
 from .settings import Settings
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -221,6 +221,15 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     sw, sh = surface.get_size()
     cw, ch = canvas.get_size()
     scale = min(sw / cw, sh / ch)
+    if is_web():
+        # The web framebuffer (config.WEB_FB_W/H, 16:9) is a wider aspect than
+        # this menu's fixed 3:2 design canvas, so the plain letterboxed fit above
+        # pillarboxes a chunk of the frame on a phone. Filling more of the frame
+        # crops only the canvas's blank top/bottom margin (above the title, below
+        # the Start/Quit row) rather than any widget, so boost it a bit for a
+        # visibly bigger, more touch-friendly menu. Capped at the full-width fit
+        # so it can never overflow sideways.
+        scale = min(scale * config.WEB_MENU_BOOST, sw / cw)
     dw, dh = round(cw * scale), round(ch * scale)
     ox, oy = (sw - dw) // 2, (sh - dh) // 2
     ms.canvas_scale, ms.canvas_offset = scale, (ox, oy)
@@ -260,7 +269,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _text(surface, f["small"], ms.status,
               _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
+          config.COLOR_TEXT_DIM, center=(w // 2, h - 108))
 
 
 def _draw_tabs(surface, ms: MenuState, w: int) -> None:
@@ -595,6 +604,11 @@ def _draw_start(surface, ms: MenuState, w: int) -> None:
     rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER,
             tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+    # Touch/web equivalent of Esc's quit — there's no keyboard on a phone, so
+    # without this a touch user has no way to leave the app at all.
+    quit_rect = pygame.Rect(rect.right + 14, rect.y, 110, rect.height)
+    _button(surface, ms, "quit", quit_rect, "Quit", fill=_BTN_FILL, border=_BTN_BORDER,
+            tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
 
 
 # --------------------------------------------------------------------------- #
@@ -752,6 +766,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
 
     if hit == "start":
         return "start"
+    if hit == "quit":
+        return "quit"
     if hit is None:
         return None
     if hit in _SLIDER_SPECS:                       # grab + jump the slider

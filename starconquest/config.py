@@ -162,6 +162,11 @@ TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android
 WEB_FB_W = 2560
 WEB_FB_H = 1440
 
+# Extra zoom applied to the setup menu's own letterbox fit on web (see
+# menu.draw): its fixed 3:2 design canvas otherwise pillarboxes against the
+# 16:9 WEB_FB frame above, wasting width and shrinking every touch target.
+WEB_MENU_BOOST = 1.12
+
 ui_scale = 1.0              # current factor; 1.0 == the baseline above
 
 # Pixel/point constants that scale with the UI. Snapshotted at import so repeated

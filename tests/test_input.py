@@ -465,6 +465,56 @@ def test_forward_rule_expands_into_order():
         pygame.quit()
 
 
+def test_quit_button_click_returns_quit():
+    """Touch/web equivalent of Esc: the live footer's Quit button, since there is
+    no keyboard to press Escape on a phone."""
+    state, ui = _setup()
+    try:
+        ui.quit_button_rect = (100, 100, 120, 24)
+        assert _click_pos(state, ui, (110, 110)) == "quit"
+    finally:
+        pygame.quit()
+
+
+def test_clear_button_click_clears_forward_rule():
+    """The footer's Clear (X) button mirrors the X key: same context-sensitive
+    cancel/clear, just reachable without a keyboard."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.selected = home
+        ui.auto_forward[home] = (nbr, 2)
+
+        ui.clear_button_rect = (100, 100, 120, 24)
+        assert _click_pos(state, ui, (110, 110)) is None
+        assert home not in ui.auto_forward
+    finally:
+        pygame.quit()
+
+
+def test_clear_button_click_is_noop_with_nothing_selected():
+    state, ui = _setup()
+    try:
+        ui.clear_button_rect = (100, 100, 120, 24)
+        assert _click_pos(state, ui, (110, 110)) is None
+    finally:
+        pygame.quit()
+
+
+def test_game_over_quit_button_click_returns_quit():
+    """The win overlay's Quit button (touch equivalent of Esc in the game-over
+    state) — a separate code path from live play's, gated on state.winner."""
+    state, ui = _setup()
+    try:
+        state.winner = 1
+        ui.quit_button_rect = (100, 100, 120, 24)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "quit"
+    finally:
+        pygame.quit()
+
+
 def test_x_key_clears_forward_rule():
     state, ui = _setup()
     try:

@@ -136,6 +136,11 @@ class Ui:
     # whichever last ran render.draw owns the current value.
     autoplay_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     restart_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Quit (Esc) and Clear/cancel (X) touch equivalents. quit_button_rect is
+    # shared between the live footer and the game-over overlay, like
+    # menu_button_rect above; clear_button_rect is live-play only.
+    quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

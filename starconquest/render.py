@@ -649,6 +649,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         # bar in history mode — zero the live buttons so no stale click resolves.
         ui.end_turn_rect = ui.play_pause_rect = ui.history_button_rect = (0, 0, 0, 0)
         ui.autoplay_button_rect = ui.restart_live_button_rect = ui.menu_button_rect = (0, 0, 0, 0)
+        ui.quit_button_rect = ui.clear_button_rect = (0, 0, 0, 0)
         return
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the
@@ -674,8 +675,9 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
                            config.COLOR_TEXT)
 
     # Remaining bottom-bar buttons live in the map's footer strip, left of the
-    # sidebar / End Turn column — touch equivalents of the P / A / H / R / M
-    # keys, so every keyboard-only live-play action is reachable on a touchscreen.
+    # sidebar / End Turn column — touch equivalents of the P / A / H / R / M / X
+    # keys (plus Quit/Esc), so every keyboard-only live-play action is reachable
+    # on a touchscreen.
     fbh = config.FOOTER_BTN_H
     fy = by + (config.HUD_BOTTOM_H - fbh) // 2
     gap = config.s(10)
@@ -739,6 +741,28 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (40, 52, 78), mr, border_radius=config.s(6))
     pygame.draw.rect(surface, (110, 140, 200), mr, config.s(2), border_radius=config.s(6))
     _text(surface, _fonts()["normal"], "Menu (M)", config.COLOR_TEXT, center=mr.center)
+    right = mr.x
+
+    # clear/cancel — touch equivalent of X (and Backspace/Delete): discards the
+    # send being adjusted, or drops whichever queued order/forward rule is
+    # highlighted. A no-op tap when nothing is selected, same as the key.
+    cw_ = config.s(96)
+    cr = pygame.Rect(right - gap - cw_, fy, cw_, fbh)
+    ui.clear_button_rect = (cr.x, cr.y, cr.w, cr.h)
+    pygame.draw.rect(surface, (40, 52, 78), cr, border_radius=config.s(6))
+    pygame.draw.rect(surface, (110, 140, 200), cr, config.s(2), border_radius=config.s(6))
+    _text(surface, _fonts()["normal"], "Clear (X)", config.COLOR_TEXT, center=cr.center)
+    right = cr.x
+
+    # quit — the only touch equivalent of Esc's quit; without it a touch/web
+    # player without a keyboard has no way to leave the app at all. Opens the
+    # same confirm-quit modal as Esc, not an immediate quit.
+    qw = config.s(100)
+    qr = pygame.Rect(right - gap - qw, fy, qw, fbh)
+    ui.quit_button_rect = (qr.x, qr.y, qr.w, qr.h)
+    pygame.draw.rect(surface, (92, 46, 52), qr, border_radius=config.s(6))
+    pygame.draw.rect(surface, (200, 96, 104), qr, config.s(2), border_radius=config.s(6))
+    _text(surface, _fonts()["normal"], "Quit (Esc)", config.COLOR_TEXT, center=qr.center)
 
 
 _DEAD_COLOR = (92, 96, 110)
@@ -1167,9 +1191,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - config.s(60)))
     _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - config.s(24)))
-    # Tappable buttons (touch equivalents of the R/M/H keys). Restart and Menu sit
-    # side by side; Review-history enters history mode to scrub the finished game
-    # with fog fully lifted (see what was happening behind the fog of war).
+    # Tappable buttons (touch equivalents of the R/M/H/Esc keys). Restart and Menu
+    # sit side by side; Review-history enters history mode to scrub the finished
+    # game with fog fully lifted (see what was happening behind the fog of war);
+    # Quit sits beside it, opening the same confirm-quit modal as Esc.
     bw, bh, gap = config.s(180), config.s(40), config.s(12)
     row_y = h // 2 + config.s(8)
     rr = pygame.Rect(w // 2 - bw - gap // 2, row_y, bw, bh)
@@ -1183,12 +1208,18 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (110, 140, 200), mr, 2, border_radius=6)
     _text(surface, _fonts()["normal"], "Setup menu (M)", config.COLOR_TEXT, center=mr.center)
 
-    hr = pygame.Rect(w // 2 - bw // 2, row_y + bh + gap, bw, bh)
+    hr = pygame.Rect(w // 2 - bw - gap // 2, row_y + bh + gap, bw, bh)
     ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
     pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
     pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
     _text(surface, _fonts()["normal"], "Review history (H)", config.COLOR_TEXT,
           center=hr.center)
+
+    qr = pygame.Rect(w // 2 + gap // 2, row_y + bh + gap, bw, bh)
+    ui.quit_button_rect = (qr.x, qr.y, qr.w, qr.h)
+    pygame.draw.rect(surface, (92, 46, 52), qr, border_radius=6)
+    pygame.draw.rect(surface, (200, 96, 104), qr, 2, border_radius=6)
+    _text(surface, _fonts()["normal"], "Quit (Esc)", config.COLOR_TEXT, center=qr.center)
 
 
 # Scrubber palette — a cool track with a bright fill/knob, echoing the play button.
