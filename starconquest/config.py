@@ -112,6 +112,12 @@ SCREEN_H = 960
 HUD_TOP_H = 40
 HUD_BOTTOM_H = 46
 HUD_RIGHT_W = 240            # reserved right column for the system/lane info panel
+# The end-turn button is the single most-tapped control, so it gets its own big
+# zone: the full width of the right info panel, reaching above the ordinary
+# bottom bar (see render._draw_side_panel, which reserves this same height so
+# the queued-orders list never draws underneath it).
+END_TURN_H = 96
+FOOTER_BTN_H = 40            # height of the smaller bottom-bar buttons (play/pause, etc.)
 
 NODE_MIN_RADIUS = 12         # for the poorest systems (production == max)
 NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
@@ -157,7 +163,7 @@ ui_scale = 1.0              # current factor; 1.0 == the baseline above
 # Pixel/point constants that scale with the UI. Snapshotted at import so repeated
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
-    "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W",
+    "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",

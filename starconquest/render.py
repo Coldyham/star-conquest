@@ -648,57 +648,97 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         # the scrubber (drawn by _draw_scrubber, after the HUD) owns the bottom
         # bar in history mode — zero the live buttons so no stale click resolves.
         ui.end_turn_rect = ui.play_pause_rect = ui.history_button_rect = (0, 0, 0, 0)
+        ui.autoplay_button_rect = ui.restart_live_button_rect = ui.menu_button_rect = (0, 0, 0, 0)
         return
-    _text(surface, _fonts()["small"], _hint(ui), config.COLOR_TEXT_DIM,
-          midleft=(14, by + config.HUD_BOTTOM_H // 2))
 
-    # end-turn button
-    bw, bh = 150, 32
-    br = pygame.Rect(w - bw - 12, by + (config.HUD_BOTTOM_H - bh) // 2, bw, bh)
+    # End-turn button: the single biggest, easiest touch target in the HUD — the
+    # full width of the right info panel, reaching up above the ordinary bottom
+    # bar (_draw_side_panel/_draw_order_list reserve the same config.END_TURN_H
+    # so the queued-orders list never draws underneath it).
+    ebw, ebh = config.HUD_RIGHT_W, config.END_TURN_H
+    br = pygame.Rect(w - ebw, h - ebh, ebw, ebh)
     ui.end_turn_rect = (br.x, br.y, br.w, br.h)
-    pygame.draw.rect(surface, (46, 92, 60), br, border_radius=6)
-    pygame.draw.rect(surface, (96, 190, 120), br, 2, border_radius=6)
+    pygame.draw.rect(surface, (46, 92, 60), br, border_radius=config.s(8))
+    pygame.draw.rect(surface, (96, 190, 120), br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:
-        _text(surface, _fonts()["normal"], "AUTO", config.COLOR_TEXT, center=br.center)
+        _text(surface, _fonts()["big"], "AUTO", config.COLOR_TEXT, center=br.center)
     else:
         # "End Turn" + a drawn return-arrow icon: the monospace font has no ⏎
         # glyph (renders as tofu), so we draw the shortcut hint instead.
-        font = _fonts()["normal"]
+        font = _fonts()["big"]
         tw = font.size("End Turn")[0]
-        gw, gap = 15, 8
+        gw, gap = config.s(26), config.s(10)
         left = br.centerx - (tw + gap + gw) // 2
         _text(surface, font, "End Turn", config.COLOR_TEXT, midleft=(left, br.centery))
-        _draw_return_glyph(surface, (left + tw + gap, br.centery - 6, gw, 12),
+        _draw_return_glyph(surface, (left + tw + gap, br.centery - config.s(9), gw, config.s(18)),
                            config.COLOR_TEXT)
 
-    # play/pause button — sits left of End Turn; hidden while autoplay, which
-    # drives turns on its own timer, would make it a no-op.
-    leftmost = br.x
+    # Remaining bottom-bar buttons live in the map's footer strip, left of the
+    # sidebar / End Turn column — touch equivalents of the P / A / H / R / M
+    # keys, so every keyboard-only live-play action is reachable on a touchscreen.
+    fbh = config.FOOTER_BTN_H
+    fy = by + (config.HUD_BOTTOM_H - fbh) // 2
+    gap = config.s(10)
+    right = w - config.HUD_RIGHT_W - config.s(12)
+
+    # play/pause — hidden while autoplay, which drives turns on its own timer
+    # and would make this a no-op.
     if ui.autoplay:
         ui.play_pause_rect = (0, 0, 0, 0)
     else:
-        pw, ph = 120, 32
-        pr = pygame.Rect(br.x - pw - 10, br.y, pw, ph)
+        pw = config.s(120)
+        pr = pygame.Rect(right - pw, fy, pw, fbh)
         ui.play_pause_rect = (pr.x, pr.y, pr.w, pr.h)
         fill = (92, 70, 46) if ui.playing else (40, 52, 78)
         edge = (190, 150, 96) if ui.playing else (110, 140, 200)
-        pygame.draw.rect(surface, fill, pr, border_radius=6)
-        pygame.draw.rect(surface, edge, pr, 2, border_radius=6)
+        pygame.draw.rect(surface, fill, pr, border_radius=config.s(6))
+        pygame.draw.rect(surface, edge, pr, config.s(2), border_radius=config.s(6))
         plabel = "Pause (P)" if ui.playing else "Play (P)"
         _text(surface, _fonts()["normal"], plabel, config.COLOR_TEXT, center=pr.center)
-        leftmost = pr.x
+        right = pr.x
 
-    # history button — sits left of Play/Pause (or End Turn under autoplay).
-    # Only meaningful once a turn has been recorded to scrub back through.
+    # autoplay toggle — hands the human seat's decisions to the AI, or (while
+    # autoplay is on) takes control back. Shown either way, unlike play/pause.
+    aw = config.s(140)
+    ar = pygame.Rect(right - gap - aw, fy, aw, fbh)
+    ui.autoplay_button_rect = (ar.x, ar.y, ar.w, ar.h)
+    afill = (92, 70, 46) if ui.autoplay else (40, 52, 78)
+    aedge = (190, 150, 96) if ui.autoplay else (110, 140, 200)
+    pygame.draw.rect(surface, afill, ar, border_radius=config.s(6))
+    pygame.draw.rect(surface, aedge, ar, config.s(2), border_radius=config.s(6))
+    alabel = "Take control (A)" if ui.autoplay else "Autoplay (A)"
+    _text(surface, _fonts()["small"], alabel, config.COLOR_TEXT, center=ar.center)
+    right = ar.x
+
+    # history — only meaningful once a turn has been recorded to scrub through.
     if state.turn > 0:
-        hw = 118
-        hr = pygame.Rect(leftmost - hw - 10, br.y, hw, 32)
+        hw = config.s(118)
+        hr = pygame.Rect(right - gap - hw, fy, hw, fbh)
         ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
-        pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
-        pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
+        pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=config.s(6))
+        pygame.draw.rect(surface, (150, 130, 200), hr, config.s(2), border_radius=config.s(6))
         _text(surface, _fonts()["normal"], "History (H)", config.COLOR_TEXT, center=hr.center)
+        right = hr.x
     else:
         ui.history_button_rect = (0, 0, 0, 0)
+
+    # new map — touch equivalent of R, which reseeds mid-game too (not just at
+    # game end); no confirmation, matching the keyboard shortcut exactly.
+    nw = config.s(128)
+    nr = pygame.Rect(right - gap - nw, fy, nw, fbh)
+    ui.restart_live_button_rect = (nr.x, nr.y, nr.w, nr.h)
+    pygame.draw.rect(surface, (120, 86, 46), nr, border_radius=config.s(6))
+    pygame.draw.rect(surface, (200, 150, 96), nr, config.s(2), border_radius=config.s(6))
+    _text(surface, _fonts()["normal"], "New map (R)", config.COLOR_TEXT, center=nr.center)
+    right = nr.x
+
+    # menu — touch equivalent of M, back to the setup menu.
+    mw = config.s(110)
+    mr = pygame.Rect(right - gap - mw, fy, mw, fbh)
+    ui.menu_button_rect = (mr.x, mr.y, mr.w, mr.h)
+    pygame.draw.rect(surface, (40, 52, 78), mr, border_radius=config.s(6))
+    pygame.draw.rect(surface, (110, 140, 200), mr, config.s(2), border_radius=config.s(6))
+    _text(surface, _fonts()["normal"], "Menu (M)", config.COLOR_TEXT, center=mr.center)
 
 
 _DEAD_COLOR = (92, 96, 110)
@@ -768,23 +808,6 @@ def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
     return fog.player_totals(state, pid)
 
 
-def _hint(ui: Ui) -> str:
-    if ui.autoplay:
-        return "Autoplay — AI is playing all seats. A: take control  ·  M: setup menu  ·  Esc: quit."
-    if ui.mode == CHOOSING and ui.forward_armed:
-        return "Forwarding each turn  ·  tabs: Send / Forward  ·  −/+: ships to keep  ·  Cancel  ·  drag box to move  ·  right-click/Esc: close"
-    if ui.mode == CHOOSING:
-        return "Send committed  ·  tabs: Send / Forward  ·  Half / All · −/+  ·  Cancel  ·  drag box to move  ·  right-click/Esc: keep & close"
-    if ui.sel_order is not None:
-        return "Editing queued order  ·  wheel or −/+ buttons: ship count  ·  X: remove  ·  right-click/Esc: done"
-    if ui.sel_forward is not None:
-        return "Editing auto-forward rule  ·  wheel or −/+ buttons: keep  ·  X: remove  ·  right-click/Esc: done"
-    if ui.mode == SELECTED:
-        return "Click a neighbour to send all (Shift: forward rule)  ·  X: clear forward rule  ·  right-click/Esc: cancel"
-    return ("Click your system to select  ·  click a queued lane/list row to edit  ·  "
-            "Space/Enter: End Turn  ·  P: play/pause  ·  A: autoplay  ·  M: menu")
-
-
 # --------------------------------------------------------------------------- #
 # Info panel (right column)
 # --------------------------------------------------------------------------- #
@@ -795,7 +818,12 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
     px = w - config.HUD_RIGHT_W
     py = config.HUD_TOP_H
-    ph = h - config.HUD_TOP_H - config.HUD_BOTTOM_H
+    # The panel's own footer is the big End Turn button (see _draw_hud), not the
+    # ordinary bottom bar under the map — it reserves config.END_TURN_H instead.
+    # History mode never draws that button (the scrubber owns the bottom bar
+    # there instead), so it falls back to the plain HUD_BOTTOM_H reservation.
+    footer_h = config.HUD_BOTTOM_H if ui.history else config.END_TURN_H
+    ph = h - config.HUD_TOP_H - footer_h
     pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
     pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), 1)
 
@@ -879,7 +907,8 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     ui.forward_hitboxes = []
     w, h = surface.get_size()
     px = w - config.HUD_RIGHT_W
-    bottom = h - config.HUD_BOTTOM_H
+    # the panel's footer is the big End Turn button, not the ordinary bottom bar
+    bottom = h - config.END_TURN_H
     rules = sorted(ui.auto_forward.items())  # stable order across frames
     if not ui.pending and not rules:
         return

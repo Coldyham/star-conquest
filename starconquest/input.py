@@ -226,9 +226,16 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 
 
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
-    # Tested before the autoplay early-out so History stays clickable under autoplay.
+    # Tested before the autoplay early-out so these stay clickable under autoplay
+    # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
     if ui.history_button_rect[2] and _point_in_rect(pos, ui.history_button_rect):
         return "toggle_history"
+    if ui.autoplay_button_rect[2] and _point_in_rect(pos, ui.autoplay_button_rect):
+        return "toggle_autoplay"
+    if ui.restart_live_button_rect[2] and _point_in_rect(pos, ui.restart_live_button_rect):
+        return "restart"
+    if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):
+        return "menu"
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if _point_in_rect(pos, ui.play_pause_rect):

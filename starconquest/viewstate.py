@@ -130,6 +130,12 @@ class Ui:
     # rebuilt by render each frame and tested by input like the rects above.
     restart_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     menu_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
+    # actions (A: autoplay, R: new map). menu_button_rect above is shared with
+    # the game-over overlay — the two scenes never draw at the same time, so
+    # whichever last ran render.draw owns the current value.
+    autoplay_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    restart_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
