@@ -517,7 +517,8 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
-    """Footer row: 'File [ name ] [Save] [Load]' — mirrors the seed field."""
+    """Footer row: 'File [ name ] [Save] [Load]' — mirrors the seed field. On the
+    web build a leading '[Get Link]' shares the whole config as a URL."""
     f = _fonts()
     lx, rx = w // 2 - 280, w // 2 + 280
     _text(surface, f["small"], "File", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
@@ -525,7 +526,15 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
     fx = lx + 56
-    field = pygame.Rect(fx, y, save.x - 10 - fx, _CH)
+    field_right = save.x - 10
+    if is_web():
+        link = pygame.Rect(fx, y, 100, _CH)
+        _button(surface, ms, "get_link", link, "Get Link",
+                fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        fx = link.right + 10
+    else:
+        ms.rects.pop("get_link", None)
+    field = pygame.Rect(fx, y, field_right - fx, _CH)
 
     editing = ms.editing_filename
     pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
@@ -846,6 +855,14 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             _set_status(ms, f"Loaded {path.name}", True)
         except (OSError, ValueError):
             _set_status(ms, f"Couldn't load {path.name}", False)
+    elif hit == "get_link":
+        ok, copied = _share_link(settings)
+        if copied:
+            _set_status(ms, "Link copied — paste to share", True)
+        elif ok:
+            _set_status(ms, "Link updated — copy it from the address bar", True)
+        else:
+            _set_status(ms, "Couldn't create link", False)
     return None
 
 
@@ -875,6 +892,31 @@ def _randomise_sliders(target, specs) -> None:
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
     settings.seed = int(ms.seed_text) if ms.seed_text else None
+
+
+def _share_link(settings: Settings) -> tuple[bool, bool]:
+    """Web only: encode ``settings`` into the URL as a ``#<token>`` fragment and
+    try to copy the full link to the clipboard. Returns ``(url_updated, copied)``.
+
+    The address-bar update (``history.replaceState``, no reload/new history) is
+    the reliable channel; the clipboard write is best-effort — it may be
+    unavailable or blocked, and it's a standalone PWA (no visible address bar)
+    where the clipboard matters most. Both go through pygbag's ``platform.window``
+    JS bridge, guarded so a missing API is a graceful failure, not a crash."""
+    import platform as _platform
+
+    try:
+        token = settings.to_token()
+        win = _platform.window
+        win.history.replaceState(None, "", "#" + token)
+        url = str(win.location.origin) + str(win.location.pathname) + "#" + token
+    except Exception:
+        return (False, False)
+    try:
+        win.navigator.clipboard.writeText(url)   # async; fire-and-forget
+        return (True, True)
+    except Exception:
+        return (True, False)
 
 
 def _settings_path(name: str) -> Path:

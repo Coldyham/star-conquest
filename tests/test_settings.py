@@ -130,6 +130,26 @@ def test_save_load_round_trip(tmp_path):
     assert Settings.load(path) == s
 
 
+def test_to_from_token_round_trip_defaults():
+    s = Settings.defaults()
+    assert Settings.from_token(s.to_token()) == s
+
+
+def test_to_from_token_round_trip_customised():
+    s = _customised()
+    assert Settings.from_token(s.to_token()) == s
+
+
+def test_token_is_url_fragment_safe():
+    token = _customised().to_token()
+    assert not (set(token) & set("+/="))
+
+
+def test_from_token_raises_on_garbage():
+    with pytest.raises(ValueError):
+        Settings.from_token("not a valid token !!!")
+
+
 def test_from_dict_ignores_unknown_and_fills_missing():
     loaded = Settings.from_dict({"players": 4, "junk": "ignored"})
     assert loaded.players == 4

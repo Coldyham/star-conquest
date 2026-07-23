@@ -48,6 +48,23 @@ def _web_is_touch() -> bool:
         return False
 
 
+def _apply_shared_link(settings: Settings) -> None:
+    """Web only: if the URL carries a ``#<token>`` shared-settings fragment,
+    decode it over ``settings`` in place (same effect as CLI args pre-filling the
+    menu). Guarded like ``_web_is_touch`` — a missing/malformed hash is a no-op,
+    never a crash."""
+    if not paths.is_web():
+        return
+    import platform as _platform
+
+    try:
+        token = str(_platform.window.location.hash).lstrip("#")
+        if token:
+            settings.copy_from(Settings.from_token(token))
+    except Exception:
+        pass
+
+
 def new_ui(state: GameState, autoplay: bool) -> Ui:
     ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
     refresh_fog(state, ui)   # seed visibility from the opening position
@@ -206,6 +223,7 @@ async def main() -> None:
     args = ap.parse_args([] if paths.is_android() else None)
 
     settings = Settings.from_args(args)
+    _apply_shared_link(settings)   # web only: pre-fill from a #<token> in the URL
     ai.load_models()          # register any drop-in models/ strategies up front
 
     pygame.init()

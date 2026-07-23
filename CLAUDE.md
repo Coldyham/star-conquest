@@ -121,7 +121,15 @@ intact.
 - **`settings.Settings` is the pure, serializable pre-game config** (players,
   map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
   interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
-  is the one funnel from menu/CLI to a `GameState`.
+  is the one funnel from menu/CLI to a `GameState`. `to_dict`/`from_dict` back
+  both the JSON file Save/Load (menu footer, gitignored `saves/`) and a
+  `to_token`/`from_token` pair (compact base64url JSON) that encodes a whole
+  config into a URL fragment. On the web build the menu's "Get Link" button
+  writes that token to `location.hash` (and best-effort to the clipboard) so a
+  setup can be shared as a link, and `main._apply_shared_link` decodes a
+  `#<token>` back onto `Settings` at boot — same effect as CLI args pre-filling
+  the menu. `from_token`/`from_dict` are deliberately tolerant (clamp, default,
+  pad), so a stale or hand-edited token still loads to a playable config.
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so

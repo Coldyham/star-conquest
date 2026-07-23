@@ -10,6 +10,8 @@ module turns one into a fresh ``GameState``. Kept distinct from ``viewstate.Ui``
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import random
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -165,6 +167,26 @@ class Settings:
         """Read a config from ``path`` (raises on missing/invalid JSON)."""
         with open(path) as fh:
             return cls.from_dict(json.load(fh))
+
+    def to_token(self) -> str:
+        """This config as a URL-fragment-safe string (compact JSON, base64url,
+        no ``=`` padding) — the payload behind a shareable settings link."""
+        raw = json.dumps(self.to_dict(), separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @classmethod
+    def from_token(cls, token: str) -> "Settings":
+        """Rebuild from a ``to_token`` string, tolerantly (via ``from_dict``).
+
+        Raises ``ValueError`` on any malformed token, mirroring ``load``'s
+        contract for bad JSON, so callers have one failure mode to catch.
+        """
+        try:
+            padded = token + "=" * (-len(token) % 4)
+            raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+            return cls.from_dict(json.loads(raw.decode("utf-8")))
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"invalid settings token: {e}") from e
 
     def copy_from(self, other: "Settings") -> None:
         """Overwrite every field from ``other`` in place (copying its lists).
