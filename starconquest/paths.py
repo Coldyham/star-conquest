@@ -18,6 +18,12 @@ from pathlib import Path
 # The package dir's parent: the repo root on desktop.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# localStorage key the web build uses to remember the last shared-settings token.
+# An installed PWA launches from the manifest's fixed ``start_url`` (no URL
+# fragment), so a ``#<token>`` seen in the browser is stashed here and read back
+# on the next launch — the one place that key is named, shared by main/menu.
+WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
+
 
 def _android_data_dir() -> Path | None:
     """The app-private writable dir on Android, or None when not on Android."""

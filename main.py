@@ -49,18 +49,28 @@ def _web_is_touch() -> bool:
 
 
 def _apply_shared_link(settings: Settings) -> None:
-    """Web only: if the URL carries a ``#<token>`` shared-settings fragment,
-    decode it over ``settings`` in place (same effect as CLI args pre-filling the
-    menu). Guarded like ``_web_is_touch`` — a missing/malformed hash is a no-op,
-    never a crash."""
+    """Web only: pre-fill ``settings`` from a shared-settings token, in place
+    (same effect as CLI args pre-filling the menu).
+
+    Prefer a ``#<token>`` in the URL (an opened shared link); failing that, fall
+    back to the last token we stashed in ``localStorage``. That fallback is what
+    survives *installing* the PWA: the installed app launches from the manifest's
+    fixed ``start_url`` with no fragment, so the hash is gone — but same-origin
+    ``localStorage`` still holds the token the browser saw before the install.
+    Guarded like ``_web_is_touch`` — anything missing/malformed is a no-op."""
     if not paths.is_web():
         return
     import platform as _platform
 
     try:
-        token = str(_platform.window.location.hash).lstrip("#")
+        win = _platform.window
+        token = str(win.location.hash).lstrip("#")
+        if not token:
+            stored = win.localStorage.getItem(paths.WEB_SHARED_SETTINGS_KEY)
+            token = str(stored) if stored else ""
         if token:
             settings.copy_from(Settings.from_token(token))
+            win.localStorage.setItem(paths.WEB_SHARED_SETTINGS_KEY, token)
     except Exception:
         pass
 

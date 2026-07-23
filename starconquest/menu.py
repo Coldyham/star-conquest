@@ -38,7 +38,7 @@ import pygame
 
 from . import ai, config, uifont
 from .model import AiParams
-from .paths import data_dir, is_web
+from .paths import WEB_SHARED_SETTINGS_KEY, data_dir, is_web
 from .settings import Settings
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -909,6 +909,9 @@ def _share_link(settings: Settings) -> tuple[bool, bool]:
         token = settings.to_token()
         win = _platform.window
         win.history.replaceState(None, "", "#" + token)
+        # Remember it so an install right after generating the link keeps these
+        # settings (the installed PWA boots from start_url with no fragment).
+        win.localStorage.setItem(WEB_SHARED_SETTINGS_KEY, token)
         url = str(win.location.origin) + str(win.location.pathname) + "#" + token
     except Exception:
         return (False, False)

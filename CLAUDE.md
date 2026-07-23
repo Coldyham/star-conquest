@@ -128,8 +128,12 @@ intact.
   writes that token to `location.hash` (and best-effort to the clipboard) so a
   setup can be shared as a link, and `main._apply_shared_link` decodes a
   `#<token>` back onto `Settings` at boot — same effect as CLI args pre-filling
-  the menu. `from_token`/`from_dict` are deliberately tolerant (clamp, default,
-  pad), so a stale or hand-edited token still loads to a playable config.
+  the menu. Because an installed PWA launches from the manifest's fixed
+  `start_url` (no fragment), the token is also mirrored to `localStorage`
+  (key `paths.WEB_SHARED_SETTINGS_KEY`) and read back as a fallback, so a shared
+  config survives installation. `from_token`/`from_dict` are deliberately
+  tolerant (clamp, default, pad), so a stale or hand-edited token still loads to
+  a playable config.
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
