@@ -17,7 +17,8 @@ import copy
 
 import pygame
 
-from starconquest import ai, config, engine, fog, mapgen, menu, paths, render, replay
+from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
+                          replay, softkeyboard)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -34,20 +35,6 @@ def build_view(state: GameState) -> WorldView:
     return WorldView(mapgen.map_bounds(state), config.play_rect(), padding=50)
 
 
-def _web_is_touch() -> bool:
-    """True on a touch-capable browser (phone/tablet), so the web build gets the
-    same finger-sized hit targets as Android. Desktop browsers report 0 touch
-    points and stay compact. pygbag augments the stdlib ``platform`` module with the
-    JS ``window``; guard everything so a missing attr just means "not a touch device".
-    """
-    import platform as _platform
-
-    try:
-        return int(_platform.window.navigator.maxTouchPoints) > 0
-    except Exception:
-        return False
-
-
 def _apply_shared_link(settings: Settings) -> None:
     """Web only: pre-fill ``settings`` from a shared-settings token, in place
     (same effect as CLI args pre-filling the menu).
@@ -57,7 +44,7 @@ def _apply_shared_link(settings: Settings) -> None:
     survives *installing* the PWA: the installed app launches from the manifest's
     fixed ``start_url`` with no fragment, so the hash is gone — but same-origin
     ``localStorage`` still holds the token the browser saw before the install.
-    Guarded like ``_web_is_touch`` — anything missing/malformed is a no-op."""
+    Guarded like ``softkeyboard.is_touch_web`` — anything missing is a no-op."""
     if not paths.is_web():
         return
     import platform as _platform
@@ -259,7 +246,7 @@ async def main() -> None:
     # sizes, so this must run before any draw.
     sw, sh = pygame.display.get_surface().get_size()
     fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
-    touch = paths.is_android() or (paths.is_web() and _web_is_touch())
+    touch = paths.is_android() or softkeyboard.is_touch_web()
     boost = config.TOUCH_UI_SCALE if touch else 1.0
     config.apply_ui_scale(max(1.0, fit) * boost)
     clock = pygame.time.Clock()
@@ -496,6 +483,9 @@ async def main() -> None:
                         resolve_turn(state, ui, log)
 
         if scene == "menu":
+            # Soft-keyboard typing arrives outside the SDL event queue, so the
+            # menu needs a per-frame poll as well as its event handler.
+            menu.pump(menu_state, settings)
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)

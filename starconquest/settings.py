@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import itertools
 import json
+import os
 import random
+import time
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Optional
 
@@ -21,6 +24,9 @@ from . import config, mapgen
 from .model import AiParams, GameState
 
 MODES = ("random", "symmetric")
+
+# Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
+_roll_count = itertools.count()
 
 # (Settings attr, config constant) for every global balance knob the menu tunes.
 # `_apply_globals` writes these into the `config` module before generation; since
@@ -238,7 +244,32 @@ def _ai_from_dict(d) -> AiParams:
 
 def resolve_seed(settings: Settings) -> int:
     """The concrete seed to generate with: the chosen one, or a fresh random."""
-    return settings.seed if settings.seed is not None else random.randrange(1_000_000)
+    return settings.seed if settings.seed is not None else random_seed()
+
+
+def fresh_rng() -> random.Random:
+    """A throwaway RNG seeded from live entropy, for the *unreproducible* rolls
+    (a new seed, the menu's dice buttons) — never for anything a seed must
+    reproduce, which always goes through ``state.rng``.
+
+    Deliberately not the global ``random`` module: the browser build boots from a
+    fixed interpreter image and its ``os.urandom`` may be stubbed, so ``random``
+    can auto-seed identically on every page load and hand out the same sequence
+    of "random" seeds each session. Mixing the wall clock, a per-call counter (in
+    case the clock is coarse — browsers deliberately blunt it) and OS entropy
+    where there is any keeps every roll distinct on the web as well as desktop.
+    """
+    mix = time.time_ns() ^ (next(_roll_count) * 0x9E3779B97F4A7C15)
+    try:
+        mix ^= int.from_bytes(os.urandom(8), "big")
+    except Exception:      # no OS entropy source (some sandboxed runtimes)
+        pass
+    return random.Random(mix)
+
+
+def random_seed() -> int:
+    """A fresh, unpredictable map seed."""
+    return fresh_rng().randrange(config.SEED_MAX)
 
 
 def _apply_globals(settings: Settings) -> None:

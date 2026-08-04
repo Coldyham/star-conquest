@@ -11,7 +11,8 @@ import pytest
 
 from starconquest import config
 from starconquest.model import AiParams
-from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state, resolve_seed
+from starconquest.settings import (_GLOBAL_KNOBS, Settings, build_state,
+                                   random_seed, resolve_seed)
 
 
 @contextlib.contextmanager
@@ -214,3 +215,22 @@ def test_build_state_stamps_per_seat_strategy():
         state = build_state(s, 5)
         assert state.players[2].ai_strategy == "rusher"
         assert state.players[3].ai_strategy == "heuristic"
+
+
+def test_random_seed_is_in_range_and_not_a_fixed_sequence():
+    """Rolled seeds must differ *within* a run even if the clock is coarse (the
+    browser blunts it), which is what a repeated roll on the web build hit."""
+    seeds = [random_seed() for _ in range(50)]
+    assert all(0 <= s < config.SEED_MAX for s in seeds)
+    assert len(set(seeds)) > 45           # collisions vanishingly unlikely
+
+
+def test_random_seed_ignores_the_global_random_state():
+    """The web build can boot `random` from the same state every page load, so a
+    fresh seed must not come off it — reseeding must not reproduce the roll."""
+    import random as _random
+
+    _random.seed(1234)
+    first = [random_seed() for _ in range(5)]
+    _random.seed(1234)
+    assert [random_seed() for _ in range(5)] != first

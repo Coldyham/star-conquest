@@ -51,6 +51,15 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     `draw` only reads `Settings`, `handle_event` mutates `MenuState`/`Settings`
     and returns `"start"`/`"quit"`/`None`. `main.py` runs a two-scene
     (`"menu"` ⇄ `"game"`) state machine and builds the `GameState` on `"start"`.
+    `menu.pump` is the second half of the mutate side: a per-frame poll `main.py`
+    calls while the menu is up, for text that never reaches the SDL event queue
+    (see `softkeyboard` below).
+  - `softkeyboard.py` is a browser-only bridge, not a pygame module: on a touch
+    browser it focuses a hidden DOM `<input>` so the mobile on-screen keyboard
+    actually appears (SDL's `start_text_input` has nothing to focus there) and
+    reports back what was typed. Everything is guarded — off the web build, on a
+    desktop browser, or if any DOM call fails, every function is a no-op and the
+    menu keeps its plain SDL text path.
 
 ### Turn resolution (engine.py)
 
@@ -144,7 +153,12 @@ intact.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given
-  the seed (`test_mapgen.py` asserts this).
+  the seed (`test_mapgen.py` asserts this). The *unreproducible* rolls — picking
+  a fresh seed, the menu's dice buttons — go through `settings.random_seed()` /
+  `settings.fresh_rng()`, which mix the clock and a per-call counter into a
+  throwaway RNG rather than using the global `random`: the web build boots from a
+  fixed interpreter image, so `random`'s auto-seeding can hand out the same
+  "random" seeds on every page load.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.

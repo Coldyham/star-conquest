@@ -24,6 +24,8 @@ SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
 DEFAULT_NODES = 18
 DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
+SEED_MAX = 1_000_000          # rolled seeds are 0..SEED_MAX-1 (short enough to read out)
+
 # Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
 MIN_PLAYERS = 2               # a game needs at least two sides
 MAX_PLAYERS = 6               # == distinct entries in PLAYER_COLORS below

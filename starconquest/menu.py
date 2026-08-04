@@ -29,17 +29,16 @@ loop needs no new action.
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
 import pygame
 
-from . import ai, config, uifont
+from . import ai, config, softkeyboard, uifont
 from .model import AiParams
 from .paths import WEB_SHARED_SETTINGS_KEY, data_dir, is_web
-from .settings import Settings
+from .settings import Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -664,13 +663,55 @@ def draw_resume_prompt(surface, log) -> None:
 # --------------------------------------------------------------------------- #
 def handle_event(event, ms: MenuState, settings: Settings):
     # Map pointer coords from the real screen back into canvas space (the widget
-    # rects live in canvas space), then dispatch. Also toggle the Android soft
-    # keyboard as a text field gains/loses focus (a harmless SDL no-op on desktop).
+    # rects live in canvas space), then dispatch. Also raise/dismiss the on-screen
+    # keyboard as a text field gains/loses focus (a no-op on desktop).
     event = _to_canvas_event(event, ms)
-    was_editing = ms.editing_seed or ms.editing_filename
+    before = _editing_field(ms)
     result = _dispatch(event, ms, settings)
-    _sync_text_input(ms, was_editing)
+    _sync_text_input(ms, before)
     return result
+
+
+def pump(ms: MenuState, settings: Settings) -> None:
+    """Per-frame poll of the mobile browser's on-screen keyboard; a no-op
+    everywhere else. Called by ``main.py`` while the menu scene is up.
+
+    Typing on a soft keyboard produces no SDL events at all, so the text arrives
+    by reading the hidden DOM field back (``softkeyboard``) and filtering it into
+    the same edit buffers ``_handle_text_input`` fills. This is the mutate half of
+    the scene, alongside ``handle_event`` — ``draw`` still only reads."""
+    field_name = _editing_field(ms)
+    if field_name is None:
+        return
+    if field_name == "seed":
+        raw = softkeyboard.value(ms.seed_text)
+        text = _filter(raw, str.isdigit, _SEED_MAX_LEN)
+        if text != ms.seed_text:
+            ms.seed_text = text
+            _apply_seed_text(ms, settings)
+    else:
+        raw = softkeyboard.value(ms.filename)
+        text = _filter(raw, lambda c: c.isalnum() or c in "_-.", _FILENAME_MAX_LEN)
+        ms.filename = text
+    if text != raw:
+        # Only on a rejected character: writing back every frame would drag the
+        # caret to the end and stop the player editing mid-string.
+        softkeyboard.set_value(text)
+    if softkeyboard.dismissed():      # Done/Go, or the keyboard swiped away
+        ms.editing_seed = ms.editing_filename = False
+        softkeyboard.close()
+
+
+def _filter(text: str, allowed, limit: int) -> str:
+    """``text`` reduced to the characters a field accepts, capped at ``limit``."""
+    return "".join(ch for ch in text if allowed(ch))[:limit]
+
+
+def _editing_field(ms: MenuState) -> Optional[str]:
+    """Which text field has the caret, if any — ``"seed"``, ``"file"`` or None."""
+    if ms.editing_seed:
+        return "seed"
+    return "file" if ms.editing_filename else None
 
 
 def _to_canvas_event(event, ms: MenuState):
@@ -703,17 +744,27 @@ def _dispatch(event, ms: MenuState, settings: Settings):
     return None
 
 
-def _sync_text_input(ms: MenuState, was_editing: bool) -> None:
-    """Raise/dismiss the on-screen keyboard as a text field gains/loses focus.
-    On Android SDL shows the IME; on desktop it just toggles TEXTINPUT delivery.
-    Guarded so a headless/uninitialised video subsystem never raises."""
-    now_editing = ms.editing_seed or ms.editing_filename
-    if now_editing == was_editing:
+def _sync_text_input(ms: MenuState, before: Optional[str]) -> None:
+    """Raise/dismiss the on-screen keyboard as a text field gains/loses focus (or
+    the caret moves between the two fields).
+
+    Two mechanisms, since no single one covers every platform: SDL's IME call
+    shows Android's native keyboard and toggles TEXTINPUT delivery on desktop,
+    while the browser needs a focused DOM field (``softkeyboard``). Both are
+    guarded, so a headless/uninitialised video subsystem or a non-web build just
+    skips the one that doesn't apply. The focus happens inside this tap's
+    handling, which is what lets the browser accept it as a user gesture."""
+    now = _editing_field(ms)
+    if now == before:
         return
     try:
-        pygame.key.start_text_input() if now_editing else pygame.key.stop_text_input()
+        pygame.key.start_text_input() if now else pygame.key.stop_text_input()
     except pygame.error:
         pass
+    if now is None:
+        softkeyboard.close()
+    else:
+        softkeyboard.open(ms.seed_text if now == "seed" else ms.filename)
 
 
 def _handle_text_input(text: str, ms: MenuState, settings: Settings):
@@ -828,7 +879,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.editing_seed = True
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
     elif hit == "seed_random":
-        settings.seed = random.randrange(1_000_000)
+        settings.seed = random_seed()
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
@@ -884,8 +935,9 @@ def _randomise_sliders(target, specs) -> None:
     """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
     on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
     snap-and-clamp logic with ``_apply_slider``."""
+    rng = fresh_rng()
     for _key, _label, attr, lo, hi, step, is_int in specs:
-        snapped = round(random.uniform(lo, hi) / step) * step
+        snapped = round(rng.uniform(lo, hi) / step) * step
         snapped = max(lo, min(hi, snapped))
         setattr(target, attr, int(round(snapped)) if is_int else round(snapped, 4))
 

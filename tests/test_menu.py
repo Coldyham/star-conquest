@@ -284,3 +284,90 @@ def test_ai_tab_strategy_dropdown_select():
     finally:
         ai.STRATEGIES.pop("dropdown_test", None)
         pygame.quit()
+
+
+class _FakeSoftKeyboard:
+    """Stand-in for the browser's hidden DOM field (see softkeyboard.py): holds a
+    value, knows whether it has focus, and can be 'dismissed' like a Done key."""
+
+    def __init__(self):
+        self.text = None          # None == closed (no field to read)
+        self.opens = []
+        self.gone = False
+
+    def open(self, text):
+        self.text, self.gone = text, False
+        self.opens.append(text)
+
+    def close(self):
+        self.text = None
+
+    def value(self, fallback):
+        return fallback if self.text is None else self.text
+
+    def set_value(self, text):
+        self.text = text
+
+    def dismissed(self):
+        return self.gone
+
+
+def test_soft_keyboard_opens_on_the_focused_field(monkeypatch):
+    """Tapping a text field must focus the DOM input primed with that field's
+    text — including when the caret moves straight from one field to the other,
+    where a plain 'is anything being edited' flag wouldn't change."""
+    screen, ms, settings = _setup()
+    fake = _FakeSoftKeyboard()
+    monkeypatch.setattr(menu, "softkeyboard", fake)
+    try:
+        settings.seed = 77
+        _click_key(screen, ms, settings, "seed_field")
+        assert fake.opens == ["77"]
+        _click_key(screen, ms, settings, "filename_field")
+        assert fake.opens == ["77", ms.filename]
+        _click_key(screen, ms, settings, "start")           # focus lost
+        assert fake.text is None
+    finally:
+        pygame.quit()
+
+
+def test_pump_reads_soft_keyboard_text_and_filters_it(monkeypatch):
+    """Soft-keyboard typing bypasses SDL entirely, so the per-frame pump is the
+    only channel; rejected characters are pushed back so the field agrees."""
+    screen, ms, settings = _setup()
+    fake = _FakeSoftKeyboard()
+    monkeypatch.setattr(menu, "softkeyboard", fake)
+    try:
+        _click_key(screen, ms, settings, "seed_field")
+        fake.text = "12a3"                       # swipe-typed, one bad character
+        menu.pump(ms, settings)
+        assert ms.seed_text == "123" and settings.seed == 123
+        assert fake.text == "123"                # filtered text written back
+
+        fake.text = "9" * (menu._SEED_MAX_LEN + 4)
+        menu.pump(ms, settings)
+        assert len(ms.seed_text) == menu._SEED_MAX_LEN
+
+        fake.gone = True                         # the keyboard's Done key
+        menu.pump(ms, settings)
+        assert not ms.editing_seed and fake.text is None
+    finally:
+        pygame.quit()
+
+
+def test_pump_is_inert_without_a_soft_keyboard():
+    """Desktop (and any browser where the DOM bridge is unavailable) keeps the
+    plain SDL path: the pump must not disturb the edit buffers."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "seed_field")
+        _textinput(ms, settings, "1234")
+        menu.pump(ms, settings)
+        assert ms.seed_text == "1234" and settings.seed == 1234
+        assert ms.editing_seed
+        _click_key(screen, ms, settings, "filename_field")
+        before = ms.filename
+        menu.pump(ms, settings)
+        assert ms.filename == before and ms.editing_filename
+    finally:
+        pygame.quit()
