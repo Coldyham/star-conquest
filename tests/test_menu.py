@@ -15,7 +15,7 @@ import pygame  # noqa: E402
 
 from starconquest import ai, config, menu  # noqa: E402
 from starconquest.menu import MenuState  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
+from starconquest.settings import Challenge, Settings  # noqa: E402
 
 
 def _setup():
@@ -391,5 +391,132 @@ def test_pump_is_inert_without_a_soft_keyboard():
         before = ms.filename
         menu.pump(ms, settings)
         assert ms.filename == before and ms.editing_filename
+    finally:
+        pygame.quit()
+
+
+# --- the un-challenge confirm modal ------------------------------------------ #
+def _challenged_setup():
+    """A menu sitting on a challenge link, with the score still comparable."""
+    screen, ms, settings = _setup()
+    settings.seed, settings.nodes, settings.players = 4821, 18, 3
+    settings.challenge = Challenge(turns=137, lost=412, hand=119, by="Andrew",
+                                   key=settings.challenge_key())
+    return screen, ms, settings
+
+
+def test_editing_a_challenge_setup_raises_the_confirm_modal():
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "nodes_inc")
+        assert ms.confirm_unchallenge
+        assert settings.nodes == 19          # the edit is applied, then queried
+    finally:
+        pygame.quit()
+
+
+def test_keeping_the_challenge_reverts_the_edit():
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "nodes_inc")
+        _click_key(screen, ms, settings, "unchallenge_keep")
+        assert not ms.confirm_unchallenge
+        assert settings.nodes == 18
+        assert settings.challenge is not None
+        assert settings.challenge.matches(settings)
+    finally:
+        pygame.quit()
+
+
+def test_changing_anyway_drops_the_challenge_and_keeps_the_edit():
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "nodes_inc")
+        _click_key(screen, ms, settings, "unchallenge_change")
+        assert not ms.confirm_unchallenge
+        assert settings.nodes == 19
+        assert settings.challenge is None
+        assert ms.status                      # told the player what happened
+    finally:
+        pygame.quit()
+
+
+def test_modal_answers_on_the_keyboard_too():
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "nodes_inc")
+        _keydown(ms, settings, pygame.K_ESCAPE)
+        assert settings.nodes == 18 and settings.challenge is not None
+
+        _click_key(screen, ms, settings, "nodes_inc")
+        _keydown(ms, settings, pygame.K_y)
+        assert settings.nodes == 19 and settings.challenge is None
+    finally:
+        pygame.quit()
+
+
+def test_modal_swallows_every_other_widget_until_answered():
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "nodes_inc")
+        players, nodes = settings.players, settings.nodes
+        assert _click_key(screen, ms, settings, "players_inc") is None
+        assert _click_key(screen, ms, settings, "start") is None, "must not start a game"
+        assert (settings.players, settings.nodes) == (players, nodes)
+        assert ms.confirm_unchallenge
+    finally:
+        pygame.quit()
+
+
+def test_reverting_a_seed_edit_resyncs_the_text_field():
+    """The seed box keeps its own edit buffer, so a revert has to put that back too
+    or the field would still show the rejected number."""
+    screen, ms, settings = _challenged_setup()
+    try:
+        _click_key(screen, ms, settings, "seed_field")
+        _textinput(ms, settings, "9")
+        assert ms.confirm_unchallenge and settings.seed == 48219
+        _click_key(screen, ms, settings, "unchallenge_keep")
+        assert settings.seed == 4821
+        assert ms.seed_text == "4821"
+    finally:
+        pygame.quit()
+
+
+def test_a_plain_config_never_raises_the_modal():
+    screen, ms, settings = _setup()
+    try:
+        assert settings.challenge is None
+        _click_key(screen, ms, settings, "nodes_inc")
+        _click_key(screen, ms, settings, "players_inc")
+        assert not ms.confirm_unchallenge
+    finally:
+        pygame.quit()
+
+
+def test_slider_drag_is_not_interrupted_mid_gesture():
+    """The modal waits for the slider to be released: asking on the first pixel of
+    a drag would make the Advanced tab unusable on a challenge."""
+    screen, ms, settings = _challenged_setup()
+    try:
+        ms.tab = "advanced"
+        menu.draw(screen, ms, settings)
+        track = ms.rects["adv_node_jitter"]
+        down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=track.center, button=1)
+        menu.handle_event(down, ms, settings)
+        assert ms.drag_key == "adv_node_jitter"
+        for x in (track.left + 10, track.centerx + 30, track.right - 10):
+            move = pygame.event.Event(pygame.MOUSEMOTION, pos=(x, track.centery),
+                                      rel=(1, 0), buttons=(1, 0, 0))
+            menu.handle_event(move, ms, settings)
+            assert not ms.confirm_unchallenge, "asked mid-drag"
+        up = pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(track.right - 10,
+                                                           track.centery), button=1)
+        menu.handle_event(up, ms, settings)
+        assert ms.confirm_unchallenge, "never asked after the drag ended"
+        # and the revert restores the pre-drag value
+        before = ms.challenge_snapshot["node_jitter"]
+        _click_key(screen, ms, settings, "unchallenge_keep")
+        assert settings.node_jitter == before
     finally:
         pygame.quit()

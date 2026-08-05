@@ -291,6 +291,18 @@ class Settings:
                 zlib.error, ValueError) as e:
             raise ValueError(f"invalid settings token: {e}") from e
 
+    def without_challenge(self) -> "Settings":
+        """A copy of this config with any attached score dropped.
+
+        What gets *stored* and put in the address bar: a remembered challenge token
+        would be read back at the next launch and its banner would haunt every
+        later session. The score travels by clipboard instead (``webstore.copy_link``).
+        """
+        plain = Settings()
+        plain.copy_from(self)
+        plain.challenge = None
+        return plain
+
     def challenge_key(self) -> str:
         """A stable id for "this exact setup", ignoring any attached score.
 

@@ -111,36 +111,82 @@ def record_best(challenge_key: str, turns: int, lost: int) -> bool:
     return True
 
 
-def share_token(token: str) -> tuple[bool, bool]:
-    """Web only: put ``token`` in the URL as a ``#<token>`` fragment and try to
-    copy the full link to the clipboard. Returns ``(url_updated, copied)``.
-
-    The address-bar update (``history.replaceState`` — no reload, no new history
-    entry) is the reliable channel; the clipboard write is best-effort, since it
-    may be unavailable or blocked, and it is in a standalone PWA — no visible
-    address bar — that the clipboard matters most.
-
-    The token is also mirrored into ``localStorage``, which is what survives
-    *installing* the PWA: the installed app launches from the manifest's fixed
-    ``start_url`` with no fragment, so the hash is gone, but same-origin storage
-    still holds what the browser saw before the install.
-    """
+def link_url(token: str) -> str:
+    """The full shareable URL carrying ``token``, or ``""`` off the web."""
     if not is_web():
-        return (False, False)
+        return ""
     import platform as _platform
 
     try:
-        win = _platform.window
-        win.history.replaceState(None, "", "#" + token)
-        win.localStorage.setItem(WEB_SHARED_SETTINGS_KEY, token)
-        url = str(win.location.origin) + str(win.location.pathname) + "#" + token
+        loc = _platform.window.location
+        return f"{loc.origin}{loc.pathname}#{token}"
     except Exception:
-        return (False, False)
+        return ""
+
+
+def set_url_fragment(token: str) -> bool:
+    """Web only: replace the address bar's ``#fragment``, no reload, no new
+    history entry (``history.replaceState``)."""
+    if not is_web():
+        return False
+    import platform as _platform
+
     try:
-        win.navigator.clipboard.writeText(url)   # async; fire-and-forget
-        return (True, True)
+        _platform.window.history.replaceState(None, "", "#" + token)
+        return True
     except Exception:
-        return (True, False)
+        return False
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Web only, best-effort: the write is async and fire-and-forget, so True
+    means the call was accepted, not that the paste buffer definitely changed."""
+    if not is_web():
+        return False
+    import platform as _platform
+
+    try:
+        _platform.window.navigator.clipboard.writeText(text)
+        return True
+    except Exception:
+        return False
+
+
+def sync_settings(token: str) -> bool:
+    """Keep the address bar and the remembered token in step with a setup.
+
+    The stored copy is what survives *installing* the PWA: the installed app
+    launches from the manifest's fixed ``start_url`` with no fragment, so the hash
+    is gone, but same-origin storage still holds what the browser saw before.
+    """
+    updated = set_url_fragment(token)
+    return set(WEB_SHARED_SETTINGS_KEY, token) or updated
+
+
+def share_token(token: str) -> tuple[bool, bool]:
+    """Share a *setup*: sync the address bar and stored token, then try the
+    clipboard. Returns ``(url_updated, copied)``.
+
+    Both channels on purpose — the address bar is the reliable one in a browser
+    tab, and the clipboard is the only one that exists in an installed PWA.
+    """
+    if not is_web():
+        return (False, False)
+    updated = sync_settings(token)
+    return (updated, copy_to_clipboard(link_url(token)))
+
+
+def copy_link(token: str) -> bool:
+    """Share a *challenge*: clipboard only — no address bar, nothing stored.
+
+    Deliberately unlike ``share_token``. A challenge token must not be persisted
+    or left in the URL: it would be read back at the next launch and the score-to-
+    beat banner would haunt every later session (and in an installed PWA there is
+    no address bar to read a link out of anyway, so the clipboard is the only
+    channel that actually works there).
+    """
+    url = link_url(token)
+    return bool(url) and copy_to_clipboard(url)
 
 
 def close_window() -> bool:

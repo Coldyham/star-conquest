@@ -103,6 +103,33 @@ def test_web_only_helpers_are_no_ops_off_the_browser():
     assert webstore.share_token("abc") == (False, False)
     assert webstore.url_token() == ""
     assert webstore.close_window() is False
+    assert webstore.link_url("abc") == ""
+    assert webstore.set_url_fragment("abc") is False
+    assert webstore.copy_to_clipboard("abc") is False
+    assert webstore.copy_link("abc") is False
+
+
+def test_copy_link_never_stores_the_token(monkeypatch):
+    """A challenge token must not be persisted: it would be read back at the next
+    launch and its score-to-beat banner would haunt every later session. Unlike
+    `share_token`, `copy_link` touches the clipboard and nothing else."""
+    stored, urls = {}, []
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setattr(webstore, "link_url", lambda t: f"https://x/#{t}")
+    monkeypatch.setattr(webstore, "copy_to_clipboard", lambda text: True)
+    monkeypatch.setattr(webstore, "set_url_fragment", lambda t: urls.append(t) or True)
+    monkeypatch.setattr(webstore, "set", lambda k, v: stored.setdefault(k, v) or True)
+
+    assert webstore.copy_link("challenge-token") is True
+    assert stored == {}, "copy_link must not write to storage"
+    assert urls == [], "copy_link must not touch the address bar"
+
+
+def test_copy_link_reports_failure_when_the_clipboard_is_refused(monkeypatch):
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setattr(webstore, "link_url", lambda t: f"https://x/#{t}")
+    monkeypatch.setattr(webstore, "copy_to_clipboard", lambda text: False)
+    assert webstore.copy_link("tok") is False
 
 
 def test_quitting_ends_the_loop_off_the_web():

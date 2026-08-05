@@ -240,6 +240,15 @@ def test_challenge_matches_until_the_config_is_edited():
     assert not s.challenge.matches(s)
 
 
+def test_without_challenge_strips_the_score_only():
+    s = _challenged()
+    plain = s.without_challenge()
+    assert plain.challenge is None
+    assert s.challenge is not None                    # the original is untouched
+    assert plain.challenge_key() == s.challenge_key()  # same setup, no target
+    assert Settings.from_token(plain.to_token()).challenge is None
+
+
 def test_challenge_without_a_key_is_taken_on_trust():
     s = _customised()
     s.challenge = Challenge(turns=10)      # hand-written: no key stamped

@@ -189,13 +189,32 @@ intact.
   that the config has since been edited and warn (rather than locking widgets).
   `challenge_key` hashes the *full* dict minus `challenge`/`autoplay`, so two
   people agree regardless of what their tokens pruned.
+  - **A challenge token is never stored or left in the URL.** It travels by
+    clipboard (`webstore.copy_link`), unlike a settings link
+    (`webstore.share_token`, which syncs the address bar *and* `localStorage`).
+    Both halves of that matter: an installed PWA has no address bar to read a link
+    out of, and a *remembered* challenge gets read back at every later launch, so
+    its banner haunts sessions long after the link was opened. Hence
+    `Settings.without_challenge()` — what `main._apply_shared_link` persists, and
+    what the menu re-syncs when a challenge is dropped.
+  - **Editing a challenge's setup asks first** (`menu._draw_unchallenge`, raised
+    from `handle_event` once `Challenge.matches` goes false and any slider drag has
+    been released). "Change it anyway" clears `Settings.challenge` and rewrites the
+    address bar so a reload can't resurrect it; "Keep the challenge" restores
+    `MenuState.challenge_snapshot`, the last config the score still applied to.
+    Locking the widgets instead is a dead end the moment someone wants the same map
+    with one knob moved. `main.new_ui` independently refuses to carry a
+    `challenge_target` onto the `Ui` unless the challenge still matches, so a
+    finished game can never report "short of" a target from another setup.
 - **`webstore` is the third browser bridge** (with `softkeyboard` and the
   web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
   a JSON file under `data_dir()` elsewhere — so personal bests work on desktop
-  too — plus `share_token` (address bar + clipboard) and `url_token`, which are
-  genuinely web-only and no-op off it. Same defensive style as `softkeyboard`:
-  local `import platform`, every DOM call guarded, storage failure never
-  load-bearing.
+  too. The rest is genuinely web-only and no-ops off it: `link_url`,
+  `set_url_fragment`, `copy_to_clipboard` and `url_token` are the primitives, and
+  `sync_settings` / `share_token` / `copy_link` the compositions callers use (see
+  the challenge notes above for why the last two must stay distinct). Same
+  defensive style as `softkeyboard`: local `import platform`, every DOM call
+  guarded, storage failure never load-bearing.
 - **Quitting is a desktop concept; the web has nothing to exit to.** Ending the
   main loop runs `pygame.quit()`, which on the web destroys the canvas and strands
   the player on a blank page only a force-close escapes. So every confirmed quit

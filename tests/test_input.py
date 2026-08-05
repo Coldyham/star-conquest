@@ -18,7 +18,7 @@ import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
 from starconquest import config, engine, mapgen, replay  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
+from starconquest.settings import Challenge, Settings  # noqa: E402
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
 
 
@@ -672,6 +672,74 @@ def test_restart_only_carries_autoplay_out_of_a_pure_demo():
         assert main.carry_autoplay(ui) is False
         ui.autoplay = False
         assert main.carry_autoplay(ui) is False
+    finally:
+        pygame.quit()
+
+
+def test_challenge_target_is_dropped_when_the_setup_no_longer_matches():
+    """Judging a result against a score made on a different map is worse than
+    saying nothing — this is what used to report "short of X" after the settings
+    had been edited."""
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        settings = Settings(seed=4821, nodes=18, players=3)
+        settings.challenge = Challenge(turns=137, lost=412,
+                                       key=settings.challenge_key())
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        assert main.new_ui(state, False, settings).challenge_target == (137, 412)
+
+        settings.nodes = 22            # edited: the score no longer applies
+        ui = main.new_ui(state, False, settings)
+        assert ui.challenge_target is None
+        assert ui.challenge_by == ""
+    finally:
+        pygame.quit()
+
+
+def test_shared_link_is_remembered_without_its_challenge(monkeypatch):
+    """A stored challenge would be read back at the next launch and its banner
+    would haunt every later session, so only the setup is persisted."""
+    stored: dict[str, str] = {}
+    challenged = Settings(seed=4821, nodes=18, players=3)
+    challenged.challenge = Challenge(turns=137, lost=412,
+                                     key=challenged.challenge_key())
+    monkeypatch.setattr(main.paths, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "url_token", lambda: challenged.to_token())
+    monkeypatch.setattr(main.webstore, "get", lambda key: "")
+    monkeypatch.setattr(main.webstore, "set",
+                        lambda key, value: stored.__setitem__(key, value) or True)
+
+    settings = Settings.defaults()
+    main._apply_shared_link(settings)
+    # This session sees the challenge...
+    assert settings.challenge is not None and settings.seed == 4821
+    # ...but what's remembered for the next one carries only the setup.
+    remembered = Settings.from_token(stored[main.paths.WEB_SHARED_SETTINGS_KEY])
+    assert remembered.challenge is None
+    assert remembered.seed == 4821 and remembered.nodes == 18
+
+
+def test_share_challenge_prefers_the_clipboard_and_stores_nothing(monkeypatch):
+    """In an installed PWA there is no address bar to read a link out of, so the
+    clipboard is the channel — and nothing may be persisted."""
+    calls: list[str] = []
+    monkeypatch.setattr(main.webstore, "copy_link",
+                        lambda token: calls.append("copy") or True)
+    monkeypatch.setattr(main.webstore, "set_url_fragment",
+                        lambda token: calls.append("url") or True)
+    monkeypatch.setattr(main.webstore, "set",
+                        lambda k, v: calls.append("store") or True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        msg = main.share_challenge(settings, state, ui, 77, log)
+        assert "copied" in msg
+        assert calls == ["copy"], "the address bar and storage must be left alone"
     finally:
         pygame.quit()
 

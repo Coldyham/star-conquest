@@ -54,6 +54,12 @@ _DISABLED_TEXT = (78, 84, 100)
 _STATUS_ERR = (214, 130, 110)
 _WARN = (214, 172, 92)      # amber: a challenge whose settings no longer match
 
+# Event types that can change a Settings — the ones worth snapshotting before.
+# MOUSEMOTION is excluded deliberately: it only mutates mid-slider-drag, which the
+# opening click already snapshotted, and it fires far too often to copy a config on.
+_MUTATING_EVENTS = (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                    pygame.TEXTINPUT, pygame.KEYDOWN)
+
 _TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
 
 _CH = 34            # control height
@@ -175,6 +181,11 @@ class MenuState:
     strategies: list[str] = field(            # dropdown options, refreshed on open
         default_factory=lambda: ["heuristic"]
     )
+    # Un-challenge confirm modal: raised when an edit has just made the loaded
+    # challenge's score incomparable. `challenge_snapshot` is the last config that
+    # still matched it, so "keep the challenge" can put the setup back.
+    confirm_unchallenge: bool = False
+    challenge_snapshot: Optional[dict] = None
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -277,6 +288,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
     if not config.touch_ui:
         _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
               config.COLOR_TEXT_DIM, center=(w // 2, 886))
+    if ms.confirm_unchallenge:   # last, so the modal veils every widget above
+        _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
 
 def _draw_challenge(surface, settings: Settings, w: int) -> None:
@@ -316,6 +329,63 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
     _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM,
           center=(w // 2, 144))
+
+
+def _unchallenge_labels() -> tuple[str, str]:
+    """(change-anyway, keep-the-challenge) labels; key hints dropped on a touch
+    build, where there is no Y/N to press — as `_resume_labels` does."""
+    if config.touch_ui:
+        return ("Change it anyway", "Keep the challenge")
+    return ("Change it anyway (Y)", "Keep the challenge (Esc)")
+
+
+def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
+    """Modal: this edit would make the challenge's score meaningless — confirm.
+
+    Asking beats the alternatives. Locking the widgets is a dead end the moment
+    someone wants the same map with one knob moved, and silently letting the edit
+    through leaves a score-to-beat on screen that no longer means anything (which
+    is how a finished game ended up reporting "short of" a target from a different
+    setup). Measured and centred rather than positioned, like `_draw_modal` in
+    render — the labels grow on a phone.
+    """
+    f = _fonts()
+    change, keep = _unchallenge_labels()
+    ch = settings.challenge
+    lines = [
+        ("Change the challenge setup?", f["normal"], config.COLOR_TEXT),
+        ("Your result won't compare to the score on the link", f["small"], _WARN),
+        # `summary` brings its own parenthetical, so don't wrap it in more.
+        (f"Target: {ch.summary()}" if ch is not None else "",
+         f["small"], config.COLOR_TEXT_DIM),
+    ]
+
+    pad, gap, row = 28, 14, 34
+    bw = max(f["normal"].size(s)[0] for s in (change, keep)) + 2 * 18
+    bh = 40
+    text_w = max(font.size(text)[0] for text, font, _ in lines)
+    pw = max(text_w, 2 * bw + gap) + 2 * pad
+    ph = pad + len(lines) * row + gap + bh + pad
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
+    pygame.draw.rect(surface, _WARN, panel, 2, border_radius=10)
+
+    y = panel.y + pad + row // 2
+    for text, font, color in lines:
+        _text(surface, font, text, color, center=(panel.centerx, y))
+        y += row
+
+    by = panel.bottom - pad - bh
+    _button(surface, ms, "unchallenge_change",
+            pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh), change,
+            fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "unchallenge_keep",
+            pygame.Rect(panel.centerx + gap // 2, by, bw, bh), keep,
+            fill=_HL_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT)
 
 
 def _draw_tabs(surface, ms: MenuState, w: int) -> None:
@@ -753,10 +823,61 @@ def handle_event(event, ms: MenuState, settings: Settings):
     # rects live in canvas space), then dispatch. Also raise/dismiss the on-screen
     # keyboard as a text field gains/loses focus (a no-op on desktop).
     event = _to_canvas_event(event, ms)
+    if ms.confirm_unchallenge:      # modal: swallows everything until answered
+        _handle_unchallenge(event, ms, settings)
+        return None
+    if event.type in _MUTATING_EVENTS and _comparable(settings):
+        # Remember the last setup the challenge's score still applied to, before
+        # this event gets a chance to change it. A slider drag is covered by the
+        # snapshot its opening MOUSEBUTTONDOWN took.
+        ms.challenge_snapshot = settings.to_dict()
     before = _editing_field(ms)
     result = _dispatch(event, ms, settings)
     _sync_text_input(ms, before)
+    if (settings.challenge is not None and ms.drag_key is None
+            and not settings.challenge.matches(settings)):
+        # Edited away from the challenge's setup. Ask rather than silently
+        # invalidating the score — and wait for a slider to be released first, so
+        # a drag isn't interrupted on its very first pixel.
+        ms.confirm_unchallenge = True
     return result
+
+
+def _comparable(settings: Settings) -> bool:
+    """Is there a challenge whose score still applies to this exact setup?"""
+    return settings.challenge is not None and settings.challenge.matches(settings)
+
+
+def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> None:
+    """Answer the un-challenge modal: keep the edit and drop the score, or put the
+    setup back the way the link had it."""
+    keep_edit: Optional[bool] = None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for key, answer in (("unchallenge_change", True), ("unchallenge_keep", False)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                keep_edit = answer
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+            keep_edit = True
+        elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+            keep_edit = False
+    if keep_edit is None:
+        return
+
+    ms.confirm_unchallenge = False
+    if keep_edit:
+        settings.challenge = None
+        ms.challenge_snapshot = None
+        # Also drop it from the address bar and the remembered token, or a reload
+        # would resurrect the banner we were just asked to get rid of.
+        webstore.sync_settings(settings.to_token())
+        set_status(ms, "Challenge cleared — this is your own setup now", True)
+    elif ms.challenge_snapshot is not None:
+        settings.copy_from(Settings.from_dict(ms.challenge_snapshot))
+        # The seed field keeps its own edit buffer, so resync it or the box would
+        # still show the rejected number.
+        ms.seed_text = "" if settings.seed is None else str(settings.seed)
 
 
 def pump(ms: MenuState, settings: Settings) -> None:

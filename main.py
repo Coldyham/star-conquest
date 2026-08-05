@@ -82,16 +82,22 @@ def _apply_shared_link(settings: Settings) -> None:
         settings.copy_from(Settings.from_token(token))
     except ValueError:
         return          # stale or hand-edited link: keep the CLI/default config
-    webstore.set(paths.WEB_SHARED_SETTINGS_KEY, token)
+    # Remember the *setup* only. Storing a challenge would make its score-to-beat
+    # banner reappear on every later launch, long after the link was opened — the
+    # target belongs to the session you opened it in.
+    webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.without_challenge().to_token())
 
 
 def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None) -> Ui:
     ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
-    if settings is not None and settings.challenge is not None:
+    challenge = settings.challenge if settings is not None else None
+    if challenge is not None and challenge.matches(settings):
         # Carry the target onto the Ui as plain numbers so the win overlay can say
-        # whether it fell, without render needing to see a Settings.
-        ui.challenge_target = (settings.challenge.turns, settings.challenge.lost)
-        ui.challenge_by = settings.challenge.by
+        # whether it fell, without render needing to see a Settings. Only when the
+        # setup still matches: judging a result against a target scored on a
+        # different map would be worse than saying nothing.
+        ui.challenge_target = (challenge.turns, challenge.lost)
+        ui.challenge_by = challenge.by
     refresh_fog(state, ui)   # seed visibility from the opening position
     return ui
 
@@ -196,17 +202,22 @@ def share_challenge(settings: Settings, state: GameState, ui: Ui,
                     seed: int, log: GameLog) -> str:
     """Publish this win as a challenge link. Returns a line for the overlay.
 
-    On the web the token goes into the address bar and (best-effort) the
-    clipboard. Off the web there is no address bar to write to, so it is saved
-    next to the settings files — the feature would otherwise be web-only, and a
-    desktop player has just as much reason to hand a friend a link.
+    The clipboard is the channel, not the address bar: an installed PWA has no
+    address bar to read a link out of, and a challenge token must never be stored
+    or left in the URL or it would be read back at the next launch and its banner
+    would haunt every later session (see ``webstore.copy_link``). Only if the
+    clipboard is refused do we fall back to the URL, which at least works in a
+    plain browser tab — and even then nothing is persisted.
+
+    Off the web there is no clipboard bridge or address bar at all, so the token is
+    saved next to the settings files; the feature would otherwise be web-only, and
+    a desktop player has just as much reason to hand a friend a link.
     """
     shared = challenge_settings(settings, state, ui, seed, log)
     token = shared.to_token()
-    ok, copied = webstore.share_token(token)
-    if copied:
+    if webstore.copy_link(token):
         return "Challenge link copied — paste it to a friend"
-    if ok:
+    if webstore.set_url_fragment(token):
         return "Challenge link is in the address bar — copy it to share"
     path = paths.saves_dir() / f"challenge_{seed}.txt"
     try:
