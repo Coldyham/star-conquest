@@ -26,6 +26,8 @@ def decide(state, pid) -> list[Order]:
   `Order(owner_id, source_id, dest_id, ships)` — built **positionally**.
   Ships are deducted from the source at launch; you may issue at most the ships
   a system currently has.
+- `owner_id` must be your `pid`. You command your own ships and nothing else — the
+  engine discards any order you issue naming a different owner.
 
 Turns resolve simultaneously, so you decide against the start-of-turn state and
 launch order never matters. A file that fails to import or has no `decide` is
@@ -64,12 +66,44 @@ system ids).
 (ships of theirs destroyed in combat so far, all match long), `ai_strategy`,
 `ai_params`.
 
-`ai_params` is your seat's tuning (`reserve_fraction`, `reserve_floor`,
+`ai_params` is a seat's tuning (`reserve_fraction`, `reserve_floor`,
 `expand_margin`, `attack_margin`, `reinforce_margin`), set per seat on the **AI**
-tab. Reading it is optional — the built-in heuristic uses it, and yours may too if
-you want the same knobs to steer your bot.
+tab. Reading your own is optional — the built-in heuristic uses it, and yours may
+too if you want the same knobs to steer your bot.
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
+
+## Predicting the other seats
+
+`state.players` is every seat, not just yours, and `ai_strategy` / `ai_params` /
+`is_human` are readable on all of them. Since `ai.STRATEGIES` maps a strategy name
+to the function that will decide that seat, you can *run your opponent's code* and
+find out what they are about to do.
+
+This works because turns resolve **simultaneously**: the engine hands every player
+the same unmutated start-of-turn state and applies nothing until all of them have
+decided, so an opponent's orders cannot depend on yours. There is no circularity to
+untangle — one forward pass of their real code is the answer, and it comes with
+their `ai_params` applied for free, because their own function reads them.
+
+`models/knower.py` is the worked example. If you write another, four rules:
+
+- **Clone the state first.** `decide` is contractually read-only, but you cannot
+  assume a rival honours that, and you need your own `rng` anyway (below).
+- **Draw nothing from `state.rng`.** Seats decide in ascending player id, so the
+  seats after you will find the stream exactly where you leave it. Leave it alone
+  and their orders are reproducible bit-for-bit; draw once and they aren't. Use a
+  private `random.Random` seeded from `state.seed`/`state.turn` — never the clock,
+  or a seed will stop reproducing its match.
+- **Read `ai.STRATEGIES` lazily, inside `decide`.** Model files are imported in
+  sorted filename order, so at *your* import time the registry is still incomplete.
+- **Never call `ai.load_models()` from a model.** It imports every file in this
+  folder with no re-entry guard — including yours, which would call it again.
+
+Two things you cannot predict: a **human** seat (their orders come from the UI, not
+from code — knower models them with a weaker copy of itself and only ever lets that
+*raise* a threat estimate), and **another predicting bot**, which will recurse
+unless you model it with something simpler.
 
 ## Example: copy this into `models/rusher.py`
 

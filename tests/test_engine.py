@@ -115,3 +115,38 @@ def test_decide_callback_runs_for_ai_only():
 
     engine.end_turn(s, decide=decide)
     assert called == [2]
+
+
+def test_a_seat_cannot_command_another_players_ships():
+    """`apply_order` only checks the *declared* owner holds the source.
+
+    So the rule that a seat commands its own ships and nothing else has to be
+    enforced where orders are attributed to a seat. Without it a drop-in AI could
+    launch a rival's fleet — or the human's — by naming them as the owner.
+    """
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100), (2, 3, 10, 100)],
+                   [(0, 1, 2), (1, 2, 2)], human=1)
+
+    # Seat 2 tries to move seat 1's garrison (system 0) and seat 3's (system 2),
+    # alongside a legitimate order of its own.
+    def greedy(state, pid):
+        if pid != 2:
+            return []
+        return [Order(1, 0, 1, 10),      # the human's ships
+                Order(3, 2, 1, 10),      # another AI's ships
+                Order(2, 1, 0, 4)]       # its own — must still go through
+
+    engine.end_turn(s, decide=greedy)
+    assert s.systems[0].ships == 10, "the human's garrison was launched"
+    assert s.systems[2].ships == 10, "another seat's garrison was launched"
+    assert s.systems[1].ships == 6, "seat 2's own order should still go through"
+    assert [(f.owner_id, f.source_id) for f in s.fleets] == [(2, 1)]
+
+
+def test_human_orders_are_confined_to_the_human_seat():
+    """Under autoplay these come from `ai.decide`, so they need the same guard."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 2)], human=1)
+    engine.end_turn(s, human_orders=[Order(2, 1, 0, 10), Order(1, 0, 1, 3)])
+    assert s.systems[1].ships == 10, "an AI seat's garrison was launched"
+    assert s.systems[0].ships == 7, "the human's own order should still go through"
+    assert [(f.owner_id, f.source_id) for f in s.fleets] == [(1, 0)]

@@ -5,7 +5,10 @@ puts a fleet on a lane, so issuing order has no bearing on outcomes. ``end_turn`
 then resolves one turn deterministically:
 
     1. AI phase        — each AI player's decisions are applied (injected via
-                         ``decide`` so the engine never imports the AI).
+                         ``decide`` so the engine never imports the AI). A seat may
+                         only command its own ships: orders naming a different owner
+                         are dropped (``_own_orders``), since ``apply_order`` alone
+                         cannot tell which seat issued an order.
     2. Advance fleets  — every in-transit fleet counts down one turn.
     3. Arrivals+combat — fleets that reach their destination are grouped by node
                          and resolved together (fair regardless of launch order).
@@ -92,14 +95,36 @@ def end_turn(
 def _collect_orders(
     state: GameState, human_orders: Optional[list[Order]], decide: Optional[DecideFn]
 ) -> list[Order]:
-    orders: list[Order] = list(human_orders or [])
+    human = state.human()
+    orders: list[Order] = _own_orders(human_orders, human.id if human else None)
     if decide is not None:
         for pid in sorted(state.players):
             player = state.players[pid]
             if player.is_neutral or player.is_human or not player.alive:
                 continue
-            orders.extend(decide(state, pid))  # all read the same pre-apply state
+            orders.extend(_own_orders(decide(state, pid), pid))  # same pre-apply state
     return orders
+
+
+def _own_orders(orders: Optional[list[Order]], seat: Optional[int]) -> list[Order]:
+    """Keep only the orders ``seat`` is entitled to issue.
+
+    A seat commands its own ships and nothing else. This has to be enforced here,
+    at the point where orders are attributed to a seat, because ``apply_order``
+    can't: it only checks that the *declared* owner holds the source, so an order
+    naming another player as owner is perfectly valid on its own terms. Without
+    this filter a drop-in AI could return ``Order(other_pid, their_system, ...)``
+    and launch a rival's fleet for them.
+
+    ``seat is None`` means there is no human seat to attribute ``human_orders`` to
+    — a headless caller passing orders explicitly — so they are taken as given.
+    Nothing a rival AI produces reaches that path.
+    """
+    if not orders:
+        return []
+    if seat is None:
+        return list(orders)
+    return [order for order in orders if order.owner_id == seat]
 
 
 def _advance_fleets(state: GameState) -> None:

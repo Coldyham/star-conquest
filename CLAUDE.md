@@ -243,6 +243,30 @@ intact.
   `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
   list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
   `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
+  - **Those fields are readable for *every* seat, and `models/knower.py` is what
+    that makes possible.** Because turns resolve simultaneously — `_collect_orders`
+    hands every seat the same unmutated state and applies nothing until all have
+    decided — an opponent's orders cannot depend on yours, so a bot can clone the
+    board, call each rival's own registered `decide`, and know their moves before
+    the engine asks for them. There is no fixed point to solve; one forward pass of
+    their real code *is* the answer. knower folds those predictions into a
+    "post-launch board" (a clone with the predicted orders applied via
+    `engine.apply_order` but not advanced) and runs thinker's phases against it.
+    Three rules any such bot must keep: never `ai.load_models()` from inside a
+    model (it re-`exec_module`s every file, including yours, unguarded); read
+    `ai.STRATEGIES` *lazily* inside `decide`, since files load in sorted order and
+    the registry is incomplete at your import time; and draw **nothing** from
+    `state.rng`, because leaving the stream where the later seats expect it is
+    exactly what makes their prediction bit-exact (`tests/test_knower.py` asserts
+    both).
+  - **A seat commands its own ships and nothing else.** `apply_order` cannot enforce
+    that — it only checks the *declared* owner holds the source, so an `Order` naming
+    another player is valid on its own terms. So `_collect_orders` filters every
+    seat's orders through `engine._own_orders` (and the human's, which under autoplay
+    also come from `ai.decide`). Without it any drop-in bot could launch a rival's
+    fleet, or the human's. knower mirrors the same rule when building its board, both
+    as defence in depth and for fidelity — predicting a fleet the engine will refuse
+    is just a wrong prediction.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given
