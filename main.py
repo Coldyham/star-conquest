@@ -133,6 +133,16 @@ def hand_turns(log: GameLog) -> int:
     return sum(1 for i in range(log.turn_count) if not log.turn_is_ai(i))
 
 
+def carry_autoplay(ui: Ui) -> bool:
+    """Should the *next* match start in autoplay, given how this one was played?
+
+    Only out of a pure demo. Flipping autoplay on to clean up a decided game is
+    normal play (see ``hand_turns``), and the player who did that wants to play
+    the next map, not watch it.
+    """
+    return ui.autoplay and ui.hand_turns == 0
+
+
 def challenge_settings(settings: Settings, state: GameState, ui: Ui,
                        seed: int, log: GameLog) -> Settings:
     """``settings`` plus the human's result on it, ready to encode as a link.
@@ -502,7 +512,8 @@ async def main() -> None:
                 auto_accum = 0
             elif action == "restart":
                 current_seed += 1
-                state, ui, log = start_game(settings, current_seed, ui.autoplay)
+                state, ui, log = start_game(settings, current_seed,
+                                            carry_autoplay(ui))
             elif action == "toggle_history":
                 if ui.history:
                     # leave review: drop snapshots and restore the live fog exactly

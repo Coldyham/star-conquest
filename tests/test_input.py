@@ -661,6 +661,21 @@ def test_hand_turns_counts_only_manually_played_turns():
         pygame.quit()
 
 
+def test_restart_only_carries_autoplay_out_of_a_pure_demo():
+    """Autoplaying the tail of a hand-played game must not start the next map in
+    autoplay too — but a demo that was never touched keeps running."""
+    state, ui = _setup()
+    try:
+        ui.autoplay = True
+        assert main.carry_autoplay(ui) is True       # never played a turn: a demo
+        ui.hand_turns = 12                           # ...played, then autoplayed
+        assert main.carry_autoplay(ui) is False
+        ui.autoplay = False
+        assert main.carry_autoplay(ui) is False
+    finally:
+        pygame.quit()
+
+
 def test_challenge_settings_pins_the_seed_and_stamps_the_key():
     """A challenge whose settings still say "roll a fresh seed" would send a
     different map, so the played seed is baked in."""
