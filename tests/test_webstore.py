@@ -102,3 +102,25 @@ def test_corrupt_bests_blob_does_not_lose_a_new_result(isolated_store):
 def test_web_only_helpers_are_no_ops_off_the_browser():
     assert webstore.share_token("abc") == (False, False)
     assert webstore.url_token() == ""
+    assert webstore.close_window() is False
+
+
+def test_quitting_ends_the_loop_off_the_web():
+    """Off the browser a confirmed quit really does exit."""
+    import main
+
+    assert main.leave_app() is True
+
+
+def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
+    """In the browser, ending the loop would run pygame.quit() and leave the player
+    on a dead black canvas that only a force-close escapes. So a web quit asks the
+    browser to close the window and reports that we're still running, letting main
+    fall back to the setup menu instead of tearing the display down."""
+    import main
+
+    tried = []
+    monkeypatch.setattr(main.paths, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "close_window", lambda: tried.append(True) or True)
+    assert main.leave_app() is False
+    assert tried == [True], "a web quit must at least attempt to close the window"

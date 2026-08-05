@@ -33,7 +33,34 @@ PLAY_MS = 350      # delay between turns while play/pause (P) is running
 
 
 def build_view(state: GameState) -> WorldView:
-    return WorldView(mapgen.map_bounds(state), config.play_rect(), padding=50)
+    # Two margins, both scaled and both floored at config.node_clearance() so a
+    # boundary system's circle can never be sliced by the viewport edge: a modest
+    # one for the zoom-1 fit (raising it would just shrink the whole map) and a
+    # roomier one for panning a zoomed-in view, which otherwise presses systems
+    # right up against the clip.
+    return WorldView(mapgen.map_bounds(state), config.play_rect(),
+                     padding=config.map_fit_padding(),
+                     pan_padding=config.map_pan_padding())
+
+
+# Shown on the menu when a confirmed quit couldn't actually close the app.
+CANT_CLOSE_MSG = "Close the tab or app window to exit"
+
+
+def leave_app() -> bool:
+    """Act on a confirmed quit. True if the main loop should end and the process go.
+
+    Off the web that is always right. In the browser there is nothing to exit *to*:
+    ending the loop runs ``pygame.quit()``, which destroys the canvas and leaves the
+    player staring at a blank page that only a force-close escapes — so we ask the
+    browser to close the window (which an installed PWA often can, and a plain tab
+    usually can't) and report that we are still running. The caller then drops back
+    to the setup menu with ``CANT_CLOSE_MSG`` rather than tearing the display down.
+    """
+    if not paths.is_web():
+        return True
+    webstore.close_window()
+    return False
 
 
 def _apply_shared_link(settings: Settings) -> None:
@@ -332,12 +359,13 @@ async def main() -> None:
     # framebuffer is now high-res (WEB_FB_*), so `fit` already scales the UI up for
     # crispness and only *touch* browsers need the extra boost — desktop browsers
     # report no touch points and stay compact. Fonts are built lazily from these
-    # sizes, so this must run before any draw.
+    # sizes, so this must run before any draw. The same probe also tells the shell
+    # to drop keyboard-only labels/hints (config.touch_ui).
     sw, sh = pygame.display.get_surface().get_size()
     fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
     touch = paths.is_android() or softkeyboard.is_touch_web()
     boost = config.TOUCH_UI_SCALE if touch else 1.0
-    config.apply_ui_scale(max(1.0, fit) * boost)
+    config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
     clock = pygame.time.Clock()
 
     # Two scenes share the one window: the setup menu and the game board. The
@@ -387,19 +415,30 @@ async def main() -> None:
                     pygame.KEYDOWN, key=pygame.K_ESCAPE, unicode="\x1b", mod=0)
             if confirm_quit:
                 # Modal: swallow all other input until the user answers.
+                do_quit = False
                 if event.type == pygame.QUIT:
-                    running = False
+                    running = False       # the OS/WM is closing us; not our choice
                 elif event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
-                        running = False
+                        do_quit = True
                     elif event.key in (pygame.K_n, pygame.K_ESCAPE):
                         confirm_quit = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     quit_r, cancel_r = render.confirm_quit_buttons(screen)
                     if quit_r.collidepoint(event.pos):
-                        running = False
+                        do_quit = True
                     elif cancel_r.collidepoint(event.pos):
                         confirm_quit = False
+                if do_quit:
+                    if leave_app():
+                        running = False
+                    else:
+                        # web: the browser wouldn't close the window, so fall back to
+                        # the setup menu and say so — never to a dead black canvas.
+                        confirm_quit = False
+                        scene = "menu"
+                        state, ui, log = None, None, None
+                        menu.set_status(menu_state, CANT_CLOSE_MSG, False)
                 continue
 
             if confirm_rewind:

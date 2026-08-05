@@ -43,7 +43,8 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
-    reaching into `ai`.
+    reaching into `ai`. Its layout is measured rather than hardcoded — see the
+    scaling convention under Key conventions.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
     touches the simulation. It returns a high-level action string
     (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`, `"toggle_history"`,
@@ -132,6 +133,25 @@ intact.
   (nothing is cached at import), so the Advanced menu tunes copies on a
   `Settings`, and `settings._apply_globals` (called by `build_state` just before
   generation) is the single writer that pushes them back into `config`.
+- **Nothing that holds text gets a fixed pixel size.** `config.apply_ui_scale`
+  grows the font by ~2x on a phone, so a width or row pitch tuned at the baseline
+  size overflows there — which is how labels used to spill out of footer buttons
+  and how the info panel's rows used to land on top of each other. Instead: a
+  button's width comes from its measured label (`render._btn_w`, and `render._btn`
+  draws + returns the hit-rect), a stacked text row's pitch from the font's own
+  line height (`render._row_h`), a modal's stack is measured then centred
+  (`render._draw_modal`), and help prose is reflowed to the panel it sits in
+  (`render._wrap`). One-off layout literals still go through `config.s()`.
+- **`config.touch_ui` is the input modality**, set beside the scale in
+  `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
+  browser). On a touch build the shell drops every keyboard-only string — the
+  `(Esc)`/`(R)` suffixes on button labels (`render._key_hint`,
+  `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
+  panel's help text and the win overlay, the menu's `Enter: start game` footer —
+  and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`),
+  which is what keeps the send popup's −/+ and preset rows finger-sized. Those
+  hints are both useless without a keyboard *and* the thing that made the labels
+  too wide, so dropping them fixes the layout and the copy together.
 - **`settings.Settings` is the pure, serializable pre-game config** (players,
   map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
   interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
@@ -176,6 +196,27 @@ intact.
   genuinely web-only and no-op off it. Same defensive style as `softkeyboard`:
   local `import platform`, every DOM call guarded, storage failure never
   load-bearing.
+- **Quitting is a desktop concept; the web has nothing to exit to.** Ending the
+  main loop runs `pygame.quit()`, which on the web destroys the canvas and strands
+  the player on a blank page only a force-close escapes. So every confirmed quit
+  goes through `main.leave_app()`: off the web it returns True and the loop ends,
+  while on the web it asks the browser to close the window
+  (`webstore.close_window` — often possible in an installed PWA, usually not in a
+  tab) and returns False, and the caller falls back to the setup menu with
+  `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop on the web
+  build. (`menu.set_status` is public for exactly this: it is the menu's one line
+  for telling the player what just happened.)
+- **The map viewport has two margins, both floored at `config.node_clearance()`.**
+  `config.map_fit_padding()` sizes the zoom-1 fit (raising it just shrinks the
+  whole map) and `config.map_pan_padding()` is what the pan clamp keeps past the
+  outermost system once zoomed in — `geometry.WorldView` takes them as `padding`
+  and `pan_padding`. The floor exists because a node's circle is drawn at a pixel
+  radius that is *not* part of the world bounds, so the fit/pan maths cannot see
+  it; a margin below the largest node's drawn extent slices that circle. Related:
+  `_clamp` centres an axis only while its content still fits the *fit-padded*
+  span, since that is what `_center_axis` divides up — comparing against the bare
+  viewport let the "centred" offset push a boundary system back out through the
+  margin at certain zooms (`test_boundary_never_crosses_the_margin_at_any_zoom`).
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
@@ -195,6 +236,16 @@ intact.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
+- **The side panel's queued list is capped and scrolled, not truncated.** It may
+  take at most half the panel so the system/lane/rule details above it are never
+  pushed off, and what doesn't fit is reached with `ui.order_scroll` (the ▲/▼
+  buttons, or the wheel while the pointer is over the panel — where the wheel no
+  longer zooms the map). `render` records how far it may scroll in
+  `ui.order_scroll_max` and tolerates a stale offset by clamping locally when it
+  draws; `Ui.scroll_orders` re-clamps before applying a delta. Each drawn row
+  carries **its own index** into `pending` (`ui.order_hitboxes` is
+  `(index, row, delete)`): a positional mapping silently deletes the wrong order
+  once only a window of the list is on screen.
 - **`viewstate.Ui` holds all transient interaction state**, including human-only
   quality-of-life features (e.g. `auto_forward` standing rules) that must stay
   out of the pure `GameState`. `main.resolve_turn` expands such UI state into

@@ -77,10 +77,21 @@ class Ui:
     play_pause_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the queued-orders panel, rebuilt by render each frame and
     # tested by input (same store-rect-then-test handoff as end_turn_rect).
-    # Parallel to `pending`: entry i is (row_rect, delete_rect), each (x,y,w,h).
-    order_hitboxes: list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = field(
-        default_factory=list
+    # (pending_index, row_rect, delete_rect) per drawn row — the index is carried
+    # explicitly rather than implied by position, because the list scrolls and only
+    # a window of it is drawn; a positional mapping would delete the wrong order.
+    order_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
+        field(default_factory=list)
     )
+    # Queued-list scrolling: `order_scroll` is the first entry drawn, and render
+    # records how far it may go in `order_scroll_max` (0 == everything fits) along
+    # with the ▲/▼ button rects. The list is capped to part of the panel so the
+    # system details above it are never pushed off, so it can overflow well before
+    # the orders themselves become unmanageable.
+    order_scroll: int = 0
+    order_scroll_max: int = 0
+    order_up_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    order_down_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the −/+ ship-count buttons flanking the active count label on
     # the map (composing or editing an order). Rebuilt by render each frame; zeroed
     # when no count is being adjusted (same handoff as end_turn_rect).
@@ -371,6 +382,15 @@ class Ui:
     def clear_pending(self) -> None:
         self.pending.clear()
         self.sel_order = None
+        self.order_scroll = 0        # the list it scrolled through is gone
+
+    def scroll_orders(self, delta: int) -> None:
+        """Move the queued-list window by ``delta`` rows, clamped to what render
+        reported as scrollable. Clamps where we are *before* applying ``delta``, so
+        an offset left stale by removed orders snaps back on the first scroll
+        instead of needing one press per vanished row."""
+        here = max(0, min(self.order_scroll, self.order_scroll_max))
+        self.order_scroll = max(0, min(self.order_scroll_max, here + delta))
 
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""

@@ -973,3 +973,102 @@ def test_right_click_deselects_order_then_selecting_system_clears_it():
         assert ui.sel_order is None and ui.selected == home
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Queued-list scrolling
+# --------------------------------------------------------------------------- #
+def _queue_many(state, ui, count):
+    """Queue ``count`` distinct orders and draw, so the list lays itself out."""
+    from starconquest import render
+    from starconquest.model import Order
+
+    ids = sorted(state.systems)
+    for i in range(count):
+        src, dst = ids[i % len(ids)], ids[(i + 1) % len(ids)]
+        ui.pending.append(Order(1, src, dst, i + 1))
+    screen = pygame.display.get_surface()
+    render._FONTS.clear()
+    render.draw(screen, state, ui)
+    return screen
+
+
+def test_long_queue_scrolls_instead_of_hiding_entries():
+    """A queue too long for its capped block becomes scrollable, and every entry is
+    reachable — a bare '+N more' line left the overflow unmanageable."""
+    state, ui = _setup()
+    try:
+        from starconquest import render
+
+        screen = _queue_many(state, ui, 40)
+        assert ui.order_scroll_max > 0, "40 orders should overflow the capped block"
+        assert ui.order_up_rect[2] > 0 and ui.order_down_rect[2] > 0
+
+        seen = set()
+        for _ in range(ui.order_scroll_max + 1):
+            seen.update(idx for idx, _row, _del in ui.order_hitboxes)
+            _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
+            render.draw(screen, state, ui)
+        seen.update(idx for idx, _row, _del in ui.order_hitboxes)
+        assert seen == set(range(40)), "scrolling must reach every queued order"
+    finally:
+        pygame.quit()
+
+
+def test_deleting_a_row_while_scrolled_removes_that_order():
+    """The regression guard for the hit-rect index: rows carry their own index into
+    `pending`, so the second visible row of a scrolled list is not order #1."""
+    state, ui = _setup()
+    try:
+        from starconquest import render
+
+        screen = _queue_many(state, ui, 40)
+        _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
+        render.draw(screen, state, ui)
+        assert ui.order_scroll > 0
+
+        idx, _row, delete = ui.order_hitboxes[0]
+        assert idx == ui.order_scroll, "the first drawn row is the scroll offset"
+        doomed = ui.pending[idx]
+        before = len(ui.pending)
+        _click_pos(state, ui, pygame.Rect(*delete).center)
+        assert len(ui.pending) == before - 1
+        assert doomed not in ui.pending, "deleted the wrong order"
+    finally:
+        pygame.quit()
+
+
+def test_scroll_offset_survives_orders_being_removed():
+    """A stale offset (orders resolved out from under it) snaps back into range on
+    the next scroll rather than needing one press per vanished row."""
+    state, ui = _setup()
+    try:
+        _queue_many(state, ui, 40)
+        ui.order_scroll = ui.order_scroll_max
+        del ui.pending[5:]                       # most of the list goes away
+        _queue_many(state, ui, 0)                # redraw with the short list
+        ui.scroll_orders(1)
+        assert ui.order_scroll <= ui.order_scroll_max
+    finally:
+        pygame.quit()
+
+
+def test_wheel_over_the_panel_scrolls_the_list_not_the_map():
+    """The wheel means 'scroll this list' over the info panel and 'zoom' over the
+    map, so a flick while reviewing orders doesn't throw the camera about."""
+    state, ui = _setup()
+    try:
+        _queue_many(state, ui, 40)
+        zoom = ui.view.zoom
+        panel = (config.SCREEN_W - config.HUD_RIGHT_W // 2, config.SCREEN_H // 2)
+        pygame.mouse.set_pos(panel)
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
+        assert ui.order_scroll == 1
+        assert ui.view.zoom == zoom, "the wheel must not zoom the map from the panel"
+
+        pygame.mouse.set_pos((config.SCREEN_W // 4, config.SCREEN_H // 2))
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.view.zoom > zoom, "over the map the wheel still zooms"
+        assert ui.order_scroll == 1
+    finally:
+        pygame.quit()

@@ -100,6 +100,11 @@ def _point_in_rect(pos, rect) -> bool:
     return x <= pos[0] <= x + w and y <= pos[1] <= y + h
 
 
+def _over_side_panel(pos) -> bool:
+    """Is ``pos`` in the right-hand info panel column (rather than over the map)?"""
+    return pos[0] >= config.SCREEN_W - config.HUD_RIGHT_W
+
+
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
     # History mode is a modal review scene (entered mid-game or after a win):
     # scrub / rewind / exit only, no board interaction. Checked first so it wins
@@ -158,12 +163,17 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return _handle_key(event, ui)
 
     if event.type == pygame.MOUSEWHEEL:
+        # MOUSEWHEEL carries no position, so ask pygame for the cursor's current
+        # one — same idea as _handle_key reading key mods.
+        pos = pygame.mouse.get_pos()
         if ui.count_adjust_active():
             ui.step_count(state, event.y)
+        elif _over_side_panel(pos):
+            # over the info panel the wheel belongs to the queued list, not the map
+            # (zooming the map from off-map was disorienting anyway)
+            ui.scroll_orders(-event.y)
         else:
-            # MOUSEWHEEL carries no position, so ask pygame for the cursor's
-            # current one — same idea as _handle_key reading key mods.
-            ui.view.zoom_at(pygame.mouse.get_pos(), config.ZOOM_WHEEL_STEP ** event.y)
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP ** event.y)
         return None
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -345,17 +355,28 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.popup_pos = (px, py)
             return None
 
+    # Scroll the queued list — the touch route to entries past the visible window
+    # (the wheel does it too, see handle_event). Tested before the rows below so a
+    # tap on a button never falls through to whatever row sits under it.
+    if ui.order_up_rect[2] and _point_in_rect(pos, ui.order_up_rect):
+        ui.scroll_orders(-1)
+        return None
+    if ui.order_down_rect[2] and _point_in_rect(pos, ui.order_down_rect):
+        ui.scroll_orders(1)
+        return None
+
     # Clicks in the queued-orders panel take priority: a delete button removes
-    # its order, a row selects it for editing (scroll adjusts, X removes).
-    for i, (row, delete) in enumerate(ui.order_hitboxes):
-        if i >= len(ui.pending):
-            break
+    # its order, a row selects it for editing (scroll adjusts, X removes). Each row
+    # carries its own index into `pending`, since only a window of the list is drawn.
+    for idx, row, delete in ui.order_hitboxes:
+        if idx >= len(ui.pending):
+            continue
         if _point_in_rect(pos, delete):
-            del ui.pending[i]
+            del ui.pending[idx]
             ui.sel_order = None
             return None
         if _point_in_rect(pos, row):
-            ui.select_order(i)
+            ui.select_order(idx)
             return None
 
     # Same panel, standing auto-forward rules: a delete button clears the

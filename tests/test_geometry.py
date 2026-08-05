@@ -47,13 +47,13 @@ def test_zoom_clamped_at_max():
 
 
 def test_pan_clamped_keeps_content_onscreen():
-    """Content can never be dragged past a `padding`-sized gap from either
+    """Content can never be dragged past a `pan_padding`-sized gap from either
     edge — the slack that keeps a boundary system's centre (and its fixed-
     pixel-radius circle, drawn independently of the world bounds) clear of
     the clip edge instead of sliced flush against it."""
     v = _view()
     v.zoom_at((400, 300), 3.0)
-    pad = v._padding
+    pad = v._pan_padding
 
     v.pan(-100000, -100000)
     sx, sy, sw, sh = SCREEN
@@ -71,7 +71,7 @@ def test_pan_clamped_keeps_content_onscreen():
 
 def test_pan_clamp_leaves_exactly_padding_gap_at_extreme():
     """The world-bounds corner itself (BOUNDS[0], BOUNDS[1] — where a boundary
-    system typically sits) must land `padding` px *inside* the clip edge at
+    system typically sits) must land `pan_padding` px *inside* the clip edge at
     the clamped extreme, not flush against it — the concrete case the padding
     buffer exists to prevent."""
     v = _view()
@@ -79,8 +79,60 @@ def test_pan_clamp_leaves_exactly_padding_gap_at_extreme():
     v.pan(100000, 100000)  # drag as far as it goes, revealing the left/top edge
     sx, sy, _, _ = SCREEN
     x0, y0 = v.to_screen((BOUNDS[0], BOUNDS[1]))
-    assert abs(x0 - (sx + v._padding)) < 1e-6
-    assert abs(y0 - (sy + v._padding)) < 1e-6
+    assert abs(x0 - (sx + v._pan_padding)) < 1e-6
+    assert abs(y0 - (sy + v._pan_padding)) < 1e-6
+
+
+def test_boundary_never_crosses_the_margin_at_any_zoom():
+    """At *every* zoom, panning to an extreme leaves the revealed boundary edge at
+    least the fit padding inside the viewport.
+
+    The regression guard for a sliced-circle bug that only showed at some zoom
+    levels: `_clamp` centred an axis whenever its content fitted the bare viewport,
+    but `_center_axis` divides up the *padded* span, so between those two widths its
+    "centred" offset had a negative share to spread and pushed the outermost system
+    back out through the margin — and at a big enough zoom, off screen entirely.
+    """
+    sx, sy, sw, sh = SCREEN
+    fit = 40.0
+    for zoom in (1.0, 1.05, 1.1, 1.2, 1.35, 1.5, 1.75, 2.0, 2.5, 3.0, 4.5, 6.0):
+        for dx, dy in ((100000, 100000), (-100000, -100000),
+                       (100000, -100000), (-100000, 100000), (0, 0)):
+            v = WorldView(BOUNDS, SCREEN, padding=fit, pan_padding=110.0)
+            v.zoom_at((400, 300), zoom)
+            v.pan(dx, dy)
+            x0, y0 = v.to_screen((BOUNDS[0], BOUNDS[1]))
+            x1, y1 = v.to_screen((BOUNDS[2], BOUNDS[3]))
+            where = f"zoom {zoom}, pan {dx},{dy}"
+            if dx > 0:      # dragged right: the left edge is the one on show
+                assert x0 >= sx + fit - 1e-6, f"left boundary inside the margin ({where})"
+            if dx < 0:
+                assert x1 <= sx + sw - fit + 1e-6, f"right boundary inside ({where})"
+            if dy > 0:
+                assert y0 >= sy + fit - 1e-6, f"top boundary inside ({where})"
+            if dy < 0:
+                assert y1 <= sy + sh - fit + 1e-6, f"bottom boundary inside ({where})"
+
+
+def test_pan_padding_never_below_fit_padding():
+    """A pan margin tighter than the fit's would let a system be dragged closer to
+    the edge than the resting view puts it, and breaks `_clamp`'s bound ordering."""
+    v = WorldView(BOUNDS, SCREEN, padding=80.0, pan_padding=10.0)
+    assert v._pan_padding == 80.0
+
+
+def test_larger_pan_padding_leaves_the_fit_view_alone():
+    """Raising only the pan margin must not shrink or shift the zoom-1 view — that
+    is the whole reason the two paddings are separate knobs."""
+    tight = WorldView(BOUNDS, SCREEN, padding=40.0)
+    roomy = WorldView(BOUNDS, SCREEN, padding=40.0, pan_padding=200.0)
+    assert roomy.scale == tight.scale
+    assert (roomy.off_x, roomy.off_y) == (tight.off_x, tight.off_y)
+    roomy.zoom_at((400, 300), 3.0)
+    roomy.reset()
+    assert (round(roomy.off_x, 6), round(roomy.off_y, 6)) == (
+        round(tight.off_x, 6), round(tight.off_y, 6),
+    )
 
 
 def test_pan_at_fit_zoom_is_a_noop():

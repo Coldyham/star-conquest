@@ -46,6 +46,28 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
+def test_file_row_never_overlaps_on_the_web_layout():
+    """The web File row carries an extra 'Get Link' button, which used to leave the
+    name field narrower than its own default value — so a long name ran out over
+    Save/Load. The field is now sized from what the buttons leave, and its text is
+    clipped to the box."""
+    screen, ms, settings = _setup()
+    real_is_web = menu.is_web
+    menu.is_web = lambda: True
+    try:
+        ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted
+        menu.draw(screen, ms, settings)
+        field = ms.rects["filename_field"]
+        assert field.width > 0
+        for key in ("get_link", "save_settings", "load_settings"):
+            assert not field.colliderect(ms.rects[key]), f"name field runs into {key}"
+        # ...and the default name has room without needing to be clipped at all
+        assert menu._fonts()["normal"].size(menu._DEFAULT_FILENAME)[0] < field.width
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
 def test_player_stepper_and_node_floor():
     screen, ms, settings = _setup()
     try:

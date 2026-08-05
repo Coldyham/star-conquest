@@ -143,6 +143,29 @@ def share_token(token: str) -> tuple[bool, bool]:
         return (True, False)
 
 
+def close_window() -> bool:
+    """Web only: ask the browser to close this window/tab. True if the call went
+    through — which is *not* a promise the app is gone, so callers must cope with
+    still being alive afterwards.
+
+    A page may normally only close itself if a script opened it, so this succeeds in
+    an installed PWA window far more often than in an ordinary tab, and never at all
+    in some browsers. There is no other way for a web app to exit, and the
+    alternative — ending the main loop, which tears down the canvas — strands the
+    player on a blank page with no way back, so a caller that can't verify the close
+    must stay in the app instead (see ``main.leave_app``).
+    """
+    if not is_web():
+        return False
+    import platform as _platform
+
+    try:
+        _platform.window.close()
+        return True
+    except Exception:
+        return False
+
+
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
     if not is_web():

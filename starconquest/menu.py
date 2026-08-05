@@ -243,7 +243,7 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     surface.fill(config.COLOR_BG)
     ms.rects.clear()
-    w, h = surface.get_size()
+    w = surface.get_width()
     f = _fonts()
 
     _text(surface, f["title"], "STAR CONQUEST", config.COLOR_TEXT, center=(w // 2, 92))
@@ -268,11 +268,15 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
 
     _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, w)
+    # Two separate lines below the Start row: the transient save/load status, then
+    # the keyboard hint (dropped on touch, where there are no keys to press — and
+    # where it used to be drawn straight on top of the status).
     if ms.status and pygame.time.get_ticks() < ms.status_until:
         _text(surface, f["small"], ms.status,
-              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
-    _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h - 108))
+              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 852))
+    if not config.touch_ui:
+        _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
+              config.COLOR_TEXT_DIM, center=(w // 2, 886))
 
 
 def _draw_challenge(surface, settings: Settings, w: int) -> None:
@@ -540,15 +544,13 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     field = pygame.Rect(dice.x - 8 - fw, y, fw, _CH)
 
     editing = ms.editing_seed
-    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
-    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
     if editing:
-        shown, color = ms.seed_text + "|", config.COLOR_TEXT
+        shown, color = ms.seed_text, config.COLOR_TEXT
     elif settings.seed is None:
         shown, color = "random", config.COLOR_TEXT_DIM
     else:
         shown, color = str(settings.seed), config.COLOR_TEXT
-    _text(surface, _fonts()["normal"], shown, color, midleft=(field.x + 10, field.centery))
+    _text_field(surface, _fonts()["normal"], field, shown, editing, color)
     ms.rects["seed_field"] = field
 
     # A drawn die (not an emoji glyph — the monospace font has no colour emoji).
@@ -559,36 +561,57 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
-    """Footer row: 'File [ name ] [Save] [Load]' — mirrors the seed field. On the
-    web build a leading '[Get Link]' shares the whole config as a URL."""
+    """Footer row: '[ name ] [Save] [Load]' — mirrors the seed field. On the web
+    build a leading '[Get Link]' shares the whole config as a URL.
+
+    The field takes whatever width the buttons leave (no "File" label: with four
+    controls on the row on web, the name field had less room than the default name
+    needs, and Save/Load say plainly enough what the row is for)."""
     f = _fonts()
     lx, rx = w // 2 - 280, w // 2 + 280
-    _text(surface, f["small"], "File", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
 
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
-    fx = lx + 56
-    field_right = save.x - 10
+    fx = lx
     if is_web():
-        link = pygame.Rect(fx, y, 100, _CH)
+        link = pygame.Rect(fx, y, 110, _CH)
         _button(surface, ms, "get_link", link, "Get Link",
                 fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         fx = link.right + 10
     else:
         ms.rects.pop("get_link", None)
-    field = pygame.Rect(fx, y, field_right - fx, _CH)
+    field = pygame.Rect(fx, y, save.x - 10 - fx, _CH)
 
-    editing = ms.editing_filename
-    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
-    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
-    shown = (ms.filename + "|") if editing else (ms.filename or _DEFAULT_FILENAME)
-    _text(surface, f["normal"], shown, config.COLOR_TEXT, midleft=(field.x + 10, field.centery))
+    _text_field(surface, f["normal"], field, ms.filename or _DEFAULT_FILENAME,
+                ms.editing_filename, config.COLOR_TEXT)
     ms.rects["filename_field"] = field
 
     _button(surface, ms, "save_settings", save, "Save",
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
     _button(surface, ms, "load_settings", load, "Load",
             fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+
+
+def _text_field(surface, font, rect: pygame.Rect, text: str, editing: bool, color) -> None:
+    """A text box holding ``text``, with a caret while ``editing``.
+
+    The content is clipped to the box and anchored to its *end*, so a name longer
+    than the field runs off the left rather than out over the buttons beside it —
+    and the caret you are typing at stays in view.
+    """
+    pygame.draw.rect(surface, _TROUGH, rect, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, rect, 2, border_radius=6)
+    shown = text + "|" if editing else text
+    pad = 10
+    img = font.render(shown, True, color)
+    inner = rect.inflate(-2 * pad, -4)
+    prev = surface.get_clip()
+    surface.set_clip(inner)
+    if img.get_width() <= inner.width:
+        surface.blit(img, img.get_rect(midleft=(inner.left, rect.centery)))
+    else:
+        surface.blit(img, img.get_rect(midright=(inner.right, rect.centery)))
+    surface.set_clip(prev)
 
 
 def _dropdown(surface, ms: MenuState, key, current, options, open_, x, y, width) -> None:
@@ -665,39 +688,60 @@ def _draw_start(surface, ms: MenuState, w: int) -> None:
 # --------------------------------------------------------------------------- #
 # Resume prompt — a boot-time modal offered when the last game was left unfinished
 # --------------------------------------------------------------------------- #
+def _resume_labels() -> tuple[str, str]:
+    """(resume, new-game) button labels; key hints dropped on a touch build, where
+    there is no Y/N to press — the same wording rule the game's modals use."""
+    if config.touch_ui:
+        return ("Resume", "New game")
+    return ("Resume (Y/Enter)", "New game (N/Esc)")
+
+
 def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(resume, new-game) button rects — shared by the drawer and the hit-tester.
-    Drawn on the real surface (not the canvas), so sizes scale via config.s."""
+
+    Drawn on the real surface rather than the fixed canvas the widgets above use,
+    so this is the one part of the menu that scales through ``config.s``; the boxes
+    are measured to fit their labels, which at a touch scale are wider than any
+    fixed width would allow for.
+    """
     w, h = surface.get_size()
-    cx, cy = w // 2, h // 2
-    bw, bh, gap = config.s(200), config.s(42), config.s(12)
-    resume_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
-    new_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
-    return resume_r, new_r
+    font = _modal_fonts()["normal"]
+    bw = max(font.size(s)[0] + 2 * config.BTN_PAD_X for s in _resume_labels())
+    bw = max(bw, config.s(200))
+    bh = max(config.s(42), font.get_height() + config.s(16))
+    gap, y = config.s(12), h // 2 + config.s(24)
+    return (pygame.Rect(w // 2 - bw - gap, y, bw, bh),
+            pygame.Rect(w // 2 + gap, y, bw, bh))
 
 
 def draw_resume_prompt(surface, log) -> None:
-    """Modal veil offering to resume ``log`` (an in-progress match), over the menu."""
+    """Modal veil offering to resume ``log`` (an in-progress match), over the menu.
+
+    Stacked upward from the button row so the title and the detail line always
+    clear it, whatever the fonts scale to.
+    """
     w, h = surface.get_size()
     f = _modal_fonts()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 200))
     surface.blit(veil, (0, 0))
-    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
-          center=(w // 2, h // 2 - config.s(52)))
+
     st = log.settings
     detail = (f"turn {log.turn_count} · {st.get('players', '?')} players · "
               f"{st.get('mode', 'random')} map")
+    detail_h = f["small"].get_height() + config.ROW_GAP
+    y = h // 2 - config.s(12) - detail_h - f["big"].get_height()
+    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
+          center=(w // 2, y + f["big"].get_height() // 2))
+    y += f["big"].get_height() + config.ROW_GAP
     _text(surface, f["small"], detail, config.COLOR_TEXT_DIM,
-          center=(w // 2, h // 2 - config.s(18)))
+          center=(w // 2, y + f["small"].get_height() // 2))
 
-    resume_r, new_r = resume_prompt_buttons(surface)
-    for rect, label, fill, edge in (
-        (resume_r, "Resume (Y/Enter)", _START_FILL, _START_BORDER),
-        (new_r, "New game (N/Esc)", _BTN_FILL, _BTN_BORDER),
-    ):
-        pygame.draw.rect(surface, fill, rect, border_radius=6)
-        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+    for rect, label, fill, edge in zip(
+            resume_prompt_buttons(surface), _resume_labels(),
+            (_START_FILL, _BTN_FILL), (_START_BORDER, _BTN_BORDER)):
+        pygame.draw.rect(surface, fill, rect, border_radius=config.s(6))
+        pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=config.s(6))
         _text(surface, f["normal"], label, config.COLOR_TEXT, center=rect.center)
 
 
@@ -939,24 +983,24 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         try:
             _SAVE_DIR.mkdir(parents=True, exist_ok=True)
             settings.save(path)
-            _set_status(ms, f"Saved {path.name}", True)
+            set_status(ms, f"Saved {path.name}", True)
         except OSError:
-            _set_status(ms, f"Couldn't save {path.name}", False)
+            set_status(ms, f"Couldn't save {path.name}", False)
     elif hit == "load_settings":
         path = _settings_path(ms.filename)
         try:
             settings.copy_from(Settings.load(path))
-            _set_status(ms, f"Loaded {path.name}", True)
+            set_status(ms, f"Loaded {path.name}", True)
         except (OSError, ValueError):
-            _set_status(ms, f"Couldn't load {path.name}", False)
+            set_status(ms, f"Couldn't load {path.name}", False)
     elif hit == "get_link":
         ok, copied = webstore.share_token(settings.to_token())
         if copied:
-            _set_status(ms, "Link copied — paste to share", True)
+            set_status(ms, "Link copied — paste to share", True)
         elif ok:
-            _set_status(ms, "Link updated — copy it from the address bar", True)
+            set_status(ms, "Link updated — copy it from the address bar", True)
         else:
-            _set_status(ms, "Couldn't create link", False)
+            set_status(ms, "Couldn't create link", False)
     return None
 
 
@@ -1001,7 +1045,10 @@ def _settings_path(name: str) -> Path:
     return _SAVE_DIR / name
 
 
-def _set_status(ms: MenuState, text: str, ok: bool) -> None:
+def set_status(ms: MenuState, text: str, ok: bool) -> None:
+    """Show ``text`` under the Start row for a few seconds. Public because
+    ``main`` posts here too — it is the menu's one line for telling the player
+    what just happened (see the web quit fallback in ``main.leave_app``)."""
     ms.status = text
     ms.status_ok = ok
     ms.status_until = pygame.time.get_ticks() + 4000

@@ -85,6 +85,12 @@ class WorldView:
     should ever touch; ``scale``/``off_x``/``off_y`` are derived from the fit
     plus the current zoom/pan and shouldn't be written to directly — use
     ``zoom_at``/``pan``/``reset`` instead.
+
+    ``padding`` is the margin the zoom-1 fit leaves around the map;
+    ``pan_padding`` (defaulting to it, and never allowed below it) is the margin the
+    pan clamp keeps past the outermost point once you are zoomed in. They are
+    separate because raising the fit margin shrinks the whole map, which is not what
+    wanting more room around a zoomed-in view asks for.
     """
 
     def __init__(
@@ -92,10 +98,15 @@ class WorldView:
         world_bounds: tuple[float, float, float, float],
         screen_rect: tuple[float, float, float, float],
         padding: float = 40.0,
+        pan_padding: float | None = None,
     ) -> None:
         self._world_bounds = world_bounds
         self._screen_rect = screen_rect
         self._padding = padding
+        # never tighter than the fit's margin: that would let a system be panned
+        # closer to the edge than the resting view puts it, and `_clamp`'s bounds
+        # rely on pan >= fit to stay well-ordered.
+        self._pan_padding = padding if pan_padding is None else max(padding, pan_padding)
         wx0, wy0, wx1, wy1 = world_bounds
         sx, sy, sw, sh = screen_rect
         ww = max(1e-6, wx1 - wx0)
@@ -160,29 +171,38 @@ class WorldView:
     def _clamp(self) -> None:
         """Keep the map on screen: centre an axis whose zoomed content is
         smaller than the viewport (recreating the constructor's fit-centring at
-        zoom == 1.0), else clamp that axis's offset so a content edge can never
-        leave a visible gap. Both branches keep ``_padding`` of breathing room
-        past the outermost system's *centre* — without it, a system sitting
-        exactly on the world bounds could be panned flush against the clip
-        edge, slicing its circle (drawn at a fixed pixel radius, not part of
-        the world bounds) clean in half with no margin at all."""
+        zoom == 1.0, so that branch uses the *fit* padding), else clamp that
+        axis's offset so a content edge can never leave a visible gap. The
+        zoomed branch keeps ``_pan_padding`` of breathing room past the
+        outermost system's *centre* — without it, a system sitting exactly on
+        the world bounds could be panned flush against the clip edge, slicing
+        its circle (drawn at a fixed pixel radius, not part of the world
+        bounds) clean in half with no margin at all."""
         scale = self.scale
         wx0, wy0, wx1, wy1 = self._world_bounds
         sx, sy, sw, sh = self._screen_rect
         ww, wh = max(1e-6, wx1 - wx0), max(1e-6, wy1 - wy0)
-        pad = self._padding
+        pad = self._pan_padding
 
-        if ww * scale <= sw:
+        # An axis is centred only while its zoomed content still fits the
+        # *fit-padded* viewport, which is the span `_center_axis` divides up. Past
+        # that its "centred" offset has a negative share to spread and pushes the
+        # outermost system back out through the margin — the intermittent
+        # sliced-circle-at-some-zoom-levels bug. Comparing against the bare
+        # viewport (`ww * scale <= sw`) is what used to let that through.
+        # Both axes fit at zoom 1.0 by construction, so the fit view and `reset()`
+        # are untouched; the epsilon absorbs rounding on the exactly-fitting axis.
+        if ww * scale <= max(1.0, sw - 2 * self._padding) + 1e-9:
             self.off_x = self._center_axis(scale, sx, sw, wx0, wx1)
         else:
-            # relative to the old zero-margin bounds (sx+sw-wx1*scale, sx-wx0*scale),
+            # relative to the zero-margin bounds (sx+sw-wx1*scale, sx-wx0*scale),
             # both ends are eased inward by `pad` — content may now stop `pad` px
-            # short of fully covering the viewport, always valid here since
-            # ww*scale > sw already exceeds that slack.
+            # short of covering the viewport. Well-ordered (lo <= hi) whenever
+            # ww*scale >= sw - 2*pad, which holds here since pad >= _padding.
             lo, hi = sx + sw - pad - wx1 * scale, sx + pad - wx0 * scale
             self.off_x = max(lo, min(hi, self.off_x))
 
-        if wh * scale <= sh:
+        if wh * scale <= max(1.0, sh - 2 * self._padding) + 1e-9:
             self.off_y = self._center_axis(scale, sy, sh, wy0, wy1)
         else:
             lo, hi = sy + sh - pad - wy1 * scale, sy + pad - wy0 * scale

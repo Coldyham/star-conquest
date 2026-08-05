@@ -12,7 +12,7 @@ import pygame
 from . import config, fog, uifont
 from .geometry import lerp
 from .model import GameState, lane_key
-from .viewstate import CHOOSING, SELECTED, Ui
+from .viewstate import CHOOSING, Ui
 
 _FONTS: dict[str, pygame.font.Font] = {}
 
@@ -38,6 +38,88 @@ def _text(surface, font, s, color, center=None, topleft=None, midleft=None, midr
         rect.midright = midright
     surface.blit(img, rect)
     return rect
+
+
+# --------------------------------------------------------------------------- #
+# Layout helpers
+#
+# Everything that holds text is measured rather than given a fixed pixel size: a
+# constant width or row pitch is only ever right at one font size, and the UI font
+# grows with config.ui_scale (up to ~2x on a phone). The helpers below are what keep
+# labels inside their buttons and rows clear of each other at any scale — plus the
+# two that adapt to a touch build (see config.touch_ui).
+# --------------------------------------------------------------------------- #
+# HUD button palette — (fill, edge) pairs, kept local like the scrubber's below.
+_BTN_BLUE = ((40, 52, 78), (110, 140, 200))      # ordinary action
+_BTN_ACTIVE = ((92, 70, 46), (190, 150, 96))     # a toggle that is currently on
+_BTN_AMBER = ((120, 86, 46), (200, 150, 96))     # new map / rewind
+_BTN_VIOLET = ((52, 46, 78), (150, 130, 200))    # history / review
+_BTN_RED = ((92, 46, 52), (200, 96, 104))        # quit
+_BTN_DANGER = ((120, 46, 52), (200, 96, 104))    # ...and its brighter modal confirm
+_BTN_GREEN = ((46, 92, 60), (96, 190, 120))      # end turn / confirm
+_BTN_TEAL = ((44, 62, 74), (120, 180, 200))      # share a challenge
+
+
+def _row_h(kind: str = "small") -> int:
+    """Pitch for one line of stacked text in ``kind``'s font: the font's own line
+    height plus a gap. Derived, so rows stay legibly apart instead of colliding
+    once the font outgrows a hardcoded pitch."""
+    return _fonts()[kind].get_height() + config.ROW_GAP
+
+
+def _btn_w(font, label: str, min_w: int = 0) -> int:
+    """Width of a button that has to fit ``label``: measured text plus padding."""
+    return max(min_w, font.size(label)[0] + 2 * config.BTN_PAD_X)
+
+
+def _tap_size(px: int) -> int:
+    """``px``, raised to ``config.TOUCH_MIN_TARGET`` on a touch build so a control
+    that is merely small with a mouse doesn't become un-tappable with a finger."""
+    return max(px, config.TOUCH_MIN_TARGET) if config.touch_ui else px
+
+
+def _btn(surface, rect: pygame.Rect, label: str, fill, edge, font=None,
+         color=None) -> tuple[int, int, int, int]:
+    """Draw a filled, outlined, centre-labelled button; return its hit-rect tuple
+    for storing on ``ui`` (the store-rect-then-test handoff input relies on).
+    Every HUD button comes through here so they share one look."""
+    radius = config.s(6)
+    pygame.draw.rect(surface, fill, rect, border_radius=radius)
+    pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=radius)
+    _text(surface, font or _fonts()["normal"], label, color or config.COLOR_TEXT,
+          center=rect.center)
+    return (rect.x, rect.y, rect.w, rect.h)
+
+
+def _key_hint(label: str, key: str) -> str:
+    """``label`` with its keyboard shortcut appended. Dropped on a touch build:
+    there is no key to press there, and the suffix is both noise and the thing
+    that pushes these labels out of their buttons at touch scale."""
+    return label if config.touch_ui else f"{label} ({key})"
+
+
+def _wrap(font, text: str, width: int) -> list[str]:
+    """``text`` broken into lines that each fit ``width`` px in ``font``.
+
+    Paragraphs are separated by a blank line and kept as one blank line in the
+    output; line breaks *within* a paragraph are just whitespace, so the source can
+    be written at whatever width reads well and still reflow to the real panel.
+    """
+    lines: list[str] = []
+    for para in text.strip().split("\n\n"):
+        if lines:
+            lines.append("")
+        line = ""
+        for word in para.split():
+            trial = f"{line} {word}" if line else word
+            if line and font.size(trial)[0] > width:
+                lines.append(line)
+                line = word
+            else:
+                line = trial
+        if line:
+            lines.append(line)
+    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +219,7 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
         # brighten the lanes touching the selected source system
         if ui.selected is not None and ui.selected in (lane.a, lane.b):
             color = config.COLOR_LANE_HILITE
-            width = max(width, 3)
+            width = max(width, config.s(3))
         pygame.draw.line(surface, color, pa, pb, width)
         # travel time is detailed intel — only show it where an endpoint is in
         # full view; a lane between two fogged systems draws as a bare dim line
@@ -153,19 +235,32 @@ def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
     Thickness tracks travel time directly (clamped) so the spread reads at a
     glance; colour brightens the quick lanes and mutes the slow ones.
     """
-    width = max(2, min(6, travel_turns))       # 2px (fast) .. 6px (slow)
+    width = config.s(max(2, min(6, travel_turns)))   # 2px (fast) .. 6px (slow)
     f = (min(6, max(1, travel_turns)) - 1) / 5.0  # 0 fast .. 1 slow
     scale = 1.3 - 0.6 * f                        # 1.3x (bright) .. 0.7x (dim)
     color = tuple(min(255, int(c * scale)) for c in config.COLOR_LANE)
     return width, color
 
 
+def _rule_label_center(pa, pb, font) -> tuple[int, int]:
+    """Where an auto-forward rule's label sits on its lane: below the midpoint by
+    enough to clear the lane's own travel-time pill, which is centred exactly there.
+    Stacked rather than side by side so it reads the same on any lane angle.
+
+    Without the offset the rule's label covers the lane's length and travel time —
+    the numbers you need in order to judge the rule (see also ``_panel_lane``, which
+    is where the panel reports them for a selected rule).
+    """
+    dy = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
+    return ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + dy)
+
+
 def _label_pill(surface, font, s: str, color, center) -> None:
     """Draw text centred on a small dark rounded rect so it reads over any line."""
     img = font.render(s, True, color)
     rect = img.get_rect(center=center)
-    pill = rect.inflate(8, 4)
-    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=5)
+    pill = rect.inflate(config.s(8), config.s(4))
+    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=config.s(5))
     surface.blit(img, rect)
 
 
@@ -198,12 +293,15 @@ def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
         length = math.hypot(dx, dy) or 1.0
         ux, uy = dx / length, dy / length
         px, py = -uy, ux  # perpendicular
+        # split stacked fleets, and sit the count clear of the triangle — both
+        # offsets scale, so the label never lands on the glyph on a big display
+        spread = config.FLEET_SIZE + config.s(3)
         rank = offsets.get(i, (0, 0))[0]
-        x += int(px * rank * 12)
-        y += int(py * rank * 12)
+        x += int(px * rank * spread)
+        y += int(py * rank * spread)
         _draw_triangle(surface, (x, y), (ux, uy), config.player_color(f.owner_id))
         _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT,
-              center=(x + int(px * 12), y + int(py * 12)))
+              center=(x + int(px * spread), y + int(py * spread)))
 
 
 def _draw_triangle(surface, center, direction, color) -> None:
@@ -223,13 +321,13 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         # the order being edited is drawn in the select colour, brighter+thicker
         selected = i == ui.sel_order
         color = config.COLOR_SELECT if selected else config.player_color(ui.human_id)
-        pygame.draw.line(surface, color, pa, pb, 5 if selected else 3)
+        pygame.draw.line(surface, color, pa, pb, config.s(5 if selected else 3))
         # arrowhead near the destination
         dx, dy = pb[0] - pa[0], pb[1] - pa[1]
         length = math.hypot(dx, dy) or 1.0
         u = (dx / length, dy / length)
-        head = (pb[0] - u[0] * 20, pb[1] - u[1] * 20)
-        _draw_triangle(surface, head, u, color)
+        inset = config.s(20)
+        _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
         # place the count 40% of the way toward the destination, not the midpoint,
         # so two opposite-direction orders on the same lane don't overlap labels
         # the count for the order being edited (selected) is drawn later, on top,
@@ -237,7 +335,8 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         if not selected:
             lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
             ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
-            _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT, center=(lx, ly - 10))
+            _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT,
+                  center=(lx, ly - config.s(10)))
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
@@ -254,16 +353,18 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
         color = config.COLOR_SELECT if selected else config.player_color(ui.human_id)
         pa = ui.view.to_screen(s.pos)
         pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_dashed_line(surface, color, pa, pb, width=3 if selected else 2)
+        _draw_dashed_line(surface, color, pa, pb, width=config.s(3 if selected else 2))
         dx, dy = pb[0] - pa[0], pb[1] - pa[1]
         length = math.hypot(dx, dy) or 1.0
         u = (dx / length, dy / length)
-        _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
+        inset = config.s(20)
+        _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
         # the selected rule's keep is drawn later (on top, with −/+ buttons) by
         # _draw_count_controls; others get a plain dim label here
         if not selected:
-            _label_pill(surface, _fonts()["small"], f"keep {keep}", config.COLOR_TEXT_DIM,
-                        ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10))
+            small = _fonts()["small"]
+            _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT_DIM,
+                        _rule_label_center(pa, pb, small))
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
@@ -275,11 +376,12 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
     pa = ui.view.to_screen(state.systems[ui.selected].pos)
     pb = ui.view.to_screen(state.systems[ui.dest].pos)
     color = config.COLOR_SELECT
-    pygame.draw.line(surface, color, pa, pb, 3)
+    pygame.draw.line(surface, color, pa, pb, config.s(3))
     dx, dy = pb[0] - pa[0], pb[1] - pa[1]
     length = math.hypot(dx, dy) or 1.0
     u = (dx / length, dy / length)
-    _draw_triangle(surface, (pb[0] - u[0] * 20, pb[1] - u[1] * 20), u, color)
+    inset = config.s(20)
+    _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
 
 
 def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
@@ -294,7 +396,7 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
         pb = ui.view.to_screen(state.systems[o.dest_id].pos)
         lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
         ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
-        _draw_count_stepper(surface, (lx, ly - 10), o.ships, config.COLOR_SELECT, ui)
+        _draw_count_stepper(surface, (lx, ly - config.s(10)), o.ships, config.COLOR_SELECT, ui)
     elif ui.sel_forward is not None and ui.sel_forward in ui.auto_forward:
         src = ui.sel_forward
         dest, keep = ui.auto_forward[src]
@@ -303,7 +405,7 @@ def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
             return  # a dormant/unowned rule isn't drawn, so it gets no buttons
         pa = ui.view.to_screen(s.pos)
         pb = ui.view.to_screen(state.systems[dest].pos)
-        center = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + 10)
+        center = _rule_label_center(pa, pb, _fonts()["normal"])
         _draw_count_stepper(surface, center, keep, config.COLOR_SELECT, ui, label=f"keep {keep}")
 
 
@@ -323,7 +425,7 @@ def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tup
         (mx - w - m, my - h // 2),    # left
         (mx - w // 2, my + m),        # below
     )
-    nodes = [(ui.view.to_screen(s.pos), config.node_radius(s.production) + 6)
+    nodes = [(ui.view.to_screen(s.pos), config.node_radius(s.production) + config.s(6))
              for s in state.systems.values()]
     best, best_score = (x_lo, y_lo), None
     for cx, cy in candidates:
@@ -354,7 +456,9 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     dest = state.systems[ui.dest]
     garrison = state.systems[ui.selected].ships
     font = _fonts()["small"]
-    pad, gap, bh = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP, config.SEND_POPUP_BTN_H
+    pad, gap = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP
+    # rows are tall enough to hold their own label, and to be tapped on a phone
+    bh = _tap_size(max(config.SEND_POPUP_BTN_H, font.get_height() + config.ROW_GAP))
     w = config.SEND_POPUP_W
     # Fixed layout — the same six rows on either tab so the box never resizes:
     # tabs, title, effect caption, stepper, two presets, cancel.
@@ -374,9 +478,9 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.popup_rect = (x, y, w, h)
 
     panel = pygame.Rect(x, y, w, h)
-    pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=8)
+    pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=config.s(8))
     accent = _forward_accent() if ui.forward_armed else config.COLOR_SELECT
-    pygame.draw.rect(surface, accent, panel, 1, border_radius=8)
+    pygame.draw.rect(surface, accent, panel, config.s(1), border_radius=config.s(8))
 
     inner = x + pad
     iw = w - pad * 2
@@ -391,8 +495,9 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     _draw_tab(surface, fwd_tab, "Forward", ui.forward_armed, _forward_accent())
     active = send_tab if not ui.forward_armed else fwd_tab
     line_y = cy + bh
-    pygame.draw.line(surface, (70, 80, 104), (inner, line_y), (inner + iw, line_y), 1)
-    pygame.draw.line(surface, (20, 24, 36), (active.left, line_y), (active.right, line_y), 1)
+    lw = config.s(1)
+    pygame.draw.line(surface, (70, 80, 104), (inner, line_y), (inner + iw, line_y), lw)
+    pygame.draw.line(surface, (20, 24, 36), (active.left, line_y), (active.right, line_y), lw)
     ui.send_tab_rect = (send_tab.x, send_tab.y, send_tab.w, send_tab.h)
     ui.forward_tab_rect = (fwd_tab.x, fwd_tab.y, fwd_tab.w, fwd_tab.h)
     cy += bh + gap
@@ -414,7 +519,7 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     cy += bh + gap
 
     # stepper row: [−]  value  [+]  — the send count, or (Forward) how many to keep
-    s = config.STEPPER_SIZE
+    s = _tap_size(config.STEPPER_SIZE)
     minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
     plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
     _draw_step_button(surface, minus, "-", accent)
@@ -466,8 +571,8 @@ def _draw_popup_button(surface, rect: pygame.Rect, label: str,
         fill, edge, col = (58, 38, 42), (170, 96, 104), config.COLOR_TEXT
     else:
         fill, edge, col = (30, 36, 52), (70, 80, 104), config.COLOR_TEXT_DIM
-    pygame.draw.rect(surface, fill, rect, border_radius=5)
-    pygame.draw.rect(surface, edge, rect, 1, border_radius=5)
+    pygame.draw.rect(surface, fill, rect, border_radius=config.s(5))
+    pygame.draw.rect(surface, edge, rect, config.s(1), border_radius=config.s(5))
     _text(surface, _fonts()["small"], label, col, center=rect.center)
 
 
@@ -480,15 +585,17 @@ def _draw_tab(surface, rect: pygame.Rect, label: str, active: bool, accent) -> N
     """A tab in the send popup's Send/Forward switcher. The active tab takes the
     panel-body fill (so it reads as connected to the body) with a bright top
     accent in its mode colour; inactive tabs are darker and dim-labelled."""
+    radius = config.s(6)
     if active:
         pygame.draw.rect(surface, (20, 24, 36), rect,
-                         border_top_left_radius=6, border_top_right_radius=6)
-        pygame.draw.line(surface, accent,
-                         (rect.left + 2, rect.top + 1), (rect.right - 2, rect.top + 1), 2)
+                         border_top_left_radius=radius, border_top_right_radius=radius)
+        top = rect.top + config.s(1)
+        pygame.draw.line(surface, accent, (rect.left + config.s(2), top),
+                         (rect.right - config.s(2), top), config.s(2))
         col = accent
     else:
         pygame.draw.rect(surface, (12, 14, 22), rect,
-                         border_top_left_radius=6, border_top_right_radius=6)
+                         border_top_left_radius=radius, border_top_right_radius=radius)
         col = config.COLOR_TEXT_DIM
     _text(surface, _fonts()["small"], label, col, center=rect.center)
 
@@ -501,12 +608,12 @@ def _draw_count_stepper(surface, center, value, color, ui: Ui, label: str | None
     font = _fonts()["normal"]
     img = font.render(label if label is not None else str(value), True, color)
     lbl = img.get_rect(center=center)
-    pill = lbl.inflate(10, 4)
-    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=5)
+    pill = lbl.inflate(config.s(10), config.s(4))
+    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=config.s(5))
     surface.blit(img, lbl)
 
-    s = config.STEPPER_SIZE
-    gap = 4
+    s = _tap_size(config.STEPPER_SIZE)
+    gap = config.s(4)
     top = center[1] - s // 2
     minus = pygame.Rect(pill.left - gap - s, top, s, s)
     plus = pygame.Rect(pill.right + gap, top, s, s)
@@ -518,13 +625,14 @@ def _draw_count_stepper(surface, center, value, color, ui: Ui, label: str | None
 
 def _draw_step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
     """A small filled −/+ button glyph inside ``rect``."""
-    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=4)
-    pygame.draw.rect(surface, color, rect, 1, border_radius=4)
+    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
+    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
     cx, cy = rect.center
     r = rect.w // 4
-    pygame.draw.line(surface, color, (cx - r, cy), (cx + r, cy), 2)   # − (and +'s bar)
+    lw = config.s(2)
+    pygame.draw.line(surface, color, (cx - r, cy), (cx + r, cy), lw)   # − (and +'s bar)
     if sign == "+":
-        pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), 2)
+        pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), lw)
 
 
 def _draw_return_glyph(surface, rect, color) -> None:
@@ -533,14 +641,17 @@ def _draw_return_glyph(surface, rect, color) -> None:
     x, y, w, h = rect
     by = y + int(h * 0.72)                       # baseline of the horizontal stroke
     a = max(3, h // 4)                            # arrowhead arm length
+    lw = config.s(2)
     # down-stroke on the right, then left along the baseline to the arrow tip
-    pygame.draw.lines(surface, color, False, [(x + w, y), (x + w, by), (x, by)], 2)
+    pygame.draw.lines(surface, color, False, [(x + w, y), (x + w, by), (x, by)], lw)
     # arrowhead pointing left
     pygame.draw.lines(surface, color, False,
-                      [(x + a, by - a), (x, by), (x + a, by + a)], 2)
+                      [(x + a, by - a), (x, by), (x + a, by + a)], lw)
 
 
-def _draw_dashed_line(surface, color, a, b, width=2, dash=10, gap=8) -> None:
+def _draw_dashed_line(surface, color, a, b, width=2, dash=None, gap=None) -> None:
+    dash = config.s(10) if dash is None else dash
+    gap = config.s(8) if gap is None else gap
     x1, y1 = a
     dx, dy = b[0] - a[0], b[1] - a[1]
     length = math.hypot(dx, dy) or 1.0
@@ -567,16 +678,21 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
 
         # selection / targeting rings — drawn even when fogged so a "?" system you
         # can still route a fleet to reads as selected / a valid destination
+        # config.node_clearance() budgets for the widest of these (the selection
+        # ring), so the map's padding always keeps a boundary node's circle whole.
         if sys.id == ui.selected:
-            pygame.draw.circle(surface, config.COLOR_SELECT, pos, radius + 6, 3)
+            pygame.draw.circle(surface, config.COLOR_SELECT, pos,
+                               radius + config.NODE_RING_PAD, config.s(3))
         elif sys.id in valid_dests:
-            pygame.draw.circle(surface, config.COLOR_LANE_HILITE, pos, radius + 4, 2)
+            pygame.draw.circle(surface, config.COLOR_LANE_HILITE, pos,
+                               radius + config.s(4), config.s(2))
         elif sys.id == ui.hover:
-            pygame.draw.circle(surface, config.COLOR_TEXT_DIM, pos, radius + 4, 2)
+            pygame.draw.circle(surface, config.COLOR_TEXT_DIM, pos,
+                               radius + config.s(4), config.s(2))
 
         if state_fog == "fogged":       # position known, contents not: hatched "?"
             pygame.draw.circle(surface, config.COLOR_FOG, pos, radius)
-            pygame.draw.circle(surface, _brighten(config.COLOR_FOG), pos, radius, 2)
+            pygame.draw.circle(surface, _brighten(config.COLOR_FOG), pos, radius, config.s(2))
             _draw_hatch(surface, pos, radius, _brighten(config.COLOR_FOG))
             _text(surface, _fonts()["normal"], "?", config.COLOR_TEXT, center=pos)
             continue
@@ -584,16 +700,17 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
         # -- visible: full detail --
         color = config.player_color(sys.owner_id)
         pygame.draw.circle(surface, color, pos, radius)
-        pygame.draw.circle(surface, _brighten(color), pos, radius, 2)
+        pygame.draw.circle(surface, _brighten(color), pos, radius, config.s(2))
 
         # production-progress ring
         if sys.production > 0 and (sys.owner_id != 0 or config.NEUTRAL_PRODUCES):
             frac = sys.prod_progress / sys.production
             if frac > 0:
-                rect = pygame.Rect(0, 0, radius * 2 + 8, radius * 2 + 8)
+                ring = radius * 2 + config.s(8)
+                rect = pygame.Rect(0, 0, ring, ring)
                 rect.center = pos
                 pygame.draw.arc(surface, config.COLOR_TEXT_DIM, rect,
-                                math.pi / 2, math.pi / 2 + 2 * math.pi * frac, 2)
+                                math.pi / 2, math.pi / 2 + 2 * math.pi * frac, config.s(2))
 
         # ship count (deployable = garrison minus queued commitments), drawn in
         # whichever of dark/light text contrasts best with this owner's colour
@@ -646,20 +763,17 @@ def _draw_zoom_controls(surface, ui: Ui) -> None:
     gap = config.s(8)
     inset = config.s(12)
     y = py + ph - inset - s
-    accent = (110, 140, 200)
+    font = _fonts()["small"]
+    accent = _BTN_BLUE[1]
 
     plus = pygame.Rect(px + pw - inset - s, y, s, s)
     minus = pygame.Rect(plus.x - gap - s, y, s, s)
-    reset_w = config.s(90)
+    reset_w = _btn_w(font, "Reset", s)
     reset = pygame.Rect(minus.x - gap - reset_w, y, reset_w, s)
 
     ui.zoom_plus_rect = (plus.x, plus.y, plus.w, plus.h)
     ui.zoom_minus_rect = (minus.x, minus.y, minus.w, minus.h)
-    ui.reset_view_rect = (reset.x, reset.y, reset.w, reset.h)
-
-    pygame.draw.rect(surface, (40, 52, 78), reset, border_radius=config.s(6))
-    pygame.draw.rect(surface, accent, reset, config.s(2), border_radius=config.s(6))
-    _text(surface, _fonts()["small"], "Reset", config.COLOR_TEXT, center=reset.center)
+    ui.reset_view_rect = _btn(surface, reset, "Reset", *_BTN_BLUE, font)
     _draw_step_button(surface, minus, "-", accent)
     _draw_step_button(surface, plus, "+", accent)
 
@@ -672,11 +786,12 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     _draw_side_panel(surface, state, ui)
 
-    # top bar
+    # top bar: turn counter, then the scoreboard starting clear of it (measured,
+    # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
-    _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT,
-          midleft=(14, config.HUD_TOP_H // 2))
-    _draw_scoreboard(surface, state, ui, w)
+    turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT,
+                 midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
+    _draw_scoreboard(surface, state, ui, w, turn.right + config.HUD_PAD * 2)
 
     # bottom bar
     by = h - config.HUD_BOTTOM_H
@@ -697,10 +812,14 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     ebw, ebh = config.HUD_RIGHT_W, config.END_TURN_H
     br = pygame.Rect(w - ebw, h - ebh, ebw, ebh)
     ui.end_turn_rect = (br.x, br.y, br.w, br.h)
-    pygame.draw.rect(surface, (46, 92, 60), br, border_radius=config.s(8))
-    pygame.draw.rect(surface, (96, 190, 120), br, config.s(3), border_radius=config.s(8))
+    fill, edge = _BTN_GREEN
+    pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
+    pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:
         _text(surface, _fonts()["big"], "AUTO", config.COLOR_TEXT, center=br.center)
+    elif config.touch_ui:
+        # no keyboard to press Enter on, so no glyph to hint at it
+        _text(surface, _fonts()["big"], "End Turn", config.COLOR_TEXT, center=br.center)
     else:
         # "End Turn" + a drawn return-arrow icon: the monospace font has no ⏎
         # glyph (renders as tofu), so we draw the shortcut hint instead.
@@ -712,106 +831,90 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _draw_return_glyph(surface, (left + tw + gap, br.centery - config.s(9), gw, config.s(18)),
                            config.COLOR_TEXT)
 
-    # Remaining bottom-bar buttons live in the map's footer strip, left of the
-    # sidebar / End Turn column — touch equivalents of the P / A / H / R / M / X
-    # keys (plus Quit/Esc), so every keyboard-only live-play action is reachable
-    # on a touchscreen.
+    _draw_footer_buttons(surface, state, ui, by)
+
+
+# Every hit-rect the footer strip can record, so a frame can zero the lot before
+# drawing whichever survive — a stale rect would otherwise still answer clicks.
+_FOOTER_RECTS = ("quit_button_rect", "clear_button_rect", "menu_button_rect",
+                 "restart_live_button_rect", "history_button_rect",
+                 "autoplay_button_rect", "play_pause_rect")
+
+
+def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
+    """The bottom bar's button strip, left of the sidebar / End Turn column: touch
+    equivalents of the P / A / H / R / M / X keys plus Quit/Esc, so every live-play
+    action is reachable without a keyboard.
+
+    Each button is sized to its own measured label and the row is laid out
+    right-to-left. Where the strip is too narrow to hold them all — a portrait
+    phone, or a shrunken desktop window — the least essential are dropped (rects
+    zeroed) rather than drawn overlapping. The ranking matters because a touch
+    player has no keys to fall back on: Menu survives longest, since it reaches the
+    setup screen and Quit from there, and Clear goes first, since the popup's own
+    Cancel and the × on a queued row already do its job.
+    """
+    w = surface.get_width()
+    font = _fonts()["normal"]
     fbh = config.FOOTER_BTN_H
-    fy = by + (config.HUD_BOTTOM_H - fbh) // 2
-    gap = config.s(10)
-    right = w - config.HUD_RIGHT_W - config.s(12)
+    y = by + (config.HUD_BOTTOM_H - fbh) // 2
 
-    # play/pause — hidden while autoplay, which drives turns on its own timer
-    # and would make this a no-op.
-    if ui.autoplay:
-        ui.play_pause_rect = (0, 0, 0, 0)
-    else:
-        pw = config.s(120)
-        pr = pygame.Rect(right - pw, fy, pw, fbh)
-        ui.play_pause_rect = (pr.x, pr.y, pr.w, pr.h)
-        fill = (92, 70, 46) if ui.playing else (40, 52, 78)
-        edge = (190, 150, 96) if ui.playing else (110, 140, 200)
-        pygame.draw.rect(surface, fill, pr, border_radius=config.s(6))
-        pygame.draw.rect(surface, edge, pr, config.s(2), border_radius=config.s(6))
-        plabel = "Pause (P)" if ui.playing else "Play (P)"
-        _text(surface, _fonts()["normal"], plabel, config.COLOR_TEXT, center=pr.center)
-        right = pr.x
-
-    # autoplay toggle — hands the human seat's decisions to the AI, or (while
-    # autoplay is on) takes control back. Shown either way, unlike play/pause.
-    aw = config.s(140)
-    ar = pygame.Rect(right - gap - aw, fy, aw, fbh)
-    ui.autoplay_button_rect = (ar.x, ar.y, ar.w, ar.h)
-    afill = (92, 70, 46) if ui.autoplay else (40, 52, 78)
-    aedge = (190, 150, 96) if ui.autoplay else (110, 140, 200)
-    pygame.draw.rect(surface, afill, ar, border_radius=config.s(6))
-    pygame.draw.rect(surface, aedge, ar, config.s(2), border_radius=config.s(6))
-    alabel = "Take control (A)" if ui.autoplay else "Autoplay (A)"
-    _text(surface, _fonts()["small"], alabel, config.COLOR_TEXT, center=ar.center)
-    right = ar.x
-
-    # history — only meaningful once a turn has been recorded to scrub through.
+    # (ui attribute, label, fill, edge, how long it survives a squeeze), in visual
+    # order — left to right. play/pause is hidden under autoplay, which drives turns
+    # on its own timer and would make it a no-op; history needs a recorded turn to
+    # scrub through.
+    specs: list[tuple[str, str, tuple, tuple, int]] = []
+    # quit is the only touch equivalent of Esc — without it a player with no
+    # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
+    # can only ask the browser to close the window (see main.leave_app).
+    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 6))
+    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
+    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
+    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1))
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 7))
+    # new map reseeds mid-game too (not just at game end), with no confirmation —
+    # matching the R key exactly.
+    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2))
     if state.turn > 0:
-        hw = config.s(118)
-        hr = pygame.Rect(right - gap - hw, fy, hw, fbh)
-        ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
-        pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=config.s(6))
-        pygame.draw.rect(surface, (150, 130, 200), hr, config.s(2), border_radius=config.s(6))
-        _text(surface, _fonts()["normal"], "History (H)", config.COLOR_TEXT, center=hr.center)
-        right = hr.x
-    else:
-        ui.history_button_rect = (0, 0, 0, 0)
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3))
+    # autoplay hands the human seat's decisions to the AI, or takes control back;
+    # shown either way, unlike play/pause.
+    specs.append(("autoplay_button_rect",
+                  _key_hint("Take control" if ui.autoplay else "Autoplay", "A"),
+                  *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4))
+    if not ui.autoplay:
+        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"),
+                      *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 5))
 
-    # new map — touch equivalent of R, which reseeds mid-game too (not just at
-    # game end); no confirmation, matching the keyboard shortcut exactly.
-    nw = config.s(128)
-    nr = pygame.Rect(right - gap - nw, fy, nw, fbh)
-    ui.restart_live_button_rect = (nr.x, nr.y, nr.w, nr.h)
-    pygame.draw.rect(surface, (120, 86, 46), nr, border_radius=config.s(6))
-    pygame.draw.rect(surface, (200, 150, 96), nr, config.s(2), border_radius=config.s(6))
-    _text(surface, _fonts()["normal"], "New map (R)", config.COLOR_TEXT, center=nr.center)
-    right = nr.x
+    widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
+    avail = w - config.HUD_RIGHT_W - config.HUD_PAD * 2
 
-    # menu — touch equivalent of M, back to the setup menu.
-    mw = config.s(110)
-    mr = pygame.Rect(right - gap - mw, fy, mw, fbh)
-    ui.menu_button_rect = (mr.x, mr.y, mr.w, mr.h)
-    pygame.draw.rect(surface, (40, 52, 78), mr, border_radius=config.s(6))
-    pygame.draw.rect(surface, (110, 140, 200), mr, config.s(2), border_radius=config.s(6))
-    _text(surface, _fonts()["normal"], "Menu (M)", config.COLOR_TEXT, center=mr.center)
-    right = mr.x
+    def row_w(items) -> int:
+        return sum(widths[s[0]] for s in items) + config.BTN_GAP * (len(items) - 1)
 
-    # clear/cancel — touch equivalent of X (and Backspace/Delete): discards the
-    # send being adjusted, or drops whichever queued order/forward rule is
-    # highlighted. A no-op tap when nothing is selected, same as the key.
-    cw_ = config.s(96)
-    cr = pygame.Rect(right - gap - cw_, fy, cw_, fbh)
-    ui.clear_button_rect = (cr.x, cr.y, cr.w, cr.h)
-    pygame.draw.rect(surface, (40, 52, 78), cr, border_radius=config.s(6))
-    pygame.draw.rect(surface, (110, 140, 200), cr, config.s(2), border_radius=config.s(6))
-    _text(surface, _fonts()["normal"], "Clear (X)", config.COLOR_TEXT, center=cr.center)
-    right = cr.x
+    shown = list(specs)
+    while shown and row_w(shown) > avail:
+        shown.remove(min(shown, key=lambda s: s[4]))
 
-    # quit — the only touch equivalent of Esc's quit; without it a touch/web
-    # player without a keyboard has no way to leave the app at all. Opens the
-    # same confirm-quit modal as Esc, not an immediate quit.
-    qw = config.s(100)
-    qr = pygame.Rect(right - gap - qw, fy, qw, fbh)
-    ui.quit_button_rect = (qr.x, qr.y, qr.w, qr.h)
-    pygame.draw.rect(surface, (92, 46, 52), qr, border_radius=config.s(6))
-    pygame.draw.rect(surface, (200, 96, 104), qr, config.s(2), border_radius=config.s(6))
-    _text(surface, _fonts()["normal"], "Quit (Esc)", config.COLOR_TEXT, center=qr.center)
+    for attr in _FOOTER_RECTS:
+        setattr(ui, attr, (0, 0, 0, 0))
+    right = w - config.HUD_RIGHT_W - config.HUD_PAD
+    for attr, label, fill, edge, _keep in reversed(shown):
+        rect = pygame.Rect(right - widths[attr], y, widths[attr], fbh)
+        setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
+        right = rect.x - config.BTN_GAP
 
 
 _DEAD_COLOR = (92, 96, 110)
 
 
-def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int) -> None:
+def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
     """Per-player standings in the top bar: swatch, systems, ships, production.
 
-    Laid out left-to-right by measured width so it never runs off-screen; names
-    are shown when the whole row fits, but a full six-player table drops them in
-    favour of the colour swatch (identity is colour-coded everywhere else too).
+    Starts at ``x0`` (clear of the turn counter) and runs left-to-right by measured
+    width so it never runs off-screen; names are shown when the whole row fits, but
+    a full six-player table drops them in favour of the colour swatch (identity is
+    colour-coded everywhere else too).
 
     Fogged (per the human's visibility): a rival is **live** while any of its
     systems is in sight, **frozen** (last-known stats, hatched swatch + "?") once
@@ -821,7 +924,8 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int) -> None:
     """
     font = _fonts()["small"]
     cy = config.HUD_TOP_H // 2
-    gap, sw_w = 22, 18
+    sw_size = config.s(12)                       # colour swatch side
+    gap, sw_w = config.s(22), sw_size + config.s(6)
 
     def vis(pid: int) -> str:
         """live | frozen | out | hidden."""
@@ -850,13 +954,13 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int) -> None:
     def row_width(with_name: bool) -> int:
         return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
 
-    with_name = row_width(True) <= (w - 120)
-    x = 120
+    with_name = row_width(True) <= (w - x0 - config.HUD_PAD)
+    x = x0
     for pid in seats:
         v = vis(pid)
         color = _DEAD_COLOR if v == "out" else config.player_color(pid)
-        sw = pygame.Rect(x, cy - 6, 12, 12)
-        pygame.draw.rect(surface, color, sw, border_radius=3)
+        sw = pygame.Rect(x, cy - sw_size // 2, sw_size, sw_size)
+        pygame.draw.rect(surface, color, sw, border_radius=config.s(3))
         if v == "frozen":
             _hatch_rect(surface, sw, _brighten(color))
         txt = label(pid, v, with_name)
@@ -873,9 +977,6 @@ def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
 # --------------------------------------------------------------------------- #
 # Info panel (right column)
 # --------------------------------------------------------------------------- #
-_ROW_H = 20
-
-
 def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
     px = w - config.HUD_RIGHT_W
@@ -887,21 +988,25 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     footer_h = config.HUD_BOTTOM_H if ui.history else config.END_TURN_H
     ph = h - config.HUD_TOP_H - footer_h
     pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
-    pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), 1)
+    pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), config.s(1))
 
     # queued-orders list occupies the bottom of the panel (always visible so
     # orders can be reviewed / removed); details fill the space above it. Hidden
     # in history mode — those orders belong to the live turn, not the past board.
+    # `content_bottom` is where the details above have to stop: the top of the
+    # queued-orders block when there is one, else the panel's own floor.
     if ui.history:
         ui.order_hitboxes = []
         ui.forward_hitboxes = []
+        ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
+        content_bottom = py + ph - config.s(8)
     else:
-        _draw_order_list(surface, state, ui)
+        content_bottom = _draw_order_list(surface, state, ui)
 
-    x, y = px + 14, py + 14
+    x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     # persistent "clear all forwarding" button, shown whenever any rule exists
     if ui.auto_forward:
-        y = _draw_clear_forward_button(surface, ui, px, py + 10)
+        y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
     editing = _editing_order(ui)
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
     if editing is not None:
@@ -911,36 +1016,38 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
     if focus is None or focus not in state.systems:
-        _panel_legend(surface, x, y)
+        _panel_legend(surface, x, y, content_bottom)
         return
 
     y = _panel_system(surface, state, ui, x, y, state.systems[focus])
+    gap = config.ROW_GAP * 2                    # breathing space between sections
 
     if editing is not None:
         if editing.dest_id in state.systems:
-            y = _panel_lane(surface, state, ui, x, y + 8, focus, editing.dest_id)
-        _panel_editing(surface, ui, x, y + 8, editing)
+            y = _panel_lane(surface, state, ui, x, y + gap, focus, editing.dest_id)
+        _panel_editing(surface, ui, x, y + gap, editing)
         return
 
     dest = _panel_lane_target(state, ui, focus)
     if dest is not None:
-        y = _panel_lane(surface, state, ui, x, y + 8, focus, dest)
+        y = _panel_lane(surface, state, ui, x, y + gap, focus, dest)
 
     if focus in ui.auto_forward:
-        _panel_rule(surface, ui, x, y + 8, focus)
+        _panel_rule(surface, ui, x, y + gap, focus)
 
 
 def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     """A slim panel-top button that clears every standing forward rule; records
     its hit-rect on ``ui``. Returns the y below it for the details that follow."""
-    n = len(ui.auto_forward)
-    r = pygame.Rect(px + 12, y, config.HUD_RIGHT_W - 24, 24)
-    pygame.draw.rect(surface, (58, 38, 42), r, border_radius=5)
-    pygame.draw.rect(surface, (170, 96, 104), r, 1, border_radius=5)
-    _text(surface, _fonts()["small"], f"Clear all forwarding ({n})",
-          config.COLOR_TEXT, center=r.center)
+    font = _fonts()["small"]
+    label = f"Clear all forwarding ({len(ui.auto_forward)})"
+    h = font.get_height() + config.s(10)
+    r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
+    pygame.draw.rect(surface, (58, 38, 42), r, border_radius=config.s(5))
+    pygame.draw.rect(surface, (170, 96, 104), r, config.s(1), border_radius=config.s(5))
+    _text(surface, font, label, config.COLOR_TEXT, center=r.center)
     ui.clear_forward_rect = (r.x, r.y, r.w, r.h)
-    return y + 24 + 10
+    return y + h + config.s(10)
 
 
 def _editing_order(ui: Ui):
@@ -958,31 +1065,46 @@ _ORDER_ROW_H = 22        # normal row pitch
 _ORDER_ROW_SEL_H = 36    # a selected row grows, so its × delete button is easy to hit
 
 
-def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
+def _draw_order_list(surface, state: GameState, ui: Ui) -> int:
     """Bottom-of-panel list of queued orders, followed by standing auto-forward
-    rules. Records a (row, delete) hit-rect per order on ``ui.order_hitboxes``
-    (parallel to ``ui.pending``) and a (source_id, row, delete) hit-rect per
-    rule on ``ui.forward_hitboxes``, both for input to test clicks against. The
+    rules. Records an (index, row, delete) hit-rect per order on
+    ``ui.order_hitboxes`` and a (source_id, row, delete) hit-rect per rule on
+    ``ui.forward_hitboxes``, both for input to test clicks against. The
     currently-selected row is drawn taller with a bigger delete button, so it can
-    be removed by tap on touch (where the keyboard X shortcut isn't available)."""
+    be removed by tap on touch (where the keyboard X shortcut isn't available).
+
+    The block is capped at part of the panel so the system details above it are
+    never pushed off the top, and scrolls (``ui.order_scroll``, driven by the ▲/▼
+    buttons or the wheel over the panel) when there is more than fits — every entry
+    stays reachable, which a bare "+N more" line could not promise.
+
+    Returns the y this block starts at — the floor for whatever the panel draws
+    above it, so the help text can't run down into the list."""
     ui.order_hitboxes = []
     ui.forward_hitboxes = []
+    ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
     w, h = surface.get_size()
     px = w - config.HUD_RIGHT_W
     # the panel's footer is the big End Turn button, not the ordinary bottom bar
     bottom = h - config.END_TURN_H
+    floor = bottom - config.s(8)
     rules = sorted(ui.auto_forward.items())  # stable order across frames
     if not ui.pending and not rules:
-        return
+        ui.order_scroll_max = 0
+        return floor
 
+    font = _fonts()["small"]
     x = px + config.s(12)
     row_w = config.HUD_RIGHT_W - config.s(24)
-    top_limit = config.HUD_TOP_H + config.s(8)
-    title_h = config.s(22)
     gap = config.s(2)
-    rh, rh_sel = config.s(_ORDER_ROW_H), config.s(_ORDER_ROW_SEL_H)
+    # a row is at least tall enough for its own text, whatever the scale does
+    rh = max(config.s(_ORDER_ROW_H), font.get_height() + config.ROW_GAP)
+    rh_sel = max(config.s(_ORDER_ROW_SEL_H), rh + config.s(10))
+    arrow = _tap_size(config.s(18))
+    title_h = max(_row_h(), arrow + config.s(4))
 
-    # orders first, then rules, so order_hitboxes indices stay aligned with pending
+    # orders first, then rules; each order carries its own index into `pending`, so
+    # a scrolled window still deletes and selects the right one.
     entries = [("order", i) for i in range(len(ui.pending))] + [("rule", src) for src, _ in rules]
     n = len(entries)
 
@@ -992,24 +1114,48 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
     def row_h(kind, key) -> int:
         return rh_sel if selected_of(kind, key) else rh
 
-    # Fit rows from the top; reserve one row for a "+N more" line if they overflow.
-    avail = bottom - config.s(8) - top_limit - title_h
-    if sum(row_h(*e) for e in entries) <= avail:
-        shown, overflow = entries, 0
-    else:
-        shown, used = [], 0
-        for e in entries:
-            if used + row_h(*e) + rh > avail:   # keep room for the "+N more" line
-                break
-            shown.append(e)
-            used += row_h(*e)
-        overflow = n - len(shown)
+    # Half the panel at most: the details above are about whatever you have
+    # selected right now, and used to get overrun by a long list.
+    panel_h = bottom - config.HUD_TOP_H
+    avail = max(rh, panel_h // 2 - title_h - config.s(8))
 
-    block_h = title_h + sum(row_h(*e) for e in shown) + (rh if overflow else 0)
+    def page_from(start: int) -> list:
+        """The entries that fit when the window starts at ``start``."""
+        out, used = [], 0
+        for e in entries[start:]:
+            if used + row_h(*e) > avail:
+                break
+            out.append(e)
+            used += row_h(*e)
+        return out
+
+    # Furthest useful scroll: the first start whose page still reaches the last
+    # entry, so scrolling can't strand you on a part-empty window past the end.
+    max_scroll = max(0, n - 1)
+    for start in range(n):
+        if start + len(page_from(start)) >= n:
+            max_scroll = start
+            break
+    ui.order_scroll_max = max_scroll
+    first = max(0, min(ui.order_scroll, max_scroll))   # tolerate a stale offset
+    shown = page_from(first)
+
+    block_h = title_h + sum(row_h(*e) for e in shown)
     top = bottom - config.s(8) - block_h
-    pygame.draw.line(surface, (40, 44, 60), (px + config.s(8), top - config.s(6)),
-                     (px + config.HUD_RIGHT_W - config.s(8), top - config.s(6)), 1)
-    _text(surface, _fonts()["small"], f"Queued ({n})", config.COLOR_TEXT_DIM, topleft=(x, top))
+    rule_y = top - config.s(6)
+    pygame.draw.line(surface, (40, 44, 60), (px + config.s(8), rule_y),
+                     (px + config.HUD_RIGHT_W - config.s(8), rule_y), config.s(1))
+    title = f"Queued ({n})" if max_scroll == 0 else \
+        f"Queued ({first + 1}-{first + len(shown)}/{n})"
+    _text(surface, font, title, config.COLOR_TEXT_DIM,
+          midleft=(x, top + title_h // 2))
+    if max_scroll > 0:
+        down = pygame.Rect(x + row_w - arrow, top + (title_h - arrow) // 2, arrow, arrow)
+        up = pygame.Rect(down.x - arrow - config.s(4), down.y, arrow, arrow)
+        _draw_arrow_button(surface, up, up=True, enabled=first > 0)
+        _draw_arrow_button(surface, down, up=False, enabled=first < max_scroll)
+        ui.order_up_rect = (up.x, up.y, up.w, up.h)
+        ui.order_down_rect = (down.x, down.y, down.w, down.h)
 
     y = top + title_h
     hcolor = config.player_color(ui.human_id)
@@ -1024,20 +1170,34 @@ def _draw_order_list(surface, state: GameState, ui: Ui) -> None:
             dest, keep = ui.auto_forward[key]
             label = f"{key}->{dest}   keep {keep}"
         if selected:
-            pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=4)
+            pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row),
+                             border_radius=config.s(4))
         dsz = config.s(26) if selected else config.s(16)
         dr = (x + row_w - dsz - config.s(2), y + (this_h - gap - dsz) // 2, dsz, dsz)
         _draw_x_button(surface, dr, boxed=selected)
-        _text(surface, _fonts()["small"], label, config.COLOR_SELECT if selected else hcolor,
+        _text(surface, font, label, config.COLOR_SELECT if selected else hcolor,
               midleft=(x + config.s(6), y + (this_h - gap) // 2))
         if kind == "order":
-            ui.order_hitboxes.append((row, dr))
+            ui.order_hitboxes.append((key, row, dr))
         else:
             ui.forward_hitboxes.append((key, row, dr))
         y += this_h
-    if overflow:
-        _text(surface, _fonts()["small"], f"+{overflow} more", config.COLOR_TEXT_DIM,
-              midleft=(x + config.s(6), y + rh // 2))
+    return rule_y - config.s(6)
+
+
+def _draw_arrow_button(surface, rect: pygame.Rect, up: bool, enabled: bool) -> None:
+    """A ▲/▼ scroll button for the queued list — drawn rather than typed, since the
+    monospace font has no arrow glyph (same reason as ``_draw_return_glyph``). A
+    disabled one still draws, dimmed, so the pair doesn't jump about as you scroll.
+    """
+    color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
+    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
+    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
+    cx, cy = rect.center
+    r = max(2, rect.w // 5)
+    pts = ([(cx - r, cy + r // 2), (cx + r, cy + r // 2), (cx, cy - r)] if up
+           else [(cx - r, cy - r // 2), (cx + r, cy - r // 2), (cx, cy + r)])
+    pygame.draw.polygon(surface, color, pts)
 
 
 def _draw_x_button(surface, rect, boxed: bool = False) -> None:
@@ -1045,8 +1205,11 @@ def _draw_x_button(surface, rect, boxed: bool = False) -> None:
     background so an enlarged (selected-row) delete target reads as a button."""
     rx, ry, rw, rh = rect
     if boxed:
-        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh), border_radius=4)
-        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh), 1, border_radius=4)
+        radius = config.s(4)
+        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh),
+                         border_radius=radius)
+        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh),
+                         config.s(1), border_radius=radius)
     pad = max(3, rw // 4)
     lw = max(2, rw // 8)
     col = config.COLOR_TEXT if boxed else config.COLOR_TEXT_DIM
@@ -1055,32 +1218,35 @@ def _draw_x_button(surface, rect, boxed: bool = False) -> None:
 
 
 def _panel_editing(surface, ui: Ui, x, y, o) -> int:
-    _text(surface, _fonts()["normal"], "Editing order", config.COLOR_SELECT, topleft=(x, y))
-    y += 26
+    y = _head(surface, x, y, "Editing order", config.COLOR_SELECT)
     y = _row(surface, x, y, f"Sending: {o.ships}", config.COLOR_SELECT)
-    y = _row(surface, x, y, "wheel or −/+ buttons · X: remove", config.COLOR_TEXT_DIM)
+    hint = "−/+ adjust  ·  × removes" if config.touch_ui else "wheel or −/+  ·  X: remove"
+    y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
     return y
 
 
 def _row(surface, x, y, text, color) -> int:
+    """One line of small panel text; returns the y for the line below it."""
     if text:
         _text(surface, _fonts()["small"], text, color, topleft=(x, y))
-    return y + _ROW_H
+    return y + _row_h()
+
+
+def _head(surface, x, y, text, color) -> int:
+    """A panel section heading, in the larger font; returns the y below it."""
+    _text(surface, _fonts()["normal"], text, color, topleft=(x, y))
+    return y + _row_h("normal")
 
 
 def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
     if sys.id not in ui.visible:
         # fogged system: we know where it is, not who holds it or how strong it is
-        _text(surface, _fonts()["normal"], f"System {sys.id}", config.COLOR_TEXT_DIM,
-              topleft=(x, y))
-        y += 26
+        y = _head(surface, x, y, f"System {sys.id}", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "Owner: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "Ships: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "(out of sight)", config.COLOR_TEXT_DIM)
         return y
-    _text(surface, _fonts()["normal"], f"System {sys.id}",
-          config.player_color(sys.owner_id), topleft=(x, y))
-    y += 26
+    y = _head(surface, x, y, f"System {sys.id}", config.player_color(sys.owner_id))
     y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}",
              config.player_color(sys.owner_id))
     if sys.owner_id == ui.human_id:
@@ -1107,8 +1273,7 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     lane = state.lanes.get(lane_key(src, dest))
     if lane is None:
         return y
-    _text(surface, _fonts()["normal"], f"Lane -> System {dest}", config.COLOR_TEXT, topleft=(x, y))
-    y += 26
+    y = _head(surface, x, y, f"Lane -> System {dest}", config.COLOR_TEXT)
     y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {lane.travel_turns} turns", config.COLOR_TEXT)
     d = state.systems[dest]
     if dest in ui.visible:
@@ -1127,43 +1292,82 @@ def _panel_rule(surface, ui: Ui, x, y, src) -> int:
     dest, keep = ui.auto_forward[src]
     editing = src == ui.sel_forward
     color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
-    _text(surface, _fonts()["normal"], "Auto-forward", color, topleft=(x, y))
-    y += 26
+    y = _head(surface, x, y, "Auto-forward", color)
     y = _row(surface, x, y, f"-> System {dest}, keep {keep}",
              config.COLOR_SELECT if editing else config.COLOR_TEXT)
-    hint = "wheel or −/+ buttons: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
+    if config.touch_ui:
+        hint = "−/+ sets keep  ·  × removes" if editing else "tap to edit"
+    else:
+        hint = "wheel or −/+: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
     y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
     return y
 
 
-def _panel_legend(surface, x, y) -> int:
-    _text(surface, _fonts()["normal"], "Star Conquest", config.COLOR_TEXT, topleft=(x, y))
-    y += 28
-    for line in (
-        "Click a system for details.",
-        "",
-        "Select -> click neighbour",
-        "  = sends all at once",
-        "Popup tabs: Send / Forward",
-        "  Half / All  ·  −/+ adjust",
-        "Forward: standing rule",
-        "Shift+click: forward now",
-        "Click queued lane/rule: edit",
-        "X: clear forward rule",
-        "Enter / Space: end turn",
-        "P: play / pause",
-    ):
+# What the panel says when nothing is selected: how the game is actually played,
+# as prose that `_wrap` reflows to the panel's width. The touch build gets the same
+# rules in tap language and none of the keyboard shortcuts — there is no keyboard to
+# use them from, and every one of them has a button in the bottom bar.
+_LEGEND_TOUCH = """Take every system to win.
+
+Tap a system to inspect it.
+
+Tap one of yours, then a neighbour, to send its garrison down that lane — or drag
+between the two.
+
+Then: −/+, Half or All retune the count. The Forward tab makes it a standing rule
+instead — everything past 'keep' flows on, every turn.
+
+Tap a queued arrow, or its row below, to change it.
+
+Drag to pan, −/+ to zoom."""
+
+_LEGEND_KEYS = """Take every system to win.
+
+Click a system to inspect it.
+
+Click one of yours, then a neighbour, to send its garrison down that lane — or
+drag between the two.
+
+Then: −/+, Half or All retune the count. The Forward tab makes it a standing rule
+instead — everything past 'keep' flows on, every turn. Shift+click arms one
+directly.
+
+Click a queued arrow, or its row below, to change it; X clears it.
+
+Drag to pan, wheel to zoom. Enter ends the turn, P plays on."""
+
+
+def _panel_legend(surface, x, y, bottom: int) -> int:
+    """How to play, shown whenever no system is in focus. Reflowed to the panel's
+    width and cut off at ``bottom`` rather than spilling under the End Turn button
+    — at a big UI scale the panel simply hasn't room for every line."""
+    y = _head(surface, x, y, "Star Conquest", config.COLOR_TEXT)
+    font = _fonts()["small"]
+    width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+    for line in _wrap(font, _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS, width):
+        if y + _row_h() > bottom:      # a whole row, so the returned y clears it too
+            break
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
     return y
 
 
 def _panel_lane_target(state: GameState, ui: Ui, focus: int):
-    """Neighbour whose lane stats to show: the chosen dest, or a hovered neighbour."""
+    """Neighbour whose lane stats to show: the chosen dest, a hovered neighbour, or
+    — failing both — the destination of a standing rule on the focused system.
+
+    That last case is why a rule shows its lane at all: on the map the rule's own
+    'keep' label sits on the lane it uses, so the panel is where you read that
+    lane's length and travel time (a queued order already gets the same section via
+    ``_panel_editing``'s branch in ``_draw_side_panel``).
+    """
     if ui.mode == CHOOSING and ui.dest is not None:
         return ui.dest
     if (ui.selected is not None and ui.hover is not None and ui.hover != ui.selected
             and state.are_adjacent(ui.selected, ui.hover)):
         return ui.hover
+    rule = ui.auto_forward.get(focus)
+    if rule is not None and rule[0] in state.systems:
+        return rule[0]
     return None
 
 
@@ -1188,96 +1392,140 @@ def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
     return friendly, enemy
 
 
+def _modal_buttons(surface, labels: tuple[str, str]) -> tuple[pygame.Rect, pygame.Rect]:
+    """The (confirm, cancel) rects for a two-button modal, sized to fit the wider
+    of ``labels`` — shared by every modal's drawer and its hit-tester, so the two
+    can never disagree about where the buttons are."""
+    w, h = surface.get_size()
+    font = _fonts()["normal"]
+    bw = max(_btn_w(font, s, config.s(200)) for s in labels)
+    bh = max(config.s(42), font.get_height() + config.s(16))
+    gap = config.s(12)
+    y = h // 2 + config.s(24)
+    return (pygame.Rect(w // 2 - bw - gap, y, bw, bh),
+            pygame.Rect(w // 2 + gap, y, bw, bh))
+
+
+def _draw_modal(surface, title: str, detail: str, buttons) -> None:
+    """A confirm modal: veil, title, an optional detail line, and two buttons.
+    ``buttons`` is ((label, fill, edge), (label, fill, edge)) — confirm then cancel.
+    """
+    w, h = surface.get_size()
+    big, normal = _fonts()["big"], _fonts()["normal"]
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    # Stacked upward from the button row so the title and detail always clear it.
+    detail_h = _row_h() if detail else 0
+    y = h // 2 - config.s(12) - detail_h - big.get_height()
+    _text(surface, big, title, config.COLOR_TEXT, center=(w // 2, y + big.get_height() // 2))
+    if detail:
+        y += _row_h("big")
+        _text(surface, _fonts()["small"], detail, config.COLOR_TEXT_DIM,
+              center=(w // 2, y + _fonts()["small"].get_height() // 2))
+    for rect, (label, fill, edge) in zip(
+            _modal_buttons(surface, (buttons[0][0], buttons[1][0])), buttons):
+        _btn(surface, rect, label, fill, edge, normal)
+
+
+def confirm_labels(confirm: str) -> tuple[str, str]:
+    """(confirm, cancel) labels for a two-button modal, with the Y/N key hints
+    dropped on a touch build. Shared with ``menu``'s resume prompt so every modal
+    in the game words its answers the same way."""
+    if config.touch_ui:
+        return (confirm, "Cancel")
+    return (f"{confirm} (Y/Enter)", "Cancel (N/Esc)")
+
+
 def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(quit, cancel) button rects — shared by the drawer and the hit-tester."""
-    w, h = surface.get_size()
-    cx, cy = w // 2, h // 2
-    bw, bh, gap = config.s(200), config.s(42), config.s(12)
-    quit_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
-    cancel_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
-    return quit_r, cancel_r
+    return _modal_buttons(surface, confirm_labels("Quit"))
 
 
 def draw_confirm_quit(surface) -> None:
     """Modal 'are you sure?' veil, overlaid on whichever scene is beneath it."""
-    w, h = surface.get_size()
-    veil = pygame.Surface((w, h), pygame.SRCALPHA)
-    veil.fill((5, 6, 12, 200))
-    surface.blit(veil, (0, 0))
-    _text(surface, _fonts()["big"], "Quit Star Conquest?", config.COLOR_TEXT,
-          center=(w // 2, h // 2 - 36))
-    quit_r, cancel_r = confirm_quit_buttons(surface)
-    for rect, label, fill, edge in (
-        (quit_r, "Quit (Y/Enter)", (120, 46, 52), (200, 96, 104)),
-        (cancel_r, "Cancel (N/Esc)", (46, 92, 60), (96, 190, 120)),
-    ):
-        pygame.draw.rect(surface, fill, rect, border_radius=6)
-        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
-        _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=rect.center)
+    quit_label, cancel = confirm_labels("Quit")
+    _draw_modal(surface, "Quit Star Conquest?", "", (
+        (quit_label, *_BTN_DANGER),
+        (cancel, *_BTN_GREEN),
+    ))
 
 
 def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
+    """The game-over veil: who won, the score, and the four (or five) things you
+    can do next. The whole stack is measured and then centred, so a hidden hint or
+    a missing verdict line tightens it up rather than leaving a gap or a collision.
+    """
     w, h = surface.get_size()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 180))
     surface.blit(veil, (0, 0))
+
+    big, normal = _fonts()["big"], _fonts()["normal"]
     if state.winner == 0:
         msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
     else:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
-    # Stacked upward from the hint line so the score and its verdict both clear it.
-    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - config.s(104)))
-    _draw_result_line(surface, state, ui, w, h // 2 - config.s(70))
-    _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - config.s(24)))
-    # Tappable buttons (touch equivalents of the R/M/H/Esc keys). Restart and Menu
-    # sit side by side; Review-history enters history mode to scrub the finished
-    # game with fog fully lifted (see what was happening behind the fog of war);
-    # Quit sits beside it, opening the same confirm-quit modal as Esc.
-    bw, bh, gap = config.s(180), config.s(40), config.s(12)
-    row_y = h // 2 + config.s(8)
-    rr = pygame.Rect(w // 2 - bw - gap // 2, row_y, bw, bh)
-    mr = pygame.Rect(w // 2 + gap // 2, row_y, bw, bh)
-    ui.restart_button_rect = (rr.x, rr.y, rr.w, rr.h)
-    ui.menu_button_rect = (mr.x, mr.y, mr.w, mr.h)
-    pygame.draw.rect(surface, (46, 68, 52), rr, border_radius=6)
-    pygame.draw.rect(surface, (110, 180, 130), rr, 2, border_radius=6)
-    _text(surface, _fonts()["normal"], "New map (R)", config.COLOR_TEXT, center=rr.center)
-    pygame.draw.rect(surface, (40, 52, 78), mr, border_radius=6)
-    pygame.draw.rect(surface, (110, 140, 200), mr, 2, border_radius=6)
-    _text(surface, _fonts()["normal"], "Setup menu (M)", config.COLOR_TEXT, center=mr.center)
 
-    hr = pygame.Rect(w // 2 - bw - gap // 2, row_y + bh + gap, bw, bh)
-    ui.history_button_rect = (hr.x, hr.y, hr.w, hr.h)
-    pygame.draw.rect(surface, (52, 46, 78), hr, border_radius=6)
-    pygame.draw.rect(surface, (150, 130, 200), hr, 2, border_radius=6)
-    _text(surface, _fonts()["normal"], "Review history (H)", config.COLOR_TEXT,
-          center=hr.center)
+    # Tappable buttons — touch equivalents of the R/M/H/Esc keys. Every box takes
+    # the width of the widest label in the grid, so the rows stay square and no
+    # label can spill into its neighbour once the font scales up.
+    labels = [_key_hint("New map", "R"), _key_hint("Setup menu", "M"),
+              _key_hint("Review history", "H"), _key_hint("Quit", "Esc")]
+    share_label = _key_hint("Challenge a friend", "C")
+    share = _shareable(state, ui)
+    bw = max(_btn_w(normal, s) for s in labels)
+    bh = max(config.s(40), normal.get_height() + config.s(16))
+    gap = config.s(12)
+    pad = config.s(12)
 
-    qr = pygame.Rect(w // 2 + gap // 2, row_y + bh + gap, bw, bh)
-    ui.quit_button_rect = (qr.x, qr.y, qr.w, qr.h)
-    pygame.draw.rect(surface, (92, 46, 52), qr, border_radius=6)
-    pygame.draw.rect(surface, (200, 96, 104), qr, 2, border_radius=6)
-    _text(surface, _fonts()["normal"], "Quit (Esc)", config.COLOR_TEXT, center=qr.center)
+    result = _result_lines(state, ui)
+    rows = 3 if share else 2
+    stack = (_row_h("big") + sum(_row_h(kind) for kind, _t, _c in result)
+             + (0 if config.touch_ui else _row_h("normal")) + pad
+             + rows * (bh + gap) - gap
+             + (_row_h() if (share and ui.share_msg) else 0))
+    y = (h - stack) // 2
+
+    _text(surface, big, msg, color, center=(w // 2, y + big.get_height() // 2))
+    y += _row_h("big")
+    for kind, text, col in result:
+        font = _fonts()[kind]
+        _text(surface, font, text, col, center=(w // 2, y + font.get_height() // 2))
+        y += _row_h(kind)
+    if not config.touch_ui:
+        _text(surface, normal, "R: new map  ·  M: setup menu  ·  Esc: quit",
+              config.COLOR_TEXT_DIM, center=(w // 2, y + normal.get_height() // 2))
+        y += _row_h("normal")
+    y += pad
+
+    # Restart and Menu sit side by side; Review-history enters history mode to
+    # scrub the finished game with fog fully lifted (see what was happening behind
+    # the fog of war); Quit sits beside it, opening the same confirm modal as Esc.
+    left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
+    ui.restart_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
+                                  labels[0], *_BTN_GREEN)
+    ui.menu_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
+                               labels[1], *_BTN_BLUE)
+    y += bh + gap
+    ui.history_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
+                                  labels[2], *_BTN_VIOLET)
+    ui.quit_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
+                               labels[3], *_BTN_RED)
+    y += bh + gap
 
     # Third row: turn this win into a challenge link. Only offered on a result
     # worth sending — the human won at least partly under their own steam.
-    if _shareable(state, ui):
-        # Wider than the paired buttons above: its label doesn't fit in `bw`, and
-        # alone on its row it has the width to spare.
-        sw = config.s(240)
-        sr = pygame.Rect(w // 2 - sw // 2, row_y + 2 * (bh + gap), sw, bh)
-        ui.share_button_rect = (sr.x, sr.y, sr.w, sr.h)
-        pygame.draw.rect(surface, (44, 62, 74), sr, border_radius=6)
-        pygame.draw.rect(surface, (120, 180, 200), sr, 2, border_radius=6)
-        _text(surface, _fonts()["normal"], "Challenge a friend (C)", config.COLOR_TEXT,
-              center=sr.center)
-        if ui.share_msg:
-            _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM,
-                  center=(w // 2, sr.bottom + config.s(18)))
-    else:
+    if not share:
         ui.share_button_rect = (0, 0, 0, 0)
+        return
+    sw = _btn_w(normal, share_label, bw)
+    ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh),
+                                share_label, *_BTN_TEAL)
+    if ui.share_msg:
+        _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM,
+              center=(w // 2, y + bh + _row_h() // 2))
 
 
 def _shareable(state: GameState, ui: Ui) -> bool:
@@ -1286,36 +1534,36 @@ def _shareable(state: GameState, ui: Ui) -> bool:
     return state.winner == ui.human_id and ui.hand_turns > 0
 
 
-def _draw_result_line(surface, state: GameState, ui: Ui, w: int, y: int) -> None:
-    """The score, under the win message: turns first, ships lost as the tiebreak.
+def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:
+    """(font kind, text, colour) for the score under the win message: turns first,
+    ships lost as the tiebreak, then the verdict against any challenge.
 
-    Shown for the human's own result only — there is nothing to boast about, or to
+    Only for the human's own result — there is nothing to boast about, or to
     compare against a challenge, in watching two bots fight. When the match came
-    from a challenge link, say outright whether the target fell.
+    from a challenge link, say outright whether the target fell. Returned rather
+    than drawn so the overlay can measure the block before placing it.
     """
     if state.winner != ui.human_id:
         if ui.challenge_target is not None:
-            _text(surface, _fonts()["normal"], "Challenge failed", (214, 130, 110),
-                  center=(w // 2, y))
-        return
+            return [("normal", "Challenge failed", (214, 130, 110))]
+        return []
 
     lost = state.players[ui.human_id].ships_lost
     line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
     if ui.hand_turns < state.turn:
         line += f"  ·  {ui.hand_turns} played by hand"
-    _text(surface, _fonts()["normal"], line, config.COLOR_TEXT, center=(w // 2, y))
+    lines = [("normal", line, config.COLOR_TEXT)]
 
     if ui.challenge_target is None:
-        return
+        return lines
     # Same ordering the score uses: fewer turns wins, ties broken on losses.
     target = ui.challenge_target
     beaten = (state.turn, lost) < target
     who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
     verdict = (f"Beat{who} {target[0]} turns / {target[1]} lost" if beaten
                else f"Short of{who} {target[0]} turns / {target[1]} lost")
-    _text(surface, _fonts()["small"], verdict,
-          (130, 200, 150) if beaten else (214, 172, 92),
-          center=(w // 2, y + config.s(22)))
+    lines.append(("small", verdict, (130, 200, 150) if beaten else (214, 172, 92)))
+    return lines
 
 
 # Scrubber palette — a cool track with a bright fill/knob, echoing the play button.
@@ -1332,38 +1580,38 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     by = h - config.HUD_BOTTOM_H
     cy = by + config.HUD_BOTTOM_H // 2
     font = _fonts()["small"]
+    bh = config.FOOTER_BTN_H
+    y = by + (config.HUD_BOTTOM_H - bh) // 2
+    gap = config.BTN_GAP
+    thick = config.s(6)                     # track thickness
+    knob = config.s(7)                      # knob radius
 
     # Exit button (far left).
-    ex = pygame.Rect(12, by + (config.HUD_BOTTOM_H - 28) // 2, 92, 28)
-    ui.exit_history_rect = (ex.x, ex.y, ex.w, ex.h)
-    pygame.draw.rect(surface, (40, 52, 78), ex, border_radius=6)
-    pygame.draw.rect(surface, (110, 140, 200), ex, 2, border_radius=6)
-    _text(surface, font, "Exit (Esc)", config.COLOR_TEXT, center=ex.center)
+    exit_label = _key_hint("Exit", "Esc")
+    ex = pygame.Rect(config.HUD_PAD, y, _btn_w(font, exit_label), bh)
+    ui.exit_history_rect = _btn(surface, ex, exit_label, *_BTN_BLUE, font)
 
     # Play/pause button — auto-advances the scrubber at sim speed (main's play
     # timer). Reuses ui.play_pause_rect (the HUD's live play button, zeroed while
     # in history) and the same "toggle_play" action; colours match it too.
-    pp = pygame.Rect(ex.right + 8, ex.y, 104, 28)
-    ui.play_pause_rect = (pp.x, pp.y, pp.w, pp.h)
-    pfill = (92, 70, 46) if ui.playing else (40, 52, 78)
-    pedge = (190, 150, 96) if ui.playing else (110, 140, 200)
-    pygame.draw.rect(surface, pfill, pp, border_radius=6)
-    pygame.draw.rect(surface, pedge, pp, 2, border_radius=6)
-    _text(surface, font, "Pause (P)" if ui.playing else "Play (P)",
-          config.COLOR_TEXT, center=pp.center)
+    play_label = _key_hint("Pause" if ui.playing else "Play", "P")
+    # sized to the wider of the two states so the track doesn't jump on toggle
+    pp = pygame.Rect(ex.right + gap, y,
+                     max(_btn_w(font, _key_hint(s, "P")) for s in ("Play", "Pause")), bh)
+    ui.play_pause_rect = _btn(surface, pp, play_label,
+                              *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), font)
 
     # Rewind button (far right). Its footprint is reserved even when hidden so the
     # track width and label position stay fixed as you scrub — the button only
     # appears for turns before the latest (when there is something to leave behind).
-    rw = pygame.Rect(w - 172 - 12, by + (config.HUD_BOTTOM_H - 28) // 2, 172, 28)
-    right_limit = rw.x - 14
+    rewind_label = "Rewind to here"
+    rww = _btn_w(font, rewind_label)
+    rw = pygame.Rect(w - rww - config.HUD_PAD, y, rww, bh)
+    right_limit = rw.x - config.HUD_PAD
     if ui.history_turn >= ui.history_max:
         ui.rewind_button_rect = (0, 0, 0, 0)
     else:
-        ui.rewind_button_rect = (rw.x, rw.y, rw.w, rw.h)
-        pygame.draw.rect(surface, (120, 86, 46), rw, border_radius=6)
-        pygame.draw.rect(surface, (200, 150, 96), rw, 2, border_radius=6)
-        _text(surface, font, "Rewind to here", config.COLOR_TEXT, center=rw.center)
+        ui.rewind_button_rect = _btn(surface, rw, rewind_label, *_BTN_AMBER, font)
 
     # Turn / fog-mode label, right-aligned just left of the rewind button. Its
     # slot is sized to the widest label this session could show (max digits, the
@@ -1375,46 +1623,33 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))
 
     # Track fills the space between the play button and the label slot.
-    track_x = pp.right + 16
-    track_w = max(1, label_x - 16 - track_x)
-    ui.scrubber_rect = (track_x, by + 6, track_w, config.HUD_BOTTOM_H - 12)
+    track_x = pp.right + config.HUD_PAD
+    track_w = max(1, label_x - config.HUD_PAD - track_x)
+    ui.scrubber_rect = (track_x, y, track_w, bh)
     pygame.draw.rect(surface, _SCRUB_TROUGH,
-                     pygame.Rect(track_x, cy - 3, track_w, 6), border_radius=3)
+                     pygame.Rect(track_x, cy - thick // 2, track_w, thick),
+                     border_radius=thick // 2)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
     fill_w = int(track_w * t)
     if fill_w > 0:
         pygame.draw.rect(surface, _SCRUB_FILL,
-                         pygame.Rect(track_x, cy - 3, fill_w, 6), border_radius=3)
+                         pygame.Rect(track_x, cy - thick // 2, fill_w, thick),
+                         border_radius=thick // 2)
     hx = track_x + fill_w
-    pygame.draw.circle(surface, config.COLOR_TEXT, (hx, cy), 7)
-    pygame.draw.circle(surface, _SCRUB_FILL, (hx, cy), 7, 2)
+    pygame.draw.circle(surface, config.COLOR_TEXT, (hx, cy), knob)
+    pygame.draw.circle(surface, _SCRUB_FILL, (hx, cy), knob, config.s(2))
 
 
 def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(rewind, cancel) button rects — shared by the drawer and the hit-tester."""
-    w, h = surface.get_size()
-    cx, cy = w // 2, h // 2
-    bw, bh, gap = config.s(220), config.s(42), config.s(12)
-    rewind_r = pygame.Rect(cx - bw - gap, cy + config.s(24), bw, bh)
-    cancel_r = pygame.Rect(cx + gap, cy + config.s(24), bw, bh)
-    return rewind_r, cancel_r
+    return _modal_buttons(surface, confirm_labels("Rewind"))
 
 
 def draw_confirm_rewind(surface, turn: int) -> None:
     """Modal confirm for a destructive mid-game rewind (discards later turns)."""
-    w, h = surface.get_size()
-    veil = pygame.Surface((w, h), pygame.SRCALPHA)
-    veil.fill((5, 6, 12, 200))
-    surface.blit(veil, (0, 0))
-    _text(surface, _fonts()["big"], f"Rewind to turn {turn}?", config.COLOR_TEXT,
-          center=(w // 2, h // 2 - 40))
-    _text(surface, _fonts()["small"], "All turns after this one will be discarded.",
-          config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 6))
-    rewind_r, cancel_r = confirm_rewind_buttons(surface)
-    for rect, label, fill, edge in (
-        (rewind_r, "Rewind (Y/Enter)", (120, 86, 46), (200, 150, 96)),
-        (cancel_r, "Cancel (N/Esc)", (46, 92, 60), (96, 190, 120)),
-    ):
-        pygame.draw.rect(surface, fill, rect, border_radius=6)
-        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
-        _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=rect.center)
+    rewind, cancel = confirm_labels("Rewind")
+    _draw_modal(surface, f"Rewind to turn {turn}?",
+                "All turns after this one will be discarded.", (
+                    (rewind, *_BTN_AMBER),
+                    (cancel, *_BTN_GREEN),
+                ))

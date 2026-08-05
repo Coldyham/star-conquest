@@ -121,9 +121,33 @@ HUD_RIGHT_W = 240            # reserved right column for the system/lane info pa
 END_TURN_H = 96
 FOOTER_BTN_H = 40            # height of the smaller bottom-bar buttons (play/pause, etc.)
 
+# Shared layout metrics. Text-bearing boxes are sized from the *measured* label
+# plus BTN_PAD_X, and text rows from the font's own line height plus ROW_GAP, so
+# nothing can overlap or spill when the UI is scaled up (see config.ui_scale) —
+# a fixed pixel width is only ever right at one font size.
+HUD_PAD = 14                 # px: inner margin at the ends of the top/bottom bars
+PANEL_PAD = 14               # px: inner margin of the right-hand info panel
+BTN_PAD_X = 14               # px: padding each side of a label inside its button
+BTN_GAP = 10                 # px: gap between neighbouring buttons in a row
+ROW_GAP = 5                  # px: added to a font's line height for a text row pitch
+# Floor on the side of a tappable control, applied only on a touch build (see
+# config.touch_ui). The send popup's −/+ and preset rows are the smallest controls
+# in the game; at their design size they come out around a third of the footer
+# buttons' height on a phone, which is well under a comfortable fingertip.
+TOUCH_MIN_TARGET = 30
+
 NODE_MIN_RADIUS = 12         # for the poorest systems (production == max)
 NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
 NODE_TAP_MIN = 22            # px: minimum tap/click reach, so tiny systems stay hittable
+NODE_RING_PAD = 6            # px: gap between a node's edge and its selection ring
+
+# Margin between the outermost system and the edge of the map viewport. Two
+# values, because they answer different questions: the fit decides how big the
+# whole map is drawn at zoom 1, while the pan clamp decides how close a system can
+# be dragged to the edge once you are zoomed in — where a tight margin reads as
+# claustrophobic. Both are floored at `node_clearance()`; see `map_*_padding`.
+MAP_FIT_PADDING = 50         # px: breathing room around the zoom-1 fit-to-viewport view
+MAP_PAN_PADDING = 110        # px: breathing room kept past the outermost system when zoomed
 FLEET_SIZE = 9              # in-transit fleet triangle half-size (pixels)
 LANE_PICK_DIST = 10         # px: click within this of a queued order's lane selects it
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
@@ -179,10 +203,19 @@ WEB_MENU_BOOST = 1.12
 
 ui_scale = 1.0              # current factor; 1.0 == the baseline above
 
+# Is this a touch build (no keyboard)? Set alongside the scale at boot from the
+# same probe (`main`: Android, or a touch browser). The shell reads it to drop
+# keyboard-only text — the "(Esc)" suffixes on button labels and the shortcut
+# lines in the help panel — which is dead weight on a phone, and is exactly what
+# pushes those labels out of their boxes at touch scale.
+touch_ui = False
+
 # Pixel/point constants that scale with the UI. Snapshotted at import so repeated
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
+    "HUD_PAD", "PANEL_PAD", "BTN_PAD_X", "BTN_GAP", "ROW_GAP", "TOUCH_MIN_TARGET",
+    "MAP_FIT_PADDING", "MAP_PAN_PADDING", "NODE_RING_PAD",
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
@@ -191,16 +224,19 @@ _SCALABLE = (
 _BASE_VALUES = {name: globals()[name] for name in _SCALABLE}
 
 
-def apply_ui_scale(factor: float) -> None:
+def apply_ui_scale(factor: float, touch: bool = False) -> None:
     """Rescale every UI pixel/point constant to ``factor``× its baseline value.
 
     The result depends only on ``factor``, not on how many times this runs — each
     constant is recomputed from its import-time baseline. Fonts are built lazily
     from these sizes, so call this before the first frame is drawn (``main`` does,
-    right after ``set_mode``).
+    right after ``set_mode``). ``touch`` records the input modality in
+    ``touch_ui``; it is set here because it comes from the same boot-time probe as
+    the scale, and callers that don't care get the desktop default.
     """
-    global ui_scale
+    global ui_scale, touch_ui
     ui_scale = max(0.1, factor)
+    touch_ui = touch
     for name, base in _BASE_VALUES.items():
         globals()[name] = max(1, round(base * ui_scale))
 
@@ -212,6 +248,30 @@ def s(px: float) -> int:
     (e.g. the menu's row pitches), so they scale with everything else.
     """
     return max(1, round(px * ui_scale))
+
+
+def node_clearance() -> int:
+    """How much room the biggest system needs around its centre: its radius, plus
+    the selection ring drawn outside that, plus the ring's own stroke.
+
+    Any map margin below this can slice a circle at the edge of the viewport — the
+    circle is drawn at a pixel radius that isn't part of the world bounds, so the
+    fit/pan maths knows nothing about it. Floors both paddings below rather than
+    trusting a constant to stay bigger than a radius that scales with the UI.
+    """
+    return NODE_MAX_RADIUS + NODE_RING_PAD + s(4)
+
+
+def map_fit_padding() -> int:
+    """Margin around the map in the zoom-1 fit-to-viewport view."""
+    return max(MAP_FIT_PADDING, node_clearance())
+
+
+def map_pan_padding() -> int:
+    """Margin kept past the outermost system while panning a zoomed-in map — more
+    generous than the fit's, since at zoom the viewport is otherwise filled edge to
+    edge and a boundary system ends up pressed against the clip."""
+    return max(MAP_PAN_PADDING, node_clearance())
 
 
 def play_rect() -> tuple[int, int, int, int]:
