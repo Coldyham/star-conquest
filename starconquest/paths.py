@@ -24,6 +24,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 # on the next launch — the one place that key is named, shared by main/menu.
 WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 
+# Storage key for your best result per challenge setup (see `webstore.best`),
+# so replaying a shared link can show what you already managed.
+WEB_BESTS_KEY = "sc_bests"
+
 
 def _android_data_dir() -> Path | None:
     """The app-private writable dir on Android, or None when not on Android."""
@@ -53,3 +57,11 @@ def data_dir() -> Path:
     """Base dir for all writable game data: the Android app-private dir, else the
     repo root (unchanged desktop behaviour)."""
     return _android_data_dir() or _REPO_ROOT
+
+
+def saves_dir() -> Path:
+    """Where saved setup configs and shared challenge tokens live (gitignored).
+
+    Named here rather than in ``menu`` now that two modules write into it.
+    """
+    return data_dir() / "saves"

@@ -35,9 +35,9 @@ from typing import Optional
 
 import pygame
 
-from . import ai, config, softkeyboard, uifont
+from . import ai, config, softkeyboard, uifont, webstore
 from .model import AiParams
-from .paths import WEB_SHARED_SETTINGS_KEY, data_dir, is_web
+from .paths import is_web, saves_dir
 from .settings import Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -52,6 +52,7 @@ _START_FILL = (46, 92, 60)
 _START_BORDER = (96, 190, 120)
 _DISABLED_TEXT = (78, 84, 100)
 _STATUS_ERR = (214, 130, 110)
+_WARN = (214, 172, 92)      # amber: a challenge whose settings no longer match
 
 _TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
 
@@ -65,7 +66,7 @@ _DEFAULT_FILENAME = "starconquest_settings"
 # Saved configs live in a gitignored dir under the writable data dir (repo root
 # on desktop, the app-private dir on Android), not the cwd, so they never litter
 # the tree wherever the game is launched from.
-_SAVE_DIR = data_dir() / "saves"
+_SAVE_DIR = saves_dir()
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
@@ -246,8 +247,11 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
     f = _fonts()
 
     _text(surface, f["title"], "STAR CONQUEST", config.COLOR_TEXT, center=(w // 2, 92))
-    _text(surface, f["small"], "configure your galaxy, then conquer it",
-          config.COLOR_TEXT_DIM, center=(w // 2, 130))
+    if settings.challenge is not None:
+        _draw_challenge(surface, settings, w)
+    else:
+        _text(surface, f["small"], "configure your galaxy, then conquer it",
+              config.COLOR_TEXT_DIM, center=(w // 2, 130))
 
     _draw_tabs(surface, ms, w)
 
@@ -269,6 +273,45 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
               _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
     _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h - 108))
+
+
+def _draw_challenge(surface, settings: Settings, w: int) -> None:
+    """Two lines where the subtitle normally sits: the score to beat, then the
+    setup it was scored on.
+
+    A challenge *is* the most important fact about the session, so it takes the
+    subtitle's slot rather than competing for space elsewhere — the band between
+    the title (y 92) and the tab row (y 162) is the only room there is.
+
+    Editing any setting invalidates the comparison, which the challenge's own
+    ``key`` checksum detects. That warns rather than locking the widgets: locking
+    is a dead end the moment someone wants to try the same map with one knob
+    moved, and it would make the seed field unusable.
+    """
+    f = _fonts()
+    ch = settings.challenge
+    valid = ch.matches(settings)
+
+    head = f"CHALLENGE — beat {ch.summary()}"
+    if ch.by:
+        head += f"   ·   from {ch.by}"
+    _text(surface, f["small"], head, _START_BORDER if valid else _WARN,
+          center=(w // 2, 124))
+
+    if not valid:
+        _text(surface, f["small"], "settings changed — your score won't compare",
+              _WARN, center=(w // 2, 144))
+        return
+
+    bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
+    bits = [f"seed {settings.seed}", f"{settings.nodes} nodes", settings.mode]
+    if bots:
+        bits.append("vs " + ", ".join(bots))
+    mine = webstore.best(settings.challenge_key())
+    if mine is not None:
+        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
+    _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM,
+          center=(w // 2, 144))
 
 
 def _draw_tabs(surface, ms: MenuState, w: int) -> None:
@@ -907,7 +950,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         except (OSError, ValueError):
             _set_status(ms, f"Couldn't load {path.name}", False)
     elif hit == "get_link":
-        ok, copied = _share_link(settings)
+        ok, copied = webstore.share_token(settings.to_token())
         if copied:
             _set_status(ms, "Link copied — paste to share", True)
         elif ok:
@@ -944,34 +987,6 @@ def _randomise_sliders(target, specs) -> None:
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
     settings.seed = int(ms.seed_text) if ms.seed_text else None
-
-
-def _share_link(settings: Settings) -> tuple[bool, bool]:
-    """Web only: encode ``settings`` into the URL as a ``#<token>`` fragment and
-    try to copy the full link to the clipboard. Returns ``(url_updated, copied)``.
-
-    The address-bar update (``history.replaceState``, no reload/new history) is
-    the reliable channel; the clipboard write is best-effort — it may be
-    unavailable or blocked, and it's a standalone PWA (no visible address bar)
-    where the clipboard matters most. Both go through pygbag's ``platform.window``
-    JS bridge, guarded so a missing API is a graceful failure, not a crash."""
-    import platform as _platform
-
-    try:
-        token = settings.to_token()
-        win = _platform.window
-        win.history.replaceState(None, "", "#" + token)
-        # Remember it so an install right after generating the link keeps these
-        # settings (the installed PWA boots from start_url with no fragment).
-        win.localStorage.setItem(WEB_SHARED_SETTINGS_KEY, token)
-        url = str(win.location.origin) + str(win.location.pathname) + "#" + token
-    except Exception:
-        return (False, False)
-    try:
-        win.navigator.clipboard.writeText(url)   # async; fire-and-forget
-        return (True, True)
-    except Exception:
-        return (True, False)
 
 
 def _settings_path(name: str) -> Path:

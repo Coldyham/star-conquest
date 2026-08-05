@@ -20,6 +20,8 @@ uv run pytest tests/test_engine.py::test_production_cadence   # one test
 
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
+uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
+uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 ```
 
 There is no linter configured; match the surrounding style.
@@ -60,6 +62,9 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     reports back what was typed. Everything is guarded — off the web build, on a
     desktop browser, or if any DOM call fails, every function is a no-op and the
     menu keeps its plain SDL text path.
+  - `webstore.py` is the other browser bridge, same style: the address bar and a
+    small key/value store (shared-settings tokens, personal bests). See the
+    challenge-link notes under Key conventions.
 
 ### Turn resolution (engine.py)
 
@@ -132,17 +137,45 @@ intact.
   interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
   is the one funnel from menu/CLI to a `GameState`. `to_dict`/`from_dict` back
   both the JSON file Save/Load (menu footer, gitignored `saves/`) and a
-  `to_token`/`from_token` pair (compact base64url JSON) that encodes a whole
-  config into a URL fragment. On the web build the menu's "Get Link" button
-  writes that token to `location.hash` (and best-effort to the clipboard) so a
-  setup can be shared as a link, and `main._apply_shared_link` decodes a
-  `#<token>` back onto `Settings` at boot — same effect as CLI args pre-filling
-  the menu. Because an installed PWA launches from the manifest's fixed
-  `start_url` (no fragment), the token is also mirrored to `localStorage`
-  (key `paths.WEB_SHARED_SETTINGS_KEY`) and read back as a fallback, so a shared
-  config survives installation. `from_token`/`from_dict` are deliberately
-  tolerant (clamp, default, pad), so a stale or hand-edited token still loads to
-  a playable config.
+  `to_token`/`from_token` pair that encodes a whole config into a URL fragment.
+  On the web build the menu's "Get Link" button writes that token to
+  `location.hash` (and best-effort to the clipboard) so a setup can be shared as
+  a link, and `main._apply_shared_link` decodes a `#<token>` back onto `Settings`
+  at boot — same effect as CLI args pre-filling the menu. Because an installed
+  PWA launches from the manifest's fixed `start_url` (no fragment), the token is
+  also mirrored to `localStorage` (key `paths.WEB_SHARED_SETTINGS_KEY`) and read
+  back as a fallback, so a shared config survives installation.
+  `from_token`/`from_dict` are deliberately tolerant (clamp, default, pad), so a
+  stale or hand-edited token still loads to a playable config.
+  - A token is **pruned then deflated**: `token_dict` drops every field the
+    reader would infer anyway (defaults, unused seats — `from_dict`'s tolerance
+    is what makes omission safe), which takes a default config from ~1470 chars
+    to under 100. `mode`/`players`/`nodes`/`seed` are always emitted even at
+    default, because pruning otherwise makes a token depend on the *reader's*
+    defaults and those four are the identity of the match. `from_token` sniffs
+    `raw[:1] != b"{"` to keep pre-compression links working. Never prune a
+    non-heuristic seat's `ai_params`: it is a documented readable field for
+    drop-in bots (`models/README.md`), so default-equality is the only safe test.
+- **Challenge links carry a score to beat.** `settings.Challenge`
+  (`turns`, `lost`, `hand`, `by`, `key`) is an optional field on `Settings`, so it
+  rides all of the above with no new plumbing; `build_state` ignores it. Score is
+  turns-to-win, ties broken on fewest ships lost (`Player.ships_lost`, written in
+  `combat.resolve_arrival` — the one place ships die). `hand` is how many turns
+  the human actually decided (`main.hand_turns` reads the log's per-turn `"ai"`
+  flag): autoplaying a *decided* game to skip the cleanup is normal play, so it is
+  disclosed on the link rather than voiding the score — only a match with zero
+  hand-played turns is unshareable. `Challenge.key` is a `challenge_key()`
+  checksum of the setup, redundant by construction so the menu banner can spot
+  that the config has since been edited and warn (rather than locking widgets).
+  `challenge_key` hashes the *full* dict minus `challenge`/`autoplay`, so two
+  people agree regardless of what their tokens pruned.
+- **`webstore` is the third browser bridge** (with `softkeyboard` and the
+  web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
+  a JSON file under `data_dir()` elsewhere — so personal bests work on desktop
+  too — plus `share_token` (address bar + clipboard) and `url_token`, which are
+  genuinely web-only and no-op off it. Same defensive style as `softkeyboard`:
+  local `import platform`, every DOM call guarded, storage failure never
+  load-bearing.
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
@@ -170,6 +203,12 @@ intact.
   the pure core headlessly, the suite uses it to assert games actually terminate
   and never corrupt state (`check_invariants`). After changing `ai.py` or
   travel/combat balance, run a `--trials` batch and watch the timeout rate.
+  It also hosts the two bot tournaments, which answer different questions and
+  share `_tally`/`_avg_turns`: `--swap` is a free-for-all (whole roster in one
+  game, rotated through every seat via the cyclic `_rotations`), `--ladder` is a
+  pairwise round-robin (`run_ladder`: every pair, both seatings, plus a
+  head-to-head grid). Both default their roster to `ai.available_strategies()`,
+  so a whole-`models/` ranking needs no arguments.
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges

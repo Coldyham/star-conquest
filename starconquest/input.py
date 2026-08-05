@@ -2,7 +2,8 @@
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'quit',
-'toggle_autoplay', 'toggle_play', 'toggle_history', 'rewind', 'menu') or None.
+'toggle_autoplay', 'toggle_play', 'toggle_history', 'rewind', 'menu', 'share')
+or None.
 """
 
 from __future__ import annotations
@@ -116,9 +117,13 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
                 return "menu"
             if event.key == pygame.K_h:
                 return "toggle_history"
+            if event.key == pygame.K_c:
+                return "share"
             if event.key == pygame.K_ESCAPE:
                 return "quit"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if ui.share_button_rect[2] and _point_in_rect(event.pos, ui.share_button_rect):
+                return "share"
             if ui.restart_button_rect[2] and _point_in_rect(event.pos, ui.restart_button_rect):
                 return "restart"
             if ui.menu_button_rect[2] and _point_in_rect(event.pos, ui.menu_button_rect):

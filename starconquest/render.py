@@ -1226,7 +1226,9 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     else:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
-    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - config.s(60)))
+    # Stacked upward from the hint line so the score and its verdict both clear it.
+    _text(surface, _fonts()["big"], msg, color, center=(w // 2, h // 2 - config.s(104)))
+    _draw_result_line(surface, state, ui, w, h // 2 - config.s(70))
     _text(surface, _fonts()["normal"], "R: new map  ·  M: setup menu  ·  Esc: quit",
           config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - config.s(24)))
     # Tappable buttons (touch equivalents of the R/M/H/Esc keys). Restart and Menu
@@ -1258,6 +1260,62 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (92, 46, 52), qr, border_radius=6)
     pygame.draw.rect(surface, (200, 96, 104), qr, 2, border_radius=6)
     _text(surface, _fonts()["normal"], "Quit (Esc)", config.COLOR_TEXT, center=qr.center)
+
+    # Third row: turn this win into a challenge link. Only offered on a result
+    # worth sending — the human won at least partly under their own steam.
+    if _shareable(state, ui):
+        # Wider than the paired buttons above: its label doesn't fit in `bw`, and
+        # alone on its row it has the width to spare.
+        sw = config.s(240)
+        sr = pygame.Rect(w // 2 - sw // 2, row_y + 2 * (bh + gap), sw, bh)
+        ui.share_button_rect = (sr.x, sr.y, sr.w, sr.h)
+        pygame.draw.rect(surface, (44, 62, 74), sr, border_radius=6)
+        pygame.draw.rect(surface, (120, 180, 200), sr, 2, border_radius=6)
+        _text(surface, _fonts()["normal"], "Challenge a friend (C)", config.COLOR_TEXT,
+              center=sr.center)
+        if ui.share_msg:
+            _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM,
+                  center=(w // 2, sr.bottom + config.s(18)))
+    else:
+        ui.share_button_rect = (0, 0, 0, 0)
+
+
+def _shareable(state: GameState, ui: Ui) -> bool:
+    """Whether this result can become a challenge link: the human won it, and
+    decided at least one turn themselves (a pure autoplay demo is not a score)."""
+    return state.winner == ui.human_id and ui.hand_turns > 0
+
+
+def _draw_result_line(surface, state: GameState, ui: Ui, w: int, y: int) -> None:
+    """The score, under the win message: turns first, ships lost as the tiebreak.
+
+    Shown for the human's own result only — there is nothing to boast about, or to
+    compare against a challenge, in watching two bots fight. When the match came
+    from a challenge link, say outright whether the target fell.
+    """
+    if state.winner != ui.human_id:
+        if ui.challenge_target is not None:
+            _text(surface, _fonts()["normal"], "Challenge failed", (214, 130, 110),
+                  center=(w // 2, y))
+        return
+
+    lost = state.players[ui.human_id].ships_lost
+    line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
+    if ui.hand_turns < state.turn:
+        line += f"  ·  {ui.hand_turns} played by hand"
+    _text(surface, _fonts()["normal"], line, config.COLOR_TEXT, center=(w // 2, y))
+
+    if ui.challenge_target is None:
+        return
+    # Same ordering the score uses: fewer turns wins, ties broken on losses.
+    target = ui.challenge_target
+    beaten = (state.turn, lost) < target
+    who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
+    verdict = (f"Beat{who} {target[0]} turns / {target[1]} lost" if beaten
+               else f"Short of{who} {target[0]} turns / {target[1]} lost")
+    _text(surface, _fonts()["small"], verdict,
+          (130, 200, 150) if beaten else (214, 172, 92),
+          center=(w // 2, y + config.s(22)))
 
 
 # Scrubber palette — a cool track with a bright fill/knob, echoing the play button.

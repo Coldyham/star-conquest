@@ -60,8 +60,14 @@ Systems, players, and fleets:
 ship — lower is richer), `prod_progress`, `neighbors` (`list[int]` of adjacent
 system ids).
 
-`Player` fields: `id`, `name`, `is_human`, `is_neutral`, `alive`, `ai_strategy`,
+`Player` fields: `id`, `name`, `is_human`, `is_neutral`, `alive`, `ships_lost`
+(ships of theirs destroyed in combat so far, all match long), `ai_strategy`,
 `ai_params`.
+
+`ai_params` is your seat's tuning (`reserve_fraction`, `reserve_floor`,
+`expand_margin`, `attack_margin`, `reinforce_margin`), set per seat on the **AI**
+tab. Reading it is optional — the built-in heuristic uses it, and yours may too if
+you want the same knobs to steer your bot.
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 
@@ -92,3 +98,33 @@ def decide(state, pid):
 
 Save that, open the game, go to the **AI** tab, and pick **rusher** for any seat.
 For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orders`).
+
+## Benchmark it before you submit
+
+`tests/sim.py` runs games headlessly, so you can measure a bot properly instead of
+eyeballing a couple of matches. Start by checking you beat the built-in:
+
+```sh
+uv run python -m tests.sim --ai rusherplus heuristic --swap --trials 100
+```
+
+`--swap` rotates the roster through every seat so start-position luck cancels out —
+without it a result mostly tells you which corner of the map is stronger. Then rank
+yourself against every bot in this folder. Both tournament flags default their
+roster to all registered strategies, so neither needs `--ai`:
+
+```sh
+uv run python -m tests.sim --ladder --trials 50   # pairwise: every pair head-to-head
+uv run python -m tests.sim --swap --trials 50     # free-for-all: everyone in one game
+```
+
+`--ladder` is the one to trust for "is my bot good": it plays each pair on its own,
+both seatings, and prints a head-to-head grid, so a bot that ranks mid-table but
+beats the leader is visible rather than averaged away. `--swap` answers the
+different question of who survives a crowded map. Watch the **timeout** count in
+either — a bot that stalls into 600-turn games is usually failing to commit, and
+timeouts are excluded from the average length.
+
+Useful extras: `--mode symmetric` (every seat starts from an identical sector, so
+seat bias is exactly zero rather than merely balanced), `--nodes`/`--players` to
+size the map, and `--seed 1 --verbose` to watch a single game turn by turn.

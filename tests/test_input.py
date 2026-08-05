@@ -15,9 +15,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 
 import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, engine, mapgen  # noqa: E402
+from starconquest import config, engine, mapgen, replay  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
+from starconquest.settings import Settings  # noqa: E402
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
 
 
@@ -613,6 +614,89 @@ def test_game_over_quit_button_click_returns_quit():
         ui.quit_button_rect = (100, 100, 120, 24)
         ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
         assert game_input.handle_event(ev, state, ui) == "quit"
+    finally:
+        pygame.quit()
+
+
+def test_game_over_share_key_and_button_return_share():
+    """C / the overlay's Challenge button ask main to publish the result. Input
+    only reports the intent — whether there is a result worth sharing is decided
+    by main and render, not here."""
+    state, ui = _setup()
+    try:
+        state.winner = 1
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_c, mod=0, unicode="c")
+        assert game_input.handle_event(key, state, ui) == "share"
+        ui.share_button_rect = (100, 100, 120, 24)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "share"
+    finally:
+        pygame.quit()
+
+
+def test_share_is_only_a_game_over_action():
+    """C during live play must not be swallowed as a share (nor do anything else)."""
+    state, ui = _setup()
+    try:
+        assert state.winner is None
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_c, mod=0, unicode="c")
+        assert game_input.handle_event(key, state, ui) != "share"
+    finally:
+        pygame.quit()
+
+
+def test_hand_turns_counts_only_manually_played_turns():
+    """A game played by hand and then autoplayed to its end reports the hand
+    count, and the Ui's running tally agrees with the log's per-turn flags."""
+    state, ui = _setup()
+    try:
+        log = replay.new_log(Settings(seed=1, nodes=18, players=3), 1)
+        log.path = None                       # keep the suite out of games/
+        for turn in range(6):
+            ui.autoplay = turn >= 4           # decided: let it play out
+            main.resolve_turn(state, ui, log)
+        assert ui.hand_turns == 4
+        assert main.hand_turns(log) == 4
+    finally:
+        pygame.quit()
+
+
+def test_challenge_settings_pins_the_seed_and_stamps_the_key():
+    """A challenge whose settings still say "roll a fresh seed" would send a
+    different map, so the played seed is baked in."""
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)     # seed None: roll at start
+        log = replay.new_log(settings, 4821)
+        log.path = None
+        ui.hand_turns = 3
+        state.turn = 137
+        state.players[1].ships_lost = 412
+        shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert shared.seed == 4821
+        assert settings.seed is None                 # the live config is untouched
+        assert (shared.challenge.turns, shared.challenge.lost) == (137, 412)
+        assert shared.challenge.matches(shared)
+    finally:
+        pygame.quit()
+
+
+def test_share_challenge_falls_back_to_a_file_off_the_web(tmp_path, monkeypatch):
+    """No address bar on desktop, so the token is saved rather than the feature
+    simply being unavailable there."""
+    monkeypatch.setattr(main.paths, "saves_dir", lambda: tmp_path)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        msg = main.share_challenge(settings, state, ui, 77, log)
+        saved = tmp_path / "challenge_77.txt"
+        assert saved.exists() and "challenge_77.txt" in msg
+        restored = Settings.from_token(saved.read_text().strip())
+        assert restored.seed == 77 and restored.challenge.turns == 50
     finally:
         pygame.quit()
 

@@ -14,17 +14,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+from typing import Optional
 
 import pygame
 
 from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, softkeyboard)
+                          replay, softkeyboard, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
 from starconquest.replay import GameLog
-from starconquest.settings import Settings, build_state, resolve_seed
+from starconquest.settings import Challenge, Settings, build_state, resolve_seed
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -44,26 +45,26 @@ def _apply_shared_link(settings: Settings) -> None:
     survives *installing* the PWA: the installed app launches from the manifest's
     fixed ``start_url`` with no fragment, so the hash is gone — but same-origin
     ``localStorage`` still holds the token the browser saw before the install.
-    Guarded like ``softkeyboard.is_touch_web`` — anything missing is a no-op."""
+    Every call is guarded inside ``webstore`` — anything missing is a no-op."""
     if not paths.is_web():
         return
-    import platform as _platform
-
+    token = webstore.url_token() or webstore.get(paths.WEB_SHARED_SETTINGS_KEY)
+    if not token:
+        return
     try:
-        win = _platform.window
-        token = str(win.location.hash).lstrip("#")
-        if not token:
-            stored = win.localStorage.getItem(paths.WEB_SHARED_SETTINGS_KEY)
-            token = str(stored) if stored else ""
-        if token:
-            settings.copy_from(Settings.from_token(token))
-            win.localStorage.setItem(paths.WEB_SHARED_SETTINGS_KEY, token)
-    except Exception:
-        pass
+        settings.copy_from(Settings.from_token(token))
+    except ValueError:
+        return          # stale or hand-edited link: keep the CLI/default config
+    webstore.set(paths.WEB_SHARED_SETTINGS_KEY, token)
 
 
-def new_ui(state: GameState, autoplay: bool) -> Ui:
+def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None) -> Ui:
     ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
+    if settings is not None and settings.challenge is not None:
+        # Carry the target onto the Ui as plain numbers so the win overlay can say
+        # whether it fell, without render needing to see a Settings.
+        ui.challenge_target = (settings.challenge.turns, settings.challenge.lost)
+        ui.challenge_by = settings.challenge.by
     refresh_fog(state, ui)   # seed visibility from the opening position
     return ui
 
@@ -97,7 +98,7 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
     """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
-    return state, new_ui(state, autoplay), replay.new_log(settings, seed)
+    return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed)
 
 
 def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
@@ -114,11 +115,70 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
         log, ai.decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
-    ui = new_ui(state, loaded.autoplay)   # sets ui.visible from the final board
+    ui = new_ui(state, loaded.autoplay, loaded)   # sets ui.visible from the final board
     ui.seen |= seen                        # ...plus memory of the whole game
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
+    ui.hand_turns = hand_turns(log)        # the log is the record of who drove
     return state, ui
+
+
+def hand_turns(log: GameLog) -> int:
+    """How many recorded turns the human decided themselves.
+
+    The log flags autoplay per turn, so this stays honest about a game that was
+    played by hand and then autoplayed to its conclusion — which is normal once a
+    match is decided, and is disclosed on a challenge link rather than voiding it.
+    """
+    return sum(1 for i in range(log.turn_count) if not log.turn_is_ai(i))
+
+
+def challenge_settings(settings: Settings, state: GameState, ui: Ui,
+                       seed: int, log: GameLog) -> Settings:
+    """``settings`` plus the human's result on it, ready to encode as a link.
+
+    The seed is pinned to the one actually played: a challenge whose settings say
+    "roll a fresh seed" would send a different map, which is the whole point of
+    fixing it. Any challenge this match itself came from is replaced by the new
+    result — ``challenge_key`` ignores the field, so the stamped key describes the
+    setup alone, which is what lets the recipient's menu spot a later edit.
+    """
+    shared = Settings()
+    shared.copy_from(settings)
+    shared.seed = seed
+    shared.challenge = Challenge(
+        turns=state.turn,
+        lost=state.players[ui.human_id].ships_lost,
+        hand=hand_turns(log),
+        key=shared.challenge_key(),
+    )
+    return shared
+
+
+def share_challenge(settings: Settings, state: GameState, ui: Ui,
+                    seed: int, log: GameLog) -> str:
+    """Publish this win as a challenge link. Returns a line for the overlay.
+
+    On the web the token goes into the address bar and (best-effort) the
+    clipboard. Off the web there is no address bar to write to, so it is saved
+    next to the settings files — the feature would otherwise be web-only, and a
+    desktop player has just as much reason to hand a friend a link.
+    """
+    shared = challenge_settings(settings, state, ui, seed, log)
+    token = shared.to_token()
+    ok, copied = webstore.share_token(token)
+    if copied:
+        return "Challenge link copied — paste it to a friend"
+    if ok:
+        return "Challenge link is in the address bar — copy it to share"
+    path = paths.saves_dir() / f"challenge_{seed}.txt"
+    try:
+        paths.saves_dir().mkdir(parents=True, exist_ok=True)
+        path.write_text(token + "\n")
+    except OSError:
+        return "Couldn't save the challenge link"
+    print(f"Challenge link token ({path}):\n#{token}")
+    return f"Saved to {path.name} — append it to the game URL as #<token>"
 
 
 def build_history(ui: Ui, log: GameLog) -> tuple[
@@ -179,12 +239,14 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     return orders
 
 
-def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
+def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
+                 settings: Settings | None = None) -> None:
     """Advance one turn. In autoplay the human seat is also driven by the AI.
 
     The human orders actually applied are recorded into ``log`` and the file is
     rewritten, so the on-disk log always matches the live game (and a crash loses
-    at most the turn in progress).
+    at most the turn in progress). Given ``settings``, a win the human earned is
+    also filed as their best on this setup, so replaying a challenge can show it.
     """
     human_orders = (
         ai.decide(state, ui.human_id)
@@ -192,6 +254,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
     engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    if not ui.autoplay:
+        ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
         log.record_turn(human_orders, human_ai=ui.autoplay)
         if state.winner is not None:
@@ -200,9 +264,24 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None) -> None:
             log.save()
         except OSError:
             pass  # a save failure must never interrupt play
+    if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
+        record_best(settings, state, ui)
     ui.clear_pending()
     ui.reset_selection()
     refresh_fog(state, ui)
+
+
+def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
+    """File the human's win as their best on this setup, if it beats the last one.
+
+    Keyed on the setup rather than the seed alone, so the same map with different
+    bots or balance knobs is a different challenge. Deliberately keyed on what was
+    *played* — ``challenge_key`` ignores any attached target, so an edited
+    challenge files under its own setup rather than the sender's. Storage is
+    best-effort by design (see ``webstore``): a failure must never touch the game.
+    """
+    webstore.record_best(settings.challenge_key(), state.turn,
+                         state.players[ui.human_id].ships_lost)
 
 
 async def main() -> None:
@@ -400,8 +479,13 @@ async def main() -> None:
             elif action == "menu":
                 scene = "menu"
                 state, ui, log = None, None, None
+            elif action == "share":
+                # Game-over only (input only returns this there), and only for a
+                # result worth sending — render gates the button the same way.
+                if state.winner == ui.human_id and ui.hand_turns > 0:
+                    ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
-                resolve_turn(state, ui, log)
+                resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step
             elif action == "toggle_play":
                 # In history mode this drives the replay scrubber; starting it while
@@ -475,12 +559,12 @@ async def main() -> None:
                     auto_accum += dt
                     if auto_accum >= AUTOPLAY_MS:
                         auto_accum = 0
-                        resolve_turn(state, ui, log)
+                        resolve_turn(state, ui, log, settings)
                 elif ui.playing:
                     play_accum += dt
                     if play_accum >= PLAY_MS:
                         play_accum = 0
-                        resolve_turn(state, ui, log)
+                        resolve_turn(state, ui, log, settings)
 
         if scene == "menu":
             # Soft-keyboard typing arrives outside the SDL event queue, so the

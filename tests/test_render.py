@@ -76,6 +76,64 @@ def test_render_all_ui_states_no_crash():
         pygame.quit()
 
 
+def test_win_overlay_offers_sharing_only_for_an_earned_human_win():
+    """The overlay's share button is the gate on what can become a challenge: the
+    human's own win, with at least one turn they actually played."""
+    pygame.init()
+    render._FONTS.clear()   # rebuild fonts under this session (prev test quit pygame)
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.turn = 137
+        state.players[1].ships_lost = 412
+
+        state.winner = 1
+        ui.hand_turns = 100
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] > 0
+
+        ui.hand_turns = 0            # a pure autoplay demo is not a score
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] == 0
+
+        ui.hand_turns = 100
+        state.winner = 2             # someone else's win is not yours to send
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] == 0
+    finally:
+        pygame.quit()
+
+
+def test_win_overlay_draws_every_challenge_verdict():
+    """Beaten / missed / failed all render, including the losing branch that shows
+    a verdict but no score."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.turn = 137
+        state.players[1].ships_lost = 412
+        ui.hand_turns = 137
+        ui.challenge_by = "Andrew"
+
+        state.winner = 1
+        for target in (None, (200, 500), (100, 100), (137, 412)):
+            ui.challenge_target = target
+            render.draw(screen, state, ui)
+
+        state.winner = 2             # "Challenge failed"
+        ui.challenge_target = (200, 500)
+        render.draw(screen, state, ui)
+
+        state.winner = 0             # mutual annihilation, with a target set
+        render.draw(screen, state, ui)
+    finally:
+        pygame.quit()
+
+
 def test_scoreboard_full_table_and_eliminated():
     """Six seats (drops names) plus an eliminated player exercise both label paths."""
     pygame.init()

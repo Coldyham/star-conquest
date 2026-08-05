@@ -43,6 +43,9 @@ class Player:
     is_human: bool = False
     is_neutral: bool = False
     alive: bool = True
+    # Ships of this player's destroyed in combat, all match long — the attrition
+    # half of a result (see `combat.resolve_arrival`, the one place ships die).
+    ships_lost: int = 0
     # Which decision function drives this seat (key into ai.STRATEGIES) and its
     # tuning. Only used while the seat is AI-driven; ignored for a live human.
     ai_strategy: str = "heuristic"

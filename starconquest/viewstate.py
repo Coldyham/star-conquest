@@ -130,6 +130,17 @@ class Ui:
     # rebuilt by render each frame and tested by input like the rects above.
     restart_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     menu_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Result-sharing, all game-over overlay only. `hand_turns` counts turns the
+    # human actually decided (main increments it in resolve_turn, and recomputes it
+    # from the log on resume/rewind) — autoplaying a decided game to skip the
+    # cleanup is normal play, so the number is disclosed on the link rather than
+    # voiding the score. `challenge_target` is the (turns, lost) this match was set
+    # to beat, if it came from a challenge link, so render can say whether you did.
+    hand_turns: int = 0
+    challenge_target: Optional[tuple[int, int]] = None
+    challenge_by: str = ""
+    share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    share_msg: str = ""     # outcome of the last share, drawn under the button
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
     # actions (A: autoplay, R: new map). menu_button_rect above is shared with
     # the game-over overlay — the two scenes never draw at the same time, so

@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import itertools
 import json
 import os
 import random
 import time
+import zlib
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Optional
 
@@ -49,6 +51,51 @@ _GLOBAL_KNOBS = (
     ("fog_sight", "FOG_SIGHT"),
     ("fog_scout", "FOG_SCOUT"),
 )
+
+
+# Token fields always emitted, even at their default value. Everything else is
+# pruned and inferred by the reader, but these four *are* the identity of the
+# match: pruning makes a token depend on the reader's defaults, so if a
+# `config.DEFAULT_*` ever changed, a pruned link would silently describe a
+# different map. `autoplay` is deliberately not here and not part of
+# `challenge_key` either — it is a play-style preference, not the setup.
+_TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
+
+
+@dataclass
+class Challenge:
+    """A result to beat, riding along with the config that produced it.
+
+    Attached to a shared link so the recipient plays the identical setup and is
+    told the target. ``hand`` is how many turns the sender actually decided
+    themselves (the rest were autoplayed) — disclosed rather than disqualifying,
+    since flipping autoplay on to skip the cleanup of a decided game is normal
+    play. Score is ``turns`` first, fewest ``lost`` breaking a tie.
+    """
+
+    turns: int = 0
+    lost: int = 0
+    hand: int = 0
+    by: str = ""
+    # `challenge_key()` of the setup this was scored on. Redundant by
+    # construction, and that is the point: it is a checksum letting the menu spot
+    # that the config has since been edited, so the target no longer compares.
+    key: str = ""
+
+    def summary(self) -> str:
+        """One line: the target, as shown on the menu banner and win overlay."""
+        out = f"{self.turns} turns / {self.lost} ships lost"
+        if self.hand < self.turns:
+            out += f" ({self.hand} by hand)"
+        return out
+
+    def matches(self, settings: "Settings") -> bool:
+        """True if ``settings`` is still the setup this score was made on.
+
+        A blank ``key`` is taken on trust — a hand-written or pre-``key`` challenge
+        should read as valid rather than permanently "edited".
+        """
+        return not self.key or self.key == settings.challenge_key()
 
 
 @dataclass
@@ -87,6 +134,11 @@ class Settings:
     ai_strategy: list[str] = field(
         default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)]
     )
+
+    # -- A score to beat on this exact setup, or None for an ordinary config --- #
+    # Presentation context only: `build_state` ignores it, and it is excluded from
+    # `challenge_key` so a config and the same config-plus-a-target agree.
+    challenge: Optional[Challenge] = None
 
     @classmethod
     def defaults(cls) -> "Settings":
@@ -139,7 +191,7 @@ class Settings:
             return cls()
         out = cls()
         for f in fields(cls):                       # scalar fields
-            if f.name in ("ai", "ai_strategy", "seed") or f.name not in data:
+            if f.name in _STRUCTURED or f.name not in data:
                 continue
             setattr(out, f.name, _coerce(data[f.name], getattr(out, f.name)))
 
@@ -161,6 +213,8 @@ class Settings:
             out.ai_strategy = [str(s) for s in raw_strat[: config.MAX_PLAYERS]]
         while len(out.ai_strategy) < config.MAX_PLAYERS:
             out.ai_strategy.append("heuristic")
+
+        out.challenge = _challenge_from_dict(data.get("challenge"))
         return out
 
     def save(self, path) -> None:
@@ -174,15 +228,55 @@ class Settings:
         with open(path) as fh:
             return cls.from_dict(json.load(fh))
 
+    def token_dict(self) -> dict:
+        """``to_dict`` minus everything the reader would infer anyway.
+
+        ``from_dict`` already defaults, clamps, truncates and pads, so *omitting* a
+        key is a supported input — which makes pruning free on the reading side and
+        keeps old full-fat tokens decoding unchanged. The full dict is 25 fields
+        dominated by six ``AiParams`` and 15 float knobs that are nearly always at
+        their defaults, so this is where most of a link's length goes.
+
+        Note the per-seat lists can only be trimmed from the *end* (they are
+        positional, indexed by seat-1), and a seat's ``ai`` is never dropped merely
+        because its strategy is a drop-in rather than the built-in heuristic:
+        ``ai_params`` is a documented readable field for custom bots, so their
+        params may well be load-bearing. Default-equality is the only safe test.
+        """
+        full = self.to_dict()
+        blank = Settings()
+        out = {k: full[k] for k in _TOKEN_ALWAYS}
+        for f in fields(self):
+            if f.name in _TOKEN_ALWAYS or f.name in _STRUCTURED:
+                continue
+            if full[f.name] != getattr(blank, f.name):
+                out[f.name] = full[f.name]
+
+        seats = self.players                        # seats beyond the player count
+        ai = _trim_trailing(full["ai"][:seats], asdict(AiParams()))
+        if ai:
+            out["ai"] = ai
+        strategies = _trim_trailing(full["ai_strategy"][:seats], "heuristic")
+        if strategies:
+            out["ai_strategy"] = strategies
+        if self.challenge is not None:
+            out["challenge"] = full["challenge"]
+        return out
+
     def to_token(self) -> str:
-        """This config as a URL-fragment-safe string (compact JSON, base64url,
-        no ``=`` padding) — the payload behind a shareable settings link."""
-        raw = json.dumps(self.to_dict(), separators=(",", ":")).encode("utf-8")
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        """This config as a URL-fragment-safe string — the payload behind a
+        shareable settings link. Pruned (``token_dict``), deflated, then base64url
+        with the ``=`` padding stripped."""
+        raw = json.dumps(self.token_dict(), separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
 
     @classmethod
     def from_token(cls, token: str) -> "Settings":
         """Rebuild from a ``to_token`` string, tolerantly (via ``from_dict``).
+
+        Reads both the current deflated form and the original uncompressed one, so
+        links shared before compression still work: plain JSON always starts ``{``,
+        which zlib output never does.
 
         Raises ``ValueError`` on any malformed token, mirroring ``load``'s
         contract for bad JSON, so callers have one failure mode to catch.
@@ -190,9 +284,27 @@ class Settings:
         try:
             padded = token + "=" * (-len(token) % 4)
             raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+            if raw[:1] != b"{":
+                raw = zlib.decompress(raw)
             return cls.from_dict(json.loads(raw.decode("utf-8")))
-        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as e:
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError,
+                zlib.error, ValueError) as e:
             raise ValueError(f"invalid settings token: {e}") from e
+
+    def challenge_key(self) -> str:
+        """A stable id for "this exact setup", ignoring any attached score.
+
+        Hashes the *full* dict, never the pruned token form, so two people whose
+        links happened to omit different defaults still agree. ``challenge`` and
+        ``autoplay`` are excluded: a config and the same config carrying a target
+        are the same match, and whether you let the AI drive is disclosed by
+        ``Challenge.hand`` instead.
+        """
+        data = self.to_dict()
+        for skip in ("challenge", "autoplay"):
+            data.pop(skip, None)
+        raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return hashlib.blake2s(raw, digest_size=8).hexdigest()
 
     def copy_from(self, other: "Settings") -> None:
         """Overwrite every field from ``other`` in place (copying its lists).
@@ -205,8 +317,28 @@ class Settings:
                 self.ai = [replace(p) for p in other.ai]
             elif f.name == "ai_strategy":
                 self.ai_strategy = list(other.ai_strategy)
+            elif f.name == "challenge":
+                self.challenge = replace(other.challenge) if other.challenge else None
             else:
                 setattr(self, f.name, getattr(other, f.name))
+
+
+# Fields `from_dict`'s scalar loop and `token_dict`'s prune loop both skip, each
+# handling them explicitly instead (nested dataclasses, per-seat lists, and `seed`
+# whose Optional[int] defeats `_coerce`'s type-of-default dispatch).
+_STRUCTURED = ("ai", "ai_strategy", "challenge", "seed")
+
+
+def _trim_trailing(items: list, default) -> list:
+    """``items`` with its trailing default-valued entries dropped.
+
+    Only the tail can go: these lists are positional (indexed by seat-1), and
+    `from_dict` pads a short one back out with defaults.
+    """
+    end = len(items)
+    while end > 0 and items[end - 1] == default:
+        end -= 1
+    return items[:end]
 
 
 def _coerce(value, default):
@@ -240,6 +372,21 @@ def _ai_from_dict(d) -> AiParams:
             if f.name in d:
                 setattr(out, f.name, _coerce(d[f.name], getattr(out, f.name)))
     return out
+
+
+def _challenge_from_dict(d) -> Optional[Challenge]:
+    """A Challenge from a dict, or None if absent/malformed/scoreless.
+
+    A zero ``turns`` is not a result anyone can beat, so it reads as "no
+    challenge" — that way callers only ever test ``settings.challenge``.
+    """
+    if not isinstance(d, dict):
+        return None
+    out = Challenge()
+    for f in fields(Challenge):
+        if f.name in d:
+            setattr(out, f.name, _coerce(d[f.name], getattr(out, f.name)))
+    return out if out.turns > 0 else None
 
 
 def resolve_seed(settings: Settings) -> int:

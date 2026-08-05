@@ -17,3 +17,6 @@ games/
 
 # pygbag web build output (rebuild with tools/build_web.sh)
 /web/
+
+# webstore key/value file (personal bests; localStorage on the web build)
+/kv.json
