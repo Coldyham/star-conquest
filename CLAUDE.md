@@ -28,7 +28,9 @@ uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwi
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 ```
 
-There is no linter configured; match the surrounding style.
+There is no lint step in `pyproject.toml`/CI; match the surrounding style. VSCode
+runs Pylance in basic type-checking mode (`.vscode/settings.json`) — treat its
+type warnings as real signal, not noise.
 
 ## Architecture
 
