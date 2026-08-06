@@ -79,9 +79,7 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tu
         sides.sort(key=lambda s: s[1], reverse=True)
         cur_owner, cur_ships = sides[0]
         for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(
-                state.rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner
-            )
+            cur_owner, cur_ships = resolve_fight(state.rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
         node.owner_id, node.ships = cur_owner, cur_ships
 
     # Attrition, per owner: everyone brought `forces[owner]` here (garrison plus

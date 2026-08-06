@@ -92,9 +92,7 @@ def end_turn(
     state.turn += 1
 
 
-def _collect_orders(
-    state: GameState, human_orders: Optional[list[Order]], decide: Optional[DecideFn]
-) -> list[Order]:
+def _collect_orders(state: GameState, human_orders: Optional[list[Order]], decide: Optional[DecideFn]) -> list[Order]:
     human = state.human()
     orders: list[Order] = _own_orders(human_orders, human.id if human else None)
     if decide is not None:

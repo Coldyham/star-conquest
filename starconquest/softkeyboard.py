@@ -28,12 +28,14 @@ _ELEMENT_ID = "sc-soft-keyboard"
 # `visibility:hidden` elements cannot take focus (and so cannot raise the
 # keyboard). 16px text is the threshold below which mobile Safari zooms the page
 # on focus. Parked bottom-left under the canvas, where the keyboard covers it.
-_STYLE = ("position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;"
-          "border:0;padding:0;margin:0;font-size:16px;background:transparent;"
-          "color:transparent;caret-color:transparent;z-index:-1;")
+_STYLE = (
+    "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;"
+    "border:0;padding:0;margin:0;font-size:16px;background:transparent;"
+    "color:transparent;caret-color:transparent;z-index:-1;"
+)
 
-_field = None        # the <input> proxy, created on first use and kept for good
-_open = False        # is it currently focused / are we reading from it?
+_field = None  # the <input> proxy, created on first use and kept for good
+_open = False  # is it currently focused / are we reading from it?
 _took_focus = False  # has the field actually held focus since `open`?
 
 
@@ -91,7 +93,7 @@ def open(text: str) -> None:
     try:
         el.value = text
         el.focus()
-        el.setSelectionRange(len(text), len(text))   # caret at the end
+        el.setSelectionRange(len(text), len(text))  # caret at the end
         _open = True
     except Exception:
         _open = False

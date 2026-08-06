@@ -24,7 +24,7 @@ from typing import Optional
 
 from .paths import WEB_BESTS_KEY, WEB_SHARED_SETTINGS_KEY, data_dir, is_web
 
-_FILE = "kv.json"      # desktop/Android backing file, beside saves/ and games/
+_FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
 
 def _file_path():
@@ -64,7 +64,7 @@ def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
             tmp = path.with_suffix(".json.tmp")
             with open(tmp, "w") as fh:
                 json.dump(data, fh, indent=2)
-            tmp.replace(path)       # atomic, like GameLog.save
+            tmp.replace(path)  # atomic, like GameLog.save
             return True
         except Exception:
             return False

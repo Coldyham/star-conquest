@@ -77,7 +77,7 @@ class GameLog:
     not part of the serialized form."""
 
     seed: int
-    settings: dict                                  # Settings.to_dict()
+    settings: dict  # Settings.to_dict()
     turns: list[dict] = field(default_factory=list)  # {"ai": bool, "orders": [...]}
     winner: Optional[int] = None
     finished: bool = False
@@ -96,10 +96,12 @@ class GameLog:
         ``human_ai`` records that the human seat was AI-driven this turn (autoplay),
         which ``reconstruct`` needs to reproduce the rng draw order (see module doc).
         """
-        self.turns.append({
-            "ai": bool(human_ai),
-            "orders": [_order_to_dict(o) for o in orders],
-        })
+        self.turns.append(
+            {
+                "ai": bool(human_ai),
+                "orders": [_order_to_dict(o) for o in orders],
+            }
+        )
         self.updated_at = _now_iso()
 
     def mark_finished(self, winner: Optional[int]) -> None:

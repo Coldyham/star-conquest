@@ -13,8 +13,8 @@ from .geometry import WorldView
 from .model import GameState, Order
 
 # interaction modes
-IDLE = "idle"            # nothing selected
-SELECTED = "selected"    # a source system is selected, awaiting a destination
+IDLE = "idle"  # nothing selected
+SELECTED = "selected"  # a source system is selected, awaiting a destination
 # a destination is picked: the send is committed and the on-map popup is open
 # to retune / forward / cancel it
 CHOOSING = "choosing"
@@ -25,17 +25,17 @@ class Ui:
     view: WorldView
     human_id: int = 1
     mode: str = IDLE
-    selected: Optional[int] = None      # source system id
-    hover: Optional[int] = None         # system under the cursor
-    dest: Optional[int] = None          # chosen destination system id
-    chosen: int = 0                     # ships the active one-shot send commits
-    keep: int = 0                       # ships held back by the active forward rule
+    selected: Optional[int] = None  # source system id
+    hover: Optional[int] = None  # system under the cursor
+    dest: Optional[int] = None  # chosen destination system id
+    chosen: int = 0  # ships the active one-shot send commits
+    keep: int = 0  # ships held back by the active forward rule
     # In CHOOSING the send is already committed: as a one-shot order at
     # `sel_order` (when forward_armed is False, sized by `chosen`) or as the
     # standing rule out of `selected` in `auto_forward` (when forward_armed is
     # True, holding back `keep` and forwarding the rest). The popup edits
     # whichever is live.
-    forward_armed: bool = False         # active send is a standing forward rule
+    forward_armed: bool = False  # active send is a standing forward rule
     # True when the popup was opened on an order/rule that *predates* it (see
     # `edit_order`/`edit_forward`) rather than one it just created. Can't be
     # derived: the popup commits immediately, so a fresh compose and a reopened
@@ -43,12 +43,12 @@ class Ui:
     # bottom button's label (Cancel vs Delete) and how far `_close_send` unwinds.
     editing_existing: bool = False
     pending: list[Order] = field(default_factory=list)
-    sel_order: Optional[int] = None     # index into `pending` being edited, if any
+    sel_order: Optional[int] = None  # index into `pending` being edited, if any
     # standing auto-forward rules: source_id -> (dest_id, keep). Human-only QoL,
     # so it lives here rather than in the pure GameState. Each turn a rule
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
-    sel_forward: Optional[int] = None   # source id of the rule being edited, if any
+    sel_forward: Optional[int] = None  # source id of the rule being edited, if any
     # Fog of war (human-only, so it lives here not in GameState). Recomputed each
     # turn by main.refresh_fog from the human's territory; render reads these.
     #   visible      — systems in full detail this turn (owner + ship counts)
@@ -92,9 +92,7 @@ class Ui:
     # (pending_index, row_rect, delete_rect) per drawn row — the index is carried
     # explicitly rather than implied by position, because the list scrolls and only
     # a window of it is drawn; a positional mapping would delete the wrong order.
-    order_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
-        field(default_factory=list)
-    )
+    order_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
     # Queued-list scrolling: `order_scroll` is the first entry drawn, and render
     # records how far it may go in `order_scroll_max` (0 == everything fits) along
     # with the ▲/▼ button rects. The list is capped to part of the panel so the
@@ -145,9 +143,7 @@ class Ui:
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for auto-forward rule rows, listed below the queued orders:
     # (source_id, row_rect, delete_rect) tuples.
-    forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = (
-        field(default_factory=list)
-    )
+    forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
     # History-mode hit-rects, rebuilt by render each frame and tested by input
     # (same store-rect-then-test handoff as end_turn_rect). `history_button_rect`
     # is the bottom-bar (and game-over overlay) toggle; the others are live only
@@ -174,7 +170,7 @@ class Ui:
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    share_msg: str = ""     # outcome of the last share, drawn under the button
+    share_msg: str = ""  # outcome of the last share, drawn under the button
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
     # actions (A: autoplay, R: new map, F: fast forward). menu_button_rect above is
     # shared with the game-over overlay — the two scenes never draw at the same
@@ -228,9 +224,8 @@ class Ui:
         below would do something) rather than zoom the camera — mirrors
         ``step_count``'s own dispatch conditions exactly, so the two can't
         drift out of sync."""
-        return (
-            (self.mode == CHOOSING and (self.forward_armed or self.selected is not None))
-            or (self.sel_forward is not None and self.sel_forward in self.auto_forward)
+        return (self.mode == CHOOSING and (self.forward_armed or self.selected is not None)) or (
+            self.sel_forward is not None and self.sel_forward in self.auto_forward
         )
 
     def step_count(self, state: GameState, delta: int) -> None:
@@ -242,7 +237,7 @@ class Ui:
         if not self.count_adjust_active():
             return
         if self.mode == CHOOSING and self.forward_armed:
-            self.set_keep(state, self.keep + delta)          # forward: adjust keep
+            self.set_keep(state, self.keep + delta)  # forward: adjust keep
         elif self.mode == CHOOSING and self.selected is not None:
             self.set_send_count(state, self.chosen + delta)  # send: adjust count
         elif self.sel_forward is not None and self.sel_forward in self.auto_forward:
@@ -316,17 +311,17 @@ class Ui:
         self.dest = dest
         self.mode = CHOOSING
         self.forward_armed = False
-        self.editing_existing = False    # this popup created its own subject
+        self.editing_existing = False  # this popup created its own subject
         self.chosen = max(0, avail)
         self.keep = 0
-        self.popup_pos = None            # fresh target -> auto-place the popup
+        self.popup_pos = None  # fresh target -> auto-place the popup
         self.dragging_popup = False
         self.dragging_slider = False
         if avail > 0:
             self.pending.append(Order(self.human_id, self.selected, dest, avail))
             self.sel_order = len(self.pending) - 1
         else:
-            self.sel_order = None   # nothing to send now; forward-only rule
+            self.sel_order = None  # nothing to send now; forward-only rule
         if forward:
             self.toggle_forward(state)
 
@@ -336,7 +331,7 @@ class Ui:
         if self.mode != CHOOSING or self.forward_armed or self.selected is None:
             return
         cap = self._active_cap(state)
-        lo = 1 if cap > 0 else 0          # an empty source sends nothing (0), not 1
+        lo = 1 if cap > 0 else 0  # an empty source sends nothing (0), not 1
         self.chosen = max(lo, min(cap, count))
         if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             self.pending[self.sel_order].ships = self.chosen
@@ -356,7 +351,7 @@ class Ui:
         self.set_send_count(state, self._active_cap(state) // 2)
 
     def keep_none(self, state: GameState) -> None:
-        self.set_keep(state, 0)                      # forward everything
+        self.set_keep(state, 0)  # forward everything
 
     def keep_half(self, state: GameState) -> None:
         if self.selected is not None:
@@ -383,7 +378,7 @@ class Ui:
                 self.pending.append(Order(self.human_id, self.selected, self.dest, self.chosen))
                 self.sel_order = len(self.pending) - 1
             else:
-                self.chosen = 0          # empty source: no one-shot order to queue
+                self.chosen = 0  # empty source: no one-shot order to queue
                 self.sel_order = None
 
     def set_forward_mode(self, state: GameState, armed: bool) -> None:
@@ -452,8 +447,7 @@ class Ui:
         expanded into an order at end of turn, and editable in the popup."""
         rule = self.auto_forward.get(sid)
         src = state.systems.get(sid)
-        return (rule is not None and src is not None
-                and src.owner_id == self.human_id and rule[0] in state.systems)
+        return rule is not None and src is not None and src.owner_id == self.human_id and rule[0] in state.systems
 
     def edit_order(self, state: GameState, i: int) -> None:
         """Reopen the send popup on an already-queued order — the one editor for a
@@ -471,7 +465,7 @@ class Ui:
             return
         o = self.pending[i]
         if o.source_id not in state.systems or o.dest_id not in state.systems:
-            return          # the popup reads both ends; never point it at neither
+            return  # the popup reads both ends; never point it at neither
         self.reset_selection()
         self.sel_forward = None
         self.selected = o.source_id
@@ -513,7 +507,7 @@ class Ui:
     def clear_pending(self) -> None:
         self.pending.clear()
         self.sel_order = None
-        self.order_scroll = 0        # the list it scrolled through is gone
+        self.order_scroll = 0  # the list it scrolled through is gone
 
     def scroll_orders(self, delta: int) -> None:
         """Move the queued-list window by ``delta`` rows, clamped to what render

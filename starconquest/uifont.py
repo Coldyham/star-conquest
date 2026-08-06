@@ -24,7 +24,7 @@ def load(size: int, bold: bool = False) -> pygame.font.Font:
     path = _BOLD if bold else _REGULAR
     if path.exists():
         return pygame.font.Font(str(path), size)
-    if _REGULAR.exists():          # bold missing but regular present: synthesise
+    if _REGULAR.exists():  # bold missing but regular present: synthesise
         f = pygame.font.Font(str(_REGULAR), size)
         f.set_bold(bold)
         return f

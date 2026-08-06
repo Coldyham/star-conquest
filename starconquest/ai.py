@@ -110,13 +110,13 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
             if spec is None or spec.loader is None:
                 continue
             module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module          # so dataclasses/typing resolve
+            sys.modules[spec.name] = module  # so dataclasses/typing resolve
             spec.loader.exec_module(module)
             fn = getattr(module, "decide", None)
             if callable(fn):
                 register(path.stem, fn)
                 loaded.append(path.stem)
-        except Exception:                            # noqa: BLE001 — one bad model mustn't break the rest
+        except Exception:  # noqa: BLE001 — one bad model mustn't break the rest
             continue
     return sorted(loaded)
 
@@ -124,8 +124,7 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Decisions
 # --------------------------------------------------------------------------- #
-def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int,
-                    params: AiParams):
+def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int, params: AiParams):
     sys = state.systems[sid]
     jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
     self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are

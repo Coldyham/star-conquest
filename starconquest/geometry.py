@@ -31,10 +31,10 @@ def point_segment_dist(p: Point, a: Point, b: Point) -> float:
     bx, by = b
     dx, dy = bx - ax, by - ay
     denom = dx * dx + dy * dy
-    if denom <= 1e-12:            # degenerate segment: fall back to point distance
+    if denom <= 1e-12:  # degenerate segment: fall back to point distance
         return dist(p, a)
     t = ((p[0] - ax) * dx + (p[1] - ay) * dy) / denom
-    t = max(0.0, min(1.0, t))     # clamp to the segment
+    t = max(0.0, min(1.0, t))  # clamp to the segment
     return dist(p, (ax + t * dx, ay + t * dy))
 
 
@@ -45,10 +45,7 @@ def _orient(a: Point, b: Point, c: Point) -> float:
 
 def _on_segment(a: Point, b: Point, c: Point) -> bool:
     """Assuming c is collinear with a-b, is c within the segment's bounding box?"""
-    return (
-        min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
-        and min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
-    )
+    return min(a[0], b[0]) <= c[0] <= max(a[0], b[0]) and min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
 
 
 def segments_intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> bool:

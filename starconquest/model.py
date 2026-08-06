@@ -57,11 +57,11 @@ class System:
     """A star system (graph node)."""
 
     id: int
-    pos: tuple[float, float]      # world coordinates
-    owner_id: int = 0            # 0 == neutral
-    ships: int = 0              # current garrison
-    production: int = 3         # "turns per ship"; lower is richer
-    prod_progress: int = 0     # counts up each turn; emits a ship at >= production
+    pos: tuple[float, float]  # world coordinates
+    owner_id: int = 0  # 0 == neutral
+    ships: int = 0  # current garrison
+    production: int = 3  # "turns per ship"; lower is richer
+    prod_progress: int = 0  # counts up each turn; emits a ship at >= production
     neighbors: list[int] = field(default_factory=list)
 
 

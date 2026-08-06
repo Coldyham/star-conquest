@@ -107,7 +107,9 @@ def generate_symmetric(
 
     # contested central system
     state.systems[center_id] = System(
-        id=center_id, pos=(cx, cy), owner_id=0,
+        id=center_id,
+        pos=(cx, cy),
+        owner_id=0,
         production=min(config.PRODUCTION_WEIGHTS),  # richest
         ships=config.GARRISON_BASE + round(config.GARRISON_K / min(config.PRODUCTION_WEIGHTS)) + 2,
     )
@@ -158,8 +160,7 @@ def _base_sector_values(state, per_player) -> tuple[list[int], list[int]]:
     for _ in range(per_player - 1):
         p = state.rng.choices(values, weights=weights, k=1)[0]
         prod.append(p)
-        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p)
-                     + state.rng.randint(0, config.GARRISON_JITTER))
+        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p) + state.rng.randint(0, config.GARRISON_JITTER))
     return prod, ships
 
 
@@ -262,10 +263,8 @@ def _add_lane(state: GameState, positions: list[Point], a: int, b: int) -> None:
     state.add_lane(a, b, round(length_ly, 1), turns)
 
 
-def _crosses_any(
-    positions: list[Point], accepted: list[tuple[int, int]], a: int, b: int
-) -> bool:
-    for (c, d) in accepted:
+def _crosses_any(positions: list[Point], accepted: list[tuple[int, int]], a: int, b: int) -> bool:
+    for c, d in accepted:
         if a in (c, d) or b in (c, d):
             continue  # edges sharing a node are incident, not crossing
         if segments_intersect(positions[a], positions[b], positions[c], positions[d]):
@@ -378,11 +377,7 @@ def _assign_production_and_garrisons(state: GameState) -> None:
         if sys.owner_id != 0:
             continue  # homeworlds already configured
         sys.production = state.rng.choices(values, weights=weights, k=1)[0]
-        sys.ships = (
-            config.GARRISON_BASE
-            + round(config.GARRISON_K / sys.production)
-            + state.rng.randint(0, config.GARRISON_JITTER)
-        )
+        sys.ships = config.GARRISON_BASE + round(config.GARRISON_K / sys.production) + state.rng.randint(0, config.GARRISON_JITTER)
 
 
 # --------------------------------------------------------------------------- #

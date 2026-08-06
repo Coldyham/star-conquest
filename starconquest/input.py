@@ -64,7 +64,7 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if event.key in (pygame.K_ESCAPE, pygame.K_h):
             return "toggle_history"
         if event.key == pygame.K_p:
-            return "toggle_play"   # play/pause the replay at sim speed
+            return "toggle_play"  # play/pause the replay at sim speed
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
@@ -92,7 +92,7 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
             return "rewind"
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True
-            ui.playing = False   # grabbing the scrubber pauses playback
+            ui.playing = False  # grabbing the scrubber pauses playback
             _seek_scrubber(ui, event.pos)
         return None
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -149,18 +149,17 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
 
     if event.type == pygame.MOUSEMOTION:
-        if ui.dragging_slider:           # dragging the popup's count slider
+        if ui.dragging_slider:  # dragging the popup's count slider
             # first, so a slider drag can never also move the popup it sits on
             ui.set_slider_from_x(state, event.pos[0])
-        elif ui.dragging_popup:          # dragging the send popup by its background
-            ui.popup_pos = (event.pos[0] - ui.popup_drag_off[0],
-                            event.pos[1] - ui.popup_drag_off[1])
+        elif ui.dragging_popup:  # dragging the send popup by its background
+            ui.popup_pos = (event.pos[0] - ui.popup_drag_off[0], event.pos[1] - ui.popup_drag_off[1])
         elif ui.drag_src is not None and event.buttons[0]:
             # a press on an owned system is being dragged toward a target
             if dist(event.pos, ui.drag_start) > config.DRAG_THRESHOLD:
                 ui.drag_active = True
             ui.drag_pos = event.pos
-            ui.hover = pick_node(state, ui, event.pos)   # highlight the drag target
+            ui.hover = pick_node(state, ui, event.pos)  # highlight the drag target
         elif ui.pan_active and event.buttons[0]:
             # a press on empty space is panning the camera
             dx = event.pos[0] - ui.pan_last[0]
@@ -185,7 +184,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
             # (zooming the map from off-map was disorienting anyway)
             ui.scroll_orders(-event.y)
         else:
-            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP ** event.y)
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -215,9 +214,14 @@ def _arm_drag(state: GameState, ui: Ui, pos) -> None:
     owned system — the source. A tap that opened the popup (CHOOSING) or hit a UI
     element doesn't arm one, so drag never fights those interactions."""
     node = pick_node(state, ui, pos)
-    if (node is not None and ui.mode == SELECTED and ui.selected == node
-            and not ui.dragging_popup and not ui.dragging_slider
-            and state.systems[node].owner_id == ui.human_id):
+    if (
+        node is not None
+        and ui.mode == SELECTED
+        and ui.selected == node
+        and not ui.dragging_popup
+        and not ui.dragging_slider
+        and state.systems[node].owner_id == ui.human_id
+    ):
         ui.drag_src = node
         ui.drag_start = pos
         ui.drag_pos = pos
@@ -430,14 +434,14 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.edit_forward(state, hit[1])
         return None
 
-    ui.sel_order = None    # selecting a system is composing, not editing an order/rule
+    ui.sel_order = None  # selecting a system is composing, not editing an order/rule
     ui.sel_forward = None
     sys = state.systems[node]
     if ui.selected is not None and ui.mode in (SELECTED, CHOOSING):
         if node == ui.selected:
-            ui.reset_selection()          # deselect the source
+            ui.reset_selection()  # deselect the source
         elif ui.mode == CHOOSING and node == ui.dest:
-            return None                   # already targeting it; adjust via popup
+            return None  # already targeting it; adjust via popup
         elif state.are_adjacent(ui.selected, node):
             # commit a send-all to this neighbour and open the popup. Arm it as a
             # forward rule when Shift is held (desktop) or when the source has no
@@ -488,18 +492,17 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
             hits.append((d, ("rule", src)))
     if not hits:
         return None
-    order = [tag for _, tag in sorted(hits)]     # nearest first, then order-before-rule
-    current = ("order", ui.sel_order) if ui.sel_order is not None else (
-        ("rule", ui.sel_forward) if ui.sel_forward is not None else None)
-    if current in order:                         # cycle to the next item on this lane
+    order = [tag for _, tag in sorted(hits)]  # nearest first, then order-before-rule
+    current = ("order", ui.sel_order) if ui.sel_order is not None else (("rule", ui.sel_forward) if ui.sel_forward is not None else None)
+    if current in order:  # cycle to the next item on this lane
         return order[(order.index(current) + 1) % len(order)]
     return order[0]
 
 
 def _cancel(ui: Ui) -> None:
     if ui.mode == CHOOSING:
-        ui.close_send()          # close the popup, keeping the committed send
+        ui.close_send()  # close the popup, keeping the committed send
     elif ui.sel_forward is not None:
-        ui.sel_forward = None    # deselect a highlighted (dormant) auto-forward rule
+        ui.sel_forward = None  # deselect a highlighted (dormant) auto-forward rule
     else:
         ui.reset_selection()

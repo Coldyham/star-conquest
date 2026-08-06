@@ -126,14 +126,10 @@ class Settings:
     fog_scout: int = config.FOG_SCOUT
 
     # -- AI: per-seat tuning, indexed by seat-1 (seats 1..MAX_PLAYERS) -------- #
-    ai: list[AiParams] = field(
-        default_factory=lambda: [AiParams() for _ in range(config.MAX_PLAYERS)]
-    )
+    ai: list[AiParams] = field(default_factory=lambda: [AiParams() for _ in range(config.MAX_PLAYERS)])
     # Per-seat strategy name (key into ai.STRATEGIES); "heuristic" is built in,
     # others come from drop-in files the menu discovers. Same seat-1 indexing.
-    ai_strategy: list[str] = field(
-        default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)]
-    )
+    ai_strategy: list[str] = field(default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)])
 
     # -- A score to beat on this exact setup, or None for an ordinary config --- #
     # Presentation context only: `build_state` ignores it, and it is excluded from
@@ -190,7 +186,7 @@ class Settings:
         if not isinstance(data, dict):
             return cls()
         out = cls()
-        for f in fields(cls):                       # scalar fields
+        for f in fields(cls):  # scalar fields
             if f.name in _STRUCTURED or f.name not in data:
                 continue
             setattr(out, f.name, _coerce(data[f.name], getattr(out, f.name)))
@@ -205,7 +201,7 @@ class Settings:
         raw_ai = data.get("ai")
         if isinstance(raw_ai, list):
             out.ai = [_ai_from_dict(d) for d in raw_ai[: config.MAX_PLAYERS]]
-        while len(out.ai) < config.MAX_PLAYERS:     # pad short lists
+        while len(out.ai) < config.MAX_PLAYERS:  # pad short lists
             out.ai.append(AiParams())
 
         raw_strat = data.get("ai_strategy")
@@ -252,7 +248,7 @@ class Settings:
             if full[f.name] != getattr(blank, f.name):
                 out[f.name] = full[f.name]
 
-        seats = self.players                        # seats beyond the player count
+        seats = self.players  # seats beyond the player count
         ai = _trim_trailing(full["ai"][:seats], asdict(AiParams()))
         if ai:
             out["ai"] = ai
@@ -287,8 +283,7 @@ class Settings:
             if raw[:1] != b"{":
                 raw = zlib.decompress(raw)
             return cls.from_dict(json.loads(raw.decode("utf-8")))
-        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError,
-                zlib.error, ValueError) as e:
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, zlib.error, ValueError) as e:
             raise ValueError(f"invalid settings token: {e}") from e
 
     def without_challenge(self) -> "Settings":
@@ -421,7 +416,7 @@ def fresh_rng() -> random.Random:
     mix = time.time_ns() ^ (next(_roll_count) * 0x9E3779B97F4A7C15)
     try:
         mix ^= int.from_bytes(os.urandom(8), "big")
-    except Exception:      # no OS entropy source (some sandboxed runtimes)
+    except Exception:  # no OS entropy source (some sandboxed runtimes)
         pass
     return random.Random(mix)
 
