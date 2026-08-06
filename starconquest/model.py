@@ -159,6 +159,16 @@ class GameState:
     def non_neutral_players(self) -> list[Player]:
         return [p for p in self.players.values() if not p.is_neutral]
 
+    def is_defeated(self, pid: int) -> bool:
+        """Has ``pid`` been knocked out — no systems left and nothing in transit?
+
+        Just the readable name for ``Player.alive``, which the engine's win check
+        recomputes every turn. Tolerant of a pid that isn't a seat (never defeated),
+        so the shell can ask about the human seat without guarding first.
+        """
+        player = self.players.get(pid)
+        return player is not None and not player.alive
+
     def human(self) -> Optional[Player]:
         for p in self.players.values():
             if p.is_human:

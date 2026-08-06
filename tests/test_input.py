@@ -1140,3 +1140,74 @@ def test_wheel_over_the_panel_scrolls_the_list_not_the_map():
         assert ui.order_scroll == 1
     finally:
         pygame.quit()
+
+
+def _knock_out_the_human(state) -> None:
+    """Hand every human system to seat 2 and resolve a turn, so the engine's win
+    check marks the human defeated exactly as a real loss would."""
+    for sys in state.systems.values():
+        if sys.owner_id == 1:
+            sys.owner_id = 2
+    engine.end_turn(state, decide=lambda s, pid: [])
+    assert state.is_defeated(1) and state.winner is None   # out, but 2 v 3 plays on
+
+
+def test_defeat_reveals_the_board_instead_of_fogging_it(monkeypatch):
+    """A knocked-out human owns nothing to see *from*, so fog.observe returns
+    nothing and every remembered system fell back to a grey "?" — the whole map,
+    when fog was off. Losing now makes you a spectator with the board revealed."""
+    state, ui = _setup()
+    try:
+        monkeypatch.setattr(config, "FOG_SIGHT", 1)
+        monkeypatch.setattr(config, "FOG_SCOUT", 1)
+        main.refresh_fog(state, ui)
+        assert ui.visible != set(state.systems), "still playing: fog applies"
+
+        _knock_out_the_human(state)
+        main.refresh_fog(state, ui)
+        assert ui.visible == set(state.systems)   # not a map full of "?"
+        assert ui.seen == set(state.systems)
+        assert ui.player_intel == {}, "everyone is in sight: live stats, not intel"
+    finally:
+        pygame.quit()
+
+
+def test_fast_forward_only_applies_while_spectating_a_lost_game():
+    """It is the 'just show me who wins' control, so it exists exactly between the
+    human's defeat and the result — and pressing F elsewhere must change nothing."""
+    state, ui = _setup()
+    try:
+        assert ui.can_fast_forward(state) is False
+        main.toggle_fast_forward(state, ui)
+        assert (ui.fast_forward, ui.playing) == (False, False), "no-op while in the game"
+
+        _knock_out_the_human(state)
+        assert ui.can_fast_forward(state) is True
+        main.toggle_fast_forward(state, ui)
+        assert ui.fast_forward is True
+        assert ui.playing is True, "a paused board would make the button look broken"
+        assert main.step_delay(ui, main.AUTOPLAY_MS) == main.FAST_FORWARD_MS
+
+        main.toggle_fast_forward(state, ui)      # ...and back to watching it slowly
+        assert ui.fast_forward is False
+        assert main.step_delay(ui, main.AUTOPLAY_MS) == main.AUTOPLAY_MS
+
+        state.winner = 2                         # decided: nothing left to rush past
+        assert ui.can_fast_forward(state) is False
+    finally:
+        pygame.quit()
+
+
+def test_fast_forward_is_reachable_by_key_and_by_button():
+    """F and the footer button return the same action, and the button answers even
+    under autoplay (like H/A/R/M) since that is when it is most wanted."""
+    state, ui = _setup()
+    try:
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_f, mod=0, unicode="f")
+        assert game_input.handle_event(key, state, ui) == "toggle_fast_forward"
+
+        ui.autoplay = True
+        ui.fast_forward_rect = (100, 100, 120, 24)
+        assert _click_pos(state, ui, (110, 110)) == "toggle_fast_forward"
+    finally:
+        pygame.quit()

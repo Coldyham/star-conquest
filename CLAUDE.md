@@ -289,6 +289,19 @@ intact.
   carries **its own index** into `pending` (`ui.order_hitboxes` is
   `(index, row, delete)`): a positional mapping silently deletes the wrong order
   once only a window of the list is on screen.
+- **Losing makes the human a spectator, not a blind one.** Fog is measured from
+  the systems you hold, so a knocked-out player has nothing to observe *from*:
+  `fog.observe` returns empty and every remembered system falls back to a grey "?"
+  — the whole map, when fog was off. So `main._accumulate_fog` reveals the board
+  (and drops the frozen `player_intel`) once `GameState.is_defeated(human_id)`,
+  which fixes history mode and a resumed game for free since both fold fog through
+  that one helper. Keyed on *defeat*, which is final: revealing for a landless
+  player who still has a fleet flying would leak the map into `Ui.seen` for good if
+  they retook a system. Its companion is **fast forward** (`Ui.can_fast_forward`,
+  `main.step_delay`, the F key / footer button): `main.FAST_FORWARD_MS` replaces the
+  autoplay/play delay so the rest of a lost match resolves a turn per frame. Offered
+  only while spectating — and it starts playback itself if nothing is stepping turns
+  yet, or the button would look broken on a paused board.
 - **`viewstate.Ui` holds all transient interaction state**, including human-only
   quality-of-life features (e.g. `auto_forward` standing rules) that must stay
   out of the pure `GameState`. `main.resolve_turn` expands such UI state into

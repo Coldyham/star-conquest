@@ -261,7 +261,7 @@ def _hud_rects(ui):
     names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
              "clear_button_rect", "quit_button_rect", "exit_history_rect",
-             "rewind_button_rect")
+             "rewind_button_rect", "fast_forward_rect")
     return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
 
 
@@ -276,8 +276,14 @@ def test_hud_buttons_never_overlap_at_touch_scale():
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         state.turn = 137                     # the widest turn counter, and enables History
         ui = _make_ui(state)
-        for history, playing in ((False, False), (False, True), (True, False)):
+        # The third case is the post-defeat footer, which carries one button more
+        # (Fast forward) — the widest strip the bottom bar ever has to tile. History
+        # stays last: it owns the whole bottom bar, so its scrubber rects linger on
+        # the Ui afterwards (harmless live — input only reads them in history mode).
+        for history, playing, defeated in ((False, False, False), (False, True, False),
+                                           (False, True, True), (True, False, False)):
             ui.history, ui.playing = history, playing
+            state.players[1].alive = not defeated
             ui.history_max, ui.history_turn = 12, 4
             render.draw(screen, state, ui)
             rects = _hud_rects(ui)
@@ -290,6 +296,30 @@ def test_hud_buttons_never_overlap_at_touch_scale():
                     assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
     finally:
         _desktop_scale()
+        pygame.quit()
+
+
+def test_fast_forward_button_only_exists_while_spectating():
+    """The footer offers it exactly when ``Ui.can_fast_forward`` does: the human is
+    knocked out and the match is still running. Before that there are turns to play;
+    after it there is nothing left to hurry."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] == 0, "no such control while still playing"
+
+        state.players[1].alive = False
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] > 0
+
+        state.winner = 2
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] == 0, "the game is decided; nothing to skip to"
+    finally:
         pygame.quit()
 
 

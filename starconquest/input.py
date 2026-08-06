@@ -2,8 +2,8 @@
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'quit',
-'toggle_autoplay', 'toggle_play', 'toggle_history', 'rewind', 'menu', 'share')
-or None.
+'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
+'rewind', 'menu', 'share') or None.
 """
 
 from __future__ import annotations
@@ -263,6 +263,10 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
         return "toggle_play"
     if event.key == pygame.K_a:
         return "toggle_autoplay"
+    if event.key == pygame.K_f:
+        # main gates this on the human actually being knocked out (see
+        # Ui.can_fast_forward); from here it is just another action string.
+        return "toggle_fast_forward"
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
         _clear_selected(ui)
         return None
@@ -287,6 +291,8 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         return "toggle_history"
     if ui.autoplay_button_rect[2] and _point_in_rect(pos, ui.autoplay_button_rect):
         return "toggle_autoplay"
+    if ui.fast_forward_rect[2] and _point_in_rect(pos, ui.fast_forward_rect):
+        return "toggle_fast_forward"
     if ui.restart_live_button_rect[2] and _point_in_rect(pos, ui.restart_live_button_rect):
         return "restart"
     if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):

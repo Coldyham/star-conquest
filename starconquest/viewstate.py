@@ -57,6 +57,11 @@ class Ui:
     # toggled by P or the play/pause button. Distinct from autoplay, which hands
     # the human seat to the AI; here the human's own orders still run each step.
     playing: bool = False
+    # Fast forward: drop the delay between auto-resolved turns so a match the human
+    # is no longer in reaches its end quickly (see main.step_delay). Offered only
+    # once the human seat is knocked out — there is nothing left to decide then, and
+    # the only remaining question is who wins.
+    fast_forward: bool = False
     show_help: bool = True
     # History mode: a modal review scene for scrubbing back through the recorded
     # match. While active, main draws a reconstructed past board (not the live
@@ -153,11 +158,14 @@ class Ui:
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""     # outcome of the last share, drawn under the button
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
-    # actions (A: autoplay, R: new map). menu_button_rect above is shared with
-    # the game-over overlay — the two scenes never draw at the same time, so
-    # whichever last ran render.draw owns the current value.
+    # actions (A: autoplay, R: new map, F: fast forward). menu_button_rect above is
+    # shared with the game-over overlay — the two scenes never draw at the same
+    # time, so whichever last ran render.draw owns the current value.
     autoplay_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     restart_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Drawn (and hit-tested) only while the human is knocked out and the match is
+    # still running — the one situation `fast_forward` applies to.
+    fast_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Quit (Esc) and Clear/cancel (X) touch equivalents. quit_button_rect is
     # shared between the live footer and the game-over overlay, like
     # menu_button_rect above; clear_button_rect is live-play only.
@@ -175,6 +183,18 @@ class Ui:
     reset_view_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     zoom_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    # -- spectating --------------------------------------------------------- #
+    def can_fast_forward(self, state: GameState) -> bool:
+        """Is the 'just show me who wins' control available?
+
+        Only while the human seat is knocked out and the match is still running:
+        there are no decisions left to rush past then, and the alternative is
+        sitting through a conclusion you have no part in. Render gates the footer
+        button on this and main gates the F key on it, so the two can never
+        disagree about when fast forward means anything.
+        """
+        return state.winner is None and state.is_defeated(self.human_id)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

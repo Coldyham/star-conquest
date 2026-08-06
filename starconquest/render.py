@@ -838,7 +838,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 # drawing whichever survive — a stale rect would otherwise still answer clicks.
 _FOOTER_RECTS = ("quit_button_rect", "clear_button_rect", "menu_button_rect",
                  "restart_live_button_rect", "history_button_rect",
-                 "autoplay_button_rect", "play_pause_rect")
+                 "autoplay_button_rect", "play_pause_rect", "fast_forward_rect")
 
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
@@ -852,7 +852,9 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     zeroed) rather than drawn overlapping. The ranking matters because a touch
     player has no keys to fall back on: Menu survives longest, since it reaches the
     setup screen and Quit from there, and Clear goes first, since the popup's own
-    Cancel and the × on a queued row already do its job.
+    Cancel and the × on a queued row already do its job. Fast forward ranks just
+    below those two, because it is only ever offered in the one situation it is the
+    point of the screen — watching a match you are out of.
     """
     w = surface.get_width()
     font = _fonts()["normal"]
@@ -867,11 +869,11 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # quit is the only touch equivalent of Esc — without it a player with no
     # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
     # can only ask the browser to close the window (see main.leave_app).
-    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 6))
+    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 7))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1))
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 7))
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 8))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the R key exactly.
     specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2))
@@ -885,6 +887,14 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if not ui.autoplay:
         specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"),
                       *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 5))
+    # Fast forward: only while the human is knocked out and the match plays on, so
+    # the rest of it can be watched at speed rather than a turn every 350ms. Same
+    # gate the F key goes through, so the button is drawn exactly when it means
+    # something.
+    if ui.can_fast_forward(state):
+        specs.append(("fast_forward_rect",
+                      _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"),
+                      *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 6))
 
     widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
     avail = w - config.HUD_RIGHT_W - config.HUD_PAD * 2

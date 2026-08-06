@@ -30,6 +30,9 @@ from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
 PLAY_MS = 350      # delay between turns while play/pause (P) is running
+# ...and while fast-forwarding: no wait at all, so the loop resolves a turn every
+# frame (config.FPS turns/second) instead of one per delay above.
+FAST_FORWARD_MS = 0
 
 
 def build_view(state: GameState) -> WorldView:
@@ -108,6 +111,18 @@ def _accumulate_fog(state: GameState, human_id: int, seen: set[int],
     return the systems currently in full view. Mutates `seen`/`intel` in place so
     the same helper serves both the live turn loop and replaying a resumed game.
     """
+    if state.is_defeated(human_id):
+        # Knocked out: there is no territory left to observe *from*, so `fog.observe`
+        # returns nothing and every remembered system falls back to a grey "?" — the
+        # whole map, when fog was off. A defeated player is a spectator with nothing
+        # left to hide from them, so reveal the rest of the match in full (what
+        # history mode already does for a finished game). Only on actual defeat,
+        # which is final: revealing while a landless player still has a fleet flying
+        # would leak the map into `seen` for good if they retook a system.
+        everything = set(state.systems)
+        seen |= everything
+        intel.clear()          # every living rival is in sight: live stats, not intel
+        return everything
     visible, scouted = fog.observe(state, human_id, config.FOG_SIGHT, config.FOG_SCOUT)
     seen |= visible | scouted      # scouted folds into memory; both render grey-"?"
     for pid, player in state.players.items():
@@ -164,6 +179,29 @@ def hand_turns(log: GameLog) -> int:
     match is decided, and is disclosed on a challenge link rather than voiding it.
     """
     return sum(1 for i in range(log.turn_count) if not log.turn_is_ai(i))
+
+
+def toggle_fast_forward(state: GameState, ui: Ui) -> None:
+    """Flip fast forward, where it applies (``Ui.can_fast_forward`` — the human is
+    out and the match plays on); a no-op anywhere else, so the F key can't secretly
+    arm it mid-game.
+
+    Turning it on also starts playback when nothing is stepping turns yet: the
+    control is 'show me the end', and on a paused board it would otherwise look
+    broken. Plain play rather than autoplay, because a knocked-out seat has nothing
+    left to hand over — its orders are empty either way.
+    """
+    if not ui.can_fast_forward(state):
+        return
+    ui.fast_forward = not ui.fast_forward
+    if ui.fast_forward and not (ui.autoplay or ui.playing):
+        ui.playing = True
+
+
+def step_delay(ui: Ui, base: int) -> int:
+    """How long to wait before auto-resolving the next turn: ``base`` normally,
+    nothing while fast-forwarding (a turn per frame)."""
+    return FAST_FORWARD_MS if ui.fast_forward else base
 
 
 def carry_autoplay(ui: Ui) -> bool:
@@ -560,6 +598,9 @@ async def main() -> None:
                 ui.reset_selection()
                 ui.clear_pending()
                 auto_accum = 0
+            elif action == "toggle_fast_forward":
+                toggle_fast_forward(state, ui)   # spectating only; else a no-op
+                auto_accum = play_accum = 0
             elif action == "restart":
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed,
@@ -618,12 +659,12 @@ async def main() -> None:
                     and not confirm_quit and not confirm_rewind and not ui.history):
                 if ui.autoplay:
                     auto_accum += dt
-                    if auto_accum >= AUTOPLAY_MS:
+                    if auto_accum >= step_delay(ui, AUTOPLAY_MS):
                         auto_accum = 0
                         resolve_turn(state, ui, log, settings)
                 elif ui.playing:
                     play_accum += dt
-                    if play_accum >= PLAY_MS:
+                    if play_accum >= step_delay(ui, PLAY_MS):
                         play_accum = 0
                         resolve_turn(state, ui, log, settings)
 
