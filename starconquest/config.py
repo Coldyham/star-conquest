@@ -160,6 +160,12 @@ SEND_POPUP_BTN_H = 22       # px: height of each button row
 SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
 
+# Sliders (the send popup's count slider and history mode's turn scrubber — the
+# same widget, drawn by render._draw_slider). The knob is inset by its radius at
+# both ends of the track, so it never overhangs the box it sits in.
+SLIDER_TRACK_H = 6          # px: thickness of the track
+SLIDER_KNOB_R = 7           # px: radius of the knob
+
 # Map camera (pan/zoom). Ratios, not pixels — relative to WorldView's one-time
 # fit-to-viewport scale (zoom == 1.0), so they don't scale with apply_ui_scale.
 ZOOM_MIN = 1.0              # can't zoom out past the original fit-all view
@@ -219,6 +225,7 @@ _SCALABLE = (
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
+    "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )
 _BASE_VALUES = {name: globals()[name] for name in _SCALABLE}

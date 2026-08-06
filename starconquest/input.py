@@ -43,12 +43,17 @@ def _play_rect_center() -> tuple[float, float]:
 
 
 def _seek_scrubber(ui: Ui, pos) -> None:
-    """Map a click/drag x within the scrubber track to a turn index (0..max)."""
+    """Map a click/drag x within the scrubber track to a turn index (0..max).
+
+    The travel is the recorded rect inset by the knob's radius at each end, which
+    is where ``render._draw_slider`` puts the knob — invert anything else and the
+    knob drifts away from the pointer toward the extremes."""
     x, _y, w, _h = ui.scrubber_rect
-    if w <= 0 or ui.history_max <= 0:
+    travel = w - 2 * config.SLIDER_KNOB_R
+    if travel <= 0 or ui.history_max <= 0:
         ui.history_turn = 0
         return
-    t = max(0.0, min(1.0, (pos[0] - x) / w))
+    t = max(0.0, min(1.0, (pos[0] - x - config.SLIDER_KNOB_R) / travel))
     ui.history_turn = round(t * ui.history_max)
 
 
@@ -140,7 +145,10 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
 
     if event.type == pygame.MOUSEMOTION:
-        if ui.dragging_popup:            # dragging the send popup by its background
+        if ui.dragging_slider:           # dragging the popup's count slider
+            # first, so a slider drag can never also move the popup it sits on
+            ui.set_slider_from_x(state, event.pos[0])
+        elif ui.dragging_popup:          # dragging the send popup by its background
             ui.popup_pos = (event.pos[0] - ui.popup_drag_off[0],
                             event.pos[1] - ui.popup_drag_off[1])
         elif ui.drag_src is not None and event.buttons[0]:
@@ -178,6 +186,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ui.dragging_popup = False
+        ui.dragging_slider = False
         if ui.drag_active and ui.drag_src is not None:
             shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
             _commit_drag(state, ui, event.pos, shift)
@@ -203,7 +212,8 @@ def _arm_drag(state: GameState, ui: Ui, pos) -> None:
     element doesn't arm one, so drag never fights those interactions."""
     node = pick_node(state, ui, pos)
     if (node is not None and ui.mode == SELECTED and ui.selected == node
-            and not ui.dragging_popup and state.systems[node].owner_id == ui.human_id):
+            and not ui.dragging_popup and not ui.dragging_slider
+            and state.systems[node].owner_id == ui.human_id):
         ui.drag_src = node
         ui.drag_start = pos
         ui.drag_pos = pos
@@ -233,7 +243,7 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
     if not state.are_adjacent(src, target):
         return
     ui.reset_selection()
-    ui.sel_order = ui.sel_forward = None
+    ui.sel_forward = None
     ui.selected = src
     ui.mode = SELECTED
     forward = shift or ui.available(state, src) == 0
@@ -242,14 +252,12 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
 
 def _clear_selected(ui: Ui) -> None:
     """Context-sensitive cancel/clear — shared by the X/Backspace/Delete keys and
-    their footer button: discard the send being adjusted in the popup, else drop
-    whichever queued order or forward rule is highlighted, else drop the selected
-    system's own forward rule. A no-op when none of those apply."""
+    their footer button: discard whatever the popup is editing (a composed send, or
+    the queued order / standing rule it was reopened on), else drop a dormant rule
+    highlighted without a popup, else drop the selected system's own forward rule.
+    A no-op when none of those apply."""
     if ui.mode == CHOOSING:
         ui.cancel_send()
-    elif ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-        del ui.pending[ui.sel_order]
-        ui.sel_order = None
     elif ui.sel_forward is not None:
         ui.clear_forward(ui.sel_forward)
     elif ui.selected is not None:
@@ -352,6 +360,13 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
             ui.cancel_send()
             return None
+        # the count slider: grab it and jump to where the press landed. Must be
+        # tested before the popup-background drag below, which would otherwise
+        # claim the press and move the whole panel instead.
+        if ui.slider_rect[2] and _point_in_rect(pos, ui.slider_rect):
+            ui.dragging_slider = True
+            ui.set_slider_from_x(state, pos[0])
+            return None
         # a click on the popup background (none of the buttons above) grabs it to
         # drag — lets the user move it off anything it's covering
         if ui.popup_rect[2] and _point_in_rect(pos, ui.popup_rect):
@@ -382,7 +397,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.sel_order = None
             return None
         if _point_in_rect(pos, row):
-            ui.select_order(idx)
+            ui.edit_order(state, idx)
             return None
 
     # Same panel, standing auto-forward rules: a delete button clears the
@@ -394,7 +409,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.clear_forward(src)
             return None
         if _point_in_rect(pos, row):
-            ui.select_forward(src)
+            ui.edit_forward(state, src)
             return None
 
     node = pick_node(state, ui, pos)
@@ -406,9 +421,9 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             _cancel(ui)
             _arm_pan(ui, pos)
         elif hit[0] == "order":
-            ui.select_order(hit[1])
+            ui.edit_order(state, hit[1])
         else:
-            ui.select_forward(hit[1])
+            ui.edit_forward(state, hit[1])
         return None
 
     ui.sel_order = None    # selecting a system is composing, not editing an order/rule
@@ -459,9 +474,9 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
         if d <= config.LANE_PICK_DIST:
             hits.append((d, ("order", i)))
     for src, (dest, _keep) in ui.auto_forward.items():
-        s = state.systems.get(src)
-        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
-            continue  # only the rules render (and so are pickable)
+        if not ui.rule_is_live(state, src):
+            continue  # only the rules that render are pickable
+        s = state.systems[src]
         a = ui.view.to_screen(s.pos)
         b = ui.view.to_screen(state.systems[dest].pos)
         d = point_segment_dist(pos, a, b)
@@ -480,9 +495,7 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
 def _cancel(ui: Ui) -> None:
     if ui.mode == CHOOSING:
         ui.close_send()          # close the popup, keeping the committed send
-    elif ui.sel_order is not None:
-        ui.sel_order = None      # deselect a highlighted queued order
     elif ui.sel_forward is not None:
-        ui.sel_forward = None    # deselect a highlighted auto-forward rule
+        ui.sel_forward = None    # deselect a highlighted (dormant) auto-forward rule
     else:
         ui.reset_selection()

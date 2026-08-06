@@ -127,8 +127,11 @@ def _wrap(font, text: str, width: int) -> list[str]:
 # --------------------------------------------------------------------------- #
 def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     surface.fill(config.COLOR_BG)
-    # zero the button rects; whichever count/popup draw runs (if any) re-records them
-    ui.minus_rect = ui.plus_rect = (0, 0, 0, 0)
+    # zero the popup's rects; _draw_send_popup re-records them if it runs. The
+    # slider's matters most: input maps a drag onto whatever rect is recorded, and a
+    # stale one would keep steering a count after the popup had gone.
+    ui.minus_rect = ui.plus_rect = ui.slider_rect = (0, 0, 0, 0)
+    ui.popup_rect = (0, 0, 0, 0)
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
@@ -151,12 +154,9 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     if not ui.history and ui.drag_active and ui.drag_src is not None:
         _draw_drag(surface, state, ui)
     if not ui.history:
-        # the active count + −/+ buttons (and the send popup) draw last of the map
-        # layer so nodes/fleets never occlude them (they must stay visible/clickable)
-        if ui.mode == CHOOSING:
-            _draw_send_popup(surface, state, ui)
-        else:
-            _draw_count_controls(surface, state, ui)
+        # the send popup draws last of the map layer so nodes/fleets never occlude
+        # it (it must stay visible and clickable); it early-outs when closed
+        _draw_send_popup(surface, state, ui)
     surface.set_clip(None)
     if not ui.history:
         _draw_zoom_controls(surface, ui)
@@ -330,13 +330,10 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
         # place the count 40% of the way toward the destination, not the midpoint,
         # so two opposite-direction orders on the same lane don't overlap labels
-        # the count for the order being edited (selected) is drawn later, on top,
-        # by _draw_count_controls (with −/+ buttons); others get a plain label here
-        if not selected:
-            lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
-            ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
-            _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT,
-                  center=(lx, ly - config.s(10)))
+        lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
+        ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
+        _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT,
+              center=(lx, ly - config.s(10)))
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
@@ -359,54 +356,32 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
         u = (dx / length, dy / length)
         inset = config.s(20)
         _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
-        # the selected rule's keep is drawn later (on top, with −/+ buttons) by
-        # _draw_count_controls; others get a plain dim label here
-        if not selected:
-            small = _fonts()["small"]
-            _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT_DIM,
-                        _rule_label_center(pa, pb, small))
+        small = _fonts()["small"]
+        _label_pill(surface, small, f"keep {keep}",
+                    config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM,
+                    _rule_label_center(pa, pb, small))
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
-    """The move being composed right now: a bright arrow. The live count and its
-    −/+ buttons are drawn separately (on top) by _draw_count_controls.
+    """The move the popup is editing right now: a bright arrow. Dashed on the
+    Forward tab, matching how standing rules are drawn everywhere else — the popup
+    now opens on existing rules too, so a solid line would misread as a one-shot.
+    The count itself lives in the popup (drawn on top, last of the map layer).
     """
     if ui.mode != CHOOSING or ui.selected is None or ui.dest is None:
         return
     pa = ui.view.to_screen(state.systems[ui.selected].pos)
     pb = ui.view.to_screen(state.systems[ui.dest].pos)
     color = config.COLOR_SELECT
-    pygame.draw.line(surface, color, pa, pb, config.s(3))
+    if ui.forward_armed:
+        _draw_dashed_line(surface, color, pa, pb, width=config.s(3))
+    else:
+        pygame.draw.line(surface, color, pa, pb, config.s(3))
     dx, dy = pb[0] - pa[0], pb[1] - pa[1]
     length = math.hypot(dx, dy) or 1.0
     u = (dx / length, dy / length)
     inset = config.s(20)
     _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
-
-
-def _draw_count_controls(surface, state: GameState, ui: Ui) -> None:
-    """Draw the active ship-count label + −/+ buttons on top of the map layer so
-    nodes and fleets never occlude them. Handles the queued order being edited
-    via a lane/list click, and the standing rule's keep being edited; records the
-    button hit-rects. (The active send in CHOOSING mode gets the fuller popup
-    instead — see _draw_send_popup.)"""
-    if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-        o = ui.pending[ui.sel_order]
-        pa = ui.view.to_screen(state.systems[o.source_id].pos)
-        pb = ui.view.to_screen(state.systems[o.dest_id].pos)
-        lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
-        ly = int(pa[1] + (pb[1] - pa[1]) * 0.4)
-        _draw_count_stepper(surface, (lx, ly - config.s(10)), o.ships, config.COLOR_SELECT, ui)
-    elif ui.sel_forward is not None and ui.sel_forward in ui.auto_forward:
-        src = ui.sel_forward
-        dest, keep = ui.auto_forward[src]
-        s = state.systems.get(src)
-        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
-            return  # a dormant/unowned rule isn't drawn, so it gets no buttons
-        pa = ui.view.to_screen(s.pos)
-        pb = ui.view.to_screen(state.systems[dest].pos)
-        center = _rule_label_center(pa, pb, _fonts()["normal"])
-        _draw_count_stepper(surface, center, keep, config.COLOR_SELECT, ui, label=f"keep {keep}")
 
 
 def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tuple[int, int]:
@@ -442,12 +417,15 @@ def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tup
 
 
 def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
-    """The on-map action panel opened when a destination is picked. Send/Forward
-    tabs choose between a one-shot send (auto-committed, default send-all, retuned
-    with −/+, Half, All) and a standing forward rule (−/+ sets ships to keep). A
-    Cancel button at the bottom discards the active send/rule on either tab.
-    Records every button's hit-rect on ``ui`` for input (store-rect-then-test)."""
-    if ui.selected is None or ui.dest is None:
+    """The on-map action panel: the one editor for a ship count, opened both when a
+    destination is picked and when an already-queued order or standing rule is
+    reopened (see Ui.edit_order / Ui.edit_forward). Send/Forward tabs choose between
+    a one-shot send (auto-committed, default send-all, retuned with the slider, −/+,
+    Half, All) and a standing forward rule (the same controls set ships to keep). The
+    button at the bottom discards whichever is live — labelled Cancel while composing,
+    Delete when the popup was opened on something that already existed.
+    Records every control's hit-rect on ``ui`` for input (store-rect-then-test)."""
+    if ui.mode != CHOOSING or ui.selected not in state.systems or ui.dest not in state.systems:
         return
     pa = ui.view.to_screen(state.systems[ui.selected].pos)
     pb = ui.view.to_screen(state.systems[ui.dest].pos)
@@ -460,16 +438,27 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     # rows are tall enough to hold their own label, and to be tapped on a phone
     bh = _tap_size(max(config.SEND_POPUP_BTN_H, font.get_height() + config.ROW_GAP))
     w = config.SEND_POPUP_W
-    # Fixed layout — the same six rows on either tab so the box never resizes:
-    # tabs, title, effect caption, stepper, two presets, cancel.
-    rows = 6
+    # Fixed layout — the same seven rows on either tab so the box never resizes:
+    # tabs, title, effect caption, stepper, slider, two presets, cancel.
+    rows = 7
+    sw, sh = surface.get_size()
+    # On a short screen at touch scale the stack can outgrow the band it is placed
+    # in, and since the clamp below pins an oversized panel to the top, what falls
+    # off the bottom (and out of draw's clip) is the destructive Delete row — still
+    # live, because input hit-tests the recorded rect, not what survived clipping.
+    # So give up the tap floor before giving up a row, down to what the labels need.
+    # The budget is the placement band itself, not the viewport, so the two agree.
+    y_lo = config.HUD_TOP_H + 2
+    budget = sh - config.HUD_BOTTOM_H - y_lo
+    if pad * 2 + bh * rows + gap * (rows - 1) > budget:
+        bh = max(font.get_height() + config.ROW_GAP,
+                 (budget - pad * 2 - gap * (rows - 1)) // rows)
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
     # placement: honour a user-dragged position (clamped to stay reachable),
     # else auto-anchor to whichever side of the lane covers the fewest nodes
-    sw, sh = surface.get_size()
     x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
-    y_lo, y_hi = config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h
+    y_hi = sh - config.HUD_BOTTOM_H - h
     if ui.popup_pos is not None:
         x = _clamp(ui.popup_pos[0], x_lo, x_hi)
         y = _clamp(ui.popup_pos[1], y_lo, y_hi)
@@ -531,6 +520,17 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
     cy += bh + gap
 
+    # slider row: the coarse move −/+ can't make. The whole row is the grab target
+    # (a dead zone at either end would fall through to the popup-drag underneath),
+    # and it is recorded from this frame's panel position, so it follows the popup
+    # wherever the player drags it.
+    track = pygame.Rect(inner, cy, iw, bh)
+    lo, hi, value = ui.slider_range(state)
+    t = 0.0 if hi <= lo else max(0.0, min(1.0, (value - lo) / (hi - lo)))
+    _draw_slider(surface, track, t, accent, config.COLOR_TEXT)
+    ui.slider_rect = (track.x, track.y, track.w, track.h)
+    cy += bh + gap
+
     # preset row: Half/All (Send) or Keep half/Keep 0 (Forward) — left, right map
     # to send_half_rect / send_all_rect on both tabs (input reads the mode). The
     # preset matching the current value lights up in the mode accent.
@@ -548,14 +548,51 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.send_all_rect = (right.x, right.y, right.w, right.h)
     cy += bh + gap
 
-    # Cancel row (both tabs): discard the active send / forward rule
+    # Discard row (both tabs): drop the active send / forward rule. It reads
+    # "Cancel" only while composing — reopened on something that was already on the
+    # board, the same press is a deletion, and should say so.
     cancel = pygame.Rect(inner, cy, iw, bh)
-    _draw_popup_button(surface, cancel, "Cancel", danger=True)
+    if ui.editing_existing:
+        discard = "Delete rule" if ui.forward_armed else "Delete order"
+    else:
+        discard = "Cancel"
+    _draw_popup_button(surface, cancel, discard, danger=True)
     ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v)) if hi >= lo else lo
+
+
+# Slider track colour, shared by the popup's count slider and the scrubber — kept
+# local to the drawing module like the HUD button palette above.
+_SLIDER_TROUGH = (40, 44, 60)
+
+
+def _draw_slider(surface, rect: pygame.Rect, t: float, fill_col, knob_col) -> None:
+    """A horizontal slider filling ``rect``: trough, filled portion, round knob at
+    fraction ``t``. Shared by the send popup's count slider and history mode's turn
+    scrubber, which are the same widget at different sizes.
+
+    The knob *travels* over ``rect`` inset by its own radius at each end, so it
+    never overhangs the box it sits in — and callers mapping a pointer x back to a
+    value must invert exactly that (see ``Ui.set_slider_from_x``), or the knob
+    drifts away from the finger at the extremes.
+    """
+    thick = config.SLIDER_TRACK_H
+    knob = config.SLIDER_KNOB_R
+    cy = rect.centery
+    travel = max(0, rect.w - 2 * knob)
+    trough = pygame.Rect(rect.x + knob, cy - thick // 2, travel, thick)
+    pygame.draw.rect(surface, _SLIDER_TROUGH, trough, border_radius=max(1, thick // 2))
+    fill_w = int(travel * max(0.0, min(1.0, t)))
+    if fill_w > 0:
+        pygame.draw.rect(surface, fill_col,
+                         pygame.Rect(trough.x, trough.y, fill_w, thick),
+                         border_radius=max(1, thick // 2))
+    hx = trough.x + fill_w
+    pygame.draw.circle(surface, knob_col, (hx, cy), knob)
+    pygame.draw.circle(surface, fill_col, (hx, cy), knob, config.s(2))
 
 
 def _draw_popup_button(surface, rect: pygame.Rect, label: str,
@@ -598,29 +635,6 @@ def _draw_tab(surface, rect: pygame.Rect, label: str, active: bool, accent) -> N
                          border_top_left_radius=radius, border_top_right_radius=radius)
         col = config.COLOR_TEXT_DIM
     _text(surface, _fonts()["small"], label, col, center=rect.center)
-
-
-def _draw_count_stepper(surface, center, value, color, ui: Ui, label: str | None = None) -> None:
-    """A count label flanked by clickable −/+ buttons, for adjusting the count
-    without a mouse wheel. ``label`` overrides the shown text (e.g. "keep 3" for a
-    rule); it defaults to the bare number. Records the button rects on ``ui`` so
-    input can hit-test them (same store-rect-then-test handoff as end_turn_rect)."""
-    font = _fonts()["normal"]
-    img = font.render(label if label is not None else str(value), True, color)
-    lbl = img.get_rect(center=center)
-    pill = lbl.inflate(config.s(10), config.s(4))
-    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=config.s(5))
-    surface.blit(img, lbl)
-
-    s = _tap_size(config.STEPPER_SIZE)
-    gap = config.s(4)
-    top = center[1] - s // 2
-    minus = pygame.Rect(pill.left - gap - s, top, s, s)
-    plus = pygame.Rect(pill.right + gap, top, s, s)
-    _draw_step_button(surface, minus, "-", color)
-    _draw_step_button(surface, plus, "+", color)
-    ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
-    ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
 
 
 def _draw_step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
@@ -1017,11 +1031,10 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     # persistent "clear all forwarding" button, shown whenever any rule exists
     if ui.auto_forward:
         y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
-    editing = _editing_order(ui)
+    # A highlighted rule wins the panel's focus over a plain hover; while the popup
+    # is open `ui.selected` is that rule's source anyway, so the two agree.
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
-    if editing is not None:
-        focus = editing.source_id
-    elif editing_rule is not None:
+    if editing_rule is not None:
         focus = editing_rule
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
@@ -1031,12 +1044,6 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
 
     y = _panel_system(surface, state, ui, x, y, state.systems[focus])
     gap = config.ROW_GAP * 2                    # breathing space between sections
-
-    if editing is not None:
-        if editing.dest_id in state.systems:
-            y = _panel_lane(surface, state, ui, x, y + gap, focus, editing.dest_id)
-        _panel_editing(surface, ui, x, y + gap, editing)
-        return
 
     dest = _panel_lane_target(state, ui, focus)
     if dest is not None:
@@ -1058,17 +1065,6 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     _text(surface, font, label, config.COLOR_TEXT, center=r.center)
     ui.clear_forward_rect = (r.x, r.y, r.w, r.h)
     return y + h + config.s(10)
-
-
-def _editing_order(ui: Ui):
-    """The queued order currently selected for editing, or None. Suppressed in
-    CHOOSING mode: there the send popup (not the side panel) is the editor, and
-    the panel already shows the lane's live 'Sending' count."""
-    if ui.mode == CHOOSING:
-        return None
-    if ui.sel_order is not None and 0 <= ui.sel_order < len(ui.pending):
-        return ui.pending[ui.sel_order]
-    return None
 
 
 _ORDER_ROW_H = 22        # normal row pitch
@@ -1227,14 +1223,6 @@ def _draw_x_button(surface, rect, boxed: bool = False) -> None:
     pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), lw)
 
 
-def _panel_editing(surface, ui: Ui, x, y, o) -> int:
-    y = _head(surface, x, y, "Editing order", config.COLOR_SELECT)
-    y = _row(surface, x, y, f"Sending: {o.ships}", config.COLOR_SELECT)
-    hint = "−/+ adjust  ·  × removes" if config.touch_ui else "wheel or −/+  ·  X: remove"
-    y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
-    return y
-
-
 def _row(surface, x, y, text, color) -> int:
     """One line of small panel text; returns the y for the line below it."""
     if text:
@@ -1324,7 +1312,7 @@ Tap a system to inspect it.
 Tap one of yours, then a neighbour, to send its garrison down that lane — or drag
 between the two.
 
-Then: −/+, Half or All retune the count. The Forward tab makes it a standing rule
+Then: the slider, −/+, Half or All retune the count. The Forward tab makes it a standing rule
 instead — everything past 'keep' flows on, every turn.
 
 Tap a queued arrow, or its row below, to change it.
@@ -1338,7 +1326,7 @@ Click a system to inspect it.
 Click one of yours, then a neighbour, to send its garrison down that lane — or
 drag between the two.
 
-Then: −/+, Half or All retune the count. The Forward tab makes it a standing rule
+Then: the slider, −/+, Half or All retune the count. The Forward tab makes it a standing rule
 instead — everything past 'keep' flows on, every turn. Shift+click arms one
 directly.
 
@@ -1367,8 +1355,8 @@ def _panel_lane_target(state: GameState, ui: Ui, focus: int):
 
     That last case is why a rule shows its lane at all: on the map the rule's own
     'keep' label sits on the lane it uses, so the panel is where you read that
-    lane's length and travel time (a queued order already gets the same section via
-    ``_panel_editing``'s branch in ``_draw_side_panel``).
+    lane's length and travel time. (A queued order reopened for editing takes the
+    first case instead — the popup sets ``ui.dest`` to its destination.)
     """
     if ui.mode == CHOOSING and ui.dest is not None:
         return ui.dest
@@ -1576,8 +1564,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     return lines
 
 
-# Scrubber palette — a cool track with a bright fill/knob, echoing the play button.
-_SCRUB_TROUGH = (40, 44, 60)
+# Scrubber fill — a bright blue on the shared _SLIDER_TROUGH, echoing the play button.
 _SCRUB_FILL = (110, 140, 200)
 
 
@@ -1593,8 +1580,6 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     bh = config.FOOTER_BTN_H
     y = by + (config.HUD_BOTTOM_H - bh) // 2
     gap = config.BTN_GAP
-    thick = config.s(6)                     # track thickness
-    knob = config.s(7)                      # knob radius
 
     # Exit button (far left).
     exit_label = _key_hint("Exit", "Esc")
@@ -1635,19 +1620,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Track fills the space between the play button and the label slot.
     track_x = pp.right + config.HUD_PAD
     track_w = max(1, label_x - config.HUD_PAD - track_x)
-    ui.scrubber_rect = (track_x, y, track_w, bh)
-    pygame.draw.rect(surface, _SCRUB_TROUGH,
-                     pygame.Rect(track_x, cy - thick // 2, track_w, thick),
-                     border_radius=thick // 2)
+    track = pygame.Rect(track_x, y, track_w, bh)
+    ui.scrubber_rect = (track.x, track.y, track.w, track.h)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
-    fill_w = int(track_w * t)
-    if fill_w > 0:
-        pygame.draw.rect(surface, _SCRUB_FILL,
-                         pygame.Rect(track_x, cy - thick // 2, fill_w, thick),
-                         border_radius=thick // 2)
-    hx = track_x + fill_w
-    pygame.draw.circle(surface, config.COLOR_TEXT, (hx, cy), knob)
-    pygame.draw.circle(surface, _SCRUB_FILL, (hx, cy), knob, config.s(2))
+    _draw_slider(surface, track, t, _SCRUB_FILL, config.COLOR_TEXT)
 
 
 def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:

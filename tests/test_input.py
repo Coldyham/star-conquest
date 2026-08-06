@@ -284,6 +284,116 @@ def test_popup_button_click_does_not_start_drag():
         pygame.quit()
 
 
+def test_slider_drag_sets_the_count_and_never_moves_the_popup():
+    """The slider sits on the popup's draggable background, so its press must be
+    claimed first — otherwise grabbing it would slide the whole panel instead."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 20
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+        assert ui.mode == CHOOSING and ui.chosen == 20
+
+        r = config.SLIDER_KNOB_R
+        ui.popup_rect = (100, 100, 120, 200)          # normally recorded by render
+        ui.slider_rect = (100 + r, 150, 100 + 2 * r, 30)   # 100px of travel inside it
+
+        _click_pos(state, ui, (100 + 2 * r + 50, 160))     # grab it halfway along
+        assert ui.dragging_slider is True
+        assert ui.dragging_popup is False and ui.popup_pos is None
+        assert ui.chosen == 10 and ui.pending[0].ships == 10
+
+        # dragging tracks the pointer, and clamps at both ends of the travel
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(100 + 2 * r + 75, 160)), state, ui
+        )
+        assert ui.chosen == 15
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(9999, 160)), state, ui
+        )
+        assert ui.chosen == 20
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(-9999, 160)), state, ui
+        )
+        assert ui.chosen == 1                          # a send is never zero ships
+        assert ui.popup_pos is None                    # ...and the panel never moved
+
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(0, 160), button=1), state, ui
+        )
+        assert ui.dragging_slider is False
+    finally:
+        pygame.quit()
+
+
+def test_slider_follows_a_dragged_popup():
+    """The slider's rect is re-recorded from the panel's position every frame, so
+    it keeps working wherever the player parks the popup."""
+    state, ui = _setup()
+    try:
+        from starconquest import render
+
+        render._FONTS.clear()      # rebuild fonts under this session
+        screen = pygame.display.get_surface()
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 20
+        nbr = state.systems[home].neighbors[0]
+        _click(state, ui, home)
+        _click(state, ui, nbr)
+
+        def offset_in_panel():
+            return (ui.slider_rect[0] - ui.popup_rect[0],
+                    ui.slider_rect[1] - ui.popup_rect[1],
+                    ui.slider_rect[2], ui.slider_rect[3])
+
+        render.draw(screen, state, ui)
+        assert ui.slider_rect[2] > 0
+        before, where = offset_in_panel(), ui.popup_rect
+
+        ui.popup_pos = (config.HUD_PAD, config.HUD_TOP_H + config.HUD_PAD)
+        render.draw(screen, state, ui)
+        assert ui.popup_rect != where          # the panel really did move
+        assert offset_in_panel() == before     # ...and the slider moved with it
+
+        # and a press at the new location still drives the count
+        x, y, w, h = ui.slider_rect
+        _click_pos(state, ui, (x + w // 2, y + h // 2))
+        assert ui.dragging_slider is True
+        assert 1 <= ui.chosen < 20
+    finally:
+        pygame.quit()
+
+
+def test_slider_is_inert_with_nothing_to_size():
+    """An empty source gives the slider a zero-width range, and a popup closed
+    mid-drag gives it a zeroed rect. Neither may divide by zero."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 0
+        _click(state, ui, home)
+        _click(state, ui, nbr)          # empty source -> arms Forward, garrison 0
+        assert ui.mode == CHOOSING and ui.forward_armed
+        assert ui.slider_range(state) == (0, 0, 0)
+
+        ui.slider_rect = (100, 150, 100, 30)
+        _click_pos(state, ui, (180, 160))
+        assert ui.keep == 0
+
+        # popup closed mid-drag: render zeroes the rect, motion must be a no-op
+        ui.dragging_slider = True
+        ui.slider_rect = (0, 0, 0, 0)
+        game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=(180, 160)), state, ui
+        )
+        assert ui.keep == 0
+    finally:
+        pygame.quit()
+
+
 def test_shift_click_arms_forward_rule_from_empty_system():
     """A system with no ships free right now can still get a standing rule set
     up in advance, so future production forwards automatically. Shift+click arms
@@ -806,7 +916,9 @@ def test_x_key_clears_forward_rule():
 from starconquest.model import Order  # noqa: E402
 
 
-def test_click_queued_lane_selects_order():
+def test_click_queued_lane_reopens_the_popup_on_that_order():
+    """Editing a queued order is the same interaction as composing one: the popup
+    reopens on it, on the Send tab, at its current count."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -815,17 +927,21 @@ def test_click_queued_lane_selects_order():
 
         _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
         assert ui.sel_order == 0
+        assert ui.mode == CHOOSING and not ui.forward_armed
+        assert (ui.selected, ui.dest) == (home, nbr)
+        assert ui.chosen == 3
+        assert ui.editing_existing          # so the popup says Delete, not Cancel
     finally:
         pygame.quit()
 
 
-def test_wheel_edits_selected_order_in_place():
+def test_wheel_edits_reopened_order_in_place():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.sel_order = 0
+        ui.edit_order(state, 0)
 
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.pending[0].ships == 4
@@ -841,17 +957,39 @@ def test_wheel_edits_selected_order_in_place():
         pygame.quit()
 
 
-def test_x_key_removes_selected_order():
+def test_x_key_removes_reopened_order():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.sel_order = 0
+        ui.edit_order(state, 0)
 
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
         assert ui.pending == []
         assert ui.sel_order is None
+        assert ui.mode != CHOOSING
+    finally:
+        pygame.quit()
+
+
+def test_closing_a_reopened_order_leaves_nothing_selected():
+    """Reopening an order borrows `selected` to aim the popup at its source. If
+    that survived the close, the next tap on a neighbour would silently queue a
+    second fleet out of a system the player only meant to look at."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 3))
+        ui.edit_order(state, 0)
+        assert ui.selected == home
+
+        ui.close_send()
+        assert ui.mode == IDLE
+        assert ui.selected is None and ui.sel_order is None
+        assert not ui.editing_existing
+        assert len(ui.pending) == 1        # the order itself survives
     finally:
         pygame.quit()
 
@@ -862,8 +1000,10 @@ def test_lane_click_cycles_orders_on_same_lane():
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
+        # both out of `home`: an order whose source we don't hold isn't a state the
+        # game can reach, and reopening one would aim the popup at a foreign system
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.pending.append(Order(1, nbr, home, 1))
+        ui.pending.append(Order(1, home, nbr, 1))
         mid = _lane_mid(state, ui, home, nbr)
 
         _click_pos(state, ui, mid); first = ui.sel_order
@@ -878,7 +1018,7 @@ def test_lane_click_cycles_orders_on_same_lane():
 # --------------------------------------------------------------------------- #
 # Editing standing auto-forward rules
 # --------------------------------------------------------------------------- #
-def test_click_rule_row_selects_it():
+def test_click_rule_row_reopens_the_popup_on_the_forward_tab():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -889,12 +1029,16 @@ def test_click_rule_row_selects_it():
         _click_pos(state, ui, (110, 105))
         assert ui.sel_forward == home
         assert ui.sel_order is None
+        assert ui.mode == CHOOSING and ui.forward_armed
+        assert (ui.selected, ui.dest) == (home, nbr)
+        assert ui.keep == 2
+        assert ui.editing_existing
     finally:
         pygame.quit()
 
 
 def test_click_rule_lane_selects_it():
-    """Clicking a rule's dashed lane selects it for editing, just like a queued
+    """Clicking a rule's dashed lane reopens the popup on it, just like a queued
     order's lane — the panel row is no longer the only way in."""
     state, ui = _setup()
     try:
@@ -905,6 +1049,84 @@ def test_click_rule_lane_selects_it():
         _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
         assert ui.sel_forward == home
         assert ui.sel_order is None
+        assert ui.mode == CHOOSING and ui.forward_armed and ui.keep == 2
+    finally:
+        pygame.quit()
+
+
+def test_popup_delete_removes_a_reopened_order_or_rule():
+    """The popup's bottom button discards whatever it is editing — for a reopened
+    subject that means deleting something that was already on the board."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 3))
+        ui.auto_forward[home] = (nbr, 2)
+        ui.cancel_rect = (110, 260, 100, 20)   # normally recorded by render
+
+        ui.edit_order(state, 0)
+        _click_pos(state, ui, (150, 270))
+        assert ui.pending == [] and ui.mode != CHOOSING
+
+        ui.edit_forward(state, home)
+        _click_pos(state, ui, (150, 270))
+        assert home not in ui.auto_forward and ui.mode != CHOOSING
+    finally:
+        pygame.quit()
+
+
+def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
+    """A lane with one candidate cycles back to itself, so repeat clicks re-enter
+    the edit — which must not throw away where the player parked the popup."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.pending.append(Order(1, home, nbr, 3))
+        mid = _lane_mid(state, ui, home, nbr)
+
+        _click_pos(state, ui, mid)
+        ui.popup_pos = (300, 300)          # as if dragged there
+        _click_pos(state, ui, mid)
+        assert ui.popup_pos == (300, 300)
+        assert ui.sel_order == 0 and ui.editing_existing
+
+        # same for a rule
+        ui.close_send()
+        ui.pending.clear()
+        ui.auto_forward[home] = (nbr, 2)
+        _click_pos(state, ui, mid)
+        ui.popup_pos = (300, 300)
+        _click_pos(state, ui, mid)
+        assert ui.popup_pos == (300, 300)
+        assert ui.sel_forward == home
+    finally:
+        pygame.quit()
+
+
+def test_dormant_rule_is_highlighted_but_never_opens_the_popup():
+    """A rule whose source we no longer hold stays in the list, but the popup reads
+    that source's garrison and would let the Send tab queue an order out of enemy
+    territory — so it highlights only."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.auto_forward[home] = (nbr, 2)
+        state.systems[home].owner_id = 2          # captured
+        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
+
+        _click_pos(state, ui, (110, 105))
+        assert ui.sel_forward == home
+        assert ui.mode != CHOOSING
+        assert ui.selected is None and ui.dest is None
+
+        # the wheel still reaches its keep, and X still clears it
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home][1] == 3
+        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
+        assert home not in ui.auto_forward
     finally:
         pygame.quit()
 
@@ -948,13 +1170,13 @@ def test_click_rule_delete_button_removes_it():
         pygame.quit()
 
 
-def test_wheel_edits_selected_rule_keep_in_place():
+def test_wheel_edits_reopened_rule_keep_in_place():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.auto_forward[home] = (nbr, 2)
-        ui.sel_forward = home
+        ui.edit_forward(state, home)
 
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.auto_forward[home] == (nbr, 3)
@@ -970,16 +1192,16 @@ def test_wheel_edits_selected_rule_keep_in_place():
         pygame.quit()
 
 
-def test_on_map_step_buttons_adjust_selected_rule_keep():
-    """The on-map −/+ buttons adjust a selected rule's keep, same as for a queued
-    order — a mouse-wheel-free way to edit, for consistency across both."""
+def test_popup_step_buttons_adjust_a_reopened_rule_keep():
+    """The popup's −/+ buttons adjust a reopened rule's keep, same as for a queued
+    order — one editor for both, reached the same way."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         state.systems[home].ships = 10
         ui.auto_forward[home] = (nbr, 2)
-        ui.sel_forward = home
+        ui.edit_forward(state, home)
         ui.minus_rect = (100, 100, 20, 20)   # normally recorded by render each frame
         ui.plus_rect = (140, 100, 20, 20)
 
@@ -991,22 +1213,23 @@ def test_on_map_step_buttons_adjust_selected_rule_keep():
         pygame.quit()
 
 
-def test_x_key_removes_selected_rule():
+def test_x_key_removes_reopened_rule():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.auto_forward[home] = (nbr, 2)
-        ui.sel_forward = home
+        ui.edit_forward(state, home)
 
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
         assert home not in ui.auto_forward
         assert ui.sel_forward is None
+        assert ui.mode != CHOOSING
     finally:
         pygame.quit()
 
 
-def test_selecting_order_and_rule_are_mutually_exclusive():
+def test_editing_an_order_and_a_rule_are_mutually_exclusive():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -1014,31 +1237,38 @@ def test_selecting_order_and_rule_are_mutually_exclusive():
         ui.pending.append(Order(1, home, nbr, 3))
         ui.auto_forward[home] = (nbr, 2)
 
-        ui.select_order(0)
+        ui.edit_order(state, 0)
         assert ui.sel_order == 0 and ui.sel_forward is None
 
-        ui.select_forward(home)
+        ui.edit_forward(state, home)
         assert ui.sel_forward == home and ui.sel_order is None
     finally:
         pygame.quit()
 
 
-def test_right_click_deselects_order_then_selecting_system_clears_it():
+def test_right_click_closes_the_edit_popup_then_selecting_system_clears_it():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.sel_order = 0
+        ui.edit_order(state, 0)
 
-        # right-click clears the order-edit highlight
+        # right-click closes the popup without discarding the order
         _click_pos(state, ui, _lane_mid(state, ui, home, nbr), button=3)
-        assert ui.sel_order is None
+        assert ui.sel_order is None and ui.mode != CHOOSING
+        assert len(ui.pending) == 1
 
-        # re-select, then clicking an owned system to compose also clears it
-        ui.sel_order = 0
+        # and the source is free to be selected again, for a fresh send
         _click(state, ui, home)
         assert ui.sel_order is None and ui.selected == home
+
+        # reopening on the order and then tapping its own source closes the popup,
+        # exactly as tapping the source while composing does
+        ui.edit_order(state, 0)
+        _click(state, ui, home)
+        assert ui.mode == IDLE and ui.selected is None and ui.sel_order is None
+        assert len(ui.pending) == 1
     finally:
         pygame.quit()
 

@@ -51,18 +51,23 @@ def test_render_all_ui_states_no_crash():
         ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
         render.draw(screen, state, ui)
 
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+
         # send popup armed as a forward rule (exercises the toggled-button path)
         ui.forward_armed = True
         render.draw(screen, state, ui)
         ui.forward_armed = False
 
-        # editing the standing rule: the on-map −/+ stepper is drawn, recording
-        # clickable button rects just like a queued order's
-        ui.mode = SELECTED
-        ui.dest = None
-        ui.sel_forward = home
+        # reopening the standing rule draws the same popup, on its Forward tab
+        ui.edit_forward(state, home)
         render.draw(screen, state, ui)
-        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+
+        # ...and so does reopening the queued order, on the Send tab
+        ui.edit_order(state, 0)
+        render.draw(screen, state, ui)
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+        ui.reset_selection()
         ui.sel_forward = None
 
         # advance a few turns so fleets exist, then draw
@@ -219,8 +224,7 @@ def test_selected_forward_rule_reports_its_lane():
 
 def test_forward_rule_label_clears_the_lane_travel_pill():
     """Both labels used to be centred on the lane midpoint, so the rule covered the
-    lane length. They're stacked now — check they don't overlap at either scale, for
-    the plain label and the taller stepper the selected rule gets."""
+    lane length. They're stacked now — check they don't overlap at either scale."""
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))   # fonts need a video ctx
     try:
@@ -231,13 +235,113 @@ def test_forward_rule_label_clears_the_lane_travel_pill():
             mid_y = 400
             # the travel-time pill is centred on the midpoint (see _draw_lanes)
             pill_bottom = mid_y + (small.get_height() + config.s(4)) // 2
-            for font in (small, render._fonts()["normal"]):
-                cy = render._rule_label_center(pa, pb, font)[1]
-                label_top = cy - (font.get_height() + config.s(4)) // 2
-                assert label_top > pill_bottom, (
-                    f"rule label overlaps the travel-time pill at {config.ui_scale}x")
+            cy = render._rule_label_center(pa, pb, small)[1]
+            label_top = cy - (small.get_height() + config.s(4)) // 2
+            assert label_top > pill_bottom, (
+                f"rule label overlaps the travel-time pill at {config.ui_scale}x")
     finally:
         _desktop_scale()
+        pygame.quit()
+
+
+def _popup_rects(ui):
+    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
+    names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
+             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect")
+    return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+
+
+def test_send_popup_stays_inside_the_map_viewport():
+    """The popup is drawn clipped to the play area, but input hit-tests the rects it
+    recorded — so a row that fell outside would be invisible and still clickable, and
+    the bottom row is the destructive Delete. Check it fits at the touch scale and on
+    a screen short enough that the seven rows would otherwise overflow."""
+    pygame.init()
+    try:
+        # The third case is the one that bites: apply_ui_scale runs once at boot, so
+        # a window shrunk afterwards keeps the big screen's scale, and seven
+        # tap-floored rows no longer fit the viewport they are clipped to.
+        for scale, size in ((_touch_scale, None), (_desktop_scale, (800, 480)),
+                            (_touch_scale, (1000, 640))):
+            scale()
+            if size is not None:
+                config.SCREEN_W, config.SCREEN_H = size
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            render._FONTS.clear()
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+            nbr = state.systems[home].neighbors[0]
+            ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
+            ui.pending.append(Order(1, home, nbr, 2))
+
+            for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
+                ui.popup_pos = corner       # auto-placed, then dragged hard each way
+                render.draw(screen, state, ui)
+                play = pygame.Rect(*config.play_rect())
+                assert play.contains(pygame.Rect(*ui.popup_rect)), (
+                    f"popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
+                rects = _popup_rects(ui)
+                assert len(rects) == 8, f"the popup drew only {sorted(rects)}"
+                for name, r in rects.items():
+                    assert play.contains(r), f"{name} is outside the viewport: {r}"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_popup_rows_tile_without_overlapping():
+    """Seven rows laid out by hand from one running y — a slip in the arithmetic
+    would stack two controls, so one of them could never be pressed. The slider's
+    knob must also stay inside the panel at both ends of its travel."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
+        ui.pending.append(Order(1, home, nbr, 2))
+
+        for armed in (False, True):
+            ui.forward_armed = armed
+            render.draw(screen, state, ui)
+            panel = pygame.Rect(*ui.popup_rect)
+            rects = _popup_rects(ui)
+            pairs = list(rects.items())
+            for i, (na, ra) in enumerate(pairs):
+                assert panel.contains(ra), f"{na} sits outside the popup: {ra}"
+                for nb, rb in pairs[i + 1:]:
+                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
+            knob = config.SLIDER_KNOB_R
+            sx, _sy, sw, _sh = ui.slider_rect
+            assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+    finally:
+        pygame.quit()
+
+
+def test_popup_slider_survives_a_source_with_nothing_to_send():
+    """`lo == hi` is the ordinary state on an empty system (a plain tap arms Forward
+    there), and the knob's value->position maths must not divide by it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 0
+        ui.mode, ui.selected, ui.dest = CHOOSING, home, nbr
+
+        for armed in (True, False):
+            ui.forward_armed = armed
+            assert ui.slider_range(state)[0] == ui.slider_range(state)[1]
+            render.draw(screen, state, ui)
+            assert ui.slider_rect[2] > 0
+    finally:
         pygame.quit()
 
 

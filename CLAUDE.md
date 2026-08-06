@@ -149,9 +149,15 @@ intact.
   `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
   panel's help text and the win overlay, the menu's `Enter: start game` footer —
   and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`),
-  which is what keeps the send popup's −/+ and preset rows finger-sized. Those
-  hints are both useless without a keyboard *and* the thing that made the labels
-  too wide, so dropping them fixes the layout and the copy together.
+  which is what keeps the send popup's −/+, slider and preset rows finger-sized.
+  Those hints are both useless without a keyboard *and* the thing that made the
+  labels too wide, so dropping them fixes the layout and the copy together. The one
+  place that floor gives way is the send popup's own height: seven tap-floored rows
+  can outgrow the band it is placed in on a window shrunk after boot (the scale is
+  probed once), and since the clamp pins an oversized panel to the top, the row that
+  falls out of `draw`'s clip is the destructive Delete — invisible but still live,
+  since input hit-tests the recorded rect. So it shrinks the rows to their labels
+  first, against a budget measured from the placement band, not the viewport.
 - **`settings.Settings` is the pure, serializable pre-game config** (players,
   map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
   interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
@@ -279,6 +285,34 @@ intact.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
+- **The send popup is the *only* ship-count editor.** Composing a new send opens it
+  (`Ui.begin_send`), and so does reopening an already-queued order or standing rule
+  — `Ui.edit_order` / `Ui.edit_forward`, reached from the panel row or the lane, put
+  the popup back into `CHOOSING` aimed at that subject rather than falling back to a
+  second on-lane widget. `Ui.editing_existing` records that the subject *predates*
+  the popup; it can't be derived, because the popup commits immediately, so a fresh
+  compose and a reopened order are structurally identical by the time it is drawn.
+  Two things read it: the bottom button (Cancel vs "Delete order"/"Delete rule" — the
+  press discards either way, so the label just tells the truth), and `_close_send`,
+  which unwinds all the way to `IDLE` for an edit. That last part is load-bearing:
+  reopening borrows `Ui.selected` to aim the popup at the order's source, and leaving
+  it armed on close would make the next tap on a neighbour queue a *second* fleet.
+  - **A dormant rule highlights but never opens it** (`Ui.rule_is_live` — the shared
+    predicate behind drawing, lane-picking, `main.auto_forward_orders` and editing).
+    The popup reads the source's garrison and the destination unguarded, and aiming
+    it at a system we no longer hold would let the Send tab queue an order out of
+    enemy territory. Highlighting still gives the row, its × and the X key a target.
+  - **The count slider must be claimed before the popup's drag fallthrough.** The
+    panel is draggable by its background (`input.py`'s `popup_rect` case), which
+    otherwise swallows every press inside it — so `slider_rect` is hit-tested first,
+    and `dragging_slider` is checked ahead of `dragging_popup` in the MOUSEMOTION
+    chain. `render` re-records `slider_rect` each frame from the panel's current
+    top-left, so it follows a dragged popup with nothing cached. The knob *travels*
+    over the recorded row inset by `config.SLIDER_KNOB_R` at each end, which
+    `Ui.set_slider_from_x` inverts exactly: any other mapping either overhangs the
+    184px panel or drifts away from the finger at the extremes. Both halves tolerate
+    `lo == hi` (an empty source, which is the *default* on touch, where a plain tap
+    arms Forward) and a zeroed rect (the popup closed mid-drag).
 - **The side panel's queued list is capped and scrolled, not truncated.** It may
   take at most half the panel so the system/lane/rule details above it are never
   pushed off, and what doesn't fit is reached with `ui.order_scroll` (the ▲/▼

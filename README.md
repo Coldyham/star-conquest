@@ -47,9 +47,10 @@ from the AI tab's dropdown (the built-in `heuristic` is the default). See
 | Action | Input |
 |---|---|
 | Select one of your systems | left-click it |
-| Choose a destination | left-click a highlighted neighbour |
-| Adjust ships to send | mouse wheel |
-| Confirm the fleet | left-click |
+| Choose a destination | left-click a highlighted neighbour (the fleet is queued at once) |
+| Adjust ships to send | the popup's slider, −/+, Half/All, or the mouse wheel |
+| Re-edit a queued fleet | left-click its arrow, or its row in the side panel |
+| Discard the fleet | the popup's Cancel/Delete button, or `X` |
 | Cancel / back | right-click or `Esc` |
 | End the turn (resolve) | `End Turn` button, `Enter`, or `Space` |
 | Toggle autoplay | `A` |
@@ -108,8 +109,8 @@ The build is self-contained: [`tools/build_web.sh`](tools/build_web.sh) mirrors 
 pygame-ce WASM wheel into `web/cdn/`, so it works on any static host with no runtime
 CDN dependency. **To deploy, copy the contents of `web/` to any static host.** On a
 phone, tap a system then a neighbour to send (or drag between them); a popup tunes
-the count with −/+ and Half/All; the on-screen **End turn** / **History** buttons
-replace the keyboard shortcuts.
+the count with a slider, −/+ and Half/All; the on-screen **End turn** / **History**
+buttons replace the keyboard shortcuts.
 
 [pygbag]: https://pygame-web.github.io/
 

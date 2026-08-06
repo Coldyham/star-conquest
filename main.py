@@ -314,9 +314,10 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     """
     orders: list[Order] = []
     for src, (dest, keep) in ui.auto_forward.items():
-        sys = state.systems.get(src)
-        if sys is None or sys.owner_id != ui.human_id:
-            continue  # dormant while the system isn't ours (may resume if recaptured)
+        # dormant while the system isn't ours (may resume if recaptured) — the same
+        # test that decides whether the rule is drawn, pickable and editable
+        if not ui.rule_is_live(state, src):
+            continue
         if not state.are_adjacent(src, dest):
             continue
         send = ui.available(state, src) - keep
@@ -623,7 +624,7 @@ async def main() -> None:
                         ui.history = True
                         ui.playing = False
                         ui.reset_selection()
-                        ui.sel_order = ui.sel_forward = None
+                        ui.sel_forward = None
                         ui.history_max = len(history_states) - 1
                         ui.history_turn = ui.history_max
                         ui.history_reveal = state.winner is not None
