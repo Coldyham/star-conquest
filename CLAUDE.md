@@ -6,6 +6,10 @@ Star Conquest is a minimalist turn-based strategy game: a graph star map where
 systems are nodes and spacelanes are edges, one ship type, take every system to
 win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 
+Design rationale, history, and edge-case detail behind the rules below live in
+[`docs/design-notes.md`](docs/design-notes.md), keyed by matching headings —
+read it when you're actually touching that code, not as background reading.
+
 ## Commands
 
 ```sh
@@ -128,18 +132,15 @@ intact.
 ### Key conventions
 
 - **All balance/aesthetic constants live in `config.py`.** Do not hardcode a
-  magic number elsewhere — add a named constant there. Tuning the game means
-  editing that one file. Every module reads `config.X` *live* at call time
-  (nothing is cached at import), so the Advanced menu tunes copies on a
-  `Settings`, and `settings._apply_globals` (called by `build_state` just before
-  generation) is the single writer that pushes them back into `config`.
-- **Nothing that holds text gets a fixed pixel size.** `config.apply_ui_scale`
-  grows the font by ~2x on a phone, so a width or row pitch tuned at the baseline
-  size overflows there — which is how labels used to spill out of footer buttons
-  and how the info panel's rows used to land on top of each other. Instead: a
-  button's width comes from its measured label (`render._btn_w`, and `render._btn`
-  draws + returns the hit-rect), a stacked text row's pitch from the font's own
-  line height (`render._row_h`), a modal's stack is measured then centred
+  magic number elsewhere — add a named constant there. Every module reads
+  `config.X` *live* at call time (nothing is cached at import), so the Advanced
+  menu tunes copies on a `Settings`, and `settings._apply_globals` (called by
+  `build_state` just before generation) is the single writer that pushes them
+  back into `config`.
+- **Nothing that holds text gets a fixed pixel size.** A button's width comes
+  from its measured label (`render._btn_w`, and `render._btn` draws + returns
+  the hit-rect), a stacked text row's pitch from the font's own line height
+  (`render._row_h`), a modal's stack is measured then centred
   (`render._draw_modal`), and help prose is reflowed to the panel it sits in
   (`render._wrap`). One-off layout literals still go through `config.s()`.
 - **`config.touch_ui` is the input modality**, set beside the scale in
@@ -148,100 +149,46 @@ intact.
   `(Esc)`/`(R)` suffixes on button labels (`render._key_hint`,
   `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
   panel's help text and the win overlay, the menu's `Enter: start game` footer —
-  and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`),
-  which is what keeps the send popup's −/+, slider and preset rows finger-sized.
-  Those hints are both useless without a keyboard *and* the thing that made the
-  labels too wide, so dropping them fixes the layout and the copy together. The one
-  place that floor gives way is the send popup's own height: seven tap-floored rows
-  can outgrow the band it is placed in on a window shrunk after boot (the scale is
-  probed once), and since the clamp pins an oversized panel to the top, the row that
-  falls out of `draw`'s clip is the destructive Delete — invisible but still live,
-  since input hit-tests the recorded rect. So it shrinks the rows to their labels
-  first, against a budget measured from the placement band, not the viewport.
+  and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`).
 - **`settings.Settings` is the pure, serializable pre-game config** (players,
   map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
   interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
   is the one funnel from menu/CLI to a `GameState`. `to_dict`/`from_dict` back
   both the JSON file Save/Load (menu footer, gitignored `saves/`) and a
-  `to_token`/`from_token` pair that encodes a whole config into a URL fragment.
-  On the web build the menu's "Get Link" button writes that token to
-  `location.hash` (and best-effort to the clipboard) so a setup can be shared as
-  a link, and `main._apply_shared_link` decodes a `#<token>` back onto `Settings`
-  at boot — same effect as CLI args pre-filling the menu. Because an installed
-  PWA launches from the manifest's fixed `start_url` (no fragment), the token is
-  also mirrored to `localStorage` (key `paths.WEB_SHARED_SETTINGS_KEY`) and read
-  back as a fallback, so a shared config survives installation.
+  `to_token`/`from_token` pair that encodes a whole config into a URL fragment
+  (mirrored to `localStorage` under `paths.WEB_SHARED_SETTINGS_KEY` so an
+  installed PWA, which launches from a fixed `start_url`, still sees it).
   `from_token`/`from_dict` are deliberately tolerant (clamp, default, pad), so a
-  stale or hand-edited token still loads to a playable config.
-  - A token is **pruned then deflated**: `token_dict` drops every field the
-    reader would infer anyway (defaults, unused seats — `from_dict`'s tolerance
-    is what makes omission safe), which takes a default config from ~1470 chars
-    to under 100. `mode`/`players`/`nodes`/`seed` are always emitted even at
-    default, because pruning otherwise makes a token depend on the *reader's*
-    defaults and those four are the identity of the match. `from_token` sniffs
-    `raw[:1] != b"{"` to keep pre-compression links working. Never prune a
-    non-heuristic seat's `ai_params`: it is a documented readable field for
-    drop-in bots (`models/README.md`), so default-equality is the only safe test.
+  stale or hand-edited token still loads to a playable config. Never prune a
+  non-heuristic seat's `ai_params` when writing a token: it is a documented
+  readable field for drop-in bots (`models/README.md`).
 - **Challenge links carry a score to beat.** `settings.Challenge`
   (`turns`, `lost`, `hand`, `by`, `key`) is an optional field on `Settings`, so it
   rides all of the above with no new plumbing; `build_state` ignores it. Score is
   turns-to-win, ties broken on fewest ships lost (`Player.ships_lost`, written in
-  `combat.resolve_arrival` — the one place ships die). `hand` is how many turns
-  the human actually decided (`main.hand_turns` reads the log's per-turn `"ai"`
-  flag): autoplaying a *decided* game to skip the cleanup is normal play, so it is
-  disclosed on the link rather than voiding the score — only a match with zero
-  hand-played turns is unshareable. `Challenge.key` is a `challenge_key()`
-  checksum of the setup, redundant by construction so the menu banner can spot
-  that the config has since been edited and warn (rather than locking widgets).
-  `challenge_key` hashes the *full* dict minus `challenge`/`autoplay`, so two
-  people agree regardless of what their tokens pruned.
-  - **A challenge token is never stored or left in the URL.** It travels by
-    clipboard (`webstore.copy_link`), unlike a settings link
-    (`webstore.share_token`, which syncs the address bar *and* `localStorage`).
-    Both halves of that matter: an installed PWA has no address bar to read a link
-    out of, and a *remembered* challenge gets read back at every later launch, so
-    its banner haunts sessions long after the link was opened. Hence
-    `Settings.without_challenge()` — what `main._apply_shared_link` persists, and
-    what the menu re-syncs when a challenge is dropped.
-  - **Editing a challenge's setup asks first** (`menu._draw_unchallenge`, raised
-    from `handle_event` once `Challenge.matches` goes false and any slider drag has
-    been released). "Change it anyway" clears `Settings.challenge` and rewrites the
-    address bar so a reload can't resurrect it; "Keep the challenge" restores
-    `MenuState.challenge_snapshot`, the last config the score still applied to.
-    Locking the widgets instead is a dead end the moment someone wants the same map
-    with one knob moved. `main.new_ui` independently refuses to carry a
-    `challenge_target` onto the `Ui` unless the challenge still matches, so a
-    finished game can never report "short of" a target from another setup.
+  `combat.resolve_arrival`). A challenge token travels by clipboard only
+  (`webstore.copy_link`) — never the address bar or `localStorage`, unlike a
+  settings link (`webstore.share_token`). Editing a challenge's setup asks first
+  (`menu._draw_unchallenge`); `Settings.without_challenge()` is what persists a
+  "change it anyway".
 - **`webstore` is the third browser bridge** (with `softkeyboard` and the
   web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
-  a JSON file under `data_dir()` elsewhere — so personal bests work on desktop
-  too. The rest is genuinely web-only and no-ops off it: `link_url`,
-  `set_url_fragment`, `copy_to_clipboard` and `url_token` are the primitives, and
-  `sync_settings` / `share_token` / `copy_link` the compositions callers use (see
-  the challenge notes above for why the last two must stay distinct). Same
-  defensive style as `softkeyboard`: local `import platform`, every DOM call
-  guarded, storage failure never load-bearing.
-- **Quitting is a desktop concept; the web has nothing to exit to.** Ending the
-  main loop runs `pygame.quit()`, which on the web destroys the canvas and strands
-  the player on a blank page only a force-close escapes. So every confirmed quit
-  goes through `main.leave_app()`: off the web it returns True and the loop ends,
-  while on the web it asks the browser to close the window
-  (`webstore.close_window` — often possible in an installed PWA, usually not in a
-  tab) and returns False, and the caller falls back to the setup menu with
-  `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop on the web
-  build. (`menu.set_status` is public for exactly this: it is the menu's one line
-  for telling the player what just happened.)
+  a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and
+  no-ops off it: `link_url`, `set_url_fragment`, `copy_to_clipboard` and
+  `url_token` are the primitives, and `sync_settings` / `share_token` /
+  `copy_link` the compositions callers use. Same defensive style as
+  `softkeyboard`: local `import platform`, every DOM call guarded, storage
+  failure never load-bearing.
+- **Quitting is a desktop concept; the web has nothing to exit to.** Every
+  confirmed quit goes through `main.leave_app()`: off the web it returns True
+  and the loop ends, while on the web it asks the browser to close the window
+  (`webstore.close_window`) and returns False, falling back to the setup menu
+  with `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop
+  (`pygame.quit()`) directly on the web build.
 - **The map viewport has two margins, both floored at `config.node_clearance()`.**
-  `config.map_fit_padding()` sizes the zoom-1 fit (raising it just shrinks the
-  whole map) and `config.map_pan_padding()` is what the pan clamp keeps past the
-  outermost system once zoomed in — `geometry.WorldView` takes them as `padding`
-  and `pan_padding`. The floor exists because a node's circle is drawn at a pixel
-  radius that is *not* part of the world bounds, so the fit/pan maths cannot see
-  it; a margin below the largest node's drawn extent slices that circle. Related:
-  `_clamp` centres an axis only while its content still fits the *fit-padded*
-  span, since that is what `_center_axis` divides up — comparing against the bare
-  viewport let the "centred" offset push a boundary system back out through the
-  margin at certain zooms (`test_boundary_never_crosses_the_margin_at_any_zoom`).
+  `config.map_fit_padding()` sizes the zoom-1 fit and `config.map_pan_padding()`
+  is what the pan clamp keeps past the outermost system once zoomed in —
+  `geometry.WorldView` takes them as `padding` and `pan_padding`.
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
   the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
@@ -249,93 +196,59 @@ intact.
   `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
   list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
   `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
-  - **Those fields are readable for *every* seat, and `models/knower.py` is what
-    that makes possible.** Because turns resolve simultaneously — `_collect_orders`
-    hands every seat the same unmutated state and applies nothing until all have
-    decided — an opponent's orders cannot depend on yours, so a bot can clone the
-    board, call each rival's own registered `decide`, and know their moves before
-    the engine asks for them. There is no fixed point to solve; one forward pass of
-    their real code *is* the answer. knower folds those predictions into a
-    "post-launch board" (a clone with the predicted orders applied via
-    `engine.apply_order` but not advanced) and runs thinker's phases against it.
-    Three rules any such bot must keep: never `ai.load_models()` from inside a
-    model (it re-`exec_module`s every file, including yours, unguarded); read
-    `ai.STRATEGIES` *lazily* inside `decide`, since files load in sorted order and
-    the registry is incomplete at your import time; and draw **nothing** from
-    `state.rng`, because leaving the stream where the later seats expect it is
-    exactly what makes their prediction bit-exact (`tests/test_knower.py` asserts
-    both).
-  - **A seat commands its own ships and nothing else.** `apply_order` cannot enforce
-    that — it only checks the *declared* owner holds the source, so an `Order` naming
-    another player is valid on its own terms. So `_collect_orders` filters every
-    seat's orders through `engine._own_orders` (and the human's, which under autoplay
-    also come from `ai.decide`). Without it any drop-in bot could launch a rival's
-    fleet, or the human's. knower mirrors the same rule when building its board, both
-    as defence in depth and for fidelity — predicting a fleet the engine will refuse
-    is just a wrong prediction.
+  - Those fields are readable for *every* seat — see `models/knower.py` for
+    what that makes possible. Any such bot must keep three rules: never call
+    `ai.load_models()` from inside a model (it re-`exec_module`s every file,
+    including yours, unguarded); read `ai.STRATEGIES` *lazily* inside `decide`,
+    since files load in sorted order and the registry is incomplete at your
+    import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
+    asserts both of the latter).
+  - **A seat commands its own ships and nothing else.** `apply_order` only
+    checks the *declared* owner holds the source, so `_collect_orders` filters
+    every seat's orders (including the human's, under autoplay) through
+    `engine._own_orders`. Without it any drop-in bot could launch a rival's
+    fleet, or the human's.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given
-  the seed (`test_mapgen.py` asserts this). The *unreproducible* rolls — picking
-  a fresh seed, the menu's dice buttons — go through `settings.random_seed()` /
-  `settings.fresh_rng()`, which mix the clock and a per-call counter into a
-  throwaway RNG rather than using the global `random`: the web build boots from a
-  fixed interpreter image, so `random`'s auto-seeding can hand out the same
-  "random" seeds on every page load.
+  the seed (`test_mapgen.py` asserts this). The *unreproducible* rolls go
+  through `settings.random_seed()` / `settings.fresh_rng()`, which mix the
+  clock and a per-call counter into a throwaway RNG rather than using the
+  global `random` (the web build boots from a fixed interpreter image, so
+  `random`'s auto-seeding can hand out the same "random" seeds on every load).
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
-- **The send popup is the *only* ship-count editor.** Composing a new send opens it
-  (`Ui.begin_send`), and so does reopening an already-queued order or standing rule
-  — `Ui.edit_order` / `Ui.edit_forward`, reached from the panel row or the lane, put
-  the popup back into `CHOOSING` aimed at that subject rather than falling back to a
-  second on-lane widget. `Ui.editing_existing` records that the subject *predates*
-  the popup; it can't be derived, because the popup commits immediately, so a fresh
-  compose and a reopened order are structurally identical by the time it is drawn.
-  Two things read it: the bottom button (Cancel vs "Delete order"/"Delete rule" — the
-  press discards either way, so the label just tells the truth), and `_close_send`,
-  which unwinds all the way to `IDLE` for an edit. That last part is load-bearing:
-  reopening borrows `Ui.selected` to aim the popup at the order's source, and leaving
-  it armed on close would make the next tap on a neighbour queue a *second* fleet.
-  - **A dormant rule highlights but never opens it** (`Ui.rule_is_live` — the shared
-    predicate behind drawing, lane-picking, `main.auto_forward_orders` and editing).
-    The popup reads the source's garrison and the destination unguarded, and aiming
-    it at a system we no longer hold would let the Send tab queue an order out of
-    enemy territory. Highlighting still gives the row, its × and the X key a target.
-  - **The count slider must be claimed before the popup's drag fallthrough.** The
-    panel is draggable by its background (`input.py`'s `popup_rect` case), which
-    otherwise swallows every press inside it — so `slider_rect` is hit-tested first,
-    and `dragging_slider` is checked ahead of `dragging_popup` in the MOUSEMOTION
-    chain. `render` re-records `slider_rect` each frame from the panel's current
-    top-left, so it follows a dragged popup with nothing cached. The knob *travels*
-    over the recorded row inset by `config.SLIDER_KNOB_R` at each end, which
-    `Ui.set_slider_from_x` inverts exactly: any other mapping either overhangs the
-    184px panel or drifts away from the finger at the extremes. Both halves tolerate
-    `lo == hi` (an empty source, which is the *default* on touch, where a plain tap
-    arms Forward) and a zeroed rect (the popup closed mid-drag).
-- **The side panel's queued list is capped and scrolled, not truncated.** It may
-  take at most half the panel so the system/lane/rule details above it are never
-  pushed off, and what doesn't fit is reached with `ui.order_scroll` (the ▲/▼
-  buttons, or the wheel while the pointer is over the panel — where the wheel no
-  longer zooms the map). `render` records how far it may scroll in
-  `ui.order_scroll_max` and tolerates a stale offset by clamping locally when it
-  draws; `Ui.scroll_orders` re-clamps before applying a delta. Each drawn row
-  carries **its own index** into `pending` (`ui.order_hitboxes` is
-  `(index, row, delete)`): a positional mapping silently deletes the wrong order
-  once only a window of the list is on screen.
-- **Losing makes the human a spectator, not a blind one.** Fog is measured from
-  the systems you hold, so a knocked-out player has nothing to observe *from*:
-  `fog.observe` returns empty and every remembered system falls back to a grey "?"
-  — the whole map, when fog was off. So `main._accumulate_fog` reveals the board
-  (and drops the frozen `player_intel`) once `GameState.is_defeated(human_id)`,
-  which fixes history mode and a resumed game for free since both fold fog through
-  that one helper. Keyed on *defeat*, which is final: revealing for a landless
-  player who still has a fleet flying would leak the map into `Ui.seen` for good if
-  they retook a system. Its companion is **fast forward** (`Ui.can_fast_forward`,
-  `main.step_delay`, the F key / footer button): `main.FAST_FORWARD_MS` replaces the
-  autoplay/play delay so the rest of a lost match resolves a turn per frame. Offered
-  only while spectating — and it starts playback itself if nothing is stepping turns
-  yet, or the button would look broken on a paused board.
+- **The send popup is the *only* ship-count editor.** Composing a new send opens
+  it (`Ui.begin_send`), and so does reopening an already-queued order or
+  standing rule — `Ui.edit_order` / `Ui.edit_forward` put the popup back into
+  `CHOOSING` aimed at that subject. `Ui.editing_existing` records that the
+  subject *predates* the popup, and drives the bottom button (Cancel vs
+  "Delete order"/"Delete rule") and `_close_send`'s unwind to `IDLE` on edit.
+  - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
+    popup reads the source's garrison and destination unguarded, and aiming it
+    at a system we no longer hold would let the Send tab queue an order out of
+    enemy territory.
+  - **The count slider must be claimed before the popup's drag fallthrough** —
+    `slider_rect` is hit-tested first, and `dragging_slider` checked ahead of
+    `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`
+    (an empty source, the touch default) and a zeroed rect (popup closed
+    mid-drag).
+- **The side panel's queued list is capped and scrolled, not truncated.** It
+  takes at most half the panel, and what doesn't fit is reached with
+  `ui.order_scroll` (▲/▼ buttons, or the wheel while over the panel). Each
+  drawn row carries **its own index** into `pending` (`ui.order_hitboxes` is
+  `(index, row, delete)`) — a positional mapping would silently delete the
+  wrong order once only a window of the list is on screen.
+- **Losing makes the human a spectator, not a blind one.** `fog.observe`
+  returns empty for a landless player, so `main._accumulate_fog` reveals the
+  whole board (dropping frozen `player_intel`) once
+  `GameState.is_defeated(human_id)` — fixing history mode and a resumed game
+  for free since both fold fog through that one helper. Its companion is
+  **fast forward** (`Ui.can_fast_forward`, `main.step_delay`, the F key /
+  footer button): `main.FAST_FORWARD_MS` replaces the autoplay/play delay so
+  the rest of a lost match resolves a turn per frame. Offered only while
+  spectating.
 - **`viewstate.Ui` holds all transient interaction state**, including human-only
   quality-of-life features (e.g. `auto_forward` standing rules) that must stay
   out of the pure `GameState`. `main.resolve_turn` expands such UI state into
@@ -344,12 +257,12 @@ intact.
   the pure core headlessly, the suite uses it to assert games actually terminate
   and never corrupt state (`check_invariants`). After changing `ai.py` or
   travel/combat balance, run a `--trials` batch and watch the timeout rate.
-  It also hosts the two bot tournaments, which answer different questions and
-  share `_tally`/`_avg_turns`: `--swap` is a free-for-all (whole roster in one
-  game, rotated through every seat via the cyclic `_rotations`), `--ladder` is a
-  pairwise round-robin (`run_ladder`: every pair, both seatings, plus a
-  head-to-head grid). Both default their roster to `ai.available_strategies()`,
-  so a whole-`models/` ranking needs no arguments.
+  It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
+  is a free-for-all (whole roster in one game, rotated through every seat via
+  the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
+  every pair, both seatings, plus a head-to-head grid). Both default their
+  roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
+  arguments.
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges
