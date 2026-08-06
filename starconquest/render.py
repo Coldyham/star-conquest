@@ -1466,20 +1466,21 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         msg = f"{config.player_name(state.winner)} wins!"
         color = config.player_color(state.winner)
 
-    # Tappable buttons — touch equivalents of the R/M/H/Esc keys. Every box takes
+    # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
     # the width of the widest label in the grid, so the rows stay square and no
     # label can spill into its neighbour once the font scales up.
-    labels = [_key_hint("New map", "R"), _key_hint("Setup menu", "M"),
-              _key_hint("Review history", "H"), _key_hint("Quit", "Esc")]
+    labels = [_key_hint("Retry", "T"), _key_hint("New map", "R"),
+              _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
+    quit_label = _key_hint("Quit", "Esc")
     share_label = _key_hint("Challenge a friend", "C")
     share = _shareable(state, ui)
-    bw = max(_btn_w(normal, s) for s in labels)
+    bw = max(_btn_w(normal, s) for s in labels + [quit_label])
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)
     pad = config.s(12)
 
     result = _result_lines(state, ui)
-    rows = 3 if share else 2
+    rows = 4 if share else 3
     stack = (_row_h("big") + sum(_row_h(kind) for kind, _t, _c in result)
              + (0 if config.touch_ui else _row_h("normal")) + pad
              + rows * (bh + gap) - gap
@@ -1493,27 +1494,32 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         _text(surface, font, text, col, center=(w // 2, y + font.get_height() // 2))
         y += _row_h(kind)
     if not config.touch_ui:
-        _text(surface, normal, "R: new map  ·  M: setup menu  ·  Esc: quit",
+        _text(surface, normal, "T: retry  ·  R: new map  ·  M: setup menu  ·  Esc: quit",
               config.COLOR_TEXT_DIM, center=(w // 2, y + normal.get_height() // 2))
         y += _row_h("normal")
     y += pad
 
-    # Restart and Menu sit side by side; Review-history enters history mode to
-    # scrub the finished game with fog fully lifted (see what was happening behind
-    # the fog of war); Quit sits beside it, opening the same confirm modal as Esc.
+    # Retry replays this exact match from the opening position (a fork of the
+    # finished log, so the completed record stays intact) — the main way back
+    # in after a loss, so it leads and sits beside New map's fresh seed.
+    # Setup menu and Review history follow; Quit stands alone below them,
+    # opening the same confirm modal as Esc.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
-    ui.restart_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
-                                  labels[0], *_BTN_GREEN)
-    ui.menu_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
-                               labels[1], *_BTN_BLUE)
+    ui.retry_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
+                                labels[0], *_BTN_AMBER)
+    ui.restart_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
+                                  labels[1], *_BTN_GREEN)
     y += bh + gap
-    ui.history_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
-                                  labels[2], *_BTN_VIOLET)
-    ui.quit_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
-                               labels[3], *_BTN_RED)
+    ui.menu_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh),
+                               labels[2], *_BTN_BLUE)
+    ui.history_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh),
+                                  labels[3], *_BTN_VIOLET)
+    y += bh + gap
+    ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh),
+                               quit_label, *_BTN_RED)
     y += bh + gap
 
-    # Third row: turn this win into a challenge link. Only offered on a result
+    # Final row: turn this win into a challenge link. Only offered on a result
     # worth sending — the human won at least partly under their own steam.
     if not share:
         ui.share_button_rect = (0, 0, 0, 0)

@@ -156,8 +156,12 @@ class Ui:
     scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Game-over overlay buttons (touch-reachable equivalents of the R/M keys),
+    # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
     # rebuilt by render each frame and tested by input like the rects above.
+    # `retry_button_rect` replays the very same match from the opening position
+    # (forks the log, same as rewinding to turn 0 from history) rather than
+    # `restart_button_rect`'s fresh map on the next seed.
+    retry_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     restart_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     menu_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Result-sharing, all game-over overlay only. `hand_turns` counts turns the

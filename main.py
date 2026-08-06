@@ -606,6 +606,21 @@ async def main() -> None:
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed,
                                             carry_autoplay(ui))
+            elif action == "retry":
+                # Replay this exact match from the opening position: fork the
+                # log at turn 0 so the completed record stays intact, then
+                # resume live play in the new file (same recipe as rewinding
+                # to turn 0 from history, minus the scrubbing).
+                assert log is not None
+                log = log.fork(0)
+                try:
+                    log.save()
+                except OSError:
+                    pass
+                current_seed = log.seed
+                state, ui = resume_game(log, settings)
+                history_states, history_fog, live_fog = [], [], None
+                auto_accum = 0
             elif action == "toggle_history":
                 if ui.history:
                     # leave review: drop snapshots and restore the live fog exactly

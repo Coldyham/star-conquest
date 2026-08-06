@@ -121,6 +121,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
     # the finished game behind the fog of war.
     if state.winner is not None:
         if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_t:
+                return "retry"
             if event.key == pygame.K_r:
                 return "restart"
             if event.key == pygame.K_m:
@@ -134,6 +136,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if ui.share_button_rect[2] and _point_in_rect(event.pos, ui.share_button_rect):
                 return "share"
+            if ui.retry_button_rect[2] and _point_in_rect(event.pos, ui.retry_button_rect):
+                return "retry"
             if ui.restart_button_rect[2] and _point_in_rect(event.pos, ui.restart_button_rect):
                 return "restart"
             if ui.menu_button_rect[2] and _point_in_rect(event.pos, ui.menu_button_rect):
