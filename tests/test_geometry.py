@@ -153,3 +153,65 @@ def test_reset_restores_fit_view():
     assert (round(v.off_x, 6), round(v.off_y, 6)) == (
         round(fresh.off_x, 6), round(fresh.off_y, 6),
     )
+
+
+# --------------------------------------------------------------------------- #
+# fit_to
+# --------------------------------------------------------------------------- #
+def test_fit_to_zooms_in_on_a_subset():
+    """Framing a small region well inside the map zooms in past the full fit,
+    and centres that region rather than the whole map."""
+    v = _view()
+    v.fit_to([(400.0, 400.0), (600.0, 600.0)])
+    assert v.zoom > 1.0
+    cx, cy = v.to_screen((500.0, 500.0))
+    sx, sy, sw, sh = SCREEN
+    assert abs(cx - (sx + sw / 2)) < 1
+    assert abs(cy - (sy + sh / 2)) < 1
+
+
+def test_fit_to_the_full_bounds_matches_reset():
+    """Framing points that span exactly ``world_bounds`` is the same view as
+    ``reset()`` — the whole point of keeping ``_fit_scale`` keyed to the full
+    map rather than whatever was last framed."""
+    v = _view()
+    v.zoom_at((250, 500), 2.5)
+    v.pan(37, -19)
+    v.fit_to([(BOUNDS[0], BOUNDS[1]), (BOUNDS[2], BOUNDS[3])])
+    fresh = _view()
+    assert v.zoom == 1.0
+    assert v.scale == fresh.scale
+    assert (round(v.off_x, 6), round(v.off_y, 6)) == (
+        round(fresh.off_x, 6), round(fresh.off_y, 6),
+    )
+
+
+def test_fit_to_a_single_point_clamps_at_zoom_max():
+    v = _view()
+    v.fit_to([(300.0, 200.0)])
+    assert v.zoom == config.ZOOM_MAX
+
+
+def test_fit_to_empty_points_falls_back_to_reset():
+    v = _view()
+    v.zoom_at((400, 300), 2.0)
+    v.fit_to([])
+    assert v.zoom == 1.0
+
+
+def test_fit_to_keeps_the_full_map_reachable_by_zooming_out():
+    """The whole point of the feature this backs: framing a subset must not
+    lower the zoom-out floor, so the "-" button/scroll can always walk back out
+    to the same full-map view ``reset()`` gives."""
+    v = _view()
+    v.fit_to([(400.0, 400.0), (600.0, 600.0)])
+    assert v.zoom > config.ZOOM_MIN
+    for _ in range(20):        # repeated zoom-out, like mashing the "-" button
+        v.zoom_at((400, 300), 1 / 1.25)
+    assert v.zoom == config.ZOOM_MIN
+
+    fresh = _view()
+    assert v.scale == fresh.scale
+    assert (round(v.off_x, 6), round(v.off_y, 6)) == (
+        round(fresh.off_x, 6), round(fresh.off_y, 6),
+    )

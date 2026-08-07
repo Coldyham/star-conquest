@@ -198,6 +198,23 @@ class Ui:
     zoom_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
+    # -- camera ------------------------------------------------------------- #
+    def reset_view(self, state: GameState) -> None:
+        """Recompute the camera's resting position: framed to just the systems
+        seen so far, or the whole map once there is nothing left to hide (the
+        human is defeated, or the game has ended). ``view.fit_to`` still leaves
+        the full map reachable by zooming out manually either way.
+
+        Call this only at the moments the camera should actually jump — a fresh
+        game, the reset button, a defeat, a win — never from an ordinary turn
+        just because fog grew, or the view would keep moving under the player.
+        """
+        if state.winner is not None or state.is_defeated(self.human_id):
+            points = [s.pos for s in state.systems.values()]
+        else:
+            points = [s.pos for sid, s in state.systems.items() if sid in self.seen]
+        self.view.fit_to(points)
+
     # -- spectating --------------------------------------------------------- #
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?

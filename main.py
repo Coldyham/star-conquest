@@ -102,6 +102,7 @@ def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None
         ui.challenge_target = (challenge.turns, challenge.lost)
         ui.challenge_by = challenge.by
     refresh_fog(state, ui)   # seed visibility from the opening position
+    ui.reset_view(state)     # frame just what's seen so far, not the whole map
     return ui
 
 
@@ -167,6 +168,7 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     ui.seen |= seen                        # ...plus memory of the whole game
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
+    ui.reset_view(state)      # re-frame now seen includes the whole replayed history
     ui.hand_turns = hand_turns(log)        # the log is the record of who drove
     return state, ui
 
@@ -335,6 +337,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     at most the turn in progress). Given ``settings``, a win the human earned is
     also filed as their best on this setup, so replaying a challenge can show it.
     """
+    was_over = state.winner is not None
+    was_defeated = state.is_defeated(ui.human_id)
     human_orders = (
         ai.decide(state, ui.human_id)
         if ui.autoplay
@@ -356,6 +360,12 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     ui.clear_pending()
     ui.reset_selection()
     refresh_fog(state, ui)
+    # Snap the camera out to the whole map right as there stops being anything left
+    # to hide — but only on the turn that crosses into it, not every turn a
+    # spectator keeps fast-forwarding through an already-decided match.
+    if (state.winner is not None and not was_over) or (
+            state.is_defeated(ui.human_id) and not was_defeated):
+        ui.reset_view(state)
 
 
 def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
@@ -457,6 +467,7 @@ async def main() -> None:
             config.SCREEN_W, config.SCREEN_H = screen.get_size()
             if state is not None and ui is not None:
                 ui.view = build_view(state)
+                ui.reset_view(state)   # re-frame for the new size, not the whole map
         for event in pygame.event.get():
             # Android hardware/gesture Back arrives as K_AC_BACK; normalise it to
             # Esc so every existing "cancel / back out" handler below just works.

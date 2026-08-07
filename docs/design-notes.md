@@ -91,3 +91,14 @@ panel or drifts from the finger at the extremes.
 Keyed on *defeat* rather than "no systems left" because revealing the map for
 a landless player who still has a fleet flying would leak it into `Ui.seen`
 for good if they retook a system.
+
+The reset-view camera piggybacks on the same moment: `Ui.reset_view` frames
+the whole map once `state.winner` is set or the human is defeated, and frames
+just `Ui.seen` otherwise (game start, the reset button, a window resize).
+`WorldView.fit_to` gets there by layering a fresh zoom/pan on top of the
+existing full-map `_world_bounds`/`_fit_scale` rather than recomputing them,
+so `ZOOM_MIN` and the pan clamp stay keyed to the true full map regardless of
+what was last framed — manually zooming out always reaches it. `resolve_turn`
+compares defeat/winner state before and after `engine.end_turn` rather than
+checking it plain, so a spectator fast-forwarding an already-decided match
+doesn't get re-snapped every turn, only the one that actually crosses into it.

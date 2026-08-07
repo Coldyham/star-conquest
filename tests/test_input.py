@@ -588,6 +588,10 @@ def test_wheel_adjusts_count_when_choosing():
 
 
 def test_reset_view_button_click_resets_camera():
+    """`_setup()` never calls `refresh_fog`, so `ui.seen` is empty here — the
+    same degenerate case `WorldView.fit_to` falls back to `reset()` for, which
+    keeps this the same full-map-fit assertion the button gave before fog
+    framing existed."""
     state, ui = _setup()
     try:
         ui.view.zoom_at((600, 460), 2.0)
@@ -596,6 +600,49 @@ def test_reset_view_button_click_resets_camera():
         ui.reset_view_rect = (100, 100, 120, 24)
         _click_pos(state, ui, (110, 110))
         assert ui.view.zoom == 1.0
+    finally:
+        pygame.quit()
+
+
+def test_reset_view_button_fits_only_what_fog_has_revealed():
+    state, ui = _setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.seen = {home, nbr}
+        ui.view.zoom_at((600, 460), 2.0)   # arbitrary manual zoom beforehand
+
+        ui.reset_view_rect = (100, 100, 120, 24)
+        _click_pos(state, ui, (110, 110))
+
+        expected = WorldView(mapgen.map_bounds(state), config.play_rect())
+        expected.fit_to([state.systems[home].pos, state.systems[nbr].pos])
+        assert (ui.view.zoom, ui.view.off_x, ui.view.off_y) == (
+            expected.zoom, expected.off_x, expected.off_y)
+        assert ui.view.zoom > 1.0     # zoomed in past the full-map fit
+    finally:
+        pygame.quit()
+
+
+def test_new_game_starts_framed_to_the_opening_sight_not_the_whole_map(monkeypatch):
+    """`main.new_ui` is the "start of game" trigger — with fog tight enough to
+    matter, turn one's camera should already be zoomed to what's visible from
+    the home system, not spoil the map's full shape."""
+    monkeypatch.setattr(config, "FOG_SIGHT", 1)
+    monkeypatch.setattr(config, "FOG_SCOUT", 1)
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = main.new_ui(state, False)
+
+        assert ui.seen and ui.seen < set(state.systems)   # partial fog, not the whole map
+        expected = WorldView(mapgen.map_bounds(state), config.play_rect(),
+                             padding=config.map_fit_padding(), pan_padding=config.map_pan_padding())
+        expected.fit_to([state.systems[sid].pos for sid in ui.seen])
+        assert (ui.view.zoom, ui.view.off_x, ui.view.off_y) == (
+            expected.zoom, expected.off_x, expected.off_y)
+        assert ui.view.zoom > 1.0
     finally:
         pygame.quit()
 
@@ -767,6 +814,47 @@ def test_hand_turns_counts_only_manually_played_turns():
             main.resolve_turn(state, ui, log)
         assert ui.hand_turns == 4
         assert main.hand_turns(log) == 4
+    finally:
+        pygame.quit()
+
+
+def test_defeat_snaps_the_camera_out_once_not_every_turn():
+    """The turn the human is knocked out (but the match continues without
+    them) should snap the camera to the whole map exactly once — a later turn
+    spent merely spectating must leave a manual zoom alone."""
+    state, ui = _setup()
+    try:
+        for sid, s in state.systems.items():
+            if s.owner_id == 1:
+                s.owner_id = 0            # strip every system from the human
+        state.fleets = [f for f in state.fleets if f.owner_id != 1]
+
+        main.resolve_turn(state, ui, log=None)
+        assert state.winner is None              # others are still fighting it out
+        assert state.is_defeated(1)
+        assert ui.view.zoom == 1.0                 # snapped out on the defeat turn
+
+        ui.view.zoom_at((600, 460), 2.0)           # spectator zooms in by hand
+        main.resolve_turn(state, ui, log=None)     # another turn, still defeated
+        assert state.winner is None
+        assert ui.view.zoom == 2.0                  # untouched: no second snap
+    finally:
+        pygame.quit()
+
+
+def test_winning_snaps_the_camera_out_to_the_whole_map():
+    state, ui = _setup()
+    try:
+        for s in state.systems.values():
+            if s.owner_id in (2, 3):
+                s.owner_id = 1            # hand every rival system to the human
+        state.fleets = [f for f in state.fleets if f.owner_id == 1]
+
+        ui.view.zoom_at((600, 460), 2.0)
+        main.resolve_turn(state, ui, log=None)
+
+        assert state.winner == 1
+        assert ui.view.zoom == 1.0
     finally:
         pygame.quit()
 

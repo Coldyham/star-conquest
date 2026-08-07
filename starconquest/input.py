@@ -319,7 +319,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         _clear_selected(ui)
         return None
     if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
-        ui.view.reset()
+        ui.reset_view(state)
         return None
     if ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
         ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)

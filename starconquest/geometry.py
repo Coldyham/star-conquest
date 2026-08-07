@@ -158,6 +158,32 @@ class WorldView:
         self.zoom = 1.0
         self._clamp()
 
+    def fit_to(self, points: list[Point]) -> None:
+        """Move the camera to its resting position for ``points`` instead of the
+        full map: the zoom/pan that centres exactly their bounding box.
+
+        ``world_bounds``/``_fit_scale`` are untouched, so this is layered on top
+        of the ordinary fit rather than replacing it — ``ZOOM_MIN`` still means
+        "the full map", so zooming out manually (the "-" button or scroll) always
+        reaches it no matter what ``points`` framed. Falls back to ``reset()`` for
+        an empty list, since there is no box to fit.
+        """
+        if not points:
+            self.reset()
+            return
+        bx0, by0, bx1, by1 = bounds_of(points)
+        sx, sy, sw, sh = self._screen_rect
+        bw = max(1e-6, bx1 - bx0)
+        bh = max(1e-6, by1 - by0)
+        avail_w = max(1.0, sw - 2 * self._padding)
+        avail_h = max(1.0, sh - 2 * self._padding)
+        target_scale = min(avail_w / bw, avail_h / bh)
+        self.zoom = max(config.ZOOM_MIN, min(config.ZOOM_MAX, target_scale / self._fit_scale))
+        scale = self.scale
+        self.off_x = self._center_axis(scale, sx, sw, bx0, bx1)
+        self.off_y = self._center_axis(scale, sy, sh, by0, by1)
+        self._clamp()
+
     def _center_axis(self, scale: float, s0: float, slen: float, w0: float, w1: float) -> float:
         """The centred offset for one axis at ``scale`` — the same formula the
         constructor uses, generalised so ``reset``/``_clamp`` can reuse it."""
