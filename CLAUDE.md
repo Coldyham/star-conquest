@@ -218,6 +218,11 @@ intact.
   clock and a per-call counter into a throwaway RNG rather than using the
   global `random` (the web build boots from a fixed interpreter image, so
   `random`'s auto-seeding can hand out the same "random" seeds on every load).
+- **Travel time is a query, not a stored value.** `Lane.travel_turns` (and
+  `adjacency`) hold the mapgen-time figure; with `config.SHIP_SPEED_GROWTH` on,
+  ships get faster each turn, so always ask `state.travel_turns(a, b)` — it
+  re-times through `config.travel_turns_at` for the *current* turn. Growth bites
+  at launch only: a fleet in transit keeps its `turns_total`.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.

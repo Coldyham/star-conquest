@@ -1,8 +1,40 @@
-"""Palette helpers (contrast-based text colour) and the map-margin metrics."""
+"""Palette helpers (contrast-based text colour), map margins, and ship speed."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from starconquest import config
+
+
+@contextmanager
+def speed_growth(per_turn: float):
+    old = config.SHIP_SPEED_GROWTH
+    config.SHIP_SPEED_GROWTH = per_turn
+    try:
+        yield
+    finally:
+        config.SHIP_SPEED_GROWTH = old
+
+
+def test_speed_is_flat_by_default():
+    assert config.SHIP_SPEED_GROWTH == 0.0
+    for turn in (0, 50, 500):
+        assert config.ship_speed(turn) == config.SHIP_LY_PER_TURN
+        assert config.travel_turns_at(4, turn) == 4
+
+
+def test_speed_growth_shortens_lanes_but_never_below_one():
+    with speed_growth(0.06):
+        assert config.ship_speed(100) == config.SHIP_LY_PER_TURN + 6.0
+        assert config.travel_turns_at(4, 0) == 4      # unchanged at the start
+        assert config.travel_turns_at(4, 100) == 2    # twice the speed, half the time
+        assert config.travel_turns_at(1, 100) == 1    # a one-turn lane can't get faster
+
+
+def test_speed_growth_stops_at_the_slider_ceiling():
+    with speed_growth(10.0):
+        assert config.ship_speed(1_000) == config.SHIP_SPEED_MAX
 
 
 def test_map_paddings_always_clear_the_largest_node():

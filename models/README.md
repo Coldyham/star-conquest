@@ -53,8 +53,8 @@ Systems, players, and fleets:
 | `state.fleets` | `list[Fleet]` currently in transit |
 | `state.fleets_incoming(dest_id)` | fleets (yours and enemies') heading to a node |
 | `state.are_adjacent(a, b)` | `bool` — is there a lane between two systems |
-| `state.travel_turns(a, b)` | hops along that lane, or `None` if not adjacent |
-| `state.adjacency` | `dict[int, dict[int, int]]` — `src -> {neighbour: turns}` |
+| `state.travel_turns(a, b)` | turns to cross that lane if launched now, or `None` if not adjacent |
+| `state.adjacency` | `dict[int, dict[int, int]]` — `src -> {neighbour: turns}`, as baked at map generation |
 | `state.rng` | the seeded RNG (use it for tie-breaks so games stay reproducible) |
 | `state.turn`, `state.winner` | turn counter / winner id (or `None`) |
 

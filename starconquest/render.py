@@ -208,7 +208,8 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
         pb = ui.view.to_screen(state.systems[lane.b].pos)
         # width & brightness encode travel time: slow lanes thicker+dimmer,
         # fast lanes thinner+brighter, so length variety reads at a glance.
-        width, color = _lane_style(lane.travel_turns)
+        turns = state.travel_turns(lane.a, lane.b) or lane.travel_turns
+        width, color = _lane_style(turns)
         # a lane touching a fogged system reads as uncertain: mute it to the fog
         # colour (its travel time — route topology — is still shown below)
         if sa != "visible" or sb != "visible":
@@ -222,7 +223,7 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
         # full view; a lane between two fogged systems draws as a bare dim line
         if sa == "visible" or sb == "visible":
             mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
-            _label_pill(surface, _fonts()["small"], str(lane.travel_turns), config.COLOR_TEXT_DIM, mid)
+            _label_pill(surface, _fonts()["small"], str(turns), config.COLOR_TEXT_DIM, mid)
 
 
 def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
@@ -1232,7 +1233,10 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     if lane is None:
         return y
     y = _head(surface, x, y, f"Lane -> System {dest}", config.COLOR_TEXT)
-    y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {lane.travel_turns} turns", config.COLOR_TEXT)
+    turns = state.travel_turns(src, dest) or lane.travel_turns
+    y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {turns} turns", config.COLOR_TEXT)
+    if config.SHIP_SPEED_GROWTH > 0:
+        y = _row(surface, x, y, f"Fleet speed: {config.ship_speed(state.turn):.1f} ly/turn", config.COLOR_TEXT_DIM)
     d = state.systems[dest]
     if dest in ui.visible:
         y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh", config.player_color(d.owner_id))

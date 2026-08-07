@@ -6,6 +6,8 @@ so balancing the game is a matter of editing this one file.
 
 from __future__ import annotations
 
+import math
+
 # --------------------------------------------------------------------------- #
 # World & travel
 # --------------------------------------------------------------------------- #
@@ -17,6 +19,10 @@ SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
 #   travel_turns = max(1, ceil(length_ly / SHIP_LY_PER_TURN))
 #   e.g. nodes ~240 units apart -> 24 ly -> 4 turns; ~60 units -> 6 ly -> 1 turn
 #   lower value == finer granularity, so varied lane lengths read as distinct times
+
+SHIP_SPEED_MAX = 30.0          # fastest ships ever get: the speed slider's top, and
+                               # the ceiling growth below climbs towards
+SHIP_SPEED_GROWTH = 0.0        # ly/turn gained each game turn (0 == fixed speed)
 
 # --------------------------------------------------------------------------- #
 # Map generation
@@ -255,6 +261,23 @@ def s(px: float) -> int:
     (e.g. the menu's row pitches), so they scale with everything else.
     """
     return max(1, round(px * ui_scale))
+
+
+def ship_speed(turn: int) -> float:
+    """Effective ship speed (ly/turn) on a given game turn."""
+    return min(SHIP_SPEED_MAX, SHIP_LY_PER_TURN + SHIP_SPEED_GROWTH * max(0, turn))
+
+
+def travel_turns_at(base_turns: int, turn: int) -> int:
+    """Re-time a lane baked at ``SHIP_LY_PER_TURN`` for the speed on ``turn``.
+
+    Scales the mapgen-time value rather than re-deriving from lane length, so a
+    state built by hand (tests, fixtures) keeps the travel times it was given.
+    """
+    speed = ship_speed(turn)
+    if speed <= SHIP_LY_PER_TURN:
+        return max(1, base_turns)
+    return max(1, math.ceil(base_turns * SHIP_LY_PER_TURN / speed))
 
 
 def node_clearance() -> int:

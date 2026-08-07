@@ -59,6 +59,40 @@ def test_fleet_arrives_after_exactly_travel_turns():
     assert len(s.fleets) == 0 and s.systems[1].ships == 5   # arrived on turn 3
 
 
+@contextmanager
+def speed_growth(per_turn: float):
+    old = config.SHIP_SPEED_GROWTH
+    config.SHIP_SPEED_GROWTH = per_turn
+    try:
+        yield
+    finally:
+        config.SHIP_SPEED_GROWTH = old
+
+
+def test_speed_growth_shortens_later_launches():
+    s = make_state([(0, 1, 40, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 4), (1, 2, 5)])
+    with speed_growth(0.06):
+        early = engine.apply_order(s, Order(1, 0, 1, 5))
+        assert early is not None and early.turns_total == 4   # turn 0: full price
+        for _ in range(100):
+            engine.end_turn(s)
+        late = engine.apply_order(s, Order(1, 0, 1, 5))
+        assert late is not None and late.turns_total == 2     # same lane, twice the speed
+
+
+def test_growth_never_re_times_a_fleet_in_flight():
+    s = make_state([(0, 1, 40, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 4), (1, 2, 5)])
+    with speed_growth(3.0):   # by turn 2 a fresh launch would only take 2 turns
+        engine.apply_order(s, Order(1, 0, 1, 5))
+        for _ in range(3):
+            engine.end_turn(s)
+        assert len(s.fleets) == 1 and s.systems[1].ships == 0
+        engine.end_turn(s)
+        assert s.systems[1].ships == 5   # arrives on its launch-time schedule
+
+
 def test_reinforcement_via_engine():
     s = make_state([(0, 1, 10, 100), (1, 1, 4, 100)], [(0, 1, 1)])
     engine.apply_order(s, Order(1, 0, 1, 6))

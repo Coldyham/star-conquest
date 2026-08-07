@@ -50,6 +50,27 @@ Editing a challenge's setup asks first rather than locking the widgets,
 because locking is a dead end the moment someone wants the same map with one
 knob moved.
 
+## Ship-speed growth
+
+`config.SHIP_SPEED_GROWTH` (Advanced → Travel, 0 by default) models tech
+progression: ships get slightly faster every turn, so a map that opens at
+3-4 turns a lane closes at 1-2. It applies **only at launch** — a fleet
+already in transit keeps the schedule it was given. That was chosen over
+re-timing fleets live because it needs no new mutable state anywhere: the
+effective speed is a pure function of `state.turn` and two constants, which
+keeps a seed bit-reproducible and leaves `Fleet` untouched.
+
+`config.travel_turns_at` scales the *baked* `Lane.travel_turns` rather than
+re-deriving from `length_ly`, so a state assembled by hand (tests, fixtures)
+keeps whatever travel times it was handed. `GameState.travel_turns` is where
+that scaling happens, which is why nothing outside mapgen should read
+`Lane.travel_turns` directly — every AI ETA estimate and the lane labels in
+`render` pick up the current-turn value for free by going through the query.
+Growth climbs towards `SHIP_SPEED_MAX`, which is also the ship-speed slider's
+top — one declared ceiling rather than two, so however long a game runs a
+fleet is never faster than the base speed alone could have made it. It is
+belt-and-braces either way: travel already floors at one turn.
+
 ## Map viewport margins
 
 The floor at `config.node_clearance()` exists because a node's circle is

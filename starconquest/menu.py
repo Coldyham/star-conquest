@@ -82,7 +82,10 @@ _ADV_MAP = (
     ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
     ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
 )
-_ADV_TRAVEL = (("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, 30.0, 0.5, False),)
+_ADV_TRAVEL = (
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
+    ("adv_speed_growth", "Speed gain/turn", "ship_speed_growth", 0.0, 0.2, 0.01, False),
+)
 _ADV_ECON = (
     ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
     ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
@@ -441,17 +444,17 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     lx = panel.x + pad
     rx = lx + col_w + pad
 
-    y = panel.y + 16  # LEFT: Map + Travel + Visibility
+    y = panel.y + 16  # LEFT: Map + Travel
     y = _section(surface, "Map", lx, y)
     y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
-    y = _section(surface, "Visibility", lx, y)
-    y = _sliders(surface, ms, settings, _ADV_FOG, lx, y, col_w)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
-    y = panel.y + 16  # RIGHT: Economy + Combat
+    y = panel.y + 16  # RIGHT: Visibility + Economy + Combat
+    y = _section(surface, "Visibility", rx, y)
+    y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
     y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
     y = _section(surface, "Combat", rx, y)

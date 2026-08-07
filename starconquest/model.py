@@ -148,7 +148,16 @@ class GameState:
 
     # -- queries ------------------------------------------------------------ #
     def travel_turns(self, a: int, b: int) -> Optional[int]:
-        return self.adjacency.get(a, {}).get(b)
+        """Turns to cross the a-b lane if launched *now*, or None if not adjacent.
+
+        ``Lane.travel_turns`` (and ``adjacency``) hold the mapgen-time value; with
+        ship-speed growth switched on this shortens as the game runs, so ask here
+        rather than reading the lane directly.
+        """
+        base = self.adjacency.get(a, {}).get(b)
+        if base is None:
+            return None
+        return config.travel_turns_at(base, self.turn)
 
     def are_adjacent(self, a: int, b: int) -> bool:
         return b in self.adjacency.get(a, {})
