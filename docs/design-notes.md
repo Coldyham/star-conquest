@@ -52,13 +52,26 @@ knob moved.
 
 ## Ship-speed growth
 
-`config.SHIP_SPEED_GROWTH` (Advanced → Travel, 0 by default) models tech
+`config.SHIP_SPEED_GROWTH_PCT` (Advanced → Travel, 0 by default) models tech
 progression: ships get slightly faster every turn, so a map that opens at
 3-4 turns a lane closes at 1-2. It applies **only at launch** — a fleet
 already in transit keeps the schedule it was given. That was chosen over
 re-timing fleets live because it needs no new mutable state anywhere: the
 effective speed is a pure function of `state.turn` and two constants, which
 keeps a seed bit-reproducible and leaves `Fleet` untouched.
+
+**Growth compounds rather than adding a flat ly/turn**, for two reasons.
+What a player perceives is travel *turns*, `L / v` — under linear growth
+that is a hyperbola, so the step-downs bunch at the start: a 6-turn lane
+tuned to reach 1 turn by turn 150 loses its first turn on turn 6 and its
+last on turn 150, gaps of 6, 9, 15, 30, 90. Compounding spreads the same
+five steps over gaps of 15, 19, 24, 34, 58. Second, linear growth made
+*waiting* pay: delaying a launch shortens the trip when
+`trip_turns > 1 / ln(1+r)`, and under linear growth that threshold is
+`v / g`, which at the speed slider's 1.0 floor drops inside ordinary lane
+lengths. Compounding makes it a constant ~50 turns at the gain slider's 2%
+top, independent of base speed and past any lane on any map — which is what
+sets that 2%.
 
 `config.travel_turns_at` scales the *baked* `Lane.travel_turns` rather than
 re-deriving from `length_ly`, so a state assembled by hand (tests, fixtures)

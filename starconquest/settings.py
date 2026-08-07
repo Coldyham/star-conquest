@@ -41,7 +41,7 @@ _GLOBAL_KNOBS = (
     ("extra_edge_fraction", "EXTRA_EDGE_FRACTION"),
     ("max_edge_length_frac", "MAX_EDGE_LENGTH_FRAC"),
     ("ship_ly_per_turn", "SHIP_LY_PER_TURN"),
-    ("ship_speed_growth", "SHIP_SPEED_GROWTH"),
+    ("ship_speed_growth_pct", "SHIP_SPEED_GROWTH_PCT"),
     ("home_start_ships", "HOME_START_SHIPS"),
     ("home_production", "HOME_PRODUCTION"),
     ("garrison_base", "GARRISON_BASE"),
@@ -116,7 +116,7 @@ class Settings:
     extra_edge_fraction: float = config.EXTRA_EDGE_FRACTION
     max_edge_length_frac: float = config.MAX_EDGE_LENGTH_FRAC
     ship_ly_per_turn: float = config.SHIP_LY_PER_TURN
-    ship_speed_growth: float = config.SHIP_SPEED_GROWTH
+    ship_speed_growth_pct: float = config.SHIP_SPEED_GROWTH_PCT
     home_start_ships: int = config.HOME_START_SHIPS
     home_production: int = config.HOME_PRODUCTION
     garrison_base: int = config.GARRISON_BASE

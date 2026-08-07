@@ -84,7 +84,7 @@ _ADV_MAP = (
 )
 _ADV_TRAVEL = (
     ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
-    ("adv_speed_growth", "Speed gain/turn", "ship_speed_growth", 0.0, 0.2, 0.01, False),
+    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
 )
 _ADV_ECON = (
     ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),

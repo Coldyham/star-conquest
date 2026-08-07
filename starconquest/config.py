@@ -20,9 +20,14 @@ SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
 #   e.g. nodes ~240 units apart -> 24 ly -> 4 turns; ~60 units -> 6 ly -> 1 turn
 #   lower value == finer granularity, so varied lane lengths read as distinct times
 
-SHIP_SPEED_MAX = 30.0          # fastest ships ever get: the speed slider's top, and
-                               # the ceiling growth below climbs towards
-SHIP_SPEED_GROWTH = 0.0        # ly/turn gained each game turn (0 == fixed speed)
+# Fastest ships ever get: the speed slider's top, and the ceiling growth climbs to.
+SHIP_SPEED_MAX = 30.0
+SHIP_SPEED_GROWTH_PCT = 0.0    # compounding % gained each game turn (0 == fixed speed)
+#   speed(t) = min(SHIP_SPEED_MAX, SHIP_LY_PER_TURN * (1 + pct/100) ** t)
+#   compounding, not additive: lane times then shorten at a steady rate instead of
+#   collapsing in the opening turns, and "wait a few turns so the fleet arrives
+#   sooner" never pays (that needs a trip longer than 1/ln(1+r) turns — ~50 at the
+#   slider's 2% top, past any lane, at any base speed)
 
 # --------------------------------------------------------------------------- #
 # Map generation
@@ -265,7 +270,14 @@ def s(px: float) -> int:
 
 def ship_speed(turn: int) -> float:
     """Effective ship speed (ly/turn) on a given game turn."""
-    return min(SHIP_SPEED_MAX, SHIP_LY_PER_TURN + SHIP_SPEED_GROWTH * max(0, turn))
+    rate = 1.0 + SHIP_SPEED_GROWTH_PCT / 100.0
+    if rate <= 1.0 or SHIP_LY_PER_TURN >= SHIP_SPEED_MAX:
+        return SHIP_LY_PER_TURN
+    # Clamp the exponent at the turn the ceiling is reached: the result is capped
+    # there anyway, and an unbounded power would overflow in a very long game (or
+    # on a hand-edited rate from a token).
+    full = math.ceil(math.log(SHIP_SPEED_MAX / SHIP_LY_PER_TURN, rate))
+    return min(SHIP_SPEED_MAX, SHIP_LY_PER_TURN * rate ** min(max(0, turn), full))
 
 
 def travel_turns_at(base_turns: int, turn: int) -> int:
