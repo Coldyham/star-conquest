@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 
 from starconquest import ai
@@ -55,6 +56,29 @@ def test_avg_turns_excludes_timeouts():
     finished = sim.SwapGame(sim.SimResult(0, 1, 50, False), ["a", "b"])
     timed_out = sim.SwapGame(sim.SimResult(1, None, 600, True), ["a", "b"])
     assert sim._avg_turns([finished, timed_out]) == 50.0
+
+
+def test_bot_timeout_caps_a_slow_bot_and_survives():
+    """A decide() that overruns its budget scores as no orders, not a crash —
+    the whole point is capping an oracle-style bot's compute, not aborting it."""
+
+    def _slow(state, pid):
+        time.sleep(0.05)
+        return []
+
+    ai.register("_test_slow", _slow)
+    try:
+        r = sim.play(1, nodes=12, players=2, max_turns=200, strategies=["heuristic", "_test_slow"], bot_timeout=0.01)
+    finally:
+        ai.STRATEGIES.pop("_test_slow", None)
+    assert r.bot_timeouts >= 1
+
+
+def test_bot_timeout_is_zero_when_disabled_or_generous():
+    default = sim.play(1, nodes=12, players=2, max_turns=200)
+    generous = sim.play(1, nodes=12, players=2, max_turns=200, bot_timeout=1.0)
+    assert default.bot_timeouts == 0
+    assert generous.bot_timeouts == 0
 
 
 def test_no_seat_is_systematically_doomed():

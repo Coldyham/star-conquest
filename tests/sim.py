@@ -25,16 +25,71 @@ omitted, so this ranks everything in models/:
 Because the whole simulation core imports no pygame, this is also what the
 pytest suite calls to assert the game actually terminates and never corrupts
 its state.
+
+Cap wall-clock time per decide() call to keep an "oracle"-style bot (one that
+pre-simulates rivals' moves, e.g. models/knower.py) from brute-forcing a whole
+game tree; a bot that blows its budget just takes no orders that turn:
+    uv run python -m tests.sim --ladder --trials 50 --bot-timeout 0.5
 """
 
 from __future__ import annotations
 
 import argparse
 import itertools
+import signal
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from starconquest import ai, config, engine, mapgen
 from starconquest.model import GameState
+
+_warned_no_sigalrm = False
+
+
+class _BotTimeout(TimeoutError):
+    """Raised when a decide() call blows its wall-clock budget."""
+
+
+@contextmanager
+def _time_budget(seconds: float):
+    """Arm a wall-clock alarm for the duration of the block; raises _BotTimeout.
+
+    Relies on SIGALRM (POSIX only) and single-threaded, sequential decide()
+    calls (engine._collect_orders loops seats one at a time) — no need for
+    multiprocessing sandboxing since models/ bots are already fully trusted.
+    """
+    global _warned_no_sigalrm
+    if not hasattr(signal, "SIGALRM"):
+        if not _warned_no_sigalrm:
+            print("--bot-timeout is unsupported on this platform (no SIGALRM); ignoring it")
+            _warned_no_sigalrm = True
+        yield
+        return
+
+    def _raise(signum, frame):
+        raise _BotTimeout(f"decide() exceeded {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _raise)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _timed_decide(seconds: float, timeouts: list[int]) -> ai.DecideFn:
+    """Wrap ai.decide with a per-call budget; a blown budget scores as no orders."""
+
+    def _decide(state: GameState, pid: int) -> list:
+        try:
+            with _time_budget(seconds):
+                return ai.decide(state, pid)
+        except _BotTimeout:
+            timeouts[0] += 1
+            return []
+
+    return _decide
 
 
 @dataclass
@@ -43,6 +98,7 @@ class SimResult:
     winner: int | None  # player id, 0 for a draw, None if it timed out
     turns: int
     timed_out: bool
+    bot_timeouts: int = 0
 
 
 @dataclass
@@ -123,6 +179,7 @@ def play(
     max_turns: int = 600,
     verbose: bool = False,
     strategies: list[str] | None = None,
+    bot_timeout: float = 0.0,
 ) -> SimResult:
     state = mapgen.generate(seed, mode, nodes, players)
     # AI-vs-AI: drive every slot with the AI, including the human's seat.
@@ -133,30 +190,32 @@ def play(
     check_invariants(state)
     if verbose:
         print_state(state)
+    timeouts = [0]
+    decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=ai.decide)
+        engine.end_turn(state, decide=decide)
         check_invariants(state)
         if verbose:
             print_state(state)
-    return SimResult(seed, state.winner, state.turn, state.winner is None)
+    return SimResult(seed, state.winner, state.turn, state.winner is None, timeouts[0])
 
 
-def run_trials(seeds, mode, nodes, players, max_turns, strategies=None) -> list[SimResult]:
-    return [play(s, mode, nodes, players, max_turns, strategies=strategies) for s in seeds]
+def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0) -> list[SimResult]:
+    return [play(s, mode, nodes, players, max_turns, strategies=strategies, bot_timeout=bot_timeout) for s in seeds]
 
 
-def run_swap(seeds, mode, nodes, strategies, max_turns) -> list[SwapGame]:
+def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0) -> list[SwapGame]:
     """Play every rotation of the roster on each seed (same map, seats rotated)."""
     n = len(strategies)
     games: list[SwapGame] = []
     for seed in seeds:
         for assignment in _rotations(strategies):
-            r = play(seed, mode, nodes, n, max_turns, strategies=assignment)
+            r = play(seed, mode, nodes, n, max_turns, strategies=assignment, bot_timeout=bot_timeout)
             games.append(SwapGame(r, assignment))
     return games
 
 
-def run_ladder(seeds, mode, nodes, roster, max_turns) -> list[SwapGame]:
+def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0) -> list[SwapGame]:
     """Pairwise round-robin: every unordered pair, both seatings, on every seed.
 
     Two players per game, so a win means "beat *that* bot" rather than "survived
@@ -168,7 +227,7 @@ def run_ladder(seeds, mode, nodes, roster, max_turns) -> list[SwapGame]:
     for seed in seeds:
         for a, b in itertools.combinations(roster, 2):
             for assignment in ([a, b], [b, a]):
-                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment)
+                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout)
                 games.append(SwapGame(r, assignment))
     return games
 
@@ -184,6 +243,7 @@ def _seat_label(pid: int, strategies: list[str] | None) -> str:
 def _summarise(results: list[SimResult], strategies: list[str] | None = None) -> None:
     n = len(results)
     timeouts = sum(r.timed_out for r in results)
+    bot_timeouts = sum(r.bot_timeouts for r in results)
     finished = [r for r in results if not r.timed_out]
     wins: dict[int, int] = {}
     for r in finished:
@@ -192,7 +252,7 @@ def _summarise(results: list[SimResult], strategies: list[str] | None = None) ->
             continue
         wins[w] = wins.get(w, 0) + 1
     avg = sum(r.turns for r in finished) / len(finished) if finished else 0.0
-    print(f"\n{n} games | finished {len(finished)} | timeouts {timeouts}")
+    print(f"\n{n} games | finished {len(finished)} | timeouts {timeouts} | bot timeouts {bot_timeouts}")
     print(f"avg length (finished): {avg:.1f} turns")
     for pid in sorted(wins):
         label = "draw" if pid == 0 else _seat_label(pid, strategies)
@@ -224,6 +284,10 @@ def _avg_turns(games: list[SwapGame]) -> float:
     return sum(lengths) / len(lengths) if lengths else 0.0
 
 
+def _bot_timeout_total(games: list[SwapGame]) -> int:
+    return sum(g.result.bot_timeouts for g in games)
+
+
 def _rank_lines(wins: dict[str, int], finished: int) -> None:
     for strat, w in sorted(wins.items(), key=lambda kv: (-kv[1], kv[0])):
         pct = 100 * w / finished if finished else 0.0
@@ -235,7 +299,8 @@ def _summarise_swap(games: list[SwapGame], roster: list[str], seeds: int) -> Non
     wins, draws, timeouts = _tally(games, roster)
     total = len(games)
     finished = total - timeouts
-    print(f"\n{total} games | {len(roster)} rotations x {seeds} seeds | draws {draws} | timeouts {timeouts}")
+    print(f"\n{total} games | {len(roster)} rotations x {seeds} seeds | draws {draws} | timeouts {timeouts} "
+          f"| bot timeouts {_bot_timeout_total(games)}")
     print(f"avg length (finished): {_avg_turns(games):.1f} turns")
     _rank_lines(wins, finished)
 
@@ -251,7 +316,7 @@ def _summarise_ladder(games: list[SwapGame], roster: list[str], seeds: int) -> N
     finished = total - timeouts
     pairs = len(roster) * (len(roster) - 1) // 2
     print(f"\n{total} games | {pairs} pairs x 2 seatings x {seeds} seeds "
-          f"| draws {draws} | timeouts {timeouts}")
+          f"| draws {draws} | timeouts {timeouts} | bot timeouts {_bot_timeout_total(games)}")
     print(f"avg length (finished): {_avg_turns(games):.1f} turns")
     _rank_lines(wins, finished)
 
@@ -299,6 +364,7 @@ def main() -> None:
     ap.add_argument("--ladder", action="store_true", help="pairwise round-robin: every pair head-to-head, both seatings, ranked with a matchup grid")
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
+    ap.add_argument("--bot-timeout", type=float, default=0.0, help="wall-clock seconds allowed per decide() call (0 = disabled)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -326,10 +392,10 @@ def main() -> None:
             ap.error(f"{flag} sets the seat count itself; omit --players (it is forced to {seats})")
         seeds = range(args.seed, args.seed + args.trials)
         if args.ladder:
-            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns)
+            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
             _summarise_ladder(games, strategies, args.trials)
         else:
-            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns)
+            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
             _summarise_swap(games, strategies, args.trials)
         return
 
@@ -342,10 +408,10 @@ def main() -> None:
 
     if args.trials > 1:
         seeds = range(args.seed, args.seed + args.trials)
-        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies)
+        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout)
         _summarise(results, strategies)
     else:
-        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies)
+        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout)
         if r.winner == 0:
             winner = "draw"
         elif r.winner is None:
