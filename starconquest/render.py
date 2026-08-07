@@ -1442,7 +1442,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     stack = (
         _row_h("big")
         + sum(_row_h(kind) for kind, _t, _c in result)
-        + (0 if config.touch_ui else _row_h("normal"))
         + pad
         + rows * (bh + gap)
         - gap
@@ -1456,16 +1455,13 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         font = _fonts()[kind]
         _text(surface, font, text, col, center=(w // 2, y + font.get_height() // 2))
         y += _row_h(kind)
-    if not config.touch_ui:
-        _text(surface, normal, "T: retry  ·  R: new map  ·  M: setup menu  ·  Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, y + normal.get_height() // 2))
-        y += _row_h("normal")
     y += pad
 
     # Retry replays this exact match from the opening position (a fork of the
     # finished log, so the completed record stays intact) — the main way back
     # in after a loss, so it leads and sits beside New map's fresh seed.
-    # Setup menu and Review history follow; Quit stands alone below them,
-    # opening the same confirm modal as Esc.
+    # Setup menu and Review history follow; Challenge a friend (when offered)
+    # comes next; Quit is always last, opening the same confirm modal as Esc.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
     ui.retry_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[0], *_BTN_AMBER)
     ui.restart_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[1], *_BTN_GREEN)
@@ -1473,18 +1469,19 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.menu_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[2], *_BTN_BLUE)
     ui.history_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[3], *_BTN_VIOLET)
     y += bh + gap
-    ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
-    y += bh + gap
 
-    # Final row: turn this win into a challenge link. Only offered on a result
-    # worth sending — the human won at least partly under their own steam.
-    if not share:
+    if share:
+        sw = _btn_w(normal, share_label, bw)
+        button_y = y
+        ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, button_y, sw, bh), share_label, *_BTN_TEAL)
+        y += bh + gap
+        if ui.share_msg:
+            _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM, center=(w // 2, button_y + bh + _row_h() // 2))
+            y += _row_h()
+    else:
         ui.share_button_rect = (0, 0, 0, 0)
-        return
-    sw = _btn_w(normal, share_label, bw)
-    ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), share_label, *_BTN_TEAL)
-    if ui.share_msg:
-        _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM, center=(w // 2, y + bh + _row_h() // 2))
+
+    ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
 def _shareable(state: GameState, ui: Ui) -> bool:
