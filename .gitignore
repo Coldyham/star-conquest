@@ -20,3 +20,6 @@ games/
 
 # webstore key/value file (personal bests; localStorage on the web build)
 /kv.json
+
+# Claude generated feature spec/session notes
+/notes

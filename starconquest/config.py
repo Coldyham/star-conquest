@@ -45,6 +45,8 @@ MAX_NODES = 40                # cap: edge build is O(n^2), keep map-gen responsi
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
 MAX_EDGE_LENGTH_FRAC = 0.5     # prune non-MST candidate edges longer than this * WORLD_SIZE
+LANE_NODE_CLEARANCE_FRAC = 0.045  # reject an extra edge passing closer than this * WORLD_SIZE
+#   to an unrelated node's centre -> it would render as if running underneath that system
 LLOYD_PASSES = 1              # relaxation passes to even out random node placement
 NODE_JITTER = 0.85           # placement spread within a grid cell (0..1); higher == more length variety
 RELAX_MIN_SEP_FRAC = 0.6     # relaxation only pushes apart nodes closer than this * ideal spacing

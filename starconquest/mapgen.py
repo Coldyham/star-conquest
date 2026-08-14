@@ -16,7 +16,7 @@ import math
 from collections import deque
 
 from . import config
-from .geometry import Point, bounds_of, dist, segments_intersect
+from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
 from .model import GameState, Player, System
 
 
@@ -272,6 +272,23 @@ def _crosses_any(positions: list[Point], accepted: list[tuple[int, int]], a: int
     return False
 
 
+def _grazes_other_node(positions: list[Point], a: int, b: int) -> bool:
+    """True if segment a-b passes closer than clearance to some third node's centre.
+
+    A two-hop path (e.g. a-c and c-b already accepted) never trips ``_crosses_any``
+    for a direct a-b edge, since both segments share an endpoint with it and
+    incident edges are never "crossings" — but if a, c and b are near-collinear,
+    the direct edge still runs right underneath c, rendering as hidden behind it.
+    """
+    clearance = config.LANE_NODE_CLEARANCE_FRAC * config.WORLD_SIZE
+    for c, p in enumerate(positions):
+        if c in (a, b):
+            continue
+        if point_segment_dist(p, positions[a], positions[b]) < clearance:
+            return True
+    return False
+
+
 def _planar_edges(positions: list[Point]) -> list[tuple[int, int]]:
     """Euclidean MST (connected, crossing-free) + a few short extras for loops.
 
@@ -302,6 +319,8 @@ def _planar_edges(positions: list[Point]) -> list[tuple[int, int]]:
         if (i, j) in accepted_set or d > max_len:
             continue
         if _crosses_any(positions, accepted, i, j):
+            continue
+        if _grazes_other_node(positions, i, j):
             continue
         accepted.append((i, j))
         accepted_set.add((i, j))
