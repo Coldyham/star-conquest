@@ -285,11 +285,25 @@ def travel_turns_at(base_turns: int, turn: int) -> int:
 
     Scales the mapgen-time value rather than re-deriving from lane length, so a
     state built by hand (tests, fixtures) keeps the travel times it was given.
+    Prefer ``travel_turns_at_length`` when the lane's real length is on hand
+    (i.e. any real ``Lane``) — rescaling this already-rounded-up figure can
+    overstate the true time by up to a turn, visibly so once it's shown
+    alongside the lane's length and the current speed.
     """
     speed = ship_speed(turn)
     if speed <= SHIP_LY_PER_TURN:
         return max(1, base_turns)
     return max(1, math.ceil(base_turns * SHIP_LY_PER_TURN / speed))
+
+
+def travel_turns_at_length(length_ly: float, turn: int) -> int:
+    """Turns to cross a lane of ``length_ly`` if launched on ``turn``.
+
+    Derives straight from the lane's real length and the current speed, so it
+    matches what's shown alongside it (length, "Fleet speed") exactly — unlike
+    ``travel_turns_at``, there's no previously-rounded-up figure to double-round.
+    """
+    return max(1, math.ceil(length_ly / ship_speed(turn)))
 
 
 def node_clearance() -> int:

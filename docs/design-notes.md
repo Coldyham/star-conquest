@@ -73,12 +73,16 @@ lengths. Compounding makes it a constant ~50 turns at the gain slider's 2%
 top, independent of base speed and past any lane on any map — which is what
 sets that 2%.
 
-`config.travel_turns_at` scales the *baked* `Lane.travel_turns` rather than
-re-deriving from `length_ly`, so a state assembled by hand (tests, fixtures)
-keeps whatever travel times it was handed. `GameState.travel_turns` is where
-that scaling happens, which is why nothing outside mapgen should read
-`Lane.travel_turns` directly — every AI ETA estimate and the lane labels in
-`render` pick up the current-turn value for free by going through the query.
+`GameState.travel_turns` re-times from the lane's real `length_ly`
+(`config.travel_turns_at_length`), not by rescaling the already-rounded-up
+baked `Lane.travel_turns` — that rescale-based approach (`config.travel_turns_at`,
+kept around for hand-built states with no real length, e.g. some test
+fixtures) double-rounds and can overstate the true time by up to a turn,
+which read as a bug once it was visible next to the lane's length and the
+current speed in the side panel (10.7 ly at 7.0 ly/turn showing 3 turns
+instead of 2). Nothing outside mapgen should read `Lane.travel_turns`
+directly regardless — every AI ETA estimate and the lane labels in `render`
+pick up the current-turn value for free by going through the query.
 Growth climbs towards `SHIP_SPEED_MAX`, which is also the ship-speed slider's
 top — one declared ceiling rather than two, so however long a game runs a
 fleet is never faster than the base speed alone could have made it. It is

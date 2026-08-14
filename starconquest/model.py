@@ -152,12 +152,15 @@ class GameState:
 
         ``Lane.travel_turns`` (and ``adjacency``) hold the mapgen-time value; with
         ship-speed growth switched on this shortens as the game runs, so ask here
-        rather than reading the lane directly.
+        rather than reading the lane directly. Re-times from the lane's real
+        ``length_ly`` (``config.travel_turns_at_length``) rather than rescaling
+        the already-rounded-up baked figure, so this always matches what's shown
+        alongside it on screen (the lane's length and the current speed).
         """
-        base = self.adjacency.get(a, {}).get(b)
-        if base is None:
+        lane = self.lanes.get(lane_key(a, b))
+        if lane is None:
             return None
-        return config.travel_turns_at(base, self.turn)
+        return config.travel_turns_at_length(lane.length_ly, self.turn)
 
     def are_adjacent(self, a: int, b: int) -> bool:
         return b in self.adjacency.get(a, {})

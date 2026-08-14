@@ -28,7 +28,7 @@ def make_state(specs, lanes, human=None):
     for owner in {o for _, o, _, _ in specs if o != 0}:
         s.players[owner] = Player(owner, f"P{owner}", (0, 0, 0), is_human=(owner == human))
     for a, b, t in lanes:
-        s.add_lane(a, b, float(t), t)
+        s.add_lane(a, b, float(t) * config.SHIP_LY_PER_TURN, t)
     s.rebuild_topology()
     return s
 
