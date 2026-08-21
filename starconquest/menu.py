@@ -109,6 +109,7 @@ _AI_PARAMS = (
     ("ai_expand", "Expand margin", "expand_margin", 1.0, 3.0, 0.1, False),
     ("ai_attack", "Attack margin", "attack_margin", 1.0, 3.0, 0.1, False),
     ("ai_reinforce", "Reinforce margin", "reinforce_margin", 0, 10, 1, True),
+    ("ai_aux", "Custom (bot-defined)", "aux", 0.0, 8.0, 1.0, False),
 )
 
 # key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.

@@ -205,6 +205,17 @@ intact.
     since files load in sorted order and the registry is incomplete at your
     import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
     asserts both of the latter).
+  - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
+    (only the AI tab's generic "Custom (bot-defined)" slider writes it); each
+    strategy assigns its own meaning. `config.AI_AUX` is `1.0` and that is the
+    documented "untuned" value, so a bot's default behaviour must be what it does
+    at 1.0 — a stale token or save with no `aux` key deserialises to it.
+    `models/knower.py` reads it as search depth. Add per-bot knobs here rather
+    than growing `AiParams` one field per strategy.
+  - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
+    prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
+    which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
+    its depth-0 seats are predicted for real, and trusted, instead of approximated).
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through

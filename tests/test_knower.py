@@ -380,3 +380,156 @@ def test_knower_beats_thinker_head_to_head(kn):
     games = sim.run_ladder(range(1, 13), "random", 24, roster, 500)
     wins, _draws, _timeouts = sim._tally(games, roster)
     assert wins["knower"] > wins["thinker"], wins
+
+
+# --------------------------------------------------------------------------- #
+# Depth: the `aux` knob, and the rollout search above depth 1
+# --------------------------------------------------------------------------- #
+def test_seat_depth_is_tolerant(kn):
+    """`aux` rides a hand-editable token, so nothing it can hold may raise."""
+    class _P:
+        pass
+
+    p = _P()
+    p.ai_params = _P()
+    for raw, want in ((0.0, 0), (1.0, 1), (3.0, 3),
+                      (999.0, kn.SEARCH_DEPTH_MAX), (-5.0, 0)):
+        p.ai_params.aux = raw
+        assert kn._seat_depth(p) == want, raw
+
+    p.ai_params.aux = "nonsense"
+    assert kn._seat_depth(p) == kn.SEARCH_DEPTH_DEFAULT
+    assert kn._seat_depth(_P()) == kn.SEARCH_DEPTH_DEFAULT   # no params at all
+
+
+def test_depth_zero_is_the_blind_planner(kn):
+    """Depth 0 must cost nothing: the same orders as `_blind`, and no oracle."""
+    state = _state()
+    state.players[2].ai_params.aux = 0.0
+    kn.LAST_ORACLE = None
+
+    assert _totals(ai.decide(state, 2)) == _totals(kn._plan(state, 2, None))
+    assert kn.LAST_ORACLE is None, "depth 0 built an oracle it never uses"
+
+
+def test_depth_one_matches_the_plain_oracle(kn):
+    """The default. Depth 1 is the one-turn oracle, untouched by the search path."""
+    state = _state()
+    state.players[2].ai_params.aux = 1.0
+    plain = _totals(ai.decide(state, 2))
+    assert plain == _totals(kn._plan(state, 2, kn.LAST_ORACLE))
+
+
+@pytest.mark.parametrize("depth", [2, 3, 5, 8])
+def test_search_is_deterministic_and_pure(kn, depth):
+    """Common random numbers, state-derived rngs: same board in, same plan out.
+
+    Also the invariant the whole rollout rests on — stepping cloned boards must not
+    touch the real one, and must not advance `state.rng`, or every seat after us is
+    predicted off-position.
+    """
+    state = _state()
+    state.players[2].ai_params.aux = float(depth)
+    fingerprint, rng_state = kn._fingerprint(state), state.rng.getstate()
+
+    first = _totals(ai.decide(state, 2))
+    second = _totals(ai.decide(state, 2))
+
+    assert first == second, "the search is not reproducible"
+    assert kn._fingerprint(state) == fingerprint, "the rollout leaked into the board"
+    assert state.rng.getstate() == rng_state, "the rollout drew from the real rng"
+    assert kn._DEPTH == 0, "the depth guard leaked"
+
+
+def test_search_falls_back_when_a_rollout_raises(kn, monkeypatch):
+    """A search is a luxury; a legal plan is not. Depth must never cost us a turn."""
+    state = _state()
+    state.players[2].ai_params.aux = 4.0
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("rollout exploded")
+
+    monkeypatch.setattr(kn, "_rollout", boom)
+    kn.LAST_ERROR = None
+    orders = ai.decide(state, 2)
+
+    assert isinstance(kn.LAST_ERROR, RuntimeError), "the failure path was not taken"
+    assert all(o.owner_id == 2 for o in orders)
+    assert kn._DEPTH == 0, "the depth guard leaked through the failure path"
+
+    # And it lands on the depth-1 plan — the search is lost, the oracle is not.
+    monkeypatch.undo()
+    state.players[2].ai_params.aux = 1.0
+    assert _totals(orders) == _totals(ai.decide(state, 2))
+
+
+def test_a_depth_zero_seat_is_trusted_and_exploited(kn):
+    """Depth 0 is the one seat we model *exactly*: its algorithm is `_blind` itself.
+
+    So its predicted launches may be believed, which is what lets the vacated system
+    be sniped. At depth 1 the same seat is an oracle we cannot read, and is not.
+    """
+    systems, lanes = ({1: (2, 12, 3), 2: (3, 20, 3), 3: (3, 1, 3)},
+                      [(1, 2, 2), (2, 3, 2)])
+
+    shallow = _board(systems, lanes)
+    shallow.players[3].ai_strategy = "knower"
+    shallow.players[3].ai_params.aux = 0.0
+    ai.decide(shallow, 2)
+    assert 3 in kn.LAST_ORACLE.trusted, "a depth-0 seat of our own module is exact"
+
+    deep = _board(systems, lanes)
+    deep.players[3].ai_strategy = "knower"
+    deep.players[3].ai_params.aux = 1.0
+    ai.decide(deep, 2)
+    assert 3 not in kn.LAST_ORACLE.trusted, "an oracle seat cannot be believed"
+
+
+def test_is_oracle_seat_tracks_depth(kn):
+    """The public per-seat flag sibling oracles read in place of `IS_ORACLE`."""
+    state = _state()
+    player = state.players[2]
+
+    player.ai_params.aux = 0.0
+    assert kn.is_oracle_seat(player) is False
+    player.ai_params.aux = 3.0
+    assert kn.is_oracle_seat(player) is True
+    assert kn.IS_ORACLE, "the module flag stays, as the fallback for older siblings"
+
+
+def test_a_deep_game_stays_legal_and_reproducible(kn):
+    """Cloning and stepping boards all game must not corrupt the real one."""
+    def _run():
+        state = _state(seed=11, nodes=18)
+        for pid in (1, 2, 3):
+            state.players[pid].ai_strategy = "knower"
+            state.players[pid].ai_params.aux = 3.0
+        for _ in range(25):
+            if state.winner is not None:
+                break
+            engine.end_turn(state, decide=ai.decide)
+            sim.check_invariants(state)
+        return state.turn, state.winner, sim.player_stats(state)
+
+    assert _run() == _run(), "a depth-3 game is not reproducible from its seed"
+
+
+def test_search_works_for_the_autoplayed_human_seat(kn):
+    """`_collect_orders` skips a human seat, so a rollout must not lose our plan.
+
+    Under autoplay `main.py` calls `decide` for the human seat itself. If the rollout
+    left `is_human` set on its clone, the engine would ignore our own orders and
+    every candidate would score the same do-nothing board — a silently dead search.
+    """
+    def _seat(as_human):
+        state = _state(seed=5, nodes=24)
+        state.players[2].ai_params.aux = 4.0
+        state.players[2].is_human = as_human
+        return state, _totals(ai.decide(state, 2))
+
+    ai_state, ai_orders = _seat(False)
+    human_state, human_orders = _seat(True)
+
+    assert human_orders == ai_orders, "the rollout dropped our plan for a human seat"
+    assert human_state.players[2].is_human, "the clone's is_human leaked to the board"
+    assert kn._fingerprint(human_state) == kn._fingerprint(ai_state)

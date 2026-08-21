@@ -21,11 +21,16 @@ def lane_key(a: int, b: int) -> frozenset[int]:
 
 @dataclass
 class AiParams:
-    """Per-seat tuning for the built-in heuristic AI.
+    """Per-seat tuning for the AI.
 
     Defaults mirror the global ``config.AI_*`` constants, so a player left
     untuned behaves exactly as the AI always has. The menu edits these per seat;
     a custom strategy is free to ignore them (see ``ai.STRATEGIES``).
+
+    Every field but ``aux`` is read only by the built-in heuristic
+    (``ai.compute_orders``). ``aux`` is the opposite: the core never interprets it,
+    and each strategy is free to define its own meaning (``models/knower.py`` reads
+    it as search depth). See ``models/README.md``.
     """
 
     reserve_fraction: float = config.AI_RESERVE_FRACTION
@@ -33,6 +38,7 @@ class AiParams:
     expand_margin: float = config.AI_EXPAND_MARGIN
     attack_margin: float = config.AI_ATTACK_MARGIN
     reinforce_margin: int = config.AI_REINFORCE_MARGIN
+    aux: float = config.AI_AUX
 
 
 @dataclass

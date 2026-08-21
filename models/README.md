@@ -71,6 +71,15 @@ system ids).
 tab. Reading your own is optional — the built-in heuristic uses it, and yours may
 too if you want the same knobs to steer your bot.
 
+`ai_params.aux` is the exception: a **generic knob the core never interprets**,
+shown on the AI tab as *Custom (bot-defined)* and free for each bot to define
+however it likes. It ranges 0–8 and defaults to `1.0`, so treat 1.0 as "untuned"
+and make that your normal behaviour — a seat that never touched the slider must
+still play well. `models/knower.py` reads it as its search depth (0 = no
+prediction, 1 = predict one turn, N = predict then roll N−1 turns forward). Being
+per-seat, it is also readable on *rivals*, so a bot can tell a shallow opponent
+from a deep one.
+
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 
 ## Predicting the other seats
@@ -104,6 +113,21 @@ Two things you cannot predict: a **human** seat (their orders come from the UI, 
 from code — knower models them with a weaker copy of itself and only ever lets that
 *raise* a threat estimate), and **another predicting bot**, which will recurse
 unless you model it with something simpler.
+
+To make that last one detectable, a predicting bot should advertise itself:
+
+- **`IS_ORACLE = True`** — a module-level flag meaning "this file predicts other
+  seats". Anyone seeing it on your module will proxy your seats with a simpler model
+  instead of calling you, which is what stops two predictors recursing forever.
+- **`is_oracle_seat(player) -> bool`** — optional, and preferred when present, since
+  prediction may be a per-*seat* setting that one module-level flag cannot express.
+  knower defines it as "depth ≥ 1", so its depth-0 seats correctly report `False`
+  and get predicted for real rather than approximated. Keep the flag as well, for
+  anything that only checks it.
+
+Recursion is still your own responsibility: guard re-entry into your `decide` (a
+module-level depth counter is enough in this single-threaded codebase) rather than
+trusting every rival to check your flags.
 
 ## Example: copy this into `models/rusher.py`
 

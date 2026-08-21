@@ -81,6 +81,61 @@ Measured against thinker, ladder, both seatings, 24-node random maps:
 The gap between those first two rows *is* the thesis of this bot: the faster ships
 are, the more of the game thinker cannot see, and the oracle scales with it.
 
+--- Depth: how far forward to look ------------------------------------------- #
+
+Everything above is **depth 1**. The seat's generic ``ai_params.aux`` knob (the AI
+tab's "Custom (bot-defined)" slider) turns that into a dial:
+
+    0   no oracle at all — the blind ``_plan``, i.e. thinker-strength
+    1   the one-turn oracle described above (the default, `config.AI_AUX`)
+    N   the oracle, then N-1 turns actually *played out* and scored
+
+Depth >= 2 is a rollout search. ``engine.end_turn`` is drivable on a clone — the
+engine takes ``decide`` as a parameter and mutates nothing outside the state handed
+to it — so ``_rollout`` clones the board, plays a candidate plan, runs the next
+turns, and scores the position with ``_evaluate``. ``_search`` does that for a few
+candidate ``Posture``s and keeps the winner. Three things make it sound:
+
+  * **Candidates come from a threaded ``Posture``, not patched globals.** Patching
+    would be process-wide: it would corrupt the ``_blind`` self-model used to
+    predict rivals, and every other knower seat in the game.
+  * **Common random numbers.** Every candidate's rollout gets the same
+    state-derived rng, so all of them meet the same combat jitter and the score gap
+    reflects the plan rather than the dice. Free variance reduction, and it keeps
+    ``replay.reconstruct`` bit-exact.
+  * **Rolled turns use the blind planner for every oracle seat**, ours included
+    (``_rollout_decide``). Letting them build real oracles would mean a full
+    prediction sweep per rolled turn. Our own future play is understated, but
+    identically for every candidate, which is all a comparison needs.
+
+Work is *iteration*-bounded (fixed depth x ``SEARCH_WIDTH``), so a game stays
+reproducible; ``SEARCH_BUDGET_S`` is only a catastrophe guard, checked between
+candidates so there is always a whole plan to return. Candidate 0 is the tuned
+default, so a search that runs out of budget or finds nothing better *is* depth 1.
+
+Measured, knower vs knower, both seatings, 40 seeds, 24-node random maps:
+
+    depth 1 vs 2    54% - 46%      one turn is not enough to separate postures
+    depth 1 vs 3    42% - 58%
+    depth 1 vs 5    31% - 69%      <- best
+    depth 3 vs 5    34% - 66%
+    depth 5 vs 8    55% - 45%      plateaus, then decays
+
+Deeper play is also *faster* and less passive, not more: timeouts fell 13 -> 5 and
+games shortened 157 -> 125 turns from depth 1 to 5. It costs 0.6 ms/turn at depth 1
+and 5.5 ms at depth 5 (40 nodes, 4 seats), against a 350 ms autoplay frame.
+
+The decay past 5 is the honest limit of the method: rollouts play every seat with
+the blind planner, so far-future turns are increasingly fiction, and eventually the
+extra turns add noise rather than signal. The other ceiling is candidate breadth —
+``POSTURE_VARIANTS`` only explores "knower, more or less aggressive", and cannot
+find a move the four phases structurally cannot express.
+
+Note **depth 0 is thinker-*strength*, not thinker**: ``RESERVE_FLOOR`` is 0 here
+against thinker's 1, ``_richness`` peeks a hop further (``BEYOND_DECAY``), and
+tie-breaks are deterministic where thinker's draw from ``state.rng``. It measures
+stronger than thinker (80%-20%), so the two are not interchangeable.
+
 Forked from ``models/thinker.py`` (commit f94ff20); the four phases and the helpers
 below ``_richness`` are thinker's, changed only where the oracle changes them.
 """
@@ -93,7 +148,7 @@ import random
 import sys
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from starconquest import ai, engine
 from starconquest.model import Order
@@ -111,7 +166,7 @@ NEUTRAL_MARGIN = 1.3
 ENEMY_NEAR = 1.3
 ENEMY_FAR = 1.9
 OVERWHELM = 2.0
-RESERVE_FLOOR = 1
+RESERVE_FLOOR = 0
 FRONTIER_GUARD = 0.3            # now applied only against seats we *can't* predict
 
 # --- knower's own ----------------------------------------------------------- #
@@ -122,9 +177,86 @@ KNOWN_MARGINS = True            # False reverts to thinker's padded margins
 KNOWN_ATTACK = _EDGE + 0.02
 KNOWN_DEFEND = _EDGE + 0.02
 
+# `_richness` also peeks one hop past the system it is pricing, at this weight, so a
+# poor system guarding a rich one is valued as the gateway it is. Not an oracle
+# change — thinker would benefit too — just not ported back without its own
+# measurement.
+BEYOND_DECAY = 0.35
+
 TRUST_HUMAN = False             # True lets a human-seat prediction relax guards and
                                 # justify snipes, as if they were a bot. Off by
                                 # default: a real human is not obliged to comply.
+
+# --- search ----------------------------------------------------------------- #
+# Depth comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
+# 1.0 default is what keeps an untuned seat on the plain one-turn oracle).
+SEARCH_DEPTH_DEFAULT = 1        # what a malformed or absent `aux` falls back to
+SEARCH_DEPTH_MAX = 8            # matches the menu slider's top end
+SEARCH_WIDTH = 4                # candidate postures actually rolled out
+
+# A second budget, kept separate from ORACLE_BUDGET_S so depth 1 stays byte-exact.
+# Checked *between* candidates, so there is always a whole plan to return.
+SEARCH_BUDGET_S = 0.150
+
+# Terminal position value. Production dominates: it is the only term that compounds.
+EVAL_PRODUCTION = 10.0
+EVAL_SYSTEMS = 1.0
+EVAL_SHIPS = 0.15
+EVAL_DECIDED = 1000.0           # winning/losing outranks any amount of material
+
+_SALT_ROLLOUT = 7               # keeps rollout rngs clear of `_priv`'s other users
+
+
+@dataclass(frozen=True)
+class Posture:
+    """The planner's tunables, bundled so a search can vary them per candidate.
+
+    Patching the module globals instead would be process-wide: it would corrupt the
+    `_blind` self-model used to predict rivals, and every other knower seat in the
+    game. Threading a value keeps a candidate plan's aggression local to that
+    candidate. Built by `_posture` from the globals *at call time*, so the globals
+    above stay the real tunables and nothing is frozen at import.
+    """
+
+    reserve_floor: int
+    frontier_guard: float
+    defend_margin: float
+    neutral_margin: float
+    enemy_near: float
+    enemy_far: float
+    overwhelm: float
+    beyond_decay: float
+    known_margins: bool
+    known_attack: float
+    known_defend: float
+
+
+def _posture() -> Posture:
+    """The default posture, read live from the module globals."""
+    return Posture(
+        reserve_floor=RESERVE_FLOOR,
+        frontier_guard=FRONTIER_GUARD,
+        defend_margin=DEFEND_MARGIN,
+        neutral_margin=NEUTRAL_MARGIN,
+        enemy_near=ENEMY_NEAR,
+        enemy_far=ENEMY_FAR,
+        overwhelm=OVERWHELM,
+        beyond_decay=BEYOND_DECAY,
+        known_margins=KNOWN_MARGINS,
+        known_attack=KNOWN_ATTACK,
+        known_defend=KNOWN_DEFEND,
+    )
+
+
+# Candidate stances, as overrides on the default. Index 0 must stay `{}` — it is the
+# tuned default, and the search only prefers another candidate that outscores it.
+POSTURE_VARIANTS = (
+    {},
+    {"frontier_guard": 0.6, "reserve_floor": 2},                    # timid
+    {"frontier_guard": 0.0, "enemy_near": 1.15, "enemy_far": 1.5},  # all-in
+    {"beyond_decay": 0.8},                                          # push for depth
+    {"enemy_near": 1.6, "enemy_far": 2.2},                          # only sure strikes
+)
 
 # A pathological opponent cannot be *interrupted* in pure Python (no threads, no
 # signals on WASM), so the only defence is to stop asking the rest of them once the
@@ -167,12 +299,22 @@ class Oracle:
 
 
 def decide(state, pid):
-    """Plan against a forecast of every other seat. Never raises."""
+    """Plan against a forecast of every other seat. Never raises.
+
+    Depth comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1 the
+    plain one-turn oracle, and N the oracle plus N-1 turns of rollout search.
+    """
     global _DEPTH, LAST_ERROR
 
     if _DEPTH:
         # Someone is predicting *us*. Answer as the blind planner: it terminates,
         # and it is the same self-model we use for seats we cannot read.
+        return _plan(state, pid, None)
+
+    depth = _seat_depth(state.players[pid]) if pid in state.players \
+        else SEARCH_DEPTH_DEFAULT
+    if depth <= 0:
+        # No oracle at all. Kept ahead of `_build_oracle` so depth 0 costs nothing.
         return _plan(state, pid, None)
 
     _DEPTH += 1
@@ -184,16 +326,31 @@ def decide(state, pid):
         _DEPTH -= 1
 
     try:
+        if depth > 1:
+            # `_rollout_decide` resolves each seat itself and routes oracles to
+            # `_blind`, so nothing here re-enters us today. The guard stays up across
+            # the search anyway: it is the backstop for a rolled seat that calls back
+            # into `decide`, which `_surrogate`'s identity check cannot see.
+            _DEPTH += 1
+            try:
+                return _search(state, pid, orc, depth - 1,
+                               time.perf_counter() + SEARCH_BUDGET_S)
+            finally:
+                _DEPTH -= 1
         return _plan(state, pid, orc)
     except Exception as exc:              # noqa: BLE001
         # Nothing upstream catches a bot (engine.py:101, main.py:300 both call it
         # bare), so a crash here would take the whole game down.
         LAST_ERROR = exc
         try:
-            return _plan(state, pid, None)
+            return _plan(state, pid, orc)
         except Exception as exc2:         # noqa: BLE001
             LAST_ERROR = exc2
-            return []
+            try:
+                return _plan(state, pid, None)
+            except Exception as exc3:     # noqa: BLE001
+                LAST_ERROR = exc3
+                return []
 
 
 # --------------------------------------------------------------------------- #
@@ -284,20 +441,66 @@ def _surrogate(player):
     knower one level shallower and never trusted. Our own strategy gets the same
     treatment — under whatever filename it was registered as, and likewise any
     sibling oracle — which is what keeps two knower seats from recursing.
+
+    The one case where the model is *exact* is a **depth-0** seat of our own module:
+    its whole algorithm is `_plan(state, pid, None)`, which is precisely what
+    `_blind` computes. So that seat is predicted the same way but believed, which
+    frees the guard `_pessimistic_owners` would otherwise pin against it and lets
+    `_garrison` price its vacated systems honestly. A depth-0 seat of a *different*
+    oracle module cannot get that, because its blind planner is not ours.
     """
     if player.is_human:
         return _blind, (_TRUSTED if TRUST_HUMAN else _UNTRUSTED)
     # Resolve exactly as ai.decide does (ai.py:84), so even a stale strategy name
     # is predicted correctly: the engine will fall back to the heuristic too.
     fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
-    if fn is decide or _is_oracle(fn):
+    if fn is decide:
+        return _blind, (_TRUSTED if _seat_depth(player) == 0 else _UNTRUSTED)
+    if _is_oracle(fn, player):
         return _blind, _UNTRUSTED
     return fn, _TRUSTED
 
 
-def _is_oracle(fn):
+def _is_oracle(fn, player=None):
+    """Is ``fn`` an oracle that must be proxied rather than called?
+
+    Depth is per *seat*, not per module, so a module-level ``IS_ORACLE`` cannot
+    describe a game holding both a depth-0 and a depth-3 seat of the same bot. A
+    module may therefore also export ``is_oracle_seat(player) -> bool``, which is
+    preferred when present; the flag is the fallback for anything that doesn't.
+    """
     module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    per_seat = getattr(module, "is_oracle_seat", None)
+    if player is not None and callable(per_seat):
+        try:
+            return bool(per_seat(player))
+        except Exception:                 # noqa: BLE001 — a broken probe is their bug
+            pass
     return bool(getattr(module, "IS_ORACLE", False))
+
+
+def _seat_depth(player) -> int:
+    """This seat's search depth, from its generic ``ai_params.aux`` knob.
+
+    0 = no oracle (the blind planner), 1 = the plain one-turn oracle, N = the oracle
+    plus N-1 turns of rollout. Tolerant by design: a hand-edited token or a seat with
+    no params at all must never take a bot down, so anything unreadable is depth
+    ``SEARCH_DEPTH_DEFAULT``.
+    """
+    try:
+        return max(0, min(SEARCH_DEPTH_MAX, int(player.ai_params.aux)))
+    except Exception:                     # noqa: BLE001
+        return SEARCH_DEPTH_DEFAULT
+
+
+def is_oracle_seat(player) -> bool:
+    """Public: does this seat actually run an oracle? False at depth 0.
+
+    Read by sibling oracle bots (and by our own `_is_oracle`) in preference to the
+    module-level ``IS_ORACLE`` flag. Part of the drop-in contract — see
+    models/README.md.
+    """
+    return _seat_depth(player) >= 1
 
 
 def _blind(state, pid):
@@ -374,10 +577,142 @@ def _priv(state, pid, salt):
 
 
 # --------------------------------------------------------------------------- #
+# The search — roll candidate plans forward and keep the best
+# --------------------------------------------------------------------------- #
+def _material(state, pid) -> tuple[int, int, float]:
+    """``(systems, ships incl. in-transit, production in ships/turn)`` for ``pid``.
+
+    Deliberately a local helper rather than `fog.player_totals`, which computes the
+    same thing: `fog` is presentation-only and the AI is documented never to consult
+    it (CLAUDE.md). Cheap enough that duplicating eight lines beats crossing that
+    boundary.
+    """
+    systems = ships = 0
+    prod = 0.0
+    for s in state.systems.values():
+        if s.owner_id == pid:
+            systems += 1
+            ships += s.ships
+            if s.production > 0:
+                prod += 1.0 / s.production
+    ships += sum(f.ships for f in state.fleets if f.owner_id == pid)
+    return systems, ships, prod
+
+
+def _evaluate(state, pid) -> float:
+    """How good this position is for ``pid``, against the strongest rival.
+
+    A differential rather than an absolute, so it still means something in a
+    free-for-all: being twice the size of a two-player board is not the same as being
+    twice the size of the best of four. Production carries the most weight because it
+    is the only term that compounds.
+    """
+    if state.winner is not None:
+        return EVAL_DECIDED if state.winner == pid else -EVAL_DECIDED
+
+    def score(q):
+        systems, ships, prod = _material(state, q)
+        return EVAL_PRODUCTION * prod + EVAL_SYSTEMS * systems + EVAL_SHIPS * ships
+
+    mine = score(pid)
+    rivals = [score(p.id) for p in state.players.values()
+              if not p.is_neutral and p.id != pid and p.alive]
+    return mine - (max(rivals) if rivals else 0.0)
+
+
+def _rollout_decide(state, q, humans=frozenset()):
+    """The `decide` a rollout runs its seats with.
+
+    Oracle seats — ours included — are played by the cheap blind planner. Letting
+    them build real oracles would mean a full prediction sweep on *every* rolled
+    turn, which is where the cost would run away. Understating our own future play is
+    fine: it is understated identically for every candidate, and a search only needs
+    the comparison to be fair.
+
+    ``humans`` are the seats a person really holds, modelled with `_blind` for the
+    same reason the oracle does it — there is no code to run for them.
+    """
+    if q in humans:
+        return _blind(state, q)
+    player = state.players[q]
+    fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
+    if fn is decide or _is_oracle(fn, player):
+        return _blind(state, q)
+    return fn(state, q)
+
+
+def _rollout(state, pid, plan, turns: int, rng) -> float:
+    """Play ``plan`` on a clone, run ``turns`` more turns, and score the result.
+
+    ``rng`` is seeded identically for every candidate (common random numbers), so all
+    of them meet the same combat jitter and the score difference is attributable to
+    the plan rather than to luck.
+
+    Note the board is *advanced* here, unlike the oracle's static post-launch board —
+    so `state.travel_turns` re-times lanes as `state.turn` climbs under
+    `SHIP_SPEED_GROWTH_PCT`. That is correct, not a bug.
+    """
+    board = _clone(state, rng)
+
+    # A rollout is headless, so every seat has to be driven through `decide`.
+    # `_collect_orders` skips a human seat entirely (engine.py:101), which would drop
+    # our *own* plan on the floor whenever knower is the autoplayed human — leaving
+    # every candidate scoring the same do-nothing board. Clear the flag on the clone
+    # and model the seats a person really holds with `_blind` instead.
+    humans = frozenset(q for q, p in board.players.items() if p.is_human)
+    if humans:
+        for p in board.players.values():
+            p.is_human = False
+
+    def rolled(s, q):
+        return _rollout_decide(s, q, humans)
+
+    def first_turn(s, q):
+        return plan if q == pid else rolled(s, q)
+
+    engine.end_turn(board, decide=first_turn)
+    for _ in range(turns - 1):
+        if board.winner is not None:
+            break
+        engine.end_turn(board, decide=rolled)
+    return _evaluate(board, pid)
+
+
+def _search(state, pid, orc, turns: int, deadline):
+    """Roll each candidate posture forward ``turns`` turns; return the best plan.
+
+    The default posture is candidate 0 and is what we fall back to, so a search that
+    runs out of budget — or finds nothing better — is exactly depth-1 knower.
+    """
+    base = _plan(state, pid, orc)
+    if turns <= 0:
+        return base
+
+    default = _posture()
+    best, best_score = base, None
+    for i, overrides in enumerate(POSTURE_VARIANTS[:SEARCH_WIDTH]):
+        plan = base if not overrides else _plan(state, pid, orc,
+                                                replace(default, **overrides))
+        score = _rollout(state, pid, plan, turns, _priv(state, pid, _SALT_ROLLOUT))
+        if best_score is None or score > best_score:
+            best, best_score = plan, score
+        if i and time.perf_counter() > deadline:
+            break                         # degrade to what we have; never stall
+    return best
+
+
+# --------------------------------------------------------------------------- #
 # The planner — thinker's four phases, reading the post-launch board
 # --------------------------------------------------------------------------- #
-def _plan(state, pid, orc):
-    """thinker's plan. With ``orc`` it reads the future; with ``None`` it is thinker."""
+def _plan(state, pid, orc, pos: Posture | None = None):
+    """thinker's plan. With ``orc`` it reads the future; with ``None`` it is thinker.
+
+    ``pos`` is the stance to plan at; ``None`` means the tuned default. A search
+    passes a variant here rather than patching the globals, which would leak into
+    every other seat and into the `_blind` self-model.
+    """
+    if pos is None:
+        pos = _posture()
     post = orc.post if orc is not None else state
     sysmap = post.systems
     owned = [sid for sid, s in sysmap.items() if s.owner_id == pid]
@@ -399,10 +734,11 @@ def _plan(state, pid, orc):
     for sid in owned:
         s = sysmap[sid]
         if sid in frontier:
-            guard = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(post, orc, s, guarded_against))
-            budget[sid] = max(0, s.ships - max(RESERVE_FLOOR, guard))
+            guard = math.ceil(
+                pos.frontier_guard * _max_adjacent_enemy(post, orc, s, guarded_against))
+            budget[sid] = max(0, s.ships - max(pos.reserve_floor, guard))
         else:
-            budget[sid] = max(0, s.ships - RESERVE_FLOOR)
+            budget[sid] = max(0, s.ships - pos.reserve_floor)
 
     # --- Phase 1: arrival-aware defence -------------------------------------- #
     # A system hit along a long lane can amass defence over several turns, so we
@@ -423,7 +759,8 @@ def _plan(state, pid, orc):
         # The garrison we must have present, and the turn that demand binds.
         worst, t_bind = 0, 1
         for t, ecum in _enemy_arrivals(post, pid, sid):
-            margin = KNOWN_DEFEND if (KNOWN_MARGINS and t <= known) else DEFEND_MARGIN
+            margin = (pos.known_defend if (pos.known_margins and t <= known)
+                      else pos.defend_margin)
             deficit = (math.ceil(ecum * margin)
                        - _production_by(s, t) - _inbound(post, sid, pid, t))
             if deficit > worst:
@@ -460,7 +797,7 @@ def _plan(state, pid, orc):
     # On the post-launch board this quietly gains its best move: the attacker's own
     # home is now visibly empty, so a system about to be overrun steps *into* it.
     for sid in doomed:
-        order = _evacuate(post, orc, pid, sysmap[sid], max_prod)
+        order = _evacuate(post, orc, pid, sysmap[sid], max_prod, pos)
         if order is not None:
             orders.append(order)
         budget[sid] = 0  # whether it retreated or holds to inflict casualties, don't drain it
@@ -469,7 +806,7 @@ def _plan(state, pid, orc):
     targets = [sysmap[n] for n in
                {n for sid in frontier for n in sysmap[sid].neighbors
                 if sysmap[n].owner_id != pid}]
-    targets.sort(key=lambda t: (-_richness(t, max_prod), t.ships, t.id))
+    targets.sort(key=lambda t: (-_richness(post, pid, t, max_prod, pos), t.ships, t.id))
 
     for target in targets:
         # Our budgeted systems adjacent to the target, and how far off each is.
@@ -484,7 +821,7 @@ def _plan(state, pid, orc):
         # demands the farther systems too.
         chosen_h, shortfall = None, 0
         for h in sorted({d for d, _ in nbrs}):
-            req = _required(post, orc, pid, target, h)
+            req = _required(post, orc, pid, target, h, pos)
             inbound = _inbound(post, target.id, pid, h)
             committable = sum(budget[sid] for d, sid in nbrs if d <= h)
             if inbound + committable < req:
@@ -509,7 +846,7 @@ def _plan(state, pid, orc):
             need -= send
 
     # --- Phase 4: leapfrog / flow to the richest front ----------------------- #
-    parent = _flow_to_front(post, set(owned), frontier, pid, max_prod)
+    parent = _flow_to_front(post, set(owned), frontier, pid, max_prod, pos)
     for sid in sorted(owned):
         if sid in frontier:
             continue  # the front's leftover stays home as the standing reserve
@@ -571,11 +908,20 @@ def _known_horizon(post, orc, sid):
 
 
 # --------------------------------------------------------------------------- #
-# Helpers vendored from thinker — identical but for the oracle hooks
+# Helpers vendored from thinker — identical but for the oracle hooks, the threaded
+# `Posture`, and `_richness`'s one-hop lookahead (see ``BEYOND_DECAY``).
 # --------------------------------------------------------------------------- #
-def _richness(system, max_prod: int) -> int:
-    """Value of a system: higher output (lower ``production``) scores higher."""
-    return max_prod - system.production + 1
+def _richness(post, pid, system, max_prod: int, pos: Posture) -> float:
+    """Value of a system: its own output, plus a discounted peek at the richest
+    non-owned neighbour past it. A poor system that opens onto a rich one is
+    worth more than its own production alone says — pricing it that way is what
+    pushes knower *through* a weak front instead of stalling on it.
+    """
+    base = max_prod - system.production + 1
+    beyond = max((max_prod - post.systems[n].production + 1
+                  for n in system.neighbors if post.systems[n].owner_id != pid),
+                 default=0)
+    return base + pos.beyond_decay * beyond
 
 
 def _incoming(post, sid, pid, hostile: bool) -> int:
@@ -632,7 +978,7 @@ def _max_adjacent_enemy(post, orc, sysobj, owners) -> int:
     return best
 
 
-def _required(post, orc, pid, target, dist: int) -> int:
+def _required(post, orc, pid, target, dist: int, pos: Posture) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
 
     ``target.ships`` is read off the post-launch board, so a system that has just
@@ -644,19 +990,19 @@ def _required(post, orc, pid, target, dist: int) -> int:
     known = _known_horizon(post, orc, target.id)
     ships = _garrison(orc, target)
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
-        return max(ships + 1, math.ceil(ships * NEUTRAL_MARGIN))
+        return max(ships + 1, math.ceil(ships * pos.neutral_margin))
     # Enemy: fold in the reinforcements and production that land before we arrive,
     # and pad more the later we strike (more time for the enemy to react).
     reinforcements = _inbound(post, target.id, target.owner_id, dist)
     defence = ships + reinforcements + _production_by(target, dist)
-    if KNOWN_MARGINS and dist <= known:
-        margin = KNOWN_ATTACK
+    if pos.known_margins and dist <= known:
+        margin = pos.known_attack
     else:
-        margin = min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1))
+        margin = min(pos.enemy_far, pos.enemy_near + 0.1 * (dist - 1))
     return max(ships + 1, math.ceil(defence * margin))
 
 
-def _evacuate(post, orc, pid, s, max_prod: int):
+def _evacuate(post, orc, pid, s, max_prod: int, pos: Posture):
     """Route a doomed system's whole garrison to the most useful place — or hold."""
     sysmap = post.systems
     ships = s.ships
@@ -671,8 +1017,8 @@ def _evacuate(post, orc, pid, s, max_prod: int):
         o = sysmap[n]
         if o.owner_id != pid:
             dist = post.travel_turns(s.id, n) or 1
-            if ships >= _required(post, orc, pid, o, dist):
-                caps.append((_richness(o, max_prod), -o.ships, n))
+            if ships >= _required(post, orc, pid, o, dist, pos):
+                caps.append((_richness(post, pid, o, max_prod, pos), -o.ships, n))
     if caps:
         caps.sort(reverse=True)
         return Order(pid, s.id, caps[0][2], ships)
@@ -681,7 +1027,7 @@ def _evacuate(post, orc, pid, s, max_prod: int):
     friends = [n for n in s.neighbors if sysmap[n].owner_id == pid]
     if friends:
         friends.sort(
-            key=lambda n: (sysmap[n].ships, _front_pull(post, pid, n, max_prod), -n),
+            key=lambda n: (sysmap[n].ships, _front_pull(post, pid, n, max_prod, pos), -n),
             reverse=True,
         )
         return Order(pid, s.id, friends[0], ships)
@@ -690,7 +1036,7 @@ def _evacuate(post, orc, pid, s, max_prod: int):
     #     kills more attackers than a doomed strike on a weak neighbour would.
     enemy_in = _incoming(post, s.id, pid, hostile=True)
     friend_in = _incoming(post, s.id, pid, hostile=False)
-    if enemy_in > OVERWHELM * (ships + friend_in):
+    if enemy_in > pos.overwhelm * (ships + friend_in):
         enemies = [n for n in s.neighbors if sysmap[n].owner_id != pid]
         if enemies:
             weakest = min(enemies, key=lambda n: (sysmap[n].ships, n))
@@ -698,17 +1044,17 @@ def _evacuate(post, orc, pid, s, max_prod: int):
     return None
 
 
-def _front_pull(post, pid, sid, max_prod: int) -> int:
+def _front_pull(post, pid, sid, max_prod: int, pos: Posture) -> float:
     """How rich a prize the front at ``sid`` faces — its richest non-owned neighbour."""
-    best = 0
+    best = 0.0
     for n in post.systems[sid].neighbors:
         o = post.systems[n]
         if o.owner_id != pid:
-            best = max(best, _richness(o, max_prod))
+            best = max(best, _richness(post, pid, o, max_prod, pos))
     return best
 
 
-def _flow_to_front(post, owned, frontier, pid, max_prod) -> dict[int, int]:
+def _flow_to_front(post, owned, frontier, pid, max_prod, pos: Posture) -> dict[int, int]:
     """Multi-source BFS over owned territory: rear node -> next hop toward the front.
 
     Seeds are ordered by the richness of the prize each frontier faces, so a rear
@@ -718,7 +1064,8 @@ def _flow_to_front(post, owned, frontier, pid, max_prod) -> dict[int, int]:
     """
     parent: dict[int, int] = {}
     seen = set(frontier)
-    seeds = sorted(frontier, key=lambda sid: (-_front_pull(post, pid, sid, max_prod), sid))
+    seeds = sorted(frontier,
+                   key=lambda sid: (-_front_pull(post, pid, sid, max_prod, pos), sid))
     queue = deque(seeds)
     while queue:
         cur = queue.popleft()

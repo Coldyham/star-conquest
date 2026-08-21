@@ -79,6 +79,11 @@ AI_ATTACK_MARGIN = 1.5      # need surplus >= enemy   * this to attack a player
 AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more exposed than us
 #   (one-directional + hysteresis: stops two frontier systems swapping ships each turn)
 
+AI_AUX = 1.0                # generic per-seat knob, meaning defined by the strategy
+#   Ignored by the built-in heuristic. 1.0 is the neutral "untuned" value, so a bot
+#   can treat it as absent; `models/knower.py` reads it as its search depth. See
+#   models/README.md.
+
 # --------------------------------------------------------------------------- #
 # Fog of war  (presentation only — the AI always has full information)
 # --------------------------------------------------------------------------- #
