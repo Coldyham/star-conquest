@@ -1,0 +1,11 @@
+# Netlify build for the pygbag (WebAssembly) browser build.
+#
+# web/ is a gitignored build artifact, so Netlify produces it here at deploy time:
+# install uv, then run the same tools/build_web.sh used locally. uv fetches the
+# required Python (3.12, per pyproject) and the dev deps (pygbag), so the Netlify
+# image's own Python/Node versions don't matter. The build also curls the
+# pygame-ce WASM wheel from the pygame-web CDN into web/cdn/ (network is available
+# during Netlify builds), keeping the published site self-contained.
+[build]
+  command = "curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
+  publish = "web"

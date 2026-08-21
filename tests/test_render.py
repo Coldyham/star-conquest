@@ -29,6 +29,7 @@ def _make_ui(state):
 
 def test_render_all_ui_states_no_crash():
     pygame.init()
+    render._FONTS.clear()   # rebuild fonts under this session (an earlier test quit)
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
@@ -50,13 +51,23 @@ def test_render_all_ui_states_no_crash():
         ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
         render.draw(screen, state, ui)
 
-        # editing the standing rule: the on-map −/+ stepper is drawn, recording
-        # clickable button rects just like a queued order's
-        ui.mode = SELECTED
-        ui.dest = None
-        ui.sel_forward = home
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+
+        # send popup armed as a forward rule (exercises the toggled-button path)
+        ui.forward_armed = True
         render.draw(screen, state, ui)
-        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0
+        ui.forward_armed = False
+
+        # reopening the standing rule draws the same popup, on its Forward tab
+        ui.edit_forward(state, home)
+        render.draw(screen, state, ui)
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+
+        # ...and so does reopening the queued order, on the Send tab
+        ui.edit_order(state, 0)
+        render.draw(screen, state, ui)
+        assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
+        ui.reset_selection()
         ui.sel_forward = None
 
         # advance a few turns so fleets exist, then draw
@@ -66,6 +77,64 @@ def test_render_all_ui_states_no_crash():
 
         # win overlay
         state.winner = 2
+        render.draw(screen, state, ui)
+    finally:
+        pygame.quit()
+
+
+def test_win_overlay_offers_sharing_only_for_an_earned_human_win():
+    """The overlay's share button is the gate on what can become a challenge: the
+    human's own win, with at least one turn they actually played."""
+    pygame.init()
+    render._FONTS.clear()   # rebuild fonts under this session (prev test quit pygame)
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.turn = 137
+        state.players[1].ships_lost = 412
+
+        state.winner = 1
+        ui.hand_turns = 100
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] > 0
+
+        ui.hand_turns = 0            # a pure autoplay demo is not a score
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] == 0
+
+        ui.hand_turns = 100
+        state.winner = 2             # someone else's win is not yours to send
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] == 0
+    finally:
+        pygame.quit()
+
+
+def test_win_overlay_draws_every_challenge_verdict():
+    """Beaten / missed / failed all render, including the losing branch that shows
+    a verdict but no score."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.turn = 137
+        state.players[1].ships_lost = 412
+        ui.hand_turns = 137
+        ui.challenge_by = "Andrew"
+
+        state.winner = 1
+        for target in (None, (200, 500), (100, 100), (137, 412)):
+            ui.challenge_target = target
+            render.draw(screen, state, ui)
+
+        state.winner = 2             # "Challenge failed"
+        ui.challenge_target = (200, 500)
+        render.draw(screen, state, ui)
+
+        state.winner = 0             # mutual annihilation, with a target set
         render.draw(screen, state, ui)
     finally:
         pygame.quit()
@@ -99,6 +168,299 @@ def test_render_fogged_states_no_crash():
         ui.hover = next(iter(ui.seen - ui.visible), None)   # hover a fogged system
         render.draw(screen, state, ui)
     finally:
+        pygame.quit()
+
+
+def test_draw_resets_clip_after_map_layer():
+    """The map layer is clipped to config.play_rect() (now that pan/zoom can
+    push it past the viewport's edges) — guard against a missing
+    set_clip(None) leaking that clip into the HUD/side panel."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        render.draw(screen, state, _make_ui(state))
+        assert screen.get_clip() == screen.get_rect()
+    finally:
+        pygame.quit()
+
+
+def test_selected_forward_rule_reports_its_lane():
+    """A standing rule's own label sits on the lane it uses, hiding that lane's
+    travel-time pill — so the panel has to be where its length and travel time are
+    readable. A queued order already gets the same section."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+
+        # no rule, nothing hovered or chosen: there is no lane to report
+        assert render._panel_lane_target(state, ui, home) is None
+
+        ui.auto_forward[home] = (nbr, 2)
+        assert render._panel_lane_target(state, ui, home) == nbr
+        ui.sel_forward = home
+        assert render._panel_lane_target(state, ui, home) == nbr
+
+        # a hovered neighbour still wins — that's the lane you're pointing at
+        other = next((n for n in state.systems[home].neighbors if n != nbr), None)
+        if other is not None:
+            ui.selected, ui.hover = home, other
+            assert render._panel_lane_target(state, ui, home) == other
+
+        # and a rule whose destination has gone is not reported at all
+        ui.selected = ui.hover = None
+        ui.auto_forward[home] = (max(state.systems) + 99, 2)
+        assert render._panel_lane_target(state, ui, home) is None
+        render.draw(screen, state, ui)      # still draws
+    finally:
+        pygame.quit()
+
+
+def test_forward_rule_label_clears_the_lane_travel_pill():
+    """Both labels used to be centred on the lane midpoint, so the rule covered the
+    lane length. They're stacked now — check they don't overlap at either scale."""
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))   # fonts need a video ctx
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            small = render._fonts()["small"]
+            pa, pb = (100, 400), (900, 400)
+            mid_y = 400
+            # the travel-time pill is centred on the midpoint (see _draw_lanes)
+            pill_bottom = mid_y + (small.get_height() + config.s(4)) // 2
+            cy = render._rule_label_center(pa, pb, small)[1]
+            label_top = cy - (small.get_height() + config.s(4)) // 2
+            assert label_top > pill_bottom, (
+                f"rule label overlaps the travel-time pill at {config.ui_scale}x")
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def _popup_rects(ui):
+    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
+    names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
+             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect")
+    return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+
+
+def test_send_popup_stays_inside_the_map_viewport():
+    """The popup is drawn clipped to the play area, but input hit-tests the rects it
+    recorded — so a row that fell outside would be invisible and still clickable, and
+    the bottom row is the destructive Delete. Check it fits at the touch scale and on
+    a screen short enough that the seven rows would otherwise overflow."""
+    pygame.init()
+    try:
+        # The third case is the one that bites: apply_ui_scale runs once at boot, so
+        # a window shrunk afterwards keeps the big screen's scale, and seven
+        # tap-floored rows no longer fit the viewport they are clipped to.
+        for scale, size in ((_touch_scale, None), (_desktop_scale, (800, 480)),
+                            (_touch_scale, (1000, 640))):
+            scale()
+            if size is not None:
+                config.SCREEN_W, config.SCREEN_H = size
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            render._FONTS.clear()
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+            nbr = state.systems[home].neighbors[0]
+            ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
+            ui.pending.append(Order(1, home, nbr, 2))
+
+            for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
+                ui.popup_pos = corner       # auto-placed, then dragged hard each way
+                render.draw(screen, state, ui)
+                play = pygame.Rect(*config.play_rect())
+                assert play.contains(pygame.Rect(*ui.popup_rect)), (
+                    f"popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
+                rects = _popup_rects(ui)
+                assert len(rects) == 8, f"the popup drew only {sorted(rects)}"
+                for name, r in rects.items():
+                    assert play.contains(r), f"{name} is outside the viewport: {r}"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_popup_rows_tile_without_overlapping():
+    """Seven rows laid out by hand from one running y — a slip in the arithmetic
+    would stack two controls, so one of them could never be pressed. The slider's
+    knob must also stay inside the panel at both ends of its travel."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
+        ui.pending.append(Order(1, home, nbr, 2))
+
+        for armed in (False, True):
+            ui.forward_armed = armed
+            render.draw(screen, state, ui)
+            panel = pygame.Rect(*ui.popup_rect)
+            rects = _popup_rects(ui)
+            pairs = list(rects.items())
+            for i, (na, ra) in enumerate(pairs):
+                assert panel.contains(ra), f"{na} sits outside the popup: {ra}"
+                for nb, rb in pairs[i + 1:]:
+                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
+            knob = config.SLIDER_KNOB_R
+            sx, _sy, sw, _sh = ui.slider_rect
+            assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+    finally:
+        pygame.quit()
+
+
+def test_popup_slider_survives_a_source_with_nothing_to_send():
+    """`lo == hi` is the ordinary state on an empty system (a plain tap arms Forward
+    there), and the knob's value->position maths must not divide by it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        state.systems[home].ships = 0
+        ui.mode, ui.selected, ui.dest = CHOOSING, home, nbr
+
+        for armed in (True, False):
+            ui.forward_armed = armed
+            assert ui.slider_range(state)[0] == ui.slider_range(state)[1]
+            render.draw(screen, state, ui)
+            assert ui.slider_rect[2] > 0
+    finally:
+        pygame.quit()
+
+
+def _touch_scale():
+    """Enter the mobile-web geometry: the browser framebuffer plus the touch boost,
+    the combination (~2x fonts) that used to push HUD labels out of their boxes."""
+    config.SCREEN_W, config.SCREEN_H = config.WEB_FB_W, config.WEB_FB_H
+    fit = min(config.WEB_FB_W / config.BASE_SCREEN_W, config.WEB_FB_H / config.BASE_SCREEN_H)
+    config.apply_ui_scale(fit * config.TOUCH_UI_SCALE, touch=True)
+    render._FONTS.clear()
+
+
+def _desktop_scale():
+    config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H
+    config.apply_ui_scale(1.0)
+    render._FONTS.clear()
+
+
+def _hud_rects(ui):
+    """The bottom bar's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
+    names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
+             "history_button_rect", "restart_live_button_rect", "menu_button_rect",
+             "clear_button_rect", "quit_button_rect", "exit_history_rect",
+             "rewind_button_rect", "fast_forward_rect")
+    return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+
+
+def test_hud_buttons_never_overlap_at_touch_scale():
+    """Every bottom-bar button is sized from its measured label, so at the ~2x touch
+    scale (where fixed widths used to be too narrow) they still tile without
+    colliding and stay on screen — live play and history review alike."""
+    pygame.init()
+    _touch_scale()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        state.turn = 137                     # the widest turn counter, and enables History
+        ui = _make_ui(state)
+        # The third case is the post-defeat footer, which carries one button more
+        # (Fast forward) — the widest strip the bottom bar ever has to tile. History
+        # stays last: it owns the whole bottom bar, so its scrubber rects linger on
+        # the Ui afterwards (harmless live — input only reads them in history mode).
+        for history, playing, defeated in ((False, False, False), (False, True, False),
+                                           (False, True, True), (True, False, False)):
+            ui.history, ui.playing = history, playing
+            state.players[1].alive = not defeated
+            ui.history_max, ui.history_turn = 12, 4
+            render.draw(screen, state, ui)
+            rects = _hud_rects(ui)
+            assert rects, "the bottom bar drew no buttons at all"
+            for name, r in rects.items():
+                assert screen.get_rect().contains(r), f"{name} is off screen: {r}"
+            pairs = list(rects.items())
+            for i, (na, ra) in enumerate(pairs):
+                for nb, rb in pairs[i + 1:]:
+                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_fast_forward_button_only_exists_while_spectating():
+    """The footer offers it exactly when ``Ui.can_fast_forward`` does: the human is
+    knocked out and the match is still running. Before that there are turns to play;
+    after it there is nothing left to hurry."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] == 0, "no such control while still playing"
+
+        state.players[1].alive = False
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] > 0
+
+        state.winner = 2
+        render.draw(screen, state, ui)
+        assert ui.fast_forward_rect[2] == 0, "the game is decided; nothing to skip to"
+    finally:
+        pygame.quit()
+
+
+def test_touch_build_drops_keyboard_only_text():
+    """A phone has no keyboard, so the '(Esc)' suffixes and the shortcut lines in
+    the help panel are dropped there — they were also what overflowed the labels."""
+    pygame.init()
+    try:
+        _desktop_scale()
+        assert render._key_hint("Quit", "Esc") == "Quit (Esc)"
+        assert render.confirm_labels("Quit") == ("Quit (Y/Enter)", "Cancel (N/Esc)")
+        _touch_scale()
+        assert render._key_hint("Quit", "Esc") == "Quit"
+        assert render.confirm_labels("Quit") == ("Quit", "Cancel")
+        assert "Shift" not in render._LEGEND_TOUCH and "Enter" not in render._LEGEND_TOUCH
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_wrapped_help_text_fits_the_panel():
+    """The help panel reflows to the panel width and is cut off at its bottom rather
+    than spilling under the End Turn button."""
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            font = render._fonts()["small"]
+            width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+            for text in (render._LEGEND_TOUCH, render._LEGEND_KEYS):
+                for line in render._wrap(font, text, width):
+                    assert font.size(line)[0] <= width, f"{line!r} overruns the panel"
+            bottom = config.HUD_TOP_H + 200
+            assert render._panel_legend(screen, 0, config.HUD_TOP_H, bottom) <= bottom
+    finally:
+        _desktop_scale()
         pygame.quit()
 
 

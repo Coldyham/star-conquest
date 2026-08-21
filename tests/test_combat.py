@@ -6,7 +6,7 @@ import random
 from contextlib import contextmanager
 
 from starconquest import combat, config
-from starconquest.model import Fleet, GameState, System
+from starconquest.model import Fleet, GameState, Player, System
 
 
 @contextmanager
@@ -94,6 +94,60 @@ def test_capture_resets_production_progress():
         combat.resolve_arrival(s, 0, [Fleet(1, 9, 0, 10, 2, 0)])
     assert s.systems[0].owner_id == 1
     assert s.systems[0].prod_progress == 0
+
+
+# --- attrition (Player.ships_lost) ------------------------------------------- #
+# The other resolve_arrival tests leave `players` empty, so the counter is skipped
+# there by design; these populate it. Losses are per owner: everyone brings
+# garrison + arrivals, only the final owner keeps anything.
+def _peopled_state(*pids: int):
+    s = GameState.new(0)
+    s.players = {pid: Player(id=pid, name=f"P{pid}", color=(0, 0, 0)) for pid in pids}
+    return s
+
+
+def test_reinforcement_loses_nothing():
+    s = _peopled_state(1)
+    s.systems[0] = System(id=0, pos=(0.0, 0.0), owner_id=1, ships=4)
+    combat.resolve_arrival(s, 0, [Fleet(1, 9, 0, 5, 2, 0)])
+    assert s.players[1].ships_lost == 0
+
+
+def test_attack_debits_both_sides():
+    s = _peopled_state(1, 2)
+    s.systems[0] = System(id=0, pos=(0.0, 0.0), owner_id=2, ships=3)
+    with jitter(0.0):
+        combat.resolve_arrival(s, 0, [Fleet(1, 9, 0, 10, 2, 0)])
+    survivors = s.systems[0].ships
+    assert s.players[1].ships_lost == 10 - survivors   # winner's sub-1:1 losses
+    assert s.players[2].ships_lost == 3                # defender lost the lot
+
+
+def test_losses_accumulate_across_battles():
+    s = _peopled_state(1, 2)
+    for node in (0, 1):
+        s.systems[node] = System(id=node, pos=(0.0, 0.0), owner_id=2, ships=3)
+        with jitter(0.0):
+            combat.resolve_arrival(s, node, [Fleet(1, 9, node, 10, 2, 0)])
+    assert s.players[2].ships_lost == 6   # 3 at each system, all match long
+
+
+def test_pileup_conserves_ships():
+    """Every ship brought is either a survivor or a loss — nothing invented."""
+    s = _peopled_state(1, 2)
+    s.systems[0] = System(id=0, pos=(0.0, 0.0), owner_id=2, ships=4)
+    fleets = [Fleet(1, 9, 0, 12, 2, 0), Fleet(2, 8, 0, 9, 2, 0)]
+    brought = 4 + 12 + 9
+    combat.resolve_arrival(s, 0, fleets)
+    lost = sum(p.ships_lost for p in s.players.values())
+    assert lost + s.systems[0].ships == brought
+
+
+def test_capturing_an_empty_neutral_costs_nothing():
+    s = _peopled_state(1)
+    s.systems[0] = System(id=0, pos=(0.0, 0.0), owner_id=0, ships=0)
+    combat.resolve_arrival(s, 0, [Fleet(1, 9, 0, 6, 2, 0)])
+    assert s.players[1].ships_lost == 0
 
 
 def test_three_way_pileup_single_winner():

@@ -16,7 +16,7 @@ import math
 from collections import deque
 
 from . import config
-from .geometry import Point, bounds_of, dist, segments_intersect
+from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
 from .model import GameState, Player, System
 
 
@@ -107,7 +107,9 @@ def generate_symmetric(
 
     # contested central system
     state.systems[center_id] = System(
-        id=center_id, pos=(cx, cy), owner_id=0,
+        id=center_id,
+        pos=(cx, cy),
+        owner_id=0,
         production=min(config.PRODUCTION_WEIGHTS),  # richest
         ships=config.GARRISON_BASE + round(config.GARRISON_K / min(config.PRODUCTION_WEIGHTS)) + 2,
     )
@@ -158,8 +160,7 @@ def _base_sector_values(state, per_player) -> tuple[list[int], list[int]]:
     for _ in range(per_player - 1):
         p = state.rng.choices(values, weights=weights, k=1)[0]
         prod.append(p)
-        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p)
-                     + state.rng.randint(0, config.GARRISON_JITTER))
+        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p) + state.rng.randint(0, config.GARRISON_JITTER))
     return prod, ships
 
 
@@ -262,13 +263,28 @@ def _add_lane(state: GameState, positions: list[Point], a: int, b: int) -> None:
     state.add_lane(a, b, round(length_ly, 1), turns)
 
 
-def _crosses_any(
-    positions: list[Point], accepted: list[tuple[int, int]], a: int, b: int
-) -> bool:
-    for (c, d) in accepted:
+def _crosses_any(positions: list[Point], accepted: list[tuple[int, int]], a: int, b: int) -> bool:
+    for c, d in accepted:
         if a in (c, d) or b in (c, d):
             continue  # edges sharing a node are incident, not crossing
         if segments_intersect(positions[a], positions[b], positions[c], positions[d]):
+            return True
+    return False
+
+
+def _grazes_other_node(positions: list[Point], a: int, b: int) -> bool:
+    """True if segment a-b passes closer than clearance to some third node's centre.
+
+    A two-hop path (e.g. a-c and c-b already accepted) never trips ``_crosses_any``
+    for a direct a-b edge, since both segments share an endpoint with it and
+    incident edges are never "crossings" — but if a, c and b are near-collinear,
+    the direct edge still runs right underneath c, rendering as hidden behind it.
+    """
+    clearance = config.LANE_NODE_CLEARANCE_FRAC * config.WORLD_SIZE
+    for c, p in enumerate(positions):
+        if c in (a, b):
+            continue
+        if point_segment_dist(p, positions[a], positions[b]) < clearance:
             return True
     return False
 
@@ -303,6 +319,8 @@ def _planar_edges(positions: list[Point]) -> list[tuple[int, int]]:
         if (i, j) in accepted_set or d > max_len:
             continue
         if _crosses_any(positions, accepted, i, j):
+            continue
+        if _grazes_other_node(positions, i, j):
             continue
         accepted.append((i, j))
         accepted_set.add((i, j))
@@ -378,11 +396,7 @@ def _assign_production_and_garrisons(state: GameState) -> None:
         if sys.owner_id != 0:
             continue  # homeworlds already configured
         sys.production = state.rng.choices(values, weights=weights, k=1)[0]
-        sys.ships = (
-            config.GARRISON_BASE
-            + round(config.GARRISON_K / sys.production)
-            + state.rng.randint(0, config.GARRISON_JITTER)
-        )
+        sys.ships = config.GARRISON_BASE + round(config.GARRISON_K / sys.production) + state.rng.randint(0, config.GARRISON_JITTER)
 
 
 # --------------------------------------------------------------------------- #

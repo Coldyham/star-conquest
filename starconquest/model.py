@@ -21,11 +21,16 @@ def lane_key(a: int, b: int) -> frozenset[int]:
 
 @dataclass
 class AiParams:
-    """Per-seat tuning for the built-in heuristic AI.
+    """Per-seat tuning for the AI.
 
     Defaults mirror the global ``config.AI_*`` constants, so a player left
     untuned behaves exactly as the AI always has. The menu edits these per seat;
     a custom strategy is free to ignore them (see ``ai.STRATEGIES``).
+
+    Every field but ``aux`` is read only by the built-in heuristic
+    (``ai.compute_orders``). ``aux`` is the opposite: the core never interprets it,
+    and each strategy is free to define its own meaning (``models/knower.py`` reads
+    it as search depth). See ``models/README.md``.
     """
 
     reserve_fraction: float = config.AI_RESERVE_FRACTION
@@ -33,6 +38,7 @@ class AiParams:
     expand_margin: float = config.AI_EXPAND_MARGIN
     attack_margin: float = config.AI_ATTACK_MARGIN
     reinforce_margin: int = config.AI_REINFORCE_MARGIN
+    aux: float = config.AI_AUX
 
 
 @dataclass
@@ -43,6 +49,9 @@ class Player:
     is_human: bool = False
     is_neutral: bool = False
     alive: bool = True
+    # Ships of this player's destroyed in combat, all match long — the attrition
+    # half of a result (see `combat.resolve_arrival`, the one place ships die).
+    ships_lost: int = 0
     # Which decision function drives this seat (key into ai.STRATEGIES) and its
     # tuning. Only used while the seat is AI-driven; ignored for a live human.
     ai_strategy: str = "heuristic"
@@ -54,11 +63,11 @@ class System:
     """A star system (graph node)."""
 
     id: int
-    pos: tuple[float, float]      # world coordinates
-    owner_id: int = 0            # 0 == neutral
-    ships: int = 0              # current garrison
-    production: int = 3         # "turns per ship"; lower is richer
-    prod_progress: int = 0     # counts up each turn; emits a ship at >= production
+    pos: tuple[float, float]  # world coordinates
+    owner_id: int = 0  # 0 == neutral
+    ships: int = 0  # current garrison
+    production: int = 3  # "turns per ship"; lower is richer
+    prod_progress: int = 0  # counts up each turn; emits a ship at >= production
     neighbors: list[int] = field(default_factory=list)
 
 
@@ -145,7 +154,19 @@ class GameState:
 
     # -- queries ------------------------------------------------------------ #
     def travel_turns(self, a: int, b: int) -> Optional[int]:
-        return self.adjacency.get(a, {}).get(b)
+        """Turns to cross the a-b lane if launched *now*, or None if not adjacent.
+
+        ``Lane.travel_turns`` (and ``adjacency``) hold the mapgen-time value; with
+        ship-speed growth switched on this shortens as the game runs, so ask here
+        rather than reading the lane directly. Re-times from the lane's real
+        ``length_ly`` (``config.travel_turns_at_length``) rather than rescaling
+        the already-rounded-up baked figure, so this always matches what's shown
+        alongside it on screen (the lane's length and the current speed).
+        """
+        lane = self.lanes.get(lane_key(a, b))
+        if lane is None:
+            return None
+        return config.travel_turns_at_length(lane.length_ly, self.turn)
 
     def are_adjacent(self, a: int, b: int) -> bool:
         return b in self.adjacency.get(a, {})
@@ -155,6 +176,16 @@ class GameState:
 
     def non_neutral_players(self) -> list[Player]:
         return [p for p in self.players.values() if not p.is_neutral]
+
+    def is_defeated(self, pid: int) -> bool:
+        """Has ``pid`` been knocked out — no systems left and nothing in transit?
+
+        Just the readable name for ``Player.alive``, which the engine's win check
+        recomputes every turn. Tolerant of a pid that isn't a seat (never defeated),
+        so the shell can ask about the human seat without guarding first.
+        """
+        player = self.players.get(pid)
+        return player is not None and not player.alive
 
     def human(self) -> Optional[Player]:
         for p in self.players.values():

@@ -47,9 +47,10 @@ from the AI tab's dropdown (the built-in `heuristic` is the default). See
 | Action | Input |
 |---|---|
 | Select one of your systems | left-click it |
-| Choose a destination | left-click a highlighted neighbour |
-| Adjust ships to send | mouse wheel |
-| Confirm the fleet | left-click |
+| Choose a destination | left-click a highlighted neighbour (the fleet is queued at once) |
+| Adjust ships to send | the popup's slider, −/+, Half/All, or the mouse wheel |
+| Re-edit a queued fleet | left-click its arrow, or its row in the side panel |
+| Discard the fleet | the popup's Cancel/Delete button, or `X` |
 | Cancel / back | right-click or `Esc` |
 | End the turn (resolve) | `End Turn` button, `Enter`, or `Space` |
 | Toggle autoplay | `A` |
@@ -79,6 +80,9 @@ starconquest/
   input.py       # event handling (pygame)
   menu.py        # pre-game setup screen (pygame)
   viewstate.py   # transient in-game UI state
+  paths.py       # where writable data lives (repo root, or app-private on Android)
+  uifont.py      # bundled-font loader (falls back to a system monospace)
+  assets/        # bundled DejaVu Sans Mono TTF (+ licence)
 main.py          # entry point + menu/game scene loop
 tests/           # pytest suite + sim.py headless AI-vs-AI harness
 ```
@@ -88,6 +92,27 @@ uv run pytest                          # full test suite
 uv run python -m tests.sim --verbose   # watch one AI-vs-AI game in the terminal
 uv run python -m tests.sim --trials 200   # batch stats (winners, length, timeouts)
 ```
+
+## Web (browser)
+
+The same source runs in the browser via [pygbag] (pygame → WebAssembly). The pure
+core is untouched; the pygame shell adapts for touch — a DPI/scale layer, a
+bundled font, tap/drag input, and an async main loop (see
+[`paths.py`](starconquest/paths.py) `is_web()`).
+
+```sh
+./tools/build_web.sh                       # -> ./web/ (staged so .venv isn't bundled)
+cd web && python3 -m http.server 8000 --bind 0.0.0.0   # test at http://localhost:8000
+```
+
+The build is self-contained: [`tools/build_web.sh`](tools/build_web.sh) mirrors the
+pygame-ce WASM wheel into `web/cdn/`, so it works on any static host with no runtime
+CDN dependency. **To deploy, copy the contents of `web/` to any static host.** On a
+phone, tap a system then a neighbour to send (or drag between them); a popup tunes
+the count with a slider, −/+ and Half/All; the on-screen **End turn** / **History**
+buttons replace the keyboard shortcuts.
+
+[pygbag]: https://pygame-web.github.io/
 
 ## Roadmap (not yet built)
 

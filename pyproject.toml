@@ -5,7 +5,10 @@ description = "A minimalist sci-fi turn-based strategy game (graph-node star map
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pygame>=2.6.1",
+    # pygame-ce (Community Edition): a drop-in for pygame (same `import pygame`,
+    # same API surface this game uses) that is actively maintained and is what
+    # pygbag compiles to WebAssembly for the browser build.
+    "pygame-ce>=2.5",
 ]
 
 [tool.pytest.ini_options]
@@ -15,4 +18,7 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    # Web (browser/WebAssembly) build tooling — see tools/build_web.sh.
+    "pygbag>=0.9.3",
+    "pip",            # pygbag's build/dev server shells out to `python -m pip`
 ]

@@ -29,16 +29,16 @@ loop needs no new action.
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
 import pygame
 
-from . import ai, config
+from . import ai, config, softkeyboard, uifont, webstore
 from .model import AiParams
-from .settings import Settings
+from .paths import is_web, saves_dir
+from .settings import Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -52,19 +52,26 @@ _START_FILL = (46, 92, 60)
 _START_BORDER = (96, 190, 120)
 _DISABLED_TEXT = (78, 84, 100)
 _STATUS_ERR = (214, 130, 110)
+_WARN = (214, 172, 92)  # amber: a challenge whose settings no longer match
+
+# Event types that can change a Settings — the ones worth snapshotting before.
+# MOUSEMOTION is excluded deliberately: it only mutates mid-slider-drag, which the
+# opening click already snapshotted, and it fires far too often to copy a config on.
+_MUTATING_EVENTS = (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.TEXTINPUT, pygame.KEYDOWN)
 
 _TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
 
-_CH = 34            # control height
-_ROW_H = 62         # vertical pitch between Basic-tab rows
-_SLIDER_H = 42      # vertical pitch between sliders
-_HEADER_H = 24      # height of a section header
+_CH = 34  # control height
+_ROW_H = 62  # vertical pitch between Basic-tab rows
+_SLIDER_H = 42  # vertical pitch between sliders
+_HEADER_H = 24  # height of a section header
 _SEED_MAX_LEN = 7
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
-# Saved configs live in a gitignored dir beside the repo (not the cwd), so they
-# never litter the tree wherever the game is launched from.
-_SAVE_DIR = Path(__file__).resolve().parent.parent / "saves"
+# Saved configs live in a gitignored dir under the writable data dir (repo root
+# on desktop, the app-private dir on Android), not the cwd, so they never litter
+# the tree wherever the game is launched from.
+_SAVE_DIR = saves_dir()
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
@@ -76,7 +83,8 @@ _ADV_MAP = (
     ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
 )
 _ADV_TRAVEL = (
-    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, 30.0, 0.5, False),
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
+    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
 )
 _ADV_ECON = (
     ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
@@ -85,9 +93,7 @@ _ADV_ECON = (
     ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
     ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
 )
-_ADV_COMBAT = (
-    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
-)
+_ADV_COMBAT = (("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),)
 # Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
 # detail); scout floors at 1 so immediate neighbours stay visible enough to target
 # (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
@@ -103,6 +109,7 @@ _AI_PARAMS = (
     ("ai_expand", "Expand margin", "expand_margin", 1.0, 3.0, 0.1, False),
     ("ai_attack", "Attack margin", "attack_margin", 1.0, 3.0, 0.1, False),
     ("ai_reinforce", "Reinforce margin", "reinforce_margin", 0, 10, 1, True),
+    ("ai_aux", "Custom (bot-defined)", "aux", 0.0, 8.0, 1.0, False),
 )
 
 # key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
@@ -114,16 +121,32 @@ for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
     _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
 
 _FONTS: dict[str, pygame.font.Font] = {}
+_MODAL_FONTS: dict[str, object] = {}
 
 
 def _fonts() -> dict[str, pygame.font.Font]:
+    # Baseline (design-resolution) sizes: the menu is laid out on a fixed
+    # BASE_SCREEN canvas that `draw` then scales to the real screen, so these must
+    # NOT use the DPI-scaled config.FONT_SIZE* (that would scale twice).
     if not _FONTS:
-        name = "consolas,menlo,monospace"
-        _FONTS["title"] = pygame.font.SysFont(name, 44, bold=True)
-        _FONTS["big"] = pygame.font.SysFont(name, config.FONT_SIZE_BIG, bold=True)
-        _FONTS["normal"] = pygame.font.SysFont(name, config.FONT_SIZE)
-        _FONTS["small"] = pygame.font.SysFont(name, config.FONT_SIZE_SMALL)
+        _FONTS["title"] = uifont.load(44, bold=True)
+        _FONTS["big"] = uifont.load(30, bold=True)
+        _FONTS["normal"] = uifont.load(18)
+        _FONTS["small"] = uifont.load(14)
     return _FONTS
+
+
+def _modal_fonts() -> dict[str, pygame.font.Font]:
+    """Fonts for the real-screen boot modal (resume prompt), which is drawn onto
+    the actual surface rather than the scaled canvas — so these DO use the
+    DPI-scaled sizes to stay legible on a phone. Rebuilt if the scale changes."""
+    if _MODAL_FONTS.get("_scale") != config.ui_scale:
+        _MODAL_FONTS.clear()
+        _MODAL_FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
+        _MODAL_FONTS["normal"] = uifont.load(config.FONT_SIZE)
+        _MODAL_FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
+        _MODAL_FONTS["_scale"] = config.ui_scale
+    return _MODAL_FONTS  # type: ignore[return-value]
 
 
 def _text(surface, font, s, color, center=None, midleft=None, midright=None):
@@ -145,19 +168,28 @@ class MenuState:
 
     tab: str = "basic"
     editing_seed: bool = False
-    seed_text: str = ""                       # edit buffer, live only while editing
-    ai_seat: int = 2                          # which seat the AI tab is editing
-    drag_key: Optional[str] = None            # slider currently being dragged
-    filename: str = _DEFAULT_FILENAME         # save/load target (no extension)
+    seed_text: str = ""  # edit buffer, live only while editing
+    ai_seat: int = 2  # which seat the AI tab is editing
+    drag_key: Optional[str] = None  # slider currently being dragged
+    filename: str = _DEFAULT_FILENAME  # save/load target (no extension)
     editing_filename: bool = False
-    status: str = ""                          # transient save/load feedback
+    status: str = ""  # transient save/load feedback
     status_ok: bool = True
-    status_until: int = 0                     # ms tick after which status hides
-    strategy_open: bool = False               # is the AI-seat strategy dropdown open
-    strategies: list[str] = field(            # dropdown options, refreshed on open
+    status_until: int = 0  # ms tick after which status hides
+    strategy_open: bool = False  # is the AI-seat strategy dropdown open
+    strategies: list[str] = field(  # dropdown options, refreshed on open
         default_factory=lambda: ["heuristic"]
     )
+    # Un-challenge confirm modal: raised when an edit has just made the loaded
+    # challenge's score incomparable. `challenge_snapshot` is the last config that
+    # still matched it, so "keep the challenge" can put the setup back.
+    confirm_unchallenge: bool = False
+    challenge_snapshot: Optional[dict] = None
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
+    # Transform from real-screen coords to the fixed menu canvas, set by draw() and
+    # inverted by handle_event so clicks land on the widget rects (in canvas space).
+    canvas_scale: float = 1.0
+    canvas_offset: tuple[int, int] = (0, 0)
 
 
 def _ai_seats(settings: Settings) -> list[int]:
@@ -170,22 +202,64 @@ def _fog_off(settings: Settings) -> bool:
     """True when both fog ranges sit at max — full visibility. The Basic-tab
     "Fog of war" checkbox is the inverse of this, derived live from the sliders so
     editing them on the Advanced tab flips the checkbox automatically."""
-    return (settings.fog_sight >= config.FOG_MAX_HOPS
-            and settings.fog_scout >= config.FOG_MAX_HOPS)
+    return settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS
 
 
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
+_CANVAS: Optional[pygame.Surface] = None
+
+
+def _get_canvas() -> pygame.Surface:
+    """The fixed-size surface the menu is always laid out on (design resolution)."""
+    global _CANVAS
+    size = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    if _CANVAS is None or _CANVAS.get_size() != size:
+        _CANVAS = pygame.Surface(size)
+    return _CANVAS
+
+
 def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
+    """Render the menu on a fixed design-resolution canvas, then scale it to fit
+    the real surface (letterboxed, aspect-preserved). One transform keeps the whole
+    menu on-screen and correctly proportioned at any resolution/DPI without
+    per-widget scaling; `handle_event` inverts it so clicks hit the right widgets."""
+    canvas = _get_canvas()
+    _draw_menu(canvas, ms, settings)
+    sw, sh = surface.get_size()
+    cw, ch = canvas.get_size()
+    scale = min(sw / cw, sh / ch)
+    if is_web():
+        # The web framebuffer (config.WEB_FB_W/H, 16:9) is a wider aspect than
+        # this menu's fixed 3:2 design canvas, so the plain letterboxed fit above
+        # pillarboxes a chunk of the frame on a phone. Filling more of the frame
+        # crops only the canvas's blank top/bottom margin (above the title, below
+        # the Start/Quit row) rather than any widget, so boost it a bit for a
+        # visibly bigger, more touch-friendly menu. Capped at the full-width fit
+        # so it can never overflow sideways.
+        scale = min(scale * config.WEB_MENU_BOOST, sw / cw)
+    dw, dh = round(cw * scale), round(ch * scale)
+    ox, oy = (sw - dw) // 2, (sh - dh) // 2
+    ms.canvas_scale, ms.canvas_offset = scale, (ox, oy)
+    if (dw, dh) == (cw, ch):
+        surface.blit(canvas, (ox, oy))
+    else:
+        surface.fill(config.COLOR_BG)  # letterbox bars
+        surface.blit(pygame.transform.smoothscale(canvas, (dw, dh)), (ox, oy))
+
+
+def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     surface.fill(config.COLOR_BG)
     ms.rects.clear()
-    w, h = surface.get_size()
+    w = surface.get_width()
     f = _fonts()
 
     _text(surface, f["title"], "STAR CONQUEST", config.COLOR_TEXT, center=(w // 2, 92))
-    _text(surface, f["small"], "configure your galaxy, then conquer it",
-          config.COLOR_TEXT_DIM, center=(w // 2, 130))
+    if settings.challenge is not None:
+        _draw_challenge(surface, settings, w)
+    else:
+        _text(surface, f["small"], "configure your galaxy, then conquer it", config.COLOR_TEXT_DIM, center=(w // 2, 130))
 
     _draw_tabs(surface, ms, w)
 
@@ -202,11 +276,105 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
 
     _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, w)
+    # Two separate lines below the Start row: the transient save/load status, then
+    # the keyboard hint (dropped on touch, where there are no keys to press — and
+    # where it used to be drawn straight on top of the status).
     if ms.status and pygame.time.get_ticks() < ms.status_until:
-        _text(surface, f["small"], ms.status,
-              _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 850))
-    _text(surface, f["small"], "Enter: start game   ·   Esc: quit",
-          config.COLOR_TEXT_DIM, center=(w // 2, h - 28))
+        _text(surface, f["small"], ms.status, _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 852))
+    if not config.touch_ui:
+        _text(surface, f["small"], "Enter: start game   ·   Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, 886))
+    if ms.confirm_unchallenge:  # last, so the modal veils every widget above
+        _draw_unchallenge(surface, ms, settings, w, surface.get_height())
+
+
+def _draw_challenge(surface, settings: Settings, w: int) -> None:
+    """Two lines where the subtitle normally sits: the score to beat, then the
+    setup it was scored on.
+
+    A challenge *is* the most important fact about the session, so it takes the
+    subtitle's slot rather than competing for space elsewhere — the band between
+    the title (y 92) and the tab row (y 162) is the only room there is.
+
+    Editing any setting invalidates the comparison, which the challenge's own
+    ``key`` checksum detects. That warns rather than locking the widgets: locking
+    is a dead end the moment someone wants to try the same map with one knob
+    moved, and it would make the seed field unusable.
+    """
+    f = _fonts()
+    ch = settings.challenge
+    valid = ch.matches(settings)
+
+    head = f"CHALLENGE — beat {ch.summary()}"
+    if ch.by:
+        head += f"   ·   from {ch.by}"
+    _text(surface, f["small"], head, _START_BORDER if valid else _WARN, center=(w // 2, 124))
+
+    if not valid:
+        _text(surface, f["small"], "settings changed — your score won't compare", _WARN, center=(w // 2, 144))
+        return
+
+    bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
+    bits = [f"seed {settings.seed}", f"{settings.nodes} nodes", settings.mode]
+    if bots:
+        bits.append("vs " + ", ".join(bots))
+    mine = webstore.best(settings.challenge_key())
+    if mine is not None:
+        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
+    _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
+
+
+def _unchallenge_labels() -> tuple[str, str]:
+    """(change-anyway, keep-the-challenge) labels; key hints dropped on a touch
+    build, where there is no Y/N to press — as `_resume_labels` does."""
+    if config.touch_ui:
+        return ("Change it anyway", "Keep the challenge")
+    return ("Change it anyway (Y)", "Keep the challenge (Esc)")
+
+
+def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
+    """Modal: this edit would make the challenge's score meaningless — confirm.
+
+    Asking beats the alternatives. Locking the widgets is a dead end the moment
+    someone wants the same map with one knob moved, and silently letting the edit
+    through leaves a score-to-beat on screen that no longer means anything (which
+    is how a finished game ended up reporting "short of" a target from a different
+    setup). Measured and centred rather than positioned, like `_draw_modal` in
+    render — the labels grow on a phone.
+    """
+    f = _fonts()
+    change, keep = _unchallenge_labels()
+    ch = settings.challenge
+    lines = [
+        ("Change the challenge setup?", f["normal"], config.COLOR_TEXT),
+        ("Your result won't compare to the score on the link", f["small"], _WARN),
+        # `summary` brings its own parenthetical, so don't wrap it in more.
+        (f"Target: {ch.summary()}" if ch is not None else "", f["small"], config.COLOR_TEXT_DIM),
+    ]
+
+    pad, gap, row = 28, 14, 34
+    bw = max(f["normal"].size(s)[0] for s in (change, keep)) + 2 * 18
+    bh = 40
+    text_w = max(font.size(text)[0] for text, font, _ in lines)
+    pw = max(text_w, 2 * bw + gap) + 2 * pad
+    ph = pad + len(lines) * row + gap + bh + pad
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
+    pygame.draw.rect(surface, _WARN, panel, 2, border_radius=10)
+
+    y = panel.y + pad + row // 2
+    for text, font, color in lines:
+        _text(surface, font, text, color, center=(panel.centerx, y))
+        y += row
+
+    by = panel.bottom - pad - bh
+    _button(
+        surface, ms, "unchallenge_change", pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh), change, fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT
+    )
+    _button(surface, ms, "unchallenge_keep", pygame.Rect(panel.centerx + gap // 2, by, bw, bh), keep, fill=_HL_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT)
 
 
 def _draw_tabs(surface, ms: MenuState, w: int) -> None:
@@ -245,10 +413,16 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     y += _ROW_H
 
     _row_label(surface, "Map type", left, y)
-    _segmented(surface, ms, right, y, [
-        ("mode_random", "Random", settings.mode == "random"),
-        ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
-    ])
+    _segmented(
+        surface,
+        ms,
+        right,
+        y,
+        [
+            ("mode_random", "Random", settings.mode == "random"),
+            ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
+        ],
+    )
     y += _ROW_H
 
     _row_label(surface, "Seed", left, y)
@@ -271,24 +445,22 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     lx = panel.x + pad
     rx = lx + col_w + pad
 
-    y = panel.y + 16                                   # LEFT: Map + Travel + Visibility
+    y = panel.y + 16  # LEFT: Map + Travel
     y = _section(surface, "Map", lx, y)
     y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
-    y = _section(surface, "Visibility", lx, y)
-    y = _sliders(surface, ms, settings, _ADV_FOG, lx, y, col_w)
-    _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM,
-          midleft=(lx, y + _CH // 2))
+    _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
-    y = panel.y + 16                                   # RIGHT: Economy + Combat
+    y = panel.y + 16  # RIGHT: Visibility + Economy + Combat
+    y = _section(surface, "Visibility", rx, y)
+    y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
     y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
     y = _section(surface, "Combat", rx, y)
     y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
-    _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM,
-          midleft=(rx, y + _CH // 2))
+    _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
     _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
 
 
@@ -308,8 +480,7 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
         selected = seat == ms.ai_seat
         fill = base if selected else tuple(c // 2 + 8 for c in base)
         pygame.draw.rect(surface, fill, rect, border_radius=6)
-        pygame.draw.rect(surface, config.COLOR_SELECT if selected else _BTN_BORDER,
-                         rect, 2, border_radius=6)
+        pygame.draw.rect(surface, config.COLOR_SELECT if selected else _BTN_BORDER, rect, 2, border_radius=6)
         _text(surface, _fonts()["normal"], str(seat), config.text_on(fill), center=rect.center)
         ms.rects[f"seat_{seat}"] = rect
         cx += 52
@@ -317,21 +488,17 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     # edit-all shortcuts, pinned near the top
     y += 44
     bw = 150
-    _button(surface, ms, "copy_all", pygame.Rect(x, y, bw, _CH), "Copy to all",
-            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-    _button(surface, ms, "reset_all", pygame.Rect(x + bw + 12, y, bw, _CH), "Reset all",
-            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "copy_all", pygame.Rect(x, y, bw, _CH), "Copy to all", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "reset_all", pygame.Rect(x + bw + 12, y, bw, _CH), "Reset all", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
     dice = pygame.Rect(x + 2 * (bw + 12), y, _CH, _CH)
     _die_button(surface, ms, "randomise_ai", dice)
     name = config.player_name(ms.ai_seat)
-    _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat),
-          midleft=(dice.right + 12, y + _CH // 2))
+    _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat), midleft=(dice.right + 12, y + _CH // 2))
 
     # strategy dropdown (built-in heuristic + any drop-in models/)
     y += 44
     _text(surface, _fonts()["small"], "Strategy", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
-    _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat),
-              ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
+    _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat), ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
 
     # per-seat param sliders (hidden while the dropdown is open so its options,
     # which overlay this region, own the hit-test — no slider rect underneath)
@@ -435,15 +602,13 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     field = pygame.Rect(dice.x - 8 - fw, y, fw, _CH)
 
     editing = ms.editing_seed
-    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
-    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
     if editing:
-        shown, color = ms.seed_text + "|", config.COLOR_TEXT
+        shown, color = ms.seed_text, config.COLOR_TEXT
     elif settings.seed is None:
         shown, color = "random", config.COLOR_TEXT_DIM
     else:
         shown, color = str(settings.seed), config.COLOR_TEXT
-    _text(surface, _fonts()["normal"], shown, color, midleft=(field.x + 10, field.centery))
+    _text_field(surface, _fonts()["normal"], field, shown, editing, color)
     ms.rects["seed_field"] = field
 
     # A drawn die (not an emoji glyph — the monospace font has no colour emoji).
@@ -454,27 +619,53 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
-    """Footer row: 'File [ name ] [Save] [Load]' — mirrors the seed field."""
+    """Footer row: '[ name ] [Save] [Load]' — mirrors the seed field. On the web
+    build a leading '[Get Link]' shares the whole config as a URL.
+
+    The field takes whatever width the buttons leave (no "File" label: with four
+    controls on the row on web, the name field had less room than the default name
+    needs, and Save/Load say plainly enough what the row is for)."""
     f = _fonts()
     lx, rx = w // 2 - 280, w // 2 + 280
-    _text(surface, f["small"], "File", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
 
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
-    fx = lx + 56
+    fx = lx
+    if is_web():
+        link = pygame.Rect(fx, y, 110, _CH)
+        _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        fx = link.right + 10
+    else:
+        ms.rects.pop("get_link", None)
     field = pygame.Rect(fx, y, save.x - 10 - fx, _CH)
 
-    editing = ms.editing_filename
-    pygame.draw.rect(surface, _TROUGH, field, border_radius=6)
-    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, field, 2, border_radius=6)
-    shown = (ms.filename + "|") if editing else (ms.filename or _DEFAULT_FILENAME)
-    _text(surface, f["normal"], shown, config.COLOR_TEXT, midleft=(field.x + 10, field.centery))
+    _text_field(surface, f["normal"], field, ms.filename or _DEFAULT_FILENAME, ms.editing_filename, config.COLOR_TEXT)
     ms.rects["filename_field"] = field
 
-    _button(surface, ms, "save_settings", save, "Save",
-            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-    _button(surface, ms, "load_settings", load, "Load",
-            fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "save_settings", save, "Save", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "load_settings", load, "Load", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+
+
+def _text_field(surface, font, rect: pygame.Rect, text: str, editing: bool, color) -> None:
+    """A text box holding ``text``, with a caret while ``editing``.
+
+    The content is clipped to the box and anchored to its *end*, so a name longer
+    than the field runs off the left rather than out over the buttons beside it —
+    and the caret you are typing at stays in view.
+    """
+    pygame.draw.rect(surface, _TROUGH, rect, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER if editing else _BTN_BORDER, rect, 2, border_radius=6)
+    shown = text + "|" if editing else text
+    pad = 10
+    img = font.render(shown, True, color)
+    inner = rect.inflate(-2 * pad, -4)
+    prev = surface.get_clip()
+    surface.set_clip(inner)
+    if img.get_width() <= inner.width:
+        surface.blit(img, img.get_rect(midleft=(inner.left, rect.centery)))
+    else:
+        surface.blit(img, img.get_rect(midright=(inner.right, rect.centery)))
+    surface.set_clip(prev)
 
 
 def _dropdown(surface, ms: MenuState, key, current, options, open_, x, y, width) -> None:
@@ -522,8 +713,7 @@ def _draw_die(surface, rect: pygame.Rect) -> None:
     face.center = rect.center
     pygame.draw.rect(surface, config.COLOR_TEXT, face, border_radius=4)
     cx, cy, o, r = face.centerx, face.centery, 5, 2
-    for px, py in ((cx - o, cy - o), (cx + o, cy - o), (cx, cy),
-                   (cx - o, cy + o), (cx + o, cy + o)):
+    for px, py in ((cx - o, cy - o), (cx + o, cy - o), (cx, cy), (cx - o, cy + o), (cx + o, cy + o)):
         pygame.draw.circle(surface, _PANEL_BG, (px, py), r)
 
 
@@ -539,44 +729,64 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 
 def _draw_start(surface, ms: MenuState, w: int) -> None:
     rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
-    _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER,
-            tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+    _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+    # Touch/web equivalent of Esc's quit — there's no keyboard on a phone, so
+    # without this a touch user has no way to leave the app at all.
+    quit_rect = pygame.Rect(rect.right + 14, rect.y, 110, rect.height)
+    _button(surface, ms, "quit", quit_rect, "Quit", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
 
 
 # --------------------------------------------------------------------------- #
 # Resume prompt — a boot-time modal offered when the last game was left unfinished
 # --------------------------------------------------------------------------- #
+def _resume_labels() -> tuple[str, str]:
+    """(resume, new-game) button labels; key hints dropped on a touch build, where
+    there is no Y/N to press — the same wording rule the game's modals use."""
+    if config.touch_ui:
+        return ("Resume", "New game")
+    return ("Resume (Y/Enter)", "New game (N/Esc)")
+
+
 def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
-    """(resume, new-game) button rects — shared by the drawer and the hit-tester."""
+    """(resume, new-game) button rects — shared by the drawer and the hit-tester.
+
+    Drawn on the real surface rather than the fixed canvas the widgets above use,
+    so this is the one part of the menu that scales through ``config.s``; the boxes
+    are measured to fit their labels, which at a touch scale are wider than any
+    fixed width would allow for.
+    """
     w, h = surface.get_size()
-    cx, cy = w // 2, h // 2
-    bw, bh = 200, 42
-    resume_r = pygame.Rect(cx - bw - 12, cy + 24, bw, bh)
-    new_r = pygame.Rect(cx + 12, cy + 24, bw, bh)
-    return resume_r, new_r
+    font = _modal_fonts()["normal"]
+    bw = max(font.size(s)[0] + 2 * config.BTN_PAD_X for s in _resume_labels())
+    bw = max(bw, config.s(200))
+    bh = max(config.s(42), font.get_height() + config.s(16))
+    gap, y = config.s(12), h // 2 + config.s(24)
+    return (pygame.Rect(w // 2 - bw - gap, y, bw, bh), pygame.Rect(w // 2 + gap, y, bw, bh))
 
 
 def draw_resume_prompt(surface, log) -> None:
-    """Modal veil offering to resume ``log`` (an in-progress match), over the menu."""
+    """Modal veil offering to resume ``log`` (an in-progress match), over the menu.
+
+    Stacked upward from the button row so the title and the detail line always
+    clear it, whatever the fonts scale to.
+    """
     w, h = surface.get_size()
-    f = _fonts()
+    f = _modal_fonts()
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 200))
     surface.blit(veil, (0, 0))
-    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT,
-          center=(w // 2, h // 2 - 52))
-    st = log.settings
-    detail = (f"turn {log.turn_count} · {st.get('players', '?')} players · "
-              f"{st.get('mode', 'random')} map")
-    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, h // 2 - 18))
 
-    resume_r, new_r = resume_prompt_buttons(surface)
-    for rect, label, fill, edge in (
-        (resume_r, "Resume (Y/Enter)", _START_FILL, _START_BORDER),
-        (new_r, "New game (N/Esc)", _BTN_FILL, _BTN_BORDER),
-    ):
-        pygame.draw.rect(surface, fill, rect, border_radius=6)
-        pygame.draw.rect(surface, edge, rect, 2, border_radius=6)
+    st = log.settings
+    detail = f"turn {log.turn_count} · {st.get('players', '?')} players · {st.get('mode', 'random')} map"
+    detail_h = f["small"].get_height() + config.ROW_GAP
+    y = h // 2 - config.s(12) - detail_h - f["big"].get_height()
+    _text(surface, f["big"], "Resume last game?", config.COLOR_TEXT, center=(w // 2, y + f["big"].get_height() // 2))
+    y += f["big"].get_height() + config.ROW_GAP
+    _text(surface, f["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, y + f["small"].get_height() // 2))
+
+    for rect, label, fill, edge in zip(resume_prompt_buttons(surface), _resume_labels(), (_START_FILL, _BTN_FILL), (_START_BORDER, _BTN_BORDER)):
+        pygame.draw.rect(surface, fill, rect, border_radius=config.s(6))
+        pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=config.s(6))
         _text(surface, f["normal"], label, config.COLOR_TEXT, center=rect.center)
 
 
@@ -584,6 +794,122 @@ def draw_resume_prompt(surface, log) -> None:
 # Input
 # --------------------------------------------------------------------------- #
 def handle_event(event, ms: MenuState, settings: Settings):
+    # Map pointer coords from the real screen back into canvas space (the widget
+    # rects live in canvas space), then dispatch. Also raise/dismiss the on-screen
+    # keyboard as a text field gains/loses focus (a no-op on desktop).
+    event = _to_canvas_event(event, ms)
+    if ms.confirm_unchallenge:  # modal: swallows everything until answered
+        _handle_unchallenge(event, ms, settings)
+        return None
+    if event.type in _MUTATING_EVENTS and _comparable(settings):
+        # Remember the last setup the challenge's score still applied to, before
+        # this event gets a chance to change it. A slider drag is covered by the
+        # snapshot its opening MOUSEBUTTONDOWN took.
+        ms.challenge_snapshot = settings.to_dict()
+    before = _editing_field(ms)
+    result = _dispatch(event, ms, settings)
+    _sync_text_input(ms, before)
+    if settings.challenge is not None and ms.drag_key is None and not settings.challenge.matches(settings):
+        # Edited away from the challenge's setup. Ask rather than silently
+        # invalidating the score — and wait for a slider to be released first, so
+        # a drag isn't interrupted on its very first pixel.
+        ms.confirm_unchallenge = True
+    return result
+
+
+def _comparable(settings: Settings) -> bool:
+    """Is there a challenge whose score still applies to this exact setup?"""
+    return settings.challenge is not None and settings.challenge.matches(settings)
+
+
+def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> None:
+    """Answer the un-challenge modal: keep the edit and drop the score, or put the
+    setup back the way the link had it."""
+    keep_edit: Optional[bool] = None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for key, answer in (("unchallenge_change", True), ("unchallenge_keep", False)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                keep_edit = answer
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+            keep_edit = True
+        elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+            keep_edit = False
+    if keep_edit is None:
+        return
+
+    ms.confirm_unchallenge = False
+    if keep_edit:
+        settings.challenge = None
+        ms.challenge_snapshot = None
+        # Also drop it from the address bar and the remembered token, or a reload
+        # would resurrect the banner we were just asked to get rid of.
+        webstore.sync_settings(settings.to_token())
+        set_status(ms, "Challenge cleared — this is your own setup now", True)
+    elif ms.challenge_snapshot is not None:
+        settings.copy_from(Settings.from_dict(ms.challenge_snapshot))
+        # The seed field keeps its own edit buffer, so resync it or the box would
+        # still show the rejected number.
+        ms.seed_text = "" if settings.seed is None else str(settings.seed)
+
+
+def pump(ms: MenuState, settings: Settings) -> None:
+    """Per-frame poll of the mobile browser's on-screen keyboard; a no-op
+    everywhere else. Called by ``main.py`` while the menu scene is up.
+
+    Typing on a soft keyboard produces no SDL events at all, so the text arrives
+    by reading the hidden DOM field back (``softkeyboard``) and filtering it into
+    the same edit buffers ``_handle_text_input`` fills. This is the mutate half of
+    the scene, alongside ``handle_event`` — ``draw`` still only reads."""
+    field_name = _editing_field(ms)
+    if field_name is None:
+        return
+    if field_name == "seed":
+        raw = softkeyboard.value(ms.seed_text)
+        text = _filter(raw, str.isdigit, _SEED_MAX_LEN)
+        if text != ms.seed_text:
+            ms.seed_text = text
+            _apply_seed_text(ms, settings)
+    else:
+        raw = softkeyboard.value(ms.filename)
+        text = _filter(raw, lambda c: c.isalnum() or c in "_-.", _FILENAME_MAX_LEN)
+        ms.filename = text
+    if text != raw:
+        # Only on a rejected character: writing back every frame would drag the
+        # caret to the end and stop the player editing mid-string.
+        softkeyboard.set_value(text)
+    if softkeyboard.dismissed():  # Done/Go, or the keyboard swiped away
+        ms.editing_seed = ms.editing_filename = False
+        softkeyboard.close()
+
+
+def _filter(text: str, allowed, limit: int) -> str:
+    """``text`` reduced to the characters a field accepts, capped at ``limit``."""
+    return "".join(ch for ch in text if allowed(ch))[:limit]
+
+
+def _editing_field(ms: MenuState) -> Optional[str]:
+    """Which text field has the caret, if any — ``"seed"``, ``"file"`` or None."""
+    if ms.editing_seed:
+        return "seed"
+    return "file" if ms.editing_filename else None
+
+
+def _to_canvas_event(event, ms: MenuState):
+    """Return ``event`` with any pointer position mapped from screen to canvas
+    space (inverse of draw()'s fit transform). Non-pointer events pass through."""
+    if event.type not in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
+        return event
+    ox, oy = ms.canvas_offset
+    scale = ms.canvas_scale or 1.0
+    x, y = event.pos
+    data = dict(event.dict)
+    data["pos"] = (round((x - ox) / scale), round((y - oy) / scale))
+    return pygame.event.Event(event.type, data)
+
+
+def _dispatch(event, ms: MenuState, settings: Settings):
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -592,8 +918,48 @@ def handle_event(event, ms: MenuState, settings: Settings):
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ms.drag_key = None
         return None
+    if event.type == pygame.TEXTINPUT:  # characters (soft keyboard or physical)
+        return _handle_text_input(event.text, ms, settings)
     if event.type == pygame.KEYDOWN:
         return _handle_key(event, ms, settings)
+    return None
+
+
+def _sync_text_input(ms: MenuState, before: Optional[str]) -> None:
+    """Raise/dismiss the on-screen keyboard as a text field gains/loses focus (or
+    the caret moves between the two fields).
+
+    Two mechanisms, since no single one covers every platform: SDL's IME call
+    shows Android's native keyboard and toggles TEXTINPUT delivery on desktop,
+    while the browser needs a focused DOM field (``softkeyboard``). Both are
+    guarded, so a headless/uninitialised video subsystem or a non-web build just
+    skips the one that doesn't apply. The focus happens inside this tap's
+    handling, which is what lets the browser accept it as a user gesture."""
+    now = _editing_field(ms)
+    if now == before:
+        return
+    try:
+        pygame.key.start_text_input() if now else pygame.key.stop_text_input()
+    except pygame.error:
+        pass
+    if now is None:
+        softkeyboard.close()
+    else:
+        softkeyboard.open(ms.seed_text if now == "seed" else ms.filename)
+
+
+def _handle_text_input(text: str, ms: MenuState, settings: Settings):
+    """Character entry from the OS — physical keys and the Android soft keyboard
+    both arrive here as TEXTINPUT. Control keys stay in ``_handle_key``."""
+    if ms.editing_seed:
+        for ch in text:
+            if ch.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
+                ms.seed_text += ch
+        _apply_seed_text(ms, settings)
+    elif ms.editing_filename:
+        for ch in text:
+            if (ch.isalnum() or ch in "_-.") and len(ms.filename) < _FILENAME_MAX_LEN:
+                ms.filename += ch
     return None
 
 
@@ -608,20 +974,14 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         if event.key == pygame.K_BACKSPACE:
             ms.seed_text = ms.seed_text[:-1]
             _apply_seed_text(ms, settings)
-        elif event.unicode.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
-            ms.seed_text += event.unicode
-            _apply_seed_text(ms, settings)
         return None
 
     if ms.editing_filename:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
-            ms.editing_filename = False        # commit / cancel are the same here
+            ms.editing_filename = False  # commit / cancel are the same here
             return None
         if event.key == pygame.K_BACKSPACE:
             ms.filename = ms.filename[:-1]
-        elif (event.unicode and (event.unicode.isalnum() or event.unicode in "_-.")
-              and len(ms.filename) < _FILENAME_MAX_LEN):
-            ms.filename += event.unicode
         return None
 
     if ms.strategy_open:
@@ -643,26 +1003,28 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     if hit != "filename_field":
         ms.editing_filename = False
     if not (hit == "strategy" or (hit or "").startswith("strategy_opt_")):
-        ms.strategy_open = False           # click anywhere else closes the dropdown
+        ms.strategy_open = False  # click anywhere else closes the dropdown
 
     if hit == "start":
         return "start"
+    if hit == "quit":
+        return "quit"
     if hit is None:
         return None
-    if hit in _SLIDER_SPECS:                       # grab + jump the slider
+    if hit in _SLIDER_SPECS:  # grab + jump the slider
         ms.drag_key = hit
         _apply_slider(hit, ms, settings, pos)
     elif hit.startswith("tab_"):
-        ms.tab = hit[len("tab_"):]
+        ms.tab = hit[len("tab_") :]
     elif hit.startswith("seat_"):
-        ms.ai_seat = int(hit[len("seat_"):])
-    elif hit == "strategy":                        # toggle the dropdown, rescanning models/
+        ms.ai_seat = int(hit[len("seat_") :])
+    elif hit == "strategy":  # toggle the dropdown, rescanning models/
         if not ms.strategy_open:
             ai.load_models()
             ms.strategies = ai.available_strategies()
         ms.strategy_open = not ms.strategy_open
     elif hit.startswith("strategy_opt_"):
-        idx = int(hit[len("strategy_opt_"):])
+        idx = int(hit[len("strategy_opt_") :])
         if 0 <= idx < len(ms.strategies):
             settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
         ms.strategy_open = False
@@ -698,15 +1060,15 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.editing_seed = True
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
     elif hit == "seed_random":
-        settings.seed = random.randrange(1_000_000)
+        settings.seed = random_seed()
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
     elif hit == "fog_of_war":
-        if _fog_off(settings):                     # off -> on: apply the fog preset
+        if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT
             settings.fog_scout = config.FOG_ON_SCOUT
-        else:                                      # on -> off: full visibility
+        else:  # on -> off: full visibility
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "filename_field":
         ms.editing_filename = True
@@ -715,16 +1077,24 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         try:
             _SAVE_DIR.mkdir(parents=True, exist_ok=True)
             settings.save(path)
-            _set_status(ms, f"Saved {path.name}", True)
+            set_status(ms, f"Saved {path.name}", True)
         except OSError:
-            _set_status(ms, f"Couldn't save {path.name}", False)
+            set_status(ms, f"Couldn't save {path.name}", False)
     elif hit == "load_settings":
         path = _settings_path(ms.filename)
         try:
             settings.copy_from(Settings.load(path))
-            _set_status(ms, f"Loaded {path.name}", True)
+            set_status(ms, f"Loaded {path.name}", True)
         except (OSError, ValueError):
-            _set_status(ms, f"Couldn't load {path.name}", False)
+            set_status(ms, f"Couldn't load {path.name}", False)
+    elif hit == "get_link":
+        ok, copied = webstore.share_token(settings.to_token())
+        if copied:
+            set_status(ms, "Link copied — paste to share", True)
+        elif ok:
+            set_status(ms, "Link updated — copy it from the address bar", True)
+        else:
+            set_status(ms, "Couldn't create link", False)
     return None
 
 
@@ -746,8 +1116,9 @@ def _randomise_sliders(target, specs) -> None:
     """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
     on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
     snap-and-clamp logic with ``_apply_slider``."""
+    rng = fresh_rng()
     for _key, _label, attr, lo, hi, step, is_int in specs:
-        snapped = round(random.uniform(lo, hi) / step) * step
+        snapped = round(rng.uniform(lo, hi) / step) * step
         snapped = max(lo, min(hi, snapped))
         setattr(target, attr, int(round(snapped)) if is_int else round(snapped, 4))
 
@@ -768,7 +1139,10 @@ def _settings_path(name: str) -> Path:
     return _SAVE_DIR / name
 
 
-def _set_status(ms: MenuState, text: str, ok: bool) -> None:
+def set_status(ms: MenuState, text: str, ok: bool) -> None:
+    """Show ``text`` under the Start row for a few seconds. Public because
+    ``main`` posts here too — it is the menu's one line for telling the player
+    what just happened (see the web quit fallback in ``main.leave_app``)."""
     ms.status = text
     ms.status_ok = ok
     ms.status_until = pygame.time.get_ticks() + 4000

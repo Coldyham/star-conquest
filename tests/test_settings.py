@@ -11,7 +11,8 @@ import pytest
 
 from starconquest import config
 from starconquest.model import AiParams
-from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state, resolve_seed
+from starconquest.settings import (_GLOBAL_KNOBS, Challenge, Settings,
+                                   build_state, random_seed, resolve_seed)
 
 
 @contextlib.contextmanager
@@ -130,6 +131,141 @@ def test_save_load_round_trip(tmp_path):
     assert Settings.load(path) == s
 
 
+def test_to_from_token_round_trip_defaults():
+    s = Settings.defaults()
+    assert Settings.from_token(s.to_token()) == s
+
+
+def test_to_from_token_round_trip_customised():
+    s = _customised()
+    assert Settings.from_token(s.to_token()) == s
+
+
+def test_token_is_url_fragment_safe():
+    token = _customised().to_token()
+    assert not (set(token) & set("+/="))
+
+
+def test_from_token_raises_on_garbage():
+    with pytest.raises(ValueError):
+        Settings.from_token("not a valid token !!!")
+
+
+# --- token pruning ----------------------------------------------------------- #
+# `to_token` omits anything the reader would infer, so the property that matters
+# is that a round trip is still *exact* — a dropped field must never change a game.
+def test_pruned_token_omits_defaults_but_keeps_identity():
+    pruned = Settings.defaults().token_dict()
+    assert set(pruned) == {"mode", "players", "nodes", "seed"}
+
+
+def test_pruning_shrinks_the_default_token_a_lot():
+    assert len(Settings.defaults().to_token()) < 200   # was ~1470 unpruned
+
+
+def test_pruned_token_keeps_params_of_a_non_heuristic_seat():
+    """`ai_params` is documented as readable by drop-in bots, so a custom seat's
+    params are load-bearing and must survive even though its strategy isn't the
+    built-in heuristic."""
+    s = Settings(players=3)
+    s.ai_strategy[1] = "thinker"
+    s.ai[1] = AiParams(attack_margin=1.9)
+    assert Settings.from_token(s.to_token()).ai[1].attack_margin == 1.9
+
+
+def test_pruned_token_trims_unused_seats():
+    s = Settings(players=2)
+    s.ai_strategy[4] = "thinker"        # seat 5 isn't in a 2-player game
+    assert "ai_strategy" not in s.token_dict()
+
+
+def test_legacy_uncompressed_token_still_loads():
+    """Links shared before the token was deflated must keep working."""
+    import base64
+    import json
+
+    s = _customised()
+    raw = json.dumps(s.to_dict(), separators=(",", ":")).encode("utf-8")
+    legacy = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    assert Settings.from_token(legacy) == s
+
+
+# --- challenges -------------------------------------------------------------- #
+def _challenged() -> Settings:
+    s = _customised()
+    s.challenge = Challenge(turns=137, lost=412, hand=119, by="Andrew")
+    s.challenge.key = s.challenge_key()
+    return s
+
+
+def test_challenge_round_trips_through_dict_and_token():
+    s = _challenged()
+    assert Settings.from_dict(s.to_dict()) == s
+    assert Settings.from_token(s.to_token()) == s
+
+
+def test_challenge_absent_or_scoreless_reads_as_none():
+    assert Settings.from_dict({}).challenge is None
+    assert Settings.from_dict({"challenge": "nonsense"}).challenge is None
+    assert Settings.from_dict({"challenge": {"turns": 0}}).challenge is None
+
+
+def test_copy_from_carries_the_challenge():
+    target = Settings.defaults()
+    target.copy_from(_challenged())
+    assert target.challenge == _challenged().challenge
+    target.challenge.turns = 1          # must be a copy, not the same object
+    assert _challenged().challenge.turns == 137
+
+
+def test_challenge_key_ignores_the_attached_score_and_autoplay():
+    plain = Settings(seed=7)
+    scored = Settings(seed=7)
+    scored.challenge = Challenge(turns=99)
+    scored.autoplay = True
+    assert plain.challenge_key() == scored.challenge_key()
+
+
+def test_challenge_key_changes_with_the_setup():
+    assert Settings(seed=7).challenge_key() != Settings(seed=8).challenge_key()
+    a, b = Settings(players=3), Settings(players=3)
+    b.ai_strategy[1] = "thinker"
+    assert a.challenge_key() != b.challenge_key()
+
+
+def test_challenge_matches_until_the_config_is_edited():
+    s = _challenged()
+    assert s.challenge.matches(s)
+    s.nodes += 1
+    assert not s.challenge.matches(s)
+
+
+def test_without_challenge_strips_the_score_only():
+    s = _challenged()
+    plain = s.without_challenge()
+    assert plain.challenge is None
+    assert s.challenge is not None                    # the original is untouched
+    assert plain.challenge_key() == s.challenge_key()  # same setup, no target
+    assert Settings.from_token(plain.to_token()).challenge is None
+
+
+def test_challenge_without_a_key_is_taken_on_trust():
+    s = _customised()
+    s.challenge = Challenge(turns=10)      # hand-written: no key stamped
+    assert s.challenge.matches(s)
+
+
+def test_build_state_ignores_the_challenge():
+    with _preserve_config():
+        plain = build_state(Settings(seed=5, nodes=14, players=2), 5)
+        challenged = Settings(seed=5, nodes=14, players=2)
+        challenged.challenge = Challenge(turns=1, lost=1)
+        scored = build_state(challenged, 5)
+    assert plain.systems.keys() == scored.systems.keys()
+    assert all(plain.systems[i].owner_id == scored.systems[i].owner_id
+               for i in plain.systems)
+
+
 def test_from_dict_ignores_unknown_and_fills_missing():
     loaded = Settings.from_dict({"players": 4, "junk": "ignored"})
     assert loaded.players == 4
@@ -194,3 +330,22 @@ def test_build_state_stamps_per_seat_strategy():
         state = build_state(s, 5)
         assert state.players[2].ai_strategy == "rusher"
         assert state.players[3].ai_strategy == "heuristic"
+
+
+def test_random_seed_is_in_range_and_not_a_fixed_sequence():
+    """Rolled seeds must differ *within* a run even if the clock is coarse (the
+    browser blunts it), which is what a repeated roll on the web build hit."""
+    seeds = [random_seed() for _ in range(50)]
+    assert all(0 <= s < config.SEED_MAX for s in seeds)
+    assert len(set(seeds)) > 45           # collisions vanishingly unlikely
+
+
+def test_random_seed_ignores_the_global_random_state():
+    """The web build can boot `random` from the same state every page load, so a
+    fresh seed must not come off it — reseeding must not reproduce the roll."""
+    import random as _random
+
+    _random.seed(1234)
+    first = [random_seed() for _ in range(5)]
+    _random.seed(1234)
+    assert [random_seed() for _ in range(5)] != first

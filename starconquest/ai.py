@@ -22,10 +22,13 @@ from typing import Callable
 
 from . import config
 from .model import AiParams, GameState, Order
+from .paths import data_dir
 
-# User-supplied strategies live in a gitignored dir beside the repo (mirrors
-# menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without touching src.
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+# User-supplied strategies live in a gitignored dir under the writable data dir
+# (mirrors menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without
+# touching src. On Android this is the app-private dir, a real filesystem, so a
+# strategy dropped in there is still importable by path.
+MODELS_DIR = data_dir() / "models"
 
 # A seat's decision function: same shape the engine injects as `decide`.
 DecideFn = Callable[[GameState, int], list[Order]]
@@ -107,13 +110,13 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
             if spec is None or spec.loader is None:
                 continue
             module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module          # so dataclasses/typing resolve
+            sys.modules[spec.name] = module  # so dataclasses/typing resolve
             spec.loader.exec_module(module)
             fn = getattr(module, "decide", None)
             if callable(fn):
                 register(path.stem, fn)
                 loaded.append(path.stem)
-        except Exception:                            # noqa: BLE001 — one bad model mustn't break the rest
+        except Exception:  # noqa: BLE001 — one bad model mustn't break the rest
             continue
     return sorted(loaded)
 
@@ -121,8 +124,7 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Decisions
 # --------------------------------------------------------------------------- #
-def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int,
-                    params: AiParams):
+def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int, params: AiParams):
     sys = state.systems[sid]
     jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
     self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are

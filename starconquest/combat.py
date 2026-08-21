@@ -79,10 +79,18 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tu
         sides.sort(key=lambda s: s[1], reverse=True)
         cur_owner, cur_ships = sides[0]
         for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(
-                state.rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner
-            )
+            cur_owner, cur_ships = resolve_fight(state.rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
         node.owner_id, node.ships = cur_owner, cur_ships
+
+    # Attrition, per owner: everyone brought `forces[owner]` here (garrison plus
+    # arrivals) and only the final owner keeps anything, so the difference is
+    # exactly what they lost. Correct for a plain reinforcement (nothing lost), a
+    # two-way attack and the 3+-owner pile-up alike. Draws no rng, so this cannot
+    # perturb a seeded replay.
+    for owner, brought in forces.items():
+        kept = node.ships if owner == node.owner_id else 0
+        if brought > kept and owner in state.players:
+            state.players[owner].ships_lost += brought - kept
 
     if node.owner_id != old_owner:
         node.prod_progress = 0  # a captured system starts building fresh
