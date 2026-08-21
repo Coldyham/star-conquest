@@ -113,23 +113,51 @@ reproducible; ``SEARCH_BUDGET_S`` is only a catastrophe guard, checked between
 candidates so there is always a whole plan to return. Candidate 0 is the tuned
 default, so a search that runs out of budget or finds nothing better *is* depth 1.
 
-Measured, knower vs knower, both seatings, 40 seeds, 24-node random maps:
+**How much depth is worth depends on whether the opponent is an oracle**, and by a
+lot. Measure it against the bots you actually care about, not in a mirror.
 
-    depth 1 vs 2    54% - 46%      one turn is not enough to separate postures
-    depth 1 vs 3    42% - 58%
-    depth 1 vs 5    31% - 69%      <- best
-    depth 3 vs 5    34% - 66%
-    depth 5 vs 8    55% - 45%      plateaus, then decays
+Against thinker, both seatings, 24-node maps (n = decided games):
 
-Deeper play is also *faster* and less passive, not more: timeouts fell 13 -> 5 and
-games shortened 157 -> 125 turns from depth 1 to 5. It costs 0.6 ms/turn at depth 1
-and 5.5 ms at depth 5 (40 nodes, 4 seats), against a 350 ms autoplay frame.
+    depth 1     86%   n=78
+    depth 5     89%   n=75
+    depth 8     95%   n=111    <- the plateau, and the deepest the slider goes
+    depth 16    95%   n=163
+    depth 40    86%   n=73     falls away again
 
-The decay past 5 is the honest limit of the method: rollouts play every seat with
-the blind planner, so far-future turns are increasingly fiction, and eventually the
-extra turns add noise rather than signal. The other ceiling is candidate breadth —
-``POSTURE_VARIANTS`` only explores "knower, more or less aggressive", and cannot
-find a move the four phases structurally cannot express.
+Against claudebot there is no headroom to find: depth 1 already wins 100% (75-0).
+
+In a **mirror**, the same sweep peaks at depth 5 and is flat to 8 (52%, n=169),
+then reverses — depth 5 beats depth 16 66% (n=68) and depth 40 59% (n=66). That
+looks like an argument against depth, and it is not: it is an artifact of the mirror.
+``_rollout_decide`` plays a non-oracle seat with its *real* ``decide``, so a rollout
+against thinker is a faithful simulation and stays informative for a dozen turns;
+but it plays an oracle seat with ``_blind``, which is a poor model of a deep knower,
+so a rollout against another knower compounds a fiction and extra turns hurt.
+Useful depth tracks how well the rollout can model the opposition. (The mirror
+numbers are still a fair A/B *of the search* — both sides are equally handicapped —
+they just understate the depth worth using in a real game.)
+
+The mirror's turnover was measured, not assumed, over 75 midgame positions: deeper
+rollouts separate the candidates *more* often (35/75 at depth 5 rising to 48/75 at
+40) while agreeing with depth 5's choice *less* often (59/75 at 8, 48/75 at 16,
+44/75 at 40) — extra discrimination that is noise rather than signal. It is *not*
+that deep rollouts bottom out at a decided game: none of them reach one, since even
+a 39-turn rollout from turn 45 ends mid-game.
+
+Cost, per decide: 0.7 ms at depth 1, 7.6 ms at 8, 14.8 ms at 16 (24 nodes, 2 seats);
+1.9 / 13.6 / 26.4 ms at 40 nodes and 4 seats. All fit the 350 ms autoplay frame, but
+the WASM build has no thread to spare, which is the other reason ``SEARCH_DEPTH_MAX``
+stops at 8 — it is the cheaper end of the plateau, so the slider reaches full
+strength without reaching the range where more lookahead starts costing.
+
+Depth also plays *faster* and less passively up to the plateau, not more: from depth
+1 to 5 in the mirror, timeouts fell 13 -> 5 and games shortened 157 -> 125 turns.
+
+The remaining ceiling is candidate breadth — ``POSTURE_VARIANTS`` only explores
+"knower, more or less aggressive", and cannot find a move the four phases
+structurally cannot express. Past that, the levers are a stronger rollout policy
+(which is exactly what the mirror result indicts) or an eval integrated over the
+path rather than read off the final board.
 
 Note **depth 0 is thinker-*strength*, not thinker**: ``RESERVE_FLOOR`` is 0 here
 against thinker's 1, ``_richness`` peeks a hop further (``BEYOND_DECAY``), and
