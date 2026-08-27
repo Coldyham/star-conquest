@@ -133,9 +133,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
-    # route mode's own controls; _draw_footer_buttons/_draw_hud re-record whichever
-    # of them the current stage actually draws
-    ui.route_next_rect = ui.route_back_rect = (0, 0, 0, 0)
+    # route mode's confirm; _draw_hud re-records it once the plan has something in it
     ui.route_confirm_rect = (0, 0, 0, 0)
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
     # (unlike the old fixed fit-to-bounds view, which always fit inside it by
@@ -1075,7 +1073,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
             pygame.draw.rect(surface, (40, 46, 66), br, config.s(3), border_radius=config.s(8))
             ui.route_confirm_rect = (0, 0, 0, 0)
-            label = "Route" if ui.route_stage == "select" else "Pick a target"
+            label = "Route" if not ui.route_sel else "Pick a target"
         colour = config.COLOR_TEXT if ui.route_plan else config.COLOR_TEXT_DIM
         _text(surface, _fonts()["big" if ui.route_plan else "normal"], label, colour,
               center=br.center)
@@ -1115,8 +1113,6 @@ _FOOTER_RECTS = (
     "play_pause_rect",
     "fast_forward_rect",
     "route_button_rect",
-    "route_next_rect",
-    "route_back_rect",
     "route_cancel_rect",
 )
 
@@ -1153,10 +1149,6 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # zeroing loop below then takes every live-play rect out of service for free,
     # so nothing from the ordinary strip can be clicked under an open plan.
     if ui.mode == ROUTING:
-        if ui.route_stage == "select":
-            specs.append(("route_next_rect", "Choose destination", *_BTN_TEAL, 3))
-        else:
-            specs.append(("route_back_rect", "Back", *_BTN_BLUE, 3))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2))
         _lay_out_footer(surface, ui, specs, y, fbh, font)
@@ -1669,7 +1661,7 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
     dest = ui.route_dest
     lines: list[tuple[str, tuple[int, int, int]]] = [
-        (f"{len(ui.route_sel)} selected", config.COLOR_ROUTE),
+        (f"{len(ui.route_sources())} selected", config.COLOR_ROUTE),
     ]
     if dest is None:
         lines.append(("no destination yet", config.COLOR_TEXT_DIM))
@@ -1688,9 +1680,8 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
             break
         y = _row(surface, x, y, text, colour)
 
-    hint = ("Drag a box, or tap systems, to pick a group."
-            if ui.route_stage == "select"
-            else "Tap a system to aim the group at it.")
+    hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
+            "un-aim, and to drop it from the group.")
     y += config.ROW_GAP * 2
     for line in _wrap(font, hint, width):
         if y + _row_h() > bottom:

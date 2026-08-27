@@ -175,15 +175,33 @@ looks like it is working. `_detect_route_cycles` walks the merged graph and
 `confirm_route` drops the closing edge, which is always a rule the plan doesn't
 overwrite.
 
-**Two stages, because a tap is ambiguous.** An owned system could be a source or
-the destination, and nothing disambiguates that on touch — Shift already means
-"arm as a forward rule" and there is no long-press anywhere in the shell. The
-tempting one-stage scheme (tap a selected system to remove it, tap any other to
-aim at it) is unambiguous but quietly costs tap-to-add: once anything is
-selected, tapping an unselected system would aim instead of add, and a
-sub-threshold drag around a single node reads as a tap. So `route_stage` says
-what a tap means and the footer says which stage you are in. Two stages also
-leave drag free to pan in "dest", the stage where the group is already framed.
+**A drag boxes; a tap always aims.** There is no stage and no modifier. The
+gesture set is deliberately lopsided — the box adds, and a tap never does —
+because that is what leaves a tap with exactly one primary meaning.
+
+This went through two wrong shapes first, both worth recording. It started as two
+stages ("pick", then "aim"), on the reasoning that an owned system is ambiguous:
+is a tap adding it or naming it as the target? That is real, but the fix was worse
+than the problem — you cannot tell which stage a tap will land in without reading
+the footer, and an extra button sits between you and every route.
+
+The obvious collapse is to let the system decide: tap a picked system to remove
+it, tap anything else to aim at it. That is unambiguous in the formal sense and
+still wrong, because it makes a tap mean two different things depending on what it
+lands on — and worse, it makes *aiming at one of your own picks* destructive. Pick
+a group, aim at a member, aim somewhere else, and the member is gone. Aim at each
+member in turn and the group empties completely.
+
+So: a tap aims, always, whatever is under it. The destination is not removed from
+`route_sel` — it stays picked and is skipped as a source by `route_sources` — so
+re-aiming is free and reversible. Removal is the second tap on the thing you are
+already pointing at, which also un-aims it. The rule is one sentence, and nothing
+it does is silent.
+
+Drag is spent on the box, so panning is right-drag on a mouse and the on-map
+Reset / −/+ cluster on touch. That costs less than it sounds: `ZOOM_MIN` is the
+fit-all view, so at zoom 1 the whole map is on screen and there is nothing to pan
+to until you have zoomed in — and Reset undoes that in one tap.
 
 **Nothing from live play stays live.** `_handle_route_event` takes the whole event
 stream, so the ordinary `_handle_left_click` ladder — every branch of which

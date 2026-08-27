@@ -163,14 +163,28 @@ def test_no_destination_yet_means_nothing_is_unroutable():
     assert ui.route_plan == {} and ui.route_unroutable == set()
 
 
-def test_the_destination_is_dropped_from_the_selection():
-    """A system can't be both a source and the sink."""
+def test_the_destination_is_skipped_not_dropped_from_the_group():
+    """A system can't be both a source and the sink — but aiming at one of your own
+    picks must not quietly delete it, or re-aiming elsewhere loses it."""
     s = _line(3, owned={0, 1, 2})
     ui = _ui(s)
     ui.route_sel = {0, 2}
     ui.set_route_dest(s, 2)
-    assert ui.route_sel == {0}
+    assert ui.route_sel == {0, 2}          # still picked
+    assert ui.route_sources() == {0}       # but not a source while it is the sink
     assert 2 not in ui.route_plan
+
+
+def test_re_aiming_hands_the_old_destination_back_as_a_source():
+    """The bug this guards: aiming at each pick in turn used to empty the group."""
+    s = _line(4, owned={0, 1, 2, 3})
+    ui = _ui(s)
+    ui.route_sel = {0, 1, 2}
+    for dest in (2, 1, 0, 3):              # walk the destination over every pick
+        ui.set_route_dest(s, dest)
+    assert ui.route_sel == {0, 1, 2}       # nothing was lost on the way
+    assert ui.route_sources() == {0, 1, 2}
+    assert ui.route_plan == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
 
 
 def test_a_system_we_no_longer_hold_leaves_the_selection():
@@ -388,24 +402,49 @@ def test_box_follows_the_camera_when_zoomed():
         pygame.quit()
 
 
-def test_tapping_a_selected_system_removes_it():
+def test_a_tap_always_aims():
+    """One primary meaning, whatever is under it — a pick, a rival's system, an
+    empty neutral. Aiming is never destructive."""
     state, ui = _display_setup()
     try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.toggle_route_system(state, home)
-        assert home in ui.route_sel
-        ui.toggle_route_system(state, home)
-        assert home not in ui.route_sel
+        a = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        b = state.systems[a].neighbors[0]
+        state.systems[b].owner_id = 1     # a second system, as any mid-game has
+        ui.route_sel = {a, b}
+
+        ui.route_tap(state, a)                  # one of our own picks
+        assert ui.route_dest == a and ui.route_sel == {a, b}
+        theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
+        ui.route_tap(state, theirs)              # a rival's system
+        assert ui.route_dest == theirs and ui.route_sel == {a, b}
     finally:
         pygame.quit()
 
 
-def test_a_system_we_do_not_own_cannot_be_selected():
+def test_a_second_tap_on_the_target_un_aims_and_drops_it():
+    """The remove gesture: it has to be a second tap, because the first one is
+    already spoken for by aiming."""
     state, ui = _display_setup()
     try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.route_sel = {home}
+        ui.route_tap(state, home)
+        assert ui.route_dest == home and ui.route_sel == {home}
+        ui.route_tap(state, home)
+        assert ui.route_dest is None and ui.route_sel == set()
+    finally:
+        pygame.quit()
+
+
+def test_un_aiming_something_that_was_never_picked_drops_nothing():
+    state, ui = _display_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
-        ui.toggle_route_system(state, theirs)
-        assert ui.route_sel == set()
+        ui.route_sel = {home}
+        ui.route_tap(state, theirs)
+        ui.route_tap(state, theirs)
+        assert ui.route_dest is None and ui.route_sel == {home}
     finally:
         pygame.quit()
 
@@ -470,14 +509,32 @@ def test_g_toggles_the_mode():
         pygame.quit()
 
 
-def test_tap_adds_then_removes_a_system():
+def test_a_tap_through_input_aims_and_then_un_aims():
     state, ui = _routed_setup()
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         _tap(state, ui, home)
-        assert home in ui.route_sel
+        assert ui.route_dest == home
         _tap(state, ui, home)
-        assert home not in ui.route_sel
+        assert ui.route_dest is None
+    finally:
+        pygame.quit()
+
+
+def test_walking_the_target_over_every_pick_keeps_the_group():
+    """The reported bug, at the gesture level: aiming at each pick in turn used to
+    empty the group one system at a time."""
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        for n in state.systems[home].neighbors[:2]:
+            state.systems[n].owner_id = 1
+        picks = {home} | set(state.systems[home].neighbors[:2])
+        ui.route_sel = set(picks)
+        for sid in sorted(picks):
+            _tap(state, ui, sid)
+            assert ui.route_sel == picks, f"aiming at {sid} disturbed the group"
+            assert ui.route_sources() == picks - {sid}
     finally:
         pygame.quit()
 
@@ -503,7 +560,7 @@ def test_a_tap_on_empty_space_selects_nothing_and_clears_nothing():
     state, ui = _routed_setup()
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.toggle_route_system(state, home)
+        ui.route_sel = {home}
         pos = _empty_pos(state, ui)
         _press(state, ui, pos)
         _release(state, ui, pos)             # never moved: no box
@@ -512,32 +569,20 @@ def test_a_tap_on_empty_space_selects_nothing_and_clears_nothing():
         pygame.quit()
 
 
-def test_the_stage_buttons_move_between_picking_and_aiming():
+def test_box_then_tap_is_the_whole_flow():
+    """The one gesture pair the mode is built around: drag a group, tap a target."""
     state, ui = _routed_setup()
     try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.toggle_route_system(state, home)
-        ui.route_next_rect = (100, 100, 60, 20)
-        _press(state, ui, (110, 110))
-        assert ui.route_stage == "dest"
-        ui.route_back_rect = (200, 100, 60, 20)
-        _press(state, ui, (210, 110))
-        assert ui.route_stage == "select"
-        assert ui.route_sel == {home}         # going back keeps the group
-    finally:
-        pygame.quit()
-
-
-def test_a_tap_in_the_dest_stage_aims_the_group():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        px, py, pw, ph = config.play_rect()
+        start = _empty_pos(state, ui)
+        _press(state, ui, start)
+        _motion(state, ui, (px + pw - 3, py + ph - 3))
+        _release(state, ui, (px + pw - 3, py + ph - 3))
+        assert ui.route_sel                       # a group, in one drag
+        home = next(iter(ui.route_sel))
         nbr = state.systems[home].neighbors[0]
-        ui.toggle_route_system(state, home)
-        ui.route_stage = "dest"
         _tap(state, ui, nbr)
-        assert ui.route_dest == nbr
-        assert ui.route_plan == {home: (nbr, 0)}
+        assert ui.route_dest == nbr and ui.route_plan
     finally:
         pygame.quit()
 
@@ -547,8 +592,7 @@ def test_cancel_button_drops_the_plan_without_writing_it():
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.toggle_route_system(state, home)
-        ui.route_stage = "dest"
+        ui.route_sel = {home}
         _tap(state, ui, nbr)
         ui.route_cancel_rect = (300, 100, 60, 20)
         _press(state, ui, (310, 110))
@@ -562,8 +606,7 @@ def test_confirm_button_writes_the_plan():
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.toggle_route_system(state, home)
-        ui.route_stage = "dest"
+        ui.route_sel = {home}
         _tap(state, ui, nbr)
         ui.route_confirm_rect = (400, 100, 60, 20)
         _press(state, ui, (410, 110))
@@ -602,11 +645,11 @@ def test_x_clears_the_group_but_stays_in_the_mode():
     state, ui = _routed_setup()
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.toggle_route_system(state, home)
-        ui.route_stage = "dest"
+        ui.route_sel = {home}
+        ui.set_route_dest(state, state.systems[home].neighbors[0])
         _key(state, ui, pygame.K_x)
         assert ui.route_sel == set() and ui.route_dest is None
-        assert ui.mode == ROUTING and ui.route_stage == "select"
+        assert ui.mode == ROUTING
     finally:
         pygame.quit()
 
@@ -647,25 +690,9 @@ def test_resolving_a_turn_drops_any_open_plan():
     state, ui = _routed_setup()
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.toggle_route_system(state, home)
+        ui.route_sel = {home}
         main.resolve_turn(state, ui)
         assert ui.mode == IDLE and ui.route_sel == set()
-    finally:
-        pygame.quit()
-
-
-def test_changing_stage_abandons_a_half_made_gesture():
-    """A box armed while picking must not finish as one after switching to aiming,
-    where the same drag pans instead."""
-    state, ui = _routed_setup()
-    try:
-        pos = _empty_pos(state, ui)
-        _press(state, ui, pos)
-        assert ui.route_press is True
-        ui.route_next_rect = (100, 100, 60, 20)
-        _press(state, ui, (110, 110))
-        assert ui.route_stage == "dest"
-        assert ui.route_press is False and ui.route_box is False
     finally:
         pygame.quit()
 

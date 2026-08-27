@@ -314,16 +314,14 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
     """Route mode's whole event stream: build a group, aim it, confirm or drop it.
 
-    Two stages, because an owned system is ambiguous — is a tap adding it to the
-    group, or naming it as the destination? Nothing disambiguates that on touch
-    (Shift already means "arm as a forward rule", and there is no long-press
-    anywhere), so ``route_stage`` says which a tap means and the footer says which
-    stage you are in.
+    One flat mode, no stages: a drag from empty space boxes a group, and a tap on a
+    system means exactly one thing given what is on screen (see ``Ui.route_tap``).
+    A tap commits on press, as everywhere else in the game.
 
-    Gestures, both stages: a tap commits on press, as everywhere else in the game.
-    In "select" a drag from empty space is a selection box; in "dest" it pans, the
-    stage where the group is already framed and panning is what you want. Right-drag
-    pans in either, on a mouse.
+    Drag is spent on the box, so panning is right-drag on a mouse and the on-map
+    Reset / −/+ cluster on touch. That costs little: zoom 1 already fits the whole
+    map, so there is nothing to pan to until you have zoomed in, and Reset undoes
+    that in one tap.
     """
     if event.type == pygame.MOUSEMOTION:
         if ui.route_press and event.buttons[0]:
@@ -379,42 +377,18 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     if ui.route_cancel_rect[2] and _point_in_rect(pos, ui.route_cancel_rect):
         ui.reset_route()
         return None
-    if ui.route_next_rect[2] and _point_in_rect(pos, ui.route_next_rect):
-        _set_route_stage(ui, "dest")
-        return None
-    if ui.route_back_rect[2] and _point_in_rect(pos, ui.route_back_rect):
-        # keep the group — going back is for fixing the selection, not restarting
-        _set_route_stage(ui, "select")
-        return None
-
     node = pick_node(state, ui, pos)
     if node is not None:
-        if ui.route_stage == "select":
-            ui.toggle_route_system(state, node)
-        else:
-            ui.set_route_dest(state, node)
+        ui.route_tap(state, node)
         return None
 
-    # Empty space: a box in "select", a pan in "dest". Neither clears the group —
-    # this mode confirms and cancels explicitly, so a stray tap must not undo it.
-    if ui.route_stage == "select":
-        ui.route_press = True
-        ui.route_box = False
-        ui.drag_start = pos
-        ui.drag_pos = pos
-    else:
-        _arm_pan(ui, pos)
-    return None
-
-
-def _set_route_stage(ui: Ui, stage: str) -> None:
-    """Switch stage, abandoning any half-made gesture. A box or pan armed under the
-    old stage must not finish under the new one, where the same drag means
-    something else."""
-    ui.route_stage = stage
-    ui.route_press = False
+    # Empty space arms a selection box. It never clears the group — this mode
+    # confirms and cancels explicitly, so a stray tap must not undo the work.
+    ui.route_press = True
     ui.route_box = False
-    ui.pan_active = False
+    ui.drag_start = pos
+    ui.drag_pos = pos
+    return None
 
 
 def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
@@ -432,7 +406,8 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
         # clear the group but stay in the mode, mirroring Clear elsewhere
         ui.route_sel = set()
         ui.route_dest = None
-        _set_route_stage(ui, "select")
+        ui.route_press = False
+        ui.route_box = False
         ui.recompute_route(state)
         return None
     if event.key == pygame.K_m:

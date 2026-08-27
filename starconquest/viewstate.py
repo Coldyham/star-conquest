@@ -64,12 +64,14 @@ class Ui:
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     sel_forward: Optional[int] = None  # source id of the rule being edited, if any
-    # Route mode (see ROUTING above): pick a group of owned systems, then a
+    # Route mode (see ROUTING above): pick a group of owned systems, aim them at a
     # destination, and confirm to lay a forwarding chain from each of them to it.
-    # Two stages because an owned system is ambiguous — source or destination? —
-    # and there is no modifier to disambiguate a tap with on touch.
-    #   route_stage      — "select" (building the group) or "dest" (aiming it)
-    #   route_sel        — the chosen source systems
+    # A drag boxes a group; a tap means one of three things, decided entirely by
+    # what is already drawn (see `route_tap`), so no stage or modifier is needed.
+    #   route_sel        — the chosen group. The destination is *not* removed from
+    #                      it: it is skipped when building the plan instead, so
+    #                      re-aiming somewhere else hands the system straight back
+    #                      as a source rather than silently having dropped it.
     #   route_plan       — source -> (next hop, keep): the rules a confirm writes.
     #                      Covers the *whole* path, not just the selected systems,
     #                      so ships actually conveyor the full distance.
@@ -84,7 +86,6 @@ class Ui:
     #                      `drag_start`/`drag_pos` below, which are dead in this
     #                      mode; the separate flag is what stops render's
     #                      drag-to-target rubber band drawing over the box.
-    route_stage: str = "select"
     route_sel: set[int] = field(default_factory=set)
     route_dest: Optional[int] = None
     route_plan: dict[int, tuple[int, int]] = field(default_factory=dict)
@@ -238,8 +239,6 @@ class Ui:
     # `route_confirm_rect` deliberately takes over the End Turn button's slot, so
     # ending the turn under an open plan is impossible rather than merely guarded.
     route_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    route_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    route_back_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_confirm_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Camera pan: a press on empty space (no node/lane/button under it) arms
@@ -519,7 +518,6 @@ class Ui:
         self.sel_forward = None
         self.reset_route()
         self.mode = ROUTING
-        self.route_stage = "select"
         self.playing = False  # a plan must not be resolved out from under us
 
     def reset_route(self) -> None:
@@ -529,7 +527,6 @@ class Ui:
         Deliberately *not* folded into `reset_selection`: that runs from several
         places mid-gesture, and would wipe the plan the route branch is building.
         """
-        self.route_stage = "select"
         self.route_sel = set()
         self.route_dest = None
         self.route_plan = {}
@@ -541,16 +538,33 @@ class Ui:
         if self.mode == ROUTING:
             self.mode = IDLE
 
-    def toggle_route_system(self, state: GameState, sid: int) -> None:
-        """Add or remove one of our systems from the selection."""
-        if sid in self.route_sel:
-            self.route_sel.discard(sid)
-        else:
-            sys = state.systems.get(sid)
-            if sys is None or sys.owner_id != self.human_id:
-                return
-            self.route_sel.add(sid)
+    def route_tap(self, state: GameState, sid: int) -> None:
+        """A tap always aims the group at that system. Tapping whatever is already
+        the destination un-aims it, and drops it from the group if it was in it.
+
+        One primary meaning is the whole point. Making a tap mean "aim" on some
+        systems and "remove" on others is what makes it feel arbitrary, and it also
+        makes aiming at one of your own picks destructive — pick a group, aim at a
+        member, aim somewhere else, and the member is silently gone. Here aiming
+        never removes anything: the destination stays in the group and is merely
+        skipped as a source (`route_sources`), so re-aiming hands it straight back.
+
+        Removing is therefore the second tap on the thing you are pointing at, and
+        adding is the drag box's job — a tap never adds.
+        """
+        if sid not in state.systems:
+            return
+        if sid == self.route_dest:
+            self.route_dest = None
+            self.route_sel.discard(sid)  # a second tap on the target rejects it
+        elif sid in self.seen:
+            self.route_dest = sid
         self.recompute_route(state)
+
+    def route_sources(self) -> set[int]:
+        """The group members that will actually get a rule — everything picked bar
+        the destination, which is the sink and can't forward to itself."""
+        return self.route_sel - {self.route_dest}
 
     def add_route_box(self, state: GameState, rect: tuple[int, int, int, int]) -> None:
         """Add every one of our systems inside a dragged screen-space box.
@@ -598,8 +612,9 @@ class Ui:
 
         Cases worth knowing, all decided here:
           * the destination is the sink and never gets a rule of its own;
-          * a selected system that *is* the destination is dropped from the
-            selection, rather than reported unroutable;
+          * a selected system that *is* the destination is skipped, not dropped
+            from the group and not reported unroutable — so re-aiming elsewhere
+            gives it straight back as a source;
           * a selected system the search never reached goes in `route_unroutable`;
           * with no destination yet the plan is empty and so is `route_unroutable`
             (otherwise every selection would read as unroutable before aiming);
@@ -616,9 +631,6 @@ class Ui:
         self.route_replaces = set()
         self.route_unroutable = set()
         self.route_cycles = set()
-        # a system can't be both a source and the sink
-        if self.route_dest is not None:
-            self.route_sel.discard(self.route_dest)
         # forget anything we no longer hold, so a stale selection can't plan
         self.route_sel = {
             sid for sid in self.route_sel
@@ -628,7 +640,7 @@ class Ui:
             return
         owned = {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
         parent = model.flow_field(state, owned, {self.route_dest})
-        for sid in sorted(self.route_sel):
+        for sid in sorted(self.route_sources()):
             node = sid
             while node != self.route_dest:
                 if node in self.route_plan:

@@ -301,6 +301,12 @@ intact.
   enemy front. `input._handle_route_event` takes the whole event stream (placed
   after the game-over branch), and render swaps the footer strip and the End Turn
   button, so nothing from live play stays clickable under an open plan.
+  - **A drag boxes a group; a tap always aims** (`Ui.route_tap`). Aiming is never
+    destructive — the destination stays in `route_sel` and is merely skipped as a
+    source (`Ui.route_sources`), so re-aiming hands it straight back. Removing is
+    the *second* tap on whatever you are already pointing at. Never give a tap a
+    second primary meaning conditional on the system: that is what made aiming at
+    one of your own picks silently drop it.
 - **`tests/sim.py` is both a demo harness and a test fixture.** Because it drives
   the pure core headlessly, the suite uses it to assert games actually terminate
   and never corrupt state (`check_invariants`). After changing `ai.py` or
