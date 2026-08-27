@@ -6,6 +6,8 @@ seat to its named strategy, and per-seat `AiParams` actually change behaviour.
 
 from __future__ import annotations
 
+import sys
+
 from starconquest import ai, mapgen
 from starconquest.model import AiParams, Order
 
@@ -86,3 +88,69 @@ def test_available_strategies_lists_heuristic_first():
         assert names[1:] == sorted(names[1:])     # the rest are sorted
     finally:
         ai.STRATEGIES.pop("zzz_test", None)
+
+
+# --------------------------------------------------------------------------- #
+# The bot-defined `aux` knob (menu labelling)
+# --------------------------------------------------------------------------- #
+def _register_aux_bot(name: str, **attrs):
+    """Register a strategy whose module carries `attrs` (AUX_LABEL and friends),
+    the way a real drop-in file does. Returns the module for cleanup."""
+    modname = f"sc_model_{name}"
+    module = type(ai)(modname)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register(name, fn)
+    return modname
+
+
+def _drop_aux_bot(name: str, modname: str) -> None:
+    ai.STRATEGIES.pop(name, None)
+    sys.modules.pop(modname, None)
+
+
+def test_aux_spec_is_none_without_a_declaration():
+    """The heuristic, an unknown name, and a bot that ignores `aux` all opt out."""
+    assert ai.aux_spec("heuristic") is None
+    assert ai.aux_spec("no_such_strategy") is None
+    modname = _register_aux_bot("aux_silent_test")
+    try:
+        assert ai.aux_spec("aux_silent_test") is None
+    finally:
+        _drop_aux_bot("aux_silent_test", modname)
+
+
+def test_aux_spec_reads_label_range_and_int():
+    modname = _register_aux_bot(
+        "aux_bot_test", AUX_LABEL="  Search depth  ", AUX_RANGE=(0, 4, 1), AUX_INT=True
+    )
+    try:
+        assert ai.aux_spec("aux_bot_test") == ("Search depth", 0.0, 4.0, 1.0, True)
+    finally:
+        _drop_aux_bot("aux_bot_test", modname)
+
+
+def test_aux_spec_defaults_and_tolerates_junk():
+    """A hand-written model must only ever cost itself the slider's range."""
+    modname = _register_aux_bot("aux_plain_test", AUX_LABEL="Aggression")
+    try:
+        assert ai.aux_spec("aux_plain_test") == ("Aggression", *ai.AUX_RANGE_DEFAULT, False)
+    finally:
+        _drop_aux_bot("aux_plain_test", modname)
+
+    for junk in ("wide", (1,), (2.0, 1.0, 0.5), (0.0, 1.0, 0.0), None, 7):
+        modname = _register_aux_bot("aux_junk_test", AUX_LABEL="X", AUX_RANGE=junk)
+        try:
+            assert ai.aux_spec("aux_junk_test") == ("X", *ai.AUX_RANGE_DEFAULT, False)
+        finally:
+            _drop_aux_bot("aux_junk_test", modname)
+
+    for bad_label in ("", "   ", 3, None):
+        modname = _register_aux_bot("aux_badlabel_test", AUX_LABEL=bad_label)
+        try:
+            assert ai.aux_spec("aux_badlabel_test") is None
+        finally:
+            _drop_aux_bot("aux_badlabel_test", modname)

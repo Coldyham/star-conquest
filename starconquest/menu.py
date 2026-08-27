@@ -15,7 +15,9 @@ valid for this frame's events.
 Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
 global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
 tuning with copy/reset-all shortcuts, plus a **Strategy** dropdown listing the
-built-in heuristic and any drop-in ``models/`` files, via ``ai.load_models``).
+built-in heuristic and any drop-in ``models/`` files, via ``ai.load_models``; the
+bot-defined ``aux`` knob is labelled by the selected strategy, or absent if it
+declares no meaning for it — see ``ai.aux_spec``).
 Both slider tabs also carry a die button that rolls their sliders to random
 in-bounds values, for fun — the same roll-the-dice metaphor as the seed control.
 Sliders are driven by the spec tables below so drawing and hit-routing stay
@@ -103,14 +105,16 @@ _ADV_FOG = (
 )
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
 _ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT + _ADV_FOG
+# The five knobs the built-in heuristic reads. The sixth, `aux`, is bot-defined and
+# so has no fixed label or range — see `_ai_specs`.
 _AI_PARAMS = (
     ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
     ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
     ("ai_expand", "Expand margin", "expand_margin", 1.0, 3.0, 0.1, False),
     ("ai_attack", "Attack margin", "attack_margin", 1.0, 3.0, 0.1, False),
     ("ai_reinforce", "Reinforce margin", "reinforce_margin", 0, 10, 1, True),
-    ("ai_aux", "Custom (bot-defined)", "aux", 0.0, 8.0, 1.0, False),
 )
+_AUX_KEY = "ai_aux"
 
 # key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
 _SLIDER_SPECS: dict[str, tuple] = {}
@@ -119,6 +123,10 @@ for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT, _ADV_FOG):
         _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
 for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
     _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
+# The aux knob is registered with the generic range so hit-routing knows the key;
+# whether it is drawn at all, and under what label and range, is the selected
+# strategy's call (`_ai_specs`, resolved live in `_slider_spec`).
+_SLIDER_SPECS[_AUX_KEY] = ("ai", "aux", *ai.AUX_RANGE_DEFAULT, False)
 
 _FONTS: dict[str, pygame.font.Font] = {}
 _MODAL_FONTS: dict[str, object] = {}
@@ -190,6 +198,17 @@ class MenuState:
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
     canvas_scale: float = 1.0
     canvas_offset: tuple[int, int] = (0, 0)
+
+
+def _ai_specs(ms: MenuState, settings: Settings) -> tuple:
+    """Slider specs for the seat the AI tab is editing: the heuristic's five, plus
+    the ``aux`` knob under whatever the seat's strategy calls it. A strategy that
+    declares no meaning for ``aux`` gets no sixth slider."""
+    spec = ai.aux_spec(settings.seat_strategy(ms.ai_seat))
+    if spec is None:
+        return _AI_PARAMS
+    label, lo, hi, step, is_int = spec
+    return _AI_PARAMS + ((_AUX_KEY, label, "aux", lo, hi, step, is_int),)
 
 
 def _ai_seats(settings: Settings) -> list[int]:
@@ -505,7 +524,7 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     y += 46
     if not ms.strategy_open:
         params = settings.ai[ms.ai_seat - 1]
-        _sliders(surface, ms, params, _AI_PARAMS, x, y, panel.width - 48)
+        _sliders(surface, ms, params, _ai_specs(ms, settings), x, y, panel.width - 48)
 
 
 def _section(surface, title: str, x: int, y: int) -> int:
@@ -1039,7 +1058,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.ai[seat - 1] = AiParams()
             settings.ai_strategy[seat - 1] = "heuristic"
     elif hit == "randomise_ai":
-        _randomise_sliders(settings.ai[ms.ai_seat - 1], _AI_PARAMS)
+        _randomise_sliders(settings.ai[ms.ai_seat - 1], _ai_specs(ms, settings))
     elif hit == "randomise_adv":
         _randomise_sliders(settings, _ADV_ALL)
     elif hit == "neutral_produces":
@@ -1098,11 +1117,23 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     return None
 
 
+def _slider_spec(key: str, ms: MenuState, settings: Settings) -> Optional[tuple]:
+    """``_SLIDER_SPECS[key]``, except the aux knob, whose range belongs to the
+    strategy the edited seat is running (None if it declares no aux knob)."""
+    if key == _AUX_KEY:
+        for k, _label, attr, lo, hi, step, is_int in _ai_specs(ms, settings):
+            if k == key:
+                return ("ai", attr, lo, hi, step, is_int)
+        return None
+    return _SLIDER_SPECS.get(key)
+
+
 def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
-    kind, attr, lo, hi, step, is_int = _SLIDER_SPECS[key]
+    spec = _slider_spec(key, ms, settings)
     track = ms.rects.get(key)
-    if track is None:
+    if spec is None or track is None:
         return
+    kind, attr, lo, hi, step, is_int = spec
     t = 0.0 if track.w == 0 else max(0.0, min(1.0, (pos[0] - track.x) / track.w))
     raw = lo + t * (hi - lo)
     snapped = round(raw / step) * step
