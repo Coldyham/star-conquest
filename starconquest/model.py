@@ -1,4 +1,4 @@
-"""Core data model: plain dataclasses plus small, pure helpers.
+"""Core data model: plain dataclasses plus small, pure helpers and graph queries.
 
 No game logic and no pygame here. Everything is driven from integer ids so the
 state is easy to reason about, serialize, and feed to the AI. Neutral is a real
@@ -8,6 +8,7 @@ player with ``id == 0``.
 from __future__ import annotations
 
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -17,6 +18,43 @@ from . import config
 def lane_key(a: int, b: int) -> frozenset[int]:
     """Canonical, order-independent key for the lane between systems a and b."""
     return frozenset((a, b))
+
+
+def flow_field(state: GameState, allowed: set[int], seeds: set[int]) -> dict[int, int]:
+    """Multi-source BFS outward from ``seeds``; returns node -> next hop toward the
+    nearest seed. Expansion only ever enters ``allowed``.
+
+    The one graph query the whole game shares: the AI uses it to stream rear ships
+    toward the front line (``ai._flow_to_frontier``), and route mode to lay a
+    forwarding chain toward a chosen destination (``viewstate.Ui.recompute_route``).
+
+    Two properties callers rely on:
+
+    * **``seeds`` need not be in ``allowed``.** Only expansion is restricted, so a
+      seed may be a system the caller couldn't otherwise traverse — which is what
+      lets route mode aim a supply chain at an enemy system while keeping every
+      hop of the path inside its own territory.
+    * **A seed never gets a parent**, so the returned map is exactly the nodes
+      *other than* the seeds from which one is reachable through ``allowed``.
+
+    Since a parent edge always steps to a strictly shallower node, following the
+    map from any node in it terminates at a seed — the walk can't loop.
+
+    Seeds and neighbours are visited in sorted order so the flow is deterministic:
+    where two seeds are equidistant a node keeps the same next hop every call
+    instead of flip-flopping, which is what made rear AI ships oscillate.
+    """
+    parent: dict[int, int] = {}
+    seen = set(seeds)
+    queue = deque(sorted(seeds))
+    while queue:
+        cur = queue.popleft()
+        for nbr in sorted(state.systems[cur].neighbors):
+            if nbr in allowed and nbr not in seen:
+                seen.add(nbr)
+                parent[nbr] = cur  # move from nbr toward cur (closer to a seed)
+                queue.append(nbr)
+    return parent
 
 
 @dataclass
