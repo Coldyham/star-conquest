@@ -460,8 +460,9 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
         _draw_rule_flow(surface, pa, pb, config.node_radius(s.production),
                         config.node_radius(state.systems[dest].production),
                         color, config.s(3 if selected else 2), animate=selected)
-        small = _fonts()["small"]
-        _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM, _rule_label_center(pa, pb, small))
+        if keep:  # 0 is the default; the chevron flow already says a rule is there
+            small = _fonts()["small"]
+            _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM, _rule_label_center(pa, pb, small))
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
@@ -922,6 +923,8 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         taken.append(_pill_rect(font, str(turns), ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)))
     if not ui.history:
         for src, (dest, keep) in ui.auto_forward.items():
+            if not keep:  # nothing drawn for the default — see _draw_forward_rules
+                continue
             a, b = state.systems.get(src), state.systems.get(dest)
             if a is None or b is None or a.owner_id != ui.human_id:
                 continue
