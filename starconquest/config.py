@@ -108,6 +108,7 @@ COLOR_TEXT_DARK = (12, 14, 22)      # for labels sitting on a light player colou
 COLOR_NEUTRAL = (122, 128, 140)
 COLOR_SELECT = (250, 240, 150)
 COLOR_FOG = (58, 62, 82)            # fogged systems/lanes — cool grey, distinct from NEUTRAL
+COLOR_ROUTE = (250, 120, 200)       # route-mode planning accent — magenta, the one hue no seat uses
 
 # Index 0 is neutral; 1 is the human by convention; 2+ are AI opponents.
 PLAYER_COLORS = [
