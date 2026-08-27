@@ -725,6 +725,43 @@ def test_forward_rule_expands_into_order():
         pygame.quit()
 
 
+def test_losing_a_system_deletes_its_forwarding_rule():
+    """A rule dies with the system it forwards out of. Keeping it dormant meant it
+    fired again — unannounced — the turn the system was recaptured. Rules *into* a
+    system that changed hands are untouched: that's an attack, and still intended."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        back = next(n for n in state.systems[nbr].neighbors if n != home)
+        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[nbr] = (back, 1)     # a rule aimed at a system we don't hold
+        state.systems[home].owner_id = 2     # ...and the rule's own source, captured
+        state.systems[nbr].owner_id = 1
+
+        main.resolve_turn(state, ui, log=None)
+        assert home not in ui.auto_forward
+        assert ui.auto_forward.get(nbr) == (back, 1)
+    finally:
+        pygame.quit()
+
+
+def test_forward_rules_all_die_when_the_human_is_knocked_out():
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        for s in state.systems.values():
+            if s.owner_id == 1:
+                s.owner_id = 0
+        state.fleets = [f for f in state.fleets if f.owner_id != 1]
+
+        main.resolve_turn(state, ui, log=None)
+        assert ui.auto_forward == {}
+    finally:
+        pygame.quit()
+
+
 def test_quit_button_click_returns_quit():
     """Touch/web equivalent of Esc: the live footer's Quit button, since there is
     no keyboard to press Escape on a phone."""
@@ -1126,7 +1163,7 @@ def test_click_rule_row_reopens_the_popup_on_the_forward_tab():
 
 
 def test_click_rule_lane_selects_it():
-    """Clicking a rule's dashed lane reopens the popup on it, just like a queued
+    """Clicking a rule's chevron lane reopens the popup on it, just like a queued
     order's lane — the panel row is no longer the only way in."""
     state, ui = _setup()
     try:

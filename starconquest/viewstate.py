@@ -458,10 +458,10 @@ class Ui:
 
     def rule_is_live(self, state: GameState, sid: int) -> bool:
         """Is the standing rule out of ``sid`` one that will actually fire — i.e.
-        we still hold the source and the destination still exists? A rule outlives
-        losing its source (you may retake it), so it can sit dormant in the list;
-        the same predicate decides whether it is drawn, picked off its lane,
-        expanded into an order at end of turn, and editable in the popup."""
+        we still hold the source and the destination still exists? The same
+        predicate decides whether a rule is drawn, picked off its lane, expanded
+        into an order at end of turn, and editable in the popup — and, in
+        `prune_forward`, whether it survives the turn at all."""
         rule = self.auto_forward.get(sid)
         src = state.systems.get(sid)
         return rule is not None and src is not None and src.owner_id == self.human_id and rule[0] in state.systems
@@ -539,3 +539,14 @@ class Ui:
         self.auto_forward.pop(sid, None)
         if self.sel_forward == sid:
             self.sel_forward = None
+
+    def prune_forward(self, state: GameState) -> None:
+        """Drop every rule that no longer holds — losing the source system ends its
+        forwarding. A dropped rule is gone for good: keeping it would have it fire
+        again, unannounced, on the turn the system was recaptured.
+
+        Called once per turn resolution, so a rule is only ever dormant for the rest
+        of the turn that lost it; `rule_is_live` still guards each use of one.
+        """
+        for sid in [s for s in self.auto_forward if not self.rule_is_live(state, s)]:
+            self.clear_forward(sid)

@@ -144,7 +144,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     # overlays (queued/standing orders, the count being composed) — there is no
     # order entry while scrubbing.
     if not ui.history:
-        _draw_forward_rules(surface, state, ui)  # standing auto-forward (dashed)
+        _draw_forward_rules(surface, state, ui)  # standing auto-forward (chevron flow)
         _draw_pending(surface, state, ui)  # queued one-shot sends (solid)
         _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
@@ -240,17 +240,34 @@ def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
     return width, color
 
 
-def _rule_label_center(pa, pb, font) -> tuple[int, int]:
-    """Where an auto-forward rule's label sits on its lane: below the midpoint by
-    enough to clear the lane's own travel-time pill, which is centred exactly there.
-    Stacked rather than side by side so it reads the same on any lane angle.
+def _lane_unit(pa, pb) -> tuple[float, float, float]:
+    """Unit vector from ``pa`` toward ``pb``, plus the lane's on-screen length."""
+    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+    length = math.hypot(dx, dy) or 1.0
+    return dx / length, dy / length, length
 
-    Without the offset the rule's label covers the lane's length and travel time —
-    the numbers you need in order to judge the rule (see also ``_panel_lane``, which
-    is where the panel reports them for a selected rule).
+
+def _rule_label_center(pa, pb, font) -> tuple[int, int]:
+    """Where an auto-forward rule's label sits on its lane: just past the *sending*
+    system, offset clear of the line itself. "keep N" is a fact about that garrison,
+    so it belongs at the end it constrains — and it leaves the lane's own
+    travel-time pill (centred on the midpoint) readable, which is the other number
+    you judge a rule by (see also ``_panel_lane``).
+
+    Clamped to a fraction of the lane so a short one still puts the label on its own
+    half, and offset perpendicular to the lane rather than straight down, so the
+    label clears the source node on a steep lane as well as a flat one. On a lane
+    too short for that clamp to clear the node, the perpendicular offset grows to
+    make up the difference — the label leans out into space rather than onto the
+    system it belongs to.
     """
-    dy = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
-    return ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2 + dy)
+    ux, uy, length = _lane_unit(pa, pb)
+    px, py = (-uy, ux) if ux >= 0 else (uy, -ux)   # perpendicular, biased screen-down
+    clear = config.node_clearance() + config.RULE_LABEL_GAP
+    along = min(clear, length * config.RULE_LABEL_MAX_FRAC)
+    off = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
+    off = max(off, math.sqrt(max(0.0, clear * clear - along * along)))
+    return (int(pa[0] + ux * along + px * off), int(pa[1] + uy * along + py * off))
 
 
 def _label_pill(surface, font, s: str, color, center) -> None:
@@ -310,6 +327,78 @@ def _draw_triangle(surface, center, direction, color) -> None:
     pygame.draw.polygon(surface, color, [tip, left, right])
 
 
+def _draw_arrowhead(surface, tip, direction, color, width: int, size: int | None = None) -> None:
+    """An open chevron pointing ``direction``, drawn in the line's own weight — the
+    head of a queued order at full size, one link of a rule's conveyor at a small one.
+
+    Deliberately not `_draw_triangle`'s filled wedge — that means ships actually on
+    the lane, and an order or rule is only an intention.
+    """
+    ux, uy = direction
+    px, py = -uy, ux
+    size = config.ARROWHEAD_SIZE if size is None else size
+    back = (tip[0] - ux * size, tip[1] - uy * size)
+    wing = size * config.ARROW_WING
+    pygame.draw.line(surface, color, (back[0] + px * wing, back[1] + py * wing), tip, width)
+    pygame.draw.line(surface, color, (back[0] - px * wing, back[1] - py * wing), tip, width)
+
+
+def _flow_phase() -> float:
+    """Where a rule's conveyor sits in its cycle, 0..1, off the wall clock.
+
+    Presentation only — nothing in the simulation is timed off this, and it is read
+    (never stored), so a frame drawn in a test simply gets whatever phase it gets.
+    """
+    period = max(1, config.RULE_FLOW_MS)
+    return (pygame.time.get_ticks() % period) / period
+
+
+def _draw_planned(surface, pa, pb, dest_r: int, color, width: int) -> None:
+    """A queued one-shot send: a solid lane line with a chevron head. The head stops
+    at the destination's edge rather than under the node, which is drawn over this
+    layer."""
+    pygame.draw.line(surface, color, pa, pb, width)
+    ux, uy, _ = _lane_unit(pa, pb)
+    inset = dest_r + config.ARROW_GAP
+    _draw_arrowhead(surface, (pb[0] - ux * inset, pb[1] - uy * inset), (ux, uy), color, width)
+
+
+def _rule_chevron_dists(length: float, src_r: int, dest_r: int, phase: float) -> list[float]:
+    """Distances along a rule's lane at which to draw its conveyor chevrons.
+
+    The run fills the whole gap between the two systems: `config.RULE_CHEVRON_GAP` is
+    a target pitch, and the actual spacing is the span divided by however many
+    chevrons that asks for, so no remainder is left idling short of the destination.
+    `phase` (0..1) advances every chevron by one spacing over a full cycle and wraps
+    the leading one back to the source — because the spacing divides the span evenly,
+    that wrap is a chevron arriving at the destination as another leaves the source,
+    which is what makes the flow read as continuous.
+    """
+    start = src_r + config.ARROW_GAP + config.RULE_CHEVRON_SIZE
+    span = length - (dest_r + config.ARROW_GAP) - start
+    if span <= config.RULE_CHEVRON_SIZE:
+        return [length / 2]   # nose-to-nose systems: no room for a run, so mark the lane
+    count = max(1, round(span / max(1, config.RULE_CHEVRON_GAP)))
+    step = span / count
+    return [start + ((i + phase) % count) * step for i in range(count)]
+
+
+def _draw_rule_flow(surface, pa, pb, src_r: int, dest_r: int, color, width: int,
+                    animate: bool) -> None:
+    """A standing forward rule's lane: a conveyor of small chevrons running toward
+    the destination, so the way its ships will go reads from anywhere along the lane
+    rather than only its far end — and nothing on it resembles a fleet in transit.
+
+    Only the selected rule crawls (`animate`, one spacing per `config.RULE_FLOW_MS`)
+    — a board full of standing rules would otherwise shimmer.
+    """
+    ux, uy, length = _lane_unit(pa, pb)
+    phase = _flow_phase() if animate else 0.0
+    for d in _rule_chevron_dists(length, src_r, dest_r, phase):
+        _draw_arrowhead(surface, (pa[0] + ux * d, pa[1] + uy * d), (ux, uy),
+                        color, width, config.RULE_CHEVRON_SIZE)
+
+
 def _draw_pending(surface, state: GameState, ui: Ui) -> None:
     for i, o in enumerate(ui.pending):
         pa = ui.view.to_screen(state.systems[o.source_id].pos)
@@ -317,13 +406,8 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         # the order being edited is drawn in the select colour, brighter+thicker
         selected = i == ui.sel_order
         color = config.COLOR_SELECT if selected else config.player_color(ui.human_id)
-        pygame.draw.line(surface, color, pa, pb, config.s(5 if selected else 3))
-        # arrowhead near the destination
-        dx, dy = pb[0] - pa[0], pb[1] - pa[1]
-        length = math.hypot(dx, dy) or 1.0
-        u = (dx / length, dy / length)
-        inset = config.s(20)
-        _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
+        _draw_planned(surface, pa, pb, config.node_radius(state.systems[o.dest_id].production),
+                      color, config.s(5 if selected else 3))
         # place the count 40% of the way toward the destination, not the midpoint,
         # so two opposite-direction orders on the same lane don't overlap labels
         lx = int(pa[0] + (pb[0] - pa[0]) * 0.4)
@@ -332,10 +416,11 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
-    """Standing auto-forward rules as persistent dashed arrows (human colour).
+    """Standing auto-forward rules as a persistent chevron flow (human colour).
 
-    The rule being edited is drawn in the select colour, brighter+thicker —
-    same convention as `_draw_pending`'s selected queued order.
+    The rule being edited is drawn in the select colour, brighter+thicker, and is
+    the only one whose chevrons crawl — same convention as `_draw_pending`'s
+    selected queued order.
     """
     for src, (dest, keep) in ui.auto_forward.items():
         s = state.systems.get(src)
@@ -345,36 +430,29 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
         color = config.COLOR_SELECT if selected else config.player_color(ui.human_id)
         pa = ui.view.to_screen(s.pos)
         pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_dashed_line(surface, color, pa, pb, width=config.s(3 if selected else 2))
-        dx, dy = pb[0] - pa[0], pb[1] - pa[1]
-        length = math.hypot(dx, dy) or 1.0
-        u = (dx / length, dy / length)
-        inset = config.s(20)
-        _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
+        _draw_rule_flow(surface, pa, pb, config.node_radius(s.production),
+                        config.node_radius(state.systems[dest].production),
+                        color, config.s(3 if selected else 2), animate=selected)
         small = _fonts()["small"]
         _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM, _rule_label_center(pa, pb, small))
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
-    """The move the popup is editing right now: a bright arrow. Dashed on the
-    Forward tab, matching how standing rules are drawn everywhere else — the popup
-    now opens on existing rules too, so a solid line would misread as a one-shot.
+    """The move the popup is editing right now: a bright arrow — the chevron flow on
+    the Forward tab, matching how standing rules are drawn everywhere else, since the
+    popup opens on existing rules too and a solid line would misread as a one-shot.
     The count itself lives in the popup (drawn on top, last of the map layer).
     """
     if ui.mode != CHOOSING or ui.selected is None or ui.dest is None:
         return
     pa = ui.view.to_screen(state.systems[ui.selected].pos)
     pb = ui.view.to_screen(state.systems[ui.dest].pos)
-    color = config.COLOR_SELECT
+    dest_r = config.node_radius(state.systems[ui.dest].production)
     if ui.forward_armed:
-        _draw_dashed_line(surface, color, pa, pb, width=config.s(3))
+        _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[ui.selected].production),
+                        dest_r, config.COLOR_SELECT, config.s(3), animate=True)
     else:
-        pygame.draw.line(surface, color, pa, pb, config.s(3))
-    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
-    length = math.hypot(dx, dy) or 1.0
-    u = (dx / length, dy / length)
-    inset = config.s(20)
-    _draw_triangle(surface, (pb[0] - u[0] * inset, pb[1] - u[1] * inset), u, color)
+        _draw_planned(surface, pa, pb, dest_r, config.COLOR_SELECT, config.s(3))
 
 
 def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tuple[int, int]:
@@ -640,20 +718,6 @@ def _draw_return_glyph(surface, rect, color) -> None:
     pygame.draw.lines(surface, color, False, [(x + w, y), (x + w, by), (x, by)], lw)
     # arrowhead pointing left
     pygame.draw.lines(surface, color, False, [(x + a, by - a), (x, by), (x + a, by + a)], lw)
-
-
-def _draw_dashed_line(surface, color, a, b, width=2, dash=None, gap=None) -> None:
-    dash = config.s(10) if dash is None else dash
-    gap = config.s(8) if gap is None else gap
-    x1, y1 = a
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    length = math.hypot(dx, dy) or 1.0
-    ux, uy = dx / length, dy / length
-    s = 0.0
-    while s < length:
-        e = min(s + dash, length)
-        pygame.draw.line(surface, color, (x1 + ux * s, y1 + uy * s), (x1 + ux * e, y1 + uy * e), width)
-        s += dash + gap
 
 
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:

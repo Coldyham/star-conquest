@@ -50,7 +50,9 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
     reaching into `ai`. Its layout is measured rather than hardcoded — see the
-    scaling convention under Key conventions.
+    scaling convention under Key conventions. Its one animation (the selected
+    forward rule's chevron conveyor) reads the wall clock in `_flow_phase` and
+    stores nothing, so a frame stays a pure function of `GameState` + `Ui` + time.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
     touches the simulation. It returns a high-level action string
     (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`, `"toggle_history"`,
@@ -246,7 +248,9 @@ intact.
   - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
     popup reads the source's garrison and destination unguarded, and aiming it
     at a system we no longer hold would let the Send tab queue an order out of
-    enemy territory.
+    enemy territory. Dormancy only lasts the turn — `Ui.prune_forward`
+    (`main.resolve_turn`) deletes a rule whose source was taken, so it can never
+    come silently back to life on recapture.
   - **The count slider must be claimed before the popup's drag fallthrough** —
     `slider_rect` is hit-tested first, and `dragging_slider` checked ahead of
     `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`

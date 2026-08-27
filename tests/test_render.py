@@ -6,12 +6,14 @@ checks that drawing every UI state is exception-free — not how it looks.
 
 from __future__ import annotations
 
+import math
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame  # noqa: E402
+import pytest  # noqa: E402
 
 from starconquest import ai, config, engine, fog, mapgen, render  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
@@ -48,7 +50,7 @@ def test_render_all_ui_states_no_crash():
         ui.chosen = 3
         ui.hover = nbr
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.auto_forward[home] = (nbr, 2)   # exercise dashed rule arrow + panel rule section
+        ui.auto_forward[home] = (nbr, 2)   # exercise the rule chevron flow + panel rule section
         render.draw(screen, state, ui)
 
         assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
@@ -222,25 +224,99 @@ def test_selected_forward_rule_reports_its_lane():
         pygame.quit()
 
 
-def test_forward_rule_label_clears_the_lane_travel_pill():
-    """Both labels used to be centred on the lane midpoint, so the rule covered the
-    lane length. They're stacked now — check they don't overlap at either scale."""
+def test_forward_rule_label_sits_by_the_sending_system():
+    """"keep N" describes the *source's* garrison, so it belongs at that end — and
+    clear of both the source node and the lane's own travel-time pill (centred on
+    the midpoint). Checked on a long lane, a short one, and a vertical one, at both
+    scales, since the offset is perpendicular to the lane."""
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))   # fonts need a video ctx
     try:
         for scale in (_desktop_scale, _touch_scale):
             scale()
             small = render._fonts()["small"]
-            pa, pb = (100, 400), (900, 400)
-            mid_y = 400
-            # the travel-time pill is centred on the midpoint (see _draw_lanes)
-            pill_bottom = mid_y + (small.get_height() + config.s(4)) // 2
-            cy = render._rule_label_center(pa, pb, small)[1]
-            label_top = cy - (small.get_height() + config.s(4)) // 2
-            assert label_top > pill_bottom, (
-                f"rule label overlaps the travel-time pill at {config.ui_scale}x")
+            for pa, pb in (((100, 400), (900, 400)),    # long, left-to-right
+                           ((900, 400), (100, 400)),    # ...and the same lane reversed
+                           ((400, 400), (480, 400)),    # short: the clamp takes over
+                           ((400, 700), (400, 200))):   # vertical, running up-screen
+                cx, cy = render._rule_label_center(pa, pb, small)
+                at = f"lane {pa}->{pb} at {config.ui_scale}x"
+                to_a = math.hypot(cx - pa[0], cy - pa[1])
+                to_b = math.hypot(cx - pb[0], cy - pb[1])
+                assert to_a < to_b, f"rule label is not at the sending end: {at}"
+                assert to_a >= config.node_clearance(), f"rule label covers its source: {at}"
+                mid = ((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2)
+                # the travel-time pill is centred on the midpoint (see _draw_lanes)
+                pill = pygame.Rect(0, 0, small.size("99")[0] + config.s(8),
+                                   small.get_height() + config.s(4))
+                pill.center = (int(mid[0]), int(mid[1]))
+                label = pygame.Rect(0, 0, small.size("keep 99")[0] + config.s(8),
+                                    small.get_height() + config.s(4))
+                label.center = (cx, cy)
+                assert not label.colliderect(pill), f"rule label overlaps the travel pill: {at}"
     finally:
         _desktop_scale()
+        pygame.quit()
+
+
+def test_rule_chevrons_fill_the_whole_lane():
+    """The conveyor has to reach the destination: a fixed pitch left up to a whole
+    spacing of empty lane before the far node. Spacing is the span divided by the
+    chevron count instead, checked across lane lengths and at both scales."""
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            src_r, dest_r = config.node_radius(2), config.node_radius(9)
+            head = src_r + config.ARROW_GAP + config.RULE_CHEVRON_SIZE
+            for length in (120, 200, 337, 500, 900):
+                if length - (dest_r + config.ARROW_GAP) - head <= config.RULE_CHEVRON_SIZE:
+                    continue           # too short for a run; covered below
+                at = f"lane of {length}px at {config.ui_scale}x"
+                ds = render._rule_chevron_dists(length, src_r, dest_r, 0.0)
+                tail = length - (dest_r + config.ARROW_GAP)
+                assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
+                step = (tail - head) / len(ds)
+                assert ds[-1] == pytest.approx(tail - step), f"run stops short: {at}"
+                # ...and a full cycle later every chevron has moved up exactly one
+                # spacing, the last one wrapping back to the source
+                moved = render._rule_chevron_dists(length, src_r, dest_r, 0.999)
+                assert moved[-1] == pytest.approx(tail, abs=step / 100), f"no arrival: {at}"
+                for a, b in zip(ds[:-1], moved[:-1]):
+                    assert b - a == pytest.approx(step, abs=step / 100), f"uneven crawl: {at}"
+
+            # two systems all but touching: one chevron rather than an empty lane
+            assert len(render._rule_chevron_dists(src_r + dest_r + 4, src_r, dest_r, 0.0)) == 1
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_only_the_selected_forward_rule_animates(monkeypatch):
+    """A standing rule's lane is a conveyor of chevrons; the selected one crawls so
+    its direction is unmistakable, and every other rule holds still — a board full of
+    rules shimmering would be unreadable."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 2)
+
+        def frame(ms: int) -> bytes:
+            monkeypatch.setattr(pygame.time, "get_ticks", lambda: ms)
+            render.draw(screen, state, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        half = config.RULE_FLOW_MS // 2
+        assert frame(0) == frame(half), "an unselected rule must not animate"
+        ui.sel_forward = home
+        assert frame(0) != frame(half), "the selected rule's chevrons should have moved"
+    finally:
+        monkeypatch.undo()
         pygame.quit()
 
 

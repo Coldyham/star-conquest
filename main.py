@@ -316,8 +316,8 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     """
     orders: list[Order] = []
     for src, (dest, keep) in ui.auto_forward.items():
-        # dormant while the system isn't ours (may resume if recaptured) — the same
-        # test that decides whether the rule is drawn, pickable and editable
+        # the same test that decides whether the rule is drawn, pickable, editable
+        # and (at the end of this turn, in `Ui.prune_forward`) kept at all
         if not ui.rule_is_live(state, src):
             continue
         if not state.are_adjacent(src, dest):
@@ -358,6 +358,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
         record_best(settings, state, ui)
     ui.clear_pending()
+    ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     ui.reset_selection()
     refresh_fog(state, ui)
     # Snap the camera out to the whole map right as there stops being anything left

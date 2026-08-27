@@ -167,6 +167,14 @@ NODE_RING_PAD = 6            # px: gap between a node's edge and its selection r
 MAP_FIT_PADDING = 50         # px: breathing room around the zoom-1 fit-to-viewport view
 MAP_PAN_PADDING = 110        # px: breathing room kept past the outermost system when zoomed
 FLEET_SIZE = 9              # in-transit fleet triangle half-size (pixels)
+ARROWHEAD_SIZE = 13         # px: length of the open chevron heading a planned move
+ARROW_GAP = 6               # px: gap between the destination node's edge and that chevron
+ARROW_WING = 0.6            # chevron half-width as a fraction of its length (both sizes)
+RULE_CHEVRON_SIZE = 11      # px: length of one chevron in a forward rule's conveyor
+RULE_CHEVRON_GAP = 26       # px: spacing between those chevrons along the lane
+RULE_FLOW_MS = 700          # ms for the selected rule's conveyor to advance one spacing
+RULE_LABEL_GAP = 16         # px: gap past the sending system's edge to its "keep N" label
+RULE_LABEL_MAX_FRAC = 0.35  # ...but never further than this fraction along a short lane
 LANE_PICK_DIST = 10         # px: click within this of a queued order's lane selects it
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
@@ -241,6 +249,8 @@ _SCALABLE = (
     "HUD_PAD", "PANEL_PAD", "BTN_PAD_X", "BTN_GAP", "ROW_GAP", "TOUCH_MIN_TARGET",
     "MAP_FIT_PADDING", "MAP_PAN_PADDING", "NODE_RING_PAD",
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
+    "ARROWHEAD_SIZE", "ARROW_GAP", "RULE_CHEVRON_SIZE", "RULE_CHEVRON_GAP",
+    "RULE_LABEL_GAP",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
