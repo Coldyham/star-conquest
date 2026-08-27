@@ -7,6 +7,7 @@ their rects during draw(), so each test draws first, then clicks a rect's centre
 from __future__ import annotations
 
 import os
+import sys
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -305,6 +306,53 @@ def test_ai_tab_strategy_dropdown_select():
         assert not ms.strategy_open
     finally:
         ai.STRATEGIES.pop("dropdown_test", None)
+        pygame.quit()
+
+
+def _register_aux_bot(name, **attrs):
+    """Register a strategy whose module declares `attrs` (AUX_LABEL and friends),
+    as a real drop-in file would."""
+    modname = f"sc_model_{name}"
+    module = type(menu)(modname)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register(name, fn)
+    return modname
+
+
+def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
+    screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
+    ms.tab = "ai"
+    modname = _register_aux_bot(
+        "aux_menu_test", AUX_LABEL="Search depth", AUX_RANGE=(0, 4, 1), AUX_INT=True
+    )
+    try:
+        # the built-in heuristic declares no aux knob, so no sixth slider is drawn
+        _click_key(screen, ms, settings, "seat_2")
+        assert "ai_aux" not in ms.rects
+        assert menu._ai_specs(ms, settings) == menu._AI_PARAMS
+
+        settings.ai_strategy[1] = "aux_menu_test"          # seat 2 -> index 1
+        menu.draw(screen, ms, settings)
+        assert "ai_aux" in ms.rects
+        assert menu._ai_specs(ms, settings)[-1][1] == "Search depth"
+        # the bot's range drives the drag, not the generic 0..8
+        _drag_slider(screen, ms, settings, "ai_aux", 1.0)
+        assert settings.ai[1].aux == 4
+        _drag_slider(screen, ms, settings, "ai_aux", 0.0)
+        assert settings.ai[1].aux == 0
+
+        # seat 3 still runs the heuristic: its slider stays hidden
+        _click_key(screen, ms, settings, "seat_3")
+        menu.draw(screen, ms, settings)
+        assert "ai_aux" not in ms.rects
+        assert settings.ai[1].aux == 0, "hiding the slider must not touch the value"
+    finally:
+        ai.STRATEGIES.pop("aux_menu_test", None)
+        sys.modules.pop(modname, None)
         pygame.quit()
 
 

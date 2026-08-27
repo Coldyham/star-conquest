@@ -84,7 +84,7 @@ are, the more of the game thinker cannot see, and the oracle scales with it.
 --- Depth: how far forward to look ------------------------------------------- #
 
 Everything above is **depth 1**. The seat's generic ``ai_params.aux`` knob (the AI
-tab's "Custom (bot-defined)" slider) turns that into a dial:
+tab's slider, which ``AUX_LABEL`` below names *Search depth*) turns that into a dial:
 
     0   no oracle at all — the blind ``_plan``, i.e. thinker-strength
     1   the one-turn oracle described above (the default, `config.AI_AUX`)
@@ -221,6 +221,12 @@ TRUST_HUMAN = False             # True lets a human-seat prediction relax guards
 SEARCH_DEPTH_DEFAULT = 1        # what a malformed or absent `aux` falls back to
 SEARCH_DEPTH_MAX = 8            # matches the menu slider's top end
 SEARCH_WIDTH = 4                # candidate postures actually rolled out
+
+# What the AI tab's generic aux slider is called when this bot holds the seat, and
+# the range/step it offers (`ai.aux_spec` reads these; see models/README.md).
+AUX_LABEL = "Search depth"
+AUX_RANGE = (0, SEARCH_DEPTH_MAX, 1)
+AUX_INT = True
 
 # A second budget, kept separate from ORACLE_BUDGET_S so depth 1 stays byte-exact.
 # Checked *between* candidates, so there is always a whole plan to return.

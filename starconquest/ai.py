@@ -90,6 +90,35 @@ def available_strategies() -> list[str]:
     return ["heuristic"] + sorted(n for n in STRATEGIES if n != "heuristic")
 
 
+# The one bot-defined knob, `AiParams.aux`: a strategy declares what it means by
+# exporting ``AUX_LABEL`` (optionally ``AUX_RANGE = (lo, hi, step)`` and
+# ``AUX_INT``); the menu shows the slider under that label, and hides it for any
+# strategy that declares nothing.
+AuxSpec = tuple[str, float, float, float, bool]  # label, lo, hi, step, is_int
+AUX_RANGE_DEFAULT = (0.0, 8.0, 1.0)
+
+
+def aux_spec(name: str) -> AuxSpec | None:
+    """What ``ai_params.aux`` means for strategy ``name``, or None if it ignores it.
+
+    Tolerant like the rest of the drop-in contract: a missing, blank or malformed
+    declaration falls back rather than raising, so a bad model can only cost itself
+    the slider.
+    """
+    fn = STRATEGIES.get(name)
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    label = getattr(module, "AUX_LABEL", None)
+    if not isinstance(label, str) or not label.strip():
+        return None
+    try:
+        lo, hi, step = (float(v) for v in getattr(module, "AUX_RANGE", None))
+    except (TypeError, ValueError):
+        lo, hi, step = AUX_RANGE_DEFAULT
+    if hi <= lo or step <= 0:
+        lo, hi, step = AUX_RANGE_DEFAULT
+    return label.strip(), lo, hi, step, bool(getattr(module, "AUX_INT", False))
+
+
 def load_models(directory: Path = MODELS_DIR) -> list[str]:
     """Import every ``*.py`` in ``directory`` and register its ``decide`` function.
 
