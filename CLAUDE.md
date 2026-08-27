@@ -243,6 +243,16 @@ intact.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
+- **Star names (`starnames.py`) are flavour on top of that, never a key.**
+  `System.name` is a cosmetic IAU star name (`System.label` is `"Vega (7)"`,
+  `System.short` the name alone); mapgen's `_name_systems` stamps one per system
+  **last**, after every roll that shapes the map, so a seed still lays out the
+  board it always did and a replay recreates the names from `state.rng` with
+  nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
+  `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
+  `render._draw_node_names` places labels collision-first and drops what doesn't
+  fit (see design notes); ids stay on the mechanical readouts — the queued list,
+  `tests/sim` logs, tokens.
 - **The send popup is the *only* ship-count editor.** Composing a new send opens
   it (`Ui.begin_send`), and so does reopening an already-queued order or
   standing rule — `Ui.edit_order` / `Ui.edit_forward` put the popup back into

@@ -18,6 +18,7 @@ from collections import deque
 from . import config
 from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
 from .model import GameState, Player, System
+from .starnames import pick as pick_names
 
 
 # --------------------------------------------------------------------------- #
@@ -54,6 +55,7 @@ def generate_random(
     _assign_production_and_garrisons(state)
 
     state.rebuild_topology()
+    _name_systems(state)
     assert is_connected(state), "generated map is not connected"
     return state
 
@@ -123,8 +125,20 @@ def generate_symmetric(
         _add_lane_between(state, base_off + innermost, center_id)  # seam to centre
 
     state.rebuild_topology()
+    _name_systems(state)
     assert is_connected(state), "symmetric map is not connected"
     return state
+
+
+def _name_systems(state: GameState) -> None:
+    """Give every system a distinct star name, drawn from ``state.rng``.
+
+    Called last in generation so the rolls that shape a map come first: two builds
+    of the same seed name the same systems, and the names are recreated on replay
+    for free (nothing about them is serialized).
+    """
+    for sid, name in zip(sorted(state.systems), pick_names(state.rng, len(state.systems))):
+        state.systems[sid].name = name
 
 
 def _base_sector_seeds(state, per_player, sector, r_inner, r_outer, cx, cy):

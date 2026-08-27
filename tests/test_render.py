@@ -15,7 +15,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 import pytest  # noqa: E402
 
-from starconquest import ai, config, engine, fog, mapgen, render  # noqa: E402
+from starconquest import ai, config, engine, fog, mapgen, render, starnames  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.model import Order  # noqa: E402
 from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
@@ -549,3 +549,73 @@ def test_production_rate_sums_inverse_production():
     # a lone homeworld (production 3) makes 1/3 of a ship per turn
     home = next(s for s in state.systems.values() if s.owner_id == 1)
     assert abs(1.0 / home.production - 1.0 / config.HOME_PRODUCTION) < 1e-9
+
+
+def test_star_name_labels_stay_in_the_map_and_off_the_nodes():
+    """The name labels are flavour: each one lands inside the map viewport, clear of
+    every system's disc, and a label that would collide is dropped rather than
+    overlapped. Checked by capturing what _draw_node_names decides to place."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=24, num_players=3)
+        ui = _make_ui(state)
+        ui.selected = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        drawn: list[tuple[str, pygame.Rect]] = []
+        real_text = render._text
+
+        def spy(surface, font, s, color, **kw):
+            if "topleft" in kw and s in {sys.name for sys in state.systems.values()}:
+                drawn.append((s, pygame.Rect(kw["topleft"], font.size(s))))
+            return real_text(surface, font, s, color, **kw)
+
+        clip = pygame.Rect(config.play_rect())
+        nodes = [pygame.Rect(0, 0, 2 * config.node_radius(sys.production), 2 * config.node_radius(sys.production))
+                 for sys in state.systems.values()]
+        for rect, sys in zip(nodes, state.systems.values()):
+            rect.center = ui.view.to_screen(sys.pos)
+
+        try:
+            render._text = spy
+            screen.set_clip(clip)
+            render._draw_node_names(screen, state, ui)
+        finally:
+            render._text = real_text
+            screen.set_clip(None)
+
+        assert drawn, "no star names were drawn at all"
+        assert any(name == state.systems[ui.selected].name for name, _ in drawn), \
+            "the selected system's name must always be labelled"
+        for name, rect in drawn:
+            assert clip.contains(rect), f"{name} label spills outside the map"
+            assert rect.collidelist(nodes) == -1, f"{name} label sits on a system"
+        for i, (name, rect) in enumerate(drawn):
+            others = [r for j, (_, r) in enumerate(drawn) if j != i]
+            assert rect.collidelist(others) == -1, f"{name} label overlaps another"
+    finally:
+        pygame.quit()
+
+
+def test_every_star_name_fits_the_info_panel():
+    """The panel heading holds a name whose length we don't control, so it drops to
+    the small font when the normal one would overrun — and at that size every name
+    in the catalogue fits, at both UI scales."""
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            render._FONTS.clear()
+            small = render._fonts()["small"]
+            width = render._panel_w()
+            worst = max(starnames.NAMES, key=lambda n: small.size(n)[0])
+            label = f"{worst} (99)"
+            assert small.size(label)[0] <= width, f"{label!r} overruns the panel"
+            # ...and a row with a name in it wraps rather than spilling
+            for line in render._wrap(small, f"-> {label}, keep 12", width):
+                assert small.size(line)[0] <= width, f"{line!r} overruns the panel"
+    finally:
+        _desktop_scale()
+        render._FONTS.clear()
+        pygame.quit()

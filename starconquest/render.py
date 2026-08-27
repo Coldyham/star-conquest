@@ -149,6 +149,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    _draw_node_names(surface, state, ui)
     if not ui.history and ui.drag_active and ui.drag_src is not None:
         _draw_drag(surface, state, ui)
     if not ui.history:
@@ -270,12 +271,19 @@ def _rule_label_center(pa, pb, font) -> tuple[int, int]:
     return (int(pa[0] + ux * along + px * off), int(pa[1] + uy * along + py * off))
 
 
+def _pill_rect(font, s: str, center) -> pygame.Rect:
+    """Bounds of the plate ``_label_pill`` would draw. Measured separately because
+    the star-name pass has to treat these labels as occupied space."""
+    rect = pygame.Rect((0, 0), font.size(s))
+    rect.center = center
+    return rect.inflate(config.s(8), config.s(4))
+
+
 def _label_pill(surface, font, s: str, color, center) -> None:
     """Draw text centred on a small dark rounded rect so it reads over any line."""
     img = font.render(s, True, color)
     rect = img.get_rect(center=center)
-    pill = rect.inflate(config.s(8), config.s(4))
-    pygame.draw.rect(surface, config.COLOR_BG, pill, border_radius=config.s(5))
+    pygame.draw.rect(surface, config.COLOR_BG, _pill_rect(font, s, center), border_radius=config.s(5))
     surface.blit(img, rect)
 
 
@@ -501,7 +509,8 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     mid = ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)
 
     dest = state.systems[ui.dest]
-    garrison = state.systems[ui.selected].ships
+    src = state.systems[ui.selected]
+    garrison = src.ships
     font = _fonts()["small"]
     pad, gap = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP
     # rows are tall enough to hold their own label, and to be tapped on a phone
@@ -559,9 +568,14 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.forward_tab_rect = (fwd_tab.x, fwd_tab.y, fwd_tab.w, fwd_tab.h)
     cy += bh + gap
 
-    # title: source -> destination on the left, destination garrison right-aligned
-    _text(surface, font, f"Sys {ui.selected} -> {ui.dest}", accent, midleft=(inner, cy + bh // 2))
+    # title: source -> destination on the left, destination garrison right-aligned.
+    # Star names where they fit the box beside that garrison, ids where they don't —
+    # the flavour is worth a line only while it stays inside the panel.
     ships_lbl = f"{dest.ships}sh"
+    title = f"{src.short} -> {dest.short}"
+    if font.size(title)[0] > iw - font.size(ships_lbl)[0] - gap:
+        title = f"Sys {ui.selected} -> {ui.dest}"
+    _text(surface, font, title, accent, midleft=(inner, cy + bh // 2))
     _text(surface, font, ships_lbl, config.player_color(dest.owner_id), midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
 
@@ -768,6 +782,79 @@ def _draw_systems(surface, state: GameState, ui: Ui) -> None:
         # whichever of dark/light text contrasts best with this owner's colour
         shown = ui.available(state, sys.id) if sys.owner_id == ui.human_id else sys.ships
         _text(surface, _fonts()["normal"], str(shown), config.text_on(color), center=pos)
+
+
+def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
+    """Star names beneath the systems — flavour, so it yields to everything else.
+
+    A second pass over the nodes (rather than a line inside _draw_systems) so every
+    circle is already down: a label is placed only where it hits neither a node nor
+    a label already drawn, which means a dense cluster quietly goes unlabelled and
+    zooming in gives the names back. What you're looking at gets first refusal —
+    the selection, then the hover, then the biggest systems.
+    """
+    if not config.SHOW_NODE_NAMES:
+        return
+    font = _fonts()["small"]
+    clip = surface.get_clip() or surface.get_rect()
+
+    shown = [s for s in state.systems.values() if s.name and _fog_state(ui, s.id) != "hidden"]
+    taken: list[pygame.Rect] = []
+    for sys in shown:  # every node's disc is an obstacle, labelled or not
+        pos = ui.view.to_screen(sys.pos)
+        r = config.node_radius(sys.production)
+        taken.append(pygame.Rect(pos[0] - r, pos[1] - r, r * 2, r * 2))
+    # ...and so is every label already on the map: a name landing on a lane's
+    # travel time or a rule's "keep N" makes both of them unreadable, and those
+    # carry information a name doesn't.
+    for lane in state.lanes.values():
+        if _fog_state(ui, lane.a) == "hidden" or _fog_state(ui, lane.b) == "hidden":
+            continue
+        pa, pb = ui.view.to_screen(state.systems[lane.a].pos), ui.view.to_screen(state.systems[lane.b].pos)
+        turns = state.travel_turns(lane.a, lane.b) or lane.travel_turns
+        taken.append(_pill_rect(font, str(turns), ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)))
+    if not ui.history:
+        for src, (dest, keep) in ui.auto_forward.items():
+            a, b = state.systems.get(src), state.systems.get(dest)
+            if a is None or b is None or a.owner_id != ui.human_id:
+                continue
+            pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
+            taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
+
+    def rank(sys) -> tuple[int, int]:
+        if sys.id == ui.selected:
+            return (0, 0)
+        if sys.id == ui.hover:
+            return (1, 0)
+        return (2, -config.node_radius(sys.production))
+
+    for sys in sorted(shown, key=rank):
+        pos = ui.view.to_screen(sys.pos)
+        if not clip.collidepoint(pos):  # node itself panned off the map: a bare
+            continue                    # name floating at the edge reads as noise
+        r = config.node_radius(sys.production)
+        pad = config.NODE_LABEL_PAD
+        placement = None
+        # below the node by preference, above it when that side is taken or off-map
+        for side in (1, -1):
+            rect = pygame.Rect((0, 0), font.size(sys.name))
+            edge = pos[1] + side * (r + config.NODE_LABEL_GAP)
+            rect.midtop = (pos[0], edge) if side > 0 else (pos[0], edge - rect.h)
+            rect.clamp_ip(clip)  # a name at the map's edge slides in rather than being cut
+            if clip.contains(rect) and rect.inflate(pad * 2, pad * 2).collidelist(taken) == -1:
+                placement = rect
+                break
+        if placement is None:
+            continue
+        rect = placement
+        taken.append(rect.inflate(pad * 2, pad * 2))
+        if sys.id == ui.selected:
+            color = config.COLOR_SELECT
+        elif sys.id == ui.hover:
+            color = config.COLOR_TEXT
+        else:
+            color = config.COLOR_TEXT_DIM
+        _text(surface, font, sys.name, color, topleft=rect.topleft)
 
 
 def _brighten(color, amount=60):
@@ -1087,7 +1174,7 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
         y = _panel_lane(surface, state, ui, x, y + gap, focus, dest)
 
     if focus in ui.auto_forward:
-        _panel_rule(surface, ui, x, y + gap, focus)
+        _panel_rule(surface, state, ui, x, y + gap, focus)
 
 
 def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
@@ -1265,15 +1352,37 @@ def _head(surface, x, y, text, color) -> int:
     return y + _row_h("normal")
 
 
+def _panel_w() -> int:
+    """Width available to panel text: the panel minus its two inner margins."""
+    return config.HUD_RIGHT_W - config.PANEL_PAD * 2
+
+
+def _head_named(surface, x, y, text, color) -> int:
+    """A heading whose length we don't control, because a star name is in it: the
+    normal font where it fits the panel, the small one where it doesn't (every
+    catalogue name fits at that size, so nothing is ever cut)."""
+    kind = "normal" if _fonts()["normal"].size(text)[0] <= _panel_w() else "small"
+    _text(surface, _fonts()[kind], text, color, topleft=(x, y))
+    return y + _row_h(kind)
+
+
+def _rows_named(surface, x, y, text, color) -> int:
+    """``_row`` for a line with a star name in it: reflowed to the panel width, so a
+    long name wraps onto a second row instead of spilling past the panel edge."""
+    for line in _wrap(_fonts()["small"], text, _panel_w()):
+        y = _row(surface, x, y, line, color)
+    return y
+
+
 def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
     if sys.id not in ui.visible:
         # fogged system: we know where it is, not who holds it or how strong it is
-        y = _head(surface, x, y, f"System {sys.id}", config.COLOR_TEXT_DIM)
+        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "Owner: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "Ships: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "(out of sight)", config.COLOR_TEXT_DIM)
         return y
-    y = _head(surface, x, y, f"System {sys.id}", config.player_color(sys.owner_id))
+    y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id))
     y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}", config.player_color(sys.owner_id))
     if sys.owner_id == ui.human_id:
         y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total", config.COLOR_TEXT)
@@ -1296,12 +1405,12 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     lane = state.lanes.get(lane_key(src, dest))
     if lane is None:
         return y
-    y = _head(surface, x, y, f"Lane -> System {dest}", config.COLOR_TEXT)
+    d = state.systems[dest]
+    y = _head_named(surface, x, y, f"Lane -> {d.label}", config.COLOR_TEXT)
     turns = state.travel_turns(src, dest) or lane.travel_turns
     y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {turns} turns", config.COLOR_TEXT)
     if config.SHIP_SPEED_GROWTH_PCT > 0:
         y = _row(surface, x, y, f"Fleet speed: {config.ship_speed(state.turn):.1f} ly/turn", config.COLOR_TEXT_DIM)
-    d = state.systems[dest]
     if dest in ui.visible:
         y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh", config.player_color(d.owner_id))
     else:
@@ -1313,12 +1422,15 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     return y
 
 
-def _panel_rule(surface, ui: Ui, x, y, src) -> int:
+def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
     dest, keep = ui.auto_forward[src]
     editing = src == ui.sel_forward
     color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
     y = _head(surface, x, y, "Auto-forward", color)
-    y = _row(surface, x, y, f"-> System {dest}, keep {keep}", config.COLOR_SELECT if editing else config.COLOR_TEXT)
+    # a rule can outlive its destination for a frame (the system was taken and the
+    # map rebuilt); name it when it is still there, fall back to the bare id when not
+    d = state.systems.get(dest)
+    y = _rows_named(surface, x, y, f"-> {d.label if d else f'System {dest}'}, keep {keep}", config.COLOR_SELECT if editing else config.COLOR_TEXT)
     if config.touch_ui:
         hint = "−/+ sets keep  ·  × removes" if editing else "tap to edit"
     else:

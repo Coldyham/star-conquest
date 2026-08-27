@@ -140,3 +140,41 @@ what was last framed — manually zooming out always reaches it. `resolve_turn`
 compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
 doesn't get re-snapped every turn, only the one that actually crosses into it.
+
+## Star names (`starnames.py`, `System.name`)
+
+Flavour with no mechanical weight: systems are still keyed by integer id
+everywhere, and every mechanical display (queued-order rows, the sim's logs,
+saved tokens) stays numeric. `System.name` is written once by mapgen and read
+only by `render`.
+
+`starnames.NAMES` is generated from the IAU Working Group on Star Names
+catalogue by `tools/gen_starnames.py`, not read at runtime: the web build ships
+only `starconquest/` plus `models/`, and a data file loaded at import would have
+to be staged and fetched. Regenerating is `uv run python
+tools/gen_starnames.py` after replacing `tools/iau-star-names.csv` with a fresh
+export.
+
+`_name_systems` runs last in both generators, after every roll that shapes a
+map, so a seed lays out exactly the board it did before names existed — which
+is what keeps saved setups, shared tokens and recorded games (whose replays
+re-run generation) playing identically. Names come out of `state.rng` like
+everything else, so a replay reproduces them for free and nothing about them is
+serialized.
+
+Labels are laid out collision-first (`render._draw_node_names`): a second pass
+over the nodes, drawn after the circles, placing a name below its system or —
+failing that — above it, and dropping any that would land on a node, on another
+name, or on a label that carries actual information (a lane's travel time, a
+rule's "keep N"; hence `_pill_rect` being split out of `_label_pill`). A
+crowded map therefore thins out to the names that fit and zooming in brings the
+rest back, rather than turning into mush. The selection and the hover are
+placed first so what you are looking at is what keeps its name. A name whose
+node has been panned off the viewport is skipped: clamping it into the clip
+would leave a label floating at the edge with no system under it.
+
+Panel headings hold a name we don't control the length of, so `_head_named`
+drops to the small font when the normal one would overrun the panel (every
+catalogue name fits at that size), `_rows_named` reflows a row containing one,
+and the send popup — too narrow for two names plus a garrison — measures its
+title and falls back to `Sys 4 -> 9` when the names don't fit.

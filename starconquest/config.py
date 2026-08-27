@@ -159,6 +159,14 @@ NODE_MAX_RADIUS = 26         # for the richest systems (production == 2)
 NODE_TAP_MIN = 22            # px: minimum tap/click reach, so tiny systems stay hittable
 NODE_RING_PAD = 6            # px: gap between a node's edge and its selection ring
 
+# Star-name labels under the systems (flavour only — see starnames.py). Labels are
+# laid out collision-first: one that would land on another label or on a node is
+# dropped, so a crowded map thins out instead of turning to mush, and zooming in
+# brings the missing names back.
+SHOW_NODE_NAMES = True       # draw the star name beneath each on-screen system
+NODE_LABEL_GAP = 5           # px: gap between a node's edge and its name label
+NODE_LABEL_PAD = 3           # px: slack around a label when testing it for collisions
+
 # Margin between the outermost system and the edge of the map viewport. Two
 # values, because they answer different questions: the fit decides how big the
 # whole map is drawn at zoom 1, while the pan clamp decides how close a system can
@@ -248,6 +256,7 @@ _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
     "HUD_PAD", "PANEL_PAD", "BTN_PAD_X", "BTN_GAP", "ROW_GAP", "TOUCH_MIN_TARGET",
     "MAP_FIT_PADDING", "MAP_PAN_PADDING", "NODE_RING_PAD",
+    "NODE_LABEL_GAP", "NODE_LABEL_PAD",
     "NODE_MIN_RADIUS", "NODE_MAX_RADIUS", "NODE_TAP_MIN", "FLEET_SIZE",
     "ARROWHEAD_SIZE", "ARROW_GAP", "RULE_CHEVRON_SIZE", "RULE_CHEVRON_GAP",
     "RULE_LABEL_GAP",

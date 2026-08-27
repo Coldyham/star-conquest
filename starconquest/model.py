@@ -69,6 +69,17 @@ class System:
     production: int = 3  # "turns per ship"; lower is richer
     prod_progress: int = 0  # counts up each turn; emits a ship at >= production
     neighbors: list[int] = field(default_factory=list)
+    name: str = ""  # cosmetic star name (see starnames.py); mechanics use ``id``
+
+    @property
+    def label(self) -> str:
+        """Full display name: ``"Vega (7)"``, or ``"System 7"`` when unnamed."""
+        return f"{self.name} ({self.id})" if self.name else f"System {self.id}"
+
+    @property
+    def short(self) -> str:
+        """Compact display name for tight rows: the star name, else the bare id."""
+        return self.name or str(self.id)
 
 
 @dataclass

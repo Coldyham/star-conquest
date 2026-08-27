@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import itertools
+import random
 
-from starconquest import config, mapgen
+from starconquest import config, mapgen, starnames
 from starconquest.geometry import point_segment_dist, segments_intersect
 
 
@@ -93,3 +94,41 @@ def test_deterministic_from_seed():
     assert [s.pos for s in a.systems.values()] == [s.pos for s in b.systems.values()]
     assert set(a.lanes.keys()) == set(b.lanes.keys())
     assert [s.ships for s in a.systems.values()] == [s.ships for s in b.systems.values()]
+
+
+def test_every_system_gets_a_distinct_star_name():
+    for mode in ("random", "symmetric"):
+        for seed in SEEDS[:10]:
+            state = mapgen.generate(seed, mode=mode, num_nodes=24, num_players=3)
+            names = [s.name for s in state.systems.values()]
+            assert all(names), f"unnamed system: seed={seed} mode={mode}"
+            assert len(set(names)) == len(names), f"duplicate name: seed={seed} mode={mode}"
+            assert set(names) <= set(starnames.NAMES)
+
+
+def test_names_are_deterministic_from_seed():
+    a = mapgen.generate_random(42, num_nodes=20, num_players=3)
+    b = mapgen.generate_random(42, num_nodes=20, num_players=3)
+    assert [s.name for s in a.systems.values()] == [s.name for s in b.systems.values()]
+
+
+def test_naming_is_the_last_roll_of_generation(monkeypatch):
+    """Names are drawn after everything that shapes the map, so a seed lays out the
+    same board with or without them — which is what keeps existing seeds, saved
+    setups and recorded games playing exactly as they did."""
+    named = mapgen.generate_random(7, num_nodes=22, num_players=4)
+    monkeypatch.setattr(mapgen, "_name_systems", lambda state: None)
+    bare = mapgen.generate_random(7, num_nodes=22, num_players=4)
+    assert [s.pos for s in named.systems.values()] == [s.pos for s in bare.systems.values()]
+    assert [s.ships for s in named.systems.values()] == [s.ships for s in bare.systems.values()]
+    assert [s.production for s in named.systems.values()] == [s.production for s in bare.systems.values()]
+    assert set(named.lanes) == set(bare.lanes)
+    assert not any(s.name for s in bare.systems.values())
+
+
+def test_pick_names_numbers_the_surplus_when_asked_for_more_than_exist():
+    rng = random.Random(0)
+    n = len(starnames.NAMES) + 5
+    names = starnames.pick(rng, n)
+    assert len(names) == n
+    assert len(set(names)) == n
