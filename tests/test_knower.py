@@ -385,6 +385,14 @@ def test_knower_beats_thinker_head_to_head(kn):
 # --------------------------------------------------------------------------- #
 # Depth: the `aux` knob, and the rollout search above depth 1
 # --------------------------------------------------------------------------- #
+def test_aux_slider_is_declared_as_search_depth(kn):
+    """The AI tab labels the generic aux knob from these, and offers our range."""
+    assert kn.AUX_LABEL and kn.AUX_INT
+    assert ai.aux_spec("knower") == (
+        kn.AUX_LABEL, 0.0, float(kn.SEARCH_DEPTH_MAX), 1.0, True
+    )
+
+
 def test_seat_depth_is_tolerant(kn):
     """`aux` rides a hand-editable token, so nothing it can hold may raise."""
     class _P:

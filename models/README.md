@@ -72,13 +72,25 @@ tab. Reading your own is optional — the built-in heuristic uses it, and yours 
 too if you want the same knobs to steer your bot.
 
 `ai_params.aux` is the exception: a **generic knob the core never interprets**,
-shown on the AI tab as *Custom (bot-defined)* and free for each bot to define
-however it likes. It ranges 0–8 and defaults to `1.0`, so treat 1.0 as "untuned"
-and make that your normal behaviour — a seat that never touched the slider must
-still play well. `models/knower.py` reads it as its search depth (0 = no
-prediction, 1 = predict one turn, N = predict then roll N−1 turns forward). Being
-per-seat, it is also readable on *rivals*, so a bot can tell a shallow opponent
-from a deep one.
+free for each bot to define however it likes. It defaults to `1.0`, so treat 1.0 as
+"untuned" and make that your normal behaviour — a seat that never touched the
+slider must still play well. Being per-seat, it is also readable on *rivals*, so a
+bot can tell a shallow opponent from a deep one.
+
+Tell the AI tab what yours means and it gets a properly labelled slider whenever
+your bot holds the seat — three optional module-level names, all read by
+`ai.aux_spec`:
+
+```python
+AUX_LABEL = "Search depth"   # required to show the slider at all
+AUX_RANGE = (0, 8, 1)        # (lo, hi, step); defaults to (0.0, 8.0, 1.0)
+AUX_INT = True               # show/store whole numbers (default: 2dp floats)
+```
+
+Declare no `AUX_LABEL` and the slider is simply hidden for your bot, which is the
+right answer if you ignore `aux`. `models/knower.py` is the worked example: it
+labels it *Search depth* and reads it as exactly that (0 = no prediction, 1 =
+predict one turn, N = predict then roll N−1 turns forward).
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 

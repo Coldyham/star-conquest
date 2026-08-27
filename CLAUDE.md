@@ -208,12 +208,16 @@ intact.
     import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
     asserts both of the latter).
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
-    (only the AI tab's generic "Custom (bot-defined)" slider writes it); each
-    strategy assigns its own meaning. `config.AI_AUX` is `1.0` and that is the
-    documented "untuned" value, so a bot's default behaviour must be what it does
-    at 1.0 — a stale token or save with no `aux` key deserialises to it.
-    `models/knower.py` reads it as search depth. Add per-bot knobs here rather
-    than growing `AiParams` one field per strategy.
+    (only the AI tab's aux slider writes it); each strategy assigns its own
+    meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,
+    so a bot's default behaviour must be what it does at 1.0 — a stale token or
+    save with no `aux` key deserialises to it. Add per-bot knobs here rather than
+    growing `AiParams` one field per strategy. A strategy names its knob with
+    module-level `AUX_LABEL` (+ optional `AUX_RANGE`, `AUX_INT`), read by
+    `ai.aux_spec`; `menu._ai_specs` appends that slider to `_AI_PARAMS` for the
+    edited seat, so a strategy declaring nothing (the built-in heuristic,
+    `thinker`, …) shows no aux slider at all. `models/knower.py` labels it
+    *Search depth*.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
