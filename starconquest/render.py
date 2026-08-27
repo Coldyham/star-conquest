@@ -1672,10 +1672,9 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     ]
     if dest is None:
         lines.append(("no destination yet", config.COLOR_TEXT_DIM))
-    else:
-        name = state.systems[dest].id if dest in state.systems else dest
-        owner = state.systems[dest].owner_id if dest in state.systems else 0
-        lines.append((f"to system {name}", config.player_color(owner)))
+    elif dest in state.systems:
+        sys = state.systems[dest]
+        lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
         lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
     if ui.route_replaces:
         lines.append((f"{len(ui.route_replaces)} replaced", _BTN_AMBER[1]))
