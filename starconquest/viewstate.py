@@ -10,6 +10,7 @@ from typing import Optional
 
 from . import config
 from .geometry import WorldView
+from . import model
 from .model import GameState, Order
 
 # interaction modes
@@ -18,6 +19,20 @@ SELECTED = "selected"  # a source system is selected, awaiting a destination
 # a destination is picked: the send is committed and the on-map popup is open
 # to retune / forward / cancel it
 CHOOSING = "choosing"
+# multi-select + route-to planning. Unlike every other mode nothing is committed
+# while it is on: it builds a *proposal* (`route_plan`) that the player confirms
+# or discards in one go, because it writes many rules at once and can overwrite
+# existing ones — too much to undo click-by-click the way a single send is.
+ROUTING = "routing"
+
+
+def _clip_to_play(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """Intersect a screen-space rect with the map viewport (empty if disjoint)."""
+    rx, ry, rw, rh = rect
+    px, py, pw, ph = config.play_rect()
+    x0, y0 = max(rx, px), max(ry, py)
+    x1, y1 = min(rx + rw, px + pw), min(ry + rh, py + ph)
+    return (x0, y0, max(0, x1 - x0), max(0, y1 - y0))
 
 
 @dataclass
@@ -49,6 +64,39 @@ class Ui:
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     sel_forward: Optional[int] = None  # source id of the rule being edited, if any
+    # Route mode (see ROUTING above): pick a group of owned systems, aim them at a
+    # destination, and confirm to lay a forwarding chain from each of them to it.
+    # A drag boxes a group; a tap means one of three things, decided entirely by
+    # what is already drawn (see `route_tap`), so no stage or modifier is needed.
+    #   route_sel        — the chosen group. The destination is *not* removed from
+    #                      it: it is skipped when building the plan instead, so
+    #                      re-aiming somewhere else hands the system straight back
+    #                      as a source rather than silently having dropped it.
+    #   route_plan       — source -> (next hop, keep): the rules a confirm writes.
+    #                      Covers the *whole* path, not just the selected systems,
+    #                      so ships actually conveyor the full distance.
+    #   route_replaces   — sources whose existing rule this would change (the old
+    #                      rule is still readable from `auto_forward`, so the set
+    #                      of ids is all the preview needs)
+    #   route_unroutable — selected systems with no path to the destination
+    #                      through our own territory
+    #   route_cycles     — systems the plan would trap ships circling in (see
+    #                      `_detect_route_cycles`)
+    #   route_box        — a selection box is being dragged. Its corners reuse
+    #                      `drag_start`/`drag_pos` below, which are dead in this
+    #                      mode; the separate flag is what stops render's
+    #                      drag-to-target rubber band drawing over the box.
+    route_sel: set[int] = field(default_factory=set)
+    route_dest: Optional[int] = None
+    route_plan: dict[int, tuple[int, int]] = field(default_factory=dict)
+    route_replaces: set[int] = field(default_factory=set)
+    route_unroutable: set[int] = field(default_factory=set)
+    route_cycles: set[int] = field(default_factory=set)
+    #   route_press      — a press landed on empty map space and may yet become a
+    #                      box. Separate from `route_box` (already past the drag
+    #                      threshold) so a tap that never moves selects nothing.
+    route_box: bool = False
+    route_press: bool = False
     # Fog of war (human-only, so it lives here not in GameState). Recomputed each
     # turn by main.refresh_fog from the human's territory; render reads these.
     #   visible      — systems in full detail this turn (owner + ship counts)
@@ -185,6 +233,14 @@ class Ui:
     # menu_button_rect above; clear_button_rect is live-play only.
     quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Route-mode hit-rects, rebuilt by render each frame and tested by input (same
+    # store-rect-then-test handoff as end_turn_rect). `route_button_rect` is the
+    # live-play toggle into the mode; the rest are live only while it is on, and
+    # `route_confirm_rect` deliberately takes over the End Turn button's slot, so
+    # ending the turn under an open plan is impossible rather than merely guarded.
+    route_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    route_confirm_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    route_cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Camera pan: a press on empty space (no node/lane/button under it) arms
     # this instead of the drag-to-target gesture, so panning and drag-to-send
     # never fight over the same press. `pan_last` is the previous motion-event
@@ -439,6 +495,212 @@ class Ui:
         self.dragging_popup = False
         self.dragging_slider = False
         self.mode = SELECTED if self.selected is not None else IDLE
+
+    # -- route mode --------------------------------------------------------- #
+    def can_route(self, state: GameState) -> bool:
+        """Is route mode available? Only while there is a human turn left to plan:
+        not once the match is decided, not while we hold nothing, and not under
+        autoplay (where the AI issues our orders and a plan would never fire).
+
+        Render gates the footer button on this and input gates the key on it, so
+        the two can never disagree about when the mode means anything — the same
+        pairing as ``can_fast_forward``.
+        """
+        return (
+            state.winner is None
+            and not state.is_defeated(self.human_id)
+            and not self.autoplay
+        )
+
+    def begin_route(self) -> None:
+        """Enter route mode from scratch, dropping any in-progress send."""
+        self.reset_selection()
+        self.sel_forward = None
+        self.reset_route()
+        self.mode = ROUTING
+        self.playing = False  # a plan must not be resolved out from under us
+
+    def reset_route(self) -> None:
+        """Drop the whole proposal and leave the mode. Committed rules survive (a
+        confirm has already written them into `auto_forward`).
+
+        Deliberately *not* folded into `reset_selection`: that runs from several
+        places mid-gesture, and would wipe the plan the route branch is building.
+        """
+        self.route_sel = set()
+        self.route_dest = None
+        self.route_plan = {}
+        self.route_replaces = set()
+        self.route_unroutable = set()
+        self.route_cycles = set()
+        self.route_box = False
+        self.route_press = False
+        if self.mode == ROUTING:
+            self.mode = IDLE
+
+    def route_tap(self, state: GameState, sid: int) -> None:
+        """A tap always aims the group at that system. Tapping whatever is already
+        the destination un-aims it, and drops it from the group if it was in it.
+
+        One primary meaning is the whole point. Making a tap mean "aim" on some
+        systems and "remove" on others is what makes it feel arbitrary, and it also
+        makes aiming at one of your own picks destructive — pick a group, aim at a
+        member, aim somewhere else, and the member is silently gone. Here aiming
+        never removes anything: the destination stays in the group and is merely
+        skipped as a source (`route_sources`), so re-aiming hands it straight back.
+
+        Removing is therefore the second tap on the thing you are pointing at, and
+        adding is the drag box's job — a tap never adds.
+        """
+        if sid not in state.systems:
+            return
+        if sid == self.route_dest:
+            self.route_dest = None
+            self.route_sel.discard(sid)  # a second tap on the target rejects it
+        elif sid in self.seen:
+            self.route_dest = sid
+        self.recompute_route(state)
+
+    def route_sources(self) -> set[int]:
+        """The group members that will actually get a rule — everything picked bar
+        the destination, which is the sink and can't forward to itself."""
+        return self.route_sel - {self.route_dest}
+
+    def add_route_box(self, state: GameState, rect: tuple[int, int, int, int]) -> None:
+        """Add every one of our systems inside a dragged screen-space box.
+
+        Additive, so several boxes build one group. Clipped to the map viewport
+        first: ``view.to_screen`` projects *every* system, including ones panned
+        out under the side panel or behind the HUD bars, and only the drawing is
+        clipped — an unclipped box dragged to the edge would quietly pick up
+        systems that aren't on screen at all.
+        """
+        bx, by, bw, bh = _clip_to_play(rect)
+        if bw <= 0 or bh <= 0:
+            return
+        for sid, sys in state.systems.items():
+            if sys.owner_id != self.human_id:
+                continue
+            sx, sy = self.view.to_screen(sys.pos)
+            if bx <= sx <= bx + bw and by <= sy <= by + bh:
+                self.route_sel.add(sid)
+        self.recompute_route(state)
+
+    def set_route_dest(self, state: GameState, sid: int) -> None:
+        """Aim the selection at a destination (replacing any previous one).
+
+        Restricted to systems we have at least seen: routing to a never-seen one
+        would answer "is there a path to it through my territory?" about topology
+        the fog hasn't disclosed. Sources need no such guard — ``fog.observe``
+        seeds every owned system, so one is never fogged.
+        """
+        if sid not in state.systems or sid not in self.seen:
+            return
+        self.route_dest = sid
+        self.recompute_route(state)
+
+    def recompute_route(self, state: GameState) -> None:
+        """Rebuild the proposal from the selection and destination. The one writer
+        of `route_plan` / `route_replaces` / `route_unroutable` / `route_cycles`,
+        called from every mutator above so the preview is never stale.
+
+        A rule can only exist on a system we own (`rule_is_live`), so the path is
+        searched over our own territory — that is forced by the rule model, not a
+        policy choice. The *destination* is exempt: its incoming rule sits on the
+        last owned system of the path, which is what lets a chain be aimed at an
+        enemy system as an assault funnel.
+
+        Cases worth knowing, all decided here:
+          * the destination is the sink and never gets a rule of its own;
+          * a selected system that *is* the destination is skipped, not dropped
+            from the group and not reported unroutable — so re-aiming elsewhere
+            gives it straight back as a source;
+          * a selected system the search never reached goes in `route_unroutable`;
+          * with no destination yet the plan is empty and so is `route_unroutable`
+            (otherwise every selection would read as unroutable before aiming);
+          * every system *along* a path gets a rule, including ones the player
+            never selected — that is what makes ships travel the full distance;
+          * replacing a rule that already pointed at the same next hop keeps its
+            `keep`, so re-routing over an existing conveyor is idempotent; only a
+            changed destination resets it to 0 (forward everything).
+
+        Two selected systems can never disagree about a shared hop: `parent` is a
+        dict, so the next hop is a function of the node alone.
+        """
+        self.route_plan = {}
+        self.route_replaces = set()
+        self.route_unroutable = set()
+        self.route_cycles = set()
+        # forget anything we no longer hold, so a stale selection can't plan
+        self.route_sel = {
+            sid for sid in self.route_sel
+            if sid in state.systems and state.systems[sid].owner_id == self.human_id
+        }
+        if self.route_dest is None or self.route_dest not in state.systems:
+            return
+        owned = {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
+        parent = model.flow_field(state, owned, {self.route_dest})
+        for sid in sorted(self.route_sources()):
+            node = sid
+            while node != self.route_dest:
+                if node in self.route_plan:
+                    break  # this hop onward is already laid by an earlier route
+                nxt = parent.get(node)
+                if nxt is None:
+                    self.route_unroutable.add(sid)
+                    break
+                old = self.auto_forward.get(node)
+                keep = old[1] if old is not None and old[0] == nxt else 0
+                if old is not None and old != (nxt, keep):
+                    self.route_replaces.add(node)
+                self.route_plan[node] = (nxt, keep)
+                node = nxt
+        self._detect_route_cycles(state)
+
+    def _detect_route_cycles(self, state: GameState) -> None:
+        """Flag systems where the plan would close a loop with a *surviving* rule.
+
+        The plan alone can't loop — each hop steps strictly closer to the
+        destination. But the destination itself gets no plan rule, so if it
+        already forwards back into the plan (directly, or down a chain of rules on
+        systems the plan doesn't touch) ships circulate forever. Friendly arrivals
+        are lossless, so nothing is destroyed; the ships simply never reach a
+        front, which is worse than losing them because it looks like it is
+        working. `confirm_route` breaks any loop it finds here.
+        """
+        merged: dict[int, int] = {
+            src: dest for src, (dest, _keep) in self.auto_forward.items()
+            if self.rule_is_live(state, src)
+        }
+        merged.update({src: dest for src, (dest, _keep) in self.route_plan.items()})
+        for start in self.route_plan:
+            walked: list[int] = []
+            seen: set[int] = set()
+            node: Optional[int] = start
+            while node is not None and node not in seen:
+                seen.add(node)
+                walked.append(node)
+                node = merged.get(node)
+            if node is not None:  # re-entered the path we came down: a loop
+                self.route_cycles.update(walked[walked.index(node):])
+
+    def confirm_route(self, state: GameState) -> None:
+        """Write the proposal into `auto_forward` and leave the mode.
+
+        Recomputes first so the rules committed are the ones just previewed,
+        rather than resting on an argument about what else could have run in
+        between.
+        """
+        self.recompute_route(state)
+        plan = dict(self.route_plan)
+        # Break any loop before arming it. The closing edge is always a rule on a
+        # system the plan doesn't touch (the plan itself is acyclic), so dropping
+        # exactly those clears every cycle without discarding planned hops.
+        for sid in self.route_cycles:
+            if sid not in plan:
+                self.clear_forward(sid)
+        self.auto_forward.update(plan)
+        self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
     def reset_selection(self) -> None:

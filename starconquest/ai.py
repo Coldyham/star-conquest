@@ -16,11 +16,10 @@ from __future__ import annotations
 import importlib.util
 import math
 import sys
-from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from . import config
+from . import config, model
 from .model import AiParams, GameState, Order
 from .paths import data_dir
 
@@ -231,21 +230,10 @@ def _threat(state: GameState, sid: int, pid: int) -> int:
 def _flow_to_frontier(state: GameState, owned: set[int], frontier: set[int]) -> dict[int, int]:
     """Multi-source BFS over owned territory; returns rear-node -> next-hop-toward-front.
 
-    Seeds and neighbours are visited in sorted order so the flow is deterministic:
-    while the frontier is stable, a rear system keeps the same next-hop every turn
-    instead of flip-flopping, which is what made rear ships oscillate.
+    The frontier is the seed set, so a rear system flows toward whichever front is
+    fewest hops away. See ``model.flow_field`` for the determinism this relies on.
     """
-    parent: dict[int, int] = {}
-    seen = set(frontier)
-    queue = deque(sorted(frontier))
-    while queue:
-        cur = queue.popleft()
-        for nbr in sorted(state.systems[cur].neighbors):
-            if nbr in owned and nbr not in seen:
-                seen.add(nbr)
-                parent[nbr] = cur  # move from nbr toward cur (closer to the front)
-                queue.append(nbr)
-    return parent
+    return model.flow_field(state, owned, frontier)
 
 
 register("heuristic", compute_orders)

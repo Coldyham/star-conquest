@@ -141,6 +141,93 @@ compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
 doesn't get re-snapped every turn, only the one that actually crosses into it.
 
+## Route mode (`viewstate.ROUTING`)
+
+Everything else in the game commits on click; this doesn't. It writes a dozen
+rules at once and can overwrite existing ones, which is far too much to unpick
+one click at a time — so it builds a proposal and confirms it, and is the only
+mode that does.
+
+**Owned-only paths are forced, not chosen.** A rule can only exist on a system we
+hold (`Ui.rule_is_live`), and `prune_forward` deletes any whose source we lose.
+So a route `a -> X(enemy) -> d` would need the rule `X->d`, which cannot exist:
+it would be born dormant and culled at the end of the turn. There is no
+safe/unrestricted toggle to offer because unrestricted routing is
+*unrepresentable*, not disallowed. The **destination** is the exception — its
+incoming rule sits on the last owned system of the path — which is exactly what
+lets a chain be aimed at an enemy front as an assault funnel. Choosing where to
+point is therefore itself the safe-vs-assault decision.
+
+**The plan can't contradict itself.** `model.flow_field` is a BFS seeded at the
+destination, so `parent[node]` is the next hop toward it. Because `parent` is a
+dict, the next hop is a function of the node alone: two selected systems whose
+routes converge cannot demand different hops from the shared node. And a parent
+edge always steps to a strictly shallower node, so walking it from anywhere
+terminates at the destination. No conflict resolution, no cycle check *within*
+the plan.
+
+**But the plan plus surviving rules can loop.** The destination is the one
+plan-adjacent node the plan gives no rule, so if it already forwards back into
+the plan — directly, or down a chain of rules on systems the plan doesn't touch —
+ships circulate forever. Friendly arrivals are lossless, so nothing is destroyed;
+the ships simply never reach a front, which is worse than losing them because it
+looks like it is working. `_detect_route_cycles` walks the merged graph and
+`confirm_route` drops the closing edge, which is always a rule the plan doesn't
+overwrite.
+
+**A drag boxes; a tap always aims.** There is no stage and no modifier. The
+gesture set is deliberately lopsided — the box adds, and a tap never does —
+because that is what leaves a tap with exactly one primary meaning.
+
+This went through two wrong shapes first, both worth recording. It started as two
+stages ("pick", then "aim"), on the reasoning that an owned system is ambiguous:
+is a tap adding it or naming it as the target? That is real, but the fix was worse
+than the problem — you cannot tell which stage a tap will land in without reading
+the footer, and an extra button sits between you and every route.
+
+The obvious collapse is to let the system decide: tap a picked system to remove
+it, tap anything else to aim at it. That is unambiguous in the formal sense and
+still wrong, because it makes a tap mean two different things depending on what it
+lands on — and worse, it makes *aiming at one of your own picks* destructive. Pick
+a group, aim at a member, aim somewhere else, and the member is gone. Aim at each
+member in turn and the group empties completely.
+
+So: a tap aims, always, whatever is under it. The destination is not removed from
+`route_sel` — it stays picked and is skipped as a source by `route_sources` — so
+re-aiming is free and reversible. Removal is the second tap on the thing you are
+already pointing at, which also un-aims it. The rule is one sentence, and nothing
+it does is silent.
+
+Drag is spent on the box, so panning is right-drag on a mouse and the on-map
+Reset / −/+ cluster on touch. That costs less than it sounds: `ZOOM_MIN` is the
+fit-all view, so at zoom 1 the whole map is on screen and there is nothing to pan
+to until you have zoomed in — and Reset undoes that in one tap.
+
+**Nothing from live play stays live.** `_handle_route_event` takes the whole event
+stream, so the ordinary `_handle_left_click` ladder — every branch of which
+assumes a single `Ui.selected` — is unreachable rather than audited. It is
+dispatched *after* the game-over branch, not beside the history one, or it would
+swallow the win screen's own controls. On the render side the mode swaps the
+footer strip wholesale and `_lay_out_footer`'s shared zeroing loop retires every
+live-play rect for free; the confirm takes the End Turn button's slot, which makes
+ending a turn mid-plan impossible by construction instead of by a guard. The
+panel's queued/rule lists are suppressed too — their × buttons would mutate
+`auto_forward` underneath the preview.
+
+**`keep` is 0 on a new rule** (the Forward tab's own default), but a replaced rule
+that already pointed at the same next hop keeps its `keep` — so re-running a route
+over an existing conveyor is idempotent rather than quietly resetting tuning that
+was already correct.
+
+**One consequence worth knowing.** With whole-path `keep = 0`, losing a mid-chain
+system leaves its upstream neighbour forwarding its entire garrison into enemy
+territory every turn: `prune_forward` drops the captured system's rule, but the
+upstream one is still live and `rule_is_live` doesn't care who owns the far end.
+A hand-made rule has always had this property, but the player made *one*, on
+purpose. Hence `_draw_forward_rules` tinting any rule aimed at a system we don't
+hold — it is a real move as well as a real accident, so it is flagged rather than
+prevented.
+
 ## Star names (`starnames.py`, `System.name`)
 
 Flavour with no mechanical weight: systems are still keyed by integer id

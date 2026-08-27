@@ -1,9 +1,9 @@
 """Event handling: translate pygame input into selection/targeting changes and
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
-engine. Returns an action string ('end_turn', 'restart', 'quit',
+engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'rewind', 'menu', 'share') or None.
+'toggle_route', 'rewind', 'menu', 'share') or None.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pygame
 from .geometry import dist, point_segment_dist
 from . import config
 from .model import GameState
-from .viewstate import CHOOSING, IDLE, SELECTED, Ui
+from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
 
 def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
@@ -147,6 +147,15 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
             if ui.quit_button_rect[2] and _point_in_rect(event.pos, ui.quit_button_rect):
                 return "quit"
         return None
+
+    # Route mode is its own interaction scene: a group selection and a destination
+    # being composed into a plan, with nothing committed until it is confirmed. It
+    # takes the whole event stream so the live-play ladder below — every branch of
+    # which assumes one selected system — is simply not reachable while it is on.
+    # Placed after the game-over branch, not before: a finished match keeps its
+    # overlay controls, and the mode can't be entered or held there at all.
+    if ui.mode == ROUTING:
+        return _handle_route_event(event, state, ui)
 
     if event.type == pygame.MOUSEMOTION:
         if ui.dragging_slider:  # dragging the popup's count slider
@@ -292,6 +301,8 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
         return "menu"
     if event.key == pygame.K_h:
         return "toggle_history"
+    if event.key == pygame.K_g:
+        return "toggle_route"
     if event.key == pygame.K_ESCAPE:
         if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
@@ -300,33 +311,157 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     return None
 
 
+def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    """Route mode's whole event stream: build a group, aim it, confirm or drop it.
+
+    One flat mode, no stages: a drag from empty space boxes a group, and a tap on a
+    system means exactly one thing given what is on screen (see ``Ui.route_tap``).
+    A tap commits on press, as everywhere else in the game.
+
+    Drag is spent on the box, so panning is right-drag on a mouse and the on-map
+    Reset / −/+ cluster on touch. That costs little: zoom 1 already fits the whole
+    map, so there is nothing to pan to until you have zoomed in, and Reset undoes
+    that in one tap.
+    """
+    if event.type == pygame.MOUSEMOTION:
+        if ui.route_press and event.buttons[0]:
+            if dist(event.pos, ui.drag_start) > config.DRAG_THRESHOLD:
+                ui.route_box = True
+            ui.drag_pos = event.pos
+        elif ui.pan_active and event.buttons[0]:
+            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1])
+            ui.pan_last = event.pos
+        ui.hover = pick_node(state, ui, event.pos)
+        return None
+
+    if event.type == pygame.KEYDOWN:
+        return _handle_route_key(event, state, ui)
+
+    if event.type == pygame.MOUSEWHEEL:
+        pos = pygame.mouse.get_pos()
+        if not _over_side_panel(pos):  # the panel holds the route summary, not a list
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
+        return None
+
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        if ui.route_box:
+            x0, y0 = ui.drag_start
+            x1, y1 = event.pos
+            ui.add_route_box(state, (min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)))
+        ui.route_press = False
+        ui.route_box = False
+        ui.pan_active = False
+        return None
+
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 3:
+        ui.pan_active = False
+        return None
+
+    if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.button == 3:  # right-drag pans, on a mouse
+            _arm_pan(ui, event.pos)
+            return None
+        if event.button == 1:
+            return _handle_route_click(state, ui, event.pos)
+    return None
+
+
+def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
+    """A left-press in route mode: a control, a system, or empty space."""
+    handled, action = _handle_global_buttons(state, ui, pos)
+    if handled:
+        return action
+    if ui.route_confirm_rect[2] and _point_in_rect(pos, ui.route_confirm_rect):
+        ui.confirm_route(state)
+        return None
+    if ui.route_cancel_rect[2] and _point_in_rect(pos, ui.route_cancel_rect):
+        ui.reset_route()
+        return None
+    node = pick_node(state, ui, pos)
+    if node is not None:
+        ui.route_tap(state, node)
+        return None
+
+    # Empty space arms a selection box. It never clears the group — this mode
+    # confirms and cancels explicitly, so a stray tap must not undo the work.
+    ui.route_press = True
+    ui.route_box = False
+    ui.drag_start = pos
+    ui.drag_pos = pos
+    return None
+
+
+def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
+    """Keys in route mode. Enter confirms rather than ending the turn — the turn
+    can't be ended from here at all (render records no end_turn_rect), so the most
+    obvious key keeps pointing at the most obvious action."""
+    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+        if ui.route_plan:
+            ui.confirm_route(state)
+        return None
+    if event.key in (pygame.K_g, pygame.K_ESCAPE):
+        ui.reset_route()
+        return None
+    if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
+        # clear the group but stay in the mode, mirroring Clear elsewhere
+        ui.route_sel = set()
+        ui.route_dest = None
+        ui.route_press = False
+        ui.route_box = False
+        ui.recompute_route(state)
+        return None
+    if event.key == pygame.K_m:
+        return "menu"
+    if event.key == pygame.K_r:
+        return "restart"
+    return None
+
+
+def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, Optional[str]]:
+    """The bar/on-map buttons that mean the same thing in every interaction scene.
+
+    Returns ``(handled, action)``. Shared by live play and route mode rather than
+    duplicated: each test is guarded on its rect having a width, and render zeroes
+    the rect of anything it didn't draw, so a button simply goes inert in a scene
+    whose strip leaves it out. Route mode gets Menu and the camera cluster this
+    way, and gets the live-play toggles excluded, without either side listing the
+    other's buttons.
+    """
+    if ui.history_button_rect[2] and _point_in_rect(pos, ui.history_button_rect):
+        return True, "toggle_history"
+    if ui.autoplay_button_rect[2] and _point_in_rect(pos, ui.autoplay_button_rect):
+        return True, "toggle_autoplay"
+    if ui.fast_forward_rect[2] and _point_in_rect(pos, ui.fast_forward_rect):
+        return True, "toggle_fast_forward"
+    if ui.restart_live_button_rect[2] and _point_in_rect(pos, ui.restart_live_button_rect):
+        return True, "restart"
+    if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):
+        return True, "menu"
+    if ui.quit_button_rect[2] and _point_in_rect(pos, ui.quit_button_rect):
+        return True, "quit"
+    if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
+        _clear_selected(ui)
+        return True, None
+    if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
+        ui.reset_view(state)
+        return True, None
+    if ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
+        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)
+        return True, None
+    if ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
+        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP)
+        return True, None
+    if ui.route_button_rect[2] and _point_in_rect(pos, ui.route_button_rect):
+        return True, "toggle_route"
+    return False, None
+
+
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
     # Tested before the autoplay early-out so these stay clickable under autoplay
     # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
-    if ui.history_button_rect[2] and _point_in_rect(pos, ui.history_button_rect):
-        return "toggle_history"
-    if ui.autoplay_button_rect[2] and _point_in_rect(pos, ui.autoplay_button_rect):
-        return "toggle_autoplay"
-    if ui.fast_forward_rect[2] and _point_in_rect(pos, ui.fast_forward_rect):
-        return "toggle_fast_forward"
-    if ui.restart_live_button_rect[2] and _point_in_rect(pos, ui.restart_live_button_rect):
-        return "restart"
-    if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):
-        return "menu"
-    if ui.quit_button_rect[2] and _point_in_rect(pos, ui.quit_button_rect):
-        return "quit"
-    if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
-        _clear_selected(ui)
-        return None
-    if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
-        ui.reset_view(state)
-        return None
-    if ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
-        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)
-        return None
-    if ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
-        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP)
-        return None
+    handled, action = _handle_global_buttons(state, ui, pos)
+    if handled:
+        return action
     if _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
     if _point_in_rect(pos, ui.play_pause_rect):

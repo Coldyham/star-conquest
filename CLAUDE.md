@@ -289,6 +289,24 @@ intact.
   quality-of-life features (e.g. `auto_forward` standing rules) that must stay
   out of the pure `GameState`. `main.resolve_turn` expands such UI state into
   `Order`s at end-of-turn.
+- **Route mode (`viewstate.ROUTING`) is the one control that doesn't commit as
+  you go.** It builds a *proposal* — a group of systems (`route_sel`) aimed at a
+  destination (`route_dest`), recomputed by `Ui.recompute_route` into
+  `route_plan` — which `confirm_route` writes into `auto_forward` in one go.
+  Paths are searched over our own territory by `model.flow_field` (the BFS
+  `ai._flow_to_frontier` also delegates to), and every hop of every path gets a
+  rule, not just the selected systems. Owned-only is *forced*, not chosen: a rule
+  can only live on a system we hold, so a path through enemy space cannot be
+  expressed. The destination is exempt, which is what lets a chain be aimed at an
+  enemy front. `input._handle_route_event` takes the whole event stream (placed
+  after the game-over branch), and render swaps the footer strip and the End Turn
+  button, so nothing from live play stays clickable under an open plan.
+  - **A drag boxes a group; a tap always aims** (`Ui.route_tap`). Aiming is never
+    destructive — the destination stays in `route_sel` and is merely skipped as a
+    source (`Ui.route_sources`), so re-aiming hands it straight back. Removing is
+    the *second* tap on whatever you are already pointing at. Never give a tap a
+    second primary meaning conditional on the system: that is what made aiming at
+    one of your own picks silently drop it.
 - **`tests/sim.py` is both a demo harness and a test fixture.** Because it drives
   the pure core headlessly, the suite uses it to assert games actually terminate
   and never corrupt state (`check_invariants`). After changing `ai.py` or
