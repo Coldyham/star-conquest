@@ -19,7 +19,7 @@ from typing import Optional
 import pygame
 
 from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, softkeyboard, webstore)
+                          replay, softkeyboard, viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -360,6 +360,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     ui.reset_selection()
+    ui.reset_route()          # a plan is only valid for the ownership it was built on
     refresh_fog(state, ui)
     # Snap the camera out to the whole map right as there stops being anything left
     # to hide — but only on the turn that crosses into it, not every turn a
@@ -609,6 +610,7 @@ async def main() -> None:
                 ui.autoplay = not ui.autoplay
                 ui.playing = False
                 ui.reset_selection()
+                ui.reset_route()
                 ui.clear_pending()
                 auto_accum = 0
             elif action == "toggle_fast_forward":
@@ -633,6 +635,14 @@ async def main() -> None:
                 state, ui = resume_game(log, settings)
                 history_states, history_fog, live_fog = [], [], None
                 auto_accum = 0
+            elif action == "toggle_route":
+                # Route mode: multi-select a group of systems and forward them all
+                # toward one destination. Leaving discards the plan — it is only
+                # ever committed by its own confirm.
+                if ui.mode == viewstate.ROUTING:
+                    ui.reset_route()
+                elif ui.can_route(state):
+                    ui.begin_route()
             elif action == "toggle_history":
                 if ui.history:
                     # leave review: drop snapshots and restore the live fog exactly
@@ -651,6 +661,7 @@ async def main() -> None:
                         ui.history = True
                         ui.playing = False
                         ui.reset_selection()
+                        ui.reset_route()
                         ui.sel_forward = None
                         ui.history_max = len(history_states) - 1
                         ui.history_turn = ui.history_max
@@ -684,7 +695,8 @@ async def main() -> None:
                     if ui.history_turn >= ui.history_max:
                         ui.playing = False
             elif (state.winner is None
-                    and not confirm_quit and not confirm_rewind and not ui.history):
+                    and not confirm_quit and not confirm_rewind and not ui.history
+                    and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
                     auto_accum += dt
                     if auto_accum >= step_delay(ui, AUTOPLAY_MS):

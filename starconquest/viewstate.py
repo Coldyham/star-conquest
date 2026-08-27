@@ -91,7 +91,11 @@ class Ui:
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
     route_cycles: set[int] = field(default_factory=set)
+    #   route_press      — a press landed on empty map space and may yet become a
+    #                      box. Separate from `route_box` (already past the drag
+    #                      threshold) so a tap that never moves selects nothing.
     route_box: bool = False
+    route_press: bool = False
     # Fog of war (human-only, so it lives here not in GameState). Recomputed each
     # turn by main.refresh_fog from the human's territory; render reads these.
     #   visible      — systems in full detail this turn (owner + ship counts)
@@ -533,6 +537,7 @@ class Ui:
         self.route_unroutable = set()
         self.route_cycles = set()
         self.route_box = False
+        self.route_press = False
         if self.mode == ROUTING:
             self.mode = IDLE
 

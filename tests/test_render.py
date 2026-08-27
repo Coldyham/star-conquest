@@ -70,6 +70,24 @@ def test_render_all_ui_states_no_crash():
         render.draw(screen, state, ui)
         assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
         ui.reset_selection()
+
+        # route mode: every stage, plus a replaced rule, an unreachable pick, a
+        # loop, and a live selection box — the whole preview in one frame
+        ui.auto_forward[home] = (nbr, 2)
+        ui.begin_route()
+        render.draw(screen, state, ui)                  # empty group, "select"
+        ui.route_sel = {sid for sid, s in state.systems.items() if s.owner_id == 1}
+        ui.route_box = True
+        ui.drag_start, ui.drag_pos = (60, 80), (400, 500)
+        render.draw(screen, state, ui)
+        ui.route_stage = "dest"
+        ui.set_route_dest(state, nbr)
+        render.draw(screen, state, ui)
+        ui.route_unroutable = {home}                    # forced, to draw the marker
+        ui.route_cycles = {home, nbr}
+        render.draw(screen, state, ui)
+        ui.reset_route()
+        ui.auto_forward.clear()
         ui.sel_forward = None
 
         # advance a few turns so fleets exist, then draw
@@ -441,7 +459,9 @@ def _hud_rects(ui):
     names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
              "clear_button_rect", "quit_button_rect", "exit_history_rect",
-             "rewind_button_rect", "fast_forward_rect")
+             "rewind_button_rect", "fast_forward_rect", "route_button_rect",
+             "route_next_rect", "route_back_rect", "route_cancel_rect",
+             "route_confirm_rect")
     return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
 
 
@@ -468,6 +488,39 @@ def test_hud_buttons_never_overlap_at_touch_scale():
             render.draw(screen, state, ui)
             rects = _hud_rects(ui)
             assert rects, "the bottom bar drew no buttons at all"
+            for name, r in rects.items():
+                assert screen.get_rect().contains(r), f"{name} is off screen: {r}"
+            pairs = list(rects.items())
+            for i, (na, ra) in enumerate(pairs):
+                for nb, rb in pairs[i + 1:]:
+                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_route_mode_footer_never_overlaps_at_touch_scale():
+    """Route mode swaps the bottom bar for a strip of its own, so it needs the same
+    measured-label guarantee as live play — in both stages, and with the confirm
+    occupying the End Turn slot."""
+    pygame.init()
+    _touch_scale()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        state.turn = 137
+        ui = _make_ui(state)
+        ui.begin_route()
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        for stage, dest in (("select", None), ("dest", None), ("dest", nbr)):
+            ui.route_stage = stage
+            ui.route_sel = {home}
+            ui.route_dest = dest
+            ui.recompute_route(state)
+            render.draw(screen, state, ui)
+            rects = _hud_rects(ui)
+            assert rects, f"route stage {stage} drew no buttons at all"
             for name, r in rects.items():
                 assert screen.get_rect().contains(r), f"{name} is off screen: {r}"
             pairs = list(rects.items())

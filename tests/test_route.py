@@ -16,7 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 
 import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, mapgen, model  # noqa: E402
+from starconquest import config, mapgen, model, render  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.model import GameState, Player, System  # noqa: E402
@@ -326,6 +326,7 @@ def test_route_mode_is_not_offered_when_there_is_nothing_to_plan():
 def _display_setup():
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    render._FONTS.clear()   # a previous test's pygame.quit() killed the cached ones
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
     ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
     ui.seen = set(state.systems)
@@ -405,5 +406,249 @@ def test_a_system_we_do_not_own_cannot_be_selected():
         theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
         ui.toggle_route_system(state, theirs)
         assert ui.route_sel == set()
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# The gesture path, through input.handle_event
+# --------------------------------------------------------------------------- #
+def _ev(kind, **kw):
+    return pygame.event.Event(kind, **kw)
+
+
+def _press(state, ui, pos, button=1):
+    return game_input.handle_event(_ev(pygame.MOUSEBUTTONDOWN, pos=pos, button=button), state, ui)
+
+
+def _release(state, ui, pos, button=1):
+    return game_input.handle_event(_ev(pygame.MOUSEBUTTONUP, pos=pos, button=button), state, ui)
+
+
+def _motion(state, ui, pos, held=True):
+    return game_input.handle_event(
+        _ev(pygame.MOUSEMOTION, pos=pos, rel=(0, 0), buttons=(1 if held else 0, 0, 0)), state, ui)
+
+
+def _key(state, ui, key):
+    return game_input.handle_event(_ev(pygame.KEYDOWN, key=key, mod=0, unicode=""), state, ui)
+
+
+def _tap(state, ui, sid):
+    pos = ui.view.to_screen(state.systems[sid].pos)
+    _press(state, ui, pos)
+    return _release(state, ui, pos)
+
+
+def _empty_pos(state, ui):
+    """A point in the map viewport with no system under it."""
+    px, py, pw, ph = config.play_rect()
+    for x in range(px + 5, px + pw - 5, 7):
+        for y in range(py + 5, py + ph - 5, 7):
+            if game_input.pick_node(state, ui, (x, y)) is None:
+                return (x, y)
+    raise AssertionError("no empty point in the viewport")
+
+
+def _routed_setup():
+    """A live map already in route mode."""
+    state, ui = _display_setup()
+    game_input.handle_event(_ev(pygame.KEYDOWN, key=pygame.K_g, mod=0, unicode="g"), state, ui)
+    ui.begin_route()
+    return state, ui
+
+
+def test_g_toggles_the_mode():
+    state, ui = _display_setup()
+    try:
+        assert _key(state, ui, pygame.K_g) == "toggle_route"
+        ui.begin_route()
+        # inside the mode G is handled locally, and leaves it
+        assert _key(state, ui, pygame.K_g) is None
+        assert ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_tap_adds_then_removes_a_system():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        _tap(state, ui, home)
+        assert home in ui.route_sel
+        _tap(state, ui, home)
+        assert home not in ui.route_sel
+    finally:
+        pygame.quit()
+
+
+def test_a_drag_from_empty_space_boxes_a_selection():
+    state, ui = _routed_setup()
+    try:
+        px, py, pw, ph = config.play_rect()
+        start = _empty_pos(state, ui)
+        _press(state, ui, start)
+        assert ui.route_press is True and ui.route_box is False
+        _motion(state, ui, (px + pw - 3, py + ph - 3))
+        assert ui.route_box is True          # promoted past the threshold
+        _release(state, ui, (px + pw - 3, py + ph - 3))
+        assert ui.route_sel                  # picked up whatever was in the box
+        assert ui.route_box is False and ui.route_press is False
+    finally:
+        pygame.quit()
+
+
+def test_a_tap_on_empty_space_selects_nothing_and_clears_nothing():
+    """This mode cancels explicitly, so a stray tap must not undo the group."""
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.toggle_route_system(state, home)
+        pos = _empty_pos(state, ui)
+        _press(state, ui, pos)
+        _release(state, ui, pos)             # never moved: no box
+        assert ui.route_sel == {home}
+    finally:
+        pygame.quit()
+
+
+def test_the_stage_buttons_move_between_picking_and_aiming():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.toggle_route_system(state, home)
+        ui.route_next_rect = (100, 100, 60, 20)
+        _press(state, ui, (110, 110))
+        assert ui.route_stage == "dest"
+        ui.route_back_rect = (200, 100, 60, 20)
+        _press(state, ui, (210, 110))
+        assert ui.route_stage == "select"
+        assert ui.route_sel == {home}         # going back keeps the group
+    finally:
+        pygame.quit()
+
+
+def test_a_tap_in_the_dest_stage_aims_the_group():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.toggle_route_system(state, home)
+        ui.route_stage = "dest"
+        _tap(state, ui, nbr)
+        assert ui.route_dest == nbr
+        assert ui.route_plan == {home: (nbr, 0)}
+    finally:
+        pygame.quit()
+
+
+def test_cancel_button_drops_the_plan_without_writing_it():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.toggle_route_system(state, home)
+        ui.route_stage = "dest"
+        _tap(state, ui, nbr)
+        ui.route_cancel_rect = (300, 100, 60, 20)
+        _press(state, ui, (310, 110))
+        assert ui.mode == IDLE and ui.auto_forward == {}
+    finally:
+        pygame.quit()
+
+
+def test_confirm_button_writes_the_plan():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.toggle_route_system(state, home)
+        ui.route_stage = "dest"
+        _tap(state, ui, nbr)
+        ui.route_confirm_rect = (400, 100, 60, 20)
+        _press(state, ui, (410, 110))
+        assert ui.auto_forward == {home: (nbr, 0)}
+        assert ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_esc_cancels_the_route_rather_than_quitting():
+    state, ui = _routed_setup()
+    try:
+        assert _key(state, ui, pygame.K_ESCAPE) is None
+        assert ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_enter_confirms_instead_of_ending_the_turn():
+    """The turn can't be ended from route mode at all, so the most obvious key
+    keeps pointing at the most obvious action."""
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbr = state.systems[home].neighbors[0]
+        ui.route_sel = {home}
+        ui.route_dest = nbr
+        ui.recompute_route(state)
+        assert _key(state, ui, pygame.K_RETURN) is None    # not "end_turn"
+        assert ui.auto_forward == {home: (nbr, 0)}
+    finally:
+        pygame.quit()
+
+
+def test_x_clears_the_group_but_stays_in_the_mode():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.toggle_route_system(state, home)
+        ui.route_stage = "dest"
+        _key(state, ui, pygame.K_x)
+        assert ui.route_sel == set() and ui.route_dest is None
+        assert ui.mode == ROUTING and ui.route_stage == "select"
+    finally:
+        pygame.quit()
+
+
+def test_render_zeroes_end_turn_so_it_cannot_be_hit_while_routing():
+    state, ui = _routed_setup()
+    try:
+        screen = pygame.display.get_surface()
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect == (0, 0, 0, 0)
+        # and the live-play strip is out of service too
+        assert ui.play_pause_rect == (0, 0, 0, 0)
+        assert ui.autoplay_button_rect == (0, 0, 0, 0)
+        assert ui.history_button_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+def test_render_suppresses_the_panel_lists_while_routing():
+    """Their × buttons would mutate auto_forward underneath the preview."""
+    state, ui = _display_setup()
+    try:
+        screen = pygame.display.get_surface()
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        render.draw(screen, state, ui)
+        assert ui.forward_hitboxes                 # normally listed
+        ui.begin_route()
+        render.draw(screen, state, ui)
+        assert ui.forward_hitboxes == [] and ui.order_hitboxes == []
+        assert ui.clear_forward_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+def test_resolving_a_turn_drops_any_open_plan():
+    """A plan is only valid for the ownership it was computed against."""
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.toggle_route_system(state, home)
+        main.resolve_turn(state, ui)
+        assert ui.mode == IDLE and ui.route_sel == set()
     finally:
         pygame.quit()
