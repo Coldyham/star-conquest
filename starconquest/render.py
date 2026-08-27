@@ -1048,6 +1048,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         ui.autoplay_button_rect = ui.restart_live_button_rect = ui.menu_button_rect = (0, 0, 0, 0)
         ui.quit_button_rect = ui.clear_button_rect = (0, 0, 0, 0)
         ui.reset_view_rect = ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
+        ui.route_button_rect = ui.route_cancel_rect = (0, 0, 0, 0)
         return
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the

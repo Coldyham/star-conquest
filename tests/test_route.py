@@ -652,3 +652,35 @@ def test_resolving_a_turn_drops_any_open_plan():
         assert ui.mode == IDLE and ui.route_sel == set()
     finally:
         pygame.quit()
+
+
+def test_changing_stage_abandons_a_half_made_gesture():
+    """A box armed while picking must not finish as one after switching to aiming,
+    where the same drag pans instead."""
+    state, ui = _routed_setup()
+    try:
+        pos = _empty_pos(state, ui)
+        _press(state, ui, pos)
+        assert ui.route_press is True
+        ui.route_next_rect = (100, 100, 60, 20)
+        _press(state, ui, (110, 110))
+        assert ui.route_stage == "dest"
+        assert ui.route_press is False and ui.route_box is False
+    finally:
+        pygame.quit()
+
+
+def test_history_mode_retires_the_route_button():
+    """Every rect render didn't draw is zeroed, or a stale one keeps answering
+    clicks — history mode draws no footer at all."""
+    state, ui = _display_setup()
+    try:
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_button_rect[2] > 0
+        ui.history = True
+        ui.history_max = ui.history_turn = 0
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_button_rect == (0, 0, 0, 0)
+        assert ui.route_cancel_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
