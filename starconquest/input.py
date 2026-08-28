@@ -474,6 +474,11 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         ui.clear_all_forward()
         return None
 
+    # Below it: clear only the rules currently pointed at a system we don't hold.
+    if ui.clear_dangerous_rect[2] and _point_in_rect(pos, ui.clear_dangerous_rect):
+        ui.clear_dangerous_forward(state)
+        return None
+
     # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
     # Tested before node-picking so a button click adjusts the send rather than
     # (re)targeting. Zero-width rects (no count being adjusted) never match.

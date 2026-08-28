@@ -189,6 +189,9 @@ class Ui:
     # Persistent side-panel button to clear every standing forward rule at once;
     # drawn (and hit-tested) only while any rule exists.
     clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Below it, a button that clears only the rules pointed at a system we don't
+    # hold; drawn (and hit-tested) only while at least one such rule exists.
+    clear_dangerous_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for auto-forward rule rows, listed below the queued orders:
     # (source_id, row_rect, delete_rect) tuples.
     forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
@@ -463,6 +466,12 @@ class Ui:
         """Remove every standing forward rule at once."""
         self.auto_forward.clear()
 
+    def clear_dangerous_forward(self, state: GameState) -> None:
+        """Remove only the standing rules currently pointed at a system we don't
+        hold, leaving the rest of the network untouched."""
+        for sid in [s for s in self.auto_forward if self.rule_is_hostile(state, s)]:
+            self.auto_forward.pop(sid, None)
+
     def cancel_send(self) -> None:
         """Discard the active send entirely, keeping just the source selected."""
         if self.forward_armed:
@@ -727,6 +736,12 @@ class Ui:
         rule = self.auto_forward.get(sid)
         src = state.systems.get(sid)
         return rule is not None and src is not None and src.owner_id == self.human_id and rule[0] in state.systems
+
+    def rule_is_hostile(self, state: GameState, sid: int) -> bool:
+        """Is the standing rule out of ``sid`` one of the "dangerous" ones
+        `_draw_forward_rules` tints — live, but pointed at a system we don't hold?
+        The same predicate is what `clear_dangerous_forward` sweeps."""
+        return self.rule_is_live(state, sid) and state.systems[self.auto_forward[sid][0]].owner_id != self.human_id
 
     def edit_order(self, state: GameState, i: int) -> None:
         """Reopen the send popup on an already-queued order — the one editor for a

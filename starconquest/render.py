@@ -133,6 +133,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
+    ui.clear_dangerous_rect = (0, 0, 0, 0)
     # route mode's confirm; _draw_hud re-records it once the plan has something in it
     ui.route_confirm_rect = (0, 0, 0, 0)
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
@@ -1351,11 +1352,17 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
+        ui.clear_dangerous_rect = (0, 0, 0, 0)
         _panel_route(surface, state, ui, x, y, content_bottom)
         return
     # persistent "clear all forwarding" button, shown whenever any rule exists
     if ui.auto_forward:
         y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
+    # below it, a narrower button for just the rules currently tinted dangerous
+    # (pointed at a system we don't hold) — shown only while at least one exists
+    dangerous = [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
+    if dangerous:
+        y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     # A highlighted rule wins the panel's focus over a plain hover; while the popup
     # is open `ui.selected` is that rule's source anyway, so the two agree.
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
@@ -1389,6 +1396,21 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     pygame.draw.rect(surface, (170, 96, 104), r, config.s(1), border_radius=config.s(5))
     _text(surface, font, label, config.COLOR_TEXT, center=r.center)
     ui.clear_forward_rect = (r.x, r.y, r.w, r.h)
+    return y + h + config.s(10)
+
+
+def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -> int:
+    """A slim panel-top button, below "Clear all forwarding", that clears only the
+    rules currently tinted dangerous (`_draw_forward_rules`) — pointed at a system
+    we don't hold. Records its hit-rect on ``ui``. Returns the y below it."""
+    font = _fonts()["small"]
+    label = f"Clear dangerous forwarding ({count})"
+    h = font.get_height() + config.s(10)
+    r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
+    pygame.draw.rect(surface, _BTN_DANGER[0], r, border_radius=config.s(5))
+    pygame.draw.rect(surface, _BTN_DANGER[1], r, config.s(1), border_radius=config.s(5))
+    _text(surface, font, label, config.COLOR_TEXT, center=r.center)
+    ui.clear_dangerous_rect = (r.x, r.y, r.w, r.h)
     return y + h + config.s(10)
 
 
