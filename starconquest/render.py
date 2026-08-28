@@ -1125,14 +1125,21 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     equivalents of the P / A / H / R / M / X keys plus Quit/Esc, so every live-play
     action is reachable without a keyboard.
 
-    Each button is sized to its own measured label and the row is laid out
-    right-to-left. Where the strip is too narrow to hold them all — a portrait
-    phone, or a shrunken desktop window — the least essential are dropped (rects
-    zeroed) rather than drawn overlapping. The ranking matters because a touch
-    player has no keys to fall back on: Menu survives longest, since it reaches the
-    setup screen and Quit from there, and Clear goes first, since the popup's own
-    Cancel and the × on a queued row already do its job. Fast forward ranks just
-    below those two, because it is only ever offered in the one situation it is the
+    Each button is sized to its own measured label. The strip is two independently
+    anchored clusters rather than one row: the buttons that leave this game (Quit,
+    Menu, New map) are pinned to the left edge, and the buttons that hand control
+    to the AI or a review mode (History, Clear, Route, Autoplay, Play, Fast
+    forward) are packed to the right, against the side panel. Pulling the exit
+    group away from the rest means there's normally a gap between them, so an
+    idle tap near the control cluster can't land on Quit by accident — the two
+    clusters only butt up when the strip is squeezed too narrow to keep them
+    apart. Where the strip is too narrow to hold every button — a portrait phone,
+    or a shrunken desktop window — the least essential are dropped (rects zeroed)
+    rather than drawn overlapping. The ranking matters because a touch player has
+    no keys to fall back on: Menu survives longest, since it reaches the setup
+    screen and Quit from there, and Clear goes first, since the popup's own Cancel
+    and the × on a queued row already do its job. Fast forward ranks just below
+    those two, because it is only ever offered in the one situation it is the
     point of the screen — watching a match you are out of.
 
     Route mode gets a strip of its own rather than extra buttons on this one — see
@@ -1142,62 +1149,73 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     fbh = config.FOOTER_BTN_H
     y = by + (config.HUD_BOTTOM_H - fbh) // 2
 
-    # (ui attribute, label, fill, edge, how long it survives a squeeze), in visual
-    # order — left to right. play/pause is hidden under autoplay, which drives turns
-    # on its own timer and would make it a no-op; history needs a recorded turn to
-    # scrub through.
-    specs: list[tuple[str, str, tuple, tuple, int]] = []
+    # (ui attribute, label, fill, edge, how long it survives a squeeze, which
+    # cluster it's pinned to), in visual order within its cluster — left to right.
+    # play/pause is hidden under autoplay, which drives turns on its own timer and
+    # would make it a no-op; history needs a recorded turn to scrub through.
+    specs: list[tuple[str, str, tuple, tuple, int, str]] = []
 
     # Route mode replaces the strip wholesale rather than adding to it: the shared
     # zeroing loop below then takes every live-play rect out of service for free,
     # so nothing from the ordinary strip can be clicked under an open plan.
     if ui.mode == ROUTING:
-        specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4))
-        specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2))
+        specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
+        specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
         _lay_out_footer(surface, ui, specs, y, fbh, font)
         return
 
     # quit is the only touch equivalent of Esc — without it a player with no
     # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
-    # can only ask the browser to close the window (see main.leave_app).
-    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8))
-    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
-    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
-    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1))
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9))
+    # can only ask the browser to close the window (see main.leave_app). Pinned
+    # left with the rest of the "leaves this game" group, away from the
+    # control-cluster taps on the right.
+    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the R key exactly.
-    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2))
+    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2, "left"))
     if state.turn > 0:
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3))
-    # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause.
-    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
+    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
+    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
+    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
     if ui.can_route(state):
-        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5))
+        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+    # autoplay hands the human seat's decisions to the AI, or takes control back;
+    # shown either way, unlike play/pause.
+    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
     if not ui.autoplay:
-        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6))
+        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means
     # something.
     if ui.can_fast_forward(state):
         specs.append(
-            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7)
+            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7, "right")
         )
 
     _lay_out_footer(surface, ui, specs, y, fbh, font)
 
 
 def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
-    """Measure, squeeze and draw one footer strip, right-to-left.
+    """Measure, squeeze and draw the footer strip's two clusters.
 
     Every rect the strip can ever record is zeroed first, so whichever buttons this
     call *doesn't* draw stop answering clicks — that is what lets route mode swap
     the strip out and know nothing from the live-play one is left live.
+
+    The "left" cluster is pinned to the panel's left edge and the "right" cluster
+    packed against the side panel, same as a single right-to-left row would be;
+    what's between them is empty space, not a shared gap, so the two clusters
+    drift apart when there's room and only meet once the strip is squeezed down
+    to needing every pixel. Squeezing itself still treats every button as one
+    list — the gap between clusters costs the same one `BTN_GAP` as any other
+    neighbouring pair, so dropping the least essential button is exactly as
+    likely to come from either cluster.
     """
     w = surface.get_width()
     widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
@@ -1212,8 +1230,19 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
     for attr in _FOOTER_RECTS:
         setattr(ui, attr, (0, 0, 0, 0))
+
+    x = config.HUD_PAD
+    for attr, label, fill, edge, _keep, group in shown:
+        if group != "left":
+            continue
+        rect = pygame.Rect(x, y, widths[attr], fbh)
+        setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
+        x = rect.right + config.BTN_GAP
+
     right = w - config.HUD_RIGHT_W - config.HUD_PAD
-    for attr, label, fill, edge, _keep in reversed(shown):
+    for attr, label, fill, edge, _keep, group in reversed(shown):
+        if group != "right":
+            continue
         rect = pygame.Rect(right - widths[attr], y, widths[attr], fbh)
         setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
         right = rect.x - config.BTN_GAP
