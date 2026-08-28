@@ -470,7 +470,8 @@ def _hud_rects(ui):
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
              "clear_button_rect", "quit_button_rect", "exit_history_rect",
              "rewind_button_rect", "fast_forward_rect", "route_button_rect",
-             "route_cancel_rect", "route_confirm_rect", "route_mode_rect")
+             "route_cancel_rect", "route_confirm_rect", "route_mode_rect",
+             "route_auto_rect")
     return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
 
 
@@ -523,6 +524,9 @@ def test_route_mode_footer_never_overlaps_at_touch_scale():
         ui.begin_route()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
+        # a front, so rally's Auto-route button is drawn and measured too — it is
+        # the widest label the strip can carry
+        state.systems[nbr].owner_id = 2
         cases = [(False, set(), None), (False, {home}, None), (False, {home}, nbr),
                  (True, set(), None), (True, {nbr}, None)]
         for rally, picked, dest in cases:

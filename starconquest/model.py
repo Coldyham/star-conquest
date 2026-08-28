@@ -56,7 +56,7 @@ def flow_field(state: GameState, allowed: set[int], seeds: set[int],
     instead of flip-flopping, which is what made rear AI ships oscillate.
     """
     if by_turns:
-        return _flow_field_by_turns(state, allowed, seeds)
+        return _dijkstra_by_turns(state, allowed, seeds)[1]
     parent: dict[int, int] = {}
     seen = set(seeds)
     queue = deque(sorted(seeds))
@@ -70,9 +70,20 @@ def flow_field(state: GameState, allowed: set[int], seeds: set[int],
     return parent
 
 
-def _flow_field_by_turns(state: GameState, allowed: set[int],
-                         seeds: set[int]) -> dict[int, int]:
-    """``flow_field`` weighted by travel turns — Dijkstra rather than BFS.
+def flow_costs(state: GameState, allowed: set[int], seeds: set[int]) -> dict[int, int]:
+    """Travel turns from each node to the nearest of ``seeds`` (seeds themselves 0),
+    over the same restricted expansion ``flow_field`` uses.
+
+    The distances behind ``flow_field(by_turns=True)``, for callers that need to
+    compare routes rather than just follow one — ``viewstate.Ui._plan_rally``
+    balances rally-point load across the systems these costs tie.
+    """
+    return _dijkstra_by_turns(state, allowed, seeds)[0]
+
+
+def _dijkstra_by_turns(state: GameState, allowed: set[int],
+                       seeds: set[int]) -> tuple[dict[int, int], dict[int, int]]:
+    """``(cost to nearest seed, next hop toward it)``, weighted by travel turns.
 
     Determinism comes from the heap key ``(distance, id)``: nodes settle in one
     fixed order, and a node reached at equal cost by two routes keeps the parent
@@ -98,7 +109,7 @@ def _flow_field_by_turns(state: GameState, allowed: set[int],
                 dist[nbr] = nd
                 parent[nbr] = cur  # move from nbr toward cur (nearer a seed)
                 heapq.heappush(heap, (nd, nbr))
-    return parent
+    return dist, parent
 
 
 @dataclass

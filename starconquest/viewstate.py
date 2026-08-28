@@ -233,7 +233,7 @@ class Ui:
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""  # outcome of the last share, drawn under the button
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
-    # actions (A: autoplay, R: new map, F: fast forward). menu_button_rect above is
+    # actions (A: autoplay, N: new map, F: fast forward). menu_button_rect above is
     # shared with the game-over overlay — the two scenes never draw at the same
     # time, so whichever last ran render.draw owns the current value.
     autoplay_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -257,6 +257,9 @@ class Ui:
     # the sub-mode toggle: one button naming the sub-mode it is in, which pressing
     # (or Tab) switches
     route_mode_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # rally mode's "pick the front line for me" shortcut, drawn only when there is
+    # something threatened to pick
+    route_auto_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Camera pan: a press on empty space (no node/lane/button under it) arms
     # this instead of the drag-to-target gesture, so panning and drag-to-send
     # never fight over the same press. `pan_last` is the previous motion-event
@@ -616,6 +619,45 @@ class Ui:
             self.route_dest = sid
         self.recompute_route(state)
 
+    def threatened_systems(self, state: GameState) -> set[int]:
+        """The systems we hold that something is pointed at: a rival holds a
+        neighbouring system, or rival ships are already inbound. Neutral neighbours
+        don't count — neutral never attacks.
+
+        The same shape as the AI's own `_threat`, recomputed here rather than
+        imported, so the shell keeps its derived stats local (and `ai` stays out of
+        render's reach). It discloses nothing fog hasn't: a neighbour of a system we
+        hold is one hop away and a fleet inbound to one ends at a system we hold, so
+        both are in full view at any sight range — the `visible` guards are there so
+        that stays true if the tiers ever change.
+        """
+        threatened = set()
+        for sid, sys in state.systems.items():
+            if sys.owner_id != self.human_id:
+                continue
+            if any(state.systems[n].owner_id not in (self.human_id, 0) and n in self.visible
+                   for n in sys.neighbors):
+                threatened.add(sid)
+        for f in state.fleets:
+            if f.owner_id != self.human_id and state.systems.get(f.dest_id) is not None \
+                    and state.systems[f.dest_id].owner_id == self.human_id:
+                threatened.add(f.dest_id)
+        return threatened
+
+    def auto_rally(self, state: GameState) -> None:
+        """Rally on every threatened system at once — the front line as one gesture.
+
+        Replaces the picks rather than adding to them: it is a "do the obvious thing"
+        button, and what it means has to be the same whatever was picked before. Tap
+        from there to adjust. A no-op when nothing is threatened, which is also when
+        render leaves the button out.
+        """
+        threatened = self.threatened_systems(state)
+        if not threatened:
+            return
+        self.route_sel = threatened
+        self.recompute_route(state)
+
     def route_sources(self) -> set[int]:
         """The chain-mode group members that will actually get a rule — everything
         picked bar the destination, which is the sink and can't forward to itself.
@@ -752,25 +794,61 @@ class Ui:
                 node = nxt
 
     def _plan_rally(self, state: GameState) -> None:
-        """Rally routing: seed the same BFS at *every* rally point at once and take
-        the field whole.
+        """Rally routing: every owned system forwards toward its nearest rally point,
+        with ties split to even out the load.
 
-        `flow_field` is already multi-source and already breaks ties deterministically,
-        so "forward to whichever rally point is nearest" needs no new search — and the
-        map it returns is exactly the plan: every owned system it reached, mapped to
-        its next hop inward. Rally points get no rule of their own (a seed never gets
-        a parent), which is what makes them sinks.
+        Nearest is `model.flow_costs` — travel turns, multi-source. Where a system is
+        genuinely equidistant from two rally points, sending it to whichever is
+        already drawing less is free: the ships arrive just as soon either way, and
+        the alternative (an arbitrary but consistent tie-break) piles a whole region
+        onto one point while its neighbour idles. Load is measured in **ships per
+        turn**, not systems, since that is the flow the rally point actually has to
+        absorb — four barren systems are less of a stream than one rich one. That is
+        `1 / production` (`System.production` is turns *per ship*, so lower is
+        richer), the same figure `fog.player_totals` reports. It counts inflow only:
+        a rally point's own output isn't something the plan directed anywhere.
 
-        Everything else we hold is unroutable — a pocket cut off from every rally
-        point — rather than silently left out.
+        Assigning nearest-first is what makes that exact rather than a guess: a
+        node's next hop is always strictly nearer, so it has already been assigned,
+        and `target` tells us which rally point this node's ships will really reach
+        rather than which one we aimed them at. Every hop of every path gets a rule,
+        so the plan covers the whole field; rally points get none, which is what
+        makes them sinks. Everything else we hold is unroutable — a pocket cut off
+        from every rally point — rather than silently left out.
+
+        Since a chosen hop always steps to a strictly nearer node, the plan still
+        cannot loop, however the ties fall.
         """
         if not self.route_sel:
             return
         owned = self._owned(state)
-        parent = model.flow_field(state, owned, set(self.route_sel), by_turns=True)
-        for node in sorted(parent):
-            self._add_hop(node, parent[node])
-        self.route_unroutable = owned - set(parent) - self.route_sel
+        cost = model.flow_costs(state, owned, set(self.route_sel))
+        load = {sid: 0.0 for sid in self.route_sel}
+        target: dict[int, int] = {}   # node -> the rally point its ships end at
+        for node in sorted(cost, key=lambda n: (cost[n], n)):
+            if node in self.route_sel:
+                continue
+            best = None
+            for nbr in sorted(state.systems[node].neighbors):
+                if nbr not in cost:
+                    continue
+                step = state.travel_turns(node, nbr) or 1
+                if cost[nbr] + step != cost[node]:
+                    continue          # not a hop along a shortest route
+                dest = nbr if nbr in self.route_sel else target.get(nbr)
+                if dest is None:
+                    continue          # that neighbour leads nowhere we can reach
+                key = (load[dest], dest, nbr)
+                if best is None or key < best[0]:
+                    best = (key, nbr, dest)
+            if best is None:
+                continue
+            _key, nxt, dest = best
+            self._add_hop(node, nxt)
+            target[node] = dest
+            prod = state.systems[node].production
+            load[dest] += 1.0 / prod if prod > 0 else 0.0
+        self.route_unroutable = owned - set(self.route_plan) - self.route_sel
 
     def _detect_route_cycles(self, state: GameState) -> None:
         """Flag systems where the plan would close a loop with a *surviving* rule.

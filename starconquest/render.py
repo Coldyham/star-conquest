@@ -1031,12 +1031,13 @@ def _draw_zoom_controls(surface, ui: Ui) -> None:
 
     plus = pygame.Rect(px + pw - inset - s, y, s, s)
     minus = pygame.Rect(plus.x - gap - s, y, s, s)
-    reset_w = _btn_w(font, "Reset", s)
+    reset_label = _key_hint("Reset", "R")
+    reset_w = _btn_w(font, reset_label, s)
     reset = pygame.Rect(minus.x - gap - reset_w, y, reset_w, s)
 
     ui.zoom_plus_rect = (plus.x, plus.y, plus.w, plus.h)
     ui.zoom_minus_rect = (minus.x, minus.y, minus.w, minus.h)
-    ui.reset_view_rect = _btn(surface, reset, "Reset", *_BTN_BLUE, font)
+    ui.reset_view_rect = _btn(surface, reset, reset_label, *_BTN_BLUE, font)
     _draw_step_button(surface, minus, "-", accent)
     _draw_step_button(surface, plus, "+", accent)
 
@@ -1141,6 +1142,7 @@ _FOOTER_RECTS = (
     "route_button_rect",
     "route_cancel_rect",
     "route_mode_rect",
+    "route_auto_rect",
 )
 
 
@@ -1192,6 +1194,10 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         # losing this makes the sub-mode unreachable on a touch build.
         mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
         specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
+        # Rally only, and only when there is a front to pick: drawn exactly when it
+        # would do something, the same gate `can_fast_forward` earns its button by.
+        if ui.route_rally and ui.threatened_systems(state):
+            specs.append(("route_auto_rect", _key_hint("Auto-route", "T"), *_BTN_VIOLET, 5, "right"))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
         _lay_out_footer(surface, ui, specs, y, fbh, font)
@@ -1206,7 +1212,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the R key exactly.
-    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2, "left"))
+    specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
     if state.turn > 0:
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
@@ -1735,7 +1741,7 @@ systems (drag a box), choose a destination, and every system along the way
 forwards toward it. Rally (Tab): pick the systems to gather at, and everything
 else you hold forwards to the nearest one.
 
-Drag to pan, wheel to zoom. Enter ends the turn, P plays on."""
+Drag to pan, wheel to zoom, R resets the view. Enter ends the turn, P plays on."""
 
 
 def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
@@ -1779,7 +1785,8 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
 
     if rally:
         hint = ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them.")
+                "Everything else you hold forwards to the nearest of them. "
+                "Auto-route picks your threatened systems.")
     else:
         hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
                 "un-aim, and to drop it from the group.")
@@ -1926,7 +1933,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
     # the width of the widest label in the grid, so the rows stay square and no
     # label can spill into its neighbour once the font scales up.
-    labels = [_key_hint("Retry", "T"), _key_hint("New map", "R"), _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
+    labels = [_key_hint("Retry", "T"), _key_hint("New map", "N"), _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
     quit_label = _key_hint("Quit", "Esc")
     share_label = _key_hint("Challenge a friend", "C")
     share = _shareable(state, ui)

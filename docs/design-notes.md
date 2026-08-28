@@ -210,6 +210,35 @@ means "do this" is the wrong place to teach that distinction. One button naming 
 sub-mode it is *in*, which switches when pressed, says the same thing without asking
 anyone to infer a convention from a fill colour.
 
+**A tie is a free choice, so rally spends it on balance.** Equidistant means the ships
+arrive just as soon whichever point they go to, so an arbitrary-but-consistent
+tie-break is pure waste: it piles a whole region onto one rally point while its
+neighbour idles. `_plan_rally` sends a tied system to whichever point is drawing less.
+
+Load is **ships per turn**, not systems — `System.production` is turns *per* ship, so
+four barren systems are a thinner stream than one rich one and counting systems gets
+it backwards. It is inflow only; a rally point's own output was never something the
+plan directed anywhere.
+
+The greedy is exact rather than approximate because it assigns **nearest-first**. A
+node's chosen hop is always strictly nearer, so it has already been assigned, and
+`target` records which rally point that node's ships *actually* reach — not the one we
+aimed them at. Without that the accounting drifts, because a tied node can hand its
+ships to a neighbour that was itself tied and assigned elsewhere. The no-cycle
+guarantee is untouched: balancing only ever chooses among hops that each step strictly
+nearer, so the potential still decreases along every edge.
+
+**Auto-route** picks every threatened system as a rally point in one press — the front
+line as one gesture, which is the shape rally is for. "Threatened" is the AI's own
+`_threat` (a rival, not neutral, holding a neighbour, or rival ships inbound), copied
+into `viewstate` rather than imported, since the shell computes its derived stats
+locally and `render`/`input` may not reach into `ai`. It discloses nothing fog hasn't:
+a neighbour of a system we hold is one hop away, and a fleet inbound to one ends at a
+system we hold, so both are in full view at any sight tier. It replaces the picks
+rather than adding to them — a "do the obvious thing" button has to mean the same
+whatever came before — and render leaves it out entirely when nothing is threatened,
+so it is drawn exactly when it would do something.
+
 A richer version was considered and dropped: a rally point that claims only the
 systems closer to it than to a front. It is a better *idea* and a much worse control —
 the set it claims moves every turn as the front does, so what you confirmed and what

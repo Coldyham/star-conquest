@@ -1044,3 +1044,172 @@ def test_the_nearest_rally_point_is_the_soonest_reached_one():
     ui = _rally(s, {0, 4})
     assert ui.route_plan[3] == (2, 0)      # 3 turns back to 0 beats 10 turns on to 4
     assert ui.route_plan[1] == (0, 0) and ui.route_plan[2] == (1, 0)
+
+
+# --------------------------------------------------------------------------- #
+# Rally: ties are split to even out the load
+# --------------------------------------------------------------------------- #
+def _star(feeders: dict[int, list[int]], tied: int, human=1) -> GameState:
+    """Rally points (the keys) each with their own feeder systems, plus one extra
+    system adjacent to every rally point — so it is exactly tied between them."""
+    edges = [(hub, leaf) for hub, leaves in feeders.items() for leaf in leaves]
+    edges += [(tied, hub) for hub in feeders]
+    ids = {tied} | set(feeders) | {leaf for leaves in feeders.values() for leaf in leaves}
+    return _graph(edges, {sid: human for sid in ids}, n=max(ids) + 1, human=human)
+
+
+def test_a_tie_goes_to_the_rally_point_drawing_less():
+    """Equidistant means the ships arrive just as soon either way, so the choice is
+    free — and spending it on the emptier point beats an arbitrary tie-break that
+    piles a whole region onto one while its neighbour idles."""
+    s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
+    ui = _rally(s, {0, 1})
+    assert ui.route_plan[8] == (1, 0)      # 4 systems feed 0, only 2 feed 1
+
+
+def test_the_tie_flips_when_the_other_point_is_the_busier_one():
+    """The same board with the loads swapped picks the other way, so the test above
+    is measuring load and not just preferring the higher id."""
+    s = _star({0: [2, 3], 1: [4, 5, 6, 7]}, tied=8)
+    ui = _rally(s, {0, 1})
+    assert ui.route_plan[8] == (0, 0)
+
+
+def test_load_is_ships_per_turn_not_systems():
+    """`System.production` is turns *per ship*, so four barren systems are a thinner
+    stream than one rich one — counting systems would get this backwards."""
+    s = _star({0: [2, 3, 4, 5], 1: [6]}, tied=8)
+    for sid in (2, 3, 4, 5):
+        s.systems[sid].production = 10     # 0.1 ships/turn each, 0.4 in total
+    s.systems[6].production = 1            # 1.0 ships/turn on its own
+    ui = _rally(s, {0, 1})
+    assert ui.route_plan[8] == (0, 0)      # 0 has more systems but far less inflow
+
+
+def test_balancing_never_makes_a_slower_route():
+    """Load only ever picks between hops that are already equally quick — a rally
+    point that is genuinely further away is not an option however idle it is."""
+    s = _star({0: [2, 3, 4, 5], 1: []}, tied=8)
+    _lengths(s, {(8, 1): 60.0})            # 10 turns to the idle point, 1 to the busy one
+    ui = _rally(s, {0, 1})
+    assert ui.route_plan[8] == (0, 0)
+
+
+def test_balanced_ties_are_stable_across_recomputes():
+    s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
+    ui = _rally(s, {0, 1})
+    picks = set()
+    for _ in range(10):
+        ui.recompute_route(s)
+        picks.add(ui.route_plan[8])
+    assert len(picks) == 1
+
+
+def test_a_balanced_plan_still_cannot_loop():
+    """Splitting ties chooses between hops that each step strictly nearer, so the
+    no-cycle guarantee survives however the ties fall."""
+    s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
+    ui = _rally(s, {0, 1})
+    for src in ui.route_plan:
+        node, seen = src, set()
+        while node in ui.route_plan:
+            assert node not in seen, f"cycle from {src}"
+            seen.add(node)
+            node = ui.route_plan[node][0]
+        assert node in ui.route_sel     # every walk ends at a rally point
+
+
+# --------------------------------------------------------------------------- #
+# Rally: auto-route picks the threatened systems
+# --------------------------------------------------------------------------- #
+def test_threatened_is_a_rival_neighbour_or_inbound_ships():
+    s = _line(4, owned={0, 1, 2})
+    s.systems[3].owner_id = 2              # 2 now faces a rival
+    ui = _ui(s)
+    assert ui.threatened_systems(s) == {2}
+
+
+def test_a_neutral_neighbour_is_not_a_threat():
+    """Neutral never attacks, so a border with it is not a front — the same call
+    the AI's own threat maths makes."""
+    s = _line(3, owned={0, 1})             # 2 is neutral
+    ui = _ui(s)
+    assert ui.threatened_systems(s) == set()
+
+
+def test_inbound_rival_ships_make_a_system_threatened():
+    s = _line(3, owned={0, 1, 2})
+    s.players[2] = Player(2, "E", (0, 0, 0))
+    s.fleets.append(model.Fleet(owner_id=2, source_id=2, dest_id=1, ships=4,
+                                turns_total=1, turns_remaining=1))
+    ui = _ui(s)
+    assert 1 in ui.threatened_systems(s)
+
+
+def test_auto_rally_picks_every_threatened_system():
+    s = _graph([(0, 1), (1, 2), (2, 3), (0, 4)],
+               {0: 1, 1: 1, 2: 1, 4: 1, 3: 2})
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_rally(s)
+    assert ui.route_sel == {2}             # only 2 borders the enemy
+    assert set(ui.route_plan) == {0, 1, 4}  # everything else flows to it
+
+
+def test_auto_rally_replaces_the_picks_rather_than_adding_to_them():
+    """It is a "do the obvious thing" button, so it has to mean the same whatever
+    was picked before."""
+    s = _line(4, owned={0, 1, 2})
+    s.systems[3].owner_id = 2
+    ui = _rally(s, {0})
+    ui.auto_rally(s)
+    assert ui.route_sel == {2}
+
+
+def test_auto_rally_does_nothing_when_nothing_is_threatened():
+    s = _line(3, owned={0, 1})
+    ui = _rally(s, {0})
+    ui.auto_rally(s)
+    assert ui.route_sel == {0}             # the player's own picks are left alone
+
+
+def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
+    state, ui = _routed_setup()
+    try:
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
+        ui.set_route_rally(state, True)
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert bool(ui.route_auto_rect[2]) == bool(ui.threatened_systems(state))
+    finally:
+        pygame.quit()
+
+
+def test_the_auto_route_button_picks_the_front():
+    state, ui = _rally_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        for nbr in state.systems[home].neighbors:      # guarantee a front to find
+            state.systems[nbr].owner_id = 2
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_auto_rect[2] > 0
+        ax, ay, aw, ah = ui.route_auto_rect
+        _press(state, ui, (ax + aw // 2, ay + ah // 2))
+        assert ui.route_sel == ui.threatened_systems(state)
+    finally:
+        pygame.quit()
+
+
+def test_t_picks_the_front_in_rally_mode_only():
+    state, ui = _routed_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        for nbr in state.systems[home].neighbors:
+            state.systems[nbr].owner_id = 2
+        _key(state, ui, pygame.K_t)
+        assert ui.route_sel == set()       # chain mode: T is not one of its keys
+        ui.set_route_rally(state, True)
+        _key(state, ui, pygame.K_t)
+        assert ui.route_sel == ui.threatened_systems(state)
+    finally:
+        pygame.quit()

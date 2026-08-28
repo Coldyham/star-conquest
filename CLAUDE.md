@@ -303,11 +303,16 @@ intact.
     the seeding: **chain** seeds the one destination and `_plan_chain` walks each
     selected system's path to it; **rally** seeds every pick at once and
     `_plan_rally` takes the returned field whole, so every owned system it
-    reaches forwards toward its nearest rally point. Both pass
-    `by_turns=True`, so "nearest" is **travel turns**, not hops — the same
-    `state.travel_turns` rule the rest of the game follows. The AI keeps the
+    reaches forwards toward its nearest rally point. Both measure "nearest" in
+    **travel turns**, not hops (`flow_field(by_turns=True)` / `flow_costs`) — the
+    same `state.travel_turns` rule the rest of the game follows. The AI keeps the
     unweighted default, which is why the flag exists rather than a changed
-    default. Every hop of every path gets
+    default. Rally splits a genuine tie toward whichever point is drawing less,
+    measured in ships/turn (`1 / production`, as `fog.player_totals` reports),
+    assigning nearest-first so each node's real destination is already known.
+    `Ui.auto_rally` (rally's Auto-route button, `T`) picks every
+    `threatened_systems` — the shell's own local copy of the AI's threat maths,
+    per the render/input rule against importing `ai`. Every hop of every path gets
     a rule, not just the selected systems. Owned-only is *forced*, not chosen: a
     rule can only live on a system we hold, so a path through enemy space cannot
     be expressed. The **sinks** are exempt (`flow_field` seeds need not be in

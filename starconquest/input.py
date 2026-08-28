@@ -123,7 +123,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_t:
                 return "retry"
-            if event.key == pygame.K_r:
+            if event.key == pygame.K_n:
                 return "restart"
             if event.key == pygame.K_m:
                 return "menu"
@@ -180,7 +180,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
 
     if event.type == pygame.KEYDOWN:
-        return _handle_key(event, ui)
+        return _handle_key(event, state, ui)
 
     if event.type == pygame.MOUSEWHEEL:
         # MOUSEWHEEL carries no position, so ask pygame for the cursor's current
@@ -281,7 +281,7 @@ def _clear_selected(ui: Ui) -> None:
         ui.clear_forward(ui.selected)
 
 
-def _handle_key(event, ui: Ui) -> Optional[str]:
+def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return "end_turn"
     if event.key == pygame.K_p:
@@ -295,8 +295,11 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
         _clear_selected(ui)
         return None
-    if event.key == pygame.K_r:
+    if event.key == pygame.K_n:
         return "restart"
+    if event.key == pygame.K_r:
+        ui.reset_view(state)
+        return None
     if event.key == pygame.K_m:
         return "menu"
     if event.key == pygame.K_h:
@@ -381,6 +384,9 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     if ui.route_mode_rect[2] and _point_in_rect(pos, ui.route_mode_rect):
         ui.set_route_rally(state, not ui.route_rally)
         return None
+    if ui.route_auto_rect[2] and _point_in_rect(pos, ui.route_auto_rect):
+        ui.auto_rally(state)
+        return None
     node = pick_node(state, ui, pos)
     if node is not None:
         ui.route_tap(state, node)
@@ -414,6 +420,9 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
         # switch sub-mode, the keyboard half of the footer's Mode button
         ui.set_route_rally(state, not ui.route_rally)
         return None
+    if event.key == pygame.K_t and ui.route_rally:
+        ui.auto_rally(state)
+        return None
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
         # clear the group but stay in the mode, mirroring Clear elsewhere
         ui.route_sel = set()
@@ -424,8 +433,11 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
     if event.key == pygame.K_m:
         return "menu"
-    if event.key == pygame.K_r:
+    if event.key == pygame.K_n:
         return "restart"
+    if event.key == pygame.K_r:
+        ui.reset_view(state)
+        return None
     return None
 
 
