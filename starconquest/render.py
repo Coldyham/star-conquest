@@ -1436,7 +1436,7 @@ def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -
     rules currently tinted dangerous (`_draw_forward_rules`) — pointed at a system
     we don't hold. Records its hit-rect on ``ui``. Returns the y below it."""
     font = _fonts()["small"]
-    label = f"Clear dangerous forwarding ({count})"
+    label = f"Clear dangerous ({count})"
     h = font.get_height() + config.s(10)
     r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
     pygame.draw.rect(surface, _BTN_DANGER[0], r, border_radius=config.s(5))
