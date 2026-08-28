@@ -381,21 +381,21 @@ def _draw_planned(surface, pa, pb, dest_r: int, color, width: int) -> None:
 def _rule_chevron_dists(length: float, src_r: int, dest_r: int, phase: float) -> list[float]:
     """Distances along a rule's lane at which to draw its conveyor chevrons.
 
-    The run fills the whole gap between the two systems: `config.RULE_CHEVRON_GAP` is
-    a target pitch, and the actual spacing is the span divided by however many
-    chevrons that asks for, so no remainder is left idling short of the destination.
-    `phase` (0..1) advances every chevron by one spacing over a full cycle and wraps
-    the leading one back to the source — because the spacing divides the span evenly,
-    that wrap is a chevron arriving at the destination as another leaves the source,
-    which is what makes the flow read as continuous.
+    The run spans the whole gap between the two systems: `config.RULE_CHEVRON_GAP` is
+    a target pitch, and the spacing actually used is the span divided by however many
+    chevrons that asks for (at least two), so no remainder is left idling short of the
+    destination. At rest both ends carry a chevron; `phase` (0..1) walks the run one
+    spacing forward over a cycle, retiring the leading chevron as it reaches the
+    destination and bringing it back at the source as the cycle turns over.
     """
     start = src_r + config.ARROW_GAP + config.RULE_CHEVRON_SIZE
     span = length - (dest_r + config.ARROW_GAP) - start
     if span <= config.RULE_CHEVRON_SIZE:
         return [length / 2]   # nose-to-nose systems: no room for a run, so mark the lane
-    count = max(1, round(span / max(1, config.RULE_CHEVRON_GAP)))
+    count = max(2, round(span / max(1, config.RULE_CHEVRON_GAP)))
     step = span / count
-    return [start + ((i + phase) % count) * step for i in range(count)]
+    return [start + (i + phase) * step for i in range(count + 1)
+            if (i + phase) <= count]
 
 
 def _draw_rule_flow(surface, pa, pb, src_r: int, dest_r: int, color, width: int,

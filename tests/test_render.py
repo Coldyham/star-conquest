@@ -277,9 +277,9 @@ def test_forward_rule_label_sits_by_the_sending_system():
 
 
 def test_rule_chevrons_fill_the_whole_lane():
-    """The conveyor has to reach the destination: a fixed pitch left up to a whole
-    spacing of empty lane before the far node. Spacing is the span divided by the
-    chevron count instead, checked across lane lengths and at both scales."""
+    """A rule at rest must read as covering its lane end to end — both nodes carry a
+    chevron, at least two ride any lane, and the spacing is even. Checked across lane
+    lengths and at both scales, since the pitch is only a target."""
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
@@ -291,17 +291,21 @@ def test_rule_chevrons_fill_the_whole_lane():
                 if length - (dest_r + config.ARROW_GAP) - head <= config.RULE_CHEVRON_SIZE:
                     continue           # too short for a run; covered below
                 at = f"lane of {length}px at {config.ui_scale}x"
-                ds = render._rule_chevron_dists(length, src_r, dest_r, 0.0)
                 tail = length - (dest_r + config.ARROW_GAP)
+                ds = render._rule_chevron_dists(length, src_r, dest_r, 0.0)
+                assert len(ds) >= 3, f"a lane with room for a run gets one: {at}"
                 assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
-                step = (tail - head) / len(ds)
-                assert ds[-1] == pytest.approx(tail - step), f"run stops short: {at}"
-                # ...and a full cycle later every chevron has moved up exactly one
-                # spacing, the last one wrapping back to the source
-                moved = render._rule_chevron_dists(length, src_r, dest_r, 0.999)
-                assert moved[-1] == pytest.approx(tail, abs=step / 100), f"no arrival: {at}"
-                for a, b in zip(ds[:-1], moved[:-1]):
-                    assert b - a == pytest.approx(step, abs=step / 100), f"uneven crawl: {at}"
+                assert ds[-1] == pytest.approx(tail), f"run stops short of the destination: {at}"
+                step = (tail - head) / (len(ds) - 1)
+                assert all(b - a == pytest.approx(step) for a, b in zip(ds, ds[1:])), \
+                    f"uneven spacing: {at}"
+
+                # mid-cycle the run has walked forward by that spacing, one chevron
+                # short: the one that reached the destination has left the lane
+                moved = render._rule_chevron_dists(length, src_r, dest_r, 0.5)
+                assert len(moved) == len(ds) - 1, f"lost or gained a chevron: {at}"
+                for a, b in zip(ds, moved):
+                    assert b - a == pytest.approx(step / 2), f"uneven crawl: {at}"
 
             # two systems all but touching: one chevron rather than an empty lane
             assert len(render._rule_chevron_dists(src_r + dest_r + 4, src_r, dest_r, 0.0)) == 1
