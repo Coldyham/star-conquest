@@ -64,22 +64,29 @@ class Ui:
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
     sel_forward: Optional[int] = None  # source id of the rule being edited, if any
-    # Route mode (see ROUTING above): pick a group of owned systems, aim them at a
-    # destination, and confirm to lay a forwarding chain from each of them to it.
-    # A drag boxes a group; a tap means one of three things, decided entirely by
-    # what is already drawn (see `route_tap`), so no stage or modifier is needed.
-    #   route_sel        — the chosen group. The destination is *not* removed from
-    #                      it: it is skipped when building the plan instead, so
-    #                      re-aiming somewhere else hands the system straight back
-    #                      as a source rather than silently having dropped it.
+    # Route mode (see ROUTING above) has two sub-modes, both of which end in one
+    # `route_plan` the player confirms. They differ only in how `model.flow_field`
+    # is seeded, so everything downstream of the plan is shared.
+    #   chain (`route_rally` False) — pick a group of owned systems, aim them at a
+    #     destination, and lay a forwarding chain from each of them to it. A drag
+    #     boxes a group; a tap always aims (see `route_tap`).
+    #   rally (`route_rally` True) — pick the systems ships should gather at, and
+    #     every other system we hold forwards toward the nearest of them. A tap
+    #     toggles a rally point; drag is free for panning.
+    #   route_sel        — the chosen group; in rally mode, the rally points. In
+    #                      chain mode the destination is *not* removed from it: it
+    #                      is skipped when building the plan instead, so re-aiming
+    #                      somewhere else hands the system straight back as a
+    #                      source rather than silently having dropped it.
     #   route_plan       — source -> (next hop, keep): the rules a confirm writes.
     #                      Covers the *whole* path, not just the selected systems,
     #                      so ships actually conveyor the full distance.
     #   route_replaces   — sources whose existing rule this would change (the old
     #                      rule is still readable from `auto_forward`, so the set
     #                      of ids is all the preview needs)
-    #   route_unroutable — selected systems with no path to the destination
-    #                      through our own territory
+    #   route_unroutable — systems with no path to a sink through our own
+    #                      territory: the selected ones in chain mode, every owned
+    #                      system the rally field never reached in rally mode
     #   route_cycles     — systems the plan would trap ships circling in (see
     #                      `_detect_route_cycles`)
     #   route_box        — a selection box is being dragged. Its corners reuse
@@ -88,6 +95,9 @@ class Ui:
     #                      drag-to-target rubber band drawing over the box.
     route_sel: set[int] = field(default_factory=set)
     route_dest: Optional[int] = None
+    # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
+    # it alone so re-entering the mode comes back where you left it.
+    route_rally: bool = False
     route_plan: dict[int, tuple[int, int]] = field(default_factory=dict)
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
@@ -244,6 +254,10 @@ class Ui:
     route_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_confirm_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # the sub-mode pair, drawn as a segmented control (the live one takes the
+    # strip's usual "toggle is on" fill)
+    route_chain_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    route_rally_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Camera pan: a press on empty space (no node/lane/button under it) arms
     # this instead of the drag-to-target gesture, so panning and drag-to-send
     # never fight over the same press. `pan_last` is the previous motion-event
@@ -533,6 +547,10 @@ class Ui:
         """Drop the whole proposal and leave the mode. Committed rules survive (a
         confirm has already written them into `auto_forward`).
 
+        `route_rally` is deliberately left alone: the sub-mode is a preference, and
+        this runs every turn from `main.resolve_turn`, so clearing it would drag the
+        player back to chain routing between one plan and the next.
+
         Deliberately *not* folded into `reset_selection`: that runs from several
         places mid-gesture, and would wipe the plan the route branch is building.
         """
@@ -547,9 +565,33 @@ class Ui:
         if self.mode == ROUTING:
             self.mode = IDLE
 
+    def set_route_rally(self, state: GameState, rally: bool) -> None:
+        """Switch route sub-mode, dropping the proposal but staying in the mode.
+
+        The proposal has to go: a chain group and a set of rally points are
+        different kinds of thing living in the same `route_sel`, so carrying one
+        over would silently reinterpret sources as sinks. Idempotent, so the two
+        footer buttons can both be pressed repeatedly.
+        """
+        if rally == self.route_rally:
+            return
+        self.route_rally = rally
+        self.route_sel = set()
+        self.route_dest = None
+        self.route_press = False
+        self.route_box = False
+        self.recompute_route(state)
+
     def route_tap(self, state: GameState, sid: int) -> None:
-        """A tap always aims the group at that system. Tapping whatever is already
-        the destination un-aims it, and drops it from the group if it was in it.
+        """A tap on a system, in whichever sub-mode is live.
+
+        **Rally**: a plain membership toggle — tap to make a rally point, tap again
+        to take it back. One action, not two: unlike the aim-or-remove shape
+        rejected below, what a tap *does* never changes with what it lands on.
+
+        **Chain**: a tap always aims the group at that system. Tapping whatever is
+        already the destination un-aims it, and drops it from the group if it was
+        in it.
 
         One primary meaning is the whole point. Making a tap mean "aim" on some
         systems and "remove" on others is what makes it feel arbitrary, and it also
@@ -559,11 +601,16 @@ class Ui:
         skipped as a source (`route_sources`), so re-aiming hands it straight back.
 
         Removing is therefore the second tap on the thing you are pointing at, and
-        adding is the drag box's job — a tap never adds.
+        adding is the drag box's job — a chain tap never adds.
         """
         if sid not in state.systems:
             return
-        if sid == self.route_dest:
+        if self.route_rally:
+            if sid in self.route_sel:
+                self.route_sel.discard(sid)
+            elif sid in self.seen:
+                self.route_sel.add(sid)
+        elif sid == self.route_dest:
             self.route_dest = None
             self.route_sel.discard(sid)  # a second tap on the target rejects it
         elif sid in self.seen:
@@ -571,8 +618,12 @@ class Ui:
         self.recompute_route(state)
 
     def route_sources(self) -> set[int]:
-        """The group members that will actually get a rule — everything picked bar
-        the destination, which is the sink and can't forward to itself."""
+        """The chain-mode group members that will actually get a rule — everything
+        picked bar the destination, which is the sink and can't forward to itself.
+
+        Rally mode has no equivalent: its rules are laid on systems the player
+        never picked, so what it plans is `route_plan` and nothing narrower.
+        """
         return self.route_sel - {self.route_dest}
 
     def add_route_box(self, state: GameState, rect: tuple[int, int, int, int]) -> None:
@@ -609,15 +660,62 @@ class Ui:
         self.recompute_route(state)
 
     def recompute_route(self, state: GameState) -> None:
-        """Rebuild the proposal from the selection and destination. The one writer
-        of `route_plan` / `route_replaces` / `route_unroutable` / `route_cycles`,
-        called from every mutator above so the preview is never stale.
+        """Rebuild the proposal from the selection. The one writer of `route_plan` /
+        `route_replaces` / `route_unroutable` / `route_cycles`, called from every
+        mutator above so the preview is never stale.
 
-        A rule can only exist on a system we own (`rule_is_live`), so the path is
-        searched over our own territory — that is forced by the rule model, not a
-        policy choice. The *destination* is exempt: its incoming rule sits on the
-        last owned system of the path, which is what lets a chain be aimed at an
-        enemy system as an assault funnel.
+        A rule can only exist on a system we own (`rule_is_live`), so both sub-modes
+        search over our own territory — that is forced by the rule model, not a
+        policy choice. The *sinks* are exempt: a sink's incoming rule sits on the
+        last owned system of the path, which is what lets either sub-mode be aimed
+        at enemy systems as an assault funnel.
+
+        Cycle detection is shared, and so is `_add_hop`, so `keep` preservation and
+        overwrite reporting are identical whichever sub-mode built the plan.
+        """
+        self.route_plan = {}
+        self.route_replaces = set()
+        self.route_unroutable = set()
+        self.route_cycles = set()
+        self._prune_route_sel(state)
+        if self.route_rally:
+            self._plan_rally(state)
+        else:
+            self._plan_chain(state)
+        self._detect_route_cycles(state)
+
+    def _prune_route_sel(self, state: GameState) -> None:
+        """Drop picks that can no longer mean anything, so a stale selection can't
+        plan. Chain sources must be systems we still hold; a rally point need only
+        exist and have been seen, since it is a sink rather than a rule holder."""
+        if self.route_rally:
+            self.route_sel = {
+                sid for sid in self.route_sel
+                if sid in state.systems and sid in self.seen
+            }
+        else:
+            self.route_sel = {
+                sid for sid in self.route_sel
+                if sid in state.systems and state.systems[sid].owner_id == self.human_id
+            }
+
+    def _owned(self, state: GameState) -> set[int]:
+        """The systems a rule could live on — the search space for both sub-modes."""
+        return {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
+
+    def _add_hop(self, node: int, nxt: int) -> None:
+        """Record one planned rule, preserving the `keep` of an existing rule that
+        already pointed the same way — so re-running a route over a conveyor that is
+        already correct is idempotent rather than quietly resetting tuning. Only a
+        changed next hop resets it to 0 (forward everything)."""
+        old = self.auto_forward.get(node)
+        keep = old[1] if old is not None and old[0] == nxt else 0
+        if old is not None and old != (nxt, keep):
+            self.route_replaces.add(node)
+        self.route_plan[node] = (nxt, keep)
+
+    def _plan_chain(self, state: GameState) -> None:
+        """Chain routing: walk each selected system's path to the destination.
 
         Cases worth knowing, all decided here:
           * the destination is the sink and never gets a rule of its own;
@@ -628,27 +726,14 @@ class Ui:
           * with no destination yet the plan is empty and so is `route_unroutable`
             (otherwise every selection would read as unroutable before aiming);
           * every system *along* a path gets a rule, including ones the player
-            never selected — that is what makes ships travel the full distance;
-          * replacing a rule that already pointed at the same next hop keeps its
-            `keep`, so re-routing over an existing conveyor is idempotent; only a
-            changed destination resets it to 0 (forward everything).
+            never selected — that is what makes ships travel the full distance.
 
         Two selected systems can never disagree about a shared hop: `parent` is a
         dict, so the next hop is a function of the node alone.
         """
-        self.route_plan = {}
-        self.route_replaces = set()
-        self.route_unroutable = set()
-        self.route_cycles = set()
-        # forget anything we no longer hold, so a stale selection can't plan
-        self.route_sel = {
-            sid for sid in self.route_sel
-            if sid in state.systems and state.systems[sid].owner_id == self.human_id
-        }
         if self.route_dest is None or self.route_dest not in state.systems:
             return
-        owned = {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
-        parent = model.flow_field(state, owned, {self.route_dest})
+        parent = model.flow_field(state, self._owned(state), {self.route_dest})
         for sid in sorted(self.route_sources()):
             node = sid
             while node != self.route_dest:
@@ -658,21 +743,39 @@ class Ui:
                 if nxt is None:
                     self.route_unroutable.add(sid)
                     break
-                old = self.auto_forward.get(node)
-                keep = old[1] if old is not None and old[0] == nxt else 0
-                if old is not None and old != (nxt, keep):
-                    self.route_replaces.add(node)
-                self.route_plan[node] = (nxt, keep)
+                self._add_hop(node, nxt)
                 node = nxt
-        self._detect_route_cycles(state)
+
+    def _plan_rally(self, state: GameState) -> None:
+        """Rally routing: seed the same BFS at *every* rally point at once and take
+        the field whole.
+
+        `flow_field` is already multi-source and already breaks ties deterministically,
+        so "forward to whichever rally point is nearest" needs no new search — and the
+        map it returns is exactly the plan: every owned system it reached, mapped to
+        its next hop inward. Rally points get no rule of their own (a seed never gets
+        a parent), which is what makes them sinks.
+
+        Everything else we hold is unroutable — a pocket cut off from every rally
+        point — rather than silently left out.
+        """
+        if not self.route_sel:
+            return
+        owned = self._owned(state)
+        parent = model.flow_field(state, owned, set(self.route_sel))
+        for node in sorted(parent):
+            self._add_hop(node, parent[node])
+        self.route_unroutable = owned - set(parent) - self.route_sel
 
     def _detect_route_cycles(self, state: GameState) -> None:
         """Flag systems where the plan would close a loop with a *surviving* rule.
 
-        The plan alone can't loop — each hop steps strictly closer to the
-        destination. But the destination itself gets no plan rule, so if it
-        already forwards back into the plan (directly, or down a chain of rules on
-        systems the plan doesn't touch) ships circulate forever. Friendly arrivals
+        The plan alone can't loop — each hop steps strictly closer to a sink. But a
+        sink itself gets no plan rule, so if one already forwards back into the plan
+        (directly, or down a chain of rules on systems the plan doesn't touch) ships
+        circulate forever. In rally mode that is the *only* way a loop can form, the
+        plan covering every reachable system: an owned rally point still carrying a
+        rule from before is a sink that isn't one. Friendly arrivals
         are lossless, so nothing is destroyed; the ships simply never reach a
         front, which is worse than losing them because it looks like it is
         working. `confirm_route` breaks any loop it finds here.

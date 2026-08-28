@@ -312,16 +312,17 @@ def _handle_key(event, ui: Ui) -> Optional[str]:
 
 
 def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
-    """Route mode's whole event stream: build a group, aim it, confirm or drop it.
+    """Route mode's whole event stream: build a proposal, confirm it or drop it.
 
-    One flat mode, no stages: a drag from empty space boxes a group, and a tap on a
-    system means exactly one thing given what is on screen (see ``Ui.route_tap``).
-    A tap commits on press, as everywhere else in the game.
+    No stages: a tap on a system means exactly one thing given what is on screen
+    (see ``Ui.route_tap``), and a tap commits on press, as everywhere else in the
+    game. The two sub-modes differ only in what a drag from empty space does.
 
-    Drag is spent on the box, so panning is right-drag on a mouse and the on-map
-    Reset / −/+ cluster on touch. That costs little: zoom 1 already fits the whole
-    map, so there is nothing to pan to until you have zoomed in, and Reset undoes
-    that in one tap.
+    In **chain** mode drag is spent on the selection box, so panning is right-drag
+    on a mouse and the on-map Reset / −/+ cluster on touch. That costs little: zoom
+    1 already fits the whole map, so there is nothing to pan to until you have
+    zoomed in, and Reset undoes that in one tap. **Rally** mode has no box — its
+    picks are all taps — so there left-drag pans like it does in live play.
     """
     if event.type == pygame.MOUSEMOTION:
         if ui.route_press and event.buttons[0]:
@@ -377,13 +378,23 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     if ui.route_cancel_rect[2] and _point_in_rect(pos, ui.route_cancel_rect):
         ui.reset_route()
         return None
+    if ui.route_chain_rect[2] and _point_in_rect(pos, ui.route_chain_rect):
+        ui.set_route_rally(state, False)
+        return None
+    if ui.route_rally_rect[2] and _point_in_rect(pos, ui.route_rally_rect):
+        ui.set_route_rally(state, True)
+        return None
     node = pick_node(state, ui, pos)
     if node is not None:
         ui.route_tap(state, node)
         return None
 
-    # Empty space arms a selection box. It never clears the group — this mode
-    # confirms and cancels explicitly, so a stray tap must not undo the work.
+    # Empty space: a box in chain mode, a pan in rally mode, which has no box to
+    # drag. Neither clears the group — this mode confirms and cancels explicitly,
+    # so a stray tap must not undo the work.
+    if ui.route_rally:
+        _arm_pan(ui, pos)
+        return None
     ui.route_press = True
     ui.route_box = False
     ui.drag_start = pos
@@ -401,6 +412,10 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
         return None
     if event.key in (pygame.K_g, pygame.K_ESCAPE):
         ui.reset_route()
+        return None
+    if event.key == pygame.K_TAB:
+        # switch sub-mode, the keyboard half of the footer's Chain/Rally pair
+        ui.set_route_rally(state, not ui.route_rally)
         return None
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
         # clear the group but stay in the mode, mirroring Clear elsewhere

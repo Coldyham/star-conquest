@@ -85,6 +85,13 @@ def test_render_all_ui_states_no_crash():
         ui.route_unroutable = {home}                    # forced, to draw the marker
         ui.route_cycles = {home, nbr}
         render.draw(screen, state, ui)
+        # rally: sink rings on the picks, no destination, and a cut-off pocket
+        ui.set_route_rally(state, True)
+        render.draw(screen, state, ui)                  # empty, "Rally"
+        ui.route_tap(state, nbr)
+        ui.route_unroutable = {home}
+        render.draw(screen, state, ui)
+        ui.set_route_rally(state, False)
         ui.reset_route()
         ui.auto_forward.clear()
         ui.sel_forward = None
@@ -516,13 +523,16 @@ def test_route_mode_footer_never_overlaps_at_touch_scale():
         ui.begin_route()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        for picked, dest in ((set(), None), ({home}, None), ({home}, nbr)):
+        cases = [(False, set(), None), (False, {home}, None), (False, {home}, nbr),
+                 (True, set(), None), (True, {nbr}, None)]
+        for rally, picked, dest in cases:
+            ui.route_rally = rally
             ui.route_sel = set(picked)
             ui.route_dest = dest
             ui.recompute_route(state)
             render.draw(screen, state, ui)
             rects = _hud_rects(ui)
-            assert rects, f"route mode drew no buttons at all ({picked}, {dest})"
+            assert rects, f"route mode drew no buttons at all ({rally}, {picked}, {dest})"
             for name, r in rects.items():
                 assert screen.get_rect().contains(r), f"{name} is off screen: {r}"
             pairs = list(rects.items())

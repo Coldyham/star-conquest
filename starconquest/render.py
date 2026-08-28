@@ -485,8 +485,13 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
-    """Route mode's proposal: the selection, the chain it would lay, and what
+    """Route mode's proposal: the selection, the rules it would lay, and what
     confirming would cost.
+
+    Both sub-modes share the accent: they are never on screen together, so rally
+    needs no second uncommitted hue. What differs is the rings — a chain pick is a
+    *source* and gets one ring, a rally pick is a *sink* and gets the same double
+    ring a chain destination does.
 
     Everything here is uncommitted, so it is drawn in `config.COLOR_ROUTE` — the
     one hue no seat uses — and *every* hop crawls. That matches
@@ -522,8 +527,12 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
                         config.node_radius(state.systems[dest].production),
                         accent, config.s(3), animate=True)
 
-    # 3. rings on the selected group, and markers on the ones that can't be served
-    for sid in ui.route_sel:
+    # 3. one ring per source pick, plus one on anything that can't be served. In
+    #    chain mode the unservable are always picks, so that second loop is empty
+    #    and nothing about chain drawing changes; in rally mode it is what marks a
+    #    pocket no rally point can reach, which the player never picked.
+    sources = set() if ui.route_rally else ui.route_sel
+    for sid in sources | ui.route_unroutable:
         sys = state.systems.get(sid)
         if sys is None:
             continue
@@ -532,11 +541,17 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
         bad = sid in ui.route_unroutable
         pygame.draw.circle(surface, _BTN_DANGER[1] if bad else accent, sp, r, max(2, config.s(3)))
 
-    # 4. the destination ring (labels and the drag box go on top of the nodes,
-    #    in _draw_route_overlay)
-    if ui.route_dest is not None and ui.route_dest in state.systems:
-        dp = ui.view.to_screen(state.systems[ui.route_dest].pos)
-        dr = config.node_radius(state.systems[ui.route_dest].production)
+    # 4. the double ring on every sink — the destination in chain mode, each rally
+    #    point in rally mode (labels and the drag box go on top of the nodes, in
+    #    _draw_route_overlay)
+    dest = ui.route_dest
+    sinks = ui.route_sel if ui.route_rally else ({dest} if dest is not None else set())
+    for sid in sinks:
+        sys = state.systems.get(sid)
+        if sys is None:
+            continue
+        dp = ui.view.to_screen(sys.pos)
+        dr = config.node_radius(sys.production)
         pygame.draw.circle(surface, accent, dp, dr + config.s(10), max(2, config.s(2)))
         pygame.draw.circle(surface, accent, dp, dr + config.NODE_RING_PAD, max(2, config.s(3)))
 
@@ -1077,7 +1092,14 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
             pygame.draw.rect(surface, (40, 46, 66), br, config.s(3), border_radius=config.s(8))
             ui.route_confirm_rect = (0, 0, 0, 0)
-            label = "Route" if not ui.route_sel else "Pick a target"
+            if not ui.route_sel:
+                label = "Rally" if ui.route_rally else "Route"
+            elif ui.route_rally:
+                # picked, but the field is empty: rallying on the only system we
+                # hold, or on a pocket with nothing behind it
+                label = "Nothing to route"
+            else:
+                label = "Pick a target"
         colour = config.COLOR_TEXT if ui.route_plan else config.COLOR_TEXT_DIM
         _text(surface, _fonts()["big" if ui.route_plan else "normal"], label, colour,
               center=br.center)
@@ -1118,6 +1140,8 @@ _FOOTER_RECTS = (
     "fast_forward_rect",
     "route_button_rect",
     "route_cancel_rect",
+    "route_chain_rect",
+    "route_rally_rect",
 )
 
 
@@ -1160,6 +1184,14 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # zeroing loop below then takes every live-play rect out of service for free,
     # so nothing from the ordinary strip can be clicked under an open plan.
     if ui.mode == ROUTING:
+        # Chain/Rally is a segmented control built out of two ordinary buttons: the
+        # live one takes _BTN_ACTIVE, the strip's existing "this toggle is on" fill
+        # (autoplay, play, fast forward), so it needs no drawing code of its own.
+        # Both outrank Cancel in a squeeze — Cancel still has Esc and the confirm
+        # slot behind it, whereas losing these makes the sub-mode unreachable on a
+        # touch build.
+        specs.append(("route_chain_rect", "Chain", *(_BTN_BLUE if ui.route_rally else _BTN_ACTIVE), 7, "right"))
+        specs.append(("route_rally_rect", "Rally", *(_BTN_ACTIVE if ui.route_rally else _BTN_BLUE), 6, "right"))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
         _lay_out_footer(surface, ui, specs, y, fbh, font)
@@ -1678,8 +1710,10 @@ instead — everything past 'keep' flows on, every turn.
 
 Tap a queued arrow, or its row below, to change it.
 
-Route sets up many rules at once: pick a group of your systems (drag a box, or tap
-them), choose a destination, and every system along the way forwards toward it.
+Route sets up many rules at once. Chain: pick a group of your systems (drag a
+box), choose a destination, and every system along the way forwards toward it.
+Rally: pick the systems to gather at, and everything else you hold forwards to
+the nearest one.
 
 Drag to pan, −/+ to zoom."""
 
@@ -1696,9 +1730,10 @@ directly.
 
 Click a queued arrow, or its row below, to change it; X clears it.
 
-G opens Route, which sets up many rules at once: pick a group of your systems
-(drag a box, or click them), choose a destination, and every system along the way
-forwards toward it.
+G opens Route, which sets up many rules at once. Chain: pick a group of your
+systems (drag a box), choose a destination, and every system along the way
+forwards toward it. Rally (Tab): pick the systems to gather at, and everything
+else you hold forwards to the nearest one.
 
 Drag to pan, wheel to zoom. Enter ends the turn, P plays on."""
 
@@ -1710,19 +1745,27 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     the numbers are the part that isn't obvious from looking — how many rules this
     replaces, and how much of the selection can't actually be served.
     """
-    y = _head(surface, x, y, "Route", config.COLOR_TEXT)
+    rally = ui.route_rally
+    y = _head(surface, x, y, "Rally" if rally else "Route", config.COLOR_TEXT)
     font = _fonts()["small"]
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
     dest = ui.route_dest
-    lines: list[tuple[str, tuple[int, int, int]]] = [
-        (f"{len(ui.route_sources())} selected", config.COLOR_ROUTE),
-    ]
-    if dest is None:
-        lines.append(("no destination yet", config.COLOR_TEXT_DIM))
-    elif dest in state.systems:
-        sys = state.systems[dest]
-        lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
-        lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
+    lines: list[tuple[str, tuple[int, int, int]]] = []
+    if rally:
+        n = len(ui.route_sel)
+        lines.append((f"{n} rally point{'' if n == 1 else 's'}", config.COLOR_ROUTE))
+        if not n:
+            lines.append(("tap systems to gather at", config.COLOR_TEXT_DIM))
+        else:
+            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
+    else:
+        lines.append((f"{len(ui.route_sources())} selected", config.COLOR_ROUTE))
+        if dest is None:
+            lines.append(("no destination yet", config.COLOR_TEXT_DIM))
+        elif dest in state.systems:
+            sys = state.systems[dest]
+            lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
+            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
     if ui.route_replaces:
         lines.append((f"{len(ui.route_replaces)} replaced", _BTN_AMBER[1]))
     if ui.route_unroutable:
@@ -1734,8 +1777,12 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
             break
         y = _row(surface, x, y, text, colour)
 
-    hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
-            "un-aim, and to drop it from the group.")
+    if rally:
+        hint = ("Tap the systems ships should gather at — tap again to drop one. "
+                "Everything else you hold forwards to the nearest of them.")
+    else:
+        hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
+                "un-aim, and to drop it from the group.")
     y += config.ROW_GAP * 2
     for line in _wrap(font, hint, width):
         if y + _row_h() > bottom:
