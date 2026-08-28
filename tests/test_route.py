@@ -50,6 +50,15 @@ def _ui(state, human=1) -> Ui:
     return ui
 
 
+def _lengths(state: GameState, lengths: dict[tuple[int, int], float]) -> GameState:
+    """Restretch named lanes. ``state.travel_turns`` re-times from ``length_ly``
+    every call, so length is the only thing that sets what a hop costs — at the
+    default speed 1.0 ly is a 1-turn lane and 60.0 ly is a 10-turn one."""
+    for (a, b), ly in lengths.items():
+        state.lanes[model.lane_key(a, b)].length_ly = ly
+    return state
+
+
 def _line(n, owned, human=1) -> GameState:
     return _graph([(a, a + 1) for a in range(n - 1)],
                   {sid: human for sid in owned}, n=n, human=human)
@@ -711,3 +720,327 @@ def test_history_mode_retires_the_route_button():
         assert ui.route_cancel_rect == (0, 0, 0, 0)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Rally sub-mode: planning
+# --------------------------------------------------------------------------- #
+def _rally(state, sel, human=1) -> Ui:
+    """A Ui in rally mode with ``sel`` already picked as the rally points."""
+    ui = _ui(state, human=human)
+    ui.route_rally = True
+    ui.route_sel = set(sel)
+    ui.recompute_route(state)
+    return ui
+
+
+def test_rally_flows_every_system_to_the_nearest_point():
+    """Two rally points at either end of a line split it down the middle."""
+    s = _line(7, owned=range(7))
+    ui = _rally(s, {0, 6})
+    assert ui.route_plan == {1: (0, 0), 2: (1, 0), 3: (2, 0), 4: (5, 0), 5: (6, 0)}
+
+
+def test_a_rally_point_gets_no_rule_of_its_own():
+    """It is the sink: a rule there would forward the gathered ships straight out."""
+    s = _line(4, owned=range(4))
+    ui = _rally(s, {0})
+    assert 0 not in ui.route_plan
+    assert ui.route_plan == {1: (0, 0), 2: (1, 0), 3: (2, 0)}
+
+
+def test_rally_covers_systems_the_player_never_picked():
+    """The whole point of the sub-mode: one tap rules the entire empire."""
+    s = _line(5, owned=range(5))
+    ui = _rally(s, {4})
+    assert set(ui.route_plan) == {0, 1, 2, 3}
+
+
+def test_rally_ties_are_deterministic():
+    """A system equidistant from two rally points must not flip-flop between
+    recomputes, or the preview shimmers and the confirmed rule is a coin toss."""
+    s = _line(5, owned=range(5))
+    ui = _rally(s, {0, 4})
+    picks = set()
+    for _ in range(10):
+        ui.recompute_route(s)
+        picks.add(ui.route_plan[2])
+    assert len(picks) == 1
+
+
+def test_an_un_owned_rally_point_is_legal():
+    """The assault funnel: rally the empire on an enemy system. Its incoming rule
+    sits on the last system we own, exactly as a chain destination's does."""
+    s = _line(4, owned={0, 1, 2})
+    s.systems[3].owner_id = 2
+    ui = _rally(s, {3})
+    assert ui.route_plan == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
+    assert ui.route_unroutable == set()
+
+
+def test_a_pocket_no_rally_point_reaches_is_unroutable():
+    s = _graph([(0, 1), (1, 2), (3, 4)], {sid: 1 for sid in range(5)})
+    ui = _rally(s, {0})
+    assert set(ui.route_plan) == {1, 2}
+    assert ui.route_unroutable == {3, 4}
+
+
+def test_rally_never_routes_through_territory_we_do_not_own():
+    s = _line(4, owned={0, 3})
+    s.systems[1].owner_id = s.systems[2].owner_id = 2
+    ui = _rally(s, {0})
+    assert ui.route_plan == {}
+    assert ui.route_unroutable == {3}
+
+
+def test_no_rally_points_yet_means_nothing_is_unroutable():
+    """Otherwise the whole empire reads as unreachable before the first tap."""
+    s = _line(4, owned=range(4))
+    ui = _rally(s, set())
+    assert ui.route_plan == {} and ui.route_unroutable == set()
+
+
+def test_rally_keeps_a_rule_that_already_points_the_right_way():
+    s = _line(4, owned=range(4))
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[2] = (1, 4)     # already flowing inward, keeping 4
+    ui.route_sel = {0}
+    ui.recompute_route(s)
+    assert ui.route_plan[2] == (1, 4)
+    assert 2 not in ui.route_replaces
+
+
+def test_a_rally_plan_reports_the_rules_it_replaces():
+    """Rally overwrites the whole rear, so the count is the only warning the
+    player gets before confirming."""
+    s = _graph([(0, 1), (1, 2), (2, 3), (1, 3)], {sid: 1 for sid in range(4)})
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[3] = (2, 4)     # points away from the rally point
+    ui.route_sel = {0}
+    ui.recompute_route(s)
+    assert ui.route_plan[3] == (1, 0)   # re-aimed, keep reset
+    assert ui.route_replaces == {3}
+
+
+def test_a_rally_point_forwarding_back_into_the_field_is_a_cycle():
+    """The only shape a rally loop can take: the plan rules every system it
+    reaches, so the sink's own leftover rule is the one edge that can close one."""
+    s = _line(3, owned=range(3))
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[0] = (1, 0)     # the rally point pushes straight back out
+    ui.route_sel = {0}
+    ui.recompute_route(s)
+    assert ui.route_cycles == {0, 1}
+
+
+def test_rally_confirm_breaks_the_cycle_rather_than_arming_it():
+    s = _line(3, owned=range(3))
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[0] = (1, 0)
+    ui.route_sel = {0}
+    ui.recompute_route(s)
+    ui.confirm_route(s)
+    assert ui.auto_forward == {1: (0, 0), 2: (1, 0)}   # the sink's rule is gone
+
+
+def test_rally_confirm_writes_the_field_and_leaves_the_mode():
+    s = _line(4, owned=range(4))
+    ui = _rally(s, {0})
+    ui.mode = ROUTING
+    ui.confirm_route(s)
+    assert ui.auto_forward == {1: (0, 0), 2: (1, 0), 3: (2, 0)}
+    assert ui.mode == IDLE and ui.route_sel == set()
+
+
+# --------------------------------------------------------------------------- #
+# Rally sub-mode: switching, pruning and taps
+# --------------------------------------------------------------------------- #
+def test_switching_sub_mode_drops_the_proposal():
+    """A chain group and a set of rally points share `route_sel` but mean opposite
+    things, so carrying one over would reinterpret sources as sinks."""
+    s = _line(4, owned=range(4))
+    ui = _ui(s)
+    ui.route_sel = {0, 1}
+    ui.set_route_dest(s, 3)
+    ui.set_route_rally(s, True)
+    assert ui.route_rally is True
+    assert ui.route_sel == set() and ui.route_dest is None and ui.route_plan == {}
+
+
+def test_switching_to_the_sub_mode_already_live_changes_nothing():
+    s = _line(4, owned=range(4))
+    ui = _rally(s, {0})
+    ui.set_route_rally(s, True)
+    assert ui.route_sel == {0} and ui.route_plan
+
+
+def test_the_sub_mode_survives_reset_route():
+    """It is a preference, not proposal state — and `reset_route` runs every turn."""
+    s = _line(4, owned=range(4))
+    ui = _rally(s, {0})
+    ui.mode = ROUTING
+    ui.reset_route()
+    assert ui.route_rally is True
+    assert ui.route_sel == set() and ui.route_plan == {}
+
+
+def test_an_un_owned_rally_point_survives_the_prune():
+    """A chain source has to be a system we hold; a sink does not."""
+    s = _line(4, owned={0, 1, 2})
+    s.systems[3].owner_id = 2
+    ui = _rally(s, {3})
+    assert ui.route_sel == {3}
+    ui.set_route_rally(s, False)
+    ui.route_sel = {3}
+    ui.recompute_route(s)
+    assert ui.route_sel == set()
+
+
+def test_a_rally_point_must_have_been_seen():
+    s = _line(3, owned={0, 1})
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.seen = {0, 1}               # 2 never sighted
+    ui.route_tap(s, 2)
+    assert ui.route_sel == set()
+
+
+def test_a_rally_tap_toggles():
+    """One meaning, whatever it lands on — unlike a chain tap, which aims."""
+    s = _line(3, owned=range(3))
+    ui = _rally(s, set())
+    ui.route_tap(s, 0)
+    assert ui.route_sel == {0} and ui.route_dest is None
+    ui.route_tap(s, 2)
+    assert ui.route_sel == {0, 2}
+    ui.route_tap(s, 0)
+    assert ui.route_sel == {2}
+
+
+# --------------------------------------------------------------------------- #
+# Rally sub-mode: gestures and render
+# --------------------------------------------------------------------------- #
+def _rally_setup():
+    """A live map already in route mode, switched to rally."""
+    state, ui = _routed_setup()
+    ui.set_route_rally(state, True)
+    return state, ui
+
+
+def test_tab_switches_sub_mode():
+    state, ui = _routed_setup()
+    try:
+        assert ui.route_rally is False
+        _key(state, ui, pygame.K_TAB)
+        assert ui.route_rally is True and ui.mode == ROUTING
+        _key(state, ui, pygame.K_TAB)
+        assert ui.route_rally is False
+    finally:
+        pygame.quit()
+
+
+def test_the_footer_button_switches_sub_mode():
+    """One button, naming the sub-mode it is in and switching when pressed."""
+    state, ui = _routed_setup()
+    try:
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_mode_rect[2] > 0
+        rx, ry, rw, rh = ui.route_mode_rect
+        _press(state, ui, (rx + rw // 2, ry + rh // 2))
+        assert ui.route_rally is True
+        render.draw(pygame.display.get_surface(), state, ui)
+        rx, ry, rw, rh = ui.route_mode_rect
+        _press(state, ui, (rx + rw // 2, ry + rh // 2))
+        assert ui.route_rally is False
+    finally:
+        pygame.quit()
+
+
+def test_a_tap_through_input_toggles_a_rally_point():
+    state, ui = _rally_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        _tap(state, ui, home)
+        assert ui.route_sel == {home} and ui.route_dest is None
+        _tap(state, ui, home)
+        assert ui.route_sel == set()
+    finally:
+        pygame.quit()
+
+
+def test_a_drag_from_empty_space_pans_instead_of_boxing_in_rally():
+    """Rally picks are all taps, so drag goes back to panning — the one gesture
+    chain mode has to give up for its selection box."""
+    state, ui = _rally_setup()
+    try:
+        px, py, pw, ph = config.play_rect()
+        # zoom about the middle, so the pan clamp has slack in every direction
+        ui.view.zoom_at((px + pw // 2, py + ph // 2), 2.0)
+        start = _empty_pos(state, ui)
+        before = ui.view.to_screen(state.systems[0].pos)
+        _press(state, ui, start)
+        assert ui.pan_active is True and ui.route_press is False
+        _motion(state, ui, (start[0] + 40, start[1] + 40))
+        _release(state, ui, (start[0] + 40, start[1] + 40))
+        assert ui.view.to_screen(state.systems[0].pos) != before
+        assert ui.route_sel == set() and ui.route_box is False
+    finally:
+        pygame.quit()
+
+
+def test_render_draws_a_rally_plan_without_a_destination():
+    """Rally leaves `route_dest` None, so every preview layer — the sink rings
+    especially, which chain mode reaches through `route_dest` — has to cope."""
+    state, ui = _rally_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        for nbr in state.systems[home].neighbors:   # something for the field to rule
+            state.systems[nbr].owner_id = 1
+        ui.route_tap(state, home)
+        assert ui.route_plan and ui.route_dest is None
+        render.draw(pygame.display.get_surface(), state, ui)
+        assert ui.route_confirm_rect[2] > 0       # the confirm takes the End Turn slot
+        assert ui.end_turn_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# "Nearest" is measured in travel turns, not hops
+# --------------------------------------------------------------------------- #
+def test_flow_field_by_turns_prefers_the_faster_path_over_the_shorter_one():
+    """Hop count and travel time disagree the moment lanes differ in length, and
+    a conveyor is judged by when ships arrive."""
+    s = _graph([(0, 1), (1, 2), (0, 2)], {sid: 1 for sid in range(3)})
+    _lengths(s, {(0, 2): 60.0})            # 10 turns direct, 2 turns via 1
+    assert model.flow_field(s, {0, 1, 2}, {0})[2] == 0          # hops: straight there
+    assert model.flow_field(s, {0, 1, 2}, {0}, by_turns=True)[2] == 1   # turns: round
+
+
+def test_flow_field_by_turns_is_deterministic_on_ties():
+    s = _graph([(0, 1), (1, 2), (2, 3), (3, 4)], {sid: 1 for sid in range(5)})
+    picks = {model.flow_field(s, set(range(5)), {0, 4}, by_turns=True)[2]
+             for _ in range(10)}
+    assert len(picks) == 1
+
+
+def test_a_route_takes_the_fastest_path_not_the_fewest_jumps():
+    s = _graph([(0, 1), (1, 2), (0, 2)], {sid: 1 for sid in range(3)})
+    _lengths(s, {(0, 2): 60.0})
+    ui = _ui(s)
+    ui.route_sel = {2}
+    ui.set_route_dest(s, 0)
+    assert ui.route_plan == {2: (1, 0), 1: (0, 0)}   # the long lane is left alone
+
+
+def test_the_nearest_rally_point_is_the_soonest_reached_one():
+    """A rally point one long hop away loses to one three short hops away."""
+    s = _line(5, owned=range(5))
+    _lengths(s, {(3, 4): 60.0})            # 10 turns to rally 4, 3 turns to rally 0
+    ui = _rally(s, {0, 4})
+    assert ui.route_plan[3] == (2, 0)      # 3 turns back to 0 beats 10 turns on to 4
+    assert ui.route_plan[1] == (0, 0) and ui.route_plan[2] == (1, 0)

@@ -133,6 +133,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
     ui.clear_forward_rect = (0, 0, 0, 0)
+    ui.clear_dangerous_rect = (0, 0, 0, 0)
     # route mode's confirm; _draw_hud re-records it once the plan has something in it
     ui.route_confirm_rect = (0, 0, 0, 0)
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
@@ -381,21 +382,21 @@ def _draw_planned(surface, pa, pb, dest_r: int, color, width: int) -> None:
 def _rule_chevron_dists(length: float, src_r: int, dest_r: int, phase: float) -> list[float]:
     """Distances along a rule's lane at which to draw its conveyor chevrons.
 
-    The run fills the whole gap between the two systems: `config.RULE_CHEVRON_GAP` is
-    a target pitch, and the actual spacing is the span divided by however many
-    chevrons that asks for, so no remainder is left idling short of the destination.
-    `phase` (0..1) advances every chevron by one spacing over a full cycle and wraps
-    the leading one back to the source — because the spacing divides the span evenly,
-    that wrap is a chevron arriving at the destination as another leaves the source,
-    which is what makes the flow read as continuous.
+    The run spans the whole gap between the two systems: `config.RULE_CHEVRON_GAP` is
+    a target pitch, and the spacing actually used is the span divided by however many
+    chevrons that asks for (at least two), so no remainder is left idling short of the
+    destination. At rest both ends carry a chevron; `phase` (0..1) walks the run one
+    spacing forward over a cycle, retiring the leading chevron as it reaches the
+    destination and bringing it back at the source as the cycle turns over.
     """
     start = src_r + config.ARROW_GAP + config.RULE_CHEVRON_SIZE
     span = length - (dest_r + config.ARROW_GAP) - start
     if span <= config.RULE_CHEVRON_SIZE:
         return [length / 2]   # nose-to-nose systems: no room for a run, so mark the lane
-    count = max(1, round(span / max(1, config.RULE_CHEVRON_GAP)))
+    count = max(2, round(span / max(1, config.RULE_CHEVRON_GAP)))
     step = span / count
-    return [start + ((i + phase) % count) * step for i in range(count)]
+    return [start + (i + phase) * step for i in range(count + 1)
+            if (i + phase) <= count]
 
 
 def _draw_rule_flow(surface, pa, pb, src_r: int, dest_r: int, color, width: int,
@@ -484,8 +485,13 @@ def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
-    """Route mode's proposal: the selection, the chain it would lay, and what
+    """Route mode's proposal: the selection, the rules it would lay, and what
     confirming would cost.
+
+    Both sub-modes share the accent: they are never on screen together, so rally
+    needs no second uncommitted hue. What differs is the rings — a chain pick is a
+    *source* and gets one ring, a rally pick is a *sink* and gets the same double
+    ring a chain destination does.
 
     Everything here is uncommitted, so it is drawn in `config.COLOR_ROUTE` — the
     one hue no seat uses — and *every* hop crawls. That matches
@@ -521,8 +527,12 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
                         config.node_radius(state.systems[dest].production),
                         accent, config.s(3), animate=True)
 
-    # 3. rings on the selected group, and markers on the ones that can't be served
-    for sid in ui.route_sel:
+    # 3. one ring per source pick, plus one on anything that can't be served. In
+    #    chain mode the unservable are always picks, so that second loop is empty
+    #    and nothing about chain drawing changes; in rally mode it is what marks a
+    #    pocket no rally point can reach, which the player never picked.
+    sources = set() if ui.route_rally else ui.route_sel
+    for sid in sources | ui.route_unroutable:
         sys = state.systems.get(sid)
         if sys is None:
             continue
@@ -531,11 +541,17 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
         bad = sid in ui.route_unroutable
         pygame.draw.circle(surface, _BTN_DANGER[1] if bad else accent, sp, r, max(2, config.s(3)))
 
-    # 4. the destination ring (labels and the drag box go on top of the nodes,
-    #    in _draw_route_overlay)
-    if ui.route_dest is not None and ui.route_dest in state.systems:
-        dp = ui.view.to_screen(state.systems[ui.route_dest].pos)
-        dr = config.node_radius(state.systems[ui.route_dest].production)
+    # 4. the double ring on every sink — the destination in chain mode, each rally
+    #    point in rally mode (labels and the drag box go on top of the nodes, in
+    #    _draw_route_overlay)
+    dest = ui.route_dest
+    sinks = ui.route_sel if ui.route_rally else ({dest} if dest is not None else set())
+    for sid in sinks:
+        sys = state.systems.get(sid)
+        if sys is None:
+            continue
+        dp = ui.view.to_screen(sys.pos)
+        dr = config.node_radius(sys.production)
         pygame.draw.circle(surface, accent, dp, dr + config.s(10), max(2, config.s(2)))
         pygame.draw.circle(surface, accent, dp, dr + config.NODE_RING_PAD, max(2, config.s(3)))
 
@@ -1076,7 +1092,14 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
             pygame.draw.rect(surface, (40, 46, 66), br, config.s(3), border_radius=config.s(8))
             ui.route_confirm_rect = (0, 0, 0, 0)
-            label = "Route" if not ui.route_sel else "Pick a target"
+            if not ui.route_sel:
+                label = "Rally" if ui.route_rally else "Route"
+            elif ui.route_rally:
+                # picked, but the field is empty: rallying on the only system we
+                # hold, or on a pocket with nothing behind it
+                label = "Nothing to route"
+            else:
+                label = "Pick a target"
         colour = config.COLOR_TEXT if ui.route_plan else config.COLOR_TEXT_DIM
         _text(surface, _fonts()["big" if ui.route_plan else "normal"], label, colour,
               center=br.center)
@@ -1117,6 +1140,7 @@ _FOOTER_RECTS = (
     "fast_forward_rect",
     "route_button_rect",
     "route_cancel_rect",
+    "route_mode_rect",
 )
 
 
@@ -1125,14 +1149,21 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     equivalents of the P / A / H / R / M / X keys plus Quit/Esc, so every live-play
     action is reachable without a keyboard.
 
-    Each button is sized to its own measured label and the row is laid out
-    right-to-left. Where the strip is too narrow to hold them all — a portrait
-    phone, or a shrunken desktop window — the least essential are dropped (rects
-    zeroed) rather than drawn overlapping. The ranking matters because a touch
-    player has no keys to fall back on: Menu survives longest, since it reaches the
-    setup screen and Quit from there, and Clear goes first, since the popup's own
-    Cancel and the × on a queued row already do its job. Fast forward ranks just
-    below those two, because it is only ever offered in the one situation it is the
+    Each button is sized to its own measured label. The strip is two independently
+    anchored clusters rather than one row: the buttons that leave this game (Quit,
+    Menu, New map) are pinned to the left edge, and the buttons that hand control
+    to the AI or a review mode (History, Clear, Route, Autoplay, Play, Fast
+    forward) are packed to the right, against the side panel. Pulling the exit
+    group away from the rest means there's normally a gap between them, so an
+    idle tap near the control cluster can't land on Quit by accident — the two
+    clusters only butt up when the strip is squeezed too narrow to keep them
+    apart. Where the strip is too narrow to hold every button — a portrait phone,
+    or a shrunken desktop window — the least essential are dropped (rects zeroed)
+    rather than drawn overlapping. The ranking matters because a touch player has
+    no keys to fall back on: Menu survives longest, since it reaches the setup
+    screen and Quit from there, and Clear goes first, since the popup's own Cancel
+    and the × on a queued row already do its job. Fast forward ranks just below
+    those two, because it is only ever offered in the one situation it is the
     point of the screen — watching a match you are out of.
 
     Route mode gets a strip of its own rather than extra buttons on this one — see
@@ -1142,62 +1173,82 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     fbh = config.FOOTER_BTN_H
     y = by + (config.HUD_BOTTOM_H - fbh) // 2
 
-    # (ui attribute, label, fill, edge, how long it survives a squeeze), in visual
-    # order — left to right. play/pause is hidden under autoplay, which drives turns
-    # on its own timer and would make it a no-op; history needs a recorded turn to
-    # scrub through.
-    specs: list[tuple[str, str, tuple, tuple, int]] = []
+    # (ui attribute, label, fill, edge, how long it survives a squeeze, which
+    # cluster it's pinned to), in visual order within its cluster — left to right.
+    # play/pause is hidden under autoplay, which drives turns on its own timer and
+    # would make it a no-op; history needs a recorded turn to scrub through.
+    specs: list[tuple[str, str, tuple, tuple, int, str]] = []
 
     # Route mode replaces the strip wholesale rather than adding to it: the shared
     # zeroing loop below then takes every live-play rect out of service for free,
     # so nothing from the ordinary strip can be clicked under an open plan.
     if ui.mode == ROUTING:
-        specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4))
-        specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2))
+        # One button rather than a Chain/Rally pair: with two, whichever is lit has
+        # to be read as "you are here" and the other as "go here", and a strip of
+        # buttons that all mean "do this" is the wrong place to learn that. This
+        # one names the sub-mode it is *in* and switches when pressed. Teal ties it
+        # to the live-play Route button it came from, and it outranks Cancel in a
+        # squeeze — Cancel still has Esc and the confirm slot behind it, whereas
+        # losing this makes the sub-mode unreachable on a touch build.
+        mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
+        specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
+        specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
+        specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
         _lay_out_footer(surface, ui, specs, y, fbh, font)
         return
 
     # quit is the only touch equivalent of Esc — without it a player with no
     # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
-    # can only ask the browser to close the window (see main.leave_app).
-    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8))
-    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
-    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
-    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1))
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9))
+    # can only ask the browser to close the window (see main.leave_app). Pinned
+    # left with the rest of the "leaves this game" group, away from the
+    # control-cluster taps on the right.
+    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the R key exactly.
-    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2))
+    specs.append(("restart_live_button_rect", _key_hint("New map", "R"), *_BTN_AMBER, 2, "left"))
     if state.turn > 0:
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3))
-    # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause.
-    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
+    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
+    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
+    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
     if ui.can_route(state):
-        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5))
+        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+    # autoplay hands the human seat's decisions to the AI, or takes control back;
+    # shown either way, unlike play/pause.
+    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
     if not ui.autoplay:
-        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6))
+        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means
     # something.
     if ui.can_fast_forward(state):
         specs.append(
-            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7)
+            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7, "right")
         )
 
     _lay_out_footer(surface, ui, specs, y, fbh, font)
 
 
 def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
-    """Measure, squeeze and draw one footer strip, right-to-left.
+    """Measure, squeeze and draw the footer strip's two clusters.
 
     Every rect the strip can ever record is zeroed first, so whichever buttons this
     call *doesn't* draw stop answering clicks — that is what lets route mode swap
     the strip out and know nothing from the live-play one is left live.
+
+    The "left" cluster is pinned to the panel's left edge and the "right" cluster
+    packed against the side panel, same as a single right-to-left row would be;
+    what's between them is empty space, not a shared gap, so the two clusters
+    drift apart when there's room and only meet once the strip is squeezed down
+    to needing every pixel. Squeezing itself still treats every button as one
+    list — the gap between clusters costs the same one `BTN_GAP` as any other
+    neighbouring pair, so dropping the least essential button is exactly as
+    likely to come from either cluster.
     """
     w = surface.get_width()
     widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
@@ -1212,8 +1263,19 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
     for attr in _FOOTER_RECTS:
         setattr(ui, attr, (0, 0, 0, 0))
+
+    x = config.HUD_PAD
+    for attr, label, fill, edge, _keep, group in shown:
+        if group != "left":
+            continue
+        rect = pygame.Rect(x, y, widths[attr], fbh)
+        setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
+        x = rect.right + config.BTN_GAP
+
     right = w - config.HUD_RIGHT_W - config.HUD_PAD
-    for attr, label, fill, edge, _keep in reversed(shown):
+    for attr, label, fill, edge, _keep, group in reversed(shown):
+        if group != "right":
+            continue
         rect = pygame.Rect(right - widths[attr], y, widths[attr], fbh)
         setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
         right = rect.x - config.BTN_GAP
@@ -1322,11 +1384,17 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
+        ui.clear_dangerous_rect = (0, 0, 0, 0)
         _panel_route(surface, state, ui, x, y, content_bottom)
         return
     # persistent "clear all forwarding" button, shown whenever any rule exists
     if ui.auto_forward:
         y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
+    # below it, a narrower button for just the rules currently tinted dangerous
+    # (pointed at a system we don't hold) — shown only while at least one exists
+    dangerous = [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
+    if dangerous:
+        y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     # A highlighted rule wins the panel's focus over a plain hover; while the popup
     # is open `ui.selected` is that rule's source anyway, so the two agree.
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
@@ -1360,6 +1428,21 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     pygame.draw.rect(surface, (170, 96, 104), r, config.s(1), border_radius=config.s(5))
     _text(surface, font, label, config.COLOR_TEXT, center=r.center)
     ui.clear_forward_rect = (r.x, r.y, r.w, r.h)
+    return y + h + config.s(10)
+
+
+def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -> int:
+    """A slim panel-top button, below "Clear all forwarding", that clears only the
+    rules currently tinted dangerous (`_draw_forward_rules`) — pointed at a system
+    we don't hold. Records its hit-rect on ``ui``. Returns the y below it."""
+    font = _fonts()["small"]
+    label = f"Clear dangerous ({count})"
+    h = font.get_height() + config.s(10)
+    r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
+    pygame.draw.rect(surface, _BTN_DANGER[0], r, border_radius=config.s(5))
+    pygame.draw.rect(surface, _BTN_DANGER[1], r, config.s(1), border_radius=config.s(5))
+    _text(surface, font, label, config.COLOR_TEXT, center=r.center)
+    ui.clear_dangerous_rect = (r.x, r.y, r.w, r.h)
     return y + h + config.s(10)
 
 
@@ -1627,8 +1710,10 @@ instead — everything past 'keep' flows on, every turn.
 
 Tap a queued arrow, or its row below, to change it.
 
-Route sets up many rules at once: pick a group of your systems (drag a box, or tap
-them), choose a destination, and every system along the way forwards toward it.
+Route sets up many rules at once. Chain: pick a group of your systems (drag a
+box), choose a destination, and every system along the way forwards toward it.
+Rally: pick the systems to gather at, and everything else you hold forwards to
+the nearest one.
 
 Drag to pan, −/+ to zoom."""
 
@@ -1645,9 +1730,10 @@ directly.
 
 Click a queued arrow, or its row below, to change it; X clears it.
 
-G opens Route, which sets up many rules at once: pick a group of your systems
-(drag a box, or click them), choose a destination, and every system along the way
-forwards toward it.
+G opens Route, which sets up many rules at once. Chain: pick a group of your
+systems (drag a box), choose a destination, and every system along the way
+forwards toward it. Rally (Tab): pick the systems to gather at, and everything
+else you hold forwards to the nearest one.
 
 Drag to pan, wheel to zoom. Enter ends the turn, P plays on."""
 
@@ -1659,19 +1745,27 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     the numbers are the part that isn't obvious from looking — how many rules this
     replaces, and how much of the selection can't actually be served.
     """
-    y = _head(surface, x, y, "Route", config.COLOR_TEXT)
+    rally = ui.route_rally
+    y = _head(surface, x, y, "Rally" if rally else "Route", config.COLOR_TEXT)
     font = _fonts()["small"]
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
     dest = ui.route_dest
-    lines: list[tuple[str, tuple[int, int, int]]] = [
-        (f"{len(ui.route_sources())} selected", config.COLOR_ROUTE),
-    ]
-    if dest is None:
-        lines.append(("no destination yet", config.COLOR_TEXT_DIM))
-    elif dest in state.systems:
-        sys = state.systems[dest]
-        lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
-        lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
+    lines: list[tuple[str, tuple[int, int, int]]] = []
+    if rally:
+        n = len(ui.route_sel)
+        lines.append((f"{n} rally point{'' if n == 1 else 's'}", config.COLOR_ROUTE))
+        if not n:
+            lines.append(("tap systems to gather at", config.COLOR_TEXT_DIM))
+        else:
+            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
+    else:
+        lines.append((f"{len(ui.route_sources())} selected", config.COLOR_ROUTE))
+        if dest is None:
+            lines.append(("no destination yet", config.COLOR_TEXT_DIM))
+        elif dest in state.systems:
+            sys = state.systems[dest]
+            lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
+            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
     if ui.route_replaces:
         lines.append((f"{len(ui.route_replaces)} replaced", _BTN_AMBER[1]))
     if ui.route_unroutable:
@@ -1683,8 +1777,12 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
             break
         y = _row(surface, x, y, text, colour)
 
-    hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
-            "un-aim, and to drop it from the group.")
+    if rally:
+        hint = ("Tap the systems ships should gather at — tap again to drop one. "
+                "Everything else you hold forwards to the nearest of them.")
+    else:
+        hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
+                "un-aim, and to drop it from the group.")
     y += config.ROW_GAP * 2
     for line in _wrap(font, hint, width):
         if y + _row_h() > bottom:

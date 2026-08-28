@@ -85,6 +85,13 @@ def test_render_all_ui_states_no_crash():
         ui.route_unroutable = {home}                    # forced, to draw the marker
         ui.route_cycles = {home, nbr}
         render.draw(screen, state, ui)
+        # rally: sink rings on the picks, no destination, and a cut-off pocket
+        ui.set_route_rally(state, True)
+        render.draw(screen, state, ui)                  # empty, "Rally"
+        ui.route_tap(state, nbr)
+        ui.route_unroutable = {home}
+        render.draw(screen, state, ui)
+        ui.set_route_rally(state, False)
         ui.reset_route()
         ui.auto_forward.clear()
         ui.sel_forward = None
@@ -277,9 +284,9 @@ def test_forward_rule_label_sits_by_the_sending_system():
 
 
 def test_rule_chevrons_fill_the_whole_lane():
-    """The conveyor has to reach the destination: a fixed pitch left up to a whole
-    spacing of empty lane before the far node. Spacing is the span divided by the
-    chevron count instead, checked across lane lengths and at both scales."""
+    """A rule at rest must read as covering its lane end to end — both nodes carry a
+    chevron, at least two ride any lane, and the spacing is even. Checked across lane
+    lengths and at both scales, since the pitch is only a target."""
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
@@ -291,17 +298,21 @@ def test_rule_chevrons_fill_the_whole_lane():
                 if length - (dest_r + config.ARROW_GAP) - head <= config.RULE_CHEVRON_SIZE:
                     continue           # too short for a run; covered below
                 at = f"lane of {length}px at {config.ui_scale}x"
-                ds = render._rule_chevron_dists(length, src_r, dest_r, 0.0)
                 tail = length - (dest_r + config.ARROW_GAP)
+                ds = render._rule_chevron_dists(length, src_r, dest_r, 0.0)
+                assert len(ds) >= 3, f"a lane with room for a run gets one: {at}"
                 assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
-                step = (tail - head) / len(ds)
-                assert ds[-1] == pytest.approx(tail - step), f"run stops short: {at}"
-                # ...and a full cycle later every chevron has moved up exactly one
-                # spacing, the last one wrapping back to the source
-                moved = render._rule_chevron_dists(length, src_r, dest_r, 0.999)
-                assert moved[-1] == pytest.approx(tail, abs=step / 100), f"no arrival: {at}"
-                for a, b in zip(ds[:-1], moved[:-1]):
-                    assert b - a == pytest.approx(step, abs=step / 100), f"uneven crawl: {at}"
+                assert ds[-1] == pytest.approx(tail), f"run stops short of the destination: {at}"
+                step = (tail - head) / (len(ds) - 1)
+                assert all(b - a == pytest.approx(step) for a, b in zip(ds, ds[1:])), \
+                    f"uneven spacing: {at}"
+
+                # mid-cycle the run has walked forward by that spacing, one chevron
+                # short: the one that reached the destination has left the lane
+                moved = render._rule_chevron_dists(length, src_r, dest_r, 0.5)
+                assert len(moved) == len(ds) - 1, f"lost or gained a chevron: {at}"
+                for a, b in zip(ds, moved):
+                    assert b - a == pytest.approx(step / 2), f"uneven crawl: {at}"
 
             # two systems all but touching: one chevron rather than an empty lane
             assert len(render._rule_chevron_dists(src_r + dest_r + 4, src_r, dest_r, 0.0)) == 1
@@ -459,7 +470,7 @@ def _hud_rects(ui):
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
              "clear_button_rect", "quit_button_rect", "exit_history_rect",
              "rewind_button_rect", "fast_forward_rect", "route_button_rect",
-             "route_cancel_rect", "route_confirm_rect")
+             "route_cancel_rect", "route_confirm_rect", "route_mode_rect")
     return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
 
 
@@ -512,13 +523,16 @@ def test_route_mode_footer_never_overlaps_at_touch_scale():
         ui.begin_route()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        for picked, dest in ((set(), None), ({home}, None), ({home}, nbr)):
+        cases = [(False, set(), None), (False, {home}, None), (False, {home}, nbr),
+                 (True, set(), None), (True, {nbr}, None)]
+        for rally, picked, dest in cases:
+            ui.route_rally = rally
             ui.route_sel = set(picked)
             ui.route_dest = dest
             ui.recompute_route(state)
             render.draw(screen, state, ui)
             rects = _hud_rects(ui)
-            assert rects, f"route mode drew no buttons at all ({picked}, {dest})"
+            assert rects, f"route mode drew no buttons at all ({rally}, {picked}, {dest})"
             for name, r in rects.items():
                 assert screen.get_rect().contains(r), f"{name} is off screen: {r}"
             pairs = list(rects.items())

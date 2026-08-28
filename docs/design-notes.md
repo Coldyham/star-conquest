@@ -175,9 +175,72 @@ looks like it is working. `_detect_route_cycles` walks the merged graph and
 `confirm_route` drops the closing edge, which is always a rule the plan doesn't
 overwrite.
 
+### Two sub-modes
+
+Chain routing answers "push *these* systems at *that* place". The complementary
+question — "where should *everything* flow?" — took one chain route per arm of the
+empire, each boxed and aimed separately. Rally answers it in one gesture: pick the
+systems ships should gather at, and everything else you hold forwards toward the
+nearest of them.
+
+They are the same feature. `model.flow_field` was already a multi-source search whose
+seeds need not be traversable, so rally needed no new graph query and no new rule
+shape — only a different seeding. Chain seeds the one destination and walks each
+pick's path to it; rally seeds every pick at once and takes the returned field whole,
+since that field *is* the plan: every owned system it reached, mapped to its next hop
+inward. Everything downstream (the `keep`-preserving `_add_hop`, cycle detection, the
+confirm, the preview, the End Turn slot takeover) is shared, which is the reason this
+is a sub-mode toggle rather than a third top-level mode.
+
+**"Nearest" is travel turns, not hops.** `flow_field` was a plain BFS, which counts
+jumps and ignores how long each one takes — so a two-hop path down two long lanes beat
+a three-hop path down three short ones, against the game's own rule that travel time
+is a query (`state.travel_turns`). Route mode passes `by_turns=True` and gets Dijkstra
+instead. It matters most in rally, where "the nearest rally point" is the whole
+mechanic, but chain had the same bug and gets the same fix. The AI keeps the
+unweighted default deliberately: `ai._flow_to_frontier` wants the nearest *frontier*,
+and a frontier is a frontier however long the lane to it is — changing that would be a
+balance change wearing a bug fix's clothes. On a map of uniform lanes the two agree,
+which is why the hand-built test graphs needed lanes deliberately restretched
+(`_lengths`) to tell them apart.
+
+**One Mode button, not a Chain/Rally pair.** With two, whichever is lit has to be read
+as "you are here" and the dim one as "go here" — and a strip where every other button
+means "do this" is the wrong place to teach that distinction. One button naming the
+sub-mode it is *in*, which switches when pressed, says the same thing without asking
+anyone to infer a convention from a fill colour.
+
+A richer version was considered and dropped: a rally point that claims only the
+systems closer to it than to a front. It is a better *idea* and a much worse control —
+the set it claims moves every turn as the front does, so what you confirmed and what
+you get come apart. Rally is deliberately the dumber thing, and it is dumb in a way
+you can see on the map before confirming.
+
+**Rally overwrites the whole rear, on purpose.** It rules every system it reaches, so
+a confirm blows away hand-made rules the plan disagrees with. That is what "everything
+flows to the nearest point" means, and the panel's `N replaced` count is the
+disclosure — the same line chain mode has, doing much more work here.
+
+**The sub-mode is sticky; the proposal is not.** `reset_route` runs every turn from
+`main.resolve_turn`, so clearing `route_rally` there would drag the player back to
+chain routing between one plan and the next. `set_route_rally` does clear the
+proposal, because `route_sel` holds sources in one sub-mode and sinks in the other and
+carrying a group across would silently invert what it means.
+
+**Rally's only loop shape.** The plan covers every reachable owned system, so the one
+node left holding a rule the plan didn't write is a rally point itself — and a sink
+that forwards onward isn't a sink. `_detect_route_cycles` catches it unchanged and
+`confirm_route` drops it, which is the right answer rather than a lucky one.
+
 **A drag boxes; a tap always aims.** There is no stage and no modifier. The
 gesture set is deliberately lopsided — the box adds, and a tap never does —
 because that is what leaves a tap with exactly one primary meaning.
+
+A *rally* tap toggles, which is not a second meaning conditional on the system but a
+single one: membership. The rejected shape below was "aim on some systems, remove on
+others" — two different kinds of action, chosen by what you happened to land on.
+Toggling is one action whose effect is symmetric, and it is the only gesture rally
+needs, which is what hands drag back to panning in that sub-mode.
 
 This went through two wrong shapes first, both worth recording. It started as two
 stages ("pick", then "aim"), on the reasoning that an owned system is ambiguous:
