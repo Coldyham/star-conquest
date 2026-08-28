@@ -50,6 +50,15 @@ def _ui(state, human=1) -> Ui:
     return ui
 
 
+def _lengths(state: GameState, lengths: dict[tuple[int, int], float]) -> GameState:
+    """Restretch named lanes. ``state.travel_turns`` re-times from ``length_ly``
+    every call, so length is the only thing that sets what a hop costs — at the
+    default speed 1.0 ly is a 1-turn lane and 60.0 ly is a 10-turn one."""
+    for (a, b), ly in lengths.items():
+        state.lanes[model.lane_key(a, b)].length_ly = ly
+    return state
+
+
 def _line(n, owned, human=1) -> GameState:
     return _graph([(a, a + 1) for a in range(n - 1)],
                   {sid: human for sid in owned}, n=n, human=human)
@@ -934,17 +943,18 @@ def test_tab_switches_sub_mode():
         pygame.quit()
 
 
-def test_the_footer_buttons_switch_sub_mode():
+def test_the_footer_button_switches_sub_mode():
+    """One button, naming the sub-mode it is in and switching when pressed."""
     state, ui = _routed_setup()
     try:
         render.draw(pygame.display.get_surface(), state, ui)
-        assert ui.route_chain_rect[2] > 0 and ui.route_rally_rect[2] > 0
-        rx, ry, rw, rh = ui.route_rally_rect
+        assert ui.route_mode_rect[2] > 0
+        rx, ry, rw, rh = ui.route_mode_rect
         _press(state, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.route_rally is True
         render.draw(pygame.display.get_surface(), state, ui)
-        cx, cy, cw, ch = ui.route_chain_rect
-        _press(state, ui, (cx + cw // 2, cy + ch // 2))
+        rx, ry, rw, rh = ui.route_mode_rect
+        _press(state, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.route_rally is False
     finally:
         pygame.quit()
@@ -997,3 +1007,40 @@ def test_render_draws_a_rally_plan_without_a_destination():
         assert ui.end_turn_rect == (0, 0, 0, 0)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# "Nearest" is measured in travel turns, not hops
+# --------------------------------------------------------------------------- #
+def test_flow_field_by_turns_prefers_the_faster_path_over_the_shorter_one():
+    """Hop count and travel time disagree the moment lanes differ in length, and
+    a conveyor is judged by when ships arrive."""
+    s = _graph([(0, 1), (1, 2), (0, 2)], {sid: 1 for sid in range(3)})
+    _lengths(s, {(0, 2): 60.0})            # 10 turns direct, 2 turns via 1
+    assert model.flow_field(s, {0, 1, 2}, {0})[2] == 0          # hops: straight there
+    assert model.flow_field(s, {0, 1, 2}, {0}, by_turns=True)[2] == 1   # turns: round
+
+
+def test_flow_field_by_turns_is_deterministic_on_ties():
+    s = _graph([(0, 1), (1, 2), (2, 3), (3, 4)], {sid: 1 for sid in range(5)})
+    picks = {model.flow_field(s, set(range(5)), {0, 4}, by_turns=True)[2]
+             for _ in range(10)}
+    assert len(picks) == 1
+
+
+def test_a_route_takes_the_fastest_path_not_the_fewest_jumps():
+    s = _graph([(0, 1), (1, 2), (0, 2)], {sid: 1 for sid in range(3)})
+    _lengths(s, {(0, 2): 60.0})
+    ui = _ui(s)
+    ui.route_sel = {2}
+    ui.set_route_dest(s, 0)
+    assert ui.route_plan == {2: (1, 0), 1: (0, 0)}   # the long lane is left alone
+
+
+def test_the_nearest_rally_point_is_the_soonest_reached_one():
+    """A rally point one long hop away loses to one three short hops away."""
+    s = _line(5, owned=range(5))
+    _lengths(s, {(3, 4): 60.0})            # 10 turns to rally 4, 3 turns to rally 0
+    ui = _rally(s, {0, 4})
+    assert ui.route_plan[3] == (2, 0)      # 3 turns back to 0 beats 10 turns on to 4
+    assert ui.route_plan[1] == (0, 0) and ui.route_plan[2] == (1, 0)

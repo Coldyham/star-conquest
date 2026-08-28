@@ -378,11 +378,8 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     if ui.route_cancel_rect[2] and _point_in_rect(pos, ui.route_cancel_rect):
         ui.reset_route()
         return None
-    if ui.route_chain_rect[2] and _point_in_rect(pos, ui.route_chain_rect):
-        ui.set_route_rally(state, False)
-        return None
-    if ui.route_rally_rect[2] and _point_in_rect(pos, ui.route_rally_rect):
-        ui.set_route_rally(state, True)
+    if ui.route_mode_rect[2] and _point_in_rect(pos, ui.route_mode_rect):
+        ui.set_route_rally(state, not ui.route_rally)
         return None
     node = pick_node(state, ui, pos)
     if node is not None:
@@ -414,7 +411,7 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
         ui.reset_route()
         return None
     if event.key == pygame.K_TAB:
-        # switch sub-mode, the keyboard half of the footer's Chain/Rally pair
+        # switch sub-mode, the keyboard half of the footer's Mode button
         ui.set_route_rally(state, not ui.route_rally)
         return None
     if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):

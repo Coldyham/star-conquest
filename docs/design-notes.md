@@ -183,14 +183,32 @@ empire, each boxed and aimed separately. Rally answers it in one gesture: pick t
 systems ships should gather at, and everything else you hold forwards toward the
 nearest of them.
 
-They are the same feature. `model.flow_field` was already a multi-source BFS whose
-seeds need not be traversable, so rally needed no new search and no new rule shape —
-only a different seeding. Chain seeds the one destination and walks each pick's path
-to it; rally seeds every pick at once and takes the returned field whole, since that
-field *is* the plan: every owned system it reached, mapped to its next hop inward.
-Everything downstream (the `keep`-preserving `_add_hop`, cycle detection, the confirm,
-the preview, the End Turn slot takeover) is shared, which is the reason this is a
-sub-mode toggle rather than a third top-level mode.
+They are the same feature. `model.flow_field` was already a multi-source search whose
+seeds need not be traversable, so rally needed no new graph query and no new rule
+shape — only a different seeding. Chain seeds the one destination and walks each
+pick's path to it; rally seeds every pick at once and takes the returned field whole,
+since that field *is* the plan: every owned system it reached, mapped to its next hop
+inward. Everything downstream (the `keep`-preserving `_add_hop`, cycle detection, the
+confirm, the preview, the End Turn slot takeover) is shared, which is the reason this
+is a sub-mode toggle rather than a third top-level mode.
+
+**"Nearest" is travel turns, not hops.** `flow_field` was a plain BFS, which counts
+jumps and ignores how long each one takes — so a two-hop path down two long lanes beat
+a three-hop path down three short ones, against the game's own rule that travel time
+is a query (`state.travel_turns`). Route mode passes `by_turns=True` and gets Dijkstra
+instead. It matters most in rally, where "the nearest rally point" is the whole
+mechanic, but chain had the same bug and gets the same fix. The AI keeps the
+unweighted default deliberately: `ai._flow_to_frontier` wants the nearest *frontier*,
+and a frontier is a frontier however long the lane to it is — changing that would be a
+balance change wearing a bug fix's clothes. On a map of uniform lanes the two agree,
+which is why the hand-built test graphs needed lanes deliberately restretched
+(`_lengths`) to tell them apart.
+
+**One Mode button, not a Chain/Rally pair.** With two, whichever is lit has to be read
+as "you are here" and the dim one as "go here" — and a strip where every other button
+means "do this" is the wrong place to teach that distinction. One button naming the
+sub-mode it is *in*, which switches when pressed, says the same thing without asking
+anyone to infer a convention from a fill colour.
 
 A richer version was considered and dropped: a rally point that claims only the
 systems closer to it than to a front. It is a better *idea* and a much worse control —

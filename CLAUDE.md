@@ -296,14 +296,18 @@ intact.
   `input._handle_route_event` takes the whole event stream (placed after the
   game-over branch), and render swaps the footer strip and the End Turn button,
   so nothing from live play stays clickable under an open plan.
-  - **Two sub-modes, one plan** (`Ui.route_rally`, the footer's Chain/Rally pair
-    and Tab). Both seed the same `model.flow_field` BFS (the one
+  - **Two sub-modes, one plan** (`Ui.route_rally`, the footer's Mode button and
+    Tab). Both seed the same `model.flow_field` search (the one
     `ai._flow_to_frontier` also delegates to) over our own territory and share
     `_add_hop`, `_detect_route_cycles` and the confirm, so they differ *only* in
     the seeding: **chain** seeds the one destination and `_plan_chain` walks each
     selected system's path to it; **rally** seeds every pick at once and
     `_plan_rally` takes the returned field whole, so every owned system it
-    reaches forwards toward its nearest rally point. Every hop of every path gets
+    reaches forwards toward its nearest rally point. Both pass
+    `by_turns=True`, so "nearest" is **travel turns**, not hops — the same
+    `state.travel_turns` rule the rest of the game follows. The AI keeps the
+    unweighted default, which is why the flag exists rather than a changed
+    default. Every hop of every path gets
     a rule, not just the selected systems. Owned-only is *forced*, not chosen: a
     rule can only live on a system we hold, so a path through enemy space cannot
     be expressed. The **sinks** are exempt (`flow_field` seeds need not be in

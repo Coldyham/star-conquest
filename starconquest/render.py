@@ -1140,8 +1140,7 @@ _FOOTER_RECTS = (
     "fast_forward_rect",
     "route_button_rect",
     "route_cancel_rect",
-    "route_chain_rect",
-    "route_rally_rect",
+    "route_mode_rect",
 )
 
 
@@ -1184,14 +1183,15 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # zeroing loop below then takes every live-play rect out of service for free,
     # so nothing from the ordinary strip can be clicked under an open plan.
     if ui.mode == ROUTING:
-        # Chain/Rally is a segmented control built out of two ordinary buttons: the
-        # live one takes _BTN_ACTIVE, the strip's existing "this toggle is on" fill
-        # (autoplay, play, fast forward), so it needs no drawing code of its own.
-        # Both outrank Cancel in a squeeze — Cancel still has Esc and the confirm
-        # slot behind it, whereas losing these makes the sub-mode unreachable on a
-        # touch build.
-        specs.append(("route_chain_rect", "Chain", *(_BTN_BLUE if ui.route_rally else _BTN_ACTIVE), 7, "right"))
-        specs.append(("route_rally_rect", "Rally", *(_BTN_ACTIVE if ui.route_rally else _BTN_BLUE), 6, "right"))
+        # One button rather than a Chain/Rally pair: with two, whichever is lit has
+        # to be read as "you are here" and the other as "go here", and a strip of
+        # buttons that all mean "do this" is the wrong place to learn that. This
+        # one names the sub-mode it is *in* and switches when pressed. Teal ties it
+        # to the live-play Route button it came from, and it outranks Cancel in a
+        # squeeze — Cancel still has Esc and the confirm slot behind it, whereas
+        # losing this makes the sub-mode unreachable on a touch build.
+        mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
+        specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
         _lay_out_footer(surface, ui, specs, y, fbh, font)

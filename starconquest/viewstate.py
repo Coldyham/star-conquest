@@ -254,10 +254,9 @@ class Ui:
     route_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_confirm_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     route_cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # the sub-mode pair, drawn as a segmented control (the live one takes the
-    # strip's usual "toggle is on" fill)
-    route_chain_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    route_rally_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # the sub-mode toggle: one button naming the sub-mode it is in, which pressing
+    # (or Tab) switches
+    route_mode_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Camera pan: a press on empty space (no node/lane/button under it) arms
     # this instead of the drag-to-target gesture, so panning and drag-to-send
     # never fight over the same press. `pan_last` is the previous motion-event
@@ -670,6 +669,11 @@ class Ui:
         last owned system of the path, which is what lets either sub-mode be aimed
         at enemy systems as an assault funnel.
 
+        Both search by **travel turns**, not hops (`flow_field(by_turns=True)`): a
+        conveyor is judged by how long ships take to arrive, so the nearest rally
+        point is the soonest-reached one and a route takes the fastest path rather
+        than the one with fewest jumps.
+
         Cycle detection is shared, and so is `_add_hop`, so `keep` preservation and
         overwrite reporting are identical whichever sub-mode built the plan.
         """
@@ -733,7 +737,8 @@ class Ui:
         """
         if self.route_dest is None or self.route_dest not in state.systems:
             return
-        parent = model.flow_field(state, self._owned(state), {self.route_dest})
+        parent = model.flow_field(state, self._owned(state), {self.route_dest},
+                                  by_turns=True)
         for sid in sorted(self.route_sources()):
             node = sid
             while node != self.route_dest:
@@ -762,7 +767,7 @@ class Ui:
         if not self.route_sel:
             return
         owned = self._owned(state)
-        parent = model.flow_field(state, owned, set(self.route_sel))
+        parent = model.flow_field(state, owned, set(self.route_sel), by_turns=True)
         for node in sorted(parent):
             self._add_hop(node, parent[node])
         self.route_unroutable = owned - set(parent) - self.route_sel

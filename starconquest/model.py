@@ -7,6 +7,7 @@ player with ``id == 0``.
 
 from __future__ import annotations
 
+import heapq
 import random
 from collections import deque
 from dataclasses import dataclass, field
@@ -20,15 +21,25 @@ def lane_key(a: int, b: int) -> frozenset[int]:
     return frozenset((a, b))
 
 
-def flow_field(state: GameState, allowed: set[int], seeds: set[int]) -> dict[int, int]:
-    """Multi-source BFS outward from ``seeds``; returns node -> next hop toward the
-    nearest seed. Expansion only ever enters ``allowed``.
+def flow_field(state: GameState, allowed: set[int], seeds: set[int],
+               by_turns: bool = False) -> dict[int, int]:
+    """Multi-source search outward from ``seeds``; returns node -> next hop toward
+    the nearest seed. Expansion only ever enters ``allowed``.
 
     The one graph query the whole game shares: the AI uses it to stream rear ships
-    toward the front line (``ai._flow_to_frontier``), and route mode to lay a
-    forwarding chain toward a chosen destination (``viewstate.Ui.recompute_route``).
+    toward the front line (``ai._flow_to_frontier``), and route mode to lay
+    forwarding rules toward a destination or a set of rally points
+    (``viewstate.Ui.recompute_route``).
 
-    Two properties callers rely on:
+    ``by_turns`` picks what "nearest" measures. The default counts **hops** — a
+    plain BFS, and what the AI wants, since a frontier is a frontier however long
+    the lane to it is. Route mode passes True to measure **travel turns** instead
+    (Dijkstra over ``state.travel_turns``), because a supply chain is judged by how
+    long ships take to arrive: two hops down two long lanes is a worse conveyor
+    than three hops down three short ones. Turns are re-timed for the current turn,
+    so a plan laid under ship-speed growth uses the speeds it will actually run at.
+
+    Three properties callers rely on, true of both modes:
 
     * **``seeds`` need not be in ``allowed``.** Only expansion is restricted, so a
       seed may be a system the caller couldn't otherwise traverse — which is what
@@ -36,14 +47,16 @@ def flow_field(state: GameState, allowed: set[int], seeds: set[int]) -> dict[int
       hop of the path inside its own territory.
     * **A seed never gets a parent**, so the returned map is exactly the nodes
       *other than* the seeds from which one is reachable through ``allowed``.
-
-    Since a parent edge always steps to a strictly shallower node, following the
-    map from any node in it terminates at a seed — the walk can't loop.
+    * Since a parent edge always steps to a strictly nearer node (lane costs are
+      at least 1), following the map from any node in it terminates at a seed —
+      the walk can't loop.
 
     Seeds and neighbours are visited in sorted order so the flow is deterministic:
     where two seeds are equidistant a node keeps the same next hop every call
     instead of flip-flopping, which is what made rear AI ships oscillate.
     """
+    if by_turns:
+        return _flow_field_by_turns(state, allowed, seeds)
     parent: dict[int, int] = {}
     seen = set(seeds)
     queue = deque(sorted(seeds))
@@ -54,6 +67,37 @@ def flow_field(state: GameState, allowed: set[int], seeds: set[int]) -> dict[int
                 seen.add(nbr)
                 parent[nbr] = cur  # move from nbr toward cur (closer to a seed)
                 queue.append(nbr)
+    return parent
+
+
+def _flow_field_by_turns(state: GameState, allowed: set[int],
+                         seeds: set[int]) -> dict[int, int]:
+    """``flow_field`` weighted by travel turns — Dijkstra rather than BFS.
+
+    Determinism comes from the heap key ``(distance, id)``: nodes settle in one
+    fixed order, and a node reached at equal cost by two routes keeps the parent
+    that got there first, so an equidistant system doesn't flip its next hop
+    between recomputes.
+    """
+    dist: dict[int, int] = {sid: 0 for sid in seeds}
+    parent: dict[int, int] = {}
+    settled: set[int] = set()
+    heap = [(0, sid) for sid in sorted(seeds)]
+    heapq.heapify(heap)
+    while heap:
+        d, cur = heapq.heappop(heap)
+        if cur in settled:
+            continue
+        settled.add(cur)
+        for nbr in sorted(state.systems[cur].neighbors):
+            if nbr not in allowed or nbr in settled:
+                continue
+            step = state.travel_turns(cur, nbr) or 1
+            nd = d + step
+            if nbr not in dist or nd < dist[nbr]:
+                dist[nbr] = nd
+                parent[nbr] = cur  # move from nbr toward cur (nearer a seed)
+                heapq.heappush(heap, (nd, nbr))
     return parent
 
 
