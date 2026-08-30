@@ -1730,18 +1730,15 @@ Click a system to inspect it.
 Click one of yours, then a neighbour, to send its garrison down that lane — or
 drag between the two.
 
-Then: the slider, −/+, Half or All retune the count. The Forward tab makes it a standing rule
+Then: the slider, −/+, Half or All. The Forward tab makes a standing rule
 instead — everything past 'keep' flows on, every turn. Shift+click arms one
 directly.
 
 Click a queued arrow, or its row below, to change it; X clears it.
 
-G opens Route, which sets up many rules at once. Chain: pick a group of your
-systems (drag a box), choose a destination, and every system along the way
-forwards toward it. Rally (Tab): pick the systems to gather at, and everything
-else you hold forwards to the nearest one.
+G opens Route mode, which sets up many rules at once
 
-Drag to pan, wheel to zoom, R resets the view. Enter ends the turn, P plays on."""
+Drag to pan, wheel to zoom, R resets the view. Enter/space ends the turn, P plays on."""
 
 
 def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
