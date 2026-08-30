@@ -173,13 +173,20 @@ def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod
                     best = _better(best, (2, nbr_deficit + jitter(), nbr, surplus))
             continue
 
+        # What we actually have to out-fight, not what is parked there: a dug-in
+        # defender fights at `config.DEFENDER_ADVANTAGE` times its ship count
+        # (combat._apply_advantage). Without this the margins below understate
+        # every target, and at a high setting the AI simply stops expanding —
+        # it keeps waiting for a surplus that is already more than enough.
+        garrison = n.ships * config.DEFENDER_ADVANTAGE
+
         if n.owner_id == 0:  # neutral -> expand
-            if surplus >= math.ceil(n.ships * params.expand_margin):
+            if surplus >= math.ceil(garrison * params.expand_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships) ** 0.5)
                 cand = (1, score + jitter(), nbr, surplus)  # commit fully: concentration wins
                 best = _better(best, cand)
         else:  # enemy -> attack
-            if surplus >= math.ceil(n.ships * params.attack_margin):
+            if surplus >= math.ceil(garrison * params.attack_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships))
                 cand = (1, score + jitter(), nbr, surplus)  # mass the whole surplus
                 best = _better(best, cand)

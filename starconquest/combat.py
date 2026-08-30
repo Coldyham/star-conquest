@@ -14,10 +14,76 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Optional
 
 from . import config
 from .model import Fleet, GameState
+
+# --------------------------------------------------------------------------- #
+# Shared fight arithmetic
+#
+# `resolve_fight` (which rolls the dice) and `preview_fight` (which supplies
+# them) both run through these, so the square law, the tie rule, the rounding and
+# the ships cap are written down exactly once and the menu's Combat page cannot
+# drift from the fight it predicts.
+# --------------------------------------------------------------------------- #
+
+
+def _apply_advantage(
+    a_owner: int,
+    a_eff: float,
+    b_owner: int,
+    b_eff: float,
+    defender_owner: Optional[int],
+    advantage: float,
+) -> tuple[float, float]:
+    """Scale whichever side is holding the system. Applied *after* jitter, so the
+    multiplier lands on the already-swung strength rather than the nominal one."""
+    if a_owner == defender_owner:
+        a_eff *= advantage
+    elif b_owner == defender_owner:
+        b_eff *= advantage
+    return a_eff, b_eff
+
+
+def _survivors(w_eff: float, l_eff: float, w_actual: int) -> int:
+    """Lanchester survivors: ``sqrt(W^2 - L^2)`` on the *effective* strengths,
+    capped at the winner's *actual* ships so a fight never creates one. 0 means
+    mutual annihilation.
+
+    ``round`` is Python's banker's rounding and must stay that way: it decides
+    real battles, so swapping it would change every seeded replay.
+    """
+    n = round(math.sqrt(max(w_eff * w_eff - l_eff * l_eff, 0.0)))
+    return max(0, min(n, w_actual))
+
+
+def _resolve_effective(
+    a_owner: int,
+    a_ships: int,
+    a_eff: float,
+    b_owner: int,
+    b_ships: int,
+    b_eff: float,
+    defender_owner: Optional[int],
+) -> tuple[int, int]:
+    """The whole of a fight *after* the dice and the advantage: strengths in,
+    ``(owner, ships)`` out. ``a_eff``/``b_eff`` are post-``_apply_advantage``."""
+    if a_eff > b_eff:
+        w_owner, w_actual, w_eff, l_eff = a_owner, a_ships, a_eff, b_eff
+    elif b_eff > a_eff:
+        w_owner, w_actual, w_eff, l_eff = b_owner, b_ships, b_eff, a_eff
+    else:  # exact tie (only reachable with zero jitter): defender holds
+        if b_owner == defender_owner:
+            w_owner, w_actual, w_eff, l_eff = b_owner, b_ships, b_eff, a_eff
+        else:
+            w_owner, w_actual, w_eff, l_eff = a_owner, a_ships, a_eff, b_eff
+
+    survivors = _survivors(w_eff, l_eff, w_actual)
+    if survivors == 0:
+        return 0, 0  # mutual annihilation -> neutral
+    return w_owner, survivors
 
 
 def resolve_fight(
@@ -37,26 +103,128 @@ def resolve_fight(
     j = config.COMBAT_JITTER
     a_eff = a_ships * (1.0 + rng.uniform(-j, j))
     b_eff = b_ships * (1.0 + rng.uniform(-j, j))
-    if a_owner == defender_owner:
-        a_eff *= config.DEFENDER_ADVANTAGE
-    elif b_owner == defender_owner:
-        b_eff *= config.DEFENDER_ADVANTAGE
+    a_eff, b_eff = _apply_advantage(
+        a_owner, a_eff, b_owner, b_eff, defender_owner, config.DEFENDER_ADVANTAGE
+    )
+    return _resolve_effective(a_owner, a_ships, a_eff, b_owner, b_ships, b_eff, defender_owner)
 
-    if a_eff > b_eff:
-        w_owner, w_actual, w_eff, l_eff = a_owner, a_ships, a_eff, b_eff
-    elif b_eff > a_eff:
-        w_owner, w_actual, w_eff, l_eff = b_owner, b_ships, b_eff, a_eff
-    else:  # exact tie (only reachable with zero jitter): defender holds
-        if b_owner == defender_owner:
-            w_owner, w_actual, w_eff, l_eff = b_owner, b_ships, b_eff, a_eff
-        else:
-            w_owner, w_actual, w_eff, l_eff = a_owner, a_ships, a_eff, b_eff
 
-    survivors = round(math.sqrt(max(w_eff * w_eff - l_eff * l_eff, 0.0)))
-    survivors = max(0, min(survivors, w_actual))
-    if survivors == 0:
-        return 0, 0  # mutual annihilation -> neutral
-    return w_owner, survivors
+# --------------------------------------------------------------------------- #
+# Preview: what a fight *would* do, for the menu's Combat page
+# --------------------------------------------------------------------------- #
+
+# Stand-in owner ids for a hypothetical fight, so a preview roll runs through the
+# same resolver the engine uses. NEUTRAL is 0 for the same reason the game's
+# neutral player is: mutual annihilation vacates the system.
+ATTACKER = 1
+DEFENDER = 2
+NEUTRAL = 0
+
+
+@dataclass(frozen=True)
+class Roll:
+    """One fully determined engagement — what happens for one pair of dice."""
+
+    winner: int  # ATTACKER / DEFENDER / NEUTRAL (mutual annihilation)
+    survivors: int  # ships the winner keeps; 0 exactly when winner is NEUTRAL
+    attacker_eff: float  # the strength the attacker actually fought at
+    defender_eff: float  # ...and the defender's, advantage included
+
+    @property
+    def attacker_survivors(self) -> int:
+        """What the attacker walks away with: 0 if it lost, and 0 if both sides
+        died. Non-decreasing in the attacker's ship count, which is what makes
+        the best/worst band an ordered range."""
+        return self.survivors if self.winner == ATTACKER else 0
+
+    @property
+    def defender_survivors(self) -> int:
+        return self.survivors if self.winner == DEFENDER else 0
+
+
+@dataclass(frozen=True)
+class CombatPreview:
+    """Everything the menu's Combat page needs to explain one hypothetical fight.
+
+    The three rolls are the *corners* of the jitter square, not samples:
+    ``nominal`` is both dice at zero (exactly what ``resolve_fight`` produces at
+    ``COMBAT_JITTER == 0``), ``best`` is the attacker's luckiest possible roll (it
+    swings +j while the defender swings -j) and ``worst`` the reverse.
+
+    Every real fight lands between them. The attacker's effective strength rises
+    with its own roll and the defender's falls with it, so the corners bound both
+    who wins *and* how many ships are left — which is what makes the band honest
+    to draw as a range rather than decorative.
+    """
+
+    attacker: int
+    defender: int
+    jitter: float
+    advantage: float
+    nominal: Roll
+    best: Roll
+    worst: Roll
+
+    @property
+    def naive(self) -> int:
+        """What subtraction would say. The teaching contrast: the square law
+        leaves the winner far more than this — 10 v 6 keeps 8 ships, not 4."""
+        return self.attacker - self.defender
+
+    @property
+    def certain(self) -> bool:
+        """True when both corners agree, so no roll can change who ends up
+        holding the system. False is an honest 'could go either way'."""
+        return self.best.winner == self.worst.winner
+
+    @property
+    def annihilation(self) -> bool:
+        """The nominal roll wipes out both sides and the system goes *neutral* —
+        nobody's, not the attacker's. Only near-matched forces do this."""
+        return self.nominal.winner == NEUTRAL
+
+    @property
+    def band(self) -> tuple[int, int]:
+        """(worst, best) attacker survivors — the width of jitter, in ships."""
+        return self.worst.attacker_survivors, self.best.attacker_survivors
+
+
+def _preview_roll(attacker: int, defender: int, a_roll: float, d_roll: float, advantage: float) -> Roll:
+    """One corner of the preview: the arithmetic ``resolve_fight`` runs, with the
+    swings supplied instead of drawn."""
+    a_eff, d_eff = _apply_advantage(
+        ATTACKER, attacker * (1.0 + a_roll), DEFENDER, defender * (1.0 + d_roll), DEFENDER, advantage
+    )
+    winner, survivors = _resolve_effective(ATTACKER, attacker, a_eff, DEFENDER, defender, d_eff, DEFENDER)
+    return Roll(winner, survivors, a_eff, d_eff)
+
+
+def preview_fight(attacker: int, defender: int, jitter: float, advantage: float) -> CombatPreview:
+    """What would happen if ``attacker`` ships hit a system garrisoned by ``defender``.
+
+    Draws no rng and reads no ``config``. Both are deliberate:
+
+    * ``jitter``/``advantage`` are **parameters**, not ``config`` reads, because
+      the menu previews the values the player is dragging *right now* — those
+      only reach ``config.COMBAT_JITTER``/``config.DEFENDER_ADVANTAGE`` at game
+      start, via ``settings._apply_globals``. Reading config here would preview
+      the *previous* game's balance.
+    * No rng, so ``menu.draw`` stays a pure read of ``Settings`` (its half of the
+      draw/mutate split), and so a preview can never perturb a seeded replay.
+
+    Every number comes from the same ``_apply_advantage``/``_resolve_effective``
+    pair the engine uses, so the preview cannot drift from the fight it predicts.
+    """
+    j = max(0.0, jitter)
+    return CombatPreview(
+        attacker=attacker,
+        defender=defender,
+        jitter=j,
+        advantage=advantage,
+        nominal=_preview_roll(attacker, defender, 0.0, 0.0, advantage),
+        best=_preview_roll(attacker, defender, +j, -j, advantage),
+        worst=_preview_roll(attacker, defender, -j, +j, advantage),
+    )
 
 
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tuple[int, int]:

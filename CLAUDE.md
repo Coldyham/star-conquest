@@ -207,6 +207,13 @@ intact.
     since files load in sorted order and the registry is incomplete at your
     import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
     asserts both of the latter).
+  - **Attack margins are measured against the *effective* garrison.**
+    `ai._frontier_order` multiplies a target's ships by
+    `config.DEFENDER_ADVANTAGE` before applying `expand_margin`/`attack_margin`,
+    because that is what a fleet actually has to out-fight
+    (`combat._apply_advantage`). Against the raw count the AI stops expanding
+    entirely at a high setting. Identity at the 1.0 default — see design notes
+    for why the knob's top end still turtles regardless.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,
@@ -253,6 +260,26 @@ intact.
   `render._draw_node_names` places labels collision-first and drops what doesn't
   fit (see design notes); ids stay on the mechanical readouts — the queued list,
   `tests/sim` logs, tokens.
+- **The menu's Combat tab teaches the square law from the real code.**
+  `combat.preview_fight` sits beside `resolve_fight` and shares its
+  `_apply_advantage`/`_resolve_effective`/`_survivors` helpers, so the page
+  cannot drift from the fight it predicts (pinned by a zero-jitter equivalence
+  test). It takes `jitter`/`advantage` as **parameters and reads no `config`** —
+  those only reach `config` at game start via `settings._apply_globals`, so
+  reading them would preview the previous game's balance — and it **draws no
+  rng**, keeping `menu.draw` a pure read. `best`/`worst` are the corners of the
+  jitter square, not samples, so they really do bound the outcome.
+  - **The demo sliders are the one group that writes `MenuState`, not
+    `Settings`** — the third `kind` in `_SLIDER_SPECS`, routed in
+    `_apply_slider`. A scratch calculation has no business in a save file or a
+    share token, and on a challenge link it would raise the un-challenge modal.
+    `_ADV_COMBAT` moved tab but *not* namespace: still `adv_`-keyed, still
+    writing `Settings`, just drawn beside the demo it governs.
+  - **This one page hand-breaks its prose instead of reflowing it.** The rule
+    above exists because the *font* scales; the menu canvas is fixed, so a
+    runtime wrap would instead make the page's height depend on its text and
+    silently overflow the panel. `test_tab_content_stays_inside_the_panel`
+    guards every tab's rects against that 560x496 box.
 - **The send popup is the *only* ship-count editor.** Composing a new send opens
   it (`Ui.begin_send`), and so does reopening an already-queued order or
   standing rule — `Ui.edit_order` / `Ui.edit_forward` put the popup back into

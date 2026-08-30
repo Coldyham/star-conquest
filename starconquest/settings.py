@@ -199,6 +199,10 @@ class Settings:
             out.mode = "random"
         out.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, out.players))
         out.nodes = max(out.min_nodes(), min(config.MAX_NODES, out.nodes))
+        # Not cosmetic like the other knobs' ranges: above this the map cannot be
+        # conquered at all, so a hand-edited or pre-cap file is clamped rather
+        # than loaded into an unwinnable game.
+        out.defender_advantage = max(0.0, min(config.DEFENDER_ADVANTAGE_MAX, out.defender_advantage))
         seed = data.get("seed")
         out.seed = int(seed) if isinstance(seed, int) and not isinstance(seed, bool) else None
 

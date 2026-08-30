@@ -12,16 +12,19 @@ against those rects — the same store-rect-then-test pattern the End-Turn butto
 uses in render/input. Layout is deterministic, so the rects drawn last frame are
 valid for this frame's events.
 
-Tabs: **Basic** (players/systems/mode/seed/autoplay), **Advanced** (curated
-global balance knobs, bound to ``Settings`` fields), and **AI** (per-seat AI
-tuning with copy/reset-all shortcuts, plus a **Strategy** dropdown listing the
-built-in heuristic and any drop-in ``models/`` files, via ``ai.load_models``; the
-bot-defined ``aux`` knob is labelled by the selected strategy, or absent if it
-declares no meaning for it — see ``ai.aux_spec``).
-Both slider tabs also carry a die button that rolls their sliders to random
-in-bounds values, for fun — the same roll-the-dice metaphor as the seed control.
-Sliders are driven by the spec tables below so drawing and hit-routing stay
-data-driven.
+Tabs: **Basic** (players/systems/mode/seed/autoplay), **Combat** (the square law
+explained, with a live demo fight and the two combat knobs beside it),
+**Advanced** (curated global balance knobs, bound to ``Settings`` fields), and
+**AI** (per-seat AI tuning with copy/reset-all shortcuts, plus a **Strategy**
+dropdown listing the built-in heuristic and any drop-in ``models/`` files, via
+``ai.load_models``; the bot-defined ``aux`` knob is labelled by the selected
+strategy, or absent if it declares no meaning for it — see ``ai.aux_spec``).
+The Advanced and AI tabs each carry a die button that rolls their sliders to
+random in-bounds values, for fun — the same roll-the-dice metaphor as the seed
+control. Sliders are driven by the spec tables below so drawing and hit-routing
+stay data-driven; each spec's ``kind`` says which object it writes
+(``Settings``, a seat's ``AiParams``, or — for the Combat demo alone —
+``MenuState``).
 
 A footer row saves/loads the whole ``Settings`` to a named JSON file under the
 gitignored ``saves/`` directory (via ``settings.Settings.save``/``load``); those
@@ -31,13 +34,14 @@ loop needs no new action.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
 import pygame
 
-from . import ai, config, softkeyboard, uifont, webstore
+from . import ai, combat, config, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import is_web, saves_dir
 from .settings import Settings, fresh_rng, random_seed
@@ -61,12 +65,21 @@ _WARN = (214, 172, 92)  # amber: a challenge whose settings no longer match
 # opening click already snapshotted, and it fires far too often to copy a config on.
 _MUTATING_EVENTS = (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.TEXTINPUT, pygame.KEYDOWN)
 
-_TABS = (("basic", "Basic", True), ("advanced", "Advanced", True), ("ai", "AI", True))
+_TABS = (
+    ("basic", "Basic", True),
+    ("combat", "Combat", True),
+    ("advanced", "Advanced", True),
+    ("ai", "AI", True),
+)
 
 _CH = 34  # control height
 _ROW_H = 62  # vertical pitch between Basic-tab rows
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
+_PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
+_NOTE_H = 18  # ...and between `small` note / table rows
+_TCOL_W = 64  # survivor-curve table: one numeric column
+_TLABEL_W = 132  # ...and its row-label gutter
 _SEED_MAX_LEN = 7
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
@@ -95,9 +108,26 @@ _ADV_ECON = (
     ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
     ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
 )
+# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
+# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
+# namespace written to, not the tab drawn on.
 _ADV_COMBAT = (
     ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
-    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, 2.0, 0.05, False),
+    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
+    # setting and becomes a stalemate. Both sides produce symmetrically, so a
+    # fortress bonus that large grows the defence as fast as any assault can be
+    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
+    # resolve at a 3000-turn cap either. See design notes for the measurements.
+    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
+)
+# The Combat tab's demo. The one slider group that does *not* touch `Settings`:
+# these are transient view state on `MenuState`, so playing with them never lands
+# in a save file or a share token, and never trips the un-challenge confirm modal.
+# Hence the third `kind` in `_SLIDER_SPECS`. `attr` deliberately matches the
+# MenuState field name, as it does for the other two kinds.
+_PREVIEW = (
+    ("preview_attacker", "Attacker ships", "preview_attacker", 1, config.COMBAT_PREVIEW_MAX, 1, True),
+    ("preview_defender", "Defender ships", "preview_defender", 1, config.COMBAT_PREVIEW_MAX, 1, True),
 )
 # Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
 # detail); scout floors at 1 so immediate neighbours stay visible enough to target
@@ -107,7 +137,10 @@ _ADV_FOG = (
     ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
 )
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
-_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_COMBAT + _ADV_FOG
+# `_ADV_COMBAT` is deliberately absent: it lives on the Combat tab now, and a die
+# should only roll what you can see (silently changing an off-screen knob would
+# also raise the un-challenge modal for an edit you can't point at).
+_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG
 # The five knobs the built-in heuristic reads. The sixth, `aux`, is bot-defined and
 # so has no fixed label or range — see `_ai_specs`.
 _AI_PARAMS = (
@@ -126,6 +159,8 @@ for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT, _ADV_FOG):
         _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
 for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
     _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
+for _key, _label, _attr, _lo, _hi, _step, _is_int in _PREVIEW:
+    _SLIDER_SPECS[_key] = ("preview", _attr, _lo, _hi, _step, _is_int)
 # The aux knob is registered with the generic range so hit-routing knows the key;
 # whether it is drawn at all, and under what label and range, is the selected
 # strategy's call (`_ai_specs`, resolved live in `_slider_spec`).
@@ -181,6 +216,11 @@ class MenuState:
     editing_seed: bool = False
     seed_text: str = ""  # edit buffer, live only while editing
     ai_seat: int = 2  # which seat the AI tab is editing
+    # The Combat tab's demo fight. View state, not setup: it describes no match, so
+    # it stays off `Settings` and out of every save file, token and challenge key.
+    # Defaults to the fight the page's own prose works through.
+    preview_attacker: int = 20
+    preview_defender: int = 12
     drag_key: Optional[str] = None  # slider currently being dragged
     filename: str = _DEFAULT_FILENAME  # save/load target (no extension)
     editing_filename: bool = False
@@ -291,6 +331,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
 
     if ms.tab == "basic":
         _draw_basic(surface, ms, settings, panel)
+    elif ms.tab == "combat":
+        _draw_combat(surface, ms, settings, panel)
     elif ms.tab == "advanced":
         _draw_advanced(surface, ms, settings, panel)
     elif ms.tab == "ai":
@@ -400,7 +442,10 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
 
 
 def _draw_tabs(surface, ms: MenuState, w: int) -> None:
-    tw, th, gap = 132, 34, 8
+    # 126 rather than the old 132: four tabs at 132 span 552px inside the 560px
+    # panel below, which reads as flush-by-accident. At 126 they span 528 and sit
+    # a clean 16px inside it, still leaving 19px either side of "Advanced".
+    tw, th, gap = 126, 34, 8
     total = len(_TABS) * tw + (len(_TABS) - 1) * gap
     x = w // 2 - total // 2
     y = 162
@@ -475,15 +520,195 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
-    y = panel.y + 16  # RIGHT: Visibility + Economy + Combat
+    y = panel.y + 16  # RIGHT: Visibility + Economy
     y = _section(surface, "Visibility", rx, y)
     y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
     y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
-    y = _section(surface, "Combat", rx, y)
-    y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
     _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
     _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
+
+
+# --------------------------------------------------------------------------- #
+# Combat tab
+#
+# The rules, plus a live demonstration of them. Nothing player-facing explained
+# the square law before this page, and the natural guess (subtract the fleets) is
+# wrong by roughly a factor of two, so the page's whole job is to put the real
+# number next to the guessed one.
+#
+# The prose is hand-broken rather than reflowed. Every other measured-layout rule
+# in this project exists because the *font* scales; the menu canvas is fixed, so
+# here the risk runs the other way — a runtime wrap makes the page's height
+# depend on its text, and one added word would silently push the table through
+# the panel floor. Broken by hand, the height is a constant that can be checked.
+# Content width is 516px in a mono font: 46 chars at `normal`, 64 at `small`.
+# --------------------------------------------------------------------------- #
+_COMBAT_PROSE = (
+    "Battles use Lanchester's square law. The",
+    "winner keeps sqrt(W² − L²) ships, not W − L:",
+    "20 attacking 12 leaves 16 survivors, not 8.",
+    "The bigger fleet loses far less than it kills.",
+)
+_COMBAT_NOTES = (
+    "So concentrate: one 20-ship punch beats two waves of 10.",
+    "A slightly bigger fleet doesn't win narrowly — it wins big.",
+)
+
+
+def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
+    pad = 22
+    col_w = (panel.width - pad * 3) // 2
+    lx = panel.x + pad
+    rx = lx + col_w + pad
+    full = col_w * 2 + pad
+    f = _fonts()
+
+    y = _section(surface, "How it works", lx, panel.y + 12)
+    for line in _COMBAT_PROSE:
+        _text(surface, f["normal"], line, config.COLOR_TEXT, midleft=(lx, y + _PROSE_H // 2))
+        y += _PROSE_H
+    y += 8
+    for line in _COMBAT_NOTES:
+        _text(surface, f["small"], line, config.COLOR_TEXT_DIM, midleft=(lx, y + _NOTE_H // 2))
+        y += _NOTE_H
+
+    y += 12
+    _section(surface, "The fight", lx, y)
+    y = _section(surface, "The rules", rx, y)
+    # `ms` is both the rect store and the value target here — the demo sliders read
+    # and write MenuState, unlike every other group on every other tab.
+    _sliders(surface, ms, ms, _PREVIEW, lx, y, col_w)
+    y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
+
+    preview = combat.preview_fight(
+        ms.preview_attacker, ms.preview_defender, settings.combat_jitter, settings.defender_advantage
+    )
+    y = _draw_fight_readout(surface, preview, lx, y + 8, full)
+    _draw_survivor_curve(surface, ms, settings, lx, y + 8, full)
+
+
+def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, int], str, str]:
+    """(headline, headline colour, detail, band) for one previewed fight.
+
+    Pure and separate from the drawing so the three lines can be checked against
+    each other for every slider position — they describe the same fight from
+    three angles and must never disagree.
+    """
+    roll = preview.nominal
+    a, d, s = preview.attacker, preview.defender, roll.survivors
+
+    if roll.winner == combat.ATTACKER:
+        headline, color = f"{a} vs {d} → you keep {s}", config.player_color(1)
+    elif roll.winner == combat.DEFENDER:
+        headline, color = f"{a} vs {d} → they keep {s}", config.player_color(2)
+    else:
+        headline, color = f"{a} vs {d} → both wiped out", _DISABLED_TEXT
+    # Never assert a winner the dice don't guarantee: an uncertain fight goes amber
+    # whoever the average roll favours.
+    if not preview.certain:
+        color = _WARN
+
+    if preview.annihilation:
+        detail = "Both fleets are spent — the system goes neutral."
+    else:
+        # `abs`, so the contrast stays honest when it is the defender who wins.
+        brought = a if roll.winner == combat.ATTACKER else d
+        kept = f"{s} — untouched" if s == brought else str(s)
+        detail = f"Subtraction says {abs(preview.naive)}. The square law says {kept}."
+
+    pct = int(round(preview.jitter * 100))
+    if preview.jitter <= 0:
+        band = "Jitter off: this result is exact."
+    elif not preview.certain:
+        band = f"Jitter ±{pct}%: could go either way."
+    elif preview.best.winner == combat.ATTACKER:
+        band = "Jitter ±{}%: you keep {}–{}.".format(pct, *preview.band)
+    elif preview.best.winner == combat.DEFENDER:
+        # certain the other way: the defender's best roll is the attacker's worst
+        band = f"Jitter ±{pct}%: they keep {preview.best.defender_survivors}–{preview.worst.defender_survivors}."
+    else:  # both corners annihilate — tiny matched fleets, where no roll saves either
+        band = f"Jitter ±{pct}%: no roll leaves a survivor."
+
+    return headline, color, detail, band
+
+
+def _draw_fight_readout(surface, preview: combat.CombatPreview, x: int, y: int, width: int) -> int:
+    """The headline outcome, the contrast with what subtraction would say, and how
+    far jitter can move it. Returns the y below the box."""
+    f = _fonts()
+    box = pygame.Rect(x, y, width, 88)
+    pygame.draw.rect(surface, _TROUGH, box, border_radius=8)
+    pygame.draw.rect(surface, _PANEL_BORDER, box, 1, border_radius=8)
+
+    headline, color, detail, band = _readout_lines(preview)
+    _text(surface, f["big"], headline, color, midleft=(x + 14, y + 25))
+    _text(surface, f["small"], detail, config.COLOR_TEXT, midleft=(x + 14, y + 52))
+    _text(surface, f["small"], band, config.COLOR_TEXT_DIM, midleft=(x + 14, y + 70))
+    return box.bottom
+
+
+def _curve_ladder(attacker: int, defender: int, advantage: float = 1.0) -> tuple[list[int], int]:
+    """Six enemy-fleet sizes to plot the attacker's survivors against, and which
+    of them is the fight on screen.
+
+    Rungs are scaled so the attack is always shown failing somewhere on the
+    table — the flip is the instructive part, so it must never fall off the end.
+    It sits where the enemy's *effective* strength catches up, i.e.
+    ``attacker / advantage``, not the raw ship count: at a 0.75 advantage a
+    ladder pitched at the attacker alone would be six straight wins and the page
+    would have nothing to teach.
+
+    The defender slider then replaces its nearest rung, which makes the live
+    fight a column of the curve rather than a second, parallel demo. That can
+    lower a rung (by at most half a step, since a nearer rung would have been
+    chosen), so the guarantee lands on the last column rather than the fifth."""
+    step = max(1, math.ceil(attacker / max(advantage, 0.01) / 5))
+    ladder = [step * k for k in range(1, 7)]
+    here = min(range(len(ladder)), key=lambda i: abs(ladder[i] - defender))
+    ladder[here] = defender
+    return ladder, here
+
+
+def _draw_survivor_curve(surface, ms: MenuState, settings: Settings, x: int, y: int, width: int) -> None:
+    """The shape of the square law: survivors against enemy strength, with what
+    subtraction would have predicted underneath.
+
+    Deliberately jitter-free — the table is the law, the readout's band line owns
+    the randomness. Defender advantage *does* apply, so that knob visibly bends
+    the curve."""
+    f = _fonts()
+    a = ms.preview_attacker
+    ladder, here = _curve_ladder(a, ms.preview_defender, settings.defender_advantage)
+    outcomes = [combat.preview_fight(a, d, 0.0, settings.defender_advantage).nominal for d in ladder]
+
+    def col(i: int) -> int:
+        return x + _TLABEL_W + _TCOL_W * (i + 1)
+
+    y = _section(surface, f"Survivor curve — your {a} ships", x, y)
+    # Behind the rows, so the live column reads as one band rather than three cells.
+    pygame.draw.rect(surface, _HL_FILL, pygame.Rect(col(here) - _TCOL_W, y - 2, _TCOL_W, 58), border_radius=4)
+
+    # `attacker_survivors`, not `survivors`: the row has to answer the question its
+    # label asks. Printing the *winner's* ships would show the enemy's remnant in a
+    # row headed "your N ships", told apart only by colour.
+    def cell_color(roll: combat.Roll) -> tuple[int, int, int]:
+        return config.player_color(1) if roll.attacker_survivors else _DISABLED_TEXT
+
+    rows = (
+        ("Enemy fleet", [str(d) for d in ladder], config.COLOR_TEXT_DIM, None),
+        ("You keep", [str(r.attacker_survivors) for r in outcomes], config.COLOR_TEXT, cell_color),
+        ("Naive A−D", [str(abs(a - d)) for d in ladder], config.COLOR_TEXT_DIM, None),
+    )
+    for row, (label, cells, label_color, colorer) in enumerate(rows):
+        cy = y + _NOTE_H * row + _NOTE_H // 2
+        _text(surface, f["small"], label, label_color, midleft=(x, cy))
+        for i, cell in enumerate(cells):
+            color = colorer(outcomes[i]) if colorer else config.COLOR_TEXT_DIM
+            _text(surface, f["small"], cell, color, midright=(col(i), cy))
+        if row == 0:  # rule under the header, so the two data rows read as a pair
+            rule = y + _NOTE_H
+            pygame.draw.line(surface, _PANEL_BORDER, (x, rule), (x + width, rule), 1)
 
 
 def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -1142,7 +1367,12 @@ def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
     snapped = round(raw / step) * step
     snapped = max(lo, min(hi, snapped))
     value = int(round(snapped)) if is_int else round(snapped, 4)
-    target = settings if kind == "adv" else settings.ai[ms.ai_seat - 1]
+    if kind == "adv":
+        target = settings
+    elif kind == "preview":
+        target = ms  # transient: never reaches Settings, so no un-challenge prompt
+    else:
+        target = settings.ai[ms.ai_seat - 1]
     setattr(target, attr, value)
 
 

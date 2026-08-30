@@ -124,6 +124,85 @@ press inside it. The knob travels over the recorded row inset by
 `config.SLIDER_KNOB_R` at each end — any other mapping either overhangs the
 panel or drifts from the finger at the extremes.
 
+## Combat rules page (`menu._draw_combat`)
+
+The square law was explained nowhere player-facing, and the natural guess —
+subtract the fleets — is wrong by roughly a factor of two (20 v 12 leaves 16,
+not 8). Players read that as the game cheating. So the page's headline is
+built around the contrast, not the formula: *"Subtraction says 8. The square
+law says 16."*
+
+`combat.preview_fight` lives beside `resolve_fight` rather than in the menu,
+sharing `_apply_advantage` / `_resolve_effective` / `_survivors` with it, so
+the two run the same statements instead of two copies of the same rule. This
+is the opposite call to `viewstate.threatened_systems`, which deliberately
+keeps a *local* copy of `ai._threat`: there the shell is banned from importing
+`ai`, and approximate agreement is fine for a suggestion. Nothing bans
+importing `combat`, and a page whose job is to teach the rules must not be
+allowed to drift from them. The pin is `test_preview_nominal_matches_resolve_fight_at_zero_jitter`,
+which is only expressible with both in the same pure module.
+
+`jitter`/`advantage` are parameters rather than `config` reads because the
+menu previews what the player is dragging *now*; those values only reach
+`config` at game start via `settings._apply_globals`, so reading config there
+would show the previous game's balance.
+
+`best`/`worst` are the corners of the jitter square, not samples. The
+attacker's effective strength rises with its own roll and the defender's falls
+with it, so the corners genuinely bound both who wins and how many survive —
+which is what makes the band honest to print as a range. When they disagree,
+the headline goes amber: with a coin-flip fight the average roll's winner is
+not a fact worth asserting in 30pt type.
+
+The demo sliders are the one group writing to `MenuState` instead of
+`Settings` (the third `kind` in `_SLIDER_SPECS`). Putting them on `Settings`
+would push a scratch calculation into every save file and share token, and —
+worse — dragging them on a challenge link would raise the un-challenge modal,
+since the setup would stop matching the score.
+
+Prose is hand-broken rather than reflowed, which inverts the rule everywhere
+else in the shell. `render._wrap` exists because the *font* scales with
+`config.ui_scale`; the menu canvas is fixed at 1440x960, so the risk runs the
+other way — a runtime wrap makes the page's height depend on its text, and one
+added word would push the table through the panel floor unnoticed. Broken by
+hand, the height is a constant. That is also why `_ADV_COMBAT` moved here: the
+Advanced tab's right column had been overflowing the panel by 4px, and
+`test_tab_content_stays_inside_the_panel` now guards every tab against it.
+
+The survivor curve is transposed (three rows, six columns) because that reads
+left-to-right as a curve and costs 55px where six rows would cost 114. Its
+rungs scale with `attacker / advantage` — the point where the enemy's
+*effective* strength catches up — so the flip to defeat is always on screen;
+pitching them at the raw ship count made a 0.75-advantage table six straight
+wins, with nothing to teach. The defender slider replaces its nearest rung,
+which makes the live fight a column of the curve rather than a second, parallel
+demo, and can lower a rung by up to half a step — hence the guarantee lands on
+the last column rather than the fifth. The row prints the *attacker's*
+survivors, not the winner's: a row headed "your N ships" that silently switches
+to the enemy's remnant past the flip, distinguished only by colour, is a trap.
+
+## Defender advantage and the AI (`ai._frontier_order`)
+
+`config.DEFENDER_ADVANTAGE` multiplies the defender's strength in combat, so
+the AI's `expand_margin`/`attack_margin` have to be measured against the
+*effective* garrison (`n.ships * DEFENDER_ADVANTAGE`), not the raw ship count.
+Against the raw count the margins understate every target, and the AI simply
+stops expanding — it waits forever for a surplus it already has. At 1.0 the
+multiply is an exact identity, so nothing about a default game moves.
+
+That fix is necessary but not sufficient, which is why the slider stops at
+`config.DEFENDER_ADVANTAGE_MAX = 1.5` rather than the 2.0 first drafted.
+Measured over `tests/sim` (40 seeds, 18 nodes, 3 players): 0.75 finishes 38/40,
+1.0 → 36/40, 1.25 → 26/40, 1.5 → 19/40, 2.0 → **3/40** — and the 2.0 failures
+are *hard* stalemates, not slow games, unresolved even at a 3000-turn cap. Both
+sides produce symmetrically, so a fortress bonus that large grows the defence as
+fast as any assault can be massed against it. One AI variant (an additive rather
+than compounding cushion) moved 2.0 from 2/24 to 7/24 finished, which is not
+enough to call it a tuning problem.
+
+`Settings.from_dict` clamps the field to that ceiling, unlike the other balance
+knobs, whose out-of-range values are merely odd rather than unplayable.
+
 ## Losing / spectator mode
 
 Keyed on *defeat* rather than "no systems left" because revealing the map for

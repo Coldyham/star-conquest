@@ -280,6 +280,15 @@ def test_from_dict_clamps_structural_fields():
     assert loaded.mode == "random"
 
 
+def test_from_dict_clamps_defender_advantage_to_a_winnable_range():
+    """Alone among the balance knobs this one is clamped on load: above the
+    ceiling the map cannot be conquered at all, so a hand-edited or pre-cap file
+    must not open into an unwinnable game."""
+    assert Settings.from_dict({"defender_advantage": 5.0}).defender_advantage == config.DEFENDER_ADVANTAGE_MAX
+    assert Settings.from_dict({"defender_advantage": -3.0}).defender_advantage == 0.0
+    assert Settings.from_dict({"defender_advantage": 1.25}).defender_advantage == 1.25  # in range, untouched
+
+
 def test_from_dict_normalises_ai_list_length():
     assert len(Settings.from_dict({"ai": []}).ai) == config.MAX_PLAYERS
     over = [{"attack_margin": 2.0} for _ in range(config.MAX_PLAYERS + 3)]

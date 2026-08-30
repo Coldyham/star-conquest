@@ -14,7 +14,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame  # noqa: E402
 
-from starconquest import ai, config, menu  # noqa: E402
+from starconquest import ai, combat, config, menu  # noqa: E402
 from starconquest.menu import MenuState  # noqa: E402
 from starconquest.settings import Challenge, Settings  # noqa: E402
 
@@ -182,6 +182,8 @@ def test_all_tabs_clickable_and_switch():
     try:
         _click_key(screen, ms, settings, "tab_advanced")
         assert ms.tab == "advanced"
+        _click_key(screen, ms, settings, "tab_combat")
+        assert ms.tab == "combat"
         _click_key(screen, ms, settings, "tab_ai")
         assert ms.tab == "ai"
         _click_key(screen, ms, settings, "tab_basic")
@@ -248,6 +250,140 @@ def test_advanced_slider_sets_setting():
         assert settings.neutral_produces is True
     finally:
         pygame.quit()
+
+
+# --- Combat tab -------------------------------------------------------------- #
+def test_combat_demo_sliders_write_menu_state_not_settings():
+    """The whole point of the third slider `kind`: the demo describes no match, so
+    it must not reach Settings (and thus no save file, token or challenge key)."""
+    screen, ms, settings = _setup()
+    ms.tab = "combat"
+    try:
+        before = settings.to_dict()
+        _drag_slider(screen, ms, settings, "preview_attacker", 1.0)
+        assert ms.preview_attacker == config.COMBAT_PREVIEW_MAX
+        _drag_slider(screen, ms, settings, "preview_defender", 0.0)
+        assert ms.preview_defender == 1
+        assert settings.to_dict() == before
+    finally:
+        pygame.quit()
+
+
+def test_combat_demo_sliders_never_raise_the_unchallenge_modal():
+    """Dragging the demo on a challenge link must not look like editing the setup."""
+    screen, ms, settings = _challenged_setup()
+    ms.tab = "combat"
+    try:
+        for frac in (0.0, 0.4, 1.0):
+            _drag_slider(screen, ms, settings, "preview_attacker", frac)
+            _drag_slider(screen, ms, settings, "preview_defender", frac)
+        assert ms.confirm_unchallenge is False
+        assert settings.challenge is not None and settings.challenge.matches(settings)
+    finally:
+        pygame.quit()
+
+
+def test_combat_knobs_still_write_settings_from_the_combat_tab():
+    """They moved tab but not namespace — and the menu never writes config."""
+    screen, ms, settings = _setup()
+    ms.tab = "combat"
+    was = config.COMBAT_JITTER
+    try:
+        _drag_slider(screen, ms, settings, "adv_combat_jitter", 1.0)
+        assert settings.combat_jitter == 0.5
+        _drag_slider(screen, ms, settings, "adv_defender_adv", 1.0)
+        assert settings.defender_advantage == config.DEFENDER_ADVANTAGE_MAX
+        assert config.COMBAT_JITTER == was  # only settings._apply_globals writes config
+    finally:
+        pygame.quit()
+
+
+def test_combat_knobs_are_gone_from_advanced():
+    """Advanced no longer draws them, and its die no longer rolls them."""
+    screen, ms, settings = _setup()
+    ms.tab = "advanced"
+    try:
+        menu.draw(screen, ms, settings)
+        assert "adv_combat_jitter" not in ms.rects
+        assert "adv_defender_adv" not in ms.rects
+        assert not any(spec[2] in ("combat_jitter", "defender_advantage") for spec in menu._ADV_ALL)
+    finally:
+        pygame.quit()
+
+
+def test_tab_content_stays_inside_the_panel():
+    """Every tab's widgets must fit the fixed 560x496 panel — the menu has no
+    scrolling, and the Advanced tab silently overflowed it before the Combat page
+    took the combat knobs off it."""
+    screen, ms, settings = _setup()
+    panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
+    chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
+              "get_link", "seed_field", "seed_random"}
+    try:
+        for tab in ("basic", "combat", "advanced", "ai"):
+            ms.tab = tab
+            for a, d, jit, adv in ((1, 1, 0.0, 0.75), (50, 50, 0.5, 2.0)):
+                ms.preview_attacker, ms.preview_defender = a, d
+                settings.combat_jitter, settings.defender_advantage = jit, adv
+                menu.draw(screen, ms, settings)
+                for key, rect in ms.rects.items():
+                    if key.startswith("tab_") or key in chrome:
+                        continue
+                    assert panel.contains(rect), f"{tab}: {key} {tuple(rect)} escapes the panel"
+    finally:
+        pygame.quit()
+
+
+def test_survivor_curve_ladder_brackets_the_flip_and_pins_the_live_fight():
+    """The table must always show the attack failing somewhere (that is the
+    lesson), and the fight on screen must be one of its columns. The flip sits
+    where the enemy's *effective* strength catches up, so the ladder has to scale
+    with defender advantage too — at 0.75 an advantage-blind ladder ran out of
+    columns before the attack ever failed."""
+    for adv in (0.75, 1.0, 1.5, 2.0):
+        for a in range(1, config.COMBAT_PREVIEW_MAX + 1):
+            for d in (1, 7, 20, 50):
+                ladder, here = menu._curve_ladder(a, d, adv)
+                assert len(ladder) == 6
+                assert ladder[here] == d           # the live fight is a column
+                assert ladder == sorted(ladder)    # substitution never disorders it
+                # the attack has to be shown failing somewhere on the table
+                lost = [combat.preview_fight(a, e, 0.0, adv).nominal for e in ladder]
+                assert any(r.winner != combat.ATTACKER for r in lost), (a, d, adv)
+
+
+def test_readout_lines_never_contradict_each_other():
+    """The three lines describe one fight from three angles, so they must agree at
+    every slider position. Attacker 1 / Defender 1 / jitter 2% used to render
+    'both wiped out' above 'they keep 0–0'."""
+    for a in range(1, config.COMBAT_PREVIEW_MAX + 1):
+        for d in (1, 2, 5, 13, 50):
+            for jit in (0.0, 0.02, 0.1, 0.5):
+                for adv in (0.75, 1.0, 2.0):
+                    p = combat.preview_fight(a, d, jit, adv)
+                    headline, _color, detail, band = menu._readout_lines(p)
+                    where = (a, d, jit, adv)
+                    # "both wiped out" is exactly the neutral case, on all three lines
+                    assert ("wiped out" in headline) == p.annihilation, where
+                    assert ("goes neutral" in detail) == p.annihilation, where
+                    # a band may only name survivors when some side certainly has them
+                    if "keep" in band:
+                        assert p.certain and p.best.survivors > 0, where
+                        assert p.best.winner != combat.NEUTRAL, where
+                    # ...and may only promise a side when the corners agree on it
+                    if "you keep" in band:
+                        assert p.worst.winner == combat.ATTACKER, where
+                    if "they keep" in band:
+                        assert p.worst.winner == combat.DEFENDER, where
+
+
+def test_readout_flags_an_untouched_winner_by_the_right_fleet():
+    """The 'untouched' aside compares against the *winner's* fleet, not the larger
+    one: a defender that holds intact is the case that most sells the knob."""
+    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(10, 6, 0.1, 2.0))
+    assert "untouched" in detail  # defender keeps all 6
+    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(20, 12, 0.1, 1.0))
+    assert "untouched" not in detail  # attacker keeps 16 of 20
 
 
 def test_ai_tab_per_seat_and_copy_reset():
