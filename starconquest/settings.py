@@ -48,6 +48,7 @@ _GLOBAL_KNOBS = (
     ("garrison_k", "GARRISON_K"),
     ("garrison_jitter", "GARRISON_JITTER"),
     ("combat_jitter", "COMBAT_JITTER"),
+    ("defender_advantage", "DEFENDER_ADVANTAGE"),
     ("neutral_produces", "NEUTRAL_PRODUCES"),
     ("fog_sight", "FOG_SIGHT"),
     ("fog_scout", "FOG_SCOUT"),
@@ -123,6 +124,7 @@ class Settings:
     garrison_k: int = config.GARRISON_K
     garrison_jitter: int = config.GARRISON_JITTER
     combat_jitter: float = config.COMBAT_JITTER
+    defender_advantage: float = config.DEFENDER_ADVANTAGE
     neutral_produces: bool = config.NEUTRAL_PRODUCES
     fog_sight: int = config.FOG_SIGHT
     fog_scout: int = config.FOG_SCOUT

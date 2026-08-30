@@ -95,7 +95,10 @@ _ADV_ECON = (
     ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
     ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
 )
-_ADV_COMBAT = (("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),)
+_ADV_COMBAT = (
+    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
+    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, 2.0, 0.05, False),
+)
 # Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
 # detail); scout floors at 1 so immediate neighbours stay visible enough to target
 # (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).

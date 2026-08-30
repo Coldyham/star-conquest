@@ -68,6 +68,7 @@ NEUTRAL_PRODUCES = False    # neutrals are static garrisons by default
 # Combat  (Lanchester square law + jitter)
 # --------------------------------------------------------------------------- #
 COMBAT_JITTER = 0.10        # +/- 10% random swing applied to each side's strength
+DEFENDER_ADVANTAGE = 1.0    # multiplier on the defender's effective strength (1.0 == none)
 
 # --------------------------------------------------------------------------- #
 # AI heuristic knobs

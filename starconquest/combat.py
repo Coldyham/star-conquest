@@ -4,6 +4,10 @@ The square law makes the winner's losses sub-1:1, so concentrating force is
 rewarded (10 vs 6 leaves ~8 survivors, not 4). A small +/- jitter on each side
 adds tension without turning fights into coin flips. Everything stochastic is
 drawn from ``state.rng`` so a seed reproduces every battle.
+
+``config.DEFENDER_ADVANTAGE`` scales the defender's jittered strength before the
+square-law maths (1.0 is neutral); an exact tie still breaks to the defender
+regardless of the multiplier.
 """
 
 from __future__ import annotations
@@ -33,6 +37,10 @@ def resolve_fight(
     j = config.COMBAT_JITTER
     a_eff = a_ships * (1.0 + rng.uniform(-j, j))
     b_eff = b_ships * (1.0 + rng.uniform(-j, j))
+    if a_owner == defender_owner:
+        a_eff *= config.DEFENDER_ADVANTAGE
+    elif b_owner == defender_owner:
+        b_eff *= config.DEFENDER_ADVANTAGE
 
     if a_eff > b_eff:
         w_owner, w_actual, w_eff, l_eff = a_owner, a_ships, a_eff, b_eff
