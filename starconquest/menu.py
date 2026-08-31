@@ -78,8 +78,9 @@ _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
 _NOTE_H = 18  # ...and between `small` note / table rows
-_TCOL_W = 64  # survivor-curve table: one numeric column
-_TLABEL_W = 132  # ...and its row-label gutter
+_MATRIX_N = 3  # jitter matrix: swings per axis, spanning ∓jitter; keep it odd
+_MATRIX_ROW_H = 24  # ...its row pitch, and
+_TLABEL_W = 120  # ...the gutter its row labels sit in
 _SEED_MAX_LEN = 7
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
@@ -219,8 +220,8 @@ class MenuState:
     # The Combat tab's demo fight. View state, not setup: it describes no match, so
     # it stays off `Settings` and out of every save file, token and challenge key.
     # Defaults to the fight the page's own prose works through.
-    preview_attacker: int = 20
-    preview_defender: int = 12
+    preview_attacker: int = 12
+    preview_defender: int = 10
     drag_key: Optional[str] = None  # slider currently being dragged
     filename: str = _DEFAULT_FILENAME  # save/load target (no extension)
     editing_filename: bool = False
@@ -545,14 +546,9 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
 # Content width is 516px in a mono font: 46 chars at `normal`, 64 at `small`.
 # --------------------------------------------------------------------------- #
 _COMBAT_PROSE = (
-    "Battles use Lanchester's square law. The",
-    "winner keeps sqrt(W² − L²) ships, not W − L:",
-    "20 attacking 12 leaves 16 survivors, not 8.",
-    "The bigger fleet loses far less than it kills.",
-)
-_COMBAT_NOTES = (
-    "So concentrate: one 20-ship punch beats two waves of 10.",
-    "A slightly bigger fleet doesn't win narrowly — it wins big.",
+    "Battles use Lanchester's square law.",
+    "The winner keeps sqrt(W² − L²) ships",
+    "e.g. 12 attacking 10 leaves 6 or 7 survivors",
 )
 
 
@@ -568,12 +564,8 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
     for line in _COMBAT_PROSE:
         _text(surface, f["normal"], line, config.COLOR_TEXT, midleft=(lx, y + _PROSE_H // 2))
         y += _PROSE_H
-    y += 8
-    for line in _COMBAT_NOTES:
-        _text(surface, f["small"], line, config.COLOR_TEXT_DIM, midleft=(lx, y + _NOTE_H // 2))
-        y += _NOTE_H
 
-    y += 12
+    y += 16
     _section(surface, "The fight", lx, y)
     y = _section(surface, "The rules", rx, y)
     # `ms` is both the rect store and the value target here — the demo sliders read
@@ -584,8 +576,9 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
     preview = combat.preview_fight(
         ms.preview_attacker, ms.preview_defender, settings.combat_jitter, settings.defender_advantage
     )
-    y = _draw_fight_readout(surface, preview, lx, y + 8, full)
-    _draw_survivor_curve(surface, ms, settings, lx, y + 8, full)
+    y = _draw_fight_readout(surface, preview, lx, y + 10, full)
+    y = _section(surface, "Jitter matrix — your swing across, theirs down", lx, y + 10)
+    _draw_jitter_matrix(surface, preview, lx, y, full)
 
 
 def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, int], str, str]:
@@ -609,19 +602,28 @@ def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, 
     if not preview.certain:
         color = _WARN
 
+    # What each side actually loses. The sub-1:1 exchange *is* the square law, so
+    # stating both losses teaches it without reaching for a counterfactual.
     if preview.annihilation:
         detail = "Both fleets are spent — the system goes neutral."
+    elif roll.winner == combat.ATTACKER:
+        lost = f"You lose {a - s}" if s < a else "You lose nothing"
+        detail = f"{lost}, they lose all {d}."
     else:
-        # `abs`, so the contrast stays honest when it is the defender who wins.
-        brought = a if roll.winner == combat.ATTACKER else d
-        kept = f"{s} — untouched" if s == brought else str(s)
-        detail = f"Subtraction says {abs(preview.naive)}. The square law says {kept}."
+        lost = f"They lose {d - s}" if s < d else "They lose nothing"
+        detail = f"{lost}, you lose all {a}."
 
     pct = int(round(preview.jitter * 100))
     if preview.jitter <= 0:
         band = "Jitter off: this result is exact."
     elif not preview.certain:
-        band = f"Jitter ±{pct}%: could go either way."
+        # Name the likely side — the corners disagree, but the average roll still
+        # favours one — then give both ends, so "uncertain" comes with numbers.
+        likely = {combat.ATTACKER: "yours", combat.DEFENDER: "theirs"}.get(roll.winner, "a wipe-out")
+        band = (
+            f"Jitter ±{pct}%: likely {likely}, you keep {preview.best.attacker_survivors}"
+            f" to them {preview.worst.defender_survivors}."
+        )
     elif preview.best.winner == combat.ATTACKER:
         band = "Jitter ±{}%: you keep {}–{}.".format(pct, *preview.band)
     elif preview.best.winner == combat.DEFENDER:
@@ -648,67 +650,65 @@ def _draw_fight_readout(surface, preview: combat.CombatPreview, x: int, y: int, 
     return box.bottom
 
 
-def _curve_ladder(attacker: int, defender: int, advantage: float = 1.0) -> tuple[list[int], int]:
-    """Six enemy-fleet sizes to plot the attacker's survivors against, and which
-    of them is the fight on screen.
+def _draw_jitter_matrix(surface, preview: combat.CombatPreview, x: int, y: int, width: int) -> int:
+    """Every corner of the jitter square at once: the attacker's swing across, the
+    defender's down, so the centre cell is the average roll and the top-left /
+    bottom-right corners are the attacker's worst and best cases.
 
-    Rungs are scaled so the attack is always shown failing somewhere on the
-    table — the flip is the instructive part, so it must never fall off the end.
-    It sits where the enemy's *effective* strength catches up, i.e.
-    ``attacker / advantage``, not the raw ship count: at a 0.75 advantage a
-    ladder pitched at the attacker alone would be six straight wins and the page
-    would have nothing to teach.
+    A single curve can only ever show one slice of the randomness. Laid out as a
+    grid the win/loss boundary becomes a *shape* — a solid block of colour when
+    the fight is settled, a diagonal split when it is a coin toss — which is the
+    thing players were failing to get from a lone number.
 
-    The defender slider then replaces its nearest rung, which makes the live
-    fight a column of the curve rather than a second, parallel demo. That can
-    lower a rung (by at most half a step, since a nearer rung would have been
-    chosen), so the guarantee lands on the last column rather than the fifth."""
-    step = max(1, math.ceil(attacker / max(advantage, 0.01) / 5))
-    ladder = [step * k for k in range(1, 7)]
-    here = min(range(len(ladder)), key=lambda i: abs(ladder[i] - defender))
-    ladder[here] = defender
-    return ladder, here
-
-
-def _draw_survivor_curve(surface, ms: MenuState, settings: Settings, x: int, y: int, width: int) -> None:
-    """The shape of the square law: survivors against enemy strength, with what
-    subtraction would have predicted underneath.
-
-    Deliberately jitter-free — the table is the law, the readout's band line owns
-    the randomness. Defender advantage *does* apply, so that knob visibly bends
-    the curve."""
+    The centre cell is the fight the readout above spells out in words, and is
+    highlighted to say so: it is the same figure in the same colour, which is
+    what teaches the rest of the grid to be read.
+    """
     f = _fonts()
-    a = ms.preview_attacker
-    ladder, here = _curve_ladder(a, ms.preview_defender, settings.defender_advantage)
-    outcomes = [combat.preview_fight(a, d, 0.0, settings.defender_advantage).nominal for d in ladder]
+    gutter = _TLABEL_W
+    cell_w = (width - gutter) // _MATRIX_N
+    # Each axis runs -1 .. +1 as a fraction of jitter. Keep the count odd so the
+    # middle sample is exactly 0.0 — that centre cell is the fight the readout
+    # describes, and is matched by identity below.
+    swings = tuple(-1.0 + 2.0 * i / (_MATRIX_N - 1) for i in range(_MATRIX_N))
 
-    def col(i: int) -> int:
-        return x + _TLABEL_W + _TCOL_W * (i + 1)
+    if preview.jitter <= 0:  # every cell would be the same fight, and every
+        # header would read "0%" — a grid that says nothing, three times over
+        _text(surface, f["small"], "Jitter is off, so every battle plays out exactly like this.",
+              config.COLOR_TEXT_DIM, midleft=(x, y + _NOTE_H // 2))
+        return y + _NOTE_H
 
-    y = _section(surface, f"Survivor curve — your {a} ships", x, y)
-    # Behind the rows, so the live column reads as one band rather than three cells.
-    pygame.draw.rect(surface, _HL_FILL, pygame.Rect(col(here) - _TCOL_W, y - 2, _TCOL_W, 58), border_radius=4)
+    def label(swing: float) -> str:
+        pct = swing * preview.jitter * 100
+        return "0%" if not pct else f"{'+' if pct > 0 else '−'}{abs(pct):.0f}%"
 
-    # `attacker_survivors`, not `survivors`: the row has to answer the question its
-    # label asks. Printing the *winner's* ships would show the enemy's remnant in a
-    # row headed "your N ships", told apart only by colour.
-    def cell_color(roll: combat.Roll) -> tuple[int, int, int]:
-        return config.player_color(1) if roll.attacker_survivors else _DISABLED_TEXT
+    def centre(i: int) -> int:
+        return x + gutter + cell_w * i + cell_w // 2
 
-    rows = (
-        ("Enemy fleet", [str(d) for d in ladder], config.COLOR_TEXT_DIM, None),
-        ("You keep", [str(r.attacker_survivors) for r in outcomes], config.COLOR_TEXT, cell_color),
-        ("Naive A−D", [str(abs(a - d)) for d in ladder], config.COLOR_TEXT_DIM, None),
-    )
-    for row, (label, cells, label_color, colorer) in enumerate(rows):
-        cy = y + _NOTE_H * row + _NOTE_H // 2
-        _text(surface, f["small"], label, label_color, midleft=(x, cy))
-        for i, cell in enumerate(cells):
-            color = colorer(outcomes[i]) if colorer else config.COLOR_TEXT_DIM
-            _text(surface, f["small"], cell, color, midright=(col(i), cy))
-        if row == 0:  # rule under the header, so the two data rows read as a pair
-            rule = y + _NOTE_H
-            pygame.draw.line(surface, _PANEL_BORDER, (x, rule), (x + width, rule), 1)
+    # Attacker's swing rises left to right; the defender's *falls* top to bottom,
+    # so the attacker's worst case sits top-left and its best bottom-right —
+    # reading down-right is reading from bad luck to good.
+    for i, swing in enumerate(swings):
+        _text(surface, f["small"], label(swing), config.COLOR_TEXT_DIM, center=(centre(i), y + _NOTE_H // 2))
+    y += _NOTE_H
+    pygame.draw.line(surface, _PANEL_BORDER, (x, y), (x + width, y), 1)
+
+    for row, d_swing in enumerate(reversed(swings)):
+        cy = y + _MATRIX_ROW_H * row + _MATRIX_ROW_H // 2
+        _text(surface, f["small"], label(d_swing), config.COLOR_TEXT_DIM, midright=(x + gutter - 14, cy))
+        for i, a_swing in enumerate(swings):
+            if a_swing == 0.0 and d_swing == 0.0:  # the fight the readout describes
+                box = pygame.Rect(centre(i) - cell_w // 2, cy - _MATRIX_ROW_H // 2, cell_w, _MATRIX_ROW_H)
+                pygame.draw.rect(surface, _HL_FILL, box, border_radius=4)
+            roll = preview.roll(a_swing, d_swing)
+            if roll.winner == combat.ATTACKER:
+                text, color = f"you {roll.survivors}", config.player_color(1)
+            elif roll.winner == combat.DEFENDER:
+                text, color = f"them {roll.survivors}", config.player_color(2)
+            else:
+                text, color = "wipe-out", _DISABLED_TEXT
+            _text(surface, f["small"], text, color, center=(centre(i), cy))
+    return y + _MATRIX_ROW_H * _MATRIX_N
 
 
 def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:

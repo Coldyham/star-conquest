@@ -127,10 +127,12 @@ panel or drifts from the finger at the extremes.
 ## Combat rules page (`menu._draw_combat`)
 
 The square law was explained nowhere player-facing, and the natural guess —
-subtract the fleets — is wrong by roughly a factor of two (20 v 12 leaves 16,
-not 8). Players read that as the game cheating. So the page's headline is
-built around the contrast, not the formula: *"Subtraction says 8. The square
-law says 16."*
+subtract the fleets — is wrong by a wide margin, which players read as the game
+cheating. The page answers that by describing what *actually* happens rather
+than arguing with the wrong rule: the readout states both sides' losses ("You
+lose 5, they lose all 10"), because the sub-1:1 exchange **is** the square law.
+An earlier draft printed the subtraction answer alongside for contrast; naming
+a rule the game does not use only invites the reader to keep it in mind.
 
 `combat.preview_fight` lives beside `resolve_fight` rather than in the menu,
 sharing `_apply_advantage` / `_resolve_effective` / `_survivors` with it, so
@@ -169,17 +171,27 @@ hand, the height is a constant. That is also why `_ADV_COMBAT` moved here: the
 Advanced tab's right column had been overflowing the panel by 4px, and
 `test_tab_content_stays_inside_the_panel` now guards every tab against it.
 
-The survivor curve is transposed (three rows, six columns) because that reads
-left-to-right as a curve and costs 55px where six rows would cost 114. Its
-rungs scale with `attacker / advantage` — the point where the enemy's
-*effective* strength catches up — so the flip to defeat is always on screen;
-pitching them at the raw ship count made a 0.75-advantage table six straight
-wins, with nothing to teach. The defender slider replaces its nearest rung,
-which makes the live fight a column of the curve rather than a second, parallel
-demo, and can lower a rung by up to half a step — hence the guarantee lands on
-the last column rather than the fifth. The row prints the *attacker's*
-survivors, not the winner's: a row headed "your N ships" that silently switches
-to the enemy's remnant past the flip, distinguished only by colour, is a trap.
+The jitter matrix (`_draw_jitter_matrix`) shows the whole jitter square at
+once: the attacker's swing across, the defender's *down*, so the centre is the
+average roll, the top-left corner is the attacker's worst case and the
+bottom-right its best. Reading down-and-right is reading from bad luck to good,
+and `test_jitter_matrix_is_monotone_down_and_right` pins that orientation.
+
+It replaced a survivor-vs-enemy-strength curve, which could only ever show one
+slice of the randomness — and jitter is exactly the part players were failing
+to reason about. As a grid the win/loss boundary becomes a *shape*: a solid
+block of one colour when the fight is settled, a diagonal split when it is a
+coin toss. Its corners are `preview.best`/`worst` by construction
+(`CombatPreview.roll`), so the picture and the band line beneath the headline
+cannot disagree in front of the player.
+
+Three swings per axis rather than five: five needs 132px of height where three
+needs 96, and the extra rows only interpolate between corners that already
+bound the outcome. At zero jitter the grid would be one fight repeated nine
+times under three identical `0%` headers, so it collapses to a single sentence
+instead. The centre cell is highlighted because it is the fight the readout
+spells out in words — same number, same colour — which is what teaches the
+reader how to read the other eight.
 
 ## Defender advantage and the AI (`ai._frontier_order`)
 

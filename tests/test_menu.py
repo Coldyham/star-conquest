@@ -334,56 +334,72 @@ def test_tab_content_stays_inside_the_panel():
         pygame.quit()
 
 
-def test_survivor_curve_ladder_brackets_the_flip_and_pins_the_live_fight():
-    """The table must always show the attack failing somewhere (that is the
-    lesson), and the fight on screen must be one of its columns. The flip sits
-    where the enemy's *effective* strength catches up, so the ladder has to scale
-    with defender advantage too — at 0.75 an advantage-blind ladder ran out of
-    columns before the attack ever failed."""
-    for adv in (0.75, 1.0, 1.5, 2.0):
-        for a in range(1, config.COMBAT_PREVIEW_MAX + 1):
-            for d in (1, 7, 20, 50):
-                ladder, here = menu._curve_ladder(a, d, adv)
-                assert len(ladder) == 6
-                assert ladder[here] == d           # the live fight is a column
-                assert ladder == sorted(ladder)    # substitution never disorders it
-                # the attack has to be shown failing somewhere on the table
-                lost = [combat.preview_fight(a, e, 0.0, adv).nominal for e in ladder]
-                assert any(r.winner != combat.ATTACKER for r in lost), (a, d, adv)
-
-
 def test_readout_lines_never_contradict_each_other():
     """The three lines describe one fight from three angles, so they must agree at
     every slider position. Attacker 1 / Defender 1 / jitter 2% used to render
-    'both wiped out' above 'they keep 0–0'."""
+    'both wiped out' above 'they keep 0-0'."""
     for a in range(1, config.COMBAT_PREVIEW_MAX + 1):
         for d in (1, 2, 5, 13, 50):
             for jit in (0.0, 0.02, 0.1, 0.5):
-                for adv in (0.75, 1.0, 2.0):
+                for adv in (0.75, 1.0, 1.5):
                     p = combat.preview_fight(a, d, jit, adv)
                     headline, _color, detail, band = menu._readout_lines(p)
                     where = (a, d, jit, adv)
                     # "both wiped out" is exactly the neutral case, on all three lines
                     assert ("wiped out" in headline) == p.annihilation, where
                     assert ("goes neutral" in detail) == p.annihilation, where
-                    # a band may only name survivors when some side certainly has them
-                    if "keep" in band:
-                        assert p.certain and p.best.survivors > 0, where
-                        assert p.best.winner != combat.NEUTRAL, where
-                    # ...and may only promise a side when the corners agree on it
-                    if "you keep" in band:
+                    # hedging is exactly the uncertain case, and never silent about it
+                    assert ("likely" in band) == (not p.certain and p.jitter > 0), where
+                    # a flat range may only promise a side when the corners agree
+                    if "you keep" in band and "likely" not in band:
                         assert p.worst.winner == combat.ATTACKER, where
                     if "they keep" in band:
                         assert p.worst.winner == combat.DEFENDER, where
 
 
-def test_readout_flags_an_untouched_winner_by_the_right_fleet():
-    """The 'untouched' aside compares against the *winner's* fleet, not the larger
-    one: a defender that holds intact is the case that most sells the knob."""
-    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(10, 6, 0.1, 2.0))
-    assert "untouched" in detail  # defender keeps all 6
-    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(20, 12, 0.1, 1.0))
-    assert "untouched" not in detail  # attacker keeps 16 of 20
+def test_readout_detail_states_both_sides_losses():
+    """The detail line describes what actually happens, not what a different rule
+    would have said — the sub-1:1 exchange *is* the square law."""
+    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(12, 10, 0.1, 1.0))
+    assert detail == "You lose 5, they lose all 10."      # 12 v 10 keeps 7 of 12
+    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(50, 1, 0.1, 1.0))
+    assert detail == "You lose nothing, they lose all 1."  # survivors capped at the fleet
+    _h, _c, detail, _b = menu._readout_lines(combat.preview_fight(10, 10, 0.0, 1.0))
+    assert "goes neutral" in detail
+
+
+def test_uncertain_band_names_the_likely_side_and_both_ends():
+    """An uncertain fight still owes the player numbers: which way it leans, and
+    how far it can swing either way."""
+    p = combat.preview_fight(12, 10, 0.1, 1.0)
+    assert not p.certain
+    _h, _c, _d, band = menu._readout_lines(p)
+    assert "likely yours" in band                                   # nominal favours the attacker
+    assert f"you keep {p.best.attacker_survivors}" in band          # best corner
+    assert f"them {p.worst.defender_survivors}" in band             # worst corner
+
+
+def test_jitter_matrix_corners_are_the_previews_own_corners():
+    """The grid's extremes must be the same rolls the band line quotes, or the
+    picture and the prose disagree in front of the player."""
+    p = combat.preview_fight(12, 10, 0.1, 1.0)
+    assert p.roll(0.0, 0.0) == p.nominal          # centre cell == the headline
+    assert p.roll(+1.0, -1.0) == p.best           # bottom-right == best for you
+    assert p.roll(-1.0, +1.0) == p.worst          # top-left == worst for you
+
+
+def test_jitter_matrix_is_monotone_down_and_right():
+    """Reading down-right runs from bad luck to good, which is the whole reason
+    the axes are oriented this way — so the attacker's take must never fall as
+    its own swing rises or the defender's drops."""
+    swings = (-1.0, 0.0, 1.0)
+    for a, d, jit, adv in ((12, 10, 0.1, 1.0), (30, 10, 0.5, 1.0), (8, 20, 0.2, 1.5)):
+        p = combat.preview_fight(a, d, jit, adv)
+        grid = [[p.roll(sa, sd).attacker_survivors for sa in swings] for sd in reversed(swings)]
+        for row in grid:
+            assert row == sorted(row)                       # rightwards: your swing rises
+        for col in zip(*grid):
+            assert list(col) == sorted(col)                 # downwards: their swing falls
 
 
 def test_ai_tab_per_seat_and_copy_reset():

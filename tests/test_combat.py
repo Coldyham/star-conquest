@@ -290,3 +290,35 @@ def test_defender_advantage_flips_a_comfortable_win():
 def test_naive_is_the_teaching_contrast():
     p = combat.preview_fight(20, 12, 0.1, 1.0)
     assert p.naive == 8 and p.nominal.survivors == 16  # sqrt(400 - 144), not 20 - 12
+
+
+def test_roll_reproduces_the_named_corners():
+    """`nominal`/`best`/`worst` are just named points in the jitter square, so a
+    caller sampling the whole square (the menu's matrix) gets the same maths."""
+    for a, d, j, adv in ((20, 12, 0.1, 1.0), (5, 5, 0.5, 1.0), (8, 20, 0.2, 1.5)):
+        p = combat.preview_fight(a, d, j, adv)
+        assert p.roll(0.0, 0.0) == p.nominal
+        assert p.roll(1.0, -1.0) == p.best
+        assert p.roll(-1.0, 1.0) == p.worst
+
+
+def test_roll_is_bounded_by_the_corners_everywhere_inside():
+    """Nothing in the interior can beat the corners — the property that lets the
+    band be printed as a range and the matrix be read as a gradient."""
+    steps = [i / 4 - 1.0 for i in range(9)]  # -1.0 .. +1.0
+    for a, d, j, adv in ((20, 12, 0.1, 1.0), (11, 10, 0.3, 1.0), (30, 40, 0.5, 0.75)):
+        p = combat.preview_fight(a, d, j, adv)
+        lo, hi = p.band
+        for sa in steps:
+            for sd in steps:
+                assert lo <= p.roll(sa, sd).attacker_survivors <= hi, (a, d, j, adv, sa, sd)
+
+
+def test_roll_draws_no_randomness():
+    rng = random.Random(99)
+    before = rng.getstate()
+    p = combat.preview_fight(12, 10, 0.1, 1.0)
+    for sa in (-1.0, 0.0, 1.0):
+        for sd in (-1.0, 0.0, 1.0):
+            p.roll(sa, sd)
+    assert rng.getstate() == before

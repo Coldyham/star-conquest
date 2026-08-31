@@ -188,6 +188,23 @@ class CombatPreview:
         """(worst, best) attacker survivors — the width of jitter, in ships."""
         return self.worst.attacker_survivors, self.best.attacker_survivors
 
+    def roll(self, attacker_swing: float, defender_swing: float) -> Roll:
+        """The outcome anywhere inside the jitter square, each swing given in
+        ``[-1, +1]`` as a fraction of ``jitter``.
+
+        The three stored rolls are just its named corners — ``roll(0, 0)`` is
+        ``nominal``, ``roll(+1, -1)`` is ``best`` and ``roll(-1, +1)`` is
+        ``worst`` — so a caller wanting the whole square (the menu draws a grid
+        of it) samples the same maths rather than rebuilding it.
+        """
+        return _preview_roll(
+            self.attacker,
+            self.defender,
+            attacker_swing * self.jitter,
+            defender_swing * self.jitter,
+            self.advantage,
+        )
+
 
 def _preview_roll(attacker: int, defender: int, a_roll: float, d_roll: float, advantage: float) -> Roll:
     """One corner of the preview: the arithmetic ``resolve_fight`` runs, with the
