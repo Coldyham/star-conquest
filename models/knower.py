@@ -90,74 +90,135 @@ tab's slider, which ``AUX_LABEL`` below names *Search depth*) turns that into a 
     1   the one-turn oracle described above (the default, `config.AI_AUX`)
     N   the oracle, then N-1 turns actually *played out* and scored
 
-Depth >= 2 is a rollout search. ``engine.end_turn`` is drivable on a clone — the
-engine takes ``decide`` as a parameter and mutates nothing outside the state handed
-to it — so ``_rollout`` clones the board, plays a candidate plan, runs the next
-turns, and scores the position with ``_evaluate``. ``_search`` does that for a few
-candidate ``Posture``s and keeps the winner. Three things make it sound:
+Depth >= 2 is a **tree search over sequences**. ``engine.end_turn`` is drivable on a
+clone — the engine takes ``decide`` as a parameter and mutates nothing outside the
+state handed to it — so ``_rollout`` steps one ply of one line, ``_expand`` branches
+every live line across the whole candidate set, and ``_evaluate`` scores the leaves.
 
+Branching at *every* ply is the point. An earlier version deviated for one ply and
+then played the tuned default for the rest, which prices a candidate as "what if I
+did this now and then went back to normal" — it cannot represent "rush now,
+consolidate next turn" at all, and a posture is exactly the kind of thing you would
+want to hold for three turns or not adopt at all.
+
+The full tree is ``candidates ** turns``, ~2e9 nodes at the top of the slider, so it
+is grown as a beam. Four things make it sound:
+
+  * **The cut is per opening, not pooled** (`_prune`). This is the one that is easy
+    to get wrong and expensive to get wrong. The default's line branches as widely as
+    anyone else's, so a single pooled beam fills with *continuations of whichever
+    opening leads on material right now* — measured, 94% of survivors descended from
+    the default and a borrowed opening never survived a single cut, which made the
+    whole tree a costly way to re-derive depth 1. Grouping by ply-0 move keeps every
+    opening alive to the bottom, which is what the search exists to compare.
   * **Candidates come from a threaded ``Posture``, not patched globals.** Patching
     would be process-wide: it would corrupt the ``_blind`` self-model used to
     predict rivals, and every other knower seat in the game.
-  * **Common random numbers.** Every candidate's rollout gets the same
-    state-derived rng, so all of them meet the same combat jitter and the score gap
-    reflects the plan rather than the dice. Free variance reduction, and it keeps
+  * **Common random numbers.** Every node on a ply gets the same state-derived rng,
+    so all of them meet the same combat jitter and a score gap reflects the plan
+    rather than the dice. Free variance reduction, and it keeps
     ``replay.reconstruct`` bit-exact.
   * **Rolled turns use the blind planner for every oracle seat**, ours included
     (``_rollout_decide``). Letting them build real oracles would mean a full
     prediction sweep per rolled turn. Our own future play is understated, but
     identically for every candidate, which is all a comparison needs.
 
-Work is *iteration*-bounded (fixed depth x ``SEARCH_WIDTH``), so a game stays
-reproducible; ``SEARCH_BUDGET_S`` is only a catastrophe guard, checked between
-candidates so there is always a whole plan to return. Candidate 0 is the tuned
-default, so a search that runs out of budget or finds nothing better *is* depth 1.
+Work is *iteration*-bounded, so a game stays reproducible — and the shape of that
+bound is the thing to keep in mind when touching this code:
 
-**How much depth is worth depends on whether the opponent is an oracle**, and by a
-lot. Measure it against the bots you actually care about, not in a mirror.
+    nodes per ply = candidates**2 x SEARCH_BEAM
+
+**quadratic in the candidate count**, because the number of openings to keep alive is
+itself the candidate count. Depth is the cheap knob and the roster is the expensive
+one: going from four candidates to six costs 2.2x, which is more than depth 8 -> 12.
+``SEARCH_BUDGET_S`` is a catastrophe guard and must stay one — tripping it makes the
+plan depend on the wall clock, and `replay.reconstruct` re-runs `decide` — so the
+roster is sized to fit inside it rather than the other way round.
+
+--- Borrowing a move from another bot ---------------------------------------- #
+
+``EXTERNAL_CANDIDATES`` names bots whose ``decide`` is run *for our own seat* and
+offered as an opening (`_external_plan`), at every ply, so a sustained borrowed line
+is reachable rather than a single borrowed turn. It is the single largest measured
+win in this search, and not by a little. At depth 12 against thinker:
+
+    with rusherplus + heuristic     97.5%  (390-10, n=400)   0 timeouts
+    postures only                   89.7%  (96-11,  n=107)  13 timeouts
+
+Without them, extra depth **stops paying entirely** — postures-only measures 92.0% at
+depth 8 and 89.7% at depth 12, i.e. no better than depth 1. Rolling "knower, more or
+less aggressive" forward a dozen turns only compounds a fiction; the depth converts
+into wins because there is something structurally *different* in the tree to find.
+
+How often a borrowed move actually wins the search, over 1128 **contested** decisions
+(we hold a system adjacent to a live rival). Measure this on contested positions
+only: during the land-grab nothing is in contact, every candidate rolls out to the
+same material, and the tie-break returns the default by construction, which buries
+the effect — the same 1128 decisions read 85% default if the opening phase is folded
+in.
+
+    default 54.8%   rusherplus 16.9%   heuristic 14.9%   timid 13.4%
+
+Nearly a third of real decisions are moves knower's own four phases cannot express.
+That is also why ``SEARCH_WIDTH`` is 2: the two aggressive postures it used to cover
+(`all-in`, `push-for-depth`) fell to 1.3% and 0.5% once a real rusher was a
+candidate, and dropping them paid for the whole depth increase and more.
+
+--- How much depth is worth -------------------------------------------------- #
 
 Against thinker, both seatings, 24-node maps (n = decided games):
 
-    depth 1     86%   n=78
-    depth 5     89%   n=75
-    depth 8     95%   n=111    <- the plateau, and the deepest the slider goes
-    depth 16    95%   n=163
-    depth 40    86%   n=73     falls away again
+    depth  1    90.4%   n=114     6 timeouts
+    depth  5    96.6%   n=119     1
+    depth  8    96.0%   n=400     0
+    depth 12    97.5%   n=400     0     <- the top of the slider
+    depth 16    95.8%   n=118     2
 
-Against claudebot there is no headroom to find: depth 1 already wins 100% (75-0).
+Read that curve honestly. Depth 1 -> 5 is real and large. **Everything past 5 is
+inside the noise**: 12 over 8 is +1.5 pt with SE 1.25 (z = 1.20), and head-to-head
+knower@12 vs knower@8 finished 63-57 (52.5%, SE 4.6) — even. Depth 12 came out ahead
+in every measurement taken and behind in none, which is why the slider goes there,
+but it is a mild preference and not a proven gain. Depth 16 is not better than 12.
+Don't re-tune this on a hundred games; the differences here are smaller than that.
 
-In a **mirror**, the same sweep peaks at depth 5 and is flat to 8 (52%, n=169),
-then reverses — depth 5 beats depth 16 66% (n=68) and depth 40 59% (n=66). That
-looks like an argument against depth, and it is not: it is an artifact of the mirror.
+**How much depth is worth still depends on whether the opponent is an oracle.**
+Against knower@1 depth 12 wins 66.1% (78-40), but against knower@8 only 52.5%.
 ``_rollout_decide`` plays a non-oracle seat with its *real* ``decide``, so a rollout
-against thinker is a faithful simulation and stays informative for a dozen turns;
-but it plays an oracle seat with ``_blind``, which is a poor model of a deep knower,
-so a rollout against another knower compounds a fiction and extra turns hurt.
-Useful depth tracks how well the rollout can model the opposition. (The mirror
-numbers are still a fair A/B *of the search* — both sides are equally handicapped —
-they just understate the depth worth using in a real game.)
+against thinker is a faithful simulation and stays informative for a dozen turns; it
+plays an oracle seat with ``_blind``, which is a poor model of a deep knower, so a
+mirror compounds a fiction and understates what depth is worth in a real game.
+Useful depth tracks how well the rollout can model the opposition.
 
-The mirror's turnover was measured, not assumed, over 75 midgame positions: deeper
-rollouts separate the candidates *more* often (35/75 at depth 5 rising to 48/75 at
-40) while agreeing with depth 5's choice *less* often (59/75 at 8, 48/75 at 16,
-44/75 at 40) — extra discrimination that is noise rather than signal. It is *not*
-that deep rollouts bottom out at a decided game: none of them reach one, since even
-a 39-turn rollout from turn 45 ends mid-game.
+Against claudebot there is little headroom: 96.2% at depth 1, 98.8% (79-1) at 12.
 
-Cost, per decide: 0.7 ms at depth 1, 7.6 ms at 8, 14.8 ms at 16 (24 nodes, 2 seats);
-1.9 / 13.6 / 26.4 ms at 40 nodes and 4 seats. All fit the 350 ms autoplay frame, but
-the WASM build has no thread to spare, which is the other reason ``SEARCH_DEPTH_MAX``
-stops at 8 — it is the cheaper end of the plateau, so the slider reaches full
-strength without reaching the range where more lookahead starts costing.
+Cost per decide, beam 1 and four candidates, measured untruncated:
 
-Depth also plays *faster* and less passively up to the plateau, not more: from depth
-1 to 5 in the mirror, timeouts fell 13 -> 5 and games shortened 157 -> 125 turns.
+                        24 nodes / 2 seats     40 nodes / 6 seats
+    depth  1                   0.2 ms                 0.7 ms
+    depth  8                  18.3 ms                34.5 ms
+    depth 12                  28.0 ms                57.1 ms  (69 ms at the tail)
 
-The remaining ceiling is candidate breadth — ``POSTURE_VARIANTS`` only explores
-"knower, more or less aggressive", and cannot find a move the four phases
-structurally cannot express. Past that, the levers are a stronger rollout policy
-(which is exactly what the mirror result indicts) or an eval integrated over the
-path rather than read off the final board.
+The right-hand column is the most expensive configuration the menu can produce, at
+the top of the slider, and it fits ``SEARCH_BUDGET_S`` with better than 2x headroom —
+0% of decides truncate. It is *per decide*, though: six knower seats at depth 12 is
+~340 ms of turn resolution, so a full lobby of them is felt even though one is not.
+The WASM build has no thread to spare and is the reason the headroom is kept this
+wide rather than spent on a wider beam or a fifth candidate.
+
+Depth also plays *faster* and less passively, not more: from depth 1 to 12 against
+thinker, timeouts fall 6 -> 0 and games shorten 112 -> 100 turns.
+
+``SEARCH_BEAM`` stays 1 — one continuation kept per opening. Wider measured no
+better and costs linearly, and there is a reason to expect that: an opening's score
+is the max over its surviving lines, and a max over more noisy rollouts is biased
+upward by *sampling*, unevenly across openings. The comparison the search needs is
+between openings, not within one.
+
+The remaining ceilings are the evaluation and the roster. `_evaluate` reads material
+off the final board, so within a single opening `_prune` can still drop a line that
+gives ground early to win later; an eval integrated over the path would fix that. And
+the roster is now the dominant cost term, so a fifth candidate has to beat
+``candidates**2`` — the cheap direction is a *better* four, not more of them.
 
 Note **depth 0 is thinker-*strength*, not thinker**: ``RESERVE_FLOOR`` is 0 here
 against thinker's 1, ``_richness`` peeks a hop further (``BEYOND_DECAY``), and
@@ -219,8 +280,20 @@ TRUST_HUMAN = False             # True lets a human-seat prediction relax guards
 # Depth comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
 # 1.0 default is what keeps an untuned seat on the plain one-turn oracle).
 SEARCH_DEPTH_DEFAULT = 1        # what a malformed or absent `aux` falls back to
-SEARCH_DEPTH_MAX = 8            # matches the menu slider's top end
-SEARCH_WIDTH = 4                # candidate postures actually rolled out
+SEARCH_DEPTH_MAX = 12           # matches the menu slider's top end
+SEARCH_WIDTH = 2                # candidate postures a line may branch into
+SEARCH_BEAM = 1                 # continuations kept per opening at each ply
+
+# Candidate plans borrowed whole from *other* registered bots and rolled out beside
+# our own postures. `POSTURE_VARIANTS` can only ever say "knower, more or less
+# aggressive"; a rival's `decide` can propose a move the four phases below
+# structurally cannot express — rusherplus throws every garrison at its weakest
+# neighbour at once, the heuristic hoards where knower would spend. Neither is
+# usually the pick, and neither has to be: the search only takes one that
+# *outscores* the default. Names, not functions, and resolved lazily in
+# `_external_plan` — models/ files import in sorted filename order, so `rusherplus`
+# is not in `ai.STRATEGIES` yet when this line runs.
+EXTERNAL_CANDIDATES = ("rusherplus", "heuristic")
 
 # What the AI tab's generic aux slider is called when this bot holds the seat, and
 # the range/step it offers (`ai.aux_spec` reads these; see models/README.md).
@@ -229,7 +302,16 @@ AUX_RANGE = (0, SEARCH_DEPTH_MAX, 1)
 AUX_INT = True
 
 # A second budget, kept separate from ORACLE_BUDGET_S so depth 1 stays byte-exact.
-# Checked *between* candidates, so there is always a whole plan to return.
+# Checked *between plies*, so every line is the same depth whenever it fires and the
+# comparison stays fair; there is always a whole plan to return.
+#
+# Tripping this costs the game its bit-reproducibility (the plan starts depending on
+# the wall clock, and `replay.reconstruct` re-runs `decide`), so the candidate set is
+# sized to fit *inside* it rather than the other way round: 150 ms is about as long
+# as a turn may stall in a human game, so it is the fixed constraint and `_prune`'s
+# `c**2 * b` node count is what gets cut to meet it. Measured worst case of the most
+# expensive legal configuration — 40 nodes, 6 seats, the slider at its top — is well
+# under this; see the cost table in the module docstring.
 SEARCH_BUDGET_S = 0.150
 
 # Terminal position value. Production dominates: it is the only term that compounds.
@@ -239,6 +321,7 @@ EVAL_SHIPS = 0.15
 EVAL_DECIDED = 1000.0           # winning/losing outranks any amount of material
 
 _SALT_ROLLOUT = 7               # keeps rollout rngs clear of `_priv`'s other users
+_SALT_EXTERNAL = 11             # ...and one per `EXTERNAL_CANDIDATES` entry, from here
 
 
 @dataclass(frozen=True)
@@ -287,6 +370,18 @@ def _posture() -> Posture:
 POSTURE_VARIANTS = (
     {},
     {"frontier_guard": 0.6, "reserve_floor": 2},                    # timid
+    # --- below here is outside `SEARCH_WIDTH` and not currently searched --------- #
+    # Every ply costs `candidates**2 * SEARCH_BEAM` nodes, so a candidate is not free
+    # and has to earn its slot in picks. Measured over 1355 *contested* decisions at
+    # depth 12 (the land-grab phase is uninformative — with nothing in contact every
+    # candidate rolls out to the same material and the tie-break returns the default):
+    #
+    #     default 53.6%   rusherplus 17.3%   timid 14.2%   heuristic 13.1%
+    #     all-in   1.3%   push-for-depth 0.5%
+    #
+    # The two aggressive postures are the ones that stopped paying, and it is fairly
+    # clear why: `EXTERNAL_CANDIDATES` now carries a *real* rusher, which expresses
+    # "commit everything" far better than a margin tweak to our own phases can.
     {"frontier_guard": 0.0, "enemy_near": 1.15, "enemy_far": 1.5},  # all-in
     {"beyond_decay": 0.8},                                          # push for depth
     {"enemy_near": 1.6, "enemy_far": 2.2},                          # only sure strikes
@@ -336,7 +431,7 @@ def decide(state, pid):
     """Plan against a forecast of every other seat. Never raises.
 
     Depth comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1 the
-    plain one-turn oracle, and N the oracle plus N-1 turns of rollout search.
+    plain one-turn oracle, and N the oracle plus an N-1 ply tree search.
     """
     global _DEPTH, LAST_ERROR
 
@@ -675,12 +770,14 @@ def _rollout_decide(state, q, humans=frozenset()):
     return fn(state, q)
 
 
-def _rollout(state, pid, plan, turns: int, rng) -> float:
-    """Play ``plan`` on a clone, run ``turns`` more turns, and score the result.
+def _rollout(state, pid, plan, humans, rng):
+    """Play ``plan`` for our seat on a clone of ``state``; return the stepped board.
 
-    ``rng`` is seeded identically for every candidate (common random numbers), so all
-    of them meet the same combat jitter and the score difference is attributable to
-    the plan rather than to luck.
+    One ply, not a whole line — the search grows a tree, so each node is stepped
+    separately and kept. ``rng`` is the *ply's* stream, handed identically to every
+    node on that ply (common random numbers), so all of them meet the same combat
+    jitter and a score gap between siblings reflects the plan rather than the dice.
+    It keeps ``replay.reconstruct`` bit-exact for the same reason.
 
     Note the board is *advanced* here, unlike the oracle's static post-launch board —
     so `state.travel_turns` re-times lanes as `state.turn` climbs under
@@ -692,47 +789,168 @@ def _rollout(state, pid, plan, turns: int, rng) -> float:
     # `_collect_orders` skips a human seat entirely (engine.py:101), which would drop
     # our *own* plan on the floor whenever knower is the autoplayed human — leaving
     # every candidate scoring the same do-nothing board. Clear the flag on the clone
-    # and model the seats a person really holds with `_blind` instead.
-    humans = frozenset(q for q, p in board.players.items() if p.is_human)
+    # and model the seats a person really holds with `_blind` instead. Idempotent, so
+    # a board cloned from an already-cleared parent simply rewrites False over False.
     if humans:
         for p in board.players.values():
             p.is_human = False
 
-    def rolled(s, q):
-        return _rollout_decide(s, q, humans)
+    def stepped(s, q):
+        return plan if q == pid else _rollout_decide(s, q, humans)
 
-    def first_turn(s, q):
-        return plan if q == pid else rolled(s, q)
+    engine.end_turn(board, decide=stepped)
+    return board
 
-    engine.end_turn(board, decide=first_turn)
-    for _ in range(turns - 1):
-        if board.winner is not None:
-            break
-        engine.end_turn(board, decide=rolled)
-    return _evaluate(board, pid)
+
+@dataclass
+class _Line:
+    """One line of play under consideration, as far as the search has grown it.
+
+    ``root`` is the only part that ever reaches the engine — the orders we would
+    actually issue *this* turn. Everything past it exists to price that opening, and
+    ``origin`` is which opening it was, which is what `_prune` groups on.
+    """
+
+    root: list                  # the plan at ply 0, i.e. what winning this search means
+    origin: int                 # index of that plan in the ply-0 candidate list
+    board: object               # the position the line has reached
+    score: float                # `_evaluate` of that position
 
 
 def _search(state, pid, orc, turns: int, deadline):
-    """Roll each candidate posture forward ``turns`` turns; return the best plan.
+    """Grow a beam of lines ``turns`` plies deep; play the best one's opening.
 
-    The default posture is candidate 0 and is what we fall back to, so a search that
-    runs out of budget — or finds nothing better — is exactly depth-1 knower.
+    Every surviving line branches into the full candidate set at every ply, so the
+    search reasons about *sequences* — "rush now, consolidate next turn" is a line it
+    can hold, which a one-ply deviation followed by default play structurally could
+    not express. The tree that describes is ``len(candidates) ** turns``, which at the
+    slider's top end is ~2e9 nodes, so it is grown as a beam: each ply is expanded in
+    full and then cut back by `_prune`. Work is linear in depth, not exponential.
+
+    Candidate 0 is the tuned default and `_prune` keeps every opening alive to the
+    bottom, so the plan we would otherwise have played is always still in the beam;
+    ties are broken toward it, since openings are kept in candidate order. A search
+    that finds nothing better is therefore exactly depth-1 knower.
     """
     base = _plan(state, pid, orc)
     if turns <= 0:
         return base
 
+    # Read once, from the real board: `_rollout` clears the flag on every clone.
+    humans = frozenset(q for q, p in state.players.items() if p.is_human)
+
+    lines = []
+    for i, plan in enumerate(_candidates(state, pid, orc, base)):
+        board = _rollout(state, pid, plan, humans, _priv(state, pid, _SALT_ROLLOUT))
+        lines.append(_Line(plan, i, board, _evaluate(board, pid)))
+
+    for _ in range(1, turns):
+        if time.perf_counter() > deadline:
+            break            # every line is the same depth, so stopping here is fair
+        if all(line.board.winner is not None for line in lines):
+            break            # nothing left to learn; the verdicts are already in
+        lines = _prune(_expand(lines, pid, humans))
+
+    best = lines[0]          # origin 0, so an exact tie keeps the tuned default
+    for line in lines[1:]:
+        if line.score > best.score:
+            best = line
+    return best.root
+
+
+def _expand(lines, pid, humans):
+    """One ply: branch every live line across the whole candidate set.
+
+    A line that has already reached a decided board is carried through untouched
+    rather than dropped — its verdict is the score, and stepping a finished game
+    would only churn. The ply's rng is derived from the *parent* board, whose seed,
+    turn and pid are shared by every node on the ply, so siblings and cousins alike
+    meet identical dice.
+    """
+    out = []
+    for line in lines:
+        if line.board.winner is not None:
+            out.append(line)
+            continue
+        # No oracle past ply 0: building one per node would mean a full prediction
+        # sweep on every rolled turn, which is exactly where the cost would run away.
+        blind = _plan(line.board, pid, None)
+        for plan in _candidates(line.board, pid, None, blind):
+            board = _rollout(line.board, pid, plan, humans,
+                             _priv(line.board, pid, _SALT_ROLLOUT))
+            out.append(_Line(line.root, line.origin, board, _evaluate(board, pid)))
+    return out
+
+
+def _prune(lines):
+    """Cut each *opening* back to its own best `SEARCH_BEAM` continuations.
+
+    Grouped by ply-0 move rather than pooled, and that is the whole point of the
+    search. A single pooled beam fills with continuations of whichever opening leads
+    on material *right now*, so the alternative openings — the only thing being
+    compared — are gone after one ply, and a candidate that gives ground early to win
+    later never gets to prove it. Measured on the pooled version: 94% of surviving
+    lines descended from the default and a borrowed move never survived a single cut,
+    which made the whole tree an expensive way to re-derive depth 1.
+
+    Per opening, the cut is still greedy on `_evaluate`, which is the honest limit
+    here: within one opening a sacrifice line can still be dropped before it pays.
+    `sorted` is stable, so an exact tie keeps whichever line was generated first and
+    the search stays reproducible.
+    """
+    groups: dict[int, list] = {}
+    for line in lines:
+        groups.setdefault(line.origin, []).append(line)
+    out = []
+    for origin in sorted(groups):
+        ranked = sorted(groups[origin], key=lambda line: -line.score)
+        out.extend(ranked[:SEARCH_BEAM])
+    return out
+
+
+def _candidates(state, pid, orc, base):
+    """Every plan a line can branch into, best-understood first.
+
+    A generator, and deliberately so: the external candidates are the expensive half
+    — each runs a whole rival planner — so a caller that stops early must not have
+    paid to build what it never scored.
+    """
     default = _posture()
-    best, best_score = base, None
-    for i, overrides in enumerate(POSTURE_VARIANTS[:SEARCH_WIDTH]):
-        plan = base if not overrides else _plan(state, pid, orc,
-                                                replace(default, **overrides))
-        score = _rollout(state, pid, plan, turns, _priv(state, pid, _SALT_ROLLOUT))
-        if best_score is None or score > best_score:
-            best, best_score = plan, score
-        if i and time.perf_counter() > deadline:
-            break                         # degrade to what we have; never stall
-    return best
+    yield base
+    for overrides in POSTURE_VARIANTS[1:SEARCH_WIDTH]:
+        yield _plan(state, pid, orc, replace(default, **overrides))
+    for i, name in enumerate(EXTERNAL_CANDIDATES):
+        plan = _external_plan(state, pid, name, _SALT_EXTERNAL + i)
+        if plan is not None:
+            yield plan
+
+
+def _external_plan(state, pid, name, salt):
+    """Another registered bot's orders *for our own seat*, or None if unusable.
+
+    The oracle runs rival code to learn what they will do; this runs it to borrow
+    what it would do in our chair. Same three precautions as `_predict_seat`, for the
+    same reasons: a private clone (a rival is not obliged to honour the read-only
+    contract), a state-derived rng (both of the bots named above tie-break through
+    ``state.rng``, and advancing the real one would leave every seat after us
+    predicted off-position), and everything caught (a broken candidate may cost
+    itself its slot in the search and nothing more).
+
+    ``ai.STRATEGIES`` is read *here* rather than at import: models/ files load in
+    sorted filename order, so anything after `knower` is missing from the registry
+    until well after this module's top level has run.
+    """
+    fn = ai.STRATEGIES.get(name)
+    if fn is None or fn is decide or _is_oracle(fn):
+        return None            # unregistered, or ourselves — nothing new to propose
+    probe = _clone(state, _priv(state, pid, salt))
+    try:
+        orders = fn(probe, pid) or []
+        # Mirrors `engine._own_orders`: a seat commands its own ships and nothing
+        # else, so an order naming anyone else would be dropped by the engine anyway.
+        return [o for o in orders if getattr(o, "owner_id", None) == pid]
+    except Exception:                     # noqa: BLE001 — a broken bot is their bug
+        return None
 
 
 # --------------------------------------------------------------------------- #

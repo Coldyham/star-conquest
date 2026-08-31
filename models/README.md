@@ -90,7 +90,7 @@ AUX_INT = True               # show/store whole numbers (default: 2dp floats)
 Declare no `AUX_LABEL` and the slider is simply hidden for your bot, which is the
 right answer if you ignore `aux`. `models/knower.py` is the worked example: it
 labels it *Search depth* and reads it as exactly that (0 = no prediction, 1 =
-predict one turn, N = predict then roll N−1 turns forward).
+predict one turn, N = predict then search N−1 plies forward).
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 

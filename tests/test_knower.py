@@ -428,7 +428,7 @@ def test_depth_one_matches_the_plain_oracle(kn):
     assert plain == _totals(kn._plan(state, 2, kn.LAST_ORACLE))
 
 
-@pytest.mark.parametrize("depth", [2, 3, 5, 8])
+@pytest.mark.parametrize("depth", [2, 3, 5, 8, 12])
 def test_search_is_deterministic_and_pure(kn, depth):
     """Common random numbers, state-derived rngs: same board in, same plan out.
 
@@ -541,3 +541,89 @@ def test_search_works_for_the_autoplayed_human_seat(kn):
     assert human_orders == ai_orders, "the rollout dropped our plan for a human seat"
     assert human_state.players[2].is_human, "the clone's is_human leaked to the board"
     assert kn._fingerprint(human_state) == kn._fingerprint(ai_state)
+
+
+# --------------------------------------------------------------------------- #
+# The beam: borrowed openings, and keeping every opening alive
+# --------------------------------------------------------------------------- #
+def test_external_candidates_are_offered_as_openings(kn):
+    """The search must actually reach the other bots, not silently skip them.
+
+    `ai.STRATEGIES` is read lazily precisely because `rusherplus` sorts *after*
+    `knower` and is missing from the registry at our import time — a regression to an
+    import-time lookup would leave the roster empty and cost nothing visible.
+    """
+    state = _state()
+    orc = kn._build_oracle(state, 2)
+    base = kn._plan(state, 2, orc)
+    n = len(list(kn._candidates(state, 2, orc, base)))
+
+    assert n > min(kn.SEARCH_WIDTH, len(kn.POSTURE_VARIANTS)), \
+        "no borrowed opening survived — is the registry being read at import time?"
+    assert kn._external_plan(state, 2, "rusherplus", 11) is not None
+    assert kn._external_plan(state, 2, "no_such_bot", 11) is None, "unregistered must skip"
+    assert kn._external_plan(state, 2, "knower", 11) is None, "we are not our own candidate"
+
+
+def test_an_external_candidate_never_touches_the_real_board(kn):
+    """rusherplus and the heuristic both tie-break through `state.rng`.
+
+    Running either for a candidate has to happen on a clone with a private stream, or
+    every seat after us is predicted from the wrong rng position.
+    """
+    state = _state()
+    fingerprint, rng_state = kn._fingerprint(state), state.rng.getstate()
+
+    for name in kn.EXTERNAL_CANDIDATES:
+        plan = kn._external_plan(state, 2, name, 11)
+        assert all(o.owner_id == 2 for o in plan or []), "an order for someone else's seat"
+
+    assert kn._fingerprint(state) == fingerprint, "a candidate mutated the board"
+    assert state.rng.getstate() == rng_state, "a candidate drew from the real rng"
+
+
+def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
+    """A drop-in bot may be anything at all; it must not take the search down."""
+    def boom(state, pid):
+        raise RuntimeError("candidate exploded")
+
+    ai.register("exploding_bot_test", boom)
+    kn.EXTERNAL_CANDIDATES, saved = ("exploding_bot_test",), kn.EXTERNAL_CANDIDATES
+    try:
+        state = _state()
+        state.players[2].ai_params.aux = 3.0
+        assert kn._external_plan(state, 2, "exploding_bot_test", 11) is None
+        assert all(o.owner_id == 2 for o in ai.decide(state, 2))   # search still ran
+    finally:
+        kn.EXTERNAL_CANDIDATES = saved
+
+
+def test_pruning_keeps_every_opening_alive_to_the_bottom(kn):
+    """The invariant the whole search rests on.
+
+    A pooled beam fills with continuations of whichever opening is ahead on material
+    right now, so the rival openings — the only thing being compared — die after one
+    ply. Grouping the cut by `origin` is what prevents that; measured on the pooled
+    version, 94% of survivors descended from the default alone.
+    """
+    lines = [kn._Line(root=[], origin=o, board=None, score=score)
+             for o, score in enumerate((100.0, -50.0, -60.0, -70.0, -80.0, -90.0))]
+    # ...and a swarm of continuations of the *winning* opening, which under a pooled
+    # cut would take every slot.
+    lines += [kn._Line(root=[], origin=0, board=None, score=99.0 - i) for i in range(20)]
+
+    kept = kn._prune(lines)
+    assert {line.origin for line in kept} == {0, 1, 2, 3, 4, 5}, "an opening was cut"
+    assert all(sum(1 for k in kept if k.origin == o) <= kn.SEARCH_BEAM for o in range(6))
+    assert kept[0].origin == 0, "the tuned default must stay first, so ties favour it"
+
+
+def test_a_decided_line_is_carried_not_stepped(kn):
+    """Its verdict is already the score; stepping a finished game would only churn."""
+    state = _state()
+    board = kn._clone(state, kn._priv(state, 2, 1))
+    board.winner = 1
+    line = kn._Line(root=[], origin=0, board=board, score=-kn.EVAL_DECIDED)
+
+    out = kn._expand([line], 2, frozenset())
+    assert out == [line], "a decided line was expanded"
