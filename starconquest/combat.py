@@ -8,6 +8,11 @@ drawn from ``state.rng`` so a seed reproduces every battle.
 ``config.DEFENDER_ADVANTAGE`` scales the defender's jittered strength before the
 square-law maths (1.0 is neutral); an exact tie still breaks to the defender
 regardless of the multiplier.
+
+Both knobs are menu sliders, so the multiple a fleet needs to be *sure* of a
+fight is not a constant. ``edge_attacking``/``edge_defending`` read it off the
+same arithmetic, for the AI to size an attack or a garrison against the rules
+actually in force.
 """
 
 from __future__ import annotations
@@ -107,6 +112,68 @@ def resolve_fight(
         a_owner, a_eff, b_owner, b_eff, defender_owner, config.DEFENDER_ADVANTAGE
     )
     return _resolve_effective(a_owner, a_ships, a_eff, b_owner, b_ships, b_eff, defender_owner)
+
+
+# --------------------------------------------------------------------------- #
+# Break-even margins: what an attack needs to be *sure*
+#
+# The same arithmetic read backwards, for a bot sizing a fleet. Only the jitter
+# roll and `_apply_advantage` stand between ship counts and the winner, so the
+# multiple a side needs is exact, and belongs here rather than as a constant in
+# every model file. Read `config` live at call time, like `resolve_fight` and
+# unlike `preview_fight` (which is fed the menu's in-progress values instead).
+# --------------------------------------------------------------------------- #
+_JITTER_CAP = 0.95  # past here the worst-roll ratio runs away; keep it finite
+_ADVANTAGE_FLOOR = 0.01  # ...and never divide by a zeroed advantage
+
+
+def _swing() -> float:
+    """``(1+j)/(1-j)`` — the worst roll: our low strength against their high."""
+    j = min(max(float(config.COMBAT_JITTER), 0.0), _JITTER_CAP)
+    return (1.0 + j) / (1.0 - j)
+
+
+def edge_attacking(min_swing: float = 1.0) -> float:
+    """Break-even multiple to take a system: they hold it, so they get the bonus.
+
+    An attack of ``A`` on a garrison of ``B`` wins the worst roll iff
+    ``A(1-j) > B(1+j)*adv``, i.e. ``A > B * adv * swing``. Ties break to the
+    defender, so a caller wanting certainty must clear this *strictly* — and
+    clearing it only guarantees the defender loses, not that anyone wins: near
+    matched forces annihilate and the system goes neutral, which is why every
+    bot also floors its ask at ``target.ships + 1``.
+
+    ``min_swing`` floors the jitter half only (see ``edge_defending``).
+    """
+    return _advantage() * max(min_swing, _swing())
+
+
+def edge_defending(min_swing: float = 1.0) -> float:
+    """Break-even multiple to hold one: *we* hold it, so the bonus is ours.
+
+    A garrison of ``D`` survives ``E`` arriving ships in the worst roll iff
+    ``D(1-j)*adv > E(1+j)``, i.e. ``D > E * swing / adv``. The advantage divides
+    here and multiplies above — turning the knob up makes holding cheaper and
+    taking dearer, and a bot applying it in one direction only would be wrong in
+    the other.
+
+    ``min_swing`` floors the *swing*, not the edge: pass the swing a margin was
+    tuned at and a gentler jitter than that can no longer thin it, while a wilder
+    one still widens it. It deliberately leaves the advantage alone, so a bot
+    keeping its tuned cushion still gets the whole of the advantage in both
+    directions. The 1.0 default is the zero-jitter swing, i.e. no floor.
+    """
+    return max(min_swing, _swing()) / _advantage()
+
+
+def _advantage() -> float:
+    """``config.DEFENDER_ADVANTAGE``, clamped away from zero.
+
+    ``_apply_advantage`` scales whichever side holds the system *after* the
+    jitter roll, so it lands on the swung strength and composes with ``_swing``
+    as a plain product.
+    """
+    return max(float(config.DEFENDER_ADVANTAGE), _ADVANTAGE_FLOOR)
 
 
 # --------------------------------------------------------------------------- #

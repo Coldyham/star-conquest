@@ -9,9 +9,11 @@ reward:
     *target-first*: it gathers every owned system the *same distance* from a
     target and only strikes when their combined force clears a jitter-safe win
     margin — concentrating force the way the square law rewards.
-  * **Jitter-safe margins.** Combat swings each side by +/-10%, so the worst
-    case for an attacker is 0.9*A vs 1.1*D; A must beat D by 1.1/0.9 ~= 1.22x to
-    be *sure* of the win. The margins below are derived from that, not guessed.
+  * **Jitter-safe margins.** At the default swing of +/-10% the worst case for an
+    attacker is 0.9*A vs 1.1*D, so A must beat D by 1.1/0.9 ~= 1.22x to be *sure*
+    of the win. The margins below are derived from that break-even multiple rather
+    than guessed, and take it from `combat.edge_attacking`/`edge_defending` so they
+    follow the jitter and defender-advantage sliders instead of assuming defaults.
   * **Defence before greed.** A system about to be hit this turn holds its whole
     garrison and pulls one-hop reinforcements that land on the *same* turn to
     join the grouped fight; only the leftover surplus attacks, and rear systems
@@ -26,20 +28,39 @@ from __future__ import annotations
 import math
 from collections import deque
 
+from starconquest import combat
 from starconquest.model import Order
 
 # --- tunables -------------------------------------------------------------- #
-# Worst-case combat swing: 0.9*attacker vs 1.1*defender, so 1.1/0.9 ~= 1.222x is
-# the break-even edge. Every margin is that edge plus a task-specific cushion.
-_EDGE = 1.1 / 0.9
-DEFEND_MARGIN = _EDGE + 0.05     # to hold: garrison must clear the known incoming force
-NEUTRAL_MARGIN = _EDGE + 0.08    # neutrals are static, so a thin cushion suffices
-ENEMY_MARGIN = _EDGE + 0.15      # enemies may produce/reinforce mid-attack — a modest pad
-                               # (a fresh enemy launch always costs a turn we can react to)
+# Every margin is the break-even edge plus a task-specific cushion. The edge is
+# `combat.edge_attacking`/`edge_defending`, read live: it is 1.222x at the default
+# jitter with no defender advantage, and both menu sliders move it from there —
+# attacking and defending in opposite directions, since the bonus goes to
+# whoever holds the system.
+# `TUNED_SWING` floors the edge's jitter half at the swing these pads were
+# fitted against, so a knob only ever raises a margin: without it, a game set to
+# zero jitter would thin every margin below what claudebot was measured at.
+TUNED_SWING = 1.1 / 0.9  # the +/-10% swing these pads were fitted at
+DEFEND_PAD = 0.05     # to hold: garrison must clear the known incoming force
+NEUTRAL_PAD = 0.08    # neutrals are static, so a thin cushion suffices
+ENEMY_PAD = 0.15      # enemies may produce/reinforce mid-attack — a modest pad
+                      # (a fresh enemy launch always costs a turn we can react to)
 
-RESERVE_FLOOR = 1                # never strip a system below this when it isn't threatened
-FRONTIER_GUARD = 0.34          # a frontier system keeps this fraction of its scariest
-                               # adjacent enemy garrison home as a standing guard
+RESERVE_FLOOR = 1     # never strip a system below this when it isn't threatened
+FRONTIER_GUARD = 0.34  # a frontier system keeps this fraction of its scariest
+                       # adjacent enemy garrison home as a standing guard
+
+
+def _defend_margin() -> float:
+    return combat.edge_defending(TUNED_SWING) + DEFEND_PAD
+
+
+def _neutral_margin() -> float:
+    return combat.edge_attacking(TUNED_SWING) + NEUTRAL_PAD
+
+
+def _enemy_margin() -> float:
+    return combat.edge_attacking(TUNED_SWING) + ENEMY_PAD
 
 
 def decide(state, pid):
@@ -61,7 +82,7 @@ def decide(state, pid):
         if incoming > 0:
             # Being hit now: hold just enough to win *this* fight and spend the
             # rest, so a system under steady light pressure still fuels the war.
-            hold = math.ceil(incoming * DEFEND_MARGIN)
+            hold = math.ceil(incoming * _defend_margin())
             help_now = _inbound(state, sid, pid, 1)
             if s.ships + help_now < hold:
                 budget[sid] = 0            # can't hold alone — keep all, call for help
@@ -81,7 +102,7 @@ def decide(state, pid):
     for sid in sorted(under_attack):
         s = sysmap[sid]
         incoming = _imminent(state, pid, sid)
-        need = math.ceil(incoming * DEFEND_MARGIN) - (s.ships + _inbound(state, sid, pid, 1))
+        need = math.ceil(incoming * _defend_margin()) - (s.ships + _inbound(state, sid, pid, 1))
         if need <= 0:
             continue
         helpers = sorted(
@@ -165,12 +186,12 @@ def _max_adjacent_enemy(state, pid, sysobj) -> int:
 def _required(state, pid, target, dist) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns."""
     if target.owner_id == 0:  # static neutral garrison
-        return max(target.ships + 1, math.ceil(target.ships * NEUTRAL_MARGIN))
+        return max(target.ships + 1, math.ceil(target.ships * _neutral_margin()))
     # Enemy: fold in its own reinforcements that land by the time we arrive.
     defence = target.ships + sum(
         f.ships for f in state.fleets
         if f.dest_id == target.id and f.owner_id == target.owner_id and f.turns_remaining <= dist)
-    return max(target.ships + 1, math.ceil(defence * ENEMY_MARGIN))
+    return max(target.ships + 1, math.ceil(defence * _enemy_margin()))
 
 
 def _flow_to_front(state, owned, frontier) -> dict[int, int]:

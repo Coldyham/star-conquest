@@ -58,11 +58,12 @@ point of the margin attributable to a mechanism rather than to a re-tune.
 
 Two inherited bugs are fixed on the way past:
 
-  * ``_EDGE = 1.1 / 0.9`` hardcoded ``COMBAT_JITTER = 0.10`` and predates
+  * ``_EDGE = 1.1 / 0.9`` hardcoded ``COMBAT_JITTER = 0.10`` and predated
     ``COMBAT_JITTER``'s companion knob entirely. Both are menu sliders
-    (``settings._GLOBAL_KNOBS``), so the whole lineage silently drops below
-    break-even the moment either moves. ``_edge_attacking`` / ``_edge_defending``
-    read both live, and *in opposite directions*: ``DEFENDER_ADVANTAGE`` scales
+    (``settings._GLOBAL_KNOBS``), so the whole lineage silently dropped below
+    break-even the moment either moved. Fixed here first and now in the core:
+    ``combat.edge_attacking`` / ``edge_defending`` are the break-even multiples,
+    read live and *in opposite directions* — ``DEFENDER_ADVANTAGE`` scales
     whoever holds the system, so it multiplies the price of taking one and
     divides the price of holding one. At the defaults (0.10, 1.0) the two
     collapse to the old constant and the tuned absolutes still floor them, so
@@ -87,27 +88,40 @@ the *same* game, rotated through every seat, so map and luck are shared:
     4 players, 40 nodes    66% (149-78)
     5 players, 40 nodes    60% (155-103)
 
-Reading the two combat knobs live is worth nothing at their defaults and a great
-deal off them — the rest of the roster still prices every fight at a fixed 1.222x.
-Against thinker / claudebot, 60 games a cell, jitter 0.10:
+Reading the two combat knobs live used to be worth nothing at their defaults and
+a great deal off them, back when marshal was the only bot doing it — the rest of
+the roster priced every fight at a fixed 1.222x regardless of the sliders. That
+edge is a fixed bug now: `combat.edge_attacking`/`edge_defending` moved into the
+core and thinker, claudebot and knower all read them live too, so the margin left
+is whatever marshal's own tuning is worth against equally-honest rivals. Same
+harness, re-measured after the back-port — 60 games a cell, jitter 0.10:
 
-    DEFENDER_ADVANTAGE 1.0     80% / 98%     (unchanged, by construction)
-    DEFENDER_ADVANTAGE 1.25    91% / 98%
-    DEFENDER_ADVANTAGE 1.5    100% / 100%    (the slider ceiling)
+                      vs thinker   vs claudebot
+    DEFENDER_ADVANTAGE 1.0      86%          98%
+    DEFENDER_ADVANTAGE 1.25     68%          91%
+    DEFENDER_ADVANTAGE 1.5      76%          98%
 
-Against knower's oracle marshal has no answer, and depth is not the reason — the
-oracle itself is the wall. 24 nodes, 80 games a cell:
+Marshal still leads across the range, weakest in the middle rather than at either
+end, and is never below 68%. What actually explains it is Phase 3's commitment
+and the wedge term, not a stale constant a rival forgot to update — see the
+"three plausible ideas" list above for the mechanism.
 
-    knower depth 0    52%      <- no oracle: marshal is ahead
-    knower depth 1    41%
-    knower depth 2    42%
-    knower depth 4    29%
+Against knower's oracle marshal has no answer, and the search depth is not what
+does it — the prediction itself is the wall. 80 games a cell:
 
-Switching the oracle *on* costs 11 points; deepening its search past 1 costs
-nothing until depth 4. No heuristic buys back a rival that reads your orders
-before you issue them — that needs prediction of its own, or deliberate
-unpredictability. Full roster ladder, 900 games: knower 263, marshal 247,
-thinker 175, claudebot 111, heuristic 52, rusherplus 15.
+    knower depth    24 nodes   40 nodes
+         0              52%        71%    <- no oracle: marshal is ahead
+         1              41%        39%
+         2              42%        45%
+         4              29%        35%
+         8              20%        38%
+
+Switching the oracle *on* costs 11 points at 24 nodes and 32 at 40. Deepening it
+then buys knower much less, and on the larger board nothing at all beyond depth 2
+— which matches knower's own finding that its rollout plateaus. No heuristic buys
+back a rival that reads your orders before you issue them; that needs prediction
+of its own, or deliberate unpredictability. Full roster ladder, 900 games:
+knower 263, marshal 247, thinker 175, claudebot 111, heuristic 52, rusherplus 15.
 
 Four things deliberately *not* here — all three built, measured against the
 configuration above, and removed rather than kept on the strength of the idea:
@@ -160,13 +174,16 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 
-from starconquest import config
+from starconquest import combat
 from starconquest.model import Order
 
 # --- margins ---------------------------------------------------------------- #
-# The pads sit over the live jitter-safe edge; the absolutes below are thinker's
-# tuned figures and win at the default jitter, where the edge is 1.222. Past that
-# the floor takes over.
+# The pads sit over `combat`'s live jitter-safe edge; the absolutes below are
+# thinker's tuned figures and win at the default jitter, where the edge is 1.222.
+# Past that the floor takes over — and `TUNED_SWING` is the floor the other way,
+# so a *gentler* jitter than the one these were fitted at cannot thin them.
+TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
+                                # a floor under the live edge, never an answer
 DEFEND_PAD = 0.05
 NEUTRAL_PAD = 0.05
 NEAR_PAD = 0.02
@@ -187,52 +204,21 @@ RESERVE_PINCER = True           # hold a stagger's nearer wave for its own targe
 
 # --------------------------------------------------------------------------- #
 # Margins, read live from config
+#
+# `combat.edge_attacking`/`edge_defending` are the break-even multiples for the
+# two sides of a fight, straight off the combat code, so a knob moving mid-match
+# moves these with it. The pads sit on top; the tuned absolutes floor them.
 # --------------------------------------------------------------------------- #
-def _swing() -> float:
-    """``(1+j)/(1-j)`` — the worst-roll ratio, our low against their high."""
-    j = min(max(float(config.COMBAT_JITTER), 0.0), 0.95)
-    return (1.0 + j) / (1.0 - j)
-
-
-def _advantage() -> float:
-    """``config.DEFENDER_ADVANTAGE``, clamped away from zero.
-
-    ``combat._apply_advantage`` scales whichever side holds the system, *after*
-    the jitter roll, so it lands on the swung strength rather than the nominal
-    one — which is why it composes with `_swing` as a plain product.
-    """
-    return max(float(config.DEFENDER_ADVANTAGE), 0.01)
-
-
-def _edge_attacking() -> float:
-    """Break-even multiple to take a system: they hold it, so they get the bonus.
-
-    We win the worst roll iff ``A(1-j) > B(1+j)*adv``, i.e. ``A > B * adv * swing``.
-    """
-    return _advantage() * _swing()
-
-
-def _edge_defending() -> float:
-    """Break-even multiple to hold one: *we* hold it, so the bonus is ours.
-
-    We survive the worst roll iff ``D(1-j)*adv > E(1+j)``, i.e.
-    ``D > E * swing / adv``. The advantage divides here and multiplies above —
-    turning the slider up makes holding cheaper and taking dearer, and a bot that
-    applied it in one direction only would be wrong in the other.
-    """
-    return _swing() / _advantage()
-
-
 def _defend_margin() -> float:
-    return _edge_defending() + DEFEND_PAD
+    return combat.edge_defending(TUNED_SWING) + DEFEND_PAD
 
 
 def _neutral_margin() -> float:
-    return max(NEUTRAL_MARGIN, _edge_attacking() + NEUTRAL_PAD)
+    return max(NEUTRAL_MARGIN, combat.edge_attacking(TUNED_SWING) + NEUTRAL_PAD)
 
 
 def _enemy_margin(dist: int) -> float:
-    return max(_edge_attacking() + NEAR_PAD,
+    return max(combat.edge_attacking(TUNED_SWING) + NEAR_PAD,
                min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1)))
 
 

@@ -94,6 +94,34 @@ predict one turn, N = predict then search N−1 plies forward).
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 
+## Pricing a fight
+
+Combat swings each side by `config.COMBAT_JITTER` and multiplies whoever holds
+the system by `config.DEFENDER_ADVANTAGE`. **Both are menu sliders**, so the
+multiple you need to be *sure* of a fight is not a constant, and a bot that
+hardcodes one plays a different game from the one the player set up. Ask instead:
+
+```python
+from starconquest import combat
+
+combat.edge_attacking()   # x the garrison, to take a system in the worst roll
+combat.edge_defending()   # x the incoming force, to hold one
+```
+
+Both read the live config, and they move in *opposite* directions: the advantage
+belongs to whoever holds the system, so turning it up makes taking dearer and
+holding cheaper. At the default 0.10 / 1.0 both are the familiar 1.222x.
+
+Two things they do not promise. Ties break to the defender, so clear the multiple
+*strictly*; and clearing it only means the defender loses, not that you win —
+near-matched forces annihilate and the system goes neutral, which is why every
+bot here also floors its ask at `target.ships + 1`.
+
+If your margins were tuned at one jitter, pass that swing as `min_swing`
+(`combat.edge_attacking(1.1 / 0.9)`) and a gentler setting can no longer thin
+them below the figure you measured, while a wilder one still widens them. Every
+bot in this folder does exactly that — see `TUNED_SWING` in any of them.
+
 ## Predicting the other seats
 
 `state.players` is every seat, not just yours, and `ai_strategy` / `ai_params` /

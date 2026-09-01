@@ -214,6 +214,18 @@ intact.
     (`combat._apply_advantage`). Against the raw count the AI stops expanding
     entirely at a high setting. Identity at the 1.0 default — see design notes
     for why the knob's top end still turtles regardless.
+  - **A bot prices a fight with `combat.edge_attacking()` /
+    `edge_defending()`, never a constant.** They are the break-even multiples —
+    what a fleet must beat the garrison by, and what a garrison must beat the
+    incoming force by, to win the *worst* roll — read live off
+    `config.COMBAT_JITTER` and `config.DEFENDER_ADVANTAGE`, both of which are
+    menu sliders. They move in opposite directions, since the advantage belongs
+    to whoever holds the system. Every `models/` bot's margins are pads/absolutes
+    over those, with the edge's jitter half floored at each bot's `TUNED_SWING`
+    (the swing it was fitted at), so a knob can only ever *raise* a margin above
+    its measured figure — nothing in the roster moves at the 0.10/1.0 defaults.
+    Clearing an edge is not a promise of capture: ties break to the defender and
+    matched forces annihilate to neutral, hence the `target.ships + 1` floors.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,

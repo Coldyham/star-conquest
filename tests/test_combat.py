@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from contextlib import contextmanager
 
+import pytest
+
 from starconquest import combat, config
 from starconquest.model import Fleet, GameState, Player, System
 
@@ -322,3 +324,152 @@ def test_roll_draws_no_randomness():
         for sd in (-1.0, 0.0, 1.0):
             p.roll(sa, sd)
     assert rng.getstate() == before
+
+
+# --------------------------------------------------------------------------- #
+# Break-even margins
+#
+# These are what every bot sizes a fleet against, so they are checked against an
+# actual fight rather than against their own arithmetic: clearing the multiple
+# has to win the *worst* corner of the jitter square, which is the only thing
+# the callers are relying on.
+# --------------------------------------------------------------------------- #
+def test_edges_are_symmetric_without_a_defender_bonus():
+    with advantage(1.0), jitter(0.1):
+        assert combat.edge_attacking() == combat.edge_defending()
+        assert combat.edge_attacking() == 1.1 / 0.9
+
+
+def test_the_advantage_moves_the_two_edges_oppositely():
+    """It scales whoever holds the system, so it prices attack and defence apart.
+
+    A bot applying it one-directionally would over-defend as the slider rose and
+    throw armies at systems it could no longer take.
+    """
+    with jitter(0.1):
+        swing = 1.1 / 0.9
+        with advantage(1.5):
+            assert combat.edge_attacking() == swing * 1.5
+            assert combat.edge_defending() == swing / 1.5
+            assert combat.edge_attacking() > combat.edge_defending()
+        with advantage(0.5):
+            assert combat.edge_attacking() < combat.edge_defending()
+
+
+def test_zero_jitter_and_zero_advantage_stay_finite():
+    """Both knobs reach their ends on the menu; neither may blow up a caller."""
+    with jitter(0.0), advantage(1.0):
+        assert combat.edge_attacking() == 1.0
+    with jitter(1.0), advantage(0.0):
+        assert combat.edge_attacking() > 0
+        assert 0 < combat.edge_defending() < 1e6
+
+
+def test_clearing_the_attack_edge_beats_the_defender_on_the_worst_roll():
+    """The property every bot's margin depends on, checked against a real fight.
+
+    Note what is guaranteed: the *defender* cannot hold. Not that we capture —
+    see the annihilation floor below.
+    """
+    for j in (0.0, 0.1, 0.25):
+        for adv in (0.75, 1.0, 1.25, 1.5):
+            with jitter(j), advantage(adv):
+                need = combat.edge_attacking()
+            for defender in (1, 3, 10, 40):
+                attacker = int(defender * need) + 1
+                p = combat.preview_fight(attacker, defender, j, adv)
+                assert p.worst.winner != combat.DEFENDER, (j, adv, defender, attacker)
+
+
+def test_the_attack_edge_alone_does_not_guarantee_a_capture():
+    """Clearing it can still annihilate both sides and vacate the system.
+
+    Survivors are ``sqrt(W^2 - L^2)`` on the *effective* strengths and round to
+    zero when the two are close, which at small garrisons a bare edge-clearing
+    attack always is: 1 ship into 1 at advantage 0.75 fights 0.90 against 0.825
+    and leaves nobody. This is exactly why `_required` in the bots floors at
+    ``target.ships + 1`` rather than trusting the multiple.
+    """
+    p = combat.preview_fight(1, 1, 0.1, 0.75)
+    assert p.worst.winner == combat.NEUTRAL
+    assert p.worst.attacker_survivors == 0
+
+    # With real mass behind it the same multiple does take the system.
+    for defender in (10, 40):
+        with jitter(0.1), advantage(1.0):
+            attacker = int(defender * combat.edge_attacking()) + 1
+        q = combat.preview_fight(attacker, defender, 0.1, 1.0)
+        assert q.worst.winner == combat.ATTACKER
+        assert q.certain
+
+
+def test_falling_short_of_the_attack_edge_is_not_certain():
+    """...and the margin is tight: one ship under, the worst roll no longer wins."""
+    for j in (0.1, 0.25):
+        for adv in (1.0, 1.5):
+            with jitter(j), advantage(adv):
+                need = combat.edge_attacking()
+            for defender in (10, 40):
+                attacker = int(defender * need)      # one short of the strict clear
+                p = combat.preview_fight(attacker, defender, j, adv)
+                assert p.worst.winner != combat.ATTACKER, (j, adv, defender, attacker)
+
+
+def test_clearing_the_defence_edge_holds_the_worst_roll():
+    for j in (0.0, 0.1, 0.25):
+        for adv in (1.0, 1.5):
+            with jitter(j), advantage(adv):
+                need = combat.edge_defending()
+            for attacker in (3, 10, 40):
+                garrison = int(attacker * need) + 1
+                p = combat.preview_fight(attacker, garrison, j, adv)
+                assert p.worst.winner == combat.DEFENDER, (j, adv, attacker, garrison)
+
+
+def test_min_swing_floors_the_jitter_half_only():
+    """A margin fitted at one jitter must not be thinned by a gentler one.
+
+    The floor is on the swing, never on the advantage — otherwise a bot keeping
+    its tuned cushion would stop getting the full benefit of holding ground.
+    """
+    tuned = 1.1 / 0.9
+
+    with jitter(0.0), advantage(1.0):
+        assert combat.edge_attacking(tuned) == tuned
+        assert combat.edge_defending(tuned) == tuned
+        assert combat.edge_attacking() == 1.0, "the 1.0 default is no floor at all"
+
+    # Below the tuned jitter the floor holds the edge steady...
+    with advantage(1.0):
+        with jitter(0.0):
+            floor_cold = combat.edge_attacking(tuned)
+        with jitter(0.05):
+            floor_mid = combat.edge_attacking(tuned)
+        with jitter(0.10):
+            floor_at = combat.edge_attacking(tuned)
+        assert floor_cold == floor_mid == pytest.approx(floor_at)
+        # ...and above it, a wilder jitter still widens it.
+        with jitter(0.25):
+            assert combat.edge_attacking(tuned) > floor_at
+
+
+def test_min_swing_does_not_floor_the_advantage():
+    """Explicitly: holding must still get cheaper as the advantage rises."""
+    tuned = 1.1 / 0.9
+    with jitter(0.0):                      # floor fully engaged, so only adv moves
+        with advantage(1.0):
+            flat = combat.edge_defending(tuned)
+        with advantage(1.5):
+            strong = combat.edge_defending(tuned)
+        with advantage(0.75):
+            weak = combat.edge_defending(tuned)
+    assert strong < flat < weak, "the floor swallowed the defender advantage"
+    assert strong == pytest.approx(tuned / 1.5)
+
+    with jitter(0.0):
+        with advantage(1.0):
+            take_flat = combat.edge_attacking(tuned)
+        with advantage(1.5):
+            take_strong = combat.edge_attacking(tuned)
+    assert take_strong > take_flat, "taking must still get dearer"
+    assert take_strong == pytest.approx(tuned * 1.5)

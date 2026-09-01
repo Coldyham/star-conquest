@@ -168,13 +168,15 @@ all, so it mostly adds a constant. 47% either way.
 
 **Two bugs fixed on the way past**, both of which the removed guard used to mask.
 `_EDGE = 1.1 / 0.9` hardcoded `COMBAT_JITTER = 0.10`, which is a menu knob, so every
-margin in thinker, knower and claudebot silently drops below break-even when the
-jitter slider moves; `marshal._edge()` reads it live and the tuned absolutes floor
-it, so nothing changes at the default. And Phase 1 sized relief for the worst
-arrival horizon but scheduled it for *that* horizon's turn, while 16.1% of real
-deficits bind later than the first arrival — the standing guard used to absorb the
-early wave. marshal sizes for the worst horizon and requires delivery by the
-earliest.
+margin in thinker, knower and claudebot silently dropped below break-even when the
+jitter slider moved. marshal fixed it for itself first, reading the knob live and
+flooring the tuned absolutes over it; the fix has since moved into
+`combat.edge_attacking`/`edge_defending` (see below) and the rest of the roster
+reads it too, so this is now a roster property rather than a thing marshal alone
+gets right. And Phase 1 sized relief for the worst arrival horizon but scheduled
+it for *that* horizon's turn, while 16.1% of real deficits bind later than the
+first arrival — the standing guard used to absorb the early wave. marshal sizes
+for the worst horizon and requires delivery by the earliest.
 
 **Standing aside in a free-for-all.** The one idea here that came from watching a
 human play rather than from reading the code: when you are boxed between two
@@ -212,6 +214,57 @@ Only the defensive half of the human strategy is implemented. The other half —
 *abandoning* a system specifically to bait two rivals into contesting it — needs a
 model of what those rivals value, which is knower's territory rather than a blind
 bot's.
+
+## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
+
+Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
+`edge_defending` are now the one place a fight's break-even multiple is computed,
+and thinker, claudebot and knower all price their margins off it instead of a
+private `1.1 / 0.9` constant. Motivation was a real bug, not tidiness — with
+`DEFENDER_ADVANTAGE` a live menu slider, every bot but marshal was pricing fights
+against a defender bonus that no longer existed, or under-pricing one that had
+grown past 1.0.
+
+Two properties the API has to hold for a bot pulling it in:
+
+* **A knob can only ever *raise* a margin above the figure the bot was tuned at,
+  never thin it.** `min_swing` floors the jitter half of the edge (not the
+  advantage half) at the swing a margin was fitted against; every bot in
+  `models/` passes its own `TUNED_SWING = 1.1 / 0.9`. Skipping this is a real
+  regression, not a theoretical one: measured pre-floor, claudebot at
+  `COMBAT_JITTER = 0.0` scored 8% (2-24, 34 unresolved) against its own
+  pre-back-port self, 60 games, 24 nodes, both seatings — a gentler-than-default
+  jitter thinned every margin below what the bot's absolutes were tuned to cover.
+  With the floor, that cell and the jitter-0.10 default are both exact 50% nulls
+  for all three bots.
+* **Clearing the edge is not a promise of capture.** It only guarantees the
+  defender loses the worst roll; near-matched forces can still round to zero
+  survivors on both sides and hand the system to nobody. `preview_fight(1, 1,
+  0.1, 0.75)` clears `edge_attacking()` (0.90 vs 0.825) and still annihilates.
+  Every caller floors its ask at `target.ships + 1` for exactly this reason.
+
+**The honest margin costs something above default jitter.** Re-measured after the
+floor, thinker/claudebot/knower vs their pre-back-port selves (60 games a cell, 24
+nodes, both seatings, `DEFENDER_ADVANTAGE` fixed at 1.0):
+
+    COMBAT_JITTER   thinker   claudebot   knower
+    0.10 (default)     50%        50%        50%    (exact nulls, by construction)
+    0.15               61%        56%        49%
+    0.25               33%        40%        46%
+    0.50                0%         4%        14%
+
+The old `1.1 / 0.9` hardcode was, by accident, a *gambling* policy: at high jitter
+it kept sending at a margin that was no longer statistically safe, and won more
+than a bot pricing the real odds does. This is why the finding belongs here and
+not as a reason to cap the edge — the fix is correct, the number above is the
+honest price of correctness, and a future change chasing that regression back
+would be re-introducing the original bug. `DEFENDER_ADVANTAGE` moves the other,
+unambiguous way for all three bots (0.75: 53/66/63%, 1.25: 69/94/79%, 1.5:
+100/100/100%, same harness) — that direction was never in question, only whether
+the bot was pricing it at all.
+
+marshal's own head-to-head numbers move too, now that its rivals are no longer
+handicapped by the stale constant — see its docstring for the re-measured table.
 
 ## Send popup / `Ui.editing_existing`
 

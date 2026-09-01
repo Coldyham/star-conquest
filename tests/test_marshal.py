@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from starconquest import ai, config, engine, mapgen
+from starconquest import ai, combat, config, engine, mapgen
 from starconquest.model import Fleet, GameState, Order, Player, System
 from tests import sim
 
@@ -172,37 +172,20 @@ def test_marshal_is_not_an_oracle(ma):
 # --------------------------------------------------------------------------- #
 # The margins track the live jitter
 # --------------------------------------------------------------------------- #
-def test_edge_tracks_the_configured_jitter(ma):
-    """`config.COMBAT_JITTER` is a menu knob, so nothing may freeze it at import."""
-    config.DEFENDER_ADVANTAGE = 1.0
-    config.COMBAT_JITTER = 0.10
-    assert ma._edge_attacking() == pytest.approx(1.1 / 0.9)
-    config.COMBAT_JITTER = 0.0
-    assert ma._edge_attacking() == pytest.approx(1.0)
-    config.COMBAT_JITTER = 0.30
-    assert ma._edge_attacking() == pytest.approx(1.3 / 0.7)
+def test_margins_are_built_on_the_shared_edges(ma):
+    """marshal must price fights from `combat`, not from a constant of its own.
 
-
-def test_defender_advantage_moves_the_two_edges_oppositely(ma):
-    """It scales whoever holds the system, so it prices attack and defence apart.
-
-    Getting this one-directional is the bug: a bot that only multiplied would
-    over-defend as the slider rose, and one that only divided would throw armies
-    at systems it could no longer take.
+    The edges themselves are tested in tests/test_combat.py; what matters here is
+    that marshal's margins actually move with them.
     """
-    config.COMBAT_JITTER = 0.10
-    swing = 1.1 / 0.9
-
     config.DEFENDER_ADVANTAGE = 1.0
-    assert ma._edge_attacking() == pytest.approx(ma._edge_defending())
+    config.COMBAT_JITTER = 0.10
+    assert ma._defend_margin() == pytest.approx(combat.edge_defending() + ma.DEFEND_PAD)
 
-    config.DEFENDER_ADVANTAGE = 1.5
-    assert ma._edge_attacking() == pytest.approx(1.5 * swing)
-    assert ma._edge_defending() == pytest.approx(swing / 1.5)
-    assert ma._edge_attacking() > ma._edge_defending()
-
-    config.DEFENDER_ADVANTAGE = 0.0          # clamped, never a divide-by-zero
-    assert ma._edge_defending() < 1e4
+    config.COMBAT_JITTER = 0.30
+    assert ma._defend_margin() == pytest.approx(combat.edge_defending() + ma.DEFEND_PAD)
+    assert ma._neutral_margin() >= combat.edge_attacking()
+    assert ma._enemy_margin(1) >= combat.edge_attacking()
 
 
 def test_advantage_makes_taking_dearer_and_holding_cheaper(ma):
