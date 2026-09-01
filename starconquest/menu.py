@@ -747,10 +747,13 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     _text(surface, _fonts()["small"], "Strategy", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
     _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat), ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
 
-    # per-seat param sliders (hidden while the dropdown is open so its options,
-    # which overlay this region, own the hit-test — no slider rect underneath)
+    # the bot-maker entry point, then per-seat param sliders (both hidden while
+    # the dropdown is open so its options, which overlay this region, own the
+    # hit-test — no rect underneath)
     y += 46
     if not ms.strategy_open:
+        _button(surface, ms, "edit_rules", pygame.Rect(x, y, 130, _CH), "Edit Rules", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        y += 44
         params = settings.ai[ms.ai_seat - 1]
         _sliders(surface, ms, params, _ai_specs(ms, settings), x, y, panel.width - 48)
 
@@ -1275,6 +1278,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         if 0 <= idx < len(ms.strategies):
             settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
         ms.strategy_open = False
+    elif hit == "edit_rules":
+        return "edit_rules"
     elif hit == "copy_all":
         src = settings.ai[ms.ai_seat - 1]
         src_strat = settings.ai_strategy[ms.ai_seat - 1]

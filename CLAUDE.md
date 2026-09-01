@@ -45,7 +45,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   shell reads each turn; the engine and AI never consult it. `replay` serializes a
   match to JSON and replays it back through the headless engine — see Persistence
   & replay below.)
-- **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
+- **Shell — the only pygame modules:** `render`, `input`, `menu`, `botmaker`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
@@ -60,11 +60,23 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     what to do with it.
   - `menu.py` is a self-contained pre-game scene with the same draw/mutate split:
     `draw` only reads `Settings`, `handle_event` mutates `MenuState`/`Settings`
-    and returns `"start"`/`"quit"`/`None`. `main.py` runs a two-scene
-    (`"menu"` ⇄ `"game"`) state machine and builds the `GameState` on `"start"`.
-    `menu.pump` is the second half of the mutate side: a per-frame poll `main.py`
-    calls while the menu is up, for text that never reaches the SDL event queue
-    (see `softkeyboard` below).
+    and returns `"start"`/`"quit"`/`None`. `main.py` runs a three-scene
+    (`"menu"` ⇄ `"game"`, plus `"botmaker"`) state machine and builds the
+    `GameState` on `"start"`. `menu.pump` is the second half of the mutate side:
+    a per-frame poll `main.py` calls while the menu is up, for text that never
+    reaches the SDL event queue (see `softkeyboard` below).
+  - `botmaker.py` is the visual rule-program editor `docs/bot-maker.md` describes
+    (see `botlang.py` below for the language it edits) — a third scene, opened
+    from the AI tab's Edit Rules button, real-resolution rather than the menu's
+    fixed canvas (it needs a scrolling list, and there's no panel to fit inside).
+    Same split again: `draw` never touches the `Program`, only rebuilds
+    `BotMakerState`'s per-frame rect cache; `handle_event` mutates it and returns
+    `"done"`/`"cancel"`/`None`. Depends on `botlang` alone, not `ai` — registering
+    the finished program (`ai.register` + binding the seat's `ai_strategy`) is
+    `main.py`'s job, the same way it (not `menu.py`) decides what `"start"` means.
+    Session-only for now: `main.py` caches each seat's working `Program` in memory
+    so reopening the editor resumes it, but nothing survives a relaunch (that's
+    persistence, step 2 of `docs/bot-maker.md`'s suggested order, still open).
   - `softkeyboard.py` is a browser-only bridge, not a pygame module: on a touch
     browser it focuses a hidden DOM `<input>` so the mobile on-screen keyboard
     actually appears (SDL's `start_text_input` has nothing to focus there) and
@@ -247,9 +259,11 @@ intact.
       `test_export_round_trips_exactly` pins the two by demanding identical
       orders. Keep every table entry's evaluator and `src` in step, or that test
       is what will tell you.
-    - The visual editor it exists for is **not built** — `docs/bot-maker.md` is that
-      phase's design and the four constraints that shape it (chiefly: it cannot be a
-      menu tab, and nothing written to disk survives a web reload).
+    - The visual editor it exists for is `botmaker.py` (see Shell above) —
+      `docs/bot-maker.md` is its design record, the four constraints that shaped
+      it (chiefly: it cannot be a menu tab, and nothing written to disk survives a
+      web reload), and what's still open past it (persistence, an in-app
+      benchmark, sharing).
     - Declares no `AUX_LABEL` on purpose (every block bot shares the module, so
       one would give them all the same meaningless slider), and touches
       `AiParams` at exactly one point: the `surplus` amount reads the seat's

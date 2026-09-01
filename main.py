@@ -18,8 +18,8 @@ from typing import Optional
 
 import pygame
 
-from starconquest import (ai, botlang, config, engine, fog, mapgen, menu, paths,
-                          render, replay, softkeyboard, viewstate, webstore)
+from starconquest import (ai, botlang, botmaker, config, engine, fog, mapgen, menu,
+                          paths, render, replay, softkeyboard, viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -383,6 +383,34 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
                          state.players[ui.human_id].ships_lost)
 
 
+def open_bot_maker(settings: Settings, custom_programs: dict[int, botlang.Program],
+                   seat: int) -> botmaker.BotMakerState:
+    """The working program a bot-maker session for ``seat`` starts from:
+    whatever it was left at this run (``custom_programs``), else a copy of the
+    seat's current strategy if that happens to be one of the built-in rule
+    templates, else blank. Always renamed to ``custom{seat}`` up front — never
+    left as a STARTERS name, or finishing the session would silently overwrite
+    that shared built-in strategy for every seat using it.
+    """
+    template = custom_programs.get(seat) or botlang.STARTERS.get(settings.seat_strategy(seat))
+    rules = template.rules if template is not None else ()
+    return botmaker.new_state(seat, botlang.Program(f"custom{seat}", rules))
+
+
+def close_bot_maker(settings: Settings, custom_programs: dict[int, botlang.Program],
+                    bms: botmaker.BotMakerState) -> None:
+    """Register the finished program as a live strategy and bind it to its seat.
+
+    Session-only, per ``docs/bot-maker.md``'s step 1: nothing is written to
+    disk, so the seat plays this program for the rest of the run but a fresh
+    launch starts over. ``custom_programs`` is what lets reopening the editor
+    for the same seat later in this run resume where it was left.
+    """
+    ai.register(bms.program.name, botlang.strategy(bms.program))
+    settings.ai_strategy[bms.seat - 1] = bms.program.name
+    custom_programs[bms.seat] = bms.program
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser(description="Star Conquest")
     ap.add_argument("--seed", type=int, default=None, help="map seed (random if omitted)")
@@ -431,12 +459,18 @@ async def main() -> None:
     config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
     clock = pygame.time.Clock()
 
-    # Two scenes share the one window: the setup menu and the game board. The
-    # menu builds `state`/`ui` on "start"; pressing M in-game drops back to it.
+    # Three scenes share the one window: the setup menu, the game board, and the
+    # bot-maker rule editor. The menu builds `state`/`ui` on "start"; pressing M
+    # in-game drops back to it; its AI tab's Edit Rules button opens the bot
+    # maker. `custom_programs` is a session-only cache (seat -> Program) so
+    # reopening the editor for a seat resumes what it was left at, since nothing
+    # is written to disk yet (docs/bot-maker.md's step 1 stops short of that).
     menu_state = MenuState()
     state: GameState | None = None
     ui: Ui | None = None
     log: GameLog | None = None       # replay log of the live match (None while in menu)
+    custom_programs: dict[int, botlang.Program] = {}
+    botmaker_state: botmaker.BotMakerState | None = None
     current_seed = 0
     scene = "game" if args.no_menu else "menu"
     if args.no_menu:
@@ -582,6 +616,21 @@ async def main() -> None:
                     auto_accum = 0
                 elif action == "quit":
                     confirm_quit = True
+                elif action == "edit_rules":
+                    botmaker_state = open_bot_maker(settings, custom_programs, menu_state.ai_seat)
+                    scene = "botmaker"
+                continue
+
+            if scene == "botmaker":
+                assert botmaker_state is not None
+                action = botmaker.handle_event(event, botmaker_state)
+                if action == "done":
+                    close_bot_maker(settings, custom_programs, botmaker_state)
+                    botmaker_state = None
+                    scene = "menu"
+                elif action == "cancel":
+                    botmaker_state = None
+                    scene = "menu"
                 continue
 
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
@@ -716,6 +765,9 @@ async def main() -> None:
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
+        elif scene == "botmaker":
+            assert botmaker_state is not None
+            botmaker.draw(screen, botmaker_state)
         else:
             assert state is not None and ui is not None   # scene == "game"
             if ui.history and history_states:

@@ -3,15 +3,24 @@
 A visual, IFTTT-style rule builder, so a player who doesn't write Python has
 something between the AI tab's five sliders and a `models/*.py` file.
 
-**Half of it is built.** `starconquest/botlang.py` is the rule language and its
+**The rule language is built.** `starconquest/botlang.py` is the language and its
 interpreter, shipped and registered — `blockrush`, `blockturtle` and
 `blockheuristic` appear in the AI tab's Strategy dropdown today. Why it works the
 way it does is in [`design-notes.md`](design-notes.md#visual-bot-programs-botlangpy),
 next to every other design note.
 
-**The other half — the editor — is not built.** This file is what that phase needs
-and would otherwise have to rediscover: the measurements that justify continuing,
-and the four constraints that decide the shape.
+**The scene is built too** (`starconquest/botmaker.py`) — step 1 of the order
+below. From the setup menu's AI tab, "Edit Rules" opens it for the selected seat:
+add/reorder/delete rules over that seat's working `Program`, edit each one's
+conditions/action/amount straight off `botlang`'s spec tables, and "Use this bot"
+registers it (`custom{seat}`) and binds it to the seat for the rest of the run.
+Session-only — nothing survives a relaunch yet, which is exactly steps 2-4 below.
+
+**Steps 2-4 — persistence, the in-app benchmark, sharing — are not built.** This
+file is what those phases need and would otherwise have to rediscover: the
+measurements that justify continuing, and the four constraints that decide the
+shape (constraint 1, "cannot be a menu tab", is what the built scene already had
+to satisfy — the rest still apply to what's left).
 
 ## Why it's worth finishing
 
@@ -101,14 +110,22 @@ token probably shouldn't either.
 
 ## Suggested order
 
-1. **The scene.** Rule rows over the existing `Program` model, `+ Add rule`,
-   delete, reorder. Conditions/actions/amounts come straight from `botlang`'s
-   `CONDITIONS` / `ACTIONS` / `AMOUNTS` tables, which already carry a label, a
-   knob label, and lo/hi/step/is_int for exactly this — the editor should stay
-   data-driven off them rather than hardcoding a widget per rule kind, the way
-   `menu._SLIDER_SPECS` does.
-2. **Persistence**, per constraint 3.
-3. **The in-app benchmark.** Cheap once the scene exists and the highest-value
+1. ~~**The scene.**~~ Built — `starconquest/botmaker.py`. Rule rows over the
+   existing `Program` model, `+ Add rule`, delete, reorder (no drag-and-drop, per
+   constraint 1). Conditions/actions/amounts read straight off `botlang`'s
+   `CONDITIONS` / `ACTIONS` / `AMOUNTS` tables — the editor stays data-driven off
+   them rather than hardcoding a widget per rule kind, the way `menu._SLIDER_SPECS`
+   does. Every edit applies immediately (no separate save/cancel per field, the
+   same idiom as the AI tab's own sliders); `Rule`/`Cond`/`Program` are frozen, so
+   each edit rebuilds via `dataclasses.replace` rather than mutating in place. The
+   win-path warning from the first trap below is live in the editor, not just a
+   lesson learned after the fact.
+2. **Persistence**, per constraint 3. What's built stops at session-only: `main.py`
+   caches a seat's working `Program` in memory (`custom_programs`) so reopening
+   the editor resumes it, and "Use this bot" registers it as `custom{seat}` for
+   the rest of the run — but nothing survives a relaunch, and there's still no way
+   to name, save, or pick between more than one program per seat. That's this step.
+3. **The in-app benchmark.** Cheap now that the scene exists and the highest-value
    part for the player: `sim.play()` is pure and headless, so a Test button can
    step a few games per frame against `heuristic` behind a progress bar without
    blocking the frame. Do not call `sim.play` in a loop on the main thread — it
@@ -120,9 +137,11 @@ token probably shouldn't either.
 - **A program with no enemy-attack rule cannot win a game.** `blockturtle` first
   had hold / reinforce / expand-neutral / send-to-front — a complete-looking
   defensive bot that won **0 of 300** ladder games, because taking every enemy
-  system is the win condition and no rule could take one. The editor should
-  probably say something when a program has no rule that can capture from a
-  player. It went to 77% the moment one `attack_best` rule was added.
+  system is the win condition and no rule could take one. It went to 77% the
+  moment one `attack_best` rule was added. The editor now says so directly
+  (`botmaker._has_win_path`, a warning banner whenever no rule's action is one of
+  `attack_best`/`attack_weakest`/`attack_richest` — `expand_neutral` alone can
+  never eliminate a rival).
 - **Timeout rate is the health signal**, and its baseline is ~20%, not 0. Judge a
   program against a same-seed `heuristic`-vs-`heuristic` control, the way
   `test_starters_finish_their_games` does, never an absolute bar.
