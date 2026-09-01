@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post a score · Star Conquest Leaderboard</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>Leaderboard</span></a>
+  <a class="btn" href="index.html">All maps</a>
+</header>
+
+<main>
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Post a score</h1>
+  <p class="lede">
+    Win a game, press <strong>Challenge a friend</strong>, and the link on your
+    clipboard carries the map and your result. Paste it here to put it on the board.
+  </p>
+
+  <form id="form" class="form" autocomplete="off">
+    <label for="link">Challenge link</label>
+    <textarea id="link" name="link" rows="3" required
+              placeholder="https://…/#eNoljE0OgjAQhe_y1rOw0Crpz…"></textarea>
+
+    <label for="name">Your name</label>
+    <input id="name" name="name" type="text" maxlength="60" required placeholder="Andrew">
+
+    <p class="hint" id="preview" hidden></p>
+
+    <button id="go" type="submit">Post it</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </form>
+</main>
+
+<script type="module" src="js/submit.mjs"></script>
+</body>
+</html>

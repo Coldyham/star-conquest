@@ -1,0 +1,14 @@
+# Netlify config for the leaderboard — a *second*, separate site from the same
+# repo, with its Base directory set to `leaderboard` in the site's settings.
+# Netlify then reads this file instead of the root one (which builds the game
+# itself with pygbag) and resolves publish relative to this directory.
+#
+# No build command: these are plain static files with no bundler or build step.
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Conquest Leaderboard</title>
+<meta name="description" content="Posted scores on Star Conquest challenge maps.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>Leaderboard</span></a>
+  <a class="btn" href="submit.html">Post a score</a>
+</header>
+
+<main>
+  <h1>Recently played</h1>
+  <p class="lede">
+    Every map someone has posted a score on, newest first. Each row shows the best
+    result so far — fewest turns wins, fewest ships lost breaks a tie.
+  </p>
+  <div id="games" class="loading">Loading…</div>
+</main>
+
+<script type="module" src="js/home.mjs"></script>
+</body>
+</html>
