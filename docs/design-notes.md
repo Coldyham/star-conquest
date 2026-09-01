@@ -109,6 +109,163 @@ of their real code *is* the answer. knower folds those predictions into a
 "post-launch board" (predicted orders applied via `engine.apply_order` but
 not advanced) and runs thinker's phases against it.
 
+## `models/marshal.py` and what the measurements deleted
+
+marshal was commissioned around three ideas: bait an opponent into a system a
+neighbour can relieve, value chokepoints, and stop sending "just enough". Only the
+third survived contact with a ladder, and the other two are worth recording so
+nobody re-derives them.
+
+**Overwhelming force is provable, not a preference.** Combat is Lanchester's square
+law, so the ships an attack consumes are `A - sqrt(A^2 - B^2)`, which *decreases*
+in `A` and tends to `B^2/2A`. Concentration is therefore rewarded twice: the strike
+costs fewer ships, and the capture is held by a stack big enough to keep. What
+thinker's own tuning sweep rejected was raising the *threshold* to attack — leaner,
+sooner strikes beat over-massing — and that is a different question from what to do
+with ships that have no other job this turn. marshal strikes at exactly thinker's
+price and then pours the remainder in behind it, worth 54%/72%/80% against the
+planner it forks at 24 nodes, 40 nodes and 18 ly/turn respectively.
+
+**The standing frontier guard interacts with commitment, and ablating one at a
+time hides it.** Swept *alone* against the blind planner, `FRONTIER_GUARD = 0.3`
+looks worthless: 85-85 on a 24-node mirror, and negative at 40 nodes and at
+18 ly/turn. marshal was built with it at 0.0 on that evidence and it was a
+mistake — with Phase 3b on, the guard is what makes committing survivable, since
+a system that just emptied itself into an attack is precisely the one that needs
+cover. Sweeping it again with 3b enabled, against knower at depth 0:
+
+    guard     18n   24n   30n   40n   mean   timeouts   turns
+    0.0       38%   48%   62%   66%    53%         --      --
+    0.30      56%   59%   66%   70%    63%         50     144
+    0.45      60%   60%   72%   69%    65%         59     162
+    0.55      60%   65%   74%   66%    66%         80     182
+    0.70      59%   60%   77%   71%    67%        114     195
+
+Two lessons. The obvious one is that one-at-a-time ablation is not enough when
+mechanics interact; the guard reads as dead weight until something else spends
+the ships it was hoarding. The subtler one is that the win rate above is not the
+whole objective — past 0.3 it is flat while games stretch 35% longer and timeouts
+more than double, which is the stalemate failure mode `models/README.md` warns
+about. marshal holds thinker's exact 0.3, which also keeps its margin
+attributable to mechanisms rather than to a re-tune.
+
+The original zero-guard result was also *size*-blind. marshal at guard 0.0 beat
+the blind planner 66% at 40 nodes but lost 38-40% at 12-18 nodes, crossing over
+around 26 — and 18 is the default. Any bot result quoted at a single map size
+should be treated as provisional.
+
+**Chokepoints lose.** Normalised Brandes betweenness over the lane graph, cached
+per topology and folded into `_richness`. The measure itself is sound and cheap —
+these maps are planar and sparse (average degree 2.5-2.7) yet 34-49% of nodes are
+cut vertices, so degree says nothing while betweenness separates cleanly (top 1.00,
+median 0.21, 2.3 ms at 24 nodes, computed once). It still loses at every weight
+tried: 48%/48%/50% at 0.10/0.20/0.40, negative at 40 nodes, and consistently the
+longest games and most timeouts in the whole sweep. The bot buys corridors instead
+of winning. Production compounds and topology doesn't, which is the short version.
+Pocket-sealing — valuing a capture by how much frontier it removes — fails for a
+duller reason: 67% of candidate targets score identically and only 6.7% seal at
+all, so it mostly adds a constant. 47% either way.
+
+**Two bugs fixed on the way past**, both of which the removed guard used to mask.
+`_EDGE = 1.1 / 0.9` hardcoded `COMBAT_JITTER = 0.10`, which is a menu knob, so every
+margin in thinker, knower and claudebot silently dropped below break-even when the
+jitter slider moved. marshal fixed it for itself first, reading the knob live and
+flooring the tuned absolutes over it; the fix has since moved into
+`combat.edge_attacking`/`edge_defending` (see below) and the rest of the roster
+reads it too, so this is now a roster property rather than a thing marshal alone
+gets right. And Phase 1 sized relief for the worst arrival horizon but scheduled
+it for *that* horizon's turn, while 16.1% of real deficits bind later than the
+first arrival — the standing guard used to absorb the early wave. marshal sizes
+for the worst horizon and requires delivery by the earliest.
+
+**Standing aside in a free-for-all.** The one idea here that came from watching a
+human play rather than from reading the code: when you are boxed between two
+rivals, the node that joins them is worth less than its production says. Take it
+and you have replaced a border *they* were contesting with two borders they
+contest with you — a bad trade for as long as your income trails their combined
+income. `_wedge` prices a target by how many rivals *past the first* it borders,
+so the wall position is discounted and the rivals are left adjacent and busy with
+each other.
+
+The payoff is sharply non-monotonic in the size of the field, which is why the
+term is gated on `WEDGE_MIN_PLAYERS`. Measured by pairing marshal against a copy
+of itself with the term off, both seats in the *same* game, rotated through every
+position so map and luck are shared:
+
+    3 players, 30 nodes    48% (126-137)   gate off, so the two are identical
+    4 players, 30 nodes    64% (160-89)
+    4 players, 40 nodes    62% (168-101)
+    5 players, 40 nodes    62% (190-117)
+
+The three-player row is a **null cell** and worth keeping for that alone: the gate
+makes both variants emit identical orders, so whatever it reads is the harness's
+own noise. It reads 48%, and that is what licenses reading 62-64% as real — an
+earlier 40-seed sweep put the same null at 43%, which would have made a 58% result
+look like a finding. Any future bot experiment here should build itself a null
+cell the same way.
+
+Why it fails at three players: with a single pair of rivals there is no fight to
+stand aside from, so declining the node just feeds whichever of them takes it, and
+the lost income beats the diplomacy. Why it fades past five: the board is crowded
+enough that nearly every target borders two rivals, so the term stops
+discriminating and becomes a constant offset.
+
+Only the defensive half of the human strategy is implemented. The other half —
+*abandoning* a system specifically to bait two rivals into contesting it — needs a
+model of what those rivals value, which is knower's territory rather than a blind
+bot's.
+
+## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
+
+Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
+`edge_defending` are now the one place a fight's break-even multiple is computed,
+and thinker, claudebot and knower all price their margins off it instead of a
+private `1.1 / 0.9` constant. Motivation was a real bug, not tidiness — with
+`DEFENDER_ADVANTAGE` a live menu slider, every bot but marshal was pricing fights
+against a defender bonus that no longer existed, or under-pricing one that had
+grown past 1.0.
+
+Two properties the API has to hold for a bot pulling it in:
+
+* **A knob can only ever *raise* a margin above the figure the bot was tuned at,
+  never thin it.** `min_swing` floors the jitter half of the edge (not the
+  advantage half) at the swing a margin was fitted against; every bot in
+  `models/` passes its own `TUNED_SWING = 1.1 / 0.9`. Skipping this is a real
+  regression, not a theoretical one: measured pre-floor, claudebot at
+  `COMBAT_JITTER = 0.0` scored 8% (2-24, 34 unresolved) against its own
+  pre-back-port self, 60 games, 24 nodes, both seatings — a gentler-than-default
+  jitter thinned every margin below what the bot's absolutes were tuned to cover.
+  With the floor, that cell and the jitter-0.10 default are both exact 50% nulls
+  for all three bots.
+* **Clearing the edge is not a promise of capture.** It only guarantees the
+  defender loses the worst roll; near-matched forces can still round to zero
+  survivors on both sides and hand the system to nobody. `preview_fight(1, 1,
+  0.1, 0.75)` clears `edge_attacking()` (0.90 vs 0.825) and still annihilates.
+  Every caller floors its ask at `target.ships + 1` for exactly this reason.
+
+**The honest margin costs something above default jitter.** Re-measured after the
+floor, thinker/claudebot/knower vs their pre-back-port selves (60 games a cell, 24
+nodes, both seatings, `DEFENDER_ADVANTAGE` fixed at 1.0):
+
+    COMBAT_JITTER   thinker   claudebot   knower
+    0.10 (default)     50%        50%        50%    (exact nulls, by construction)
+    0.15               61%        56%        49%
+    0.25               33%        40%        46%
+    0.50                0%         4%        14%
+
+The old `1.1 / 0.9` hardcode was, by accident, a *gambling* policy: at high jitter
+it kept sending at a margin that was no longer statistically safe, and won more
+than a bot pricing the real odds does. This is why the finding belongs here and
+not as a reason to cap the edge — the fix is correct, the number above is the
+honest price of correctness, and a future change chasing that regression back
+would be re-introducing the original bug. `DEFENDER_ADVANTAGE` moves the other,
+unambiguous way for all three bots (0.75: 53/66/63%, 1.25: 69/94/79%, 1.5:
+100/100/100%, same harness) — that direction was never in question, only whether
+the bot was pricing it at all.
+
+marshal's own head-to-head numbers move too, now that its rivals are no longer
+handicapped by the stale constant — see its docstring for the re-measured table.
+
 ## Send popup / `Ui.editing_existing`
 
 The popup commits immediately, so a fresh compose and a reopened order are

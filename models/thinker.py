@@ -34,18 +34,27 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 
+from starconquest import combat
 from starconquest.model import Order
 
 # --- tunables -------------------------------------------------------------- #
-# Worst-case combat swing is 0.9*attacker vs 1.1*defender, so 1.1/0.9 ~= 1.222x
-# is the break-even edge. Massing past it is cheaper by the square law (a 1.5x
+# `combat.edge_attacking`/`edge_defending` are the break-even multiples for the
+# two sides of a fight — at the default jitter and no defender advantage, both
+# are the familiar 1.222x. Massing past that is cheaper by the square law (a 1.5x
 # attack loses ~25% of its force), but a coordinate-descent sweep + grid search
 # vs claudebot on held-out maps found leaner, sooner strikes beat over-massing
 # against a competent foe. Most strikes are short-lane, where the margin is
-# ENEMY_NEAR, so a cheap near-strike (just above the 1.222x jitter-safe floor)
-# rising to a padded ENEMY_FAR on the rare long lane scored best.
-_EDGE = 1.1 / 0.9
-DEFEND_MARGIN = _EDGE + 0.05    # to hold a system through a strike this turn
+# ENEMY_NEAR, so a cheap near-strike (just above the jitter-safe floor) rising to
+# a padded ENEMY_FAR on the rare long lane scored best.
+#
+# The pads and absolutes below sit over the live edge, and `TUNED_SWING` floors
+# its jitter half, so a knob only ever *raises* a margin above the figure it was
+# fitted at. Nothing measured here moves at the default 0.10 / 1.0.
+TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
+                                # a floor under the live edge, never an answer
+DEFEND_PAD = 0.05               # to hold a system through a strike this turn
+NEUTRAL_PAD = 0.05              # floor under NEUTRAL_MARGIN once jitter is wilder
+NEAR_PAD = 0.02                 # ...and under the enemy ramp
 NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
 ENEMY_NEAR = 1.3                # enemy margin for a 1-turn strike (little time to react)
 ENEMY_FAR = 1.9                 # ...rising toward this as the strike lands later
@@ -54,6 +63,19 @@ OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbe
 RESERVE_FLOOR = 1               # never strip an unthreatened system below this
 FRONTIER_GUARD = 0.3            # a frontier system keeps this fraction of its
                                 # scariest adjacent enemy garrison home as a guard
+
+
+def _defend_margin() -> float:
+    return combat.edge_defending(TUNED_SWING) + DEFEND_PAD
+
+
+def _neutral_margin() -> float:
+    return max(NEUTRAL_MARGIN, combat.edge_attacking(TUNED_SWING) + NEUTRAL_PAD)
+
+
+def _enemy_margin(dist: int) -> float:
+    return max(combat.edge_attacking(TUNED_SWING) + NEAR_PAD,
+               min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1)))
 
 
 def decide(state, pid):
@@ -92,7 +114,7 @@ def decide(state, pid):
         # The garrison we must have present, and the turn that demand binds.
         worst, t_bind = 0, 1
         for t, ecum in _enemy_arrivals(state, pid, sid):
-            deficit = (math.ceil(ecum * DEFEND_MARGIN)
+            deficit = (math.ceil(ecum * _defend_margin())
                        - _production_by(s, t) - _inbound(state, sid, pid, t))
             if deficit > worst:
                 worst, t_bind = deficit, t
@@ -242,15 +264,14 @@ def _max_adjacent_enemy(state, pid, sysobj) -> int:
 def _required(state, pid, target, dist: int) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns."""
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
-        return max(target.ships + 1, math.ceil(target.ships * NEUTRAL_MARGIN))
+        return max(target.ships + 1, math.ceil(target.ships * _neutral_margin()))
     # Enemy: fold in the reinforcements and production that land before we arrive,
     # and pad more the later we strike (more time for the enemy to react).
     reinforcements = sum(f.ships for f in state.fleets
                          if f.dest_id == target.id and f.owner_id == target.owner_id
                          and f.turns_remaining <= dist)
     defence = target.ships + reinforcements + _production_by(target, dist)
-    margin = min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1))
-    return max(target.ships + 1, math.ceil(defence * margin))
+    return max(target.ships + 1, math.ceil(defence * _enemy_margin(dist)))
 
 
 def _evacuate(state, pid, s, max_prod: int):

@@ -239,7 +239,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 
-from starconquest import ai, engine
+from starconquest import ai, combat, engine
 from starconquest.model import Order
 
 # Lets a sibling oracle bot recognise us (and us it) so two of them proxy each
@@ -248,9 +248,16 @@ IS_ORACLE = True
 
 # --- tunables vendored unchanged from thinker ------------------------------- #
 # Kept bit-identical on purpose: a knower-vs-thinker result should measure the
-# oracle, not a re-tune. See thinker.py for how these were fitted.
-_EDGE = 1.1 / 0.9
-DEFEND_MARGIN = _EDGE + 0.05
+# oracle, not a re-tune. See thinker.py for how these were fitted. The pads sit
+# over `combat`'s live break-even edge and the absolutes floor it, so a fight is
+# priced against the jitter and defender-advantage actually in force — at their
+# defaults the tuned figures win and every number here is what it always was.
+# `TUNED_SWING` is the floor in the other direction: a gentler jitter than these
+# were fitted at cannot thin them either.
+TUNED_SWING = 1.1 / 0.9
+DEFEND_PAD = 0.05
+NEUTRAL_PAD = 0.05
+NEAR_PAD = 0.02
 NEUTRAL_MARGIN = 1.3
 ENEMY_NEAR = 1.3
 ENEMY_FAR = 1.9
@@ -263,8 +270,8 @@ FRONTIER_GUARD = 0.3            # now applied only against seats we *can't* pred
 # known horizon the oracle already has every fleet that can arrive, so the only
 # thing left to cover is the combat jitter itself.
 KNOWN_MARGINS = True            # False reverts to thinker's padded margins
-KNOWN_ATTACK = _EDGE + 0.02
-KNOWN_DEFEND = _EDGE + 0.02
+KNOWN_ATTACK_PAD = 0.02
+KNOWN_DEFEND_PAD = 0.02
 
 # `_richness` also peeks one hop past the system it is pricing, at this weight, so a
 # poor system guarding a rich one is valued as the gateway it is. Not an oracle
@@ -349,19 +356,24 @@ class Posture:
 
 
 def _posture() -> Posture:
-    """The default posture, read live from the module globals."""
+    """The default posture, read live from the module globals — and, for the four
+    margins, from the two combat knobs, which are menu sliders a match may be
+    played on any setting of. Every margin here is floored at the break-even
+    multiple for its side of the fight, so a `POSTURE_VARIANTS` override is the
+    only way to end up below it, and that at least is deliberate."""
+    attack, defend = combat.edge_attacking(TUNED_SWING), combat.edge_defending(TUNED_SWING)
     return Posture(
         reserve_floor=RESERVE_FLOOR,
         frontier_guard=FRONTIER_GUARD,
-        defend_margin=DEFEND_MARGIN,
-        neutral_margin=NEUTRAL_MARGIN,
-        enemy_near=ENEMY_NEAR,
-        enemy_far=ENEMY_FAR,
+        defend_margin=defend + DEFEND_PAD,
+        neutral_margin=max(NEUTRAL_MARGIN, attack + NEUTRAL_PAD),
+        enemy_near=max(ENEMY_NEAR, attack + NEAR_PAD),
+        enemy_far=max(ENEMY_FAR, attack + NEAR_PAD),
         overwhelm=OVERWHELM,
         beyond_decay=BEYOND_DECAY,
         known_margins=KNOWN_MARGINS,
-        known_attack=KNOWN_ATTACK,
-        known_defend=KNOWN_DEFEND,
+        known_attack=attack + KNOWN_ATTACK_PAD,
+        known_defend=defend + KNOWN_DEFEND_PAD,
     )
 
 
