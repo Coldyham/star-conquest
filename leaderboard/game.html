@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Map scores · Star Conquest Leaderboard</title>
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>Leaderboard</span></a>
-  <a class="btn" href="submit.html">Post a score</a>
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <a class="btn" href="submit.html">Enter score</a>
 </header>
 
 <main>
@@ -18,6 +19,11 @@
   <p class="lede" id="subtitle"></p>
   <div id="scores" class="loading">Loading…</div>
 </main>
+
+<footer class="attract">
+  <span class="coin">▚</span> Think you can beat that? &nbsp;·&nbsp;
+  <a href="submit.html">Enter a score</a>
+</footer>
 
 <script type="module" src="js/game.mjs"></script>
 </body>

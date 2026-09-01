@@ -1,21 +1,28 @@
 import { configured, select } from "./api.mjs";
-import { clear, el, mapSummary, relativeTime, scoreSummary, showError } from "./format.mjs";
+import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 
 const target = document.getElementById("games");
 
 function row(game) {
-  const best = el("div", { class: "best" }, [
-    el("strong", { text: scoreSummary({ turns: game.best_turns, lost: game.best_lost, hand: game.best_hand }) }),
-    el("span", { class: "credit", text: ` by ${(game.best_user_name || "").trim() || "anonymous"}` }),
-  ]);
-  const meta = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} · ${relativeTime(game.last_activity)}`;
+  const holder = (game.best_user_name || "").trim() || "anonymous";
+  const detail = [
+    `${game.best_lost} lost`,
+    game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
+    `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`,
+    relativeTime(game.last_activity),
+  ].filter(Boolean).join(" · ");
 
   return el("a", { class: "card", href: `game.html?key=${encodeURIComponent(game.game_key)}` }, [
     el("div", { class: "card-main" }, [
       el("div", { class: "setup", text: mapSummary(game) }),
-      best,
+      el("div", { class: "credit", text: holder }),
+      el("div", { class: "card-meta", text: detail }),
     ]),
-    el("div", { class: "card-meta", text: meta }),
+    // The headline figure, cabinet-style: the score alone, big.
+    el("div", { class: "card-score" }, [
+      el("strong", { text: `${game.best_turns}` }),
+      el("span", { class: "card-score-label", text: "turns" }),
+    ]),
   ]);
 }
 

@@ -1,6 +1,8 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
-import { clear, credit, el, mapSummary, relativeTime, scoreSummary, showError } from "./format.mjs";
+import {
+  clear, credit, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError,
+} from "./format.mjs";
 
 const heading = document.getElementById("setup");
 const subtitle = document.getElementById("subtitle");
@@ -8,11 +10,16 @@ const target = document.getElementById("scores");
 const gameKey = new URLSearchParams(location.search).get("key") || "";
 
 function scoreRow(score, rank) {
-  return el("li", { class: rank === 1 ? "score leader" : "score" }, [
-    el("span", { class: "rank", text: `${rank}` }),
-    el("span", { class: "who", text: credit(score) }),
+  return el("li", { class: rank <= 3 ? `score rank-${rank}` : "score" }, [
+    el("span", { class: "rank", text: ordinal(rank) }),
+    // The dot leader is its own flexible element rather than trailing dots on the
+    // name: a name long enough to wrap used to drag the dots into the middle of it.
+    el("span", { class: "who" }, [
+      el("span", { class: "nm", text: credit(score) }),
+      el("span", { class: "dots", "aria-hidden": "true" }),
+    ]),
     el("span", { class: "result", text: scoreSummary(score) }),
-    el("span", { class: "when", text: relativeTime(score.submitted_at) }),
+    el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
   ]);
 }
 
