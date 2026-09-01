@@ -247,6 +247,9 @@ intact.
       `test_export_round_trips_exactly` pins the two by demanding identical
       orders. Keep every table entry's evaluator and `src` in step, or that test
       is what will tell you.
+    - The visual editor it exists for is **not built** — `docs/bot-maker.md` is that
+      phase's design and the four constraints that shape it (chiefly: it cannot be a
+      menu tab, and nothing written to disk survives a web reload).
     - Declares no `AUX_LABEL` on purpose (every block bot shares the module, so
       one would give them all the same meaningless slider), and touches
       `AiParams` at exactly one point: the `surplus` amount reads the seat's

@@ -42,6 +42,12 @@ from the AI tab's dropdown (the built-in `heuristic` is the default). See
 [`models/README.md`](models/README.md) for the authoring contract, the read-only
 `GameState` API a bot can use, and a copy-paste example.
 
+No Python? `starconquest/botlang.py` builds a bot from an ordered list of
+`WHEN ... THEN ...` rules instead. Three are registered and selectable from the
+dropdown already (`blockrush`, `blockturtle`, `blockheuristic` — two of them beat
+the built-in `heuristic` head-to-head), and `tools/export_bot.py` turns any of
+them into an ordinary, editable `models/*.py` file.
+
 ## Controls
 
 | Action | Input |
@@ -76,6 +82,7 @@ starconquest/
   combat.py      # Lanchester-with-jitter resolution
   engine.py      # simultaneous turn resolution (pure)
   ai.py          # heuristic AI + per-seat params + strategy registry (decide/register)
+  botlang.py     # visual rule language for bots (interpreter + export to Python)
   render.py      # drawing (pygame)
   input.py       # event handling (pygame)
   menu.py        # pre-game setup screen (pygame)
@@ -124,3 +131,8 @@ full **head-to-head competition** is a documented public state/query API and a
 headless sim harness that assigns a strategy per seat.
 
 Per-seat AI tuning and selectable difficulty via the AI tab are already here.
+
+The **in-app bot maker** is half built: the rule language and interpreter ship
+(`botlang.py`), the visual editor doesn't. See
+[`docs/bot-maker.md`](docs/bot-maker.md) for where it stands, what it measures,
+and the constraints the editor has to live inside.

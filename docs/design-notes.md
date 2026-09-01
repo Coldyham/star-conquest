@@ -271,6 +271,9 @@ No `AUX_LABEL` is declared: `ai.aux_spec` reads it off the strategy function's
 module, and every block bot shares this one, so declaring it would give them all
 the same meaningless knob.
 
+The editor this language exists for is not built; [`bot-maker.md`](bot-maker.md) holds that phase's design, the
+measurements behind it, and the constraints it has to live inside.
+
 **`export` vendors its helpers with `inspect.getsource`.** The generated
 `models/*.py` is an ordinary drop-in bot that imports nothing private and never
 calls back, so the helpers must be copied in — and copying the *source objects*
