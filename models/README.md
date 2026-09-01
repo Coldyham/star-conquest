@@ -169,6 +169,16 @@ def decide(state, pid):
 Save that, open the game, go to the **AI** tab, and pick **rusher** for any seat.
 For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orders`).
 
+The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
+arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
+(scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
+commits its surplus instead of parking it), `knower.py` (the oracle — it runs every
+rival's own `decide` before the engine asks for it).
+
+`marshal.py` is worth reading for its docstring as much as its code: it records
+three plausible ideas that were built, measured and then *deleted* for not beating
+the configuration without them. That is the bar here — measure before you keep.
+
 ## Benchmark it before you submit
 
 `tests/sim.py` runs games headlessly, so you can measure a bot properly instead of
