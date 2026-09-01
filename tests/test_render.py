@@ -149,7 +149,7 @@ def test_win_overlay_draws_every_challenge_verdict():
         state.turn = 137
         state.players[1].ships_lost = 412
         ui.hand_turns = 137
-        ui.challenge_by = "Andrew"
+        ui.challenge_by = "Name"
 
         state.winner = 1
         for target in (None, (200, 500), (100, 100), (137, 412)):

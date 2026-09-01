@@ -193,7 +193,7 @@ def test_legacy_uncompressed_token_still_loads():
 # --- challenges -------------------------------------------------------------- #
 def _challenged() -> Settings:
     s = _customised()
-    s.challenge = Challenge(turns=137, lost=412, hand=119, by="Andrew")
+    s.challenge = Challenge(turns=137, lost=412, hand=119, by="Name")
     s.challenge.key = s.challenge_key()
     return s
 
