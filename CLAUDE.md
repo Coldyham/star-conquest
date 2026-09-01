@@ -39,7 +39,7 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
+  `engine`, `ai`, `botlang`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
   and most of the suite run with no display. Do not add a pygame import to any of
   these. (`fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `replay` serializes a
@@ -229,6 +229,28 @@ intact.
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
     its depth-0 seats are predicted for real, and trusted, instead of approximated).
+  - **`botlang.py` is a rule language for bots, and the seam a future in-app
+    builder plugs into.** A `Program` is a flat, ordered list of `WHEN … THEN …`
+    rules over a curated vocabulary; `run` walks them per owned system and the
+    first *usable* rule fires, issuing at most one order from that system. A rule
+    that matches but has nothing to spend or no legal target **falls through** to
+    the next — `hold` is the exception and stops evaluation. It reuses `ai`'s own
+    helpers (`_threat`, `_is_frontier`, `_surplus`, `_desirability`,
+    `_flow_to_frontier`) rather than reimplementing them; `ai` must never import
+    `botlang` back. `STARTERS` holds three worked programs, registered by
+    `register_starters()` — called once at boot beside `ai.load_models()`, since
+    unlike drop-in files there are no on-disk edits to re-scan.
+    - **`export(program)` emits a standalone `models/*.py`** (also
+      `tools/export_bot.py`), vendoring its helpers via `inspect.getsource` so the
+      generated code is literally what the interpreter ran. Only the per-rule
+      code comes from the `src` templates beside each spec-table evaluator, and
+      `test_export_round_trips_exactly` pins the two by demanding identical
+      orders. Keep every table entry's evaluator and `src` in step, or that test
+      is what will tell you.
+    - Declares no `AUX_LABEL` on purpose (every block bot shares the module, so
+      one would give them all the same meaningless slider), and touches
+      `AiParams` at exactly one point: the `surplus` amount reads the seat's
+      reserve knobs, so those two AI-tab sliders keep working.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through

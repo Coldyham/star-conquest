@@ -169,6 +169,30 @@ def decide(state, pid):
 Save that, open the game, go to the **AI** tab, and pick **rusher** for any seat.
 For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orders`).
 
+## Don't fancy writing Python?
+
+`starconquest/botlang.py` is a small rule language for bots: a program is an
+ordered list of `WHEN <conditions> THEN <action>` rules, and three worked
+examples (`blockrush`, `blockturtle`, `blockheuristic`) are registered as
+strategies you can pick from the AI tab's dropdown right now. Two of them beat
+the built-in `heuristic` head-to-head.
+
+Rules are tried in order for each system you own and the first one that *can*
+act fires, issuing at most one order from that system; a rule whose conditions
+hold but which has no affordable target falls through to the next, so a useful
+bot is four rows long. `hold` is the exception and stops there.
+
+To see one, or to turn one into a real model file you can then edit freely:
+
+```sh
+uv run python tools/export_bot.py --list
+uv run python tools/export_bot.py blockturtle --name mybot   # -> models/mybot.py
+```
+
+The generated file is an ordinary drop-in bot — it imports nothing private and
+never calls back into `botlang` — so from that point on it is just Python, and
+everything on this page applies to it.
+
 ## Benchmark it before you submit
 
 `tests/sim.py` runs games headlessly, so you can measure a bot properly instead of

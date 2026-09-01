@@ -40,7 +40,7 @@ import signal
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from starconquest import ai, config, engine, mapgen
+from starconquest import ai, botlang, config, engine, mapgen
 from starconquest.model import GameState
 
 _warned_no_sigalrm = False
@@ -374,6 +374,7 @@ def main() -> None:
     strategies = args.ai
     if strategies:
         ai.load_models()  # register drop-in models/ strategies before we name them
+        botlang.register_starters()   # ...and the built-in visual rule programs
         unknown = [n for n in strategies if n not in ai.STRATEGIES]
         if unknown:
             ap.error(f"unknown strategy: {', '.join(unknown)}. available: {', '.join(ai.available_strategies())}")
@@ -381,6 +382,7 @@ def main() -> None:
         # No roster named: rank everything registered, so a tournament over the
         # whole models/ dir needs no arguments at all.
         ai.load_models()
+        botlang.register_starters()
         strategies = ai.available_strategies()
 
     if args.swap or args.ladder:

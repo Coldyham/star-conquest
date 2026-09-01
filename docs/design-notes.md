@@ -215,6 +215,72 @@ enough to call it a tuning problem.
 `Settings.from_dict` clamps the field to that ceiling, unlike the other balance
 knobs, whose out-of-range values are merely odd rather than unplayable.
 
+## Visual bot programs (`botlang.py`)
+
+A feasibility spike for an in-app rule builder, so a player who doesn't write
+Python has something between the AI tab's five sliders and a `models/*.py` file.
+A `Program` is a flat, ordered list of `WHEN ... THEN ...` rules over a curated
+vocabulary (9 conditions, 7 actions, 5 amounts), interpreted per system.
+
+**Why a flat list is enough** is the thing this spike had to establish, and the
+reason to believe it was that `ai.compute_orders` is *already* structurally a
+three-rule program. `blockheuristic` re-expresses it and lands at 49% head to
+head over 400 ladder games — parity. `blockrush` (2 rules) beats the built-in
+heuristic 59%, and `blockturtle` beats it 76% and tops a five-bot ladder.
+
+**Fall-through is what makes programs short.** A rule whose conditions hold but
+which has nothing to spend or no legal target falls through to the next, so
+`frontier -> attack` degrades naturally into a later `send to the front`. Without
+it every rule would need an affordability condition bolted on, and a four-row bot
+would be a fifteen-row bot. `hold` is the deliberate exception: it is a real
+action and stops evaluation, which is the only way to express "do nothing here".
+
+**Attack margins split, and it cost 13 points to learn.** `blockheuristic` first
+folded neutrals and enemies into one `attack_best` at a split-the-difference 1.4
+and scored 35%; giving neutrals their own `expand_neutral` rule at
+`AI_EXPAND_MARGIN` and enemies `AI_ATTACK_MARGIN` took it to 48%. The heuristic
+gates the two differently for a reason, and one blended number is not a
+substitute. The starter reads both from `config` rather than writing them out, so
+it tracks the built-in if those defaults are ever retuned.
+
+**A vocabulary with no enemy-attack rule can't win a game**, which is the trap
+this design makes easiest to fall into. `blockturtle` first had `hold`,
+`reinforce`, `expand_neutral` and `send_to_front` — perfectly sensible-looking,
+and it won 0 of 300 ladder games, because taking every enemy system is the win
+condition and no rule could take one. It went to 77% the moment an `attack_best`
+rule was added behind a `garrison is at least 12` gate. Worth remembering when
+the editor ships: an empty-handed program *looks* fine.
+
+**Only one order per system per turn**, matching `ai.compute_orders` and what
+`engine.apply_order` assumes, so a rule bot can never over-commit a garrison.
+It is also the ceiling on the language: converging waves launched from different
+distances so they land together (`thinker`), scheduling reinforcements by when a
+blow lands, evacuating a doomed system, or predicting a rival (`knower`) are all
+unreachable. Measured, that is exactly where the block bots sit — above
+`heuristic`, `rusherplus` and `claudebot`, and 0% against `thinker` and `knower`.
+
+**Tie-breaks draw from `state.rng`**, like `ai._frontier_order`, `thinker` and
+`rusherplus`. The `IS_ORACLE` prohibition on drawing binds bots that *predict*
+rivals, and a rule bot doesn't, so the ordinary house rule applies instead.
+
+**One contact point with `AiParams`**, deliberately: the `surplus` amount reads
+the seat's `reserve_fraction`/`reserve_floor` through `ai._surplus`, so those two
+AI-tab sliders keep working on a block bot. Everything else a rule needs is
+carried by the rule, because a program should be a complete description of a bot.
+No `AUX_LABEL` is declared: `ai.aux_spec` reads it off the strategy function's
+module, and every block bot shares this one, so declaring it would give them all
+the same meaningless knob.
+
+**`export` vendors its helpers with `inspect.getsource`.** The generated
+`models/*.py` is an ordinary drop-in bot that imports nothing private and never
+calls back, so the helpers must be copied in — and copying the *source objects*
+rather than retyping them means what runs in the file is literally what the
+interpreter ran. Only the per-rule code is generated, from the `src` templates
+sitting beside each table entry's evaluator, and `test_export_round_trips_exactly`
+pins that pair by running both implementations over eight turns of five games and
+demanding identical orders. That test is why the two halves of each spec entry
+can be trusted to mean the same thing.
+
 ## Losing / spectator mode
 
 Keyed on *defeat* rather than "no systems left" because revealing the map for

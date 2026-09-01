@@ -18,8 +18,8 @@ from typing import Optional
 
 import pygame
 
-from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, softkeyboard, viewstate, webstore)
+from starconquest import (ai, botlang, config, engine, fog, mapgen, menu, paths,
+                          render, replay, softkeyboard, viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -400,6 +400,7 @@ async def main() -> None:
     settings = Settings.from_args(args)
     _apply_shared_link(settings)   # web only: pre-fill from a #<token> in the URL
     ai.load_models()          # register any drop-in models/ strategies up front
+    botlang.register_starters()  # ...and the built-in visual rule programs
 
     pygame.init()
     if paths.is_android():
