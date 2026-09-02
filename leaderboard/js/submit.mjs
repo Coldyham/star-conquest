@@ -1,11 +1,11 @@
 import { configured, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
 import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
-import { decodeToken, fragmentOf } from "./token-decode.mjs";
-
 // Posting again from the same browser shouldn't mean retyping your name — the
-// whole point of arriving here from the game's win screen is one click.
-const NAME_KEY = "sc_leaderboard_name";
+// whole point of arriving here from the game's win screen is one click. The same
+// remembered name is what puts "My scores" in the marquee.
+import { mountMyScores, myName, rememberName } from "./me.mjs";
+import { decodeToken, fragmentOf } from "./token-decode.mjs";
 
 const form = document.getElementById("form");
 const linkField = document.getElementById("link");
@@ -78,14 +78,6 @@ async function refreshPreview() {
 
 linkField.addEventListener("input", refreshPreview);
 
-const remembered = (key) => {
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return ""; // private mode, or site data blocked — never load-bearing
-  }
-};
-
 /**
  * Arrive from the game already loaded: submit.html#<token> fills the link in.
  *
@@ -95,7 +87,7 @@ const remembered = (key) => {
  * everything after the '#', so a whole pasted URL works here too.
  */
 function prefill() {
-  const name = remembered(NAME_KEY);
+  const name = myName();
   if (name) nameField.value = name;
 
   const token = fragmentOf(location.hash);
@@ -109,6 +101,7 @@ function prefill() {
   (name ? document.getElementById("go") : nameField).focus();
 }
 
+mountMyScores();
 prefill();
 
 form.addEventListener("submit", async (event) => {
@@ -149,11 +142,7 @@ form.addEventListener("submit", async (event) => {
       by_name: decoded.challenge.by,
       raw_token: decoded.token,
     });
-    try {
-      localStorage.setItem(NAME_KEY, nameField.value.trim());
-    } catch {
-      // Fine — remembering the name is a convenience, not part of posting.
-    }
+    rememberName(nameField.value);
     location.href = `game.html?key=${encodeURIComponent(decoded.gameKey)}`;
   } catch (err) {
     button.disabled = false;

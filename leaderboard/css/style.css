@@ -116,6 +116,13 @@ a { color: var(--cyan); }
 .btn:hover { background: #10283f; }
 .btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.4); }
 
+/* The marquee's right-hand side. "My scores" is added there at runtime for a
+ * browser that has posted before (js/me.mjs), so it holds one button or two. */
+.actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+.btn.ghost { border-color: var(--dim); color: var(--dim); box-shadow: 0 3px 0 #1b2036; }
+.btn.ghost:hover { background: #131829; color: var(--ink); }
+
 main {
   position: relative;
   z-index: 10;
@@ -290,7 +297,11 @@ h1::after {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-.nm { overflow-wrap: anywhere; }
+/* The name is a link to that player's card wherever there is a poster to look
+ * up, but it must stay the colour its rank gives it rather than the page's
+ * link cyan — the medal colours below are the whole point of the column. */
+.nm { overflow-wrap: anywhere; color: inherit; text-decoration: none; }
+.who a.nm:hover { color: var(--cyan); text-decoration: underline; }
 .dots {
   flex: 1 1 auto;
   min-width: 1rem;
@@ -326,6 +337,140 @@ h1::after {
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
+
+/* -- one player's card ----------------------------------------------------- */
+.tally {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%);
+}
+
+.tally-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem 0.9rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
+}
+.tally-row + .tally-row { border-top: 1px dashed rgba(42, 35, 80, 0.9); }
+
+.tally-name {
+  font-family: var(--pixel);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--green);
+  text-decoration: none;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(107, 255, 143, 0.35);
+  overflow-wrap: anywhere;
+}
+.tally-name:hover { text-decoration: underline; }
+
+.tally-figs {
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  line-height: 2;
+  color: var(--dim);
+  text-transform: uppercase;
+  text-align: right;
+}
+
+.tally-note {
+  margin: 0.8rem 0 0;
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  line-height: 2;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+/* -- add or drop a rival --------------------------------------------------- */
+.compare {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+.compare input[type="text"] { flex: 1 1 12rem; width: auto; }
+
+/* The submit form's coin button pulses; these are ordinary controls, so they
+ * take the cabinet button look without the attract-mode animation. */
+button.mini {
+  align-self: auto;
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border-color: var(--cyan);
+  background: #0b1a2c;
+  color: var(--cyan);
+  font-size: 0.6rem;
+  box-shadow: 0 3px 0 #0a3345;
+  animation: none;
+}
+button.mini:hover:not(:disabled) { background: #10283f; }
+button.mini:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 #0a3345; }
+
+button.drop {
+  margin: 0;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 0.6rem;
+  box-shadow: none;
+  animation: none;
+}
+button.drop:hover { color: var(--bad); border-color: var(--bad); background: transparent; }
+
+/* -- a player's maps: one plate per map, one line per player ---------------- */
+.entries { margin: 0; padding: 0; list-style: none; }
+
+.entry {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--cyan);
+  background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%);
+}
+.entry:hover { border-left-color: var(--magenta); }
+
+.entry-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px dashed var(--line);
+  text-decoration: none;
+}
+.entry-head:hover { background: rgba(53, 230, 255, 0.06); }
+.entry-head:hover .setup { color: var(--cyan); }
+
+.entry-field {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  line-height: 2;
+  color: var(--cyan);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lines { margin: 0; padding: 0.2rem 0.6rem; list-style: none; }
+.lines .score + .score { border-top: 1px dashed rgba(42, 35, 80, 0.9); }
+
+/* Who is ahead within the comparison — a different question from the rank
+ * column, which is against the whole board. An inset bar, so marking a row
+ * cannot shift the grid beside it. */
+.score.lead { box-shadow: inset 3px 0 0 var(--green); }
+.score.absent { opacity: 0.45; }
+.score.absent .result { color: var(--dim); }
+
+/* Only the best attempt is placed; this says how many it was picked out of. */
+.tries { flex: 0 0 auto; font-size: 0.5rem; color: var(--dim); }
 
 /* -- insert coin: the submit form ------------------------------------------ */
 .form { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -453,6 +598,11 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   }
   .card-score strong { font-size: 1.4rem; }
   .card-score-label { margin-top: 0; }
+  .entry-head { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  /* Name and its × keep the first line; the figures drop below both, rather than
+   * leaving the × stranded alone on a third line once the row wraps. */
+  .tally-name { flex: 1 1 auto; }
+  .tally-figs { order: 1; flex: 1 1 100%; text-align: left; }
   .score { grid-template-columns: 3rem minmax(0, 1fr); font-size: 0.62rem; }
   .result { grid-column: 1 / -1; grid-row: auto; text-align: left; white-space: normal; }
   /* grid-row must be reset too, or the desktop `grid-row: 1` keeps the age above

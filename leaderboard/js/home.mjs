@@ -1,5 +1,6 @@
 import { configured, select } from "./api.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
+import { mountMyScores } from "./me.mjs";
 
 const target = document.getElementById("games");
 
@@ -32,6 +33,7 @@ function row(game) {
 }
 
 async function load() {
+  mountMyScores();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
     return;

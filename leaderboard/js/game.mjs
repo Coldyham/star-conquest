@@ -2,13 +2,25 @@ import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import {
   clear, competitionRanks, credit, el, mapSummary, ordinal, relativeTime, scoreSummary,
-  shortTime, showError,
+  shortTime, showError, userHref,
 } from "./format.mjs";
+import { mountMyScores } from "./me.mjs";
 
 const heading = document.getElementById("setup");
 const subtitle = document.getElementById("subtitle");
 const target = document.getElementById("scores");
 const gameKey = new URLSearchParams(location.search).get("key") || "";
+
+/**
+ * The name cell: a link to that player's card, unless the score is credited to a
+ * link's `by` field rather than to a poster, which names nobody to look up.
+ */
+function nameCell(score) {
+  const posted = ((score.users && score.users.name) || "").trim();
+  return posted
+    ? el("a", { class: "nm", href: userHref([posted]), text: posted })
+    : el("span", { class: "nm", text: credit(score) });
+}
 
 function scoreRow(score, rank) {
   return el("li", { class: rank <= 3 ? `score rank-${rank}` : "score" }, [
@@ -16,7 +28,7 @@ function scoreRow(score, rank) {
     // The dot leader is its own flexible element rather than trailing dots on the
     // name: a name long enough to wrap used to drag the dots into the middle of it.
     el("span", { class: "who" }, [
-      el("span", { class: "nm", text: credit(score) }),
+      nameCell(score),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     el("span", { class: "result", text: scoreSummary(score) }),
@@ -31,6 +43,7 @@ function playLink(token) {
 }
 
 async function load() {
+  mountMyScores();
   if (!configured()) {
     heading.textContent = "Not connected";
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");

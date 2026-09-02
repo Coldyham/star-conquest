@@ -115,6 +115,18 @@ export function credit(score) {
   return name.trim() || (score.by_name || "").trim() || "anonymous";
 }
 
+/**
+ * The player page for one or more names: `user.html?u=Andrew&u=Rival`.
+ *
+ * Repeated params rather than a comma-joined one, because a name is free text and
+ * may well contain a comma — URLSearchParams then escapes it for us either way.
+ */
+export function userHref(names) {
+  const params = new URLSearchParams();
+  for (const name of names) params.append("u", name);
+  return `user.html?${params}`;
+}
+
 export function showError(node, message) {
   node.classList.remove("loading");
   clear(node).append(el("p", { class: "error", text: message }));

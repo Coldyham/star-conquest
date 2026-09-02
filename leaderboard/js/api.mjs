@@ -1,7 +1,7 @@
 // PostgREST, which is all Supabase's REST API is, over plain fetch.
 //
-// No client library: the three queries this site makes are shorter as URLs than
-// the code to load a bundle would be, and it keeps the deploy self-contained.
+// No client library: the handful of queries this site makes are shorter as URLs
+// than the code to load a bundle would be, and it keeps the deploy self-contained.
 //
 // Writes go through insert() only. There is no update() or remove() here because
 // there are no UPDATE/DELETE policies to call them with — see schema.sql.
@@ -68,3 +68,14 @@ export function insert(table, row, { returning = false } = {}) {
 }
 
 export const eq = (value) => `eq.${encodeURIComponent(value)}`;
+
+/**
+ * `in.("a","b")` — every value quoted, since PostgREST reads a bare comma, dot,
+ * colon or bracket inside the list as syntax. Player names are free text, so
+ * assume the worst: quotes and backslashes are escaped, and each value is encoded
+ * on its own so its own commas can't be mistaken for the list's separators.
+ */
+export const inList = (values) =>
+  `in.(${[...values]
+    .map((value) => encodeURIComponent(`"${String(value).replace(/["\\]/g, "\\$&")}"`))
+    .join(",")})`;
