@@ -156,12 +156,14 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     ``log`` is then reused as the live log, so continued play appends to the very
     same file the game was resumed from. Fog-of-war memory (`seen`/`player_intel`)
     is rebuilt across every replayed turn so resuming doesn't forget places you
-    explored then lost sight of.
+    explored then lost sight of, and the standing auto-forward rules come back with
+    it — rewinding to a turn is meant to hand the board back as it was, and rebuilt
+    routes are half the position on a big map.
     """
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}
     replay_view = replay.reconstruct(
-        log, ai.decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
+        log, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
     ui = new_ui(state, loaded.autoplay, loaded)   # sets ui.visible from the final board
@@ -170,6 +172,12 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     ui.player_intel = intel
     ui.reset_view(state)      # re-frame now seen includes the whole replayed history
     ui.hand_turns = hand_turns(log)        # the log is the record of who drove
+    if log.turn_count:
+        # The rules the last replayed turn was played with, put through the same
+        # prune that turn's resolution gave them — a rule whose system was lost on
+        # it must not come back to life here.
+        ui.auto_forward = log.rules_for(log.turn_count - 1)
+        ui.prune_forward(state)
     return state, ui
 
 
@@ -317,7 +325,7 @@ def build_history(ui: Ui, log: GameLog) -> tuple[
         visible = _accumulate_fog(s, ui.human_id, seen, intel)
         fog.append((set(visible), set(seen), dict(intel)))
 
-    replay.reconstruct(log, ai.decide, on_turn=capture)
+    replay.reconstruct(log, on_turn=capture)
     return states, fog
 
 
@@ -370,11 +378,14 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
-        log.record_turn(human_orders, human_ai=ui.autoplay)
+        # Every seat's orders and every combat draw, plus the standing rules that
+        # were in force — recorded before `prune_forward` below drops any that this
+        # turn killed, so the log holds the rules the turn was actually played with.
+        log.record_turn(record, human_ai=ui.autoplay, rules=ui.auto_forward)
         if state.winner is not None:
             log.mark_finished(state.winner)
         try:

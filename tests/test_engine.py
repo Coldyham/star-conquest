@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from contextlib import contextmanager
 
 from starconquest import config, engine
@@ -184,3 +185,58 @@ def test_human_orders_are_confined_to_the_human_seat():
     assert s.systems[1].ships == 10, "an AI seat's garrison was launched"
     assert s.systems[0].ships == 7, "the human's own order should still go through"
     assert [(f.owner_id, f.source_id) for f in s.fleets] == [(1, 0)]
+
+
+# --------------------------------------------------------------------------- #
+# The turn record: what `replay` logs, and hands back to replay a turn
+# --------------------------------------------------------------------------- #
+def test_end_turn_returns_every_seats_orders_as_applied():
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 2)], human=1)
+    record = engine.end_turn(s, human_orders=[Order(1, 0, 1, 3)],
+                             decide=lambda st, pid: [Order(2, 1, 0, 4)])
+    assert [(o.owner_id, o.source_id, o.ships) for o in record.orders] == [
+        (1, 0, 3), (2, 1, 4)]
+
+
+def test_a_scripted_turn_replays_without_asking_any_seat():
+    """`replay.reconstruct` drives the engine this way: the orders go in verbatim
+    and no bot is consulted, so a strategy that cannot repeat itself can't make
+    the replay disagree with the game that was played."""
+    def play(script=None, decide=None):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 2)], human=1)
+        return s, engine.end_turn(s, script=script, decide=decide)
+
+    live, record = play(decide=lambda st, pid: [Order(2, 1, 0, 4)])
+    replayed, _ = play(script=record, decide=_never_called)
+    assert [(f.owner_id, f.source_id, f.ships) for f in replayed.fleets] == \
+           [(f.owner_id, f.source_id, f.ships) for f in live.fleets]
+    assert {sid: sys.ships for sid, sys in replayed.systems.items()} == \
+           {sid: sys.ships for sid, sys in live.systems.items()}
+
+
+def test_a_scripted_turn_refights_the_battle_on_the_recorded_dice():
+    """Combat's swing is drawn from `state.rng`, which a replay leaves in a place
+    it never was live (nobody decided anything on the way there). So the recorded
+    draws are dealt back in its place, and they — not this run's rng — settle the
+    fight: the same 10-vs-10 attack goes either way on the dice it is given."""
+    def fight(dice):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+        s.rng = random.Random(7)      # would roll its own swing, if it were asked
+        engine.end_turn(s, script=engine.TurnRecord([Order(1, 0, 1, 10)], dice))
+        return s.systems[1].owner_id
+
+    # The draws are dealt in the order the fight asks for them: the side holding
+    # the node first (it is folded in as the incumbent), then the attacker.
+    assert fight([+0.9, -0.9]) == 2, "the dice favoured the defender; it should hold"
+    assert fight([-0.9, +0.9]) == 1, "and favouring the attacker should flip it"
+
+
+def test_end_turn_records_the_draws_a_live_fight_made():
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+    s.rng = random.Random(7)
+    record = engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)])
+    assert len(record.dice) == 2      # one swing per side of the one fight
+
+
+def _never_called(state, pid):
+    raise AssertionError("a replayed turn must not consult a seat")

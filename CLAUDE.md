@@ -111,16 +111,22 @@ on outcomes.
 ### Persistence, replay & history (replay.py)
 
 A match is **never snapshotted** — it is recorded as its *inputs*: `Settings`,
-the concrete `seed`, and each turn's human orders (`replay.GameLog`, auto-saved
-after every turn to a gitignored, repo-anchored `games/` dir, mirroring
-`ai.MODELS_DIR` and `menu._SAVE_DIR`). Because all randomness flows through
-`state.rng`, `replay.reconstruct(log, decide, on_turn=…)` replays those inputs
-back through `engine.end_turn` to rebuild the **exact** state at any turn,
-bit-identical (keeping the engine's AI inversion — `decide` is a parameter, not an
-import). Under autoplay the human seat is AI-driven and draws `rng` *before*
-opponents, so those turns are flagged (`"ai": true`) and `reconstruct` re-runs
-`decide` for the human seat to reproduce the draw order. `main.resume_game` uses
-this to offer resuming the last unfinished match from the menu.
+the concrete `seed`, and per turn **every seat's orders plus the combat draws**
+(`engine.TurnRecord`, logged by `replay.GameLog`, auto-saved after every turn to a
+gitignored, repo-anchored `games/` dir, mirroring `ai.MODELS_DIR` and
+`menu._SAVE_DIR`). `replay.reconstruct(log, on_turn=…)` feeds each turn back
+through `engine.end_turn(state, script=…)` to rebuild the **exact** state at any
+turn — applying the orders verbatim and dealing the recorded dice to combat, so
+**no seat is ever asked to decide again**. `main.resume_game` uses this to offer
+resuming the last unfinished match from the menu, and restores that turn's
+standing auto-forward rules (`"rules"`, `Ui.auto_forward`) with it.
+
+**A replay must never depend on a bot repeating itself** — that is format
+version 2, and why the orders and the dice are both in the log (version 1 stored
+the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
+into a *different match*, silently). Version-1 logs can't be replayed faithfully
+and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
+autoplayed) — not for replay, but for `main.hand_turns`.
 
 **History mode** is a shell-only review scene (`Ui.history`, gated so it never
 enters the pure core). On entry `main.build_history` runs one `reconstruct` whose

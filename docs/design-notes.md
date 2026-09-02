@@ -98,6 +98,51 @@ bare viewport because the bare-viewport comparison used to let a "centred"
 offset push a boundary system back out through the margin at certain zooms
 (regression test: `test_boundary_never_crosses_the_margin_at_any_zoom`).
 
+## Persistence, replay & history (`replay.py`)
+
+Format version 1 recorded the *human's* orders alone and rebuilt everything
+else by re-running the AI against the same seeded `rng`. It was small, and it
+was only ever as reliable as the least reproducible bot in the game.
+`models/knower.py` truncates its tree search on a wall-clock budget
+(`SEARCH_BUDGET_S`), so on a busy frame it plans one thing and on the replay's
+tight headless loop another — and from that turn on the "reconstruction" is a
+different match. It shows up as history not matching the game you played and a
+resumed game handing you the wrong board. One of the saved games in the wild
+records winner 5 and rebuilt to winner 4.
+
+Nothing about a drop-in bot's determinism is enforceable, so version 2 stopped
+depending on it: `engine.end_turn` returns a `TurnRecord` of every seat's
+orders (in the sequence they were applied — `apply_order` clamps a
+double-spent garrison as it goes, so the sequence matters) and the log feeds it
+straight back as `script`. No seat is asked to decide anything on a replay.
+
+The dice are in the record for the same reason, and it is worth being explicit
+about why they have to be: skipping the AI means nobody draws the tie-break
+jitter the bots drew live, so `state.rng` is at a different position by the time
+combat asks it for a swing. Same orders, different battles, divergence anyway.
+`engine._Dice` therefore keeps every draw a live turn deals, and deals them back
+on a replay. Two alternatives were rejected: re-running `decide` purely to
+advance the rng (fragile — it re-does knower's whole search on every history
+build, seconds of it, and only works while every bot happens to be
+deterministic), and snapshotting the Mersenne Twister state per turn (~5 KB a
+turn, and the whole file is rewritten after *every* turn, so a long game would
+spend tens of MB of writes on it).
+
+Deriving combat's dice from `(seed, turn)` instead would have been free, but a
+clone made by `knower._clone` shares both, so a rollout would meet the same
+jitter the real turn is about to — handing the search the actual dice. The
+recorded-draws route keeps rollouts rolling their own.
+
+Version-1 logs can no longer be replayed faithfully, so `latest_log` skips them
+rather than offering a resume that quietly rebuilds a different game.
+
+`"rules"` (the human's `Ui.auto_forward`) is in the log because rewinding is
+meant to hand back the position as it was, and on a big map the standing routes
+*are* half the position. It is recorded before `main.resolve_turn`'s
+`prune_forward`, i.e. the rules the turn was actually played with, and
+`resume_game` re-prunes them against the rebuilt board so a rule whose system
+was lost on that turn doesn't come back to life.
+
 ## `models/knower.py` and simultaneous resolution
 
 Because turns resolve simultaneously — `_collect_orders` hands every seat the

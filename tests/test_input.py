@@ -865,13 +865,16 @@ def test_leaderboard_is_only_a_game_over_action():
         pygame.quit()
 
 
-def test_hand_turns_counts_only_manually_played_turns():
+def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
     """A game played by hand and then autoplayed to its end reports the hand
     count, and the Ui's running tally agrees with the log's per-turn flags."""
     state, ui = _setup()
     try:
+        # `save` mints a path when it has none, so the suite has to be pointed
+        # somewhere other than the player's real games/ dir.
+        monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
         log = replay.new_log(Settings(seed=1, nodes=18, players=3), 1)
-        log.path = None                       # keep the suite out of games/
+        log.path = tmp_path / "game.json"
         for turn in range(6):
             ui.autoplay = turn >= 4           # decided: let it play out
             main.resolve_turn(state, ui, log)

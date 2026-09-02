@@ -116,15 +116,16 @@ is grown as a beam. Four things make it sound:
     predict rivals, and every other knower seat in the game.
   * **Common random numbers.** Every node on a ply gets the same state-derived rng,
     so all of them meet the same combat jitter and a score gap reflects the plan
-    rather than the dice. Free variance reduction, and it keeps
-    ``replay.reconstruct`` bit-exact.
+    rather than the dice. Free variance reduction, and — being state-derived rather
+    than drawn from ``state.rng`` — it leaves the real stream where the seats after
+    us will look for it, which is what keeps *their* predictions exact.
   * **Rolled turns use the blind planner for every oracle seat**, ours included
     (``_rollout_decide``). Letting them build real oracles would mean a full
     prediction sweep per rolled turn. Our own future play is understated, but
     identically for every candidate, which is all a comparison needs.
 
-Work is *iteration*-bounded, so a game stays reproducible — and the shape of that
-bound is the thing to keep in mind when touching this code:
+Work is *iteration*-bounded, so the same board plans the same way — and the shape
+of that bound is the thing to keep in mind when touching this code:
 
     nodes per ply = candidates**2 x SEARCH_BEAM
 
@@ -132,8 +133,8 @@ bound is the thing to keep in mind when touching this code:
 itself the candidate count. Depth is the cheap knob and the roster is the expensive
 one: going from four candidates to six costs 2.2x, which is more than depth 8 -> 12.
 ``SEARCH_BUDGET_S`` is a catastrophe guard and must stay one — tripping it makes the
-plan depend on the wall clock, and `replay.reconstruct` re-runs `decide` — so the
-roster is sized to fit inside it rather than the other way round.
+plan depend on the wall clock, so the same position stops planning the same way —
+so the roster is sized to fit inside it rather than the other way round.
 
 --- Borrowing a move from another bot ---------------------------------------- #
 
@@ -312,10 +313,11 @@ AUX_INT = True
 # Checked *between plies*, so every line is the same depth whenever it fires and the
 # comparison stays fair; there is always a whole plan to return.
 #
-# Tripping this costs the game its bit-reproducibility (the plan starts depending on
-# the wall clock, and `replay.reconstruct` re-runs `decide`), so the candidate set is
-# sized to fit *inside* it rather than the other way round: 150 ms is about as long
-# as a turn may stall in a human game, so it is the fixed constraint and `_prune`'s
+# Tripping this makes the plan depend on the wall clock, so the same position no
+# longer plans the same way and a measurement stops being repeatable. The candidate
+# set is therefore sized to fit *inside* it rather than the other way round: 150 ms
+# is about as long as a turn may stall in a human game, so it is the fixed
+# constraint and `_prune`'s
 # `c**2 * b` node count is what gets cut to meet it. Measured worst case of the most
 # expensive legal configuration — 40 nodes, 6 seats, the slider at its top — is well
 # under this; see the cost table in the module docstring.
@@ -405,8 +407,8 @@ POSTURE_VARIANTS = (
 # untrusted, and `_pessimistic_owners` hedges against it the way thinker would.
 # Deliberately ~100x the measured cost of a real turn (knower 0.49 ms on a 24-node
 # board; every other bot in the roster decides in 6-21 us), so this is dead code
-# against any sane opponent. Tripping it does cost this game its bit-reproducibility,
-# which beats freezing the browser tab.
+# against any sane opponent. Tripping it does make this turn's plan depend on the
+# wall clock, which beats freezing the browser tab.
 ORACLE_BUDGET_S = 0.050
 
 _TRUSTED, _UNTRUSTED = True, False
@@ -711,8 +713,8 @@ def _priv(state, pid, salt):
     """A private rng derived from the state alone.
 
     Never the clock, never ``id()``, never ``hash()`` of a string — all three
-    would make a game unreproducible from its seed and break
-    ``replay.reconstruct``, which re-runs ``decide`` (replay.py:259-264).
+    would have the same board plan differently from one run to the next, so a
+    measurement (and a rival's prediction of us) would stop meaning anything.
     """
     return random.Random((state.seed * 1000003 + state.turn * 9176 + pid * 31 + salt) & 0x7FFFFFFF)
 
@@ -789,7 +791,8 @@ def _rollout(state, pid, plan, humans, rng):
     separately and kept. ``rng`` is the *ply's* stream, handed identically to every
     node on that ply (common random numbers), so all of them meet the same combat
     jitter and a score gap between siblings reflects the plan rather than the dice.
-    It keeps ``replay.reconstruct`` bit-exact for the same reason.
+    Being the clone's own stream, it also leaves ``state.rng`` untouched, which is
+    what the seats after us are predicted from.
 
     Note the board is *advanced* here, unlike the oracle's static post-launch board —
     so `state.travel_turns` re-times lanes as `state.turn` climbs under
