@@ -46,6 +46,12 @@ Scores group by `Challenge.key`, the game's own checksum of the setup, which rid
 along inside the token. So "the same map" means exactly what the game means by it,
 and nothing has to be re-hashed here.
 
+That checksum covers the whole setup, so adding a field to `Settings` changes it
+for every map: links shared either side of such a change describe one map under
+two keys. `KEY_ALIASES` in [`js/token-decode.mjs`](js/token-decode.mjs) folds an
+incoming legacy key onto the current one, and
+[`fold-game-key.sql`](fold-game-key.sql) moves scores already stored under it.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
@@ -54,7 +60,8 @@ and nothing has to be re-hashed here.
    `users`, `games`, `scores`, the `game_summary` view, and the row-level security
    policies that make everything append-only. The whole file is idempotent — paste
    it again after any change to it, and an existing board picks the change up
-   without touching a row.
+   without touching a row. [`fold-game-key.sql`](fold-game-key.sql) is the other
+   script here, run only when two keys need merging (see above).
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
    key belongs in git — it is designed to be public, and RLS is the real boundary.
    The `service_role` key must never go in this repo. Optionally set `GAME_URL` to

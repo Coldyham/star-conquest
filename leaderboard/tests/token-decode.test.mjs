@@ -62,3 +62,19 @@ test("an empty paste is rejected", async () => {
   await assert.rejects(() => decodeToken("   ", inflate), /malformed token/);
   await assert.rejects(() => decodeToken("https://example.test/#", inflate), /malformed token/);
 });
+
+test("a superseded checksum folds onto the key the same setup has now", async () => {
+  // A real link shared before the defender-advantage knob joined Settings, and
+  // one to the identical setup shared after: they must group as one map.
+  const before = "eNpNjkEOgyAQRe_y12ysVCxXaZoGZRQiQgO4MMa7d0y66O7N_Mz7c2BNlqCRTbRphcAn"
+    + "mJ1ygW4FImdMTS9QiCx0rx7qzpPx71KzqTTv0E842rIv1Y98X52PC-U_egmMzoRAceam"
+    + "A3XL8bI23BBSqaztBBw_8FsOLAULFrqgJTVI2faSpsmq4Ybz_AKt1Tg9";
+  const after = "eNpNjcEOgyAYg9-lZy64CcqrLMuC8EeIiAvgwRjfff-yy25f27Q9sW6eYFBs9tsKgXey"
+    + "B5UKcxPInDHJQaASeZhBj7pnZeOrtmIbzQfMA4H2EmuLjvstxLxQ-aOngAs2JcozP51o"
+    + "e8m8qjuBtNUG0zEF_v95E0-C6wt9Qaley_s0dqMceukUrusDOus27g";
+
+  const [old_, now] = await Promise.all([decodeToken(before, inflate), decodeToken(after, inflate)]);
+  assert.equal(old_.gameKey, now.gameKey);
+  assert.equal(old_.seed, now.seed);
+  assert.notEqual(old_.challenge.turns, now.challenge.turns);  // two attempts, one map
+});

@@ -11,8 +11,9 @@ import pytest
 
 from starconquest import config
 from starconquest.model import AiParams
-from starconquest.settings import (_GLOBAL_KNOBS, Challenge, Settings,
-                                   build_state, random_seed, resolve_seed)
+from starconquest.settings import (_GLOBAL_KNOBS, _LEGACY_KEY_DROPS, Challenge,
+                                   Settings, _hash_setup, build_state,
+                                   random_seed, resolve_seed)
 
 
 @contextlib.contextmanager
@@ -253,6 +254,72 @@ def test_challenge_without_a_key_is_taken_on_trust():
     s = _customised()
     s.challenge = Challenge(turns=10)      # hand-written: no key stamped
     assert s.challenge.matches(s)
+
+
+def test_challenge_key_is_stable():
+    """Pins the digest of the default setup.
+
+    A field joining `Settings` moves this, which is the point: restore it by
+    appending the new field to `settings._LEGACY_KEY_DROPS` (cumulatively — the
+    entry below it lacked its fields too) and updating the literal here, so links
+    already in circulation keep resolving to the setup they describe.
+    """
+    assert Settings().challenge_key() == "a61a1888857255e8"
+
+
+def test_challenge_keys_lead_with_the_canonical_one():
+    s = _customised()
+    keys = s.challenge_keys()
+    assert keys[0] == s.challenge_key()
+    assert len(set(keys)) == len(keys) == 1 + len(_LEGACY_KEY_DROPS)
+
+
+def test_a_legacy_key_is_dropped_once_its_own_field_is_moved():
+    """The dropped field is the one a legacy digest cannot see, so a setup that
+    moved it is not one that version could have stamped."""
+    field = _LEGACY_KEY_DROPS[0][0]
+    s = _customised()
+    assert len(s.challenge_keys()) == 1 + len(_LEGACY_KEY_DROPS)
+
+    setattr(s, field, getattr(Settings(), field) + 0.2)
+    assert s.challenge_keys() == (s.challenge_key(),)
+
+
+def test_a_key_stamped_before_a_field_existed_still_matches():
+    s = _customised()
+    older = s.to_dict()
+    for skip in ("challenge", "autoplay", *_LEGACY_KEY_DROPS[0]):
+        older.pop(skip, None)
+    s.challenge = Challenge(turns=10, key=_hash_setup(older))
+
+    assert s.challenge.key != s.challenge_key()   # a different digest, same setup
+    assert s.challenge.matches(s)
+    s.nodes += 1                                  # and still detects a real edit
+    assert not s.challenge.matches(s)
+
+
+def test_an_old_link_still_detects_an_edit_to_the_field_it_predates():
+    field = _LEGACY_KEY_DROPS[0][0]
+    s = _customised()
+    older = s.to_dict()
+    for skip in ("challenge", "autoplay", *_LEGACY_KEY_DROPS[0]):
+        older.pop(skip, None)
+    s.challenge = Challenge(turns=10, key=_hash_setup(older))
+    assert s.challenge.matches(s)
+
+    setattr(s, field, getattr(Settings(), field) + 0.2)
+    assert not s.challenge.matches(s)
+
+
+def test_a_pre_defender_advantage_challenge_link_still_matches():
+    """The concrete case `_LEGACY_KEY_DROPS` exists for: a real link shared before
+    the defender-advantage slider landed, against the same setup shared after."""
+    token = ("eNpNjkEOgyAQRe_y12ysVCxXaZoGZRQiQgO4MMa7d0y66O7N_Mz7c2BNlqCRTbRphcAn"
+             "mJ1ygW4FImdMTS9QiCx0rx7qzpPx71KzqTTv0E842rIv1Y98X52PC-U_egmMzoRAceam"
+             "A3XL8bI23BBSqaztBBw_8FsOLAULFrqgJTVI2faSpsmq4Ybz_AKt1Tg9")
+    s = Settings.from_token(token)
+    assert s.challenge is not None and s.challenge.matches(s)
+    assert s.challenge.key != s.challenge_key()
 
 
 def test_build_state_ignores_the_challenge():

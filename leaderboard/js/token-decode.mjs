@@ -15,6 +15,18 @@
 
 const MODES = ["random", "symmetric"];
 
+// Checksums that a since-superseded version of the game stamped, mapped to what
+// the same setup hashes to now (settings._LEGACY_KEY_DROPS is the game's own half
+// of this). Adding a field to Settings moves every digest, so a link shared before
+// that change groups apart from links to the identical map unless it is folded
+// here. Only reachable keys can be listed — the Python digest cannot be recomputed
+// in JS — so an entry is added when such a link actually turns up. Rows already
+// stored under the old key are moved by leaderboard/fold-game-key.sql.
+const KEY_ALIASES = {
+  // 3 players, 18 nodes, seed 879758 — stamped before the defender-advantage knob.
+  "3e7b44384effd7b2": "665714b9291851c6",
+};
+
 /** Everything after the '#', since people paste a whole URL, not a bare token. */
 export function fragmentOf(input) {
   const text = String(input).trim();
@@ -87,10 +99,15 @@ export async function decodeToken(input, inflate) {
  * a hash of the setup instead, prefixed to keep the two provenances distinct.
  * That hash is only ever compared against others computed here — Python and JS
  * disagree on integral floats (1.0 vs 1), so it is not a cross-language value.
+ *
+ * A stamped key listed in KEY_ALIASES resolves to its current form first.
  */
 export async function gameKeyFor(dict) {
   const key = dict.challenge && dict.challenge.key;
-  if (typeof key === "string" && key.trim()) return key.trim();
+  if (typeof key === "string" && key.trim()) {
+    const stamped = key.trim();
+    return KEY_ALIASES[stamped] || stamped;
+  }
 
   const { challenge, autoplay, ...setup } = dict;
   const canon = JSON.stringify(canonicalize(setup));

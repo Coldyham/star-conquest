@@ -416,8 +416,9 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
     challenge files under its own setup rather than the sender's. Storage is
     best-effort by design (see ``webstore``): a failure must never touch the game.
     """
-    webstore.record_best(settings.challenge_key(), state.turn,
-                         state.players[ui.human_id].ships_lost)
+    current, *legacy = settings.challenge_keys()
+    webstore.record_best(current, state.turn,
+                         state.players[ui.human_id].ships_lost, *legacy)
 
 
 async def main() -> None:

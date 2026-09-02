@@ -181,6 +181,17 @@ intact.
   settings link (`webstore.share_token`). Editing a challenge's setup asks first
   (`menu._draw_unchallenge`); `Settings.without_challenge()` is what persists a
   "change it anyway".
+  - **Adding a field to `Settings` invalidates every key already shared.**
+    `challenge_key()` hashes the full setup dict, so a new field moves the digest
+    of every map that ever existed and links from before it read as edited.
+    `settings._LEGACY_KEY_DROPS` lists per schema change what that version
+    lacked; `challenge_keys()` re-hashes without each and `Challenge.matches`
+    (and `webstore.best`) accept any of them. Append an entry whenever a field
+    joins `Settings` — `test_challenge_key_is_stable` pins the default digest and
+    fails until you do. Only `challenge_keys()[0]` is ever *written*. The
+    leaderboard folds by lookup instead (`KEY_ALIASES` in
+    `leaderboard/js/token-decode.mjs`, `leaderboard/fold-game-key.sql`), since JS
+    cannot recompute the Python digest.
 - **`webstore` is the third browser bridge** (with `softkeyboard` and the
   web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
   a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and

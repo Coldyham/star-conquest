@@ -92,6 +92,24 @@ def test_bests_are_kept_per_challenge():
     assert webstore.best("two") == (20, 2)
 
 
+def test_a_best_filed_under_a_legacy_key_is_still_yours():
+    webstore.record_best("old", 137, 412)
+    assert webstore.best("new", "old") == (137, 412)
+
+
+def test_a_worse_result_cannot_replace_a_legacy_best():
+    webstore.record_best("old", 137, 412)
+    assert webstore.record_best("new", 150, 10, "old") is False
+    assert webstore.best("new", "old") == (137, 412)
+
+
+def test_beating_a_legacy_best_files_under_the_canonical_key():
+    webstore.record_best("old", 137, 412)
+    assert webstore.record_best("new", 120, 5, "old")
+    assert webstore.best("new") == (120, 5)
+    assert webstore.best("old") == (137, 412)   # append-only: the old entry stands
+
+
 def test_corrupt_bests_blob_does_not_lose_a_new_result(isolated_store):
     isolated_store.write_text(json.dumps({WEB_BESTS_KEY: "not an object"}))
     assert webstore.best("key") is None

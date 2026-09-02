@@ -382,7 +382,7 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
     bits = [f"seed {settings.seed}", f"{settings.nodes} nodes", settings.mode]
     if bots:
         bits.append("vs " + ", ".join(bots))
-    mine = webstore.best(settings.challenge_key())
+    mine = webstore.best(*settings.challenge_keys())
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
     _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))

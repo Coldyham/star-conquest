@@ -59,6 +59,37 @@ Editing a challenge's setup asks first rather than locking the widgets,
 because locking is a dead end the moment someone wants the same map with one
 knob moved.
 
+### Keys outlive the schema that made them
+
+The checksum is over the *full* setup dict, so adding a field to `Settings`
+moves the digest of every setup that ever existed. A link shared before the
+change then reads as "settings changed" against the identical map, and on the
+leaderboard its scores group into a bucket of their own. The first real
+instance: the defender-advantage slider, which split seed 879758 (3 players, 18
+nodes) into `3e7b44384effd7b2` and `665714b9291851c6`.
+
+Hashing only the *non-default* fields would immunise against this permanently,
+and is rejected: a `config.DEFAULT_*` whose value later changed would then make
+an old key silently alias onto a genuinely different balance — a wrong answer,
+where the split is merely an inconvenient one. Instead `_LEGACY_KEY_DROPS`
+lists, per schema change, the fields that version lacked;
+`Settings.challenge_keys()` re-hashes without each and `Challenge.matches`
+accepts any of the results. That is sound because a field missing from an old
+dict was missing from the old game, and `from_dict` fills it with the default
+that was then the only behaviour — 1.0 for defender advantage is exactly "no
+bonus", which is how those matches were played. The converse is the guard on
+it: a legacy digest is blind to the fields it drops, so an entry is offered only
+while all of them are still at their defaults. Move the slider on an old link
+and only the current key remains, and the banner warns as it should.
+
+The list is maintained by hand, so `test_challenge_key_is_stable` pins the
+default setup's digest and fails the moment a field joins `Settings` — the
+prompt to append an entry rather than discover the split from a user. Only the
+game can do this re-hashing; `js/token-decode.mjs` cannot recompute a Python
+blake2s (the two languages disagree on integral floats), so the leaderboard
+folds by lookup instead: `KEY_ALIASES` for incoming links, and
+`leaderboard/fold-game-key.sql` for rows already stored.
+
 ## Ship-speed growth
 
 `config.SHIP_SPEED_GROWTH_PCT` (Advanced → Travel, 0 by default) models tech
