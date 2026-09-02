@@ -137,6 +137,34 @@ def test_win_overlay_offers_sharing_only_for_an_earned_human_win():
         pygame.quit()
 
 
+def test_win_overlay_pairs_the_leaderboard_button_with_sharing(monkeypatch):
+    """The leaderboard button rides the same gate as sharing, sits beside it
+    without overlapping, and disappears entirely when no leaderboard is
+    configured — so a fork with the URL cleared simply doesn't offer it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.winner = 1
+        ui.hand_turns = 100
+
+        render.draw(screen, state, ui)
+        share, board = ui.share_button_rect, ui.leaderboard_button_rect
+        assert board[2] > 0
+        assert share[1] == board[1]                      # one row
+        assert share[0] + share[2] <= board[0]           # no overlap
+        assert share[2] == board[2]                      # common width
+
+        monkeypatch.setattr(render.paths, "LEADERBOARD_SUBMIT_URL", "")
+        render.draw(screen, state, ui)
+        assert ui.leaderboard_button_rect[2] == 0
+        assert ui.share_button_rect[2] > 0               # sharing still offered
+    finally:
+        pygame.quit()
+
+
 def test_win_overlay_draws_every_challenge_verdict():
     """Beaten / missed / failed all render, including the losing branch that shows
     a verdict but no score."""

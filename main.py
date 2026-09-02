@@ -269,6 +269,32 @@ def share_challenge(settings: Settings, state: GameState, ui: Ui,
     return f"Saved to {path.name} — append it to the game URL as #<token>"
 
 
+def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
+                        seed: int, log: GameLog) -> str:
+    """Open the public leaderboard's entry form on this result. Returns a line for
+    the overlay.
+
+    The same token the clipboard link carries, handed over in the fragment: the
+    form reads it there and prefills itself, so posting is one click rather than a
+    copy, a tab, and a paste. The fragment (not a query string) both keeps the
+    token out of request logs and lets the site accept a whole pasted link with
+    the identical code path.
+
+    If the tab is refused — a popup blocker, or no browser to hand — fall back to
+    the clipboard so the link is still recoverable, mirroring ``share_challenge``.
+    """
+    if not paths.LEADERBOARD_SUBMIT_URL:
+        return "No leaderboard is configured"
+    token = challenge_settings(settings, state, ui, seed, log).to_token()
+    url = f"{paths.LEADERBOARD_SUBMIT_URL}#{token}"
+    if webstore.open_url(url):
+        return "Leaderboard opened — add your name to post"
+    if webstore.copy_to_clipboard(url):
+        return "Leaderboard link copied — open it to post"
+    print(f"Leaderboard entry link:\n{url}")
+    return "Couldn't open a browser — link printed to the console"
+
+
 def build_history(ui: Ui, log: GameLog) -> tuple[
         list[GameState], list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]]]:
     """Reconstruct one board (and the human's fog memory) per recorded turn.
@@ -596,6 +622,11 @@ async def main() -> None:
                 # result worth sending — render gates the button the same way.
                 if state.winner == ui.human_id and ui.hand_turns > 0:
                     ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
+            elif action == "leaderboard":
+                # Same gate as "share": the two buttons offer one result by two
+                # channels, so neither may fire on a result that isn't yours.
+                if state.winner == ui.human_id and ui.hand_turns > 0:
+                    ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step

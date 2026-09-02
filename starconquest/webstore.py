@@ -152,6 +152,35 @@ def copy_to_clipboard(text: str) -> bool:
         return False
 
 
+def open_url(url: str) -> bool:
+    """Open ``url`` in a browser tab, best-effort.
+
+    On the web that is ``window.open`` in a new tab, so the finished game stays
+    where it is; elsewhere it is the platform's default browser, because a desktop
+    player has just as much reason to post a score. True means the call was
+    accepted, not that a tab definitely appeared — a popup blocker can still
+    refuse it, the same contract as ``copy_to_clipboard``.
+    """
+    if not url:
+        return False
+    if is_web():
+        import platform as _platform
+
+        try:
+            # A blocked popup is reported as a null window rather than an error,
+            # and pygame's click reaches us too late to always count as a user
+            # gesture — so test the result instead of assuming it worked.
+            return _platform.window.open(url, "_blank") is not None
+        except Exception:
+            return False
+    try:
+        import webbrowser
+
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
 def sync_settings(token: str) -> bool:
     """Keep the address bar and the remembered token in step with a setup.
 

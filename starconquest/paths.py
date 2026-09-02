@@ -28,6 +28,15 @@ WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 # so replaying a shared link can show what you already managed.
 WEB_BESTS_KEY = "sc_bests"
 
+# The public leaderboard's score-entry page. The win overlay opens it with
+# ``#<token>`` appended, which is all the form needs to prefill itself — the same
+# challenge token the clipboard link carries, read by the site's own decoder.
+# Blank disables the feature: the overlay simply doesn't offer the button.
+#
+# Written without the ``.html``, the way the host serves it: that form answers
+# too, but this is the canonical URL and avoids a redirect hop.
+LEADERBOARD_SUBMIT_URL = "https://star-conquest-leaderboard.netlify.app/submit"
+
 
 def _android_data_dir() -> Path | None:
     """The app-private writable dir on Android, or None when not on Android."""

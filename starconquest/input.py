@@ -131,11 +131,15 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
                 return "toggle_history"
             if event.key == pygame.K_c:
                 return "share"
+            if event.key == pygame.K_l:
+                return "leaderboard"
             if event.key == pygame.K_ESCAPE:
                 return "quit"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if ui.share_button_rect[2] and _point_in_rect(event.pos, ui.share_button_rect):
                 return "share"
+            if ui.leaderboard_button_rect[2] and _point_in_rect(event.pos, ui.leaderboard_button_rect):
+                return "leaderboard"
             if ui.retry_button_rect[2] and _point_in_rect(event.pos, ui.retry_button_rect):
                 return "retry"
             if ui.restart_button_rect[2] and _point_in_rect(event.pos, ui.restart_button_rect):

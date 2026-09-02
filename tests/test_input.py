@@ -839,6 +839,32 @@ def test_share_is_only_a_game_over_action():
         pygame.quit()
 
 
+def test_game_over_leaderboard_key_and_button_return_leaderboard():
+    """L / the overlay's leaderboard button are the other channel for the same
+    result — a distinct action, so main can open a tab rather than copy a link."""
+    state, ui = _setup()
+    try:
+        state.winner = 1
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_l, mod=0, unicode="l")
+        assert game_input.handle_event(key, state, ui) == "leaderboard"
+        ui.leaderboard_button_rect = (300, 100, 120, 24)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(310, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "leaderboard"
+    finally:
+        pygame.quit()
+
+
+def test_leaderboard_is_only_a_game_over_action():
+    """L during live play must not be swallowed either."""
+    state, ui = _setup()
+    try:
+        assert state.winner is None
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_l, mod=0, unicode="l")
+        assert game_input.handle_event(key, state, ui) != "leaderboard"
+    finally:
+        pygame.quit()
+
+
 def test_hand_turns_counts_only_manually_played_turns():
     """A game played by hand and then autoplayed to its end reports the hand
     count, and the Ui's running tally agrees with the log's per-turn flags."""
