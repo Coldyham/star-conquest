@@ -60,6 +60,11 @@ _BTN_GREEN = ((46, 92, 60), (96, 190, 120))  # end turn / confirm
 _BTN_TEAL = ((44, 62, 74), (120, 180, 200))  # share a challenge
 _BTN_GOLD = ((92, 76, 36), (210, 180, 80))  # post to the public leaderboard
 
+# Challenge verdict, on the win overlay: target beaten, dead-heated, missed.
+_VERDICT_BEAT = (130, 200, 150)
+_VERDICT_TIE = (190, 205, 225)
+_VERDICT_MISS = (214, 172, 92)
+
 
 def _row_h(kind: str = "small") -> int:
     """Pitch for one line of stacked text in ``kind``'s font: the font's own line
@@ -2027,12 +2032,19 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
 
     if ui.challenge_target is None:
         return lines
-    # Same ordering the score uses: fewer turns wins, ties broken on losses.
+    # Same ordering the score uses: fewer turns wins, ties broken on losses, and
+    # equal on both is a dead heat.
     target = ui.challenge_target
-    beaten = (state.turn, lost) < target
+    mine = (state.turn, lost)
     who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
-    verdict = f"Beat{who} {target[0]} turns / {target[1]} lost" if beaten else f"Short of{who} {target[0]} turns / {target[1]} lost"
-    lines.append(("small", verdict, (130, 200, 150) if beaten else (214, 172, 92)))
+    against = f"{target[0]} turns / {target[1]} lost"
+    if mine < target:
+        verdict, colour = f"Beat{who} {against}", _VERDICT_BEAT
+    elif mine == target:
+        verdict, colour = f"Matched{who} {against}", _VERDICT_TIE
+    else:
+        verdict, colour = f"Short of{who} {against}", _VERDICT_MISS
+    lines.append(("small", verdict, colour))
     return lines
 
 

@@ -24,7 +24,9 @@ and nothing has to be re-hashed here.
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
    `users`, `games`, `scores`, the `game_summary` view, and the row-level security
-   policies that make everything append-only.
+   policies that make everything append-only. The whole file is idempotent — paste
+   it again after any change to it, and an existing board picks the change up
+   without touching a row.
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
    key belongs in git — it is designed to be public, and RLS is the real boundary.
    The `service_role` key must never go in this repo. Optionally set `GAME_URL` to

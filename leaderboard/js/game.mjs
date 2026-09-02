@@ -1,7 +1,8 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import {
-  clear, credit, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError,
+  clear, competitionRanks, credit, el, mapSummary, ordinal, relativeTime, scoreSummary,
+  shortTime, showError,
 } from "./format.mjs";
 
 const heading = document.getElementById("setup");
@@ -62,9 +63,11 @@ async function load() {
       ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
       : "No scores posted yet.";
 
+    const ranks = competitionRanks(scores);
+
     const link = playLink(scores.length ? scores[0].raw_token : null);
     clear(target).append(
-      el("ol", { class: "scores" }, scores.map((s, i) => scoreRow(s, i + 1))),
+      el("ol", { class: "scores" }, scores.map((s, i) => scoreRow(s, ranks[i]))),
       ...(link ? [link] : []),
     );
   } catch (err) {

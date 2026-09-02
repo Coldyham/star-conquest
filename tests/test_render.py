@@ -194,6 +194,29 @@ def test_win_overlay_draws_every_challenge_verdict():
         pygame.quit()
 
 
+def test_result_lines_verdict_is_three_way():
+    """A dead heat on turns *and* ships lost reads as a match, not a near miss."""
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = _make_ui(state)
+    state.winner = 1
+    state.turn = 31
+    state.players[1].ships_lost = 16
+    ui.hand_turns = 31
+    ui.challenge_by = "Ada"
+
+    def verdict(target):
+        ui.challenge_target = target
+        _kind, text, colour = render._result_lines(state, ui)[-1]
+        return text, colour
+
+    assert verdict((41, 14)) == ("Beat Ada's 41 turns / 14 lost", render._VERDICT_BEAT)
+    assert verdict((31, 16)) == ("Matched Ada's 31 turns / 16 lost", render._VERDICT_TIE)
+    assert verdict((31, 15)) == ("Short of Ada's 31 turns / 15 lost", render._VERDICT_MISS)
+
+    ui.challenge_by = ""      # an anonymous challenge names no one
+    assert verdict((31, 16))[0] == "Matched 31 turns / 16 lost"
+
+
 def test_scoreboard_full_table_and_eliminated():
     """Six seats (drops names) plus an eliminated player exercise both label paths."""
     pygame.init()

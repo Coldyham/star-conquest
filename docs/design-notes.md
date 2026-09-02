@@ -40,6 +40,15 @@ the score, so only a zero-hand-turn match is unshareable. `Challenge.key` is
 redundant by construction (a checksum of the full setup) purely so the menu
 banner can detect a since-edited config and warn, rather than locking widgets.
 
+Two scores matching on *both* figures are a dead heat, and every place a score
+is read out says so rather than falling back on arrival order: the win overlay's
+verdict is three-way (`render._result_lines` — beat / matched / short of), the
+leaderboard's table gives tied scores one place and skips the next
+(`format.competitionRanks`), and a shared record on its homepage credits every
+holder (`game_summary.best_holders`). A personal best is the exception —
+`webstore.record_best` rejects a tie, since equalling your own last result is no
+improvement to file.
+
 A challenge token travels by clipboard only, never the address bar or
 `localStorage` — unlike a settings link, which syncs both. Two things would
 break otherwise: an installed PWA has no address bar to read a link from, and

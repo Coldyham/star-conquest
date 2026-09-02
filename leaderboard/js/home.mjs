@@ -4,7 +4,12 @@ import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 const target = document.getElementById("games");
 
 function row(game) {
-  const holder = (game.best_user_name || "").trim() || "anonymous";
+  const name = (game.best_user_name || "").trim() || "anonymous";
+  // A dead heat on turns *and* lost is a shared record, so credit all of it.
+  // best_holders is absent unless the game_summary view is current; treat a
+  // missing count as the one leading name.
+  const others = Math.max(0, Number(game.best_holders || 1) - 1);
+  const holder = others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
   const detail = [
     `${game.best_lost} lost`,
     game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,

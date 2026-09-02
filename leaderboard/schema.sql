@@ -81,7 +81,10 @@ select
   best.lost      as best_lost,
   best.hand      as best_hand,
   best.by_name   as best_by_name,
-  best.user_name as best_user_name
+  best.user_name as best_user_name,
+  -- New columns go last: `create or replace view` can add a column but never
+  -- rename or reorder the ones already there.
+  tied.holders   as best_holders
 from public.games g
 left join lateral (
   select s.turns, s.lost, s.hand, s.by_name, u.name as user_name
@@ -90,7 +93,14 @@ left join lateral (
   where s.game_key = g.game_key
   order by s.turns asc, s.lost asc, s.submitted_at asc
   limit 1
-) best on true;
+) best on true
+left join lateral (
+  -- How many submissions share that best result: a dead heat on turns *and*
+  -- lost is a shared record, so 2+ here means the homepage credits them all.
+  select count(*) as holders
+  from public.scores s
+  where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
+) tied on true;
 
 -- ---------------------------------------------------------------------------
 -- Policies

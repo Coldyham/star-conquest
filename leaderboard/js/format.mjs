@@ -49,6 +49,24 @@ export function scoreSummary(score) {
   return out;
 }
 
+/**
+ * Standard competition ranking over a list already ordered best-first: equal
+ * results share a rank and the next distinct one skips it (1, 1, 3).
+ *
+ * Two scores are equal when both turns and lost match: `hand` is disclosure, not
+ * part of the score (Challenge in settings.py). Returns one rank per score,
+ * parallel to the input.
+ */
+export function competitionRanks(scores) {
+  let rank = 0;
+  let prev = null;
+  return scores.map((score, i) => {
+    if (!prev || prev.turns !== score.turns || prev.lost !== score.lost) rank = i + 1;
+    prev = score;
+    return rank;
+  });
+}
+
 /** 1 -> "1ST", 2 -> "2ND", 11 -> "11TH" — the rank column on a cabinet. */
 export function ordinal(n) {
   const teens = n % 100;
