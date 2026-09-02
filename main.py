@@ -156,12 +156,14 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     ``log`` is then reused as the live log, so continued play appends to the very
     same file the game was resumed from. Fog-of-war memory (`seen`/`player_intel`)
     is rebuilt across every replayed turn so resuming doesn't forget places you
-    explored then lost sight of.
+    explored then lost sight of, and the standing auto-forward rules come back with
+    it — rewinding to a turn is meant to hand the board back as it was, and rebuilt
+    routes are half the position on a big map.
     """
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}
     replay_view = replay.reconstruct(
-        log, ai.decide, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
+        log, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
     ui = new_ui(state, loaded.autoplay, loaded)   # sets ui.visible from the final board
@@ -170,6 +172,12 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     ui.player_intel = intel
     ui.reset_view(state)      # re-frame now seen includes the whole replayed history
     ui.hand_turns = hand_turns(log)        # the log is the record of who drove
+    if log.turn_count:
+        # The rules the last replayed turn was played with, put through the same
+        # prune that turn's resolution gave them — a rule whose system was lost on
+        # it must not come back to life here.
+        ui.auto_forward = log.rules_for(log.turn_count - 1)
+        ui.prune_forward(state)
     return state, ui
 
 
@@ -269,6 +277,32 @@ def share_challenge(settings: Settings, state: GameState, ui: Ui,
     return f"Saved to {path.name} — append it to the game URL as #<token>"
 
 
+def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
+                        seed: int, log: GameLog) -> str:
+    """Open the public leaderboard's entry form on this result. Returns a line for
+    the overlay.
+
+    The same token the clipboard link carries, handed over in the fragment: the
+    form reads it there and prefills itself, so posting is one click rather than a
+    copy, a tab, and a paste. The fragment (not a query string) both keeps the
+    token out of request logs and lets the site accept a whole pasted link with
+    the identical code path.
+
+    If the tab is refused — a popup blocker, or no browser to hand — fall back to
+    the clipboard so the link is still recoverable, mirroring ``share_challenge``.
+    """
+    if not paths.LEADERBOARD_SUBMIT_URL:
+        return "No leaderboard is configured"
+    token = challenge_settings(settings, state, ui, seed, log).to_token()
+    url = f"{paths.LEADERBOARD_SUBMIT_URL}#{token}"
+    if webstore.open_url(url):
+        return "Leaderboard opened — add your name to post"
+    if webstore.copy_to_clipboard(url):
+        return "Leaderboard link copied — open it to post"
+    print(f"Leaderboard entry link:\n{url}")
+    return "Couldn't open a browser — link printed to the console"
+
+
 def build_history(ui: Ui, log: GameLog) -> tuple[
         list[GameState], list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]]]:
     """Reconstruct one board (and the human's fog memory) per recorded turn.
@@ -291,7 +325,7 @@ def build_history(ui: Ui, log: GameLog) -> tuple[
         visible = _accumulate_fog(s, ui.human_id, seen, intel)
         fog.append((set(visible), set(seen), dict(intel)))
 
-    replay.reconstruct(log, ai.decide, on_turn=capture)
+    replay.reconstruct(log, on_turn=capture)
     return states, fog
 
 
@@ -344,11 +378,14 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
-        log.record_turn(human_orders, human_ai=ui.autoplay)
+        # Every seat's orders and every combat draw, plus the standing rules that
+        # were in force — recorded before `prune_forward` below drops any that this
+        # turn killed, so the log holds the rules the turn was actually played with.
+        log.record_turn(record, human_ai=ui.autoplay, rules=ui.auto_forward)
         if state.winner is not None:
             log.mark_finished(state.winner)
         try:
@@ -379,8 +416,9 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
     challenge files under its own setup rather than the sender's. Storage is
     best-effort by design (see ``webstore``): a failure must never touch the game.
     """
-    webstore.record_best(settings.challenge_key(), state.turn,
-                         state.players[ui.human_id].ships_lost)
+    current, *legacy = settings.challenge_keys()
+    webstore.record_best(current, state.turn,
+                         state.players[ui.human_id].ships_lost, *legacy)
 
 
 async def main() -> None:
@@ -596,6 +634,11 @@ async def main() -> None:
                 # result worth sending — render gates the button the same way.
                 if state.winner == ui.human_id and ui.hand_turns > 0:
                     ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
+            elif action == "leaderboard":
+                # Same gate as "share": the two buttons offer one result by two
+                # channels, so neither may fire on a result that isn't yours.
+                if state.winner == ui.human_id and ui.hand_turns > 0:
+                    ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step

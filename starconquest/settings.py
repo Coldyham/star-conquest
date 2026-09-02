@@ -64,6 +64,23 @@ _GLOBAL_KNOBS = (
 _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 
 
+# Setup fields absent from older versions of `Settings`: one entry per schema
+# change, newest first and cumulative (the oldest lacked the most).
+# `challenge_keys` re-hashes without each, recovering the checksum that version
+# would have stamped. Append here whenever a field joins `Settings` —
+# `test_challenge_key_is_stable` fails until you do.
+_LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
+    ("defender_advantage",),
+)
+
+
+def _hash_setup(data: dict) -> str:
+    """The digest behind ``Settings.challenge_key`` — a setup dict, minus its
+    score, canonicalised and hashed."""
+    raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.blake2s(raw, digest_size=8).hexdigest()
+
+
 @dataclass
 class Challenge:
     """A result to beat, riding along with the config that produced it.
@@ -95,9 +112,11 @@ class Challenge:
         """True if ``settings`` is still the setup this score was made on.
 
         A blank ``key`` is taken on trust — a hand-written or pre-``key`` challenge
-        should read as valid rather than permanently "edited".
+        should read as valid rather than permanently "edited". Any of
+        ``challenge_keys()`` counts, so a link stamped before a knob was added
+        still reads as the setup it describes rather than as an edit.
         """
-        return not self.key or self.key == settings.challenge_key()
+        return not self.key or self.key in settings.challenge_keys()
 
 
 @dataclass
@@ -314,12 +333,37 @@ class Settings:
         ``autoplay`` are excluded: a config and the same config carrying a target
         are the same match, and whether you let the AI drive is disclosed by
         ``Challenge.hand`` instead.
+
+        This is the one to *write* — the canonical id for a setup as this version
+        describes it. To *test* a key that arrived from elsewhere, use
+        ``challenge_keys``.
+        """
+        return self.challenge_keys()[0]
+
+    def challenge_keys(self) -> tuple[str, ...]:
+        """``challenge_key()``, then the same setup as older versions hashed it.
+
+        Adding a field to ``Settings`` changes the digest of every setup, so a
+        score stamped before that field existed reads as scored on some other map
+        unless the older digests are recovered too — one per ``_LEGACY_KEY_DROPS``
+        entry whose fields are all still at their defaults. Deduplicated and
+        current-first, so ``[0]`` is the canonical key.
         """
         data = self.to_dict()
         for skip in ("challenge", "autoplay"):
             data.pop(skip, None)
-        raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        return hashlib.blake2s(raw, digest_size=8).hexdigest()
+        keys = [_hash_setup(data)]
+        blank = Settings().to_dict()
+        for drops in _LEGACY_KEY_DROPS:
+            # A version without a field could not express a non-default value for
+            # it, so once one is moved that version cannot be describing this setup
+            # — and dropping it would blind the checksum to the edit.
+            if any(data.get(f) != blank.get(f) for f in drops):
+                continue
+            key = _hash_setup({k: v for k, v in data.items() if k not in drops})
+            if key not in keys:
+                keys.append(key)
+        return tuple(keys)
 
     def copy_from(self, other: "Settings") -> None:
         """Overwrite every field from ``other`` in place (copying its lists).

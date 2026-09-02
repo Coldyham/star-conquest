@@ -1,7 +1,11 @@
 import { configured, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
 import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
-import { decodeToken } from "./token-decode.mjs";
+// Posting again from the same browser shouldn't mean retyping your name — the
+// whole point of arriving here from the game's win screen is one click. The same
+// remembered name is what puts "My scores" in the marquee.
+import { mountMyScores, myName, rememberName } from "./me.mjs";
+import { decodeToken, fragmentOf } from "./token-decode.mjs";
 
 const form = document.getElementById("form");
 const linkField = document.getElementById("link");
@@ -59,7 +63,7 @@ async function decodePasted() {
   return decodeToken(linkField.value, inflate);
 }
 
-linkField.addEventListener("input", async () => {
+async function refreshPreview() {
   preview.hidden = true;
   if (!linkField.value.trim()) return;
   try {
@@ -70,7 +74,35 @@ linkField.addEventListener("input", async () => {
   } catch {
     // Stay quiet while they are still pasting; submitting is what reports.
   }
-});
+}
+
+linkField.addEventListener("input", refreshPreview);
+
+/**
+ * Arrive from the game already loaded: submit.html#<token> fills the link in.
+ *
+ * The token rides in the fragment, not a query string, for the same two reasons
+ * the game uses one — it never reaches a server or a Referer header, and it means
+ * the game can hand us its existing link shape verbatim. fragmentOf already takes
+ * everything after the '#', so a whole pasted URL works here too.
+ */
+function prefill() {
+  const name = myName();
+  if (name) nameField.value = name;
+
+  const token = fragmentOf(location.hash);
+  if (!token) {
+    linkField.focus();
+    return;
+  }
+  linkField.value = token;
+  refreshPreview();
+  // The link is the part that was tedious; put the cursor on what's left.
+  (name ? document.getElementById("go") : nameField).focus();
+}
+
+mountMyScores();
+prefill();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -110,6 +142,7 @@ form.addEventListener("submit", async (event) => {
       by_name: decoded.challenge.by,
       raw_token: decoded.token,
     });
+    rememberName(nameField.value);
     location.href = `game.html?key=${encodeURIComponent(decoded.gameKey)}`;
   } catch (err) {
     button.disabled = false;

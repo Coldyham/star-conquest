@@ -40,6 +40,15 @@ the score, so only a zero-hand-turn match is unshareable. `Challenge.key` is
 redundant by construction (a checksum of the full setup) purely so the menu
 banner can detect a since-edited config and warn, rather than locking widgets.
 
+Two scores matching on *both* figures are a dead heat, and every place a score
+is read out says so rather than falling back on arrival order: the win overlay's
+verdict is three-way (`render._result_lines` — beat / matched / short of), the
+leaderboard's table gives tied scores one place and skips the next
+(`format.competitionRanks`), and a shared record on its homepage credits every
+holder (`game_summary.best_holders`). A personal best is the exception —
+`webstore.record_best` rejects a tie, since equalling your own last result is no
+improvement to file.
+
 A challenge token travels by clipboard only, never the address bar or
 `localStorage` — unlike a settings link, which syncs both. Two things would
 break otherwise: an installed PWA has no address bar to read a link from, and
@@ -49,6 +58,37 @@ banner haunt sessions long after the link was opened.
 Editing a challenge's setup asks first rather than locking the widgets,
 because locking is a dead end the moment someone wants the same map with one
 knob moved.
+
+### Keys outlive the schema that made them
+
+The checksum is over the *full* setup dict, so adding a field to `Settings`
+moves the digest of every setup that ever existed. A link shared before the
+change then reads as "settings changed" against the identical map, and on the
+leaderboard its scores group into a bucket of their own. The first real
+instance: the defender-advantage slider, which split seed 879758 (3 players, 18
+nodes) into `3e7b44384effd7b2` and `665714b9291851c6`.
+
+Hashing only the *non-default* fields would immunise against this permanently,
+and is rejected: a `config.DEFAULT_*` whose value later changed would then make
+an old key silently alias onto a genuinely different balance — a wrong answer,
+where the split is merely an inconvenient one. Instead `_LEGACY_KEY_DROPS`
+lists, per schema change, the fields that version lacked;
+`Settings.challenge_keys()` re-hashes without each and `Challenge.matches`
+accepts any of the results. That is sound because a field missing from an old
+dict was missing from the old game, and `from_dict` fills it with the default
+that was then the only behaviour — 1.0 for defender advantage is exactly "no
+bonus", which is how those matches were played. The converse is the guard on
+it: a legacy digest is blind to the fields it drops, so an entry is offered only
+while all of them are still at their defaults. Move the slider on an old link
+and only the current key remains, and the banner warns as it should.
+
+The list is maintained by hand, so `test_challenge_key_is_stable` pins the
+default setup's digest and fails the moment a field joins `Settings` — the
+prompt to append an entry rather than discover the split from a user. Only the
+game can do this re-hashing; `js/token-decode.mjs` cannot recompute a Python
+blake2s (the two languages disagree on integral floats), so the leaderboard
+folds by lookup instead: `KEY_ALIASES` for incoming links, and
+`leaderboard/fold-game-key.sql` for rows already stored.
 
 ## Ship-speed growth
 
@@ -97,6 +137,51 @@ that circle. `_clamp` compares against the fit-padded span rather than the
 bare viewport because the bare-viewport comparison used to let a "centred"
 offset push a boundary system back out through the margin at certain zooms
 (regression test: `test_boundary_never_crosses_the_margin_at_any_zoom`).
+
+## Persistence, replay & history (`replay.py`)
+
+Format version 1 recorded the *human's* orders alone and rebuilt everything
+else by re-running the AI against the same seeded `rng`. It was small, and it
+was only ever as reliable as the least reproducible bot in the game.
+`models/knower.py` truncates its tree search on a wall-clock budget
+(`SEARCH_BUDGET_S`), so on a busy frame it plans one thing and on the replay's
+tight headless loop another — and from that turn on the "reconstruction" is a
+different match. It shows up as history not matching the game you played and a
+resumed game handing you the wrong board. One of the saved games in the wild
+records winner 5 and rebuilt to winner 4.
+
+Nothing about a drop-in bot's determinism is enforceable, so version 2 stopped
+depending on it: `engine.end_turn` returns a `TurnRecord` of every seat's
+orders (in the sequence they were applied — `apply_order` clamps a
+double-spent garrison as it goes, so the sequence matters) and the log feeds it
+straight back as `script`. No seat is asked to decide anything on a replay.
+
+The dice are in the record for the same reason, and it is worth being explicit
+about why they have to be: skipping the AI means nobody draws the tie-break
+jitter the bots drew live, so `state.rng` is at a different position by the time
+combat asks it for a swing. Same orders, different battles, divergence anyway.
+`engine._Dice` therefore keeps every draw a live turn deals, and deals them back
+on a replay. Two alternatives were rejected: re-running `decide` purely to
+advance the rng (fragile — it re-does knower's whole search on every history
+build, seconds of it, and only works while every bot happens to be
+deterministic), and snapshotting the Mersenne Twister state per turn (~5 KB a
+turn, and the whole file is rewritten after *every* turn, so a long game would
+spend tens of MB of writes on it).
+
+Deriving combat's dice from `(seed, turn)` instead would have been free, but a
+clone made by `knower._clone` shares both, so a rollout would meet the same
+jitter the real turn is about to — handing the search the actual dice. The
+recorded-draws route keeps rollouts rolling their own.
+
+Version-1 logs can no longer be replayed faithfully, so `latest_log` skips them
+rather than offering a resume that quietly rebuilds a different game.
+
+`"rules"` (the human's `Ui.auto_forward`) is in the log because rewinding is
+meant to hand back the position as it was, and on a big map the standing routes
+*are* half the position. It is recorded before `main.resolve_turn`'s
+`prune_forward`, i.e. the rules the turn was actually played with, and
+`resume_game` re-prunes them against the rebuilt board so a rule whose system
+was lost on that turn doesn't come back to life.
 
 ## `models/knower.py` and simultaneous resolution
 

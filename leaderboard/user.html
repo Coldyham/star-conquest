@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Map scores · Star Conquest Leaderboard</title>
+<title>Player · Star Conquest Leaderboard</title>
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
@@ -18,16 +18,29 @@
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1 id="setup">Loading…</h1>
-  <p class="lede" id="subtitle"></p>
+  <h1 id="who">Loading…</h1>
+  <p class="lede" id="lede">
+    Every map this player has posted a score on, and where each one places.
+  </p>
+
+  <div id="tally"></div>
+
+  <form id="compare" class="compare" autocomplete="off">
+    <input id="rival" type="text" maxlength="60" aria-label="Add a player to compare"
+           placeholder="Add a rival…">
+    <button class="mini" type="submit">Compare</button>
+    <span id="extras"></span>
+  </form>
+
   <div id="scores" class="loading">Loading…</div>
 </main>
 
 <footer class="attract">
-  <span class="coin">▚</span> Think you can beat that? &nbsp;·&nbsp;
+  <span class="coin">▚</span> Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
   <a href="submit.html">Enter a score</a>
 </footer>
 
-<script type="module" src="js/game.mjs"></script>
+<script type="module" src="js/user.mjs"></script>
 </body>
 </html>

@@ -4,17 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Post a score · Star Conquest Leaderboard</title>
+<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>Leaderboard</span></a>
-  <a class="btn" href="index.html">All maps</a>
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <nav class="actions">
+    <a class="btn" href="index.html">All maps</a>
+  </nav>
 </header>
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1>Post a score</h1>
+  <h1>Enter your score</h1>
   <p class="lede">
     Win a game, press <strong>Challenge a friend</strong>, and the link on your
     clipboard carries the map and your result. Paste it here to put it on the board.
@@ -26,14 +30,19 @@
               placeholder="https://…/#eNoljE0OgjAQhe_y1rOw0Crpz…"></textarea>
 
     <label for="name">Your name</label>
-    <input id="name" name="name" type="text" maxlength="60" required placeholder="Andrew">
+    <input id="name" name="name" type="text" maxlength="60" required placeholder="Name">
 
     <p class="hint" id="preview" hidden></p>
 
-    <button id="go" type="submit">Post it</button>
+    <button id="go" type="submit">Enter</button>
     <p class="status" id="status" role="status" aria-live="polite"></p>
   </form>
 </main>
+
+<footer class="attract">
+  <span class="coin">▚</span> No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>
+</footer>
 
 <script type="module" src="js/submit.mjs"></script>
 </body>

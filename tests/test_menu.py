@@ -600,7 +600,7 @@ def _challenged_setup():
     """A menu sitting on a challenge link, with the score still comparable."""
     screen, ms, settings = _setup()
     settings.seed, settings.nodes, settings.players = 4821, 18, 3
-    settings.challenge = Challenge(turns=137, lost=412, hand=119, by="Andrew",
+    settings.challenge = Challenge(turns=137, lost=412, hand=119, by="Name",
                                    key=settings.challenge_key())
     return screen, ms, settings
 

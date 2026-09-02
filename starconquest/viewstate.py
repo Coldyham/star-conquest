@@ -231,7 +231,11 @@ class Ui:
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    share_msg: str = ""  # outcome of the last share, drawn under the button
+    # Sits beside the share button: the same token, but opening the public
+    # leaderboard's entry form instead of going to the clipboard. Zero-width when
+    # no `paths.LEADERBOARD_SUBMIT_URL` is configured.
+    leaderboard_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    share_msg: str = ""  # outcome of the last share, drawn under the buttons
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
     # actions (A: autoplay, N: new map, F: fast forward). menu_button_rect above is
     # shared with the game-over overlay — the two scenes never draw at the same

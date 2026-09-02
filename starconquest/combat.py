@@ -3,7 +3,8 @@
 The square law makes the winner's losses sub-1:1, so concentrating force is
 rewarded (10 vs 6 leaves ~8 survivors, not 4). A small +/- jitter on each side
 adds tension without turning fights into coin flips. Everything stochastic is
-drawn from ``state.rng`` so a seed reproduces every battle.
+drawn from the rng the engine hands in — ``state.rng`` while a game is live, so a
+seed reproduces every battle; the recorded draws when a turn is being replayed.
 
 ``config.DEFENDER_ADVANTAGE`` scales the defender's jittered strength before the
 square-law maths (1.0 is neutral); an exact tie still breaks to the defender
@@ -311,14 +312,19 @@ def preview_fight(attacker: int, defender: int, jitter: float, advantage: float)
     )
 
 
-def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tuple[int, int]:
+def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
+                    rng=None) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
 
     Handles reinforcement (single owner present), a straight attack (two owners),
     and the rare 3+-owner pile-up (fold strongest-first). Mutates the system in
     place and returns (final_owner, final_ships).
+
+    ``rng`` is the turn's dice — ``engine`` passes one that records what it deals
+    (and, on a replay, deals back what was recorded). ``state.rng`` when omitted.
     """
     node = state.systems[node_id]
+    rng = state.rng if rng is None else rng
     old_owner = node.owner_id
 
     # Total each owner's strength: existing garrison + all their arriving fleets.
@@ -339,7 +345,7 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet]) -> tu
         sides.sort(key=lambda s: s[1], reverse=True)
         cur_owner, cur_ships = sides[0]
         for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(state.rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
+            cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
         node.owner_id, node.ships = cur_owner, cur_ships
 
     # Attrition, per owner: everyone brought `forces[owner]` here (garrison plus

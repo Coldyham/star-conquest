@@ -63,7 +63,8 @@ def uncompressed_token(settings: Settings) -> str:
 def main() -> None:
     cases = []
 
-    plain = stamped(Settings(seed=42), turns=25, lost=2, hand=25, by="Andrew")
+    # Placeholder sender names, never real ones: these get committed.
+    plain = stamped(Settings(seed=42), turns=25, lost=2, hand=25, by="name")
     cases.append({"name": "defaults", "token": plain.to_token(), "expect": expect_for(plain)})
 
     tuned = Settings(mode="symmetric", players=4, nodes=28, seed=99991)

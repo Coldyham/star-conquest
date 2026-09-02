@@ -9,7 +9,7 @@ import math
 
 import pygame
 
-from . import config, fog, uifont
+from . import config, fog, paths, uifont
 from .geometry import lerp
 from .model import GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -58,6 +58,12 @@ _BTN_RED = ((92, 46, 52), (200, 96, 104))  # quit
 _BTN_DANGER = ((120, 46, 52), (200, 96, 104))  # ...and its brighter modal confirm
 _BTN_GREEN = ((46, 92, 60), (96, 190, 120))  # end turn / confirm
 _BTN_TEAL = ((44, 62, 74), (120, 180, 200))  # share a challenge
+_BTN_GOLD = ((92, 76, 36), (210, 180, 80))  # post to the public leaderboard
+
+# Challenge verdict, on the win overlay: target beaten, dead-heated, missed.
+_VERDICT_BEAT = (130, 200, 150)
+_VERDICT_TIE = (190, 205, 225)
+_VERDICT_MISS = (214, 172, 92)
 
 
 def _row_h(kind: str = "small") -> int:
@@ -1933,7 +1939,9 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     labels = [_key_hint("Retry", "T"), _key_hint("New map", "N"), _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
     quit_label = _key_hint("Quit", "Esc")
     share_label = _key_hint("Challenge a friend", "C")
+    board_label = _key_hint("Enter on leaderboard", "L")
     share = _shareable(state, ui)
+    board = share and bool(paths.LEADERBOARD_SUBMIT_URL)
     bw = max(_btn_w(normal, s) for s in labels + [quit_label])
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)
@@ -1973,15 +1981,25 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     y += bh + gap
 
     if share:
-        sw = _btn_w(normal, share_label, bw)
+        # Both publish this same result, so they pair on one row and take a common
+        # width from the wider label — the clipboard link for sending to one
+        # person, the leaderboard for posting where anyone can see it.
         button_y = y
-        ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, button_y, sw, bh), share_label, *_BTN_TEAL)
+        if board:
+            sw = max(_btn_w(normal, share_label, bw), _btn_w(normal, board_label, bw))
+            ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw - gap // 2, y, sw, bh), share_label, *_BTN_TEAL)
+            ui.leaderboard_button_rect = _btn(surface, pygame.Rect(w // 2 + gap // 2, y, sw, bh), board_label, *_BTN_GOLD)
+        else:
+            sw = _btn_w(normal, share_label, bw)
+            ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), share_label, *_BTN_TEAL)
+            ui.leaderboard_button_rect = (0, 0, 0, 0)
         y += bh + gap
         if ui.share_msg:
             _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM, center=(w // 2, button_y + bh + _row_h() // 2))
             y += _row_h()
     else:
         ui.share_button_rect = (0, 0, 0, 0)
+        ui.leaderboard_button_rect = (0, 0, 0, 0)
 
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
@@ -2014,12 +2032,19 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
 
     if ui.challenge_target is None:
         return lines
-    # Same ordering the score uses: fewer turns wins, ties broken on losses.
+    # Same ordering the score uses: fewer turns wins, ties broken on losses, and
+    # equal on both is a dead heat.
     target = ui.challenge_target
-    beaten = (state.turn, lost) < target
+    mine = (state.turn, lost)
     who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
-    verdict = f"Beat{who} {target[0]} turns / {target[1]} lost" if beaten else f"Short of{who} {target[0]} turns / {target[1]} lost"
-    lines.append(("small", verdict, (130, 200, 150) if beaten else (214, 172, 92)))
+    against = f"{target[0]} turns / {target[1]} lost"
+    if mine < target:
+        verdict, colour = f"Beat{who} {against}", _VERDICT_BEAT
+    elif mine == target:
+        verdict, colour = f"Matched{who} {against}", _VERDICT_TIE
+    else:
+        verdict, colour = f"Short of{who} {against}", _VERDICT_MISS
+    lines.append(("small", verdict, colour))
     return lines
 
 

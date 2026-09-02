@@ -83,21 +83,38 @@ def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
 # improvement (fewer turns, or the same turns with fewer losses).
 
 
-def best(challenge_key: str) -> Optional[tuple[int, int]]:
-    """Your best ``(turns, lost)`` on this setup, or None if you've not won it."""
+def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:
+    """Your best ``(turns, lost)`` on this setup, or None if you've not won it.
+
+    ``legacy`` are superseded ids for the same setup (``Settings.challenge_keys``
+    past the first), searched alongside it: a result filed before a knob was added
+    to ``Settings`` was still filed on this map.
+    """
     try:
-        entry = json.loads(get(WEB_BESTS_KEY) or "{}").get(challenge_key)
-        if isinstance(entry, dict):
-            return (int(entry["turns"]), int(entry["lost"]))
+        data = json.loads(get(WEB_BESTS_KEY) or "{}")
     except Exception:
-        pass
-    return None
+        return None
+    if not isinstance(data, dict):
+        return None
+    found = []
+    for key in (challenge_key, *legacy):
+        entry = data.get(key)
+        try:
+            if isinstance(entry, dict):
+                found.append((int(entry["turns"]), int(entry["lost"])))
+        except Exception:
+            pass
+    return min(found) if found else None
 
 
-def record_best(challenge_key: str, turns: int, lost: int) -> bool:
+def record_best(challenge_key: str, turns: int, lost: int, *legacy: str) -> bool:
     """Store ``(turns, lost)`` if it beats what's there. True if it was an
-    improvement (or a first result), so the caller can say so."""
-    current = best(challenge_key)
+    improvement (or a first result), so the caller can say so.
+
+    Filed under ``challenge_key`` alone — the canonical id — but compared against
+    ``legacy`` too, so an older entry for the same setup is a record to beat
+    rather than one silently replaced by a worse result."""
+    current = best(challenge_key, *legacy)
     if current is not None and (turns, lost) >= current:
         return False
     try:
@@ -148,6 +165,35 @@ def copy_to_clipboard(text: str) -> bool:
     try:
         _platform.window.navigator.clipboard.writeText(text)
         return True
+    except Exception:
+        return False
+
+
+def open_url(url: str) -> bool:
+    """Open ``url`` in a browser tab, best-effort.
+
+    On the web that is ``window.open`` in a new tab, so the finished game stays
+    where it is; elsewhere it is the platform's default browser, because a desktop
+    player has just as much reason to post a score. True means the call was
+    accepted, not that a tab definitely appeared — a popup blocker can still
+    refuse it, the same contract as ``copy_to_clipboard``.
+    """
+    if not url:
+        return False
+    if is_web():
+        import platform as _platform
+
+        try:
+            # A blocked popup is reported as a null window rather than an error,
+            # and pygame's click reaches us too late to always count as a user
+            # gesture — so test the result instead of assuming it worked.
+            return _platform.window.open(url, "_blank") is not None
+        except Exception:
+            return False
+    try:
+        import webbrowser
+
+        return webbrowser.open(url)
     except Exception:
         return False
 
