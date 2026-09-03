@@ -1,9 +1,12 @@
 import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { GAME_URL } from "./config.mjs";
+import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, clear, configBadge, el, mapSummary, relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { configTitle } from "./setup.mjs";
+import { encodeToken, newSeedSetup } from "./token-encode.mjs";
 
 // Columns spelled out rather than `select=*`: game_summary now carries
 // settings_json for the badge label, and that's a real payload increase for a
@@ -136,10 +139,46 @@ function nameForm(configKey) {
   return form;
 }
 
-/** The header strip shown once the list is filtered to one config: its title,
- * its tags, and — while it has none — the form to give it one. */
-function configHead(game) {
-  const children = [el("h2", { class: "config-title", text: configTitle(game) })];
+/**
+ * The way back into the game from a config's page: this setup with no seed on
+ * it, so the game rolls a fresh map from it (`Settings.seed is None` ->
+ * `resolve_seed` rolls one at start, and the menu's seed field reads "random").
+ *
+ * The counterpart to game.mjs's "Play this map", which is the same door onto the
+ * other side of the split this page is about: that one pins the seed and carries
+ * the leader's score as a target, because a map has a board to beat. A config
+ * has no single score to hand over — its games are different maps of unequal
+ * difficulty — so this link carries the setup alone.
+ *
+ * Returns null rather than throwing on a setup it can't encode: this is an
+ * offer, and load()'s catch puts an error message where the game list goes. A
+ * button we couldn't build is a button that isn't there.
+ */
+async function newSeedLink(game) {
+  if (!GAME_URL) return null;
+  let token;
+  try {
+    token = await encodeToken(newSeedSetup(game.settings_json), deflate);
+  } catch {
+    return null;
+  }
+  return el("a", {
+    class: "btn play",
+    href: `${GAME_URL}#${token}`,
+    target: "_blank",
+    rel: "noopener",
+    title: "Open the game on this setup, with a freshly rolled map",
+    text: "Play a new seed",
+  });
+}
+
+/** The header strip shown once the list is filtered to one config: its title
+ * and the way to play it, its tags, and — while it has none — the form to give
+ * it a name. */
+async function configHead(game) {
+  const title = el("h2", { class: "config-title", text: configTitle(game) });
+  const play = await newSeedLink(game);
+  const children = [el("div", { class: "config-line" }, play ? [title, play] : [title])];
   const tags = game.config_tags || [];
   if (tags.length) {
     children.push(el("p", { class: "config-tags", text: tags.map((t) => `#${t}`).join(" ") }));
@@ -225,7 +264,9 @@ async function load() {
     if (bar) filterTarget.append(bar);
 
     clear(headTarget);
-    if (filters.config && kind === "game" && rows.length) headTarget.append(configHead(rows[0]));
+    if (filters.config && kind === "game" && rows.length) {
+      headTarget.append(await configHead(rows[0]));
+    }
 
     if (!rows.length) {
       const filtered = filters.config || filters.bot;

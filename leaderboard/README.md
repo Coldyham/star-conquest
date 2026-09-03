@@ -72,6 +72,17 @@ There's no bot dropdown any more: a bot chip on a card *is* the filter, linking 
 `index.html?bot=…` — clicking one narrows either list, by-game or by-config, to
 setups/maps that included that opponent.
 
+A config's page offers **Play a new seed**: the same setup handed back to the
+game with its seed emptied, so the game rolls a fresh map from it
+(`Settings.seed = None`) instead of replaying one of the maps already on the
+board. [`js/token-encode.mjs`](js/token-encode.mjs) is the writing half of the
+token format — the reverse of `token-decode.mjs`, dropping exactly the two keys
+`sc_config_key` drops, so the link offers the setup the page grouped by and
+nothing more. It needs `GAME_URL` set, like the map page's "Play this map"; that
+button is the counterpart, pinning the seed and carrying the leader's score as
+the target. A config has no single score to hand over — its games are different
+maps of unequal difficulty — so this one carries the setup alone.
+
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
 for a single existing map (see `docs/design-notes.md`, "Keys outlive the schema
@@ -108,7 +119,8 @@ already extended to every other free-text field on this board.
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
    key belongs in git — it is designed to be public, and RLS is the real boundary.
    The `service_role` key must never go in this repo. Optionally set `GAME_URL` to
-   where the game is deployed, and each map page gains a "Play this map" link.
+   where the game is deployed, and each map page gains a "Play this map" link
+   (and each config page a "Play a new seed" one).
 4. **Create a second Netlify site** from this repo with **Base directory** set to
    `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
    files as-is. The root `netlify.toml` and the game's own site are untouched.

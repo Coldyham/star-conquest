@@ -313,6 +313,17 @@ h1::after {
 .filters .clear:hover { color: var(--bad); }
 
 .config-head:empty { display: none; }
+/* Title on the left, the way to play it on the right — the button sits on the
+ * heading's own row rather than under it, so it needs no vertical margin of its
+ * own and the head's spacing stays exactly as it was without one. */
+.config-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.config-line .play { margin-top: 0; }
 .config-title {
   margin: 0;
   font-family: var(--pixel);
