@@ -193,7 +193,7 @@ ENEMY_NEAR = 1.3                # enemy margin for a 1-turn strike
 ENEMY_FAR = 1.9                 # ...rising toward this as the strike lands later
 OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
-FRONTIER_GUARD = 0.30           # fraction of the scariest adjacent enemy held home
+FRONTIER_GUARD = 0.40           # fraction of the scariest adjacent enemy held home
 BEYOND_DECAY = 0.35             # weight on the richest system one hop past a target
 
 RIVAL_WEDGE = 1.0               # penalty per rival past the first bordering a target

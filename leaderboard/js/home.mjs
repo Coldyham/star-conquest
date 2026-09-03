@@ -15,7 +15,12 @@ const COLUMNS = [
   "settings_json", "config_key", "bots", "config_name", "config_tags",
 ].join(",");
 
+// config_summary's columns are already a curated, fixed set (schema.sql), so
+// select=* is fine here unlike game_summary above.
+const CONFIG_COLUMNS = "*";
+
 const target = document.getElementById("games");
+const groupTarget = document.getElementById("group-toggle");
 const filterTarget = document.getElementById("filters");
 const headTarget = document.getElementById("config-head");
 
@@ -23,41 +28,61 @@ const headTarget = document.getElementById("config-head");
  * lives entirely in the URL so every filtered view is a shareable link. */
 function filtersFromUrl() {
   const params = new URLSearchParams(location.search);
-  return { config: params.get("config") || "", bot: params.get("bot") || "" };
+  return {
+    config: params.get("config") || "",
+    bot: params.get("bot") || "",
+    group: params.get("group") === "config" ? "config" : "game",
+  };
 }
 
 function urlFor(filters) {
   const params = new URLSearchParams();
   if (filters.config) params.set("config", filters.config);
   if (filters.bot) params.set("bot", filters.bot);
+  if (filters.group === "config") params.set("group", "config");
   const qs = params.toString();
   return qs ? `index.html?${qs}` : "index.html";
 }
 
+/**
+ * "By config" only means something above a single config's own game list, so
+ * a `config` filter always falls back to the plain per-game query regardless
+ * of what `?group=` says — that keeps a hand-edited URL from landing on a
+ * grouped view of one group.
+ */
 async function fetchGames(filters) {
+  if (filters.group === "config" && !filters.config) {
+    let query = `config_summary?select=${CONFIG_COLUMNS}&order=last_activity.desc.nullslast&limit=50`;
+    if (filters.bot) query += `&bots=${contains([filters.bot])}`;
+    return { kind: "config", rows: await select(query) };
+  }
   let query = `game_summary?select=${COLUMNS}&score_count=gt.0&order=last_activity.desc.nullslast&limit=50`;
   if (filters.config) query += `&config_key=${eq(filters.config)}`;
   if (filters.bot) query += `&bots=${contains([filters.bot])}`;
-  return select(query);
+  return { kind: "game", rows: await select(query) };
 }
 
-function filterBar(filters, bots) {
-  const picker = el("select", { "aria-label": "Filter by bot" }, [
-    el("option", { value: "", text: "Any bot" }),
-    ...bots.map((b) => el("option", {
-      value: b.bot,
-      text: `${b.bot} (${b.games})`,
-      selected: filters.bot === b.bot ? "" : undefined,
-    })),
-  ]);
-  picker.addEventListener("change", () => {
-    location.assign(urlFor({ ...filters, bot: picker.value }));
+/** By-game vs. by-config, styled like game.mjs's turns/lost ranking toggle.
+ * Hidden once already narrowed to one config — there is nothing left to
+ * group there. */
+function groupToggle(filters) {
+  if (filters.config) return null;
+  const linkFor = (value, label) => el("a", {
+    class: filters.group === value ? "btn" : "btn ghost",
+    href: urlFor({ ...filters, group: value }),
+    text: label,
   });
+  return el("div", { class: "sorts" }, [linkFor("game", "By game"), linkFor("config", "By config")]);
+}
 
-  const children = [picker];
-  if (filters.config || filters.bot) {
-    children.push(el("a", { class: "clear", href: "index.html", text: "Clear filters" }));
-  }
+/** Bot filtering has no picker any more — a bot chip on a card is the only way
+ * in (format.mjs's botChips already links to `?bot=`). This bar just states
+ * which bot is active, if any, and offers a way out of every filter at once. */
+function filterBar(filters) {
+  if (!filters.config && !filters.bot) return null;
+  const children = [];
+  if (filters.bot) children.push(el("span", { class: "current", text: `Vs ${filters.bot}` }));
+  children.push(el("a", { class: "clear", href: "index.html", text: "Clear filters" }));
   return el("div", { class: "filters" }, children);
 }
 
@@ -157,6 +182,27 @@ function row(game) {
   ]);
 }
 
+/** A config-grouped row: no single score to headline (its games may be
+ * different seeds of unequal difficulty), so the card states the setup and
+ * how much has been played on it, and drills into the per-game list on click
+ * — the same place a config badge already goes. */
+function configRow(config) {
+  const detail = [
+    `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}`,
+    `${config.score_count} ${config.score_count === 1 ? "score" : "scores"}`,
+    relativeTime(config.last_activity),
+  ].join(" · ");
+
+  const body = el("a", { class: "card-body", href: `index.html?config=${encodeURIComponent(config.config_key)}` }, [
+    el("div", { class: "card-main" }, [
+      el("div", { class: "setup", text: configTitle(config) }),
+      el("div", { class: "card-meta", text: detail }),
+    ]),
+  ]);
+
+  return el("div", { class: "card" }, [body, el("div", { class: "card-tags" }, botChips(config))]);
+}
+
 async function load() {
   mountMyScores();
   if (!configured()) {
@@ -167,16 +213,21 @@ async function load() {
   try {
     // Filtering happens server-side, on purpose: filtering only the visible
     // 50 client-side would silently hide older matches instead.
-    const [games, bots] = await Promise.all([
-      fetchGames(filters),
-      select("bot_roster?select=*&order=games.desc,bot.asc"),
-    ]);
+    const { kind, rows } = await fetchGames(filters);
     target.classList.remove("loading");
-    clear(filterTarget).append(filterBar(filters, bots));
-    clear(headTarget);
-    if (filters.config && games.length) headTarget.append(configHead(games[0]));
 
-    if (!games.length) {
+    clear(groupTarget);
+    const toggle = groupToggle(filters);
+    if (toggle) groupTarget.append(toggle);
+
+    clear(filterTarget);
+    const bar = filterBar(filters);
+    if (bar) filterTarget.append(bar);
+
+    clear(headTarget);
+    if (filters.config && kind === "game" && rows.length) headTarget.append(configHead(rows[0]));
+
+    if (!rows.length) {
       const filtered = filters.config || filters.bot;
       clear(target).append(
         el("p", { class: "empty" }, filtered
@@ -185,7 +236,7 @@ async function load() {
       );
       return;
     }
-    clear(target).append(...games.map(row));
+    clear(target).append(...rows.map(kind === "config" ? configRow : row));
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

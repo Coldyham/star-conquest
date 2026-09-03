@@ -11,7 +11,7 @@ its `web/` build depends on it.
 
 | | |
 |---|---|
-| [`index.html`](index.html) | every map with a posted score, newest first — filterable by config or bot |
+| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost |
 | [`user.html?u=…`](user.html) | one player's card — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score |
@@ -63,6 +63,15 @@ it rolled. That badge reads the setup's non-default knobs until someone gives it
 real name (`configLabel`, [`js/setup.mjs`](js/setup.mjs)) — free, since
 `Settings.token_dict()` already prunes `settings_json` to the diff from defaults.
 
+The main list's **By config** toggle switches from one row per map to one row per
+config, rolled up from `public.config_summary` — how many maps and scores it has and
+when it was last played, still newest-first. Clicking a config row (or a config
+badge anywhere else) drills back into the ordinary per-game list filtered to that
+one setup, which is where its "Name this setup" form and its own game board live.
+There's no bot dropdown any more: a bot chip on a card *is* the filter, linking to
+`index.html?bot=…` — clicking one narrows either list, by-game or by-config, to
+setups/maps that included that opponent.
+
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
 for a single existing map (see `docs/design-notes.md`, "Keys outlive the schema
@@ -88,7 +97,7 @@ already extended to every other free-text field on this board.
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, `configs`, the `game_summary`/`bot_roster` views, and
+   `users`, `games`, `scores`, `configs`, the `game_summary`/`config_summary` views, and
    the row-level security policies that make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
@@ -134,7 +143,7 @@ map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.
 covers a config's derived label (`js/setup.mjs`). Neither `schema.sql` nor its
 functions have a test harness — verify a change to `sc_config_key`/`sc_bots` by
 pasting the file into a scratch Postgres or Supabase project and querying
-`game_summary`/`bot_roster` directly.
+`game_summary`/`config_summary` directly.
 
 ## Known limitations, accepted on purpose
 

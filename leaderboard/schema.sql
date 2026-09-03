@@ -198,18 +198,51 @@ left join public.configs cfg
   on cfg.config_key = public.sc_config_key(g.settings_json);
 
 -- ---------------------------------------------------------------------------
--- bot_roster: every opponent strategy seen in a game with at least one score,
--- and how many such games it appears in. Feeds the main list's bot filter, so
--- it lists every bot on the board, not only those in the visible page.
+-- config_summary: one row per config_key, for the main list's "by config"
+-- grouping (each row rolls up every game on that setup, whatever its seed).
+-- `agg` counts and dates across the whole group; `rep` picks the fields that
+-- describe the setup itself (settings_json, mode, players, nodes) off
+-- whichever of its games was most recently active, via DISTINCT ON rather than
+-- an aggregate — those columns don't have a meaningful sum or max, and every
+-- game in the group carries an equivalent value anyway except settings_json's
+-- seed. bots is re-derived from that representative settings_json through
+-- sc_bots rather than aggregated off game_summary.bots, since array_agg over
+-- an already-array column would build a matrix, not a list of arrays.
 -- ---------------------------------------------------------------------------
-create or replace view public.bot_roster
+create or replace view public.config_summary
   with (security_invoker = true) as
-select bot, count(*)::integer as games
-from public.games g
-cross join lateral unnest(public.sc_bots(g.settings_json, g.players)) as u(bot)
-where exists (select 1 from public.scores s where s.game_key = g.game_key)
-group by bot
-order by games desc, bot;
+with agg as (
+  select
+    config_key,
+    count(*)::integer         as game_count,
+    sum(score_count)::integer as score_count,
+    max(last_activity)        as last_activity
+  from public.game_summary
+  where score_count > 0
+  group by config_key
+),
+rep as (
+  select distinct on (config_key)
+    config_key, settings_json, mode, players, nodes
+  from public.game_summary
+  where score_count > 0
+  order by config_key, last_activity desc nulls last
+)
+select
+  agg.config_key,
+  rep.settings_json,
+  rep.mode,
+  rep.players,
+  rep.nodes,
+  public.sc_bots(rep.settings_json, rep.players) as bots,
+  cfg.name as config_name,
+  cfg.tags as config_tags,
+  agg.game_count,
+  agg.score_count,
+  agg.last_activity
+from agg
+join rep on rep.config_key = agg.config_key
+left join public.configs cfg on cfg.config_key = agg.config_key;
 
 -- ---------------------------------------------------------------------------
 -- Policies
@@ -247,7 +280,7 @@ create policy "configs public insert" on public.configs for insert with check (t
 -- Explicit rather than relying on the project's default privileges, so this file
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
-  public.game_summary, public.bot_roster to anon, authenticated;
+  public.game_summary, public.config_summary to anon, authenticated;
 grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
