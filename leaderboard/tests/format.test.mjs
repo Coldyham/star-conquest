@@ -37,3 +37,12 @@ test("hand is disclosure, not part of the score", () => {
 test("an empty board ranks nothing", () => {
   assert.deepEqual(competitionRanks([]), []);
 });
+
+test("competitionRanks holds under a lost-first sort too, since a tie is symmetric", () => {
+  // Sorted by lost, then turns — the board's other ranking — rather than the
+  // turns-first order every other test in this file uses.
+  assert.deepEqual(
+    competitionRanks(scores([41, 14], [31, 16], [31, 16], [75, 31])),
+    [1, 2, 2, 4],
+  );
+});

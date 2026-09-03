@@ -90,6 +90,20 @@ blake2s (the two languages disagree on integral floats), so the leaderboard
 folds by lookup instead: `KEY_ALIASES` for incoming links, and
 `leaderboard/fold-game-key.sql` for rows already stored.
 
+The leaderboard's config grouping (same setup, different seed —
+`leaderboard/README.md`, "Same setup, different seed") deliberately sits on the
+*other* side of this trade-off. `sc_config_key` in `leaderboard/schema.sql` hashes
+a stored `settings_json` with `seed` dropped, computed entirely in SQL over data
+the game already sends — not a new `Settings`/`Challenge` field, specifically so
+adding it never moves `Challenge.key` for a single existing map. The price is the
+fragility this section spent its length rejecting for `challenge_key` itself:
+`sc_config_key` is pruned-non-default by construction, so a changed
+`config.DEFAULT_*` rehashes every config exactly the way a naive non-default
+`challenge_key` was rejected above for doing. Worth it here and not there, because
+a leaderboard grouping is cosmetic (worst case, a named config splits in two and
+loses its name) where a `Challenge.key` mismatch is load-bearing (it decides
+whether a target-to-beat banner is honoured or discarded).
+
 ## Ship-speed growth
 
 `config.SHIP_SPEED_GROWTH_PCT` (Advanced → Travel, 0 by default) models tech

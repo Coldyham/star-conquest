@@ -191,7 +191,11 @@ intact.
     fails until you do. Only `challenge_keys()[0]` is ever *written*. The
     leaderboard folds by lookup instead (`KEY_ALIASES` in
     `leaderboard/js/token-decode.mjs`, `leaderboard/fold-game-key.sql`), since JS
-    cannot recompute the Python digest.
+    cannot recompute the Python digest. For the same reason, the leaderboard's
+    same-setup-different-seed grouping (`sc_config_key` in
+    `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
+    rather than added as a field here — that would move `challenge_key()` for
+    every map instead of only the config grouping.
 - **`webstore` is the third browser bridge** (with `softkeyboard` and the
   web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
   a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compareScores, rankAmong, standings, tally } from "../js/standings.mjs";
+import { compareScores, displayOrder, rankAmong, scoreComparator, standings, tally } from "../js/standings.mjs";
 
 const at = (day) => `2026-09-${String(day).padStart(2, "0")}T12:00:00+00:00`;
 
@@ -120,4 +120,44 @@ test("without the field there is no placing to show, but the comparison still wo
   assert.equal(rows[0].fieldSize, 0);
   assert.equal(rows[0].entries[0].lead, true);
   assert.equal(tally(rows, [ann, bo]).players[0].records, 0);
+});
+
+test("scoreComparator: 'lost' ranks by fewest ships lost, turns breaks the tie", () => {
+  const byLost = scoreComparator("lost");
+  assert.ok(byLost({ turns: 40, lost: 1 }, { turns: 20, lost: 2 }) < 0);
+  assert.ok(byLost({ turns: 25, lost: 2 }, { turns: 20, lost: 2 }) > 0);
+  assert.equal(byLost({ turns: 25, lost: 2 }, { turns: 25, lost: 2 }), 0);
+});
+
+test("scoreComparator: 'turns' is compareScores, the game's own rule", () => {
+  assert.equal(scoreComparator("turns"), compareScores);
+  assert.equal(scoreComparator("anything-else"), compareScores);
+});
+
+test("displayOrder: a dead heat keeps its earliest submission on top, in both sorts", () => {
+  const submitted = (day, turns, lost) =>
+    ({ turns, lost, submitted_at: `2026-09-${String(day).padStart(2, "0")}T12:00:00+00:00` });
+  // a/b tie on both figures (25, 2); c is strictly fewer turns but more lost,
+  // so the two sorts disagree on who leads and only agree that a/b tie — with
+  // b's earlier submission the one that must come first, in both orderings.
+  const a = submitted(9, 25, 2);
+  const b = submitted(1, 25, 2);
+  const c = submitted(5, 20, 4);
+  const scores = [a, b, c]; // deliberately not already in either display order
+
+  assert.deepEqual(
+    displayOrder(scores, "turns").map((s) => s.submitted_at),
+    [c, b, a].map((s) => s.submitted_at), // fewest turns first; the tie breaks to b
+  );
+  assert.deepEqual(
+    displayOrder(scores, "lost").map((s) => s.submitted_at),
+    [b, a, c].map((s) => s.submitted_at), // fewest lost first; the tie still breaks to b
+  );
+});
+
+test("displayOrder does not mutate its input", () => {
+  const scores = [{ turns: 30, lost: 1, submitted_at: "2026-09-02T00:00:00Z" }, { turns: 20, lost: 1, submitted_at: "2026-09-01T00:00:00Z" }];
+  const original = [...scores];
+  displayOrder(scores, "turns");
+  assert.deepEqual(scores, original);
 });

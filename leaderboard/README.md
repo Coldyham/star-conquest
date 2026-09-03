@@ -11,8 +11,8 @@ its `web/` build depends on it.
 
 | | |
 |---|---|
-| [`index.html`](index.html) | every map with a posted score, newest first |
-| [`game.html?key=…`](game.html) | one map's high-score table |
+| [`index.html`](index.html) | every map with a posted score, newest first — filterable by config or bot |
+| [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost |
 | [`user.html?u=…`](user.html) | one player's card — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score |
 
@@ -52,16 +52,50 @@ two keys. `KEY_ALIASES` in [`js/token-decode.mjs`](js/token-decode.mjs) folds an
 incoming legacy key onto the current one, and
 [`fold-game-key.sql`](fold-game-key.sql) moves scores already stored under it.
 
+## Same setup, different seed
+
+Every game with a `game_key` still gets its own row and its own board — a seed is
+part of what `game_key` means. But a *config* (a map's settings with the seed set
+aside) is worth naming: `public.sc_config_key` in [`schema.sql`](schema.sql) hashes
+a game's stored `settings_json` with `seed` (and `autoplay`) removed, so every game
+on the same tuned setup shares one badge on the main list regardless of which map
+it rolled. That badge reads the setup's non-default knobs until someone gives it a
+real name (`configLabel`, [`js/setup.mjs`](js/setup.mjs)) — free, since
+`Settings.token_dict()` already prunes `settings_json` to the diff from defaults.
+
+This key is computed here, on data the game already sends, rather than as a new
+field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
+for a single existing map (see `docs/design-notes.md`, "Keys outlive the schema
+that made them"). The trade is the opposite fragility: **naming a config freezes
+it to `sc_config_key`'s current definition and to the game's current pruning
+rules.** Change either — the function's body, or a `config.DEFAULT_*` balance
+constant — and every config on the board rehashes, orphaning every name already
+posted. There's no in-site remedy for that, only the SQL editor: re-derive the old
+and new keys for the setups that matter and move the `configs` row across, the same
+way `fold-game-key.sql` moves `scores` rows after a `Challenge.key` split.
+
+Naming and tagging a config is **first name wins, permanently** — `configs` is
+append-only like every other table here (no UPDATE policy), so a typo can only be
+fixed from the SQL editor, the same trade `users.name` already makes. Since
+`config_key` is derived rather than stored, there's also no link between it and
+`games`: anyone can post a name for a config key nobody has played yet, or the
+wrong hex string entirely. Harmless — `game_summary`'s join only ever surfaces a
+name that actually matches a stored setup — but it's the same class of trust
+already extended to every other free-text field on this board.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, the `game_summary` view, and the row-level security
-   policies that make everything append-only. The whole file is idempotent — paste
-   it again after any change to it, and an existing board picks the change up
-   without touching a row. [`fold-game-key.sql`](fold-game-key.sql) is the other
-   script here, run only when two keys need merging (see above).
+   `users`, `games`, `scores`, `configs`, the `game_summary`/`bot_roster` views, and
+   the row-level security policies that make everything append-only. The whole file
+   is idempotent — paste it again after any change to it, and an existing board
+   picks the change up without touching a row. If a page 404s on a new table or
+   view right after pasting, PostgREST's schema cache hasn't caught up yet; the
+   file's own final statement (`notify pgrst, 'reload schema';`) normally makes
+   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
+   here, run only when two keys need merging (see above).
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
    key belongs in git — it is designed to be public, and RLS is the real boundary.
    The `service_role` key must never go in this repo. Optionally set `GAME_URL` to
@@ -95,7 +129,12 @@ from drifting apart.
 
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
-is why that logic sits in a module with no DOM or fetch in it.
+is why that logic sits in a module with no DOM or fetch in it. It also covers the
+map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.mjs`
+covers a config's derived label (`js/setup.mjs`). Neither `schema.sql` nor its
+functions have a test harness — verify a change to `sc_config_key`/`sc_bots` by
+pasting the file into a scratch Postgres or Supabase project and querying
+`game_summary`/`bot_roster` directly.
 
 ## Known limitations, accepted on purpose
 
@@ -108,6 +147,9 @@ is why that logic sits in a module with no DOM or fetch in it.
   your name, which is the same trade the board makes everywhere else.
 - **Wins only.** The game only offers the challenge link when the human won and
   played at least one turn by hand, so nothing else can be posted.
+- **A config's name is first-wins and permanent**, and a `config_key` can be
+  squatted or posted for a setup nobody has played — see "Same setup, different
+  seed" above.
 - **Supabase pauses free projects after about a week idle**, which needs a manual
   unpause. A weekly scheduled request against the REST API would prevent it.
 

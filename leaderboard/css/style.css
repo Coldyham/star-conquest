@@ -181,25 +181,30 @@ h1::after {
   text-shadow: 0 0 10px rgba(255, 92, 108, 0.4);
 }
 
-/* -- the map list: one cabinet plate per map ------------------------------- */
+/* -- the map list: one cabinet plate per map -------------------------------
+ * .card is the plate; .card-body is the clickable link inside it (a badge in
+ * .card-tags is a link of its own, and an anchor can't nest inside one). */
 .card {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
   padding: 1rem 1.1rem;
   margin-bottom: 0.75rem;
   border: 1px solid var(--line);
   border-left: 4px solid var(--cyan);
   background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%);
-  color: var(--ink);
-  text-decoration: none;
 }
 .card:hover {
   border-left-color: var(--magenta);
   background: linear-gradient(180deg, #141b38 0%, #0b0f22 100%);
   box-shadow: 0 0 18px rgba(53, 230, 255, 0.16);
+}
+
+.card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .card-main { min-width: 0; }
@@ -255,6 +260,79 @@ h1::after {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+
+/* A config's badge (its name, or the tweaks that stand in for one) and its
+ * bots' chips — on a card, below .card-body; on a map's own page, below its
+ * heading (see game.html's #setup-tags, same class). Both are links: the
+ * badge filters the main list to this config, a chip to games against that
+ * bot. */
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+.card-tags:empty { display: none; margin: 0; }
+
+.badge, .chip {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.badge { border-color: var(--magenta); color: var(--magenta); }
+.badge:hover { background: #240a1a; }
+.chip { color: var(--dim); }
+.chip:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* -- the main list's filter bar and a filtered config's header ------------- */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.filters select { width: auto; }
+.filters .clear {
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.filters .clear:hover { color: var(--bad); }
+
+.config-head:empty { display: none; }
+.config-title {
+  margin: 0;
+  font-family: var(--pixel);
+  font-size: 0.72rem;
+  color: var(--gold);
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(255, 210, 63, 0.35);
+}
+.config-tags {
+  margin: 0.4rem 0 0;
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+.config-head form.compare { margin: 0.9rem 0 1.25rem; }
+.name-status {
+  font-family: var(--pixel);
+  font-size: 0.5rem;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+/* -- a map's ranking toggle -------------------------------------------------- */
+.sorts { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; }
 
 /* -- one map's high-score table -------------------------------------------- */
 .scores {
@@ -484,7 +562,7 @@ label {
   text-transform: uppercase;
 }
 
-textarea, input[type="text"] {
+textarea, input[type="text"], select {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid var(--line);
@@ -502,7 +580,7 @@ input[type="text"] {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-textarea:focus, input:focus {
+textarea:focus, input:focus, select:focus {
   outline: none;
   border-color: var(--cyan);
   box-shadow: inset 0 0 18px rgba(53, 230, 255, 0.14), 0 0 12px rgba(53, 230, 255, 0.3);
@@ -586,7 +664,7 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   .brand { font-size: 0.82rem; }
   main { padding-top: 1.5rem; }
   h1 { font-size: 0.85rem; }
-  .card { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+  .card-body { flex-direction: column; align-items: stretch; gap: 0.75rem; }
   .card-score {
     display: flex;
     align-items: baseline;

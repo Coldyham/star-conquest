@@ -24,7 +24,28 @@ export function rankAmong(field, score) {
   return better + 1;
 }
 
+/**
+ * The two ranking rules a map's board can offer: fewest turns (the game's own
+ * rule, and just compareScores by another name), or fewest ships lost with
+ * turns as its tie-break — the same shape, the other way round.
+ */
+export function scoreComparator(key) {
+  return key === "lost" ? (a, b) => a.lost - b.lost || a.turns - b.turns : compareScores;
+}
+
 const time = (iso) => Date.parse(iso) || 0;
+
+/**
+ * A map's scores in display order: ranked by `key` ("turns" or "lost"), with
+ * the earliest submission first among a dead heat — matching how
+ * game_summary already credits the earliest of tied holders as
+ * best_user_name. Works on raw score rows ({turns, lost, submitted_at, ...}),
+ * not the normalised `entry` shape the rest of this module uses.
+ */
+export function displayOrder(scores, key) {
+  const compare = scoreComparator(key);
+  return [...scores].sort((a, b) => compare(a, b) || time(a.submitted_at) - time(b.submitted_at));
+}
 
 /**
  * One row per map the roster has played, carrying each member's *best* score on

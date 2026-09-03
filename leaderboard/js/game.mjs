@@ -1,15 +1,20 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import {
-  clear, competitionRanks, credit, el, mapSummary, ordinal, relativeTime, scoreSummary,
-  shortTime, showError, userHref,
+  botChips, clear, competitionRanks, configBadge, credit, el, mapSummary, ordinal,
+  relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
+import { displayOrder } from "./standings.mjs";
 
 const heading = document.getElementById("setup");
+const tagsTarget = document.getElementById("setup-tags");
 const subtitle = document.getElementById("subtitle");
+const sortTarget = document.getElementById("sort");
 const target = document.getElementById("scores");
-const gameKey = new URLSearchParams(location.search).get("key") || "";
+const params = new URLSearchParams(location.search);
+const gameKey = params.get("key") || "";
+const sortKey = params.get("sort") === "lost" ? "lost" : "turns";
 
 /**
  * The name cell: a link to that player's card, unless the score is credited to a
@@ -42,6 +47,18 @@ function playLink(token) {
   return el("a", { class: "btn play", href: `${GAME_URL}#${token}`, target: "_blank", rel: "noopener", text: "Play this map" });
 }
 
+/** Toggle between the board's two rankings, each a plain link so the choice
+ * stays shareable. Highlights the active one with the same .btn/.btn.ghost
+ * pair the rest of the site uses for "current vs. not". */
+function sortToggle() {
+  const linkFor = (value, label) => el("a", {
+    class: value === sortKey ? "btn" : "btn ghost",
+    href: `game.html?key=${encodeURIComponent(gameKey)}&sort=${value}`,
+    text: label,
+  });
+  return el("div", { class: "sorts" }, [linkFor("turns", "Fewest turns"), linkFor("lost", "Fewest lost")]);
+}
+
 async function load() {
   mountMyScores();
   if (!configured()) {
@@ -57,7 +74,7 @@ async function load() {
 
   try {
     const [games, scores] = await Promise.all([
-      select(`games?select=*&game_key=${eq(gameKey)}&limit=1`),
+      select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
       select(
         `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,users(name)` +
           `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
@@ -72,15 +89,22 @@ async function load() {
     }
     const game = games[0];
     heading.textContent = mapSummary(game);
+    clear(tagsTarget).append(configBadge(game), ...botChips(game));
     subtitle.textContent = scores.length
       ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
       : "No scores posted yet.";
+    clear(sortTarget).append(sortToggle());
 
-    const ranks = competitionRanks(scores);
-
+    // The server order above (turns then lost then earliest submission) is
+    // exactly how the turns-leader is found, regardless of which ranking is
+    // on screen — "Play this map" always hands back that target, since the
+    // game itself compares turns first.
     const link = playLink(scores.length ? scores[0].raw_token : null);
+
+    const ranked = displayOrder(scores, sortKey);
+    const ranks = competitionRanks(ranked);
     clear(target).append(
-      el("ol", { class: "scores" }, scores.map((s, i) => scoreRow(s, ranks[i]))),
+      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i]))),
       ...(link ? [link] : []),
     );
   } catch (err) {
