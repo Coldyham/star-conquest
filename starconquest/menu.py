@@ -167,6 +167,39 @@ for _key, _label, _attr, _lo, _hi, _step, _is_int in _PREVIEW:
 # strategy's call (`_ai_specs`, resolved live in `_slider_spec`).
 _SLIDER_SPECS[_AUX_KEY] = ("ai", "aux", *ai.AUX_RANGE_DEFAULT, False)
 
+# Zero-value instances for spotting an edited field — the same plain-equality
+# test `Settings.token_dict` uses to decide what a share link needs to carry.
+# Frozen once at import, like every other default baked into these dataclasses.
+_DEFAULT_SETTINGS = Settings()
+_DEFAULT_AI_PARAMS = AiParams()
+
+
+def _default_for(target):
+    """The zero-value instance matching ``target``'s type, or ``None`` for
+    anything that isn't a persisted setting — the Combat tab's demo sliders
+    write ``MenuState``, which has no notion of a default worth flagging."""
+    if isinstance(target, Settings):
+        return _DEFAULT_SETTINGS
+    if isinstance(target, AiParams):
+        return _DEFAULT_AI_PARAMS
+    return None
+
+
+def _changed(target, attr: str) -> bool:
+    """True if ``target.attr`` has moved from the game's default."""
+    default = _default_for(target)
+    return default is not None and getattr(target, attr) != getattr(default, attr)
+
+
+def _changed_dot(surface, x: int, y: int) -> None:
+    """Marker meaning "this differs from the default" — drawn left of a label,
+    in the same amber as the challenge-invalidated warning, since both mean
+    "don't assume this is stock". On unconditionally (not just on a challenge
+    link): it costs nothing to compute and is handy any time a setting reads
+    back that isn't what you'd expect."""
+    pygame.draw.circle(surface, _WARN, (x, y), 3)
+
+
 _FONTS: dict[str, pygame.font.Font] = {}
 _MODAL_FONTS: dict[str, object] = {}
 
@@ -324,7 +357,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
     else:
         _text(surface, f["small"], "configure your galaxy, then conquer it", config.COLOR_TEXT_DIM, center=(w // 2, 130))
 
-    _draw_tabs(surface, ms, w)
+    _draw_tabs(surface, ms, settings, w)
 
     panel = pygame.Rect(w // 2 - 280, 208, 560, 496)
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
@@ -442,7 +475,29 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
     _button(surface, ms, "unchallenge_keep", pygame.Rect(panel.centerx + gap // 2, by, bw, bh), keep, fill=_HL_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT)
 
 
-def _draw_tabs(surface, ms: MenuState, w: int) -> None:
+# Settings fields shown on each tab, for the tab row's own changed-dot — a tab
+# never opened (Combat/Advanced/AI, easy to skip past on a challenge link) would
+# otherwise hide an edited knob completely. "ai" isn't listed: it's resolved
+# specially in `_tab_changed`, since it spans two per-seat lists rather than a
+# flat set of Settings attrs.
+_TAB_FIELDS = {
+    "basic": ("players", "nodes", "mode", "seed", "autoplay", "fog_sight", "fog_scout"),
+    "combat": tuple(attr for _, _, attr, *_ in _ADV_COMBAT),
+    "advanced": tuple(attr for _, _, attr, *_ in _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG) + ("neutral_produces",),
+}
+
+
+def _tab_changed(tab: str, settings: Settings) -> bool:
+    """True if anything shown on ``tab`` differs from default."""
+    if tab == "ai":
+        seats = [s - 1 for s in _ai_seats(settings)]
+        if any(settings.ai_strategy[i] != "heuristic" for i in seats):
+            return True
+        return any(settings.ai[i] != _DEFAULT_AI_PARAMS for i in seats)
+    return any(_changed(settings, attr) for attr in _TAB_FIELDS.get(tab, ()))
+
+
+def _draw_tabs(surface, ms: MenuState, settings: Settings, w: int) -> None:
     # 126 rather than the old 132: four tabs at 132 span 552px inside the 560px
     # panel below, which reads as flush-by-accident. At 126 they span 528 and sit
     # a clean 16px inside it, still leaving 19px either side of "Advanced".
@@ -462,6 +517,8 @@ def _draw_tabs(surface, ms: MenuState, w: int) -> None:
         if border:
             pygame.draw.rect(surface, border, rect, 2, border_radius=6)
         _text(surface, _fonts()["normal"], label, tcol, center=rect.center)
+        if enabled and _tab_changed(key, settings):
+            _changed_dot(surface, rect.right - 10, rect.y + 9)
         if enabled:
             ms.rects[f"tab_{key}"] = rect
         x += tw + gap
@@ -472,15 +529,15 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     right = panel.right - 34
     y = panel.y + 34
 
-    _row_label(surface, "Players", left, y)
+    _row_label(surface, "Players", left, y, _changed(settings, "players"))
     _stepper(surface, ms, "players", str(settings.players), right, y)
     y += _ROW_H
 
-    _row_label(surface, "Systems", left, y)
+    _row_label(surface, "Systems", left, y, _changed(settings, "nodes"))
     _stepper(surface, ms, "nodes", str(settings.nodes), right, y)
     y += _ROW_H
 
-    _row_label(surface, "Map type", left, y)
+    _row_label(surface, "Map type", left, y, _changed(settings, "mode"))
     _segmented(
         surface,
         ms,
@@ -493,17 +550,18 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     )
     y += _ROW_H
 
-    _row_label(surface, "Seed", left, y)
+    _row_label(surface, "Seed", left, y, _changed(settings, "seed"))
     _seed_control(surface, ms, settings, right, y)
     y += _ROW_H
 
-    _row_label(surface, "Autoplay", left, y)
+    _row_label(surface, "Autoplay", left, y, _changed(settings, "autoplay"))
     _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
     y += _ROW_H
 
     # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
     # State is derived from the sliders, so it tracks Advanced edits automatically.
-    _row_label(surface, "Fog of war", left, y)
+    fog_changed = _changed(settings, "fog_sight") or _changed(settings, "fog_scout")
+    _row_label(surface, "Fog of war", left, y, fog_changed)
     _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
 
 
@@ -526,6 +584,8 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
     y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
+    if _changed(settings, "neutral_produces"):
+        _changed_dot(surface, rx - 12, y + _CH // 2)
     _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
     _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
 
@@ -744,6 +804,8 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
 
     # strategy dropdown (built-in heuristic + any drop-in models/)
     y += 44
+    if settings.seat_strategy(ms.ai_seat) != "heuristic":
+        _changed_dot(surface, x - 12, y + _CH // 2)
     _text(surface, _fonts()["small"], "Strategy", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
     _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat), ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
 
@@ -763,7 +825,8 @@ def _section(surface, title: str, x: int, y: int) -> int:
 def _sliders(surface, ms, target, specs, x: int, y: int, width: int) -> int:
     """Draw a group of sliders reading each value off ``target``; returns next y."""
     for key, label, attr, lo, hi, step, is_int in specs:
-        _slider(surface, ms, key, label, getattr(target, attr), lo, hi, is_int, x, y, width)
+        changed = _changed(target, attr)
+        _slider(surface, ms, key, label, getattr(target, attr), lo, hi, is_int, x, y, width, changed=changed)
         y += _SLIDER_H
     return y
 
@@ -771,7 +834,9 @@ def _sliders(surface, ms, target, specs, x: int, y: int, width: int) -> int:
 # --------------------------------------------------------------------------- #
 # Widgets
 # --------------------------------------------------------------------------- #
-def _row_label(surface, text: str, x: int, y: int) -> None:
+def _row_label(surface, text: str, x: int, y: int, changed: bool = False) -> None:
+    if changed:
+        _changed_dot(surface, x - 12, y + _CH // 2)
     _text(surface, _fonts()["normal"], text, config.COLOR_TEXT, midleft=(x, y + _CH // 2))
 
 
@@ -797,9 +862,11 @@ def _fmt(value, is_int: bool) -> str:
     return str(int(round(value))) if is_int else f"{value:.2f}"
 
 
-def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width) -> None:
+def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *, changed: bool = False) -> None:
     """Two-line slider: label + value on top, a full-width track below."""
     f = _fonts()
+    if changed:
+        _changed_dot(surface, x - 8, y + 8)
     _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + 8))
     # a fog range at its max means "unlimited" — read it as "All", not a bare number
     vtext = "All" if key.startswith("adv_fog_") and value >= hi else _fmt(value, is_int)
