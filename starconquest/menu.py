@@ -482,7 +482,7 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
 # flat set of Settings attrs.
 _TAB_FIELDS = {
     "basic": ("players", "nodes", "mode", "seed", "autoplay", "fog_sight", "fog_scout"),
-    "combat": tuple(attr for _, _, attr, *_ in _ADV_COMBAT),
+    "combat": tuple(attr for _, _, attr, *_ in _ADV_COMBAT) + ("in_lane_battles",),
     "advanced": tuple(attr for _, _, attr, *_ in _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG) + ("neutral_produces",),
 }
 
