@@ -283,7 +283,7 @@ def test_challenge_key_is_stable():
     entry below it lacked its fields too) and updating the literal here, so links
     already in circulation keep resolving to the setup they describe.
     """
-    assert Settings().challenge_key() == "a61a1888857255e8"
+    assert Settings().challenge_key() == "770ba09210f6127a"
 
 
 def test_challenge_keys_lead_with_the_canonical_one():

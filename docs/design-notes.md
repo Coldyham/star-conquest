@@ -142,6 +142,51 @@ top — one declared ceiling rather than two, so however long a game runs a
 fleet is never faster than the base speed alone could have made it. It is
 belt-and-braces either way: travel already floors at one turn.
 
+## In-lane battles (`engine._lane_crossings`)
+
+Off by default, and deliberately so: `apply_order` deducting ships at launch is
+what makes order-issuing have no bearing on outcomes, and a fleet that can be
+intercepted mid-lane is the one place that stops being true.
+
+The first cut fought **every** fleet sharing a lane, as one pooled force per
+owner, and moved the survivors onto the winning side's most advanced fleet. Both
+halves produced outcomes nobody wanted. Pooling meant an 8-ship fleet running a
+lane held by three separate 4-ship fleets met a single 12-ship wall — at a point
+none of the three occupied — and lost, when meeting them one at a time it wins
+(8 beats 4 leaving 7, 7 beats 4 leaving 6, 6 beats 4 leaving 4). Merging meant
+survivors teleported: `min(turns_remaining)` picks the *soonest arrival*, which
+is only the *furthest along* while every fleet on the lane shares a speed, so
+under ship-speed growth a fleet 80% of the way down a lane (2 turns left of 10)
+could be folded into one only 50% along (1 turn left of 2) and visibly jump
+backwards. And position was never consulted at all, so fleets fought from
+opposite ends of a lane: measured across 30 games, 9% of clashes were between
+fleets that never passed each other, a mean 30% of the lane apart.
+
+So a fight is now a **meeting**, decided by geometry. Each fleet covers a
+straight line along its lane over a turn, so the gap between two of them is
+linear across the step: they meet exactly when that gap is zero at either end or
+changes sign in between — reaching the same position if they share a speed,
+passing through each other if they don't. `1 - (turns_remaining + 1) / turns_total`
+is where a fleet was when the step began, and the fleets are measured from a
+single end of the lane (`min(lane_key)`) so two running opposite ways sit on one
+ruler. Solving for the zero gives the crossing point, which is what orders the
+fights, and simultaneous crossings break on fleet order — order of launch —
+so a replay fights them in the sequence the live game did.
+
+Fights are strictly pairwise, and the winner is only ever *thinned*: no merging,
+no re-timing, no moving. That is what keeps the rule checkable from the map, and
+it is the invariant worth keeping if this is ever touched again — every fight is
+between two fleets whose gap actually reached zero.
+
+**Ship-speed growth mostly switches the feature off**, which is worth knowing
+before tuning either knob. A fleet is exposed to the lane-battle phase exactly
+`turns_total` times, so as growth drives lanes toward a single turn the window
+for an interception collapses to the launch turn alone — both sides must enter
+the same lane on the same turn. Measured over 30 four-player games, as
+(share of launches that are single-turn hops, fights): 0% growth → (0%, 136);
+0.5% → (49%, 58); 1% → (79%, 36); 2% → (95%, 13). The two settings are close to
+mutually exclusive at the top of the growth slider.
+
 ## Map viewport margins
 
 The floor at `config.node_clearance()` exists because a node's circle is

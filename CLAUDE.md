@@ -81,9 +81,27 @@ Turns resolve **simultaneously**: `end_turn` collects every player's orders
 against the *same* unchanged start-of-turn state, then applies them together, so
 there is no turn-order advantage. The phase order inside `end_turn` is
 deliberate and combat/production correctness depends on it: AI decisions →
-advance fleets → arrivals+combat (fleets arriving at a node are grouped and
-resolved together, launch-order independent) → production (after combat, so a
-system captured this turn produces for its new owner) → win check → `turn += 1`.
+advance fleets → lane battles (opt-in; see below) → arrivals+combat (fleets
+arriving at a node are grouped and resolved together, launch-order independent)
+→ production (after combat, so a system captured this turn produces for its new
+owner) → win check → `turn += 1`.
+
+**In-lane battles** (`config.IN_LANE_BATTLES`, off by default, on the menu's
+Combat tab) are the one thing that breaks "fleets on lanes never interact". Two
+*enemy* fleets fight only on the turn their paths touch or cross — sharing a lane
+is not enough — and they fight **pairwise, in crossing order**, so a strong fleet
+running a defended lane picks its opponents off one at a time and carries its
+losses into each next fight. Nothing is pooled and nothing is moved: a winner is
+thinned in place and keeps its own heading, speed and arrival turn, so a fleet is
+only ever drawn where it really is. `engine._lane_span` measures both fleets from
+one end of the lane and mirrors `Fleet.progress` (what `render` draws), so a fight
+happens exactly where the triangles are seen to touch. Siting the phase *after*
+`_advance_fleets` but *before* `_resolve_arrivals` is what lets a single-turn hop
+still be intercepted — it is on the board, at `turns_remaining == 0`, for exactly
+one lane-battle check. `combat.resolve_lane_clash` passes no `defender_owner`:
+nobody holds open space, so `DEFENDER_ADVANTAGE` applies to neither side and an
+exact tie annihilates rather than breaking to a defender — but the jitter, which
+belongs to the dice rather than the ground, still applies.
 
 **The engine never imports the AI.** The decision function is injected as the
 `decide` parameter to `end_turn`; `main.py` and `tests/sim.py` pass `ai.decide`,
