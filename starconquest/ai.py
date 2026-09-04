@@ -16,16 +16,18 @@ from __future__ import annotations
 import importlib.util
 import math
 import sys
-from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from . import config
+from . import config, model
 from .model import AiParams, GameState, Order
+from .paths import data_dir
 
-# User-supplied strategies live in a gitignored dir beside the repo (mirrors
-# menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without touching src.
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+# User-supplied strategies live in a gitignored dir under the writable data dir
+# (mirrors menu._SAVE_DIR), so a drop-in `.py` becomes a selectable AI without
+# touching src. On Android this is the app-private dir, a real filesystem, so a
+# strategy dropped in there is still importable by path.
+MODELS_DIR = data_dir() / "models"
 
 # A seat's decision function: same shape the engine injects as `decide`.
 DecideFn = Callable[[GameState, int], list[Order]]
@@ -87,6 +89,35 @@ def available_strategies() -> list[str]:
     return ["heuristic"] + sorted(n for n in STRATEGIES if n != "heuristic")
 
 
+# The one bot-defined knob, `AiParams.aux`: a strategy declares what it means by
+# exporting ``AUX_LABEL`` (optionally ``AUX_RANGE = (lo, hi, step)`` and
+# ``AUX_INT``); the menu shows the slider under that label, and hides it for any
+# strategy that declares nothing.
+AuxSpec = tuple[str, float, float, float, bool]  # label, lo, hi, step, is_int
+AUX_RANGE_DEFAULT = (0.0, 8.0, 1.0)
+
+
+def aux_spec(name: str) -> AuxSpec | None:
+    """What ``ai_params.aux`` means for strategy ``name``, or None if it ignores it.
+
+    Tolerant like the rest of the drop-in contract: a missing, blank or malformed
+    declaration falls back rather than raising, so a bad model can only cost itself
+    the slider.
+    """
+    fn = STRATEGIES.get(name)
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    label = getattr(module, "AUX_LABEL", None)
+    if not isinstance(label, str) or not label.strip():
+        return None
+    try:
+        lo, hi, step = (float(v) for v in getattr(module, "AUX_RANGE", None))
+    except (TypeError, ValueError):
+        lo, hi, step = AUX_RANGE_DEFAULT
+    if hi <= lo or step <= 0:
+        lo, hi, step = AUX_RANGE_DEFAULT
+    return label.strip(), lo, hi, step, bool(getattr(module, "AUX_INT", False))
+
+
 def load_models(directory: Path = MODELS_DIR) -> list[str]:
     """Import every ``*.py`` in ``directory`` and register its ``decide`` function.
 
@@ -107,13 +138,13 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
             if spec is None or spec.loader is None:
                 continue
             module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module          # so dataclasses/typing resolve
+            sys.modules[spec.name] = module  # so dataclasses/typing resolve
             spec.loader.exec_module(module)
             fn = getattr(module, "decide", None)
             if callable(fn):
                 register(path.stem, fn)
                 loaded.append(path.stem)
-        except Exception:                            # noqa: BLE001 — one bad model mustn't break the rest
+        except Exception:  # noqa: BLE001 — one bad model mustn't break the rest
             continue
     return sorted(loaded)
 
@@ -121,8 +152,7 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Decisions
 # --------------------------------------------------------------------------- #
-def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int,
-                    params: AiParams):
+def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int, params: AiParams):
     sys = state.systems[sid]
     jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
     self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are
@@ -143,13 +173,20 @@ def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod
                     best = _better(best, (2, nbr_deficit + jitter(), nbr, surplus))
             continue
 
+        # What we actually have to out-fight, not what is parked there: a dug-in
+        # defender fights at `config.DEFENDER_ADVANTAGE` times its ship count
+        # (combat._apply_advantage). Without this the margins below understate
+        # every target, and at a high setting the AI simply stops expanding —
+        # it keeps waiting for a surplus that is already more than enough.
+        garrison = n.ships * config.DEFENDER_ADVANTAGE
+
         if n.owner_id == 0:  # neutral -> expand
-            if surplus >= math.ceil(n.ships * params.expand_margin):
+            if surplus >= math.ceil(garrison * params.expand_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships) ** 0.5)
                 cand = (1, score + jitter(), nbr, surplus)  # commit fully: concentration wins
                 best = _better(best, cand)
         else:  # enemy -> attack
-            if surplus >= math.ceil(n.ships * params.attack_margin):
+            if surplus >= math.ceil(garrison * params.attack_margin):
                 score = _desirability(n, max_prod) / (travel * max(1, n.ships))
                 cand = (1, score + jitter(), nbr, surplus)  # mass the whole surplus
                 best = _better(best, cand)
@@ -200,21 +237,10 @@ def _threat(state: GameState, sid: int, pid: int) -> int:
 def _flow_to_frontier(state: GameState, owned: set[int], frontier: set[int]) -> dict[int, int]:
     """Multi-source BFS over owned territory; returns rear-node -> next-hop-toward-front.
 
-    Seeds and neighbours are visited in sorted order so the flow is deterministic:
-    while the frontier is stable, a rear system keeps the same next-hop every turn
-    instead of flip-flopping, which is what made rear ships oscillate.
+    The frontier is the seed set, so a rear system flows toward whichever front is
+    fewest hops away. See ``model.flow_field`` for the determinism this relies on.
     """
-    parent: dict[int, int] = {}
-    seen = set(frontier)
-    queue = deque(sorted(frontier))
-    while queue:
-        cur = queue.popleft()
-        for nbr in sorted(state.systems[cur].neighbors):
-            if nbr in owned and nbr not in seen:
-                seen.add(nbr)
-                parent[nbr] = cur  # move from nbr toward cur (closer to the front)
-                queue.append(nbr)
-    return parent
+    return model.flow_field(state, owned, frontier)
 
 
 register("heuristic", compute_orders)

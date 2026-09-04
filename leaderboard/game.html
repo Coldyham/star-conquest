@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map scores · Star Conquest Leaderboard</title>
+<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <nav class="actions">
+    <a class="btn" href="submit.html">Enter score</a>
+  </nav>
+</header>
+
+<main>
+  <a class="back" href="index.html">← All maps</a>
+  <h1 id="setup">Loading…</h1>
+  <div id="setup-tags" class="card-tags"></div>
+  <p class="lede" id="subtitle"></p>
+  <div id="sort"></div>
+  <div id="scores" class="loading">Loading…</div>
+</main>
+
+<footer class="attract">
+  <span class="coin">▚</span> Think you can beat that? &nbsp;·&nbsp;
+  <a href="submit.html">Enter a score</a>
+</footer>
+
+<script type="module" src="js/game.mjs"></script>
+</body>
+</html>

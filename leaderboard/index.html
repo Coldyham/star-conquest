@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Conquest Leaderboard</title>
+<meta name="description" content="Posted scores on Star Conquest challenge maps.">
+<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <nav class="actions">
+    <a class="btn" href="submit.html">Enter score</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Recently played</h1>
+  <p class="lede">
+    Every map someone has posted a score on, newest first. Each row shows the best
+    result so far — <strong>fewest turns wins</strong>, fewest ships lost breaks a tie.
+  </p>
+  <div id="config-head"></div>
+  <div id="group-toggle"></div>
+  <div id="filters"></div>
+  <div id="games" class="loading">Loading…</div>
+</main>
+
+<footer class="attract">
+  <span class="coin">▚</span> Insert coin &nbsp;·&nbsp;
+  <a href="submit.html">Enter a score</a> &nbsp;·&nbsp; Fewest turns wins
+</footer>
+
+<script type="module" src="js/home.mjs"></script>
+</body>
+</html>
