@@ -6,7 +6,7 @@ import random
 from contextlib import contextmanager
 
 from starconquest import config, engine
-from starconquest.model import GameState, Order, Player, System
+from starconquest.model import Fleet, GameState, Order, Player, System
 
 
 @contextmanager
@@ -17,6 +17,16 @@ def no_jitter():
         yield
     finally:
         config.COMBAT_JITTER = old
+
+
+@contextmanager
+def in_lane_battles():
+    old = config.IN_LANE_BATTLES
+    config.IN_LANE_BATTLES = True
+    try:
+        yield
+    finally:
+        config.IN_LANE_BATTLES = old
 
 
 def make_state(specs, lanes, human=None):
@@ -137,6 +147,156 @@ def test_apply_order_validation():
     assert engine.apply_order(s, Order(1, 0, 1, 0)) is None    # zero ships
     fleet = engine.apply_order(s, Order(1, 0, 1, 999))         # clamps to available
     assert fleet is not None and fleet.ships == 10 and s.systems[0].ships == 0
+
+
+def _stage(state, owner, src, dst, ships, total, rem_after):
+    """Put a fleet on a lane positioned so that, once ``end_turn`` advances it, it
+    has ``rem_after`` turns left of a ``total``-turn crossing.
+
+    Lane battles are decided by where fleets actually are, so these tests need to
+    place them rather than launch them — and different ``total``s on one lane is
+    exactly what ship-speed growth produces in a real game.
+    """
+    state.fleets.append(Fleet(owner_id=owner, source_id=src, dest_id=dst,
+                              ships=ships, turns_total=total,
+                              turns_remaining=rem_after + 1))
+    return state.fleets[-1]
+
+
+def test_lane_battle_waits_until_the_paths_actually_cross():
+    """Sharing a lane is not enough. Head-on on a 3-turn lane, the fleets are
+    still approaching after one turn and only meet in the middle of the second."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 10))   # 0 -> 1
+        engine.apply_order(s, Order(2, 1, 0, 6))    # 1 -> 0 (head-on)
+        engine.end_turn(s)
+        assert len(s.fleets) == 2                   # 1/3 vs 2/3 along: no contact
+        engine.end_turn(s)                          # they cross mid-lane
+    assert len(s.fleets) == 1
+
+
+def test_lane_battle_winner_keeps_its_own_heading_and_schedule():
+    """The survivor is thinned where it stands — never merged into another fleet,
+    never moved to the meeting point, never re-timed."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.apply_order(s, Order(2, 1, 0, 6))
+        engine.end_turn(s)
+        engine.end_turn(s)
+    survivor = s.fleets[0]
+    assert survivor.owner_id == 1
+    assert survivor.dest_id == 1                    # kept its original heading
+    assert survivor.ships == round((10 ** 2 - 6 ** 2) ** 0.5)   # Lanchester: 8
+    assert survivor.turns_total == 3                # ...and its own speed
+    assert survivor.turns_remaining == 1            # advanced twice, not reset
+
+
+def test_lane_battle_charges_both_sides_ships_lost():
+    """Ships killed in open space count toward the challenge tie-break, exactly as
+    ships killed at a system do — the winner's sub-1:1 losses included."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.apply_order(s, Order(2, 1, 0, 6))
+        engine.end_turn(s)
+        engine.end_turn(s)
+    assert s.players[1].ships_lost == 10 - s.fleets[0].ships   # kept 8, so lost 2
+    assert s.players[2].ships_lost == 6                        # wiped out entirely
+
+
+def test_lane_annihilation_charges_everyone_in_full():
+    # matched forces meeting mid-lane: nobody holds open space, so the tie breaks
+    # to no one and both fleets are spent.
+    s = make_state([(0, 1, 8, 100), (1, 2, 8, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 8))
+        engine.apply_order(s, Order(2, 1, 0, 8))
+        engine.end_turn(s)
+        engine.end_turn(s)
+    assert s.fleets == []
+    assert s.players[1].ships_lost == 8
+    assert s.players[2].ships_lost == 8
+
+
+def test_fleets_that_never_meet_never_fight():
+    """Same heading at the same speed: the gap between them never closes, so they
+    ride the whole lane together without a shot, however long the game runs."""
+    s = make_state([(0, 1, 1, 100), (1, 0, 0, 100)], [(0, 1, 6)])
+    with no_jitter(), in_lane_battles():
+        _stage(s, 1, 0, 1, 5, 6, 3)
+        _stage(s, 2, 0, 1, 5, 6, 2)   # one step behind, identical speed
+        engine.end_turn(s)
+        engine.end_turn(s)
+    assert len(s.fleets) == 2
+
+
+def test_a_strong_fleet_beats_a_defended_lane_one_fleet_at_a_time():
+    """The whole point of pairwise, crossing-ordered fights.
+
+    An 8-ship fleet sweeps past three 4-ship fleets in one turn. It meets them
+    nearest-first and carries its losses into each next fight — 8 beats 4, then 7
+    beats 4, then 6 beats 4 — and comes out alive. Pooled into one 12-ship force
+    at a point none of them occupied, it would have lost instead.
+    """
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 10)])
+    with no_jitter(), in_lane_battles():
+        strong = _stage(s, 1, 0, 1, 8, 2, 1)      # sweeps 0.0 -> 0.5 of the lane
+        for rem in (2, 3, 4):                     # strung out at 0.2, 0.3, 0.4
+            _stage(s, 2, 1, 0, 4, 10, rem)
+        engine.end_turn(s)
+    assert s.fleets == [strong]
+    # 8 v 4 -> 7, 7 v 4 -> 6, 6 v 4 -> 4
+    assert strong.ships == 4
+    assert s.players[1].ships_lost == 4
+    assert s.players[2].ships_lost == 12
+
+
+def test_fleets_at_different_speeds_meet_when_they_pass():
+    """A 6-turn crossing and a 5-turn one, launched under different ship speeds,
+    never share a position — they pass through each other mid-step, and that is
+    the turn they fight."""
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 6)])
+    with no_jitter(), in_lane_battles():
+        _stage(s, 1, 0, 1, 9, 6, 3)   # progress 2/6 -> 3/6
+        _stage(s, 2, 1, 0, 5, 5, 2)   # progress 2/5 -> 3/5, the other way
+        engine.end_turn(s)
+    assert len(s.fleets) == 1
+    assert s.fleets[0].owner_id == 1
+    assert s.fleets[0].turns_total == 6   # untouched by the fleet it destroyed
+
+
+def test_same_owner_fleets_are_never_pooled():
+    """Only the fleet that is actually met does the fighting.
+
+    Two 5-ship fleets share the lane, but the enemy's 6 crosses just one of them.
+    Pooled they would be 10 and would win; met singly, 5 loses and the enemy sails
+    on with 3 — while the fleet it never reached is untouched.
+    """
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 8)])
+    with no_jitter(), in_lane_battles():
+        met = _stage(s, 1, 0, 1, 5, 8, 4)      # mid-lane, meets the enemy
+        astern = _stage(s, 1, 0, 1, 5, 8, 7)   # far behind, never gets there
+        _stage(s, 2, 1, 0, 6, 8, 4)            # crosses `met` and nothing else
+        engine.end_turn(s)
+    owners = [(f.owner_id, f.ships) for f in s.fleets]
+    assert met not in s.fleets
+    assert astern in s.fleets and astern.ships == 5   # never engaged
+    assert (2, 3) in owners      # 6 beat 5 (sqrt(36-25) -> 3), not 6 against 10
+    assert s.players[1].ships_lost == 5
+    assert s.players[2].ships_lost == 3
+
+
+def test_lane_battles_off_by_default_fleets_coexist():
+    # with the toggle off, opposing fleets pass each other untouched (default).
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter():
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.apply_order(s, Order(2, 1, 0, 6))
+        engine.end_turn(s)
+        engine.end_turn(s)
+    assert len(s.fleets) == 2
 
 
 def test_decide_callback_runs_for_ai_only():

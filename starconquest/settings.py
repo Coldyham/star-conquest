@@ -50,6 +50,7 @@ _GLOBAL_KNOBS = (
     ("combat_jitter", "COMBAT_JITTER"),
     ("defender_advantage", "DEFENDER_ADVANTAGE"),
     ("neutral_produces", "NEUTRAL_PRODUCES"),
+    ("in_lane_battles", "IN_LANE_BATTLES"),
     ("fog_sight", "FOG_SIGHT"),
     ("fog_scout", "FOG_SCOUT"),
 )
@@ -70,7 +71,8 @@ _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 # would have stamped. Append here whenever a field joins `Settings` —
 # `test_challenge_key_is_stable` fails until you do.
 _LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
-    ("defender_advantage",),
+    ("in_lane_battles",),
+    ("in_lane_battles", "defender_advantage"),
 )
 
 
@@ -145,6 +147,7 @@ class Settings:
     combat_jitter: float = config.COMBAT_JITTER
     defender_advantage: float = config.DEFENDER_ADVANTAGE
     neutral_produces: bool = config.NEUTRAL_PRODUCES
+    in_lane_battles: bool = config.IN_LANE_BATTLES
     fog_sight: int = config.FOG_SIGHT
     fog_scout: int = config.FOG_SCOUT
 

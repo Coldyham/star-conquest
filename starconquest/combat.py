@@ -312,6 +312,47 @@ def preview_fight(attacker: int, defender: int, jitter: float, advantage: float)
     )
 
 
+def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ships: int) -> None:
+    """Charge every side what the engagement cost it.
+
+    Everyone brought ``forces[owner]`` (a garrison plus arrivals at a system, or
+    a lane's fleets), and only the final owner keeps anything, so the difference
+    is exactly what they lost. Correct for a plain reinforcement (nothing lost),
+    a two-way attack, the 3+-owner pile-up and a lane clash alike — and for
+    mutual annihilation, where ``owner_id`` is neutral, holds nothing here, and
+    so everyone is charged in full. Draws no rng, so this cannot perturb a seeded
+    replay.
+    """
+    for owner, brought in forces.items():
+        kept = ships if owner == owner_id else 0
+        if brought > kept and owner in state.players:
+            state.players[owner].ships_lost += brought - kept
+
+
+def resolve_lane_clash(state: GameState, a: Fleet, b: Fleet, rng=None) -> tuple[int, int]:
+    """One engagement between two fleets that have met in open space.
+
+    Nobody holds open space, so no ``defender_owner`` is passed: an exact tie
+    annihilates instead of breaking to a defender, and ``DEFENDER_ADVANTAGE``
+    applies to neither side. The jitter still does — it belongs to the dice, not
+    the ground — so the Combat page's matrix reads true out here as well.
+
+    Strictly two fleets, never a lane's worth pooled together: the strength that
+    fights is the strength that is actually present at the meeting point. The
+    caller thins the winner in place and keeps it on its own heading, so nothing
+    is ever merged or moved.
+
+    Returns (winning_owner, surviving_ships); (0, 0) on mutual annihilation.
+    Losses go through the same ``_record_losses`` the arrival path uses, so ships
+    killed in open space count toward ``Player.ships_lost`` — the challenge
+    tie-break — exactly as ships killed at a system do.
+    """
+    rng = state.rng if rng is None else rng
+    winner, survivors = resolve_fight(rng, a.owner_id, a.ships, b.owner_id, b.ships)
+    _record_losses(state, {a.owner_id: a.ships, b.owner_id: b.ships}, winner, survivors)
+    return winner, survivors
+
+
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
                     rng=None) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
@@ -348,15 +389,7 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
             cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
         node.owner_id, node.ships = cur_owner, cur_ships
 
-    # Attrition, per owner: everyone brought `forces[owner]` here (garrison plus
-    # arrivals) and only the final owner keeps anything, so the difference is
-    # exactly what they lost. Correct for a plain reinforcement (nothing lost), a
-    # two-way attack and the 3+-owner pile-up alike. Draws no rng, so this cannot
-    # perturb a seeded replay.
-    for owner, brought in forces.items():
-        kept = node.ships if owner == node.owner_id else 0
-        if brought > kept and owner in state.players:
-            state.players[owner].ships_lost += brought - kept
+    _record_losses(state, forces, node.owner_id, node.ships)
 
     if node.owner_id != old_owner:
         node.prod_progress = 0  # a captured system starts building fresh

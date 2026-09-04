@@ -71,6 +71,7 @@ COMBAT_JITTER = 0.10        # +/- 10% random swing applied to each side's streng
 DEFENDER_ADVANTAGE = 1.0    # multiplier on the defender's effective strength (1.0 == none)
 DEFENDER_ADVANTAGE_MAX = 1.5  # slider ceiling: past here conquest stalemates (see design notes)
 COMBAT_PREVIEW_MAX = 50     # menu Combat page: ceiling on its two demo sliders
+IN_LANE_BATTLES = False     # opposing fleets sharing a lane fight in transit
 
 # --------------------------------------------------------------------------- #
 # AI heuristic knobs
