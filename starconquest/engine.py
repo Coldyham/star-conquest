@@ -11,8 +11,8 @@ everything the turn consumed — and accepting one back in ``script`` to replay 
                          are dropped (``_own_orders``), since ``apply_order`` alone
                          cannot tell which seat issued an order.
     2. Advance fleets  — every in-transit fleet counts down one turn.
-    3. Lane battles    — (opt-in) fleets of different owners sharing a lane clash
-                         in transit; only the winning side flies on.
+    3. Lane battles    — (opt-in) enemy fleets whose paths cross in transit fight
+                         pairwise, nearest crossing first; winners fly on as they were.
     4. Arrivals+combat — fleets that reach their destination are grouped by node
                          and resolved together (fair regardless of launch order).
     5. Production      — systems accrue toward their next ship (after combat, so
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Callable, Iterable, Optional
 
 from . import combat, config
@@ -179,35 +180,95 @@ def _advance_fleets(state: GameState) -> None:
         fleet.turns_remaining -= 1
 
 
-def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
-    """Fight any lane held by two or more owners (opt-in via IN_LANE_BATTLES).
+def _lane_span(fleet: Fleet, low_id: int) -> tuple[float, float]:
+    """Where ``fleet`` was when this turn's step began and where it is now, as
+    fractions of its lane measured from ``low_id``.
 
-    Fleets in transit normally never interact; when enabled, every fleet sharing
-    a lane clashes in open space and only the winning side survives. Its most
-    advanced fleet (fewest turns remaining) carries the survivors on toward its
-    destination, so the winner keeps its original heading and arrival time.
+    Mirrors ``Fleet.progress`` — which is exactly what the map draws — and
+    mirrors it from a single end of the lane so two fleets running opposite ways
+    are measured on one ruler. A fleet that launched this turn starts at 0.0 (or
+    1.0, heading the other way), i.e. on its source system.
+    """
+    total = fleet.turns_total
+    if total <= 0:
+        return 1.0, 1.0
+    was = 1.0 - (fleet.turns_remaining + 1) / total
+    now = 1.0 - fleet.turns_remaining / total
+    return (was, now) if fleet.source_id == low_id else (1.0 - was, 1.0 - now)
+
+
+def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tuple[int, int]]:
+    """Every enemy pair on one lane that meets during this turn's step, in the
+    order the meetings happen.
+
+    Each fleet covers a straight line along the lane over the turn, so the gap
+    between any two is linear across the step: they meet exactly when that gap is
+    zero at either end or changes sign in between — reaching the same position if
+    they run at the same speed, passing through each other if they don't. The
+    crossing point is where the gap hits zero, which is what orders the fights: a
+    fleet running a defended lane meets what is nearest first and carries its
+    losses into the next meeting.
+
+    Simultaneous crossings break on fleet order, which is order of launch, so a
+    replay fights them in the sequence the live game did.
+    """
+    crossings: list[tuple[float, int, int]] = []
+    for a_i, b_i in combinations(idxs, 2):
+        a, b = state.fleets[a_i], state.fleets[b_i]
+        if a.owner_id == b.owner_id:
+            continue  # friendly traffic passes through itself
+        a_was, a_now = _lane_span(a, low_id)
+        b_was, b_now = _lane_span(b, low_id)
+        gap_was, gap_now = a_was - b_was, a_now - b_now
+        if gap_was * gap_now > 0:
+            continue  # one stayed ahead of the other all step: they never met
+        when = 0.0 if gap_was == gap_now else gap_was / (gap_was - gap_now)
+        crossings.append((when, a_i, b_i))
+    crossings.sort()
+    return [(a_i, b_i) for _, a_i, b_i in crossings]
+
+
+def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
+    """Fight the fleets that actually meet in transit (opt-in via IN_LANE_BATTLES).
+
+    Fleets in transit normally never interact. When enabled, two enemy fleets
+    engage on the turn their paths touch or cross — sharing a lane is not enough,
+    and nothing is dragged to a meeting point it never reached.
+
+    Engagements are strictly pairwise and resolved in crossing order, so one
+    strong fleet running a lane picks off the fleets strung along it one at a
+    time, carrying its losses forward into each next fight, instead of facing
+    their pooled strength at once. A winner keeps its own heading, speed and
+    arrival turn and is only thinned, so a fleet is never merged into another and
+    is only ever drawn where it really is.
     """
     if not config.IN_LANE_BATTLES:
         return
 
-    by_lane: dict[frozenset[int], list[Fleet]] = defaultdict(list)
-    for fleet in state.fleets:
-        by_lane[lane_key(fleet.source_id, fleet.dest_id)].append(fleet)
+    by_lane: dict[frozenset[int], list[int]] = defaultdict(list)
+    for i, fleet in enumerate(state.fleets):
+        by_lane[lane_key(fleet.source_id, fleet.dest_id)].append(i)
 
-    kept: list[Fleet] = []
-    for fleets in by_lane.values():
-        if len({f.owner_id for f in fleets}) < 2:
-            kept.extend(fleets)  # no enemy present -> lane untouched
-            continue
-        winner, survivors = combat.resolve_lane_clash(state, fleets, dice)
-        if winner != 0 and survivors > 0:
-            vanguard = min(
-                (f for f in fleets if f.owner_id == winner),
-                key=lambda f: f.turns_remaining,
-            )
-            vanguard.ships = survivors
-            kept.append(vanguard)
-    state.fleets = kept
+    destroyed: set[int] = set()
+    for lane, idxs in by_lane.items():
+        if len({state.fleets[i].owner_id for i in idxs}) < 2:
+            continue  # no enemy out here, so there is nobody to meet
+        for a_i, b_i in _lane_crossings(state, min(lane), idxs):
+            if a_i in destroyed or b_i in destroyed:
+                continue  # killed at an earlier crossing this same turn
+            a, b = state.fleets[a_i], state.fleets[b_i]
+            winner, survivors = combat.resolve_lane_clash(state, a, b, dice)
+            if winner == a.owner_id:
+                a.ships = survivors
+                destroyed.add(b_i)
+            elif winner == b.owner_id:
+                b.ships = survivors
+                destroyed.add(a_i)
+            else:  # matched forces, and no ground to break the tie
+                destroyed.update((a_i, b_i))
+
+    if destroyed:
+        state.fleets = [f for i, f in enumerate(state.fleets) if i not in destroyed]
 
 
 def _resolve_arrivals(state: GameState, dice: _Dice) -> None:

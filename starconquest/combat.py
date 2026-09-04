@@ -329,44 +329,28 @@ def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ship
             state.players[owner].ships_lost += brought - kept
 
 
-def resolve_lane_clash(state: GameState, fleets: list[Fleet], rng=None) -> tuple[int, int]:
-    """Resolve every fleet sharing one lane against each other in open space.
+def resolve_lane_clash(state: GameState, a: Fleet, b: Fleet, rng=None) -> tuple[int, int]:
+    """One engagement between two fleets that have met in open space.
 
-    No defender exists mid-lane, so this is a plain strongest-first fold of the
-    per-owner totals via ``resolve_fight`` (mirrors the pile-up branch of
-    ``resolve_arrival``, minus the ``defender_owner`` tie-break — nobody holds
-    open space, so ``config.DEFENDER_ADVANTAGE`` applies to neither side and an
-    exact tie annihilates instead of breaking to anyone). The jitter still
-    applies: it is a property of the fight, not of the ground. Returns
-    (winning_owner, surviving_ships); (0, 0) on mutual annihilation.
+    Nobody holds open space, so no ``defender_owner`` is passed: an exact tie
+    annihilates instead of breaking to a defender, and ``DEFENDER_ADVANTAGE``
+    applies to neither side. The jitter still does — it belongs to the dice, not
+    the ground — so the Combat page's matrix reads true out here as well.
 
-    ``rng`` is the turn's dice, for the same reason ``resolve_arrival`` takes
-    them: a lane battle rolls, so a replay has to be dealt the recorded draws
-    back or it fights a different one. ``state.rng`` when omitted.
+    Strictly two fleets, never a lane's worth pooled together: the strength that
+    fights is the strength that is actually present at the meeting point. The
+    caller thins the winner in place and keeps it on its own heading, so nothing
+    is ever merged or moved.
 
-    Losses are charged through the same ``_record_losses`` the arrival path uses,
-    so ships killed in open space count toward ``Player.ships_lost`` — the
-    challenge tie-break — exactly as ships killed at a system do.
+    Returns (winning_owner, surviving_ships); (0, 0) on mutual annihilation.
+    Losses go through the same ``_record_losses`` the arrival path uses, so ships
+    killed in open space count toward ``Player.ships_lost`` — the challenge
+    tie-break — exactly as ships killed at a system do.
     """
     rng = state.rng if rng is None else rng
-
-    forces: dict[int, int] = defaultdict(int)
-    for f in fleets:
-        forces[f.owner_id] += f.ships
-
-    sides = [(owner, ships) for owner, ships in forces.items() if ships > 0]
-    if not sides:
-        return 0, 0
-    if len(sides) == 1:
-        cur_owner, cur_ships = sides[0]
-    else:
-        sides.sort(key=lambda s: s[1], reverse=True)
-        cur_owner, cur_ships = sides[0]
-        for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships)
-
-    _record_losses(state, forces, cur_owner, cur_ships)
-    return cur_owner, cur_ships
+    winner, survivors = resolve_fight(rng, a.owner_id, a.ships, b.owner_id, b.ships)
+    _record_losses(state, {a.owner_id: a.ships, b.owner_id: b.ships}, winner, survivors)
+    return winner, survivors
 
 
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
