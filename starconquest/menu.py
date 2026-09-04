@@ -588,11 +588,6 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
         _changed_dot(surface, rx - 12, y + _CH // 2)
     _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
     _checkbox(surface, ms, "neutral_produces", settings.neutral_produces, rx + col_w, y)
-    y += _SLIDER_H
-    if _changed(settings, "in_lane_battles"):
-        _changed_dot(surface, rx - 12, y + _CH // 2)
-    _text(surface, _fonts()["small"], "In-lane battles", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
-    _checkbox(surface, ms, "in_lane_battles", settings.in_lane_battles, rx + col_w, y)
 
 
 # --------------------------------------------------------------------------- #
@@ -637,6 +632,7 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
     # and write MenuState, unlike every other group on every other tab.
     _sliders(surface, ms, ms, _PREVIEW, lx, y, col_w)
     y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
+    y = _draw_lane_battles(surface, ms, settings, lx, y + 6, full)
 
     preview = combat.preview_fight(
         ms.preview_attacker, ms.preview_defender, settings.combat_jitter, settings.defender_advantage
@@ -644,6 +640,35 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
     y = _draw_fight_readout(surface, preview, lx, y + 10, full)
     y = _section(surface, "Jitter matrix — your swing across, theirs down", lx, y + 10)
     _draw_jitter_matrix(surface, preview, lx, y, full)
+
+
+# The caveat is the whole reason this toggle sits here rather than on Advanced:
+# a lane fight is the page's fight minus the ground. Nobody holds open space, so
+# `resolve_lane_clash` passes no `defender_owner` — the advantage slider above
+# applies to neither side and an exact tie annihilates instead of breaking to the
+# defender. The jitter is a property of the dice, not the ground, so it still
+# applies, and the matrix below still reads true.
+_LANE_NOTE = "same jitter, but no defender advantage"
+
+
+def _draw_lane_battles(surface, ms: MenuState, settings: Settings, x: int, y: int, width: int) -> int:
+    """The one rule on this page that is a toggle, not a slider. Laid out full
+    width as label / caveat / checkbox; returns the y below the row.
+
+    The caveat is placed off the *measured* label rather than a fixed column, so
+    it cannot collide with it — the page's hand-broken prose rule is about its
+    fixed-height canvas, and nothing here changes the row's height.
+    """
+    f = _fonts()
+    label = "In-lane battles"
+    mid = y + _CH // 2
+    if _changed(settings, "in_lane_battles"):
+        _changed_dot(surface, x - 12, mid)
+    _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, mid))
+    _text(surface, f["small"], _LANE_NOTE, _DISABLED_TEXT,
+          midleft=(x + f["small"].size(label)[0] + 16, mid))
+    _checkbox(surface, ms, "in_lane_battles", settings.in_lane_battles, x + width, y)
+    return y + _CH
 
 
 def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, int], str, str]:

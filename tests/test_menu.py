@@ -248,9 +248,6 @@ def test_advanced_slider_sets_setting():
         # neutral-produces checkbox toggles
         _click_key(screen, ms, settings, "neutral_produces")
         assert settings.neutral_produces is True
-        # in-lane-battles checkbox toggles
-        _click_key(screen, ms, settings, "in_lane_battles")
-        assert settings.in_lane_battles is True
     finally:
         pygame.quit()
 
@@ -297,6 +294,30 @@ def test_combat_knobs_still_write_settings_from_the_combat_tab():
         _drag_slider(screen, ms, settings, "adv_defender_adv", 1.0)
         assert settings.defender_advantage == config.DEFENDER_ADVANTAGE_MAX
         assert config.COMBAT_JITTER == was  # only settings._apply_globals writes config
+    finally:
+        pygame.quit()
+
+
+def test_in_lane_battles_toggles_from_the_combat_tab():
+    """It sits with the other combat rules, since the caveat that explains it is a
+    contrast with the fight this page previews."""
+    screen, ms, settings = _setup()
+    ms.tab = "combat"
+    try:
+        _click_key(screen, ms, settings, "in_lane_battles")
+        assert settings.in_lane_battles is True
+        _click_key(screen, ms, settings, "in_lane_battles")
+        assert settings.in_lane_battles is False
+    finally:
+        pygame.quit()
+
+
+def test_in_lane_battles_is_gone_from_advanced():
+    screen, ms, settings = _setup()
+    ms.tab = "advanced"
+    try:
+        menu.draw(screen, ms, settings)
+        assert "in_lane_battles" not in ms.rects
     finally:
         pygame.quit()
 

@@ -312,18 +312,41 @@ def preview_fight(attacker: int, defender: int, jitter: float, advantage: float)
     )
 
 
+def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ships: int) -> None:
+    """Charge every side what the engagement cost it.
+
+    Everyone brought ``forces[owner]`` (a garrison plus arrivals at a system, or
+    a lane's fleets), and only the final owner keeps anything, so the difference
+    is exactly what they lost. Correct for a plain reinforcement (nothing lost),
+    a two-way attack, the 3+-owner pile-up and a lane clash alike — and for
+    mutual annihilation, where ``owner_id`` is neutral, holds nothing here, and
+    so everyone is charged in full. Draws no rng, so this cannot perturb a seeded
+    replay.
+    """
+    for owner, brought in forces.items():
+        kept = ships if owner == owner_id else 0
+        if brought > kept and owner in state.players:
+            state.players[owner].ships_lost += brought - kept
+
+
 def resolve_lane_clash(state: GameState, fleets: list[Fleet], rng=None) -> tuple[int, int]:
     """Resolve every fleet sharing one lane against each other in open space.
 
     No defender exists mid-lane, so this is a plain strongest-first fold of the
     per-owner totals via ``resolve_fight`` (mirrors the pile-up branch of
     ``resolve_arrival``, minus the ``defender_owner`` tie-break — nobody holds
-    open space). Returns (winning_owner, surviving_ships); (0, 0) on mutual
-    annihilation.
+    open space, so ``config.DEFENDER_ADVANTAGE`` applies to neither side and an
+    exact tie annihilates instead of breaking to anyone). The jitter still
+    applies: it is a property of the fight, not of the ground. Returns
+    (winning_owner, surviving_ships); (0, 0) on mutual annihilation.
 
     ``rng`` is the turn's dice, for the same reason ``resolve_arrival`` takes
     them: a lane battle rolls, so a replay has to be dealt the recorded draws
     back or it fights a different one. ``state.rng`` when omitted.
+
+    Losses are charged through the same ``_record_losses`` the arrival path uses,
+    so ships killed in open space count toward ``Player.ships_lost`` — the
+    challenge tie-break — exactly as ships killed at a system do.
     """
     rng = state.rng if rng is None else rng
 
@@ -335,12 +358,14 @@ def resolve_lane_clash(state: GameState, fleets: list[Fleet], rng=None) -> tuple
     if not sides:
         return 0, 0
     if len(sides) == 1:
-        return sides[0]
+        cur_owner, cur_ships = sides[0]
+    else:
+        sides.sort(key=lambda s: s[1], reverse=True)
+        cur_owner, cur_ships = sides[0]
+        for owner, ships in sides[1:]:
+            cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships)
 
-    sides.sort(key=lambda s: s[1], reverse=True)
-    cur_owner, cur_ships = sides[0]
-    for owner, ships in sides[1:]:
-        cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships)
+    _record_losses(state, forces, cur_owner, cur_ships)
     return cur_owner, cur_ships
 
 
@@ -380,15 +405,7 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
             cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
         node.owner_id, node.ships = cur_owner, cur_ships
 
-    # Attrition, per owner: everyone brought `forces[owner]` here (garrison plus
-    # arrivals) and only the final owner keeps anything, so the difference is
-    # exactly what they lost. Correct for a plain reinforcement (nothing lost), a
-    # two-way attack and the 3+-owner pile-up alike. Draws no rng, so this cannot
-    # perturb a seeded replay.
-    for owner, brought in forces.items():
-        kept = node.ships if owner == node.owner_id else 0
-        if brought > kept and owner in state.players:
-            state.players[owner].ships_lost += brought - kept
+    _record_losses(state, forces, node.owner_id, node.ships)
 
     if node.owner_id != old_owner:
         node.prod_progress = 0  # a captured system starts building fresh

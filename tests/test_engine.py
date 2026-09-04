@@ -165,6 +165,32 @@ def test_in_lane_battle_winner_flies_on():
     assert survivor.turns_remaining == 2            # advanced one turn, not reset
 
 
+def test_in_lane_battle_charges_both_sides_ships_lost():
+    """Ships killed in open space count toward the challenge tie-break, exactly as
+    ships killed at a system do — the winner's sub-1:1 losses included."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.apply_order(s, Order(2, 1, 0, 6))
+        engine.end_turn(s)
+    survivors = s.fleets[0].ships
+    assert s.players[1].ships_lost == 10 - survivors   # kept 8 of 10, so lost 2
+    assert s.players[2].ships_lost == 6                # wiped out entirely
+
+
+def test_in_lane_annihilation_charges_everyone_in_full():
+    # matched forces mid-lane: nobody holds open space, so the tie breaks to
+    # no one and both fleets are spent.
+    s = make_state([(0, 1, 8, 100), (1, 2, 8, 100)], [(0, 1, 3)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, Order(1, 0, 1, 8))
+        engine.apply_order(s, Order(2, 1, 0, 8))
+        engine.end_turn(s)
+    assert s.fleets == []
+    assert s.players[1].ships_lost == 8
+    assert s.players[2].ships_lost == 8
+
+
 def test_lane_battles_off_by_default_fleets_coexist():
     # with the toggle off, opposing fleets pass each other untouched (default).
     s = make_state([(0, 1, 10, 100), (1, 2, 6, 100)], [(0, 1, 3)])
