@@ -97,7 +97,7 @@ class Ui:
     route_dest: Optional[int] = None
     # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
     # it alone so re-entering the mode comes back where you left it.
-    route_rally: bool = False
+    route_rally: bool = True
     route_plan: dict[int, tuple[int, int]] = field(default_factory=dict)
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
@@ -555,7 +555,7 @@ class Ui:
 
         `route_rally` is deliberately left alone: the sub-mode is a preference, and
         this runs every turn from `main.resolve_turn`, so clearing it would drag the
-        player back to chain routing between one plan and the next.
+        player back to the default sub-mode between one plan and the next.
 
         Deliberately *not* folded into `reset_selection`: that runs from several
         places mid-gesture, and would wipe the plan the route branch is building.

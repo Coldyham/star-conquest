@@ -47,6 +47,7 @@ def _ui(state, human=1) -> Ui:
     ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=human)
     ui.seen = set(state.systems)      # planning tests aren't about fog
     ui.visible = set(state.systems)
+    ui.route_rally = False            # chain is this file's default sub-mode; _rally() opts in
     return ui
 
 
@@ -416,6 +417,7 @@ def test_a_tap_always_aims():
     empty neutral. Aiming is never destructive."""
     state, ui = _display_setup()
     try:
+        ui.route_rally = False            # chain-only gesture: a tap aims
         a = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         b = state.systems[a].neighbors[0]
         state.systems[b].owner_id = 1     # a second system, as any mid-game has
@@ -435,6 +437,7 @@ def test_a_second_tap_on_the_target_un_aims_and_drops_it():
     already spoken for by aiming."""
     state, ui = _display_setup()
     try:
+        ui.route_rally = False            # chain-only gesture: a second tap un-aims
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         ui.route_sel = {home}
         ui.route_tap(state, home)
@@ -448,6 +451,7 @@ def test_a_second_tap_on_the_target_un_aims_and_drops_it():
 def test_un_aiming_something_that_was_never_picked_drops_nothing():
     state, ui = _display_setup()
     try:
+        ui.route_rally = False            # chain-only gesture
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
         ui.route_sel = {home}
@@ -499,10 +503,12 @@ def _empty_pos(state, ui):
 
 
 def _routed_setup():
-    """A live map already in route mode."""
+    """A live map already in route mode, in chain sub-mode (this file's default;
+    `_rally_setup` opts into rally)."""
     state, ui = _display_setup()
     game_input.handle_event(_ev(pygame.KEYDOWN, key=pygame.K_g, mod=0, unicode="g"), state, ui)
     ui.begin_route()
+    ui.route_rally = False
     return state, ui
 
 
@@ -919,6 +925,14 @@ def test_a_rally_tap_toggles():
     assert ui.route_sel == {0, 2}
     ui.route_tap(s, 0)
     assert ui.route_sel == {2}
+
+
+def test_rally_is_the_default_sub_mode():
+    """A fresh `Ui` starts in rally: gathering ships toward a front is the more
+    common ask than chaining out from a set of sources."""
+    s = _line(3, owned=range(3))
+    ui = Ui(view=WorldView(mapgen.map_bounds(s), config.play_rect()), human_id=1)
+    assert ui.route_rally is True
 
 
 # --------------------------------------------------------------------------- #
