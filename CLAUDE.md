@@ -416,6 +416,14 @@ intact.
   every pair, both seatings, plus a head-to-head grid). Both default their
   roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
   arguments.
+  - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
+    fixed, so a lane's length in light-years rises as the node count falls, and
+    `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
+    lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
+    a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
+    that space and unreachable in the rest, so a batch at the default 6 ly/turn
+    measures one regime out of three and a knob can look like dead code purely
+    because of where it was measured. See design notes.
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges

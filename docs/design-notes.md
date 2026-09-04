@@ -142,6 +142,48 @@ top — one declared ceiling rather than two, so however long a game runs a
 fleet is never faster than the base speed alone could have made it. It is
 belt-and-braces either way: travel already floors at one turn.
 
+## Lane length across the parameter space
+
+`WORLD_SIZE` is a constant, so the map is always laid out in the same box and
+the *node count* sets how far apart systems are: fewer nodes means physically
+longer lanes, not a smaller board. `config.SHIP_LY_PER_TURN` (1-30 on the
+slider, 6 by default) then divides all of it. The two together move lane length
+over more than an order of magnitude — measured over three seeds a cell,
+min/median/max lane in turns:
+
+    ly/turn      12 nodes    18 nodes    24 nodes    40 nodes
+       1        14/22/36    11/18/29     9/16/26     7/13/18
+       3          5/8/12      4/6/10       3/6/9       3/5/6
+       6           3/4/6       2/3/5       2/3/5       2/3/3
+      12           2/2/3       1/2/3       1/2/3       1/2/2
+      30           1/1/2       1/1/1       1/1/1       1/1/1
+
+**The consequence for tuning: a constant keyed off travel distance is live in
+part of that space and unreachable in the rest, and the default sits in exactly
+one regime.** `marshal._enemy_margin` is the worked example — it is
+`max(edge_attacking + NEAR_PAD, min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1)))`,
+so the cap needs `dist >= 7` and the break-even floor needs `dist == 1`. Which
+of the three terms actually decides a strike, as a share of every strike Phase 3
+priced:
+
+    ly/turn    ENEMY_FAR cap    ramp interior    edge floor
+       1              100%               --            --
+       2            61-100%           0-39%            --
+       3             0-60%           40-100%           --
+       6                --              100%            --
+      12                --            75-96%          4-25%
+      18                --            0-72%          28-100%
+      30                --            0-27%          73-100%
+
+At the default 6 ly/turn only the middle term is ever selected, so a sweep there
+reads both ends as dead code — and a margin fitted there is fitted for one third
+of the slider. At the bottom end `ENEMY_FAR` *is* the margin; at the top the
+ramp is inert and the live figure is whatever `combat.edge_attacking` returns.
+
+So sweep `--nodes` and the speed knob before concluding that a constant does
+nothing, or that a margin is tuned. This has produced a wrong "unreachable
+constant" reading before.
+
 ## In-lane battles (`engine._lane_crossings`)
 
 Off by default, and deliberately so: `apply_order` deducting ships at launch is
