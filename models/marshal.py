@@ -11,160 +11,35 @@ constants are safe.
 What it changes, in descending order of measured value:
 
   * **It commits its surplus.** Combat is Lanchester's square law, so the ships an
-    attack consumes are ``A - sqrt(A^2 - B^2)``, which *decreases* in ``A``:
-    sending 11 at an 8-garrison costs 3 ships and leaves 8 holding it, sending 25
-    costs 1 and leaves 24. Phase 3 still strikes at exactly thinker's price —
-    raising the bar is what thinker's own sweep and knower's pile-up pricing both
-    proved wrong — but Phase 3b then pours whatever is left into a strike already
-    going in, instead of parking it. Measured over 705 player-turns, thinker keeps
-    64.3% of its army sitting at frontier systems and only 23.1% in transit.
+    attack consumes are ``A - sqrt(A^2 - B^2)``, which *decreases* in ``A``.
+    Phase 3 still strikes at exactly thinker's price — raising the bar is what
+    thinker's own sweep and knower's pile-up pricing both proved wrong — and
+    Phase 3b then pours whatever is left into a strike already going in, instead
+    of parking it at a frontier system.
 
-  * **It won't be the wall between two rivals.** In a crowded game, a node that
-    touches two other players is worth less than its production says: taking it
-    replaces a border *they* were contesting with two borders they contest with
-    you, and while your income is behind their combined income that trade loses.
-    ``_wedge`` prices it, and the payoff is sharply non-monotonic in the size of
-    the field — 48% at three players (where the term is gated off, so that cell
-    is a null and calibrates the harness), 64% at four, 62% at five. With a single
-    pair of rivals there is no fight to stand aside from and ceding the node just
-    feeds whoever takes it; past five everyone borders everyone and it stops
-    discriminating.
+  * **It won't be the wall between two rivals.** ``_wedge`` discounts a target by
+    how many rivals *past the first* it borders: taking it replaces a border they
+    were contesting with two borders they contest with you. Gated on the size of
+    the field (``WEDGE_MIN_PLAYERS``), where the payoff is sharply non-monotonic.
 
-  * **A stagger's nearer wave is reserved.** Phase 3 picks an arrival horizon,
-    launches the far sources, and *relies* on the nearer ones firing next turn to
-    converge. Their budget was never reserved, so a later, poorer target could
-    spend it and the pincer silently failed to materialise. It can't now — which
-    also stops Phase 3b eating its own second wave.
-
-``FRONTIER_GUARD`` stays at thinker's 0.3, deliberately. A/B'd *alone* the guard
-looks worthless — 85-85 on a 24-node mirror and negative at 40 nodes and at 18
-ly/turn — and an earlier draft of this bot set it to 0.0 on that evidence. That
-was wrong, and wrong in an instructive way: the guard and Phase 3b interact.
-Committing the surplus is exactly what makes a garrison worth keeping, because a
-system that just emptied itself into an attack is the one that needs cover. With
-3b on, sweeping the guard against knower's depth-0 planner gives
-
-    guard     18n   24n   30n   40n   mean   timeouts   turns
-    0.0       38%   48%   62%   66%    53%         --      --
-    0.30      56%   59%   66%   70%    63%         50     144
-    0.45      60%   60%   72%   69%    65%         59     162
-    0.55      60%   65%   74%   66%    66%         80     182
-    0.70      59%   60%   77%   71%    67%        114     195
-
-Past 0.3 the win rate is flat while games stretch 35% longer and timeouts more
-than double — the stalemate failure mode `models/README.md` warns about — so the
-extra points are not worth taking. Holding thinker's exact value also keeps every
-point of the margin attributable to a mechanism rather than to a re-tune.
-
-Two inherited bugs are fixed on the way past:
-
-  * ``_EDGE = 1.1 / 0.9`` hardcoded ``COMBAT_JITTER = 0.10`` and predated
-    ``COMBAT_JITTER``'s companion knob entirely. Both are menu sliders
-    (``settings._GLOBAL_KNOBS``), so the whole lineage silently dropped below
-    break-even the moment either moved. Fixed here first and now in the core:
-    ``combat.edge_attacking`` / ``edge_defending`` are the break-even multiples,
-    read live and *in opposite directions* — ``DEFENDER_ADVANTAGE`` scales
-    whoever holds the system, so it multiplies the price of taking one and
-    divides the price of holding one. At the defaults (0.10, 1.0) the two
-    collapse to the old constant and the tuned absolutes still floor them, so
-    nothing measured here moves.
-  * Phase 1 sized relief for the worst arrival horizon but scheduled it for that
-    horizon's turn, and 16.1% of real deficits bind *later* than the first
-    arrival. The standing guard used to absorb the early wave; nothing does now.
-    Relief is sized for the worst horizon and required by the *earliest* one.
-
-Measured against **knower at search depth 0** — the blind planner marshal forks,
-which is the honest baseline for a non-oracle bot. Ladder, both seatings, 120
-games a cell. The paired null (that planner against itself) reads 50%.
-
-    nodes      18    24    30    40
-    marshal   56%   59%   66%   70%
-
-The wedge term, paired against a copy of marshal with it switched off — both in
-the *same* game, rotated through every seat, so map and luck are shared:
-
-    3 players, 30 nodes    52% (108-101)   gate off: identical bots, a null cell
-    4 players, 30 nodes    61% (131-84)
-    4 players, 40 nodes    66% (149-78)
-    5 players, 40 nodes    60% (155-103)
-
-Reading the two combat knobs live used to be worth nothing at their defaults and
-a great deal off them, back when marshal was the only bot doing it — the rest of
-the roster priced every fight at a fixed 1.222x regardless of the sliders. That
-edge is a fixed bug now: `combat.edge_attacking`/`edge_defending` moved into the
-core and thinker, claudebot and knower all read them live too, so the margin left
-is whatever marshal's own tuning is worth against equally-honest rivals. Same
-harness, re-measured after the back-port — 60 games a cell, jitter 0.10:
-
-                      vs thinker   vs claudebot
-    DEFENDER_ADVANTAGE 1.0      86%          98%
-    DEFENDER_ADVANTAGE 1.25     68%          91%
-    DEFENDER_ADVANTAGE 1.5      76%          98%
-
-Marshal still leads across the range, weakest in the middle rather than at either
-end, and is never below 68%. What actually explains it is Phase 3's commitment
-and the wedge term, not a stale constant a rival forgot to update — see the
-"three plausible ideas" list above for the mechanism.
-
-Against knower's oracle marshal has no answer, and the search depth is not what
-does it — the prediction itself is the wall. 80 games a cell:
-
-    knower depth    24 nodes   40 nodes
-         0              52%        71%    <- no oracle: marshal is ahead
-         1              41%        39%
-         2              42%        45%
-         4              29%        35%
-         8              20%        38%
-
-Switching the oracle *on* costs 11 points at 24 nodes and 32 at 40. Deepening it
-then buys knower much less, and on the larger board nothing at all beyond depth 2
-— which matches knower's own finding that its rollout plateaus. No heuristic buys
-back a rival that reads your orders before you issue them; that needs prediction
-of its own, or deliberate unpredictability. Full roster ladder, 900 games:
-knower 263, marshal 247, thinker 175, claudebot 111, heuristic 52, rusherplus 15.
-
-Four things deliberately *not* here — all three built, measured against the
-configuration above, and removed rather than kept on the strength of the idea:
-
-  * **Chokepoint weighting.** Normalised Brandes betweenness over the lane graph,
-    folded into ``_richness`` so a corridor every path flows through outprices a
-    cul-de-sac. Sound on paper: these maps are planar and sparse (average degree
-    2.5-2.7) but 34-49% of nodes are cut vertices, and the measure discriminates
-    well (top 1.00, median 0.21). It still loses. Swept at weight 0.10/0.20/0.40
-    it scored 48/48/50% against leaving it out, was *negative* at 40 nodes, and
-    consistently produced the longest games and the most timeouts — it buys
-    corridors instead of winning. Production compounds; topology doesn't.
-  * **Pocket-sealing.** Valuing a capture by how much of our frontier it removes.
-    It barely discriminates: sampled over 105 candidate targets, 67% score
-    identically, and only 6.7% actually seal. Measured 47% at either weight.
-  * **Reinforceability-scaled guards.** Relax a frontier guard wherever a
-    neighbour could genuinely relieve the system inside its warning window (a
-    fleet down an L-turn lane is first visible with L-1 turns to spare, so relief
-    R turns away arrives iff ``R <= L-1``). It frees a lot of ships — 3.5:1, and
-    52.8% of assignments cost nothing at all — but in the moments the guard was
-    actually load-bearing the relief was out of range 76.8% of the time. Measured
-    46% against simply setting the guard to zero, which is the same idea taken to
-    its limit and needs no machinery.
-
-  * **Splitting a breakthrough's surplus.** After Phase 3 has priced three weak
-    systems in front of a system holding an army, the leftover all rides with the
-    richest strike — 4/6/18 rather than 8/8/12, so two of the three are taken
-    with exactly their price and hold only 3 and 4 ships afterwards. Spreading it
-    in proportion to richness looks obviously safer and is not: 63% / 64% / 63%
-    at spread 0 / 0.5 / 1.0 against knower's depth-0 planner, 140 games a cell
-    across four map sizes. The reason it doesn't matter is that the square law
-    barely punishes overkill on a weak garrison, so total survivors are the same
-    either way (24 against 25 on the traced board) — only their distribution
-    moves. Worth knowing that *taking* all three was never at stake: Phase 3
-    launches at every affordable target before 3b touches the remainder.
-
-Don't re-add any of them without a measurement.
+  * **A stagger's nearer wave is reserved.** Phase 3 launches the far sources of a
+    pincer and relies on the nearer ones firing next turn; reserving their budget
+    stops a later, poorer target — or Phase 3b — spending it first.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
 of times per real turn on fictional boards (``_predict_seat``, ``_rollout_decide``)
 and would poison it.
+
+**Everything measured about this bot lives in `docs/bot-design.md` under
+"``models/marshal.py`` and what the measurements deleted"**: where it stands
+against the roster, the guard and margin sweeps, which term of ``_enemy_margin``
+is even live at a given ship speed, the four ideas that were built, measured and
+then deleted, and the known hole in its own guard. Don't re-add one of those, or
+re-tune a constant below, without a measurement — and read the note there on
+paired null cells before running one, because the older tables were measured
+against a null that drifted between 43% and 52%.
 
 Forked from ``models/knower.py``.
 """
@@ -178,10 +53,13 @@ from starconquest import combat
 from starconquest.model import Order
 
 # --- margins ---------------------------------------------------------------- #
-# The pads sit over `combat`'s live jitter-safe edge; the absolutes below are
-# thinker's tuned figures and win at the default jitter, where the edge is 1.222.
-# Past that the floor takes over — and `TUNED_SWING` is the floor the other way,
-# so a *gentler* jitter than the one these were fitted at cannot thin them.
+# The pads sit over `combat`'s live jitter-safe edge; the absolutes below win at
+# the default jitter, where the edge is 1.222. Past that the floor takes over —
+# and `TUNED_SWING` is the floor the other way, so a *gentler* jitter than the one
+# these were fitted at cannot thin them.
+# `ENEMY_NEAR`, `ENEMY_FAR` and `FRONTIER_GUARD` are marshal's own, no longer
+# thinker's: see "The 2026-09 tuning sweep" in `docs/bot-design.md` for what each
+# was measured at, and note that the guard's gain is a default-ship-speed result.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
 DEFEND_PAD = 0.05
@@ -189,11 +67,11 @@ NEUTRAL_PAD = 0.05
 NEAR_PAD = 0.02
 
 NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
-ENEMY_NEAR = 1.3                # enemy margin for a 1-turn strike
-ENEMY_FAR = 1.9                 # ...rising toward this as the strike lands later
+ENEMY_NEAR = 1.15               # enemy margin for a 1-turn strike
+ENEMY_FAR = 1.5                 # ...rising toward this as the strike lands later
 OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
-FRONTIER_GUARD = 0.40           # fraction of the scariest adjacent enemy held home
+FRONTIER_GUARD = 0.55           # fraction of the scariest adjacent enemy held home
 BEYOND_DECAY = 0.35             # weight on the richest system one hop past a target
 
 RIVAL_WEDGE = 1.0               # penalty per rival past the first bordering a target

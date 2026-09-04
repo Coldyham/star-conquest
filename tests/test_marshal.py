@@ -221,12 +221,21 @@ def test_required_rises_with_jitter(ma):
     assert at_none >= target.ships + 1, "a tie hands the system to nobody"
 
 
-def test_default_jitter_keeps_thinkers_tuned_margins(ma):
-    """At 0.10 the tuned absolutes still win, so no measured baseline moves."""
+def test_default_jitter_pins_each_term_of_the_ramp(ma):
+    """Which of the three terms governs, at the default jitter.
+
+    The 2026-09 re-tune put `ENEMY_NEAR` at 1.15, *below* the break-even edge, so
+    a 1-turn strike is now governed by the edge floor rather than by the absolute
+    — which is exactly why the re-tune is inert at high ship speeds, where every
+    lane is one turn. The absolute governs from two turns out, and `ENEMY_FAR`
+    caps it past seven.
+    """
     config.COMBAT_JITTER = 0.10
     config.DEFENDER_ADVANTAGE = 1.0
-    assert ma._enemy_margin(1) == pytest.approx(1.3)      # ENEMY_NEAR
-    assert ma._enemy_margin(9) == pytest.approx(1.9)      # ENEMY_FAR
+    edge = combat.edge_attacking(ma.TUNED_SWING) + ma.NEAR_PAD
+    assert ma._enemy_margin(1) == pytest.approx(edge)     # floor, not ENEMY_NEAR
+    assert ma._enemy_margin(2) == pytest.approx(1.25)     # ENEMY_NEAR + one step
+    assert ma._enemy_margin(9) == pytest.approx(1.5)      # ENEMY_FAR
     assert ma._neutral_margin() == pytest.approx(1.3)     # NEUTRAL_MARGIN
 
 

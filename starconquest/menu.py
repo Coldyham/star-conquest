@@ -118,7 +118,7 @@ _ADV_COMBAT = (
     # setting and becomes a stalemate. Both sides produce symmetrically, so a
     # fortress bonus that large grows the defence as fast as any assault can be
     # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
-    # resolve at a 3000-turn cap either. See design notes for the measurements.
+    # resolve at a 3000-turn cap either. See bot-design for the measurements.
     ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
 )
 # The Combat tab's demo. The one slider group that does *not* touch `Settings`:
