@@ -79,3 +79,15 @@ export const inList = (values) =>
   `in.(${[...values]
     .map((value) => encodeURIComponent(`"${String(value).replace(/["\\]/g, "\\$&")}"`))
     .join(",")})`;
+
+/**
+ * `cs.{"a","b"}` — PostgREST's array-contains filter, quoted the same way as
+ * inList() and for the same reason: bot names and tags are free text, and the
+ * query string is percent-decoded *before* PostgREST parses it, so a literal
+ * `+` or space must survive that round trip (encodeURIComponent handles both;
+ * a hand-built template string would turn a `+` into a space).
+ */
+export const contains = (values) =>
+  `cs.{${[...values]
+    .map((value) => encodeURIComponent(`"${String(value).replace(/["\\]/g, "\\$&")}"`))
+    .join(",")}}`;

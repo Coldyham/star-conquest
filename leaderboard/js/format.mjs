@@ -4,6 +4,8 @@
 // usernames and Challenge.by are free text typed by strangers, so they must never
 // be parsed as markup.
 
+import { configTitle } from "./setup.mjs";
+
 /** el("a", {href, class}, ["text", node]) -> HTMLElement */
 export function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -125,6 +127,28 @@ export function userHref(names) {
   const params = new URLSearchParams();
   for (const name of names) params.append("u", name);
   return `user.html?${params}`;
+}
+
+/**
+ * The setup badge a card or a map's heading carries: the config's name if one
+ * has been posted, else the derived label (configTitle, setup.mjs). Links to
+ * the main list filtered to that one config — the badge *is* the group.
+ */
+export function configBadge(game) {
+  return el("a", { class: "badge", href: `index.html?config=${encodeURIComponent(game.config_key)}`, text: configTitle(game) });
+}
+
+/**
+ * One chip per opponent strategy (game_summary.bots), each linking to the main
+ * list filtered to that bot — omitted entirely when every seat is the built-in
+ * heuristic, since that's the common case and would otherwise repeat on every
+ * card. Strategy names come from models/*.py drop-ins, so textContent only.
+ */
+export function botChips(game) {
+  const bots = game.bots || [];
+  if (bots.length === 1 && bots[0] === "heuristic") return [];
+  return bots.map((bot) =>
+    el("a", { class: "chip", href: `index.html?bot=${encodeURIComponent(bot)}`, text: bot }));
 }
 
 export function showError(node, message) {

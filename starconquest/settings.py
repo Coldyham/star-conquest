@@ -332,7 +332,8 @@ class Settings:
         links happened to omit different defaults still agree. ``challenge`` and
         ``autoplay`` are excluded: a config and the same config carrying a target
         are the same match, and whether you let the AI drive is disclosed by
-        ``Challenge.hand`` instead.
+        ``Challenge.hand`` instead. A seat beyond ``players`` is blanked first —
+        see ``challenge_keys``.
 
         This is the one to *write* — the canonical id for a setup as this version
         describes it. To *test* a key that arrived from elsewhere, use
@@ -352,6 +353,18 @@ class Settings:
         data = self.to_dict()
         for skip in ("challenge", "autoplay"):
             data.pop(skip, None)
+        # A seat beyond `players` is inert, and `token_dict` truncates `ai`/
+        # `ai_strategy` there — so it never travels in a shared link, and a
+        # decode always pads it back with fresh defaults. Blank it here the same
+        # way (rather than dropping it, which would change the setup's shape for
+        # every *other* setup too): otherwise a sender who once configured more
+        # seats, then dialed `players` back down, stamps a key over leftover AI
+        # settings a recipient's decode can never reproduce, and the link fails
+        # to match itself.
+        data["ai"] = data["ai"][: self.players] + [asdict(AiParams())] * (len(data["ai"]) - self.players)
+        data["ai_strategy"] = data["ai_strategy"][: self.players] + ["heuristic"] * (
+            len(data["ai_strategy"]) - self.players
+        )
         keys = [_hash_setup(data)]
         blank = Settings().to_dict()
         for drops in _LEGACY_KEY_DROPS:

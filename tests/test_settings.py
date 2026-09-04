@@ -241,6 +241,25 @@ def test_challenge_matches_until_the_config_is_edited():
     assert not s.challenge.matches(s)
 
 
+def test_challenge_key_ignores_seats_beyond_players():
+    """A leftover seat past `players` (e.g. from a since-shrunk player count)
+    never reaches the token (`token_dict` truncates `ai`/`ai_strategy` to
+    `players`), so it must not move the key either — otherwise a shared link
+    fails to match itself the moment it's decoded back (the seat's real value
+    is gone; the recipient always pads with fresh defaults)."""
+    dirty = Settings(players=3)
+    dirty.ai[3] = AiParams(reserve_fraction=0.9)
+    dirty.ai_strategy[4] = "rusher"
+    clean = Settings(players=3)
+    assert dirty.challenge_key() == clean.challenge_key()
+
+    s = Settings(players=3)
+    s.ai[3] = AiParams(reserve_fraction=0.9)
+    s.challenge = Challenge(turns=10, key=s.challenge_key())
+    reopened = Settings.from_token(s.to_token())
+    assert reopened.challenge.matches(reopened)
+
+
 def test_without_challenge_strips_the_score_only():
     s = _challenged()
     plain = s.without_challenge()
