@@ -209,8 +209,46 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-Full roster ladder, 900 games: knower 263, marshal 247, thinker 175,
-claudebot 111, heuristic 52, rusherplus 15.
+**Full roster ladder, re-run against this re-tune** (`uv run python -m tests.sim
+--ladder --trials 30`, 18 nodes, default settings — 900 games, 74 timed out and
+are excluded from the percentages): knower 255 (31%), marshal 219 (27%), thinker
+173 (21%), claudebot 95 (12%), heuristic 46 (6%), rusherplus 38 (5%). The figure
+this replaces predated both the margin back-port and this re-tune; **this table
+is the current one** — update it, not the module docstring, the next time
+marshal or the roster's pricing changes:
+
+    head-to-head (row's win rate vs column)
+                heuris  claude  knower  marsha  rusher  thinke
+      heuristic      —     19%      0%      0%     64%      2%
+      claudebot    81%       —      5%      8%     73%     12%
+      knower      100%     95%       —     65%    100%     84%
+      marshal     100%     92%     35%       —    100%     75%
+      rusherplus   36%     27%      0%      0%       —      3%
+      thinker      98%     88%     16%     25%     97%       —
+
+marshal's win *share* fell here (247→219) from the pre-back-port table this one
+replaced, which reads like the re-tune regressed it — but that table's
+opponents were still pricing fights off the stale `1.1/0.9` hardcode, not
+`combat.edge_attacking()`/`edge_defending()`, so it measures old marshal against
+a weaker roster rather than against this one. Isolated with a direct A/B — the
+pre-re-tune `marshal.py` dropped into the *current*, back-ported roster as a
+seventh strategy, same seeds, same 900-game methodology, so it fights the same
+thinker/claudebot/knower the re-tuned marshal above does:
+
+    knower 291 (25%), marshal 250 (22%), marshal_old 241 (21%), thinker 187
+    (16%), claudebot 99 (9%), heuristic 46 (4%), rusherplus 42 (4%)
+
+    marshal vs marshal_old: 60%/40%       marshal vs knower:     35%
+    marshal_old vs knower:  29%           marshal vs thinker:    75%
+    marshal_old vs thinker: 74%           marshal vs claudebot:  92%
+
+New marshal beats old marshal head-to-head and is at least as good against
+every real opponent (clearly ahead against knower, a wash against thinker and
+claudebot). So the re-tune is a net improvement; the roster-wide share drop is
+the back-port making thinker/claudebot/knower stronger, not marshal getting
+weaker. Don't re-litigate this from the win-count columns alone — they aren't
+comparable across the back-port; a fresh regression claim needs its own A/B
+against the current roster, the same way.
 
 ### A stagger's nearer wave is reserved
 
@@ -438,7 +476,8 @@ unambiguous way for all three bots (0.75: 53/66/63%, 1.25: 69/94/79%, 1.5:
 the bot was pricing it at all.
 
 marshal's own head-to-head numbers move too, now that its rivals are no longer
-handicapped by the stale constant — see its docstring for the re-measured table.
+handicapped by the stale constant — see the re-measured full-roster ladder under
+"Where marshal stands" above.
 
 ## Defender advantage and the AI (`ai._frontier_order`)
 
