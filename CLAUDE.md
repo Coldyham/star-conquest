@@ -7,8 +7,11 @@ systems are nodes and spacelanes are edges, one ship type, take every system to
 win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 
 Design rationale, history, and edge-case detail behind the rules below live in
-[`docs/design-notes.md`](docs/design-notes.md), keyed by matching headings —
-read it when you're actually touching that code, not as background reading.
+two companion files, keyed by matching headings — read them when you're actually
+touching that code, not as background reading.
+[`docs/system-design.md`](docs/system-design.md) covers the core and the shell;
+[`docs/bot-design.md`](docs/bot-design.md) covers the `models/` roster, the
+margins bots price fights with, and the measurements behind every AI constant.
 
 ## Commands
 
@@ -251,7 +254,7 @@ intact.
     `config.DEFENDER_ADVANTAGE` before applying `expand_margin`/`attack_margin`,
     because that is what a fleet actually has to out-fight
     (`combat._apply_advantage`). Against the raw count the AI stops expanding
-    entirely at a high setting. Identity at the 1.0 default — see design notes
+    entirely at a high setting. Identity at the 1.0 default — see bot-design
     for why the knob's top end still turtles regardless.
   - **A bot prices a fight with `combat.edge_attacking()` /
     `edge_defending()`, never a constant.** They are the break-even multiples —
@@ -309,7 +312,7 @@ intact.
   nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
   `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
   `render._draw_node_names` places labels collision-first and drops what doesn't
-  fit (see design notes); ids stay on the mechanical readouts — the queued list,
+  fit (see system-design); ids stay on the mechanical readouts — the queued list,
   `tests/sim` logs, tokens.
 - **The menu's Combat tab teaches the square law from the real code.**
   `combat.preview_fight` sits beside `resolve_fight` and shares its
@@ -416,6 +419,14 @@ intact.
   every pair, both seatings, plus a head-to-head grid). Both default their
   roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
   arguments.
+  - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
+    fixed, so a lane's length in light-years rises as the node count falls, and
+    `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
+    lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
+    a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
+    that space and unreachable in the rest, so a batch at the default 6 ly/turn
+    measures one regime out of three and a knob can look like dead code purely
+    because of where it was measured. See bot-design.
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges

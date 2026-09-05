@@ -85,7 +85,7 @@ maps of unequal difficulty — so this one carries the setup alone.
 
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
-for a single existing map (see `docs/design-notes.md`, "Keys outlive the schema
+for a single existing map (see `docs/system-design.md`, "Keys outlive the schema
 that made them"). The trade is the opposite fragility: **naming a config freezes
 it to `sc_config_key`'s current definition and to the game's current pruning
 rules.** Change either — the function's body, or a `config.DEFAULT_*` balance
