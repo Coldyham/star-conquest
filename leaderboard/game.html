@@ -23,6 +23,16 @@
   <p class="lede" id="subtitle"></p>
   <div id="sort"></div>
   <div id="scores" class="loading">Loading…</div>
+
+  <!-- How each models/ bot fares in the player's seat on this exact map,
+       computed offline by .github/workflows/bot-replay.yml. Empty until that
+       job has run, so the whole section hides itself rather than showing a
+       placeholder on a board that has never had a worker pointed at it. -->
+  <section id="bots" class="bots" hidden>
+    <h2>How the bots did</h2>
+    <p class="lede" id="bots-lede"></p>
+    <div id="bots-table"></div>
+  </section>
 </main>
 
 <footer class="attract">

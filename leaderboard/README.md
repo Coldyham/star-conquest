@@ -12,7 +12,7 @@ its `web/` build depends on it.
 | | |
 |---|---|
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
-| [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost |
+| [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score |
 
@@ -103,6 +103,50 @@ wrong hex string entirely. Harmless — `game_summary`'s join only ever surfaces
 name that actually matches a stored setup — but it's the same class of trust
 already extended to every other free-text field on this board.
 
+## How the bots did
+
+Every map's page carries a second table: each `models/` bot replayed from the
+player's seat on that exact map — same seed, same opponents in the same seats —
+so a human score has something to be measured against. The verdict line above it
+asks the only question worth asking of a high-score board, which is whether
+anyone has outplayed the *best* machine answer to that map rather than where they
+place among six of them.
+
+None of it is computed here. A replay's result is a pure function of the stored
+setup, the seed and the code, so it only ever needs computing once and there is
+nothing to serve live: [`tools/bot_replay.py`](../tools/bot_replay.py) runs on a
+schedule in GitHub Actions and caches its answers in `public.bot_scores`. See
+[`.github/workflows/bot-replay.yml`](../.github/workflows/bot-replay.yml) for the
+job and `docs/system-design.md` ("Bot replays") for why it is a batch job rather
+than the small service this file used to ask for.
+
+The worker also lifts the bots' own per-decide wall-clock guards 100x. Those
+exist so the single-threaded browser build never freezes mid-search; nothing waits
+on a background job, and tripping one is the only thing that makes such a bot's
+output depend on the machine it ran on — so a batch run that can never trip one is
+*more* reproducible, which is exactly what a cached result needs. (Measured: a
+runner only 2x slower would otherwise have cached a different answer for knower on
+a 40-node map.)
+
+`bot_scores` is the one table on the board the public cannot write: a read policy,
+no insert policy, no insert grant, and the worker's `service_role` key bypassing
+RLS as its only writer. Human scores are unforgeable only in the sense that
+nobody bothers; these genuinely are.
+
+Each bot is replayed at its **best** profile, not its menu default: `REPLAY_AUX`
+in [`tools/bot_replay.py`](../tools/bot_replay.py) currently runs `knower` at
+search depth 12, the top of its own slider and a far stronger player than the
+depth 1 an untuned seat gets. The setting in force is stored on the row and shown
+beside the name ("knower · search depth 12"), so the board never quietly compares
+two different versions of one bot — and changing it refills those rows on the next
+ordinary run.
+
+A bot that never took the board still gets a row — `won` is the discriminator,
+never `turns` — and is listed after every winner in plain name order, since
+lasting 600 turns is not a better result than dying on turn 40. `js/standings.mjs`
+(`botOrder`, `bestBot`, `humanVsBots`) holds that logic, and
+`tests/standings.test.mjs` pins it.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
@@ -124,6 +168,16 @@ already extended to every other free-text field on this board.
 4. **Create a second Netlify site** from this repo with **Base directory** set to
    `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
    files as-is. The root `netlify.toml` and the game's own site are untouched.
+5. **Optional — turn on the bot column.** Add two repository secrets under
+   *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
+   `SUPABASE_SERVICE_KEY` set to the project's **service_role** key (*not* the
+   anon key in `config.mjs` — that one is public on purpose, this one must never
+   be). The workflow skips itself cleanly while they are unset, so there is
+   nothing to undo if you'd rather not. It runs every six hours — a cadence set
+   by Actions minutes on a private repo rather than by how fresh the column needs
+   to be, with *Run workflow* for when you want it sooner — and any run keeps a
+   free Supabase project from idling into the pause noted under *Known
+   limitations*.
 
 ## Local development
 
@@ -141,8 +195,11 @@ The decoder is pinned against real tokens from the Python encoder:
 
 ```sh
 uv run python tools/dump_challenge_fixtures.py   # regenerate the fixtures
-node --test leaderboard/tests/
+node --test leaderboard/tests/*.test.mjs
 ```
+
+(The glob is load-bearing on Node 22+: handed a bare directory, `--test` tries to
+load it as a module and fails before running anything.)
 
 Re-run the generator and commit `tests/fixtures/tokens.json` if the token format
 in `settings.py` ever changes — that fixture file is what keeps the two encoders
@@ -162,7 +219,9 @@ pasting the file into a scratch Postgres or Supabase project and querying
 - **Scores are unverifiable.** The token format is public and unsigned, so a
   hand-crafted impossible score would be accepted. RLS protects the database, not
   the plausibility of what is in a link. Catching that needs server-side
-  re-simulation from the seed.
+  re-simulation from the seed — which the bot-replay worker now does for the
+  *machine* column, and could be extended to sanity-check a human's, since it
+  already rebuilds the exact map from `settings_json` alone.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
@@ -176,7 +235,4 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-Replaying each `models/` bot through the same seed to show how they would have
-done in the player's seat. It needs the real Python engine, so it wants its own
-small service — keyed by `game_key` + bot name and cached once computed, since the
-result is deterministic.
+Nothing outstanding. The bot column below was the last item here.

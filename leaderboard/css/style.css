@@ -432,6 +432,34 @@ h1::after {
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
 
+/* -- the bot replays ------------------------------------------------------ */
+/* Deliberately the same .scores/.score grid as the human table above, so the two
+ * read as one board rather than two widgets. What separates them is colour: the
+ * machine table is cyan where the human one is gold, and everything that never
+ * took the map is dimmed out of the running entirely. */
+.bots { margin-top: 2.5rem; }
+.bots h2 {
+  margin: 0 0 0.6rem;
+  font-family: var(--pixel);
+  font-size: 0.95rem;
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bots .lede { margin-bottom: 1.1rem; }
+.score.bot .result { color: var(--cyan); }
+.score.bot a.nm:hover { color: var(--magenta); text-decoration: underline; }
+
+/* A replay that never won is shown, but never ranked — see standings.botOrder.
+ * The dash in the rank column and the drop in contrast say the same thing twice
+ * on purpose: nothing here is competing with the rows above it. */
+.score.bot-lost { opacity: 0.55; }
+.score.bot-lost .result { color: var(--dim); }
+
+/* The one row that isn't reproducible: its bot ran out of thinking time and
+ * forfeited orders, so the result depended on the runner. Hover for the count. */
+.when.warn { color: var(--bad); font-size: 0.85rem; cursor: help; }
+
 /* -- one player's card ----------------------------------------------------- */
 .tally {
   margin: 0 0 1.5rem;

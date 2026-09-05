@@ -118,6 +118,34 @@ def aux_spec(name: str) -> AuxSpec | None:
     return label.strip(), lo, hi, step, bool(getattr(module, "AUX_INT", False))
 
 
+def set_budget_scale(scale: float) -> list[str]:
+    """Widen (or restore) every registered strategy's wall-clock guards.
+
+    Some bots carry a catastrophe guard on how long one ``decide`` may take —
+    ``models/knower.py`` has two — sized for the browser build, where the
+    alternative to giving up is freezing the tab. An offline batch caller has no
+    such constraint, and tripping a guard is the one thing that makes those bots'
+    output depend on the wall clock, so lifting it out of the way there makes a
+    result *more* reproducible rather than less. ``tools/bot_replay.py`` is why
+    this exists.
+
+    Opt-in and declarative, like ``aux_spec`` above: a module that declares a
+    module-level ``BUDGET_SCALE`` float is multiplying its own budgets by it at
+    call time, and is saying so. Anything that doesn't is left alone. Returns the
+    names actually set, so a caller can report what it changed.
+
+    Never call this from inside a model, and never mid-game: it is process-wide,
+    so it must be set once at startup, before any ``decide`` runs.
+    """
+    touched: list[str] = []
+    for name, fn in sorted(STRATEGIES.items()):
+        module = sys.modules.get(getattr(fn, "__module__", "") or "")
+        if module is not None and isinstance(getattr(module, "BUDGET_SCALE", None), (int, float)):
+            module.BUDGET_SCALE = float(scale)
+            touched.append(name)
+    return touched
+
+
 def load_models(directory: Path = MODELS_DIR) -> list[str]:
     """Import every ``*.py`` in ``directory`` and register its ``decide`` function.
 

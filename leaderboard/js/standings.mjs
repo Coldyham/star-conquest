@@ -150,3 +150,51 @@ export function tally(rows, roster) {
 
   return { players, contested, draws };
 }
+
+/**
+ * A map's bot replays in display order: the ones that took the board first,
+ * ranked by the game's own rule, then the ones that didn't, by name.
+ *
+ * The split is the point. A bot that never won has a `turns` figure — how long
+ * it lasted before it was wiped out or the replay hit its turn cap — and that
+ * number is *not* a score. Sorting the failures by it would quietly rank them
+ * against each other, and putting them in the same ordering as the winners would
+ * rank a quick death above a slow victory. So losses sit after every win, in a
+ * fixed alphabetical order that claims nothing.
+ *
+ * Rows are the shape `bot_scores` stores: {bot, won, turns, lost, bot_timeouts}.
+ */
+export function botOrder(rows) {
+  const won = rows.filter((row) => row.won).sort(compareScores);
+  const lost = rows.filter((row) => !row.won).sort((a, b) => a.bot.localeCompare(b.bot));
+  return [...won, ...lost];
+}
+
+/**
+ * The best bot result on a map, or null if none of them took the board.
+ *
+ * What the section header compares a human's score against — "31 turns, by
+ * thinker" — so it only ever considers wins, for the same reason botOrder splits
+ * them out.
+ */
+export function bestBot(rows) {
+  const won = rows.filter((row) => row.won);
+  if (!won.length) return null;
+  return won.reduce((best, row) => (compareScores(row, best) < 0 ? row : best));
+}
+
+/**
+ * How a human score stands against the bots: "ahead", "tied", "behind", or null
+ * when there is nothing to compare (no score posted, or no bot won).
+ *
+ * Deliberately measured against the *best* bot rather than counting how many it
+ * beats: the interesting question on a board of high scores is whether a person
+ * outplayed the best machine answer to that map, not whether they placed
+ * mid-table among six of them.
+ */
+export function humanVsBots(score, rows) {
+  const best = bestBot(rows);
+  if (!score || !best) return null;
+  const delta = compareScores(score, best);
+  return delta < 0 ? "ahead" : delta > 0 ? "behind" : "tied";
+}

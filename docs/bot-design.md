@@ -63,6 +63,57 @@ of their real code *is* the answer. knower folds those predictions into a
 "post-launch board" (predicted orders applied via `engine.apply_order` but
 not advanced) and runs thinker's phases against it.
 
+## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
+
+The board's bot column replays each `models/` bot through the human's seat on a
+posted map (`tools/bot_replay.py`; the infrastructure is in
+[`system-design.md`](system-design.md), "Bot replays"). Two questions about the
+roster fall out of that, and both were measured.
+
+**Which version of a bot goes on the board.** Its best one, not its menu default.
+`REPLAY_AUX` names the exceptions and today holds one: `knower` at search depth
+12. That is the top of knower's own slider (`SEARCH_DEPTH_MAX`) and the setting
+its own measurements favour — "ahead in every measurement taken and behind in
+none". It is not a small difference. On a 16-node map, same seed, same opponents:
+
+    knower @ 1 (default)     336 turns, 346 ships lost
+    knower @ 12             121 turns, 137 ships lost
+
+There is no point putting a deliberately hobbled version of the best bot on a
+board whose whole purpose is to give a human score something to be measured
+against. The cost is wall clock: depth 12 is roughly 100x depth 1, taking a
+40-node six-seat game from well under a second to tens of seconds. The worker's
+`--limit` and deadline exist for that, and it banks each result as it goes.
+
+**Why the offline runner gets a bigger time budget, not a shallower search.**
+knower's search is *iteration*-bounded, so the same board plans the same way —
+except for `SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard whose own
+comment notes that tripping it makes the plan depend on the wall clock. knower's
+cost table measured better than 2x headroom at depth 12. On a CI-class container
+the largest configuration the menu can build — 40 nodes, 6 seats — measured only
+**~1.1x**, and that is not a margin to cache results against. Shrinking
+`BUDGET_SCALE` proportionally simulates a slower machine, and a runner just 2x
+slower produced a different answer on the same map:
+
+    scale 1.00  (as shipped)        123 turns, 311 lost
+    scale 0.50  (~2x slower)        117 turns, 272 lost   <- guard tripped
+    scale 0.25  (~4x slower)        113 turns, 206 lost   <- guard tripped
+    scale 100   (the worker)        123 turns, 311 lost
+
+Both of knower's guards exist because the WASM build is single-threaded and the
+alternative to giving up mid-search is freezing the browser tab — a constraint a
+background job does not have. So the worker lifts them 100x via
+`ai.set_budget_scale`, turning 150 ms into 15 s against a measured worst case of
+~131 ms. Read that as the opposite of a loosening: those guards are the only part
+of the bot that is *not* iteration-bounded, so a run that can never trip one is
+strictly more reproducible. It remains a guard — a wedged bot is stopped long
+before the workflow's own `timeout-minutes` has to — and `BUDGET_SCALE` stays 1.0
+for every ordinary caller, so a real game is untouched.
+
+A bot that wants the same treatment declares `BUDGET_SCALE = 1.0` and multiplies
+its own budgets by it at call time; see `models/README.md`. Bots without it are
+left alone.
+
 ## `models/marshal.py` and what the measurements deleted
 
 marshal was commissioned around three ideas: bait an opponent into a system a

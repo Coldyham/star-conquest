@@ -566,3 +566,126 @@ drops to the small font when the normal one would overrun the panel (every
 catalogue name fits at that size), `_rows_named` reflows a row containing one,
 and the send popup — too narrow for two names plus a garrison — measures its
 title and falls back to `Sys 4 -> 9` when the names don't fit.
+
+## Bot replays (`tools/bot_replay.py`)
+
+The leaderboard's "how would each bot have done?" column. `leaderboard/README.md`
+carried it under **Not built yet** for a long time with the note that it "needs
+the real Python engine, so it wants its own small service". The service turned
+out to be the wrong shape.
+
+A replay's result is a pure function of three things — the stored `Settings`, the
+seed, and the code — so it only ever has to be computed *once*. There is nothing
+to serve live, and an always-on host would spend most of its life idle waiting to
+recompute answers it already had. What the feature actually needs is a cache and
+something to fill it, which is a scheduled job: `.github/workflows/bot-replay.yml`
+writes into `public.bot_scores` on a schedule and leaves no service to keep up.
+Netlify was never a candidate either way — its Functions run JavaScript and Go,
+and there is no Python runtime to put the engine in.
+
+The cadence is set by Actions minutes rather than by how fresh the column needs
+to be. This repository is **private**, so runs bill against the account's monthly
+allowance (2,000 minutes on the Free plan; public repositories are unmetered).
+GitHub rounds every job up to the whole minute, so an hourly schedule spends
+730+ minutes a month doing nothing but asking whether there is work — over a
+third of the allowance before a single replay runs. Every six hours costs ~120
+and is still far more often than a leaderboard needs, with `workflow_dispatch`
+for when it is wanted sooner. It also comfortably covers the other thing the
+schedule buys: a free Supabase project pauses after about a week idle, and any
+run touches the REST API.
+
+The one capability given up is on-demand compute: a visitor cannot ask for a bot
+that hasn't been run yet and watch it appear. That only starts to matter if the
+column ever grows into something interactive — picking a bot and watching the
+replay animate, or re-running it at a different `aux`. That would want a real
+service; a cached table does not.
+
+### Why it goes through `settings.build_state`
+
+`tests/sim.play` takes mode/nodes/players and calls `mapgen.generate` directly.
+That is the wrong door here: a posted setup carries tuned balance knobs, and
+`build_state` is the only funnel that pushes them into `config` before generation
+(`settings._apply_globals`). Replaying a 99-ships-per-homeworld map through
+`generate` would quietly hand every bot the *default* map instead — the same
+class of bug as `Settings.from_dict` returning a default `Settings()` when handed
+something that isn't a dict, which is why `bot_replay._settings_for` checks the
+shape rather than leaning on that function's usual tolerance. Tolerance is right
+for a stranger's link and wrong for a worker that will post confident numbers
+under a real map's key.
+
+The map a bot inherits is identical to the human's, down to the star names
+mapgen rolls last. The battles are not: once orders diverge so do the draws
+taken from `state.rng`. That is the point — same board, its own war.
+
+### What the replayed seat is tuned to
+
+Slot 0 of `Settings.ai` belongs to the human, so whatever a menu left in it says
+nothing about how a bot ought to play, and honouring it would let the same bot
+score differently on two otherwise identical maps. The seat therefore gets a
+default `AiParams` — with one exception.
+
+That exception is `aux`, the one bot-defined knob. Every other field belongs to
+the built-in heuristic's own tuning and says nothing about a drop-in's identity,
+but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
+statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
+makes it, and today it holds one entry: `knower` at search depth 12. Opponent
+seats keep both the strategy and the params the setup gave them — those *are* the
+map's difficulty, and changing them would answer a different question.
+
+The `aux` in force is stored on the row, not implied by the code that happened to
+be running. A reader comparing the board against a game they played from the menu
+— where knower's seat defaults to depth 1 — is owed that, and `pending` reads it
+back to notice when the policy has moved: an `aux` mismatch refills on an ordinary
+run with no flag, because such a row answers a *different question* rather than
+merely an older one. That is the distinction between it and `engine_rev`, where
+`--stale` stays opt-in.
+
+`bot_replay.BUDGET_SCALE` is the companion knob, lifting the bots' own per-decide
+wall-clock guards 100x for a caller with nobody waiting on it. Both choices are
+measured rather than assumed — see [`bot-design.md`](bot-design.md), "Replaying a
+bot for the leaderboard", for the numbers and why a bigger budget is the *more*
+reproducible option rather than a looser one.
+
+### A loss is a result, not a score
+
+`bot_scores.won` is the discriminator, never `turns`. A bot that never took the
+board still reports how long it lasted and what it spent, which is worth showing,
+but 600 turns of stalemate is not a better result than dying on turn 40 — and a
+quick death is certainly not better than a slow victory. So `standings.botOrder`
+puts every winner first, ranked by the game's own rule, and leaves the failures
+after them in plain name order, which claims nothing. `bestBot` and `humanVsBots`
+consider only winners for the same reason.
+
+The verdict line measures a person against the *best* bot rather than counting
+how many they beat. On a board of high scores the interesting question is whether
+anyone outplayed the best machine answer to that map, not whether they placed
+mid-table among six of them.
+
+### `engine_rev` hashes the simulation, not the commit
+
+Each row records a digest of what produced it, so `--stale` can find rows the
+code has moved past. A git SHA would be the obvious choice and is the wrong one:
+it moves on every commit, so a CSS change would invalidate the entire board. The
+digest covers the outcome-determining core modules plus every `models/*.py`, and
+nothing else. `starnames` is in that list despite being cosmetic — `_name_systems`
+draws from `state.rng`, so changing the name list shifts every roll taken after
+it (see **Star names** above).
+
+Nothing invalidates automatically. A changed bot leaves stale rows until someone
+runs `--stale` on purpose, which is the same "a fix is a deliberate act" trade
+`configs` already makes with its first-name-wins rule.
+
+### The one table the public cannot write
+
+`bot_scores` has a read policy and no insert policy, and no insert grant. The
+worker's `service_role` key bypasses RLS entirely, which makes it the only
+writer. Human scores are unverifiable by design — the token format is public and
+unsigned — so it would be strange to let the machine column be posted by hand
+too. It also means a rerun can *replace* a row, which is why this table is not
+append-only the way the rest of the board is.
+
+A per-decision wall-clock budget (`--bot-timeout`) is off by default, because a
+blown budget forfeits that turn's orders and the result would then depend on how
+fast the runner was that day. Where one is used, the count lands in
+`bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
+reproducible alongside the others.

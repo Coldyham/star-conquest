@@ -5,7 +5,9 @@ from __future__ import annotations
 import time
 from collections import Counter
 
-from starconquest import ai
+from starconquest import ai, settings as settings_mod
+from starconquest.model import AiParams
+from starconquest.settings import Settings
 from tests import sim
 
 
@@ -90,3 +92,149 @@ def test_no_seat_is_systematically_doomed():
     )
     for pid in (1, 2, 3):
         assert wins[pid] >= 15  # no seat wins almost never
+
+
+# --------------------------------------------------------------------------- #
+# play_settings: the leaderboard's bot-replay column (tools/bot_replay.py)
+# --------------------------------------------------------------------------- #
+def _setup(**kw) -> Settings:
+    base = dict(mode="random", players=3, nodes=16, seed=11)
+    return Settings(**{**base, **kw})
+
+
+def test_replay_is_reproducible_from_the_setup_alone():
+    # The whole premise of caching a bot result: same setup, same seed, same
+    # answer, every time and on any machine.
+    cfg = _setup()
+    a = sim.play_settings(cfg, 11, "heuristic")
+    b = sim.play_settings(cfg, 11, "heuristic")
+    assert a == b
+
+
+def test_replay_lands_on_the_same_map_the_human_played():
+    # mapgen is a pure function of the seed, so the board a bot inherits is
+    # identical down to the star names — only the war fought on it differs.
+    cfg = _setup()
+    one = settings_mod.build_state(cfg, 11)
+    two = settings_mod.build_state(cfg, 11)
+    assert [(s.id, s.name, s.owner_id, s.ships) for s in one.systems.values()] == \
+           [(s.id, s.name, s.owner_id, s.ships) for s in two.systems.values()]
+
+
+def test_the_bot_actually_drives_the_human_seat():
+    # engine._collect_orders skips the human seat, so a replay that forgot to
+    # clear is_human would sit still and lose every time. Seat 1 must be taking
+    # ground, which is only possible if `decide` ran for it.
+    cfg = _setup()
+    result = sim.play_settings(cfg, 11, "heuristic", max_turns=40)
+    assert result.turns > 0
+    assert result.lost > 0 or result.won  # it fought, or it had already won
+
+
+def test_opponents_keep_the_strategies_the_setup_gave_them():
+    # The bot must face the same opposition the human did — that is what makes
+    # the comparison mean anything.
+    ai.load_models()
+    cfg = _setup()
+    cfg.ai_strategy = ["heuristic", "rusherplus", "rusherplus"] + ["heuristic"] * 3
+    state = settings_mod.build_state(cfg, 11)
+    assert [state.players[pid].ai_strategy for pid in (2, 3)] == ["rusherplus", "rusherplus"]
+
+
+def test_the_replayed_seat_ignores_the_setup_s_own_ai_params():
+    # Slot 0 belongs to the human, so whatever a menu left in it says nothing
+    # about how a bot should play — and letting it through would score the same
+    # bot differently on two identical maps.
+    tuned = _setup()
+    tuned.ai[0] = AiParams(reserve_fraction=0.9, reserve_floor=40, expand_margin=9.0,
+                           attack_margin=9.0, reinforce_margin=40, aux=7.0)
+    assert sim.play_settings(tuned, 11, "heuristic") == sim.play_settings(_setup(), 11, "heuristic")
+
+
+def test_a_bot_that_never_wins_still_reports_a_result():
+    # `won` is the discriminator, not `turns`: a replay cut off by the turn cap
+    # is a real answer ("no win"), not a missing one.
+    result = sim.play_settings(_setup(), 11, "heuristic", max_turns=2)
+    assert result.timed_out and not result.won
+    assert result.turns == 2
+
+
+def test_balance_knobs_from_the_setup_reach_the_generated_map():
+    # build_state is the only funnel that pushes a Settings' knobs into config,
+    # which is why play_settings goes through it instead of mapgen.generate.
+    strong = _setup(home_start_ships=99)
+    weak = _setup(home_start_ships=5)
+    a = settings_mod.build_state(strong, 11)
+    b = settings_mod.build_state(weak, 11)
+    home_a = max(s.ships for s in a.systems.values() if s.owner_id == 1)
+    home_b = max(s.ships for s in b.systems.values() if s.owner_id == 1)
+    assert home_a == 99 and home_b == 5
+
+
+def test_aux_reaches_the_replayed_seat_and_changes_how_it_plays():
+    # models/knower.py reads aux as search depth, and the leaderboard replays it
+    # at 12 (bot_replay.REPLAY_AUX) because that is its own slider's top end and
+    # the setting its measurements favour. If aux stopped reaching the seat the
+    # board would quietly be showing the depth-1 bot instead, which is a
+    # materially weaker player — so assert the two actually differ.
+    ai.load_models()
+    cfg = _setup()
+    default = sim.play_settings(cfg, 11, "knower")
+    deep = sim.play_settings(cfg, 11, "knower", aux=12)
+    assert (default.turns, default.lost) != (deep.turns, deep.lost)
+
+
+def test_aux_none_is_the_documented_untuned_profile():
+    # config.AI_AUX is 1.0 and that is what a stale token deserialises to, so
+    # "no aux given" and "aux=1.0" must be the same replay.
+    ai.load_models()
+    cfg = _setup()
+    assert sim.play_settings(cfg, 11, "knower") == sim.play_settings(cfg, 11, "knower", aux=1.0)
+
+
+def test_a_tuned_replay_is_still_reproducible():
+    # The whole premise of caching. knower's search is iteration-bounded, so depth
+    # 12 plans the same way twice; only its SEARCH_BUDGET_S catastrophe guard
+    # could break that, and it is sized not to fire.
+    ai.load_models()
+    cfg = _setup()
+    assert sim.play_settings(cfg, 11, "knower", aux=12) == \
+           sim.play_settings(cfg, 11, "knower", aux=12)
+
+
+def test_budget_scale_is_wired_and_only_matters_when_it_bites():
+    # knower's wall-clock guards are the one part of it that is not
+    # iteration-bounded, so tripping one makes a cached replay unreproducible.
+    # The worker lifts them (ai.set_budget_scale) rather than searching less deep.
+    # Squeezing the scale must change the answer — that is what proves the knob
+    # reaches the guard at all — while raising it must not, since a guard that
+    # never fires cannot influence anything.
+    ai.load_models()
+    cfg = _setup()
+    try:
+        base = sim.play_settings(cfg, 11, "knower", aux=12)
+        ai.set_budget_scale(0.02)
+        assert sim.play_settings(cfg, 11, "knower", aux=12) != base, \
+            "a 3ms guard changed nothing — BUDGET_SCALE is not reaching the search"
+        ai.set_budget_scale(100)
+        assert sim.play_settings(cfg, 11, "knower", aux=12) == base
+    finally:
+        ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
+
+
+def test_set_budget_scale_only_touches_bots_that_declare_one():
+    # Opt-in and declarative, like aux_spec: a bot with no wall-clock guard has
+    # nothing to scale and must be left alone.
+    ai.load_models()
+    try:
+        assert ai.set_budget_scale(50) == ["knower"]
+    finally:
+        ai.set_budget_scale(1)
+
+
+def test_budget_scale_is_one_in_an_ordinary_game():
+    # Declaring the knob must not change how the bot plays for anyone else — a
+    # browser, a desktop game, the rest of this suite.
+    ai.load_models()
+    import sys
+    assert sys.modules["sc_model_knower"].BUDGET_SCALE == 1.0
