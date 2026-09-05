@@ -1,4 +1,4 @@
--- Move every score from a superseded game_key onto the current one.
+-- Move every score, human and bot, from a superseded game_key onto the current one.
 --
 -- games.game_key is Challenge.key out of the token — the game's blake2s checksum
 -- of the setup. Adding a field to Settings moves that digest, so links shared
@@ -26,6 +26,7 @@ declare
   from_key text := 'e2954098c1a26e02';  -- the superseded checksum
   to_key   text := '7f7fabfca0969ba4';  -- what that same setup hashes to now
   moved    integer;
+  bots     integer;
   mismatch text;
 begin
   if from_key = to_key then
@@ -64,6 +65,25 @@ begin
   update public.scores s set game_key = to_key where s.game_key = from_key;
   get diagnostics moved = row_count;
 
+  -- The bot column travels with them. It is keyed by (game_key, bot) and so
+  -- splits exactly as the human board does — and it must move before the games
+  -- row goes, since bot_scores references it.
+  --
+  -- Where both keys answer for the same bot, the two rows agree: a bot's result
+  -- is a pure function of the setup, the seed and the code, and the setup is
+  -- what we just proved identical. So there is nothing to arbitrate — drop the
+  -- destination's copy and move the source's over it. Where the *code* has since
+  -- moved on, the two engine_revs differ and `bot_replay --stale` is what
+  -- refills that, not this script. Moving them rather than dropping them saves
+  -- the worker recomputing a map it has already answered
+  -- (tools/bot_replay.pending keys its skip on (game_key, bot)).
+  delete from public.bot_scores d
+  where d.game_key = to_key
+    and exists (select 1 from public.bot_scores o
+                where o.game_key = from_key and o.bot = d.bot);
+  update public.bot_scores o set game_key = to_key where o.game_key = from_key;
+  get diagnostics bots = row_count;
+
   -- The map was first seen when the earlier of the two rows was created.
   update public.games d
   set first_seen_at = least(d.first_seen_at, o.first_seen_at)
@@ -72,5 +92,5 @@ begin
 
   delete from public.games g where g.game_key = from_key;
 
-  raise notice 'moved % score(s) from % to %', moved, from_key, to_key;
+  raise notice 'moved % score(s) and % bot row(s) from % to %', moved, bots, from_key, to_key;
 end $$;

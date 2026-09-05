@@ -67,7 +67,9 @@ before the next field joined `Settings` points at a digest nothing re-stamps.
 `findTwin` is what makes that survivable.
 
 [`fold-game-key.sql`](fold-game-key.sql) is the repair: it moves scores already
-stored under a superseded key onto the current row.
+stored under a superseded key onto the current row — the bot column with them,
+since `bot_scores` is keyed by `game_key` too and its foreign key would otherwise
+refuse the merge outright.
 
 ## Same setup, different seed
 
