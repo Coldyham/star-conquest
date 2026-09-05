@@ -1,8 +1,10 @@
-# Design notes
+# System design notes
 
 Rationale, history, and edge-case war stories behind the rules in `CLAUDE.md`'s
-Key Conventions. `CLAUDE.md` states *what* the rule is; this file is *why*, for
-whoever is next in that code. Headings match the corresponding bullet there.
+Key Conventions, for the game core and the pygame shell. `CLAUDE.md` states
+*what* the rule is; this file is *why*, for whoever is next in that code.
+Headings match the corresponding bullet there. Its companion is
+[`bot-design.md`](bot-design.md), which covers the AI roster and its tuning.
 
 ## Text sizing (`config.apply_ui_scale`)
 
@@ -127,6 +129,11 @@ lengths. Compounding makes it a constant ~50 turns at the gain slider's 2%
 top, independent of base speed and past any lane on any map — which is what
 sets that 2%.
 
+How far a lane actually is depends on the node count as much as on the speed,
+because `WORLD_SIZE` is fixed — see "Lane length across the parameter space" in
+[`bot-design.md`](bot-design.md) for the measured grid, and for why a margin
+tuned at the default speed is tuned in only one of three regimes.
+
 `GameState.travel_turns` re-times from the lane's real `length_ly`
 (`config.travel_turns_at_length`), not by rescaling the already-rounded-up
 baked `Lane.travel_turns` — that rescale-based approach (`config.travel_turns_at`,
@@ -242,174 +249,6 @@ meant to hand back the position as it was, and on a big map the standing routes
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
 was lost on that turn doesn't come back to life.
 
-## `models/knower.py` and simultaneous resolution
-
-Because turns resolve simultaneously — `_collect_orders` hands every seat the
-same unmutated state and applies nothing until all have decided — an
-opponent's orders can't depend on yours. That means a bot can clone the
-board, call each rival's own registered `decide`, and know their moves before
-the engine asks for them: there's no fixed point to solve, one forward pass
-of their real code *is* the answer. knower folds those predictions into a
-"post-launch board" (predicted orders applied via `engine.apply_order` but
-not advanced) and runs thinker's phases against it.
-
-## `models/marshal.py` and what the measurements deleted
-
-marshal was commissioned around three ideas: bait an opponent into a system a
-neighbour can relieve, value chokepoints, and stop sending "just enough". Only the
-third survived contact with a ladder, and the other two are worth recording so
-nobody re-derives them.
-
-**Overwhelming force is provable, not a preference.** Combat is Lanchester's square
-law, so the ships an attack consumes are `A - sqrt(A^2 - B^2)`, which *decreases*
-in `A` and tends to `B^2/2A`. Concentration is therefore rewarded twice: the strike
-costs fewer ships, and the capture is held by a stack big enough to keep. What
-thinker's own tuning sweep rejected was raising the *threshold* to attack — leaner,
-sooner strikes beat over-massing — and that is a different question from what to do
-with ships that have no other job this turn. marshal strikes at exactly thinker's
-price and then pours the remainder in behind it, worth 54%/72%/80% against the
-planner it forks at 24 nodes, 40 nodes and 18 ly/turn respectively.
-
-**The standing frontier guard interacts with commitment, and ablating one at a
-time hides it.** Swept *alone* against the blind planner, `FRONTIER_GUARD = 0.3`
-looks worthless: 85-85 on a 24-node mirror, and negative at 40 nodes and at
-18 ly/turn. marshal was built with it at 0.0 on that evidence and it was a
-mistake — with Phase 3b on, the guard is what makes committing survivable, since
-a system that just emptied itself into an attack is precisely the one that needs
-cover. Sweeping it again with 3b enabled, against knower at depth 0:
-
-    guard     18n   24n   30n   40n   mean   timeouts   turns
-    0.0       38%   48%   62%   66%    53%         --      --
-    0.30      56%   59%   66%   70%    63%         50     144
-    0.45      60%   60%   72%   69%    65%         59     162
-    0.55      60%   65%   74%   66%    66%         80     182
-    0.70      59%   60%   77%   71%    67%        114     195
-
-Two lessons. The obvious one is that one-at-a-time ablation is not enough when
-mechanics interact; the guard reads as dead weight until something else spends
-the ships it was hoarding. The subtler one is that the win rate above is not the
-whole objective — past 0.3 it is flat while games stretch 35% longer and timeouts
-more than double, which is the stalemate failure mode `models/README.md` warns
-about. marshal holds thinker's exact 0.3, which also keeps its margin
-attributable to mechanisms rather than to a re-tune.
-
-The original zero-guard result was also *size*-blind. marshal at guard 0.0 beat
-the blind planner 66% at 40 nodes but lost 38-40% at 12-18 nodes, crossing over
-around 26 — and 18 is the default. Any bot result quoted at a single map size
-should be treated as provisional.
-
-**Chokepoints lose.** Normalised Brandes betweenness over the lane graph, cached
-per topology and folded into `_richness`. The measure itself is sound and cheap —
-these maps are planar and sparse (average degree 2.5-2.7) yet 34-49% of nodes are
-cut vertices, so degree says nothing while betweenness separates cleanly (top 1.00,
-median 0.21, 2.3 ms at 24 nodes, computed once). It still loses at every weight
-tried: 48%/48%/50% at 0.10/0.20/0.40, negative at 40 nodes, and consistently the
-longest games and most timeouts in the whole sweep. The bot buys corridors instead
-of winning. Production compounds and topology doesn't, which is the short version.
-Pocket-sealing — valuing a capture by how much frontier it removes — fails for a
-duller reason: 67% of candidate targets score identically and only 6.7% seal at
-all, so it mostly adds a constant. 47% either way.
-
-**Two bugs fixed on the way past**, both of which the removed guard used to mask.
-`_EDGE = 1.1 / 0.9` hardcoded `COMBAT_JITTER = 0.10`, which is a menu knob, so every
-margin in thinker, knower and claudebot silently dropped below break-even when the
-jitter slider moved. marshal fixed it for itself first, reading the knob live and
-flooring the tuned absolutes over it; the fix has since moved into
-`combat.edge_attacking`/`edge_defending` (see below) and the rest of the roster
-reads it too, so this is now a roster property rather than a thing marshal alone
-gets right. And Phase 1 sized relief for the worst arrival horizon but scheduled
-it for *that* horizon's turn, while 16.1% of real deficits bind later than the
-first arrival — the standing guard used to absorb the early wave. marshal sizes
-for the worst horizon and requires delivery by the earliest.
-
-**Standing aside in a free-for-all.** The one idea here that came from watching a
-human play rather than from reading the code: when you are boxed between two
-rivals, the node that joins them is worth less than its production says. Take it
-and you have replaced a border *they* were contesting with two borders they
-contest with you — a bad trade for as long as your income trails their combined
-income. `_wedge` prices a target by how many rivals *past the first* it borders,
-so the wall position is discounted and the rivals are left adjacent and busy with
-each other.
-
-The payoff is sharply non-monotonic in the size of the field, which is why the
-term is gated on `WEDGE_MIN_PLAYERS`. Measured by pairing marshal against a copy
-of itself with the term off, both seats in the *same* game, rotated through every
-position so map and luck are shared:
-
-    3 players, 30 nodes    48% (126-137)   gate off, so the two are identical
-    4 players, 30 nodes    64% (160-89)
-    4 players, 40 nodes    62% (168-101)
-    5 players, 40 nodes    62% (190-117)
-
-The three-player row is a **null cell** and worth keeping for that alone: the gate
-makes both variants emit identical orders, so whatever it reads is the harness's
-own noise. It reads 48%, and that is what licenses reading 62-64% as real — an
-earlier 40-seed sweep put the same null at 43%, which would have made a 58% result
-look like a finding. Any future bot experiment here should build itself a null
-cell the same way.
-
-Why it fails at three players: with a single pair of rivals there is no fight to
-stand aside from, so declining the node just feeds whichever of them takes it, and
-the lost income beats the diplomacy. Why it fades past five: the board is crowded
-enough that nearly every target borders two rivals, so the term stops
-discriminating and becomes a constant offset.
-
-Only the defensive half of the human strategy is implemented. The other half —
-*abandoning* a system specifically to bait two rivals into contesting it — needs a
-model of what those rivals value, which is knower's territory rather than a blind
-bot's.
-
-## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
-
-Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
-`edge_defending` are now the one place a fight's break-even multiple is computed,
-and thinker, claudebot and knower all price their margins off it instead of a
-private `1.1 / 0.9` constant. Motivation was a real bug, not tidiness — with
-`DEFENDER_ADVANTAGE` a live menu slider, every bot but marshal was pricing fights
-against a defender bonus that no longer existed, or under-pricing one that had
-grown past 1.0.
-
-Two properties the API has to hold for a bot pulling it in:
-
-* **A knob can only ever *raise* a margin above the figure the bot was tuned at,
-  never thin it.** `min_swing` floors the jitter half of the edge (not the
-  advantage half) at the swing a margin was fitted against; every bot in
-  `models/` passes its own `TUNED_SWING = 1.1 / 0.9`. Skipping this is a real
-  regression, not a theoretical one: measured pre-floor, claudebot at
-  `COMBAT_JITTER = 0.0` scored 8% (2-24, 34 unresolved) against its own
-  pre-back-port self, 60 games, 24 nodes, both seatings — a gentler-than-default
-  jitter thinned every margin below what the bot's absolutes were tuned to cover.
-  With the floor, that cell and the jitter-0.10 default are both exact 50% nulls
-  for all three bots.
-* **Clearing the edge is not a promise of capture.** It only guarantees the
-  defender loses the worst roll; near-matched forces can still round to zero
-  survivors on both sides and hand the system to nobody. `preview_fight(1, 1,
-  0.1, 0.75)` clears `edge_attacking()` (0.90 vs 0.825) and still annihilates.
-  Every caller floors its ask at `target.ships + 1` for exactly this reason.
-
-**The honest margin costs something above default jitter.** Re-measured after the
-floor, thinker/claudebot/knower vs their pre-back-port selves (60 games a cell, 24
-nodes, both seatings, `DEFENDER_ADVANTAGE` fixed at 1.0):
-
-    COMBAT_JITTER   thinker   claudebot   knower
-    0.10 (default)     50%        50%        50%    (exact nulls, by construction)
-    0.15               61%        56%        49%
-    0.25               33%        40%        46%
-    0.50                0%         4%        14%
-
-The old `1.1 / 0.9` hardcode was, by accident, a *gambling* policy: at high jitter
-it kept sending at a margin that was no longer statistically safe, and won more
-than a bot pricing the real odds does. This is why the finding belongs here and
-not as a reason to cap the edge — the fix is correct, the number above is the
-honest price of correctness, and a future change chasing that regression back
-would be re-introducing the original bug. `DEFENDER_ADVANTAGE` moves the other,
-unambiguous way for all three bots (0.75: 53/66/63%, 1.25: 69/94/79%, 1.5:
-100/100/100%, same harness) — that direction was never in question, only whether
-the bot was pricing it at all.
-
-marshal's own head-to-head numbers move too, now that its rivals are no longer
-handicapped by the stale constant — see its docstring for the re-measured table.
-
 ## Send popup / `Ui.editing_existing`
 
 The popup commits immediately, so a fresh compose and a reopened order are
@@ -493,28 +332,6 @@ times under three identical `0%` headers, so it collapses to a single sentence
 instead. The centre cell is highlighted because it is the fight the readout
 spells out in words — same number, same colour — which is what teaches the
 reader how to read the other eight.
-
-## Defender advantage and the AI (`ai._frontier_order`)
-
-`config.DEFENDER_ADVANTAGE` multiplies the defender's strength in combat, so
-the AI's `expand_margin`/`attack_margin` have to be measured against the
-*effective* garrison (`n.ships * DEFENDER_ADVANTAGE`), not the raw ship count.
-Against the raw count the margins understate every target, and the AI simply
-stops expanding — it waits forever for a surplus it already has. At 1.0 the
-multiply is an exact identity, so nothing about a default game moves.
-
-That fix is necessary but not sufficient, which is why the slider stops at
-`config.DEFENDER_ADVANTAGE_MAX = 1.5` rather than the 2.0 first drafted.
-Measured over `tests/sim` (40 seeds, 18 nodes, 3 players): 0.75 finishes 38/40,
-1.0 → 36/40, 1.25 → 26/40, 1.5 → 19/40, 2.0 → **3/40** — and the 2.0 failures
-are *hard* stalemates, not slow games, unresolved even at a 3000-turn cap. Both
-sides produce symmetrically, so a fortress bonus that large grows the defence as
-fast as any assault can be massed against it. One AI variant (an additive rather
-than compounding cushion) moved 2.0 from 2/24 to 7/24 finished, which is not
-enough to call it a tuning problem.
-
-`Settings.from_dict` clamps the field to that ceiling, unlike the other balance
-knobs, whose out-of-range values are merely odd rather than unplayable.
 
 ## Losing / spectator mode
 
@@ -762,9 +579,20 @@ seed, and the code — so it only ever has to be computed *once*. There is nothi
 to serve live, and an always-on host would spend most of its life idle waiting to
 recompute answers it already had. What the feature actually needs is a cache and
 something to fill it, which is a scheduled job: `.github/workflows/bot-replay.yml`
-runs hourly, writes into `public.bot_scores`, and costs nothing on a public repo.
+writes into `public.bot_scores` on a schedule and leaves no service to keep up.
 Netlify was never a candidate either way — its Functions run JavaScript and Go,
 and there is no Python runtime to put the engine in.
+
+The cadence is set by Actions minutes rather than by how fresh the column needs
+to be. This repository is **private**, so runs bill against the account's monthly
+allowance (2,000 minutes on the Free plan; public repositories are unmetered).
+GitHub rounds every job up to the whole minute, so an hourly schedule spends
+730+ minutes a month doing nothing but asking whether there is work — over a
+third of the allowance before a single replay runs. Every six hours costs ~120
+and is still far more often than a leaderboard needs, with `workflow_dispatch`
+for when it is wanted sooner. It also comfortably covers the other thing the
+schedule buys: a free Supabase project pauses after about a week idle, and any
+run touches the REST API.
 
 The one capability given up is on-demand compute: a visitor cannot ask for a bot
 that hasn't been run yet and watch it appear. That only starts to matter if the
@@ -789,54 +617,20 @@ The map a bot inherits is identical to the human's, down to the star names
 mapgen rolls last. The battles are not: once orders diverge so do the draws
 taken from `state.rng`. That is the point — same board, its own war.
 
-### The replayed seat gets default `AiParams`
+### What the replayed seat is tuned to
 
 Slot 0 of `Settings.ai` belongs to the human, so whatever a menu left in it says
 nothing about how a bot ought to play, and honouring it would let the same bot
-score differently on two otherwise identical maps. `AiParams()` is the documented
-untuned profile (`config.AI_AUX` is 1.0, `models/README.md`). Opponent seats keep
-both the strategy and the params the setup gave them — those *are* the map's
-difficulty, and changing them would answer a different question.
+score differently on two otherwise identical maps. The seat therefore gets a
+default `AiParams` — with one exception.
 
-### Each bot is replayed at its best, not its default
-
-`play_settings` hands the seat default `AiParams` with one exception: `aux`, the
-one bot-defined knob. Every other field belongs to the built-in heuristic's own
-tuning and says nothing about a drop-in's identity, but `aux` is whatever that
-strategy decides it is — so "this bot at its best" is a statement only the caller
-can make. `bot_replay.REPLAY_AUX` is where the board makes it.
-
-Today it holds one entry: `knower` at 12. That is the top of knower's own slider
-(`SEARCH_DEPTH_MAX`), the setting its measurements favour — "ahead in every
-measurement taken and behind in none" — and a materially stronger player than its
-default 1. There is no point putting a deliberately hobbled version of the best
-bot on the board.
-
-Two costs come with it, both real:
-
-* **It is roughly 100x the wall clock of depth 1.** A 40-node six-seat game goes
-  from well under a second to tens of seconds. `--limit` and the deadline exist
-  for this; the job banks each result as it goes and the next run resumes.
-* **It would have broken reproducibility, until the guards were lifted.** knower's
-  search is *iteration*-bounded, so the same board plans the same way — except for
-  `SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard that, if it trips,
-  makes the plan depend on the wall clock. The module's own cost table measured
-  better than 2x headroom at depth 12; on a CI-class container the largest
-  configuration the menu can build (40 nodes, 6 seats) measured ~1.1x. That is not
-  a margin to cache results against: simulating a runner only 2x slower (by
-  shrinking `BUDGET_SCALE` proportionally) produced a *different* answer on the
-  same map — 117 turns and 272 lost against 123 and 311.
-
-  The fix is not a shallower search. Both of knower's guards exist because the
-  WASM build is single-threaded and the alternative to giving up mid-search is
-  freezing the browser tab — a constraint a background job simply does not have.
-  So `bot_replay.BUDGET_SCALE` lifts them 100x (`ai.set_budget_scale`), turning
-  150 ms into 15 s against a measured worst case of ~131 ms. This is the opposite
-  of a loosening: those guards are the only part of the bot that is not
-  iteration-bounded, so a run that can never trip one is strictly *more*
-  reproducible. It is still a guard — a wedged bot is stopped long before the
-  workflow's own `timeout-minutes` has to do it — and it stays at 1.0 for every
-  ordinary caller, so a real game is untouched.
+That exception is `aux`, the one bot-defined knob. Every other field belongs to
+the built-in heuristic's own tuning and says nothing about a drop-in's identity,
+but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
+statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
+makes it, and today it holds one entry: `knower` at search depth 12. Opponent
+seats keep both the strategy and the params the setup gave them — those *are* the
+map's difficulty, and changing them would answer a different question.
 
 The `aux` in force is stored on the row, not implied by the code that happened to
 be running. A reader comparing the board against a game they played from the menu
@@ -845,6 +639,12 @@ back to notice when the policy has moved: an `aux` mismatch refills on an ordina
 run with no flag, because such a row answers a *different question* rather than
 merely an older one. That is the distinction between it and `engine_rev`, where
 `--stale` stays opt-in.
+
+`bot_replay.BUDGET_SCALE` is the companion knob, lifting the bots' own per-decide
+wall-clock guards 100x for a caller with nobody waiting on it. Both choices are
+measured rather than assumed — see [`bot-design.md`](bot-design.md), "Replaying a
+bot for the leaderboard", for the numbers and why a bigger budget is the *more*
+reproducible option rather than a looser one.
 
 ### A loss is a result, not a score
 

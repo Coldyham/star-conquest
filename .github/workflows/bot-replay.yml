@@ -4,7 +4,7 @@
 # result of putting a bot in the player's seat is a pure function of the setup,
 # the seed and the code, so it only ever needs computing once and there is
 # nothing to serve live. A scheduled job that writes its answers into Supabase
-# costs nothing on a public repo and leaves no service to keep up.
+# leaves no service to keep up.
 #
 # Setup (once):
 #   Settings -> Secrets and variables -> Actions -> New repository secret
@@ -18,11 +18,25 @@ name: Bot replay
 
 on:
   schedule:
-    # Hourly, off the hour: GitHub's shared cron queue is busiest at :00, and a
-    # run that starts late is worth more than one that gets dropped. Hourly is
-    # also enough on its own to keep a free Supabase project from idling into a
-    # pause, which it otherwise does after about a week.
-    - cron: "17 * * * *"
+    # Every six hours, off the hour: GitHub's shared cron queue is busiest at
+    # :00, and a run that starts late is worth more than one that gets dropped.
+    #
+    # The cadence is set by Actions minutes, not by freshness. On a *private*
+    # repository every run bills against the account's monthly allowance (2,000
+    # minutes on the Free plan) and GitHub rounds each job up to the whole
+    # minute — so an hourly schedule would spend 730+ minutes a month just
+    # asking whether there is anything to do. Four runs a day costs ~120 and is
+    # still far sooner than anyone needs a bot column; use the Run workflow
+    # button when you want it now. Public repositories are unmetered, so hourly
+    # is free there if this is ever made public.
+    #
+    # It also keeps a free Supabase project from idling into a pause, which it
+    # otherwise does after about a week — any run touches the REST API.
+    #
+    # Note GitHub disables a scheduled workflow after 60 days with no commits to
+    # the repository. If the column silently stops updating on a quiet repo,
+    # that is the first thing to check (Actions tab -> Enable workflow).
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       game_key:

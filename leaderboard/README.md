@@ -85,7 +85,7 @@ maps of unequal difficulty — so this one carries the setup alone.
 
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
-for a single existing map (see `docs/design-notes.md`, "Keys outlive the schema
+for a single existing map (see `docs/system-design.md`, "Keys outlive the schema
 that made them"). The trade is the opposite fragility: **naming a config freezes
 it to `sc_config_key`'s current definition and to the game's current pruning
 rules.** Change either — the function's body, or a `config.DEFAULT_*` balance
@@ -117,7 +117,7 @@ setup, the seed and the code, so it only ever needs computing once and there is
 nothing to serve live: [`tools/bot_replay.py`](../tools/bot_replay.py) runs on a
 schedule in GitHub Actions and caches its answers in `public.bot_scores`. See
 [`.github/workflows/bot-replay.yml`](../.github/workflows/bot-replay.yml) for the
-job and `docs/design-notes.md` ("Bot replays") for why it is a batch job rather
+job and `docs/system-design.md` ("Bot replays") for why it is a batch job rather
 than the small service this file used to ask for.
 
 The worker also lifts the bots' own per-decide wall-clock guards 100x. Those
@@ -172,9 +172,12 @@ lasting 600 turns is not a better result than dying on turn 40. `js/standings.mj
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
    `SUPABASE_SERVICE_KEY` set to the project's **service_role** key (*not* the
    anon key in `config.mjs` — that one is public on purpose, this one must never
-   be). The hourly workflow skips itself cleanly while they are unset, so there
-   is nothing to undo if you'd rather not. An hourly run also keeps a free
-   Supabase project from idling into the pause noted under *Known limitations*.
+   be). The workflow skips itself cleanly while they are unset, so there is
+   nothing to undo if you'd rather not. It runs every six hours — a cadence set
+   by Actions minutes on a private repo rather than by how fresh the column needs
+   to be, with *Run workflow* for when you want it sooner — and any run keeps a
+   free Supabase project from idling into the pause noted under *Known
+   limitations*.
 
 ## Local development
 
