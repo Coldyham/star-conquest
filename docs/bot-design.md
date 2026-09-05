@@ -209,8 +209,22 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-Full roster ladder, 900 games: knower 263, marshal 247, thinker 175,
-claudebot 111, heuristic 52, rusherplus 15.
+**Full roster ladder, re-run against this re-tune** (`uv run python -m tests.sim
+--ladder --trials 30`, 18 nodes, default settings — 900 games, 74 timed out and
+are excluded from the percentages): knower 255 (31%), marshal 219 (27%), thinker
+173 (21%), claudebot 95 (12%), heuristic 46 (6%), rusherplus 38 (5%). The figure
+this replaces predated both the margin back-port and this re-tune; **this table
+is the current one** — update it, not the module docstring, the next time
+marshal or the roster's pricing changes:
+
+    head-to-head (row's win rate vs column)
+                heuris  claude  knower  marsha  rusher  thinke
+      heuristic      —     19%      0%      0%     64%      2%
+      claudebot    81%       —      5%      8%     73%     12%
+      knower      100%     95%       —     65%    100%     84%
+      marshal     100%     92%     35%       —    100%     75%
+      rusherplus   36%     27%      0%      0%       —      3%
+      thinker      98%     88%     16%     25%     97%       —
 
 ### A stagger's nearer wave is reserved
 
@@ -438,7 +452,8 @@ unambiguous way for all three bots (0.75: 53/66/63%, 1.25: 69/94/79%, 1.5:
 the bot was pricing it at all.
 
 marshal's own head-to-head numbers move too, now that its rivals are no longer
-handicapped by the stale constant — see its docstring for the re-measured table.
+handicapped by the stale constant — see the re-measured full-roster ladder under
+"Where marshal stands" above.
 
 ## Defender advantage and the AI (`ai._frontier_order`)
 
