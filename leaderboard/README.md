@@ -48,9 +48,26 @@ and nothing has to be re-hashed here.
 
 That checksum covers the whole setup, so adding a field to `Settings` changes it
 for every map: links shared either side of such a change describe one map under
-two keys. `KEY_ALIASES` in [`js/token-decode.mjs`](js/token-decode.mjs) folds an
-incoming legacy key onto the current one, and
-[`fold-game-key.sql`](fold-game-key.sql) moves scores already stored under it.
+two keys. Two things fold them back together, and a third repairs what is already
+stored.
+
+`findTwin` in [`js/submit.mjs`](js/submit.mjs) is the general one. Before a
+submission opens a new map page, it looks for a row on the same
+mode/players/nodes/seed whose stored `settings_json` *is* the setup being posted
+(`setupIdentity`), and files the score there. That works without anyone noticing
+the split first, and keeps working across the next schema change, because
+`Settings.token_dict` prunes every field still at its default — so a field added
+since is simply absent from both rows.
+
+`KEY_ALIASES` in [`js/token-decode.mjs`](js/token-decode.mjs) is the narrower one:
+it maps a specific superseded checksum onto the key that map is now filed under,
+which is what an already-split board needs, since both keys exist there and the
+stamped one still resolves. It is hand-kept, so its targets age — an entry written
+before the next field joined `Settings` points at a digest nothing re-stamps.
+`findTwin` is what makes that survivable.
+
+[`fold-game-key.sql`](fold-game-key.sql) is the repair: it moves scores already
+stored under a superseded key onto the current row.
 
 ## Same setup, different seed
 
