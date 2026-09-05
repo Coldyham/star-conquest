@@ -11,7 +11,7 @@ import test from "node:test";
 import { inflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-import { decodeToken, fragmentOf } from "../js/token-decode.mjs";
+import { aliasFor, decodeToken, fragmentOf, setupIdentity } from "../js/token-decode.mjs";
 
 // Node 18 has no global crypto (default from 19); the browser always does.
 globalThis.crypto ??= webcrypto;
@@ -77,4 +77,52 @@ test("a superseded checksum folds onto the key the same setup has now", async ()
   assert.equal(old_.gameKey, now.gameKey);
   assert.equal(old_.seed, now.seed);
   assert.notEqual(old_.challenge.turns, now.challenge.turns);  // two attempts, one map
+});
+
+test("two versions' links to one map carry the same setup identity", async () => {
+  // The half of the fold that needs no alias: submit.mjs compares this against
+  // the settings_json of every game row on the same mode/players/nodes/seed, so
+  // a checksum moved by a *later* schema change still lands on the row already
+  // holding that map's scores. Same two real links as the test above — minted
+  // either side of a field joining Settings, and identical as setups.
+  const before = "eNpNjkEOgyAQRe_y12ysVCxXaZoGZRQiQgO4MMa7d0y66O7N_Mz7c2BNlqCRTbRphcAn"
+    + "mJ1ygW4FImdMTS9QiCx0rx7qzpPx71KzqTTv0E842rIv1Y98X52PC-U_egmMzoRAceam"
+    + "A3XL8bI23BBSqaztBBw_8FsOLAULFrqgJTVI2faSpsmq4Ybz_AKt1Tg9";
+  const after = "eNpNjcEOgyAYg9-lZy64CcqrLMuC8EeIiAvgwRjfff-yy25f27Q9sW6eYFBs9tsKgXey"
+    + "B5UKcxPInDHJQaASeZhBj7pnZeOrtmIbzQfMA4H2EmuLjvstxLxQ-aOngAs2JcozP51o"
+    + "e8m8qjuBtNUG0zEF_v95E0-C6wt9Qaley_s0dqMceukUrusDOus27g";
+
+  const [old_, now] = await Promise.all([decodeToken(before, inflate), decodeToken(after, inflate)]);
+  assert.equal(setupIdentity(old_.setup), setupIdentity(now.setup));
+});
+
+test("a key with no alias is its own answer", () => {
+  // Every key on a board that has never split, and the guarantee game.mjs relies
+  // on to know a redirect is worth making.
+  assert.equal(aliasFor("770ba09210f6127a"), "770ba09210f6127a");
+  assert.equal(aliasFor(""), "");
+});
+
+test("a superseded key resolves to the one its map is filed under", () => {
+  assert.equal(aliasFor("e2954098c1a26e02"), "7f7fabfca0969ba4");
+  // Idempotent: the answer is a key, so game.mjs can redirect to it without
+  // wondering whether it needs resolving again.
+  assert.equal(aliasFor("7f7fabfca0969ba4"), "7f7fabfca0969ba4");
+  // A key and its target land in the same place — which is what makes the table
+  // safe to extend by pointing an existing target onward rather than rewriting
+  // every entry that leads to it.
+  assert.equal(aliasFor("3e7b44384effd7b2"), aliasFor("665714b9291851c6"));
+});
+
+test("setup identity ignores key order and autoplay, but not a knob", () => {
+  const a = { mode: "random", players: 3, nodes: 18, seed: 7, ai_strategy: ["heuristic", "thinker"] };
+  const b = { seed: 7, ai_strategy: ["heuristic", "thinker"], nodes: 18, players: 3, mode: "random" };
+  assert.equal(setupIdentity(a), setupIdentity(b));
+  // Watching the AI play is not a different map; a balance knob is.
+  assert.equal(setupIdentity({ ...a, autoplay: true }), setupIdentity(a));
+  assert.notEqual(setupIdentity({ ...a, in_lane_battles: true }), setupIdentity(a));
+  // Seats are positional, so their order is part of the setup.
+  assert.notEqual(setupIdentity({ ...a, ai_strategy: ["thinker", "heuristic"] }), setupIdentity(a));
+  // A missing setup is a row we cannot match, not a crash.
+  assert.equal(setupIdentity(undefined), setupIdentity({}));
 });

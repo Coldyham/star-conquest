@@ -23,9 +23,42 @@ const MODES = ["random", "symmetric"];
 // in JS — so an entry is added when such a link actually turns up. Rows already
 // stored under the old key are moved by leaderboard/fold-game-key.sql.
 const KEY_ALIASES = {
-  // 3 players, 18 nodes, seed 879758 — stamped before the defender-advantage knob.
+  // 3 players, 18 nodes, seed 879758, two thinkers — stamped before the
+  // defender-advantage knob. Its target was superseded in turn when in-lane
+  // battles joined Settings (that setup now stamps a87ef2158a2ae0cf), which is
+  // this table's standing flaw: a target is only current until the next field
+  // lands. Repointing it would move nothing, since findTwin() in submit.mjs
+  // reaches the same row by the setup itself, so it stays as the record of what
+  // was actually stored.
   "3e7b44384effd7b2": "665714b9291851c6",
+  // 3 players, 13 nodes, seed 882369, marshal + knower — stamped before in-lane
+  // battles joined Settings (merged to main 2026-09-04, days after the board
+  // went live), so replaying it filed the new score under a second key. The
+  // setup's defender advantage is off its default, which is why the game offers
+  // only this one legacy digest for it: challenge_keys() is
+  // ('7f7fabfca0969ba4', 'e2954098c1a26e02').
+  "e2954098c1a26e02": "7f7fabfca0969ba4",
 };
+
+/**
+ * A stamped key resolved through KEY_ALIASES, following a chain to its end: a
+ * digest superseded twice (a map that outlived two schema changes) has an entry
+ * pointing at an entry. The visited set is not defensive tidiness — a typo that
+ * pointed two entries at each other would otherwise hang the page it is called
+ * from, and this table is edited by hand.
+ *
+ * A key with no entry is returned unchanged, which is every key on a board that
+ * has never split.
+ */
+export function aliasFor(key) {
+  let current = key;
+  const seen = new Set([current]);
+  while (KEY_ALIASES[current] && !seen.has(KEY_ALIASES[current])) {
+    current = KEY_ALIASES[current];
+    seen.add(current);
+  }
+  return current;
+}
 
 /** Everything after the '#', since people paste a whole URL, not a bare token. */
 export function fragmentOf(input) {
@@ -105,8 +138,7 @@ export async function decodeToken(input, inflate) {
 export async function gameKeyFor(dict) {
   const key = dict.challenge && dict.challenge.key;
   if (typeof key === "string" && key.trim()) {
-    const stamped = key.trim();
-    return KEY_ALIASES[stamped] || stamped;
+    return aliasFor(key.trim());
   }
 
   const { challenge, autoplay, ...setup } = dict;
@@ -120,6 +152,28 @@ export async function gameKeyFor(dict) {
 export function setupOf(dict) {
   const { challenge, ...setup } = dict;
   return setup;
+}
+
+/**
+ * A comparable form of a stored `games.settings_json`: "the same map", derived
+ * from the setup itself rather than from a checksum some version of the game
+ * stamped.
+ *
+ * This is the fold that KEY_ALIASES above cannot be — a hand-kept alias needs a
+ * split to be noticed and reported first, and its target is only current until
+ * the next field joins Settings. Two rows written by different versions of the
+ * game carry the *same* settings_json: `token_dict` prunes every field still at
+ * its default, so a field added since is simply absent from both. Comparing that
+ * is exactly the identity `sc_config_key` already groups configs by
+ * (schema.sql), seed included here since a seed is part of a map.
+ *
+ * `autoplay` is dropped for the same reason it is excluded from the game's own
+ * `challenge_key`: watching the AI play is not a different map. Keys are sorted
+ * so two writers that emitted them in a different order still agree.
+ */
+export function setupIdentity(setup) {
+  const { autoplay, ...rest } = setup || {};
+  return JSON.stringify(canonicalize(rest));
 }
 
 function canonicalize(value) {

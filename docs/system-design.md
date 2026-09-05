@@ -92,6 +92,35 @@ blake2s (the two languages disagree on integral floats), so the leaderboard
 folds by lookup instead: `KEY_ALIASES` for incoming links, and
 `leaderboard/fold-game-key.sql` for rows already stored.
 
+Both of those are per-map and hand-kept, which is a step behind the game: an
+alias is written only once someone reports the split, and its target is current
+only until the next field joins `Settings` — the entry added for the
+defender-advantage knob outlived its own target when in-lane battles landed. So
+the leaderboard also folds *without* a checksum at all:
+`leaderboard/js/submit.mjs` matches a submission against the stored
+`settings_json` of every game row on the same mode/players/nodes/seed
+(`setupIdentity` in `js/token-decode.mjs`) and posts onto the row that already
+holds that map. Two versions of the game write the *same* `settings_json` for one
+map — `token_dict` prunes each field still at its default, so a field added since
+is absent from both — which makes this the same trade `sc_config_key` makes below,
+and the reason no future schema change needs an alias at all.
+
+It reaches two cases the alias list cannot reach even in principle. A digest can
+move with no field added: `challenge_keys` changed in 2026-09 to blank a seat
+beyond `players` rather than hash it, and a drop entry can only name a field, so
+links stamped before that carry a key *no* build recomputes. And a player on a
+stale cached build posts under the previous digest, which is a split nobody
+caused. The case it shares with the alias list is a field joining `AiParams`:
+`token_dict` prunes a seat dict only whole, so both the stored setup and the
+digest move together and neither fold sees through it — the reason the note by
+`_LEGACY_KEY_DROPS` sends a new per-bot knob to `AiParams.aux` instead.
+
+Which key a map ends up under is settled in one direction only: the newest.
+`submit.findTwin` takes the most recently created matching row and
+`fold-game-key.sql` merges into it, so the site and the repair agree; a link to
+the key that lost is not dead, since `game.mjs` resolves an unknown key through
+`aliasFor` and forwards it.
+
 The leaderboard's config grouping (same setup, different seed —
 `leaderboard/README.md`, "Same setup, different seed") deliberately sits on the
 *other* side of this trade-off. `sc_config_key` in `leaderboard/schema.sql` hashes

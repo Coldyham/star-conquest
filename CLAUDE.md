@@ -235,8 +235,13 @@ intact.
     fails until you do. Only `challenge_keys()[0]` is ever *written*. The
     leaderboard folds by lookup instead (`KEY_ALIASES` in
     `leaderboard/js/token-decode.mjs`, `leaderboard/fold-game-key.sql`), since JS
-    cannot recompute the Python digest. For the same reason, the leaderboard's
-    same-setup-different-seed grouping (`sc_config_key` in
+    cannot recompute the Python digest — plus, for the splits nobody has reported
+    yet, `submit.findTwin`, which posts onto whichever game row already stores
+    this exact setup (`setupIdentity`, matched against `settings_json`) rather
+    than opening a second page under the new digest. A split settles on the
+    *newest* key — `findTwin` and `fold-game-key.sql` both move that way, and
+    `game.mjs` forwards a link to a folded-away key through `aliasFor`. For the same reason, the
+    leaderboard's same-setup-different-seed grouping (`sc_config_key` in
     `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
     rather than added as a field here — that would move `challenge_key()` for
     every map instead of only the config grouping.

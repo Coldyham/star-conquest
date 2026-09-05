@@ -70,6 +70,16 @@ _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 # `challenge_keys` re-hashes without each, recovering the checksum that version
 # would have stamped. Append here whenever a field joins `Settings` —
 # `test_challenge_key_is_stable` fails until you do.
+#
+# Only *top-level* fields can be named here. A field joining `AiParams`, or one
+# of its defaults moving, changes every seat dict inside `ai` and so moves the
+# digest with nothing to drop — and `token_dict` prunes a seat dict only whole,
+# never field by field, so the shared link changes shape too and the
+# leaderboard's own fallback (`submit.findTwin`, which matches a stored setup
+# byte for byte) cannot fold it either. The pinned test still fires; the repair
+# is a one-off back-fill of the new key into stored `settings_json`, not an
+# entry below. Worth knowing before adding a per-bot knob here rather than
+# through `AiParams.aux`, which every seat dict already carries.
 _LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
     ("in_lane_battles",),
     ("in_lane_battles", "defender_advantage"),
