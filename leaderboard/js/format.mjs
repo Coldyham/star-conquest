@@ -52,6 +52,17 @@ export function scoreSummary(score) {
 }
 
 /**
+ * "31 turns · 4 lost", or "no win · 120 turns" for a replay that never took the
+ * board — see schema.sql's bot_scores, where `won` and not `turns` is the
+ * discriminator. Kept apart from scoreSummary() above rather than reusing it:
+ * that one would read a bot's absent `hand` as "every turn played by hand",
+ * which is true but meaningless for a machine, and it has no way to say "lost".
+ */
+export function botSummary(row) {
+  return row.won ? `${row.turns} turns · ${row.lost} lost` : `no win · ${row.turns} turns`;
+}
+
+/**
  * Standard competition ranking over a list already ordered best-first: equal
  * results share a rank and the next distinct one skips it (1, 1, 3).
  *

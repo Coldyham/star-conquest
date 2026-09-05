@@ -1,0 +1,99 @@
+# Fill in the leaderboard's "how would each bot have done?" column.
+#
+# The whole backend for that feature is this file plus tools/bot_replay.py: the
+# result of putting a bot in the player's seat is a pure function of the setup,
+# the seed and the code, so it only ever needs computing once and there is
+# nothing to serve live. A scheduled job that writes its answers into Supabase
+# costs nothing on a public repo and leaves no service to keep up.
+#
+# Setup (once):
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#     SUPABASE_URL          https://<project>.supabase.co
+#     SUPABASE_SERVICE_KEY  the *service_role* key, from Supabase's API settings
+#
+# The service_role key bypasses row-level security, which is exactly why the
+# worker needs it and why it lives here rather than in leaderboard/js/config.mjs
+# (that ships the anon key on purpose — see schema.sql for which is which).
+name: Bot replay
+
+on:
+  schedule:
+    # Hourly, off the hour: GitHub's shared cron queue is busiest at :00, and a
+    # run that starts late is worth more than one that gets dropped. Hourly is
+    # also enough on its own to keep a free Supabase project from idling into a
+    # pause, which it otherwise does after about a week.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      game_key:
+        description: "Replay only this map (blank = every map still owing results)"
+        required: false
+        default: ""
+      mode:
+        description: "fill = only what's missing · stale = also rows from older code · recompute = everything"
+        required: false
+        default: fill
+        type: choice
+        options: [fill, stale, recompute]
+
+# One run at a time: an hourly schedule and a dispatch can otherwise overlap and
+# compute the same pairs twice. Queued rather than cancelled, so a manual run
+# never kills a scheduled one mid-batch.
+concurrency:
+  group: bot-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # No dependency install: the simulation core imports no pygame and nothing
+      # off PyPI, and the worker talks to PostgREST over urllib. That is the
+      # whole reason this job is a few seconds of setup rather than a build.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the board is configured
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "No Supabase secrets set — skipping (see this file's header)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Replay the roster
+        if: steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # Through the environment, never interpolated into the script below:
+          # `${{ inputs.… }}` is substituted before bash ever sees the line, so a
+          # dispatch input containing shell syntax would run as code. Quoting the
+          # expansion of an env var is safe in a way quoting the template is not.
+          GAME_KEY: ${{ inputs.game_key }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          args=()
+          # Plain `if`, not `[ -n "$X" ] && …`: that idiom evaluates to 1 when the
+          # test fails, and a run step is `bash -e`, so an empty game_key — every
+          # scheduled run — would end the step as a failure.
+          if [ -n "$GAME_KEY" ]; then
+            args+=(--game-key "$GAME_KEY")
+          fi
+          case "$MODE" in
+            stale)     args+=(--stale) ;;
+            recompute) args+=(--recompute) ;;
+          esac
+          # Well under the job's own timeout, so the worker always gets to flush
+          # and report rather than being killed mid-batch; whatever it doesn't
+          # reach, the next run picks up.
+          python tools/bot_replay.py --deadline-minutes 20 "${args[@]}"

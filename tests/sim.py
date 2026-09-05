@@ -40,8 +40,9 @@ import signal
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from starconquest import ai, config, engine, mapgen
-from starconquest.model import GameState
+from starconquest import ai, config, engine, mapgen, settings
+from starconquest.model import AiParams, GameState
+from starconquest.settings import Settings
 
 _warned_no_sigalrm = False
 
@@ -97,6 +98,24 @@ class SimResult:
     seed: int
     winner: int | None  # player id, 0 for a draw, None if it timed out
     turns: int
+    timed_out: bool
+    bot_timeouts: int = 0
+
+
+@dataclass
+class ReplayResult:
+    """One bot's run through a stored setup, seen from the human seat it took over.
+
+    Mirrors what a win writes into a challenge link (``main.challenge_settings``):
+    ``turns`` is ``state.turn`` at the win and ``lost`` that seat's ``ships_lost``,
+    so a bot's row and a human's score are the same two numbers measured the same
+    way. ``won`` is the discriminator — a lost or timed-out game still reports both.
+    """
+
+    bot: str
+    won: bool
+    turns: int
+    lost: int
     timed_out: bool
     bot_timeouts: int = 0
 
@@ -198,6 +217,66 @@ def play(
         if verbose:
             print_state(state)
     return SimResult(seed, state.winner, state.turn, state.winner is None, timeouts[0])
+
+
+def play_settings(
+    cfg: Settings,
+    seed: int,
+    bot: str,
+    max_turns: int = 600,
+    bot_timeout: float = 0.0,
+) -> ReplayResult:
+    """Replay a stored setup with ``bot`` holding the human's seat.
+
+    What the leaderboard's "how would each bot have done?" column is made of
+    (``tools/bot_replay.py``): the same map, the same opponents in the same
+    seats, with a drop-in strategy standing in for the person who posted the
+    score. ``play`` above answers a different question and takes the map
+    parameters raw; this one goes through ``settings.build_state`` because a
+    posted setup carries tuned balance knobs, and only that funnel pushes them
+    into ``config`` before generation.
+
+    The *map* is identical to the one the human played — mapgen is a pure
+    function of the seed, down to the star names it rolls last. The *battles*
+    are not: once orders diverge, so do the draws taken from ``state.rng``, which
+    is exactly right. The bot fights its own war on the same board.
+
+    The seat is handed default ``AiParams`` rather than the setup's own ``ai[0]``.
+    That slot belongs to the human, so whatever a menu left in it is unrelated to
+    how this bot ought to play; taking it would also let two identical maps score
+    the same bot differently. ``AiParams()`` is the documented untuned profile
+    (``config.AI_AUX`` is 1.0 — see ``models/README.md``). Opponent seats keep the
+    strategy *and* the params the setup gave them, since those are part of the
+    map's difficulty.
+
+    A bot that never takes the board still returns a result: ``won`` is False and
+    ``turns``/``lost`` report how long it lasted and what it spent. Never rank a
+    lost game against a won one on turns alone.
+    """
+    state = settings.build_state(cfg, seed)
+    seat = state.human()
+    if seat is None:
+        raise ValueError("this setup has no human seat to replay")
+    # Hand the seat to the AI: engine._collect_orders skips the human, so this is
+    # what makes `decide` run for it at all (`play` does the same for every seat).
+    seat.is_human = False
+    seat.ai_strategy = bot
+    seat.ai_params = AiParams()
+
+    check_invariants(state)
+    timeouts = [0]
+    decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
+    while state.winner is None and state.turn < max_turns:
+        engine.end_turn(state, decide=decide)
+        check_invariants(state)
+    return ReplayResult(
+        bot=bot,
+        won=state.winner == seat.id,
+        turns=state.turn,
+        lost=seat.ships_lost,
+        timed_out=state.winner is None,
+        bot_timeouts=timeouts[0],
+    )
 
 
 def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0) -> list[SimResult]:

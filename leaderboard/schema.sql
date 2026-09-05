@@ -150,6 +150,43 @@ alter table public.configs add  constraint configs_tags_shape check (
 );
 
 -- ---------------------------------------------------------------------------
+-- bot_scores: how each models/ bot fares in the human's seat on a given map,
+-- computed by tools/bot_replay.py (the scheduled GitHub Actions worker) and
+-- keyed by the pair it answers for. One row per (map, bot): the result is a
+-- pure function of the setup, the seed and the code, so there is nothing to
+-- accumulate — a rerun replaces the row rather than appending to it.
+--
+-- This is the one table on the board that is NOT publicly writable. It has a
+-- read policy and no insert/update/delete policy, and no insert grant, so the
+-- only writer is the worker's service_role key, which bypasses RLS entirely.
+-- Human scores are unverifiable by design (see README, "Known limitations");
+-- these are machine-computed from the seed and cannot be posted by hand at all.
+--
+-- `won` is the discriminator, not `turns`: a bot that never took the map still
+-- reports how long it lasted and what it lost, which is worth showing. Callers
+-- must not rank a lost game against a won one on turns alone.
+-- ---------------------------------------------------------------------------
+create table if not exists public.bot_scores (
+  game_key     text not null references public.games(game_key),
+  bot          text not null check (char_length(trim(bot)) between 1 and 60),
+  won          boolean not null,
+  turns        integer not null check (turns > 0),
+  lost         integer not null check (lost >= 0),
+  -- How many times the bot blew its per-decision wall-clock budget and forfeited
+  -- that turn's orders. Zero for an ordinary row; anything else means the result
+  -- depended on how fast the runner was that day, so the page discloses it
+  -- rather than presenting it as reproducible.
+  bot_timeouts integer not null default 0 check (bot_timeouts >= 0),
+  -- Digest of the simulation code that produced this row (bot_replay.engine_rev):
+  -- the outcome-determining core modules plus every models/*.py. Provenance, and
+  -- what `--stale` re-derives from — never part of the key, so a map only ever
+  -- has one row per bot and the board never shows two answers to one question.
+  engine_rev   text not null default '',
+  computed_at  timestamptz not null default now(),
+  primary key (game_key, bot)
+);
+
+-- ---------------------------------------------------------------------------
 -- game_summary: the homepage in one select — every game with its current best
 -- score and last activity. security_invoker makes it evaluate RLS as the caller
 -- rather than the owner, so a future tightened policy can't be bypassed here.
@@ -251,6 +288,7 @@ alter table public.users   enable row level security;
 alter table public.games   enable row level security;
 alter table public.scores  enable row level security;
 alter table public.configs enable row level security;
+alter table public.bot_scores enable row level security;
 
 drop policy if exists "users public read"    on public.users;
 drop policy if exists "users public insert"  on public.users;
@@ -260,6 +298,7 @@ drop policy if exists "scores public read"   on public.scores;
 drop policy if exists "scores public insert" on public.scores;
 drop policy if exists "configs public read"   on public.configs;
 drop policy if exists "configs public insert" on public.configs;
+drop policy if exists "bot_scores public read" on public.bot_scores;
 
 create policy "users public read"    on public.users  for select using (true);
 create policy "users public insert"  on public.users  for insert with check (true);
@@ -270,8 +309,15 @@ create policy "scores public insert" on public.scores for insert with check (tru
 create policy "configs public read"   on public.configs for select using (true);
 create policy "configs public insert" on public.configs for insert with check (true);
 
+-- Read only, and no insert policy to match: bot_scores is written solely by
+-- tools/bot_replay.py under the service_role key, which bypasses RLS.
+create policy "bot_scores public read" on public.bot_scores for select using (true);
+
 -- No update or delete policy anywhere: that is what makes every row append-only
 -- — for configs, that's what makes the first name posted for a setup permanent.
+-- bot_scores is append-only to the public in the strongest sense (it has no
+-- insert policy either), but not immutable in itself: the worker's service_role
+-- key bypasses RLS, which is how a recompute replaces a row.
 --
 -- Because game_summary is security_invoker, it reads `configs` as the caller:
 -- a missing read policy or grant on configs fails the *whole* homepage query
@@ -280,7 +326,9 @@ create policy "configs public insert" on public.configs for insert with check (t
 -- Explicit rather than relying on the project's default privileges, so this file
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
-  public.game_summary, public.config_summary to anon, authenticated;
+  public.game_summary, public.config_summary, public.bot_scores to anon, authenticated;
+-- bot_scores is absent from this list on purpose: no insert grant and no insert
+-- policy is what leaves the replay worker as its only writer.
 grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;

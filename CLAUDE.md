@@ -26,6 +26,10 @@ uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
+
+uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, computed
+                                                # but not posted (needs SUPABASE_*)
+node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
 There is no lint step in `pyproject.toml`/CI; match the surrounding style. VSCode
@@ -199,6 +203,18 @@ intact.
   settings link (`webstore.share_token`). Editing a challenge's setup asks first
   (`menu._draw_unchallenge`); `Settings.without_challenge()` is what persists a
   "change it anyway".
+  - **The leaderboard's bot column is computed offline, never served.**
+    `tools/bot_replay.py` replays every `models/` bot through the human's seat on
+    each posted map and caches the answer in `bot_scores`; a scheduled GitHub
+    Action (`.github/workflows/bot-replay.yml`) is the whole backend, since the
+    result is a pure function of the setup, the seed and the code. It drives
+    `tests/sim.play_settings`, which goes through `settings.build_state` rather
+    than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
+    only funnel that pushes them into `config`. The replayed seat gets default
+    `AiParams` (slot 0 is the human's); opponents keep theirs. `won`, never
+    `turns`, says whether a bot took the board, and a loss is listed but never
+    ranked (`standings.botOrder`). `bot_scores` is the one table with no public
+    insert path: the worker's `service_role` key is its only writer.
   - **Adding a field to `Settings` invalidates every key already shared.**
     `challenge_key()` hashes the full setup dict, so a new field moves the digest
     of every map that ever existed and links from before it read as edited.
@@ -415,7 +431,10 @@ intact.
   the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
   every pair, both seatings, plus a head-to-head grid). Both default their
   roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
-  arguments.
+  arguments. `play_settings` is the third entry point — one bot through the
+  human's seat on a stored `Settings`, going through `settings.build_state` so a
+  posted setup's tuned knobs actually apply. It is what the leaderboard's bot
+  column is made of (`tools/bot_replay.py`, under Key conventions).
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges

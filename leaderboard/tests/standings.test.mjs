@@ -3,7 +3,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compareScores, displayOrder, rankAmong, scoreComparator, standings, tally } from "../js/standings.mjs";
+import {
+  bestBot, botOrder, compareScores, displayOrder, humanVsBots, rankAmong,
+  scoreComparator, standings, tally,
+} from "../js/standings.mjs";
 
 const at = (day) => `2026-09-${String(day).padStart(2, "0")}T12:00:00+00:00`;
 
@@ -160,4 +163,61 @@ test("displayOrder does not mutate its input", () => {
   const original = [...scores];
   displayOrder(scores, "turns");
   assert.deepEqual(scores, original);
+});
+
+// -- the bot replay column (bot_scores) -------------------------------------
+
+/** bot("thinker", 31, 4) won; bot("marshal", 120, 88, false) did not. */
+const bot = (name, turns, lost, won = true) => ({ bot: name, won, turns, lost, bot_timeouts: 0 });
+
+test("winning bots rank by the game's own rule, losing ones never rank at all", () => {
+  const rows = [
+    bot("marshal", 120, 88, false),
+    bot("thinker", 31, 10),
+    bot("claudebot", 600, 400, false),
+    bot("knower", 31, 4),
+  ];
+  assert.deepEqual(
+    botOrder(rows).map((row) => row.bot),
+    // knower before thinker on the tie-break; the two that never won follow in
+    // name order, which claims nothing about which of them did better.
+    ["knower", "thinker", "claudebot", "marshal"],
+  );
+});
+
+test("a bot that lasted longer is not thereby better than one that died early", () => {
+  // The whole reason losses are split out: 600 turns of stalemate is not a
+  // better result than dying on turn 40, and ordering by turns would say it was.
+  const rows = [bot("a", 600, 9, false), bot("b", 40, 9, false)];
+  assert.deepEqual(botOrder(rows).map((row) => row.bot), ["a", "b"]); // by name only
+  assert.equal(bestBot(rows), null);
+});
+
+test("botOrder does not mutate its input", () => {
+  const rows = [bot("z", 40, 1), bot("a", 20, 1)];
+  const original = [...rows];
+  botOrder(rows);
+  assert.deepEqual(rows, original);
+});
+
+test("the best bot is the best *winner*, ignoring every failed replay", () => {
+  const rows = [bot("slow", 12, 99, false), bot("thinker", 31, 10), bot("knower", 31, 4)];
+  assert.equal(bestBot(rows).bot, "knower");
+});
+
+test("a human is measured against the leading bot, not the field", () => {
+  const rows = [bot("thinker", 31, 10), bot("knower", 31, 4), bot("marshal", 90, 3, false)];
+  assert.equal(humanVsBots({ turns: 28, lost: 40 }, rows), "ahead");
+  assert.equal(humanVsBots({ turns: 31, lost: 4 }, rows), "tied");
+  assert.equal(humanVsBots({ turns: 31, lost: 5 }, rows), "behind");
+  // Beating five of six bots is still "behind" — the question is whether anyone
+  // outplayed the best machine answer to the map.
+  assert.equal(humanVsBots({ turns: 31, lost: 8 }, rows), "behind");
+});
+
+test("nothing to compare gives no verdict rather than a wrong one", () => {
+  const rows = [bot("thinker", 31, 10)];
+  assert.equal(humanVsBots(null, rows), null);            // no score posted yet
+  assert.equal(humanVsBots({ turns: 20, lost: 1 }, []), null);  // no replays yet
+  assert.equal(humanVsBots({ turns: 20, lost: 1 }, [bot("x", 90, 3, false)]), null);  // no bot won
 });
