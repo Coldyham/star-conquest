@@ -323,6 +323,19 @@ AUX_INT = True
 # under this; see the cost table in the module docstring.
 SEARCH_BUDGET_S = 0.150
 
+# Multiplier applied to *both* wall-clock guards at call time, for a caller with
+# no one waiting on it. Both budgets above are sized for the WASM build, where the
+# alternative to stopping is freezing the browser tab — a constraint an offline
+# batch run simply does not have. Raising it there is not a loosening: these guards
+# are the only thing in this bot that is not iteration-bounded, so a run that never
+# trips them is *more* reproducible than one that might, which is what the
+# leaderboard's cached results need (`tools/bot_replay.py`).
+#
+# Left at 1.0 for every ordinary caller, so a game — in a browser, on a desktop, in
+# the test suite — behaves exactly as it always has. `ai.set_budget_scale` is the
+# one writer; see models/README.md.
+BUDGET_SCALE = 1.0
+
 # Terminal position value. Production dominates: it is the only term that compounds.
 EVAL_PRODUCTION = 10.0
 EVAL_SYSTEMS = 1.0
@@ -408,7 +421,8 @@ POSTURE_VARIANTS = (
 # Deliberately ~100x the measured cost of a real turn (knower 0.49 ms on a 24-node
 # board; every other bot in the roster decides in 6-21 us), so this is dead code
 # against any sane opponent. Tripping it does make this turn's plan depend on the
-# wall clock, which beats freezing the browser tab.
+# wall clock, which beats freezing the browser tab. Scaled by `BUDGET_SCALE` at
+# call time, so an offline runner can lift it out of the way entirely.
 ORACLE_BUDGET_S = 0.050
 
 _TRUSTED, _UNTRUSTED = True, False
@@ -477,7 +491,7 @@ def decide(state, pid):
             _DEPTH += 1
             try:
                 return _search(state, pid, orc, depth - 1,
-                               time.perf_counter() + SEARCH_BUDGET_S)
+                               time.perf_counter() + SEARCH_BUDGET_S * BUDGET_SCALE)
             finally:
                 _DEPTH -= 1
         return _plan(state, pid, orc)
@@ -511,7 +525,7 @@ def _build_oracle(state, me):
     """
     global LAST_ORACLE
 
-    deadline = time.perf_counter() + ORACLE_BUDGET_S
+    deadline = time.perf_counter() + ORACLE_BUDGET_S * BUDGET_SCALE
     post = _clone(state, _priv(state, me, 1))
     orc = Oracle(post=post, trusted={0}, launched=defaultdict(int))  # neutrals never launch
 

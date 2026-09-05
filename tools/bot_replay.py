@@ -85,6 +85,20 @@ REPLAY_AUX: dict[str, float] = {
     "knower": 12,
 }
 
+# How far to lift the bots' own wall-clock catastrophe guards (`ai.set_budget_scale`).
+#
+# Those guards are sized for the browser build, where the alternative to giving up
+# mid-search is freezing the tab. Nothing is waiting on this job, so that trade
+# does not apply — and since tripping a guard is the one thing that makes such a
+# bot's output depend on the wall clock, lifting it out of the way makes these
+# cached results *more* reproducible, not less. 100x turns knower's 150 ms search
+# guard into 15 s and its 50 ms oracle guard into 5 s, against a measured worst
+# case of ~131 ms per decide at depth 12 on the largest map the menu can build.
+#
+# Still a guard, not a removal: a genuinely wedged bot is stopped long before the
+# workflow's own timeout-minutes has to do it.
+BUDGET_SCALE = 100.0
+
 PAGE = 1000          # PostgREST's own default ceiling; page rather than assume
 POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
@@ -300,6 +314,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--deadline-minutes", type=float, default=40.0,
                         help="stop starting new replays after this long, so a run "
                              "always finishes and the next one resumes")
+    parser.add_argument("--budget-scale", type=float, default=BUDGET_SCALE,
+                        help="multiply the bots' own per-decide wall-clock guards "
+                             f"by this (default {BUDGET_SCALE:g}). They are sized for "
+                             "the browser build; nothing waits on this job, and a "
+                             "guard that never trips is what keeps a result "
+                             "reproducible. 1 restores the in-game behaviour")
     parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
                         help="override a bot's replay profile for this run, e.g. "
                              "--aux knower=8 (default: REPLAY_AUX in this file)")
@@ -337,12 +357,17 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         print(f"Unknown strategies: {', '.join(unknown)}", file=sys.stderr)
         return 2
+    # Once, at startup and before any decide — the scale is process-wide.
+    widened = ai.set_budget_scale(args.budget_scale)
+
     rev = engine_rev()
     aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
     profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
     print(f"engine_rev {rev} · models {', '.join(loaded) or 'none'} · "
           f"roster {', '.join(roster)}")
-    print(f"replay profile: {profile or 'every bot at its default aux'}")
+    print(f"replay profile: {profile or 'every bot at its default aux'}"
+          + (f" · wall-clock guards x{args.budget_scale:g} on {', '.join(widened)}"
+             if widened and args.budget_scale != 1 else ""))
 
     api = Supabase(url, key)
     # A hand-written link's key is "j:"-prefixed (see schema.sql), so it is not

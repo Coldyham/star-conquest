@@ -817,16 +817,26 @@ Two costs come with it, both real:
 * **It is roughly 100x the wall clock of depth 1.** A 40-node six-seat game goes
   from well under a second to tens of seconds. `--limit` and the deadline exist
   for this; the job banks each result as it goes and the next run resumes.
-* **The reproducibility margin narrows.** knower's search is *iteration*-bounded,
-  so the same board plans the same way — except for `SEARCH_BUDGET_S`, a 150 ms
-  per-decide catastrophe guard that, if it trips, makes the plan depend on the
-  wall clock. The module's own cost table measured better than 2x headroom at
-  depth 12; on a CI-class container the largest configuration the menu can build
-  (40 nodes, 6 seats) measured ~1.1x. It did not trip in testing and replays came
-  back identical, but the margin is thin enough that a slower runner is worth
-  watching. If it ever does bite, the fix is a lower `REPLAY_AUX` entry for the
-  affected setups rather than a bigger budget — the budget is sized to the WASM
-  build's needs, not the worker's.
+* **It would have broken reproducibility, until the guards were lifted.** knower's
+  search is *iteration*-bounded, so the same board plans the same way — except for
+  `SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard that, if it trips,
+  makes the plan depend on the wall clock. The module's own cost table measured
+  better than 2x headroom at depth 12; on a CI-class container the largest
+  configuration the menu can build (40 nodes, 6 seats) measured ~1.1x. That is not
+  a margin to cache results against: simulating a runner only 2x slower (by
+  shrinking `BUDGET_SCALE` proportionally) produced a *different* answer on the
+  same map — 117 turns and 272 lost against 123 and 311.
+
+  The fix is not a shallower search. Both of knower's guards exist because the
+  WASM build is single-threaded and the alternative to giving up mid-search is
+  freezing the browser tab — a constraint a background job simply does not have.
+  So `bot_replay.BUDGET_SCALE` lifts them 100x (`ai.set_budget_scale`), turning
+  150 ms into 15 s against a measured worst case of ~131 ms. This is the opposite
+  of a loosening: those guards are the only part of the bot that is not
+  iteration-bounded, so a run that can never trip one is strictly *more*
+  reproducible. It is still a guard — a wedged bot is stopped long before the
+  workflow's own `timeout-minutes` has to do it — and it stays at 1.0 for every
+  ordinary caller, so a real game is untouched.
 
 The `aux` in force is stored on the row, not implied by the code that happened to
 be running. A reader comparing the board against a game they played from the menu

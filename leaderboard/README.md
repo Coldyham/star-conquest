@@ -120,6 +120,14 @@ schedule in GitHub Actions and caches its answers in `public.bot_scores`. See
 job and `docs/design-notes.md` ("Bot replays") for why it is a batch job rather
 than the small service this file used to ask for.
 
+The worker also lifts the bots' own per-decide wall-clock guards 100x. Those
+exist so the single-threaded browser build never freezes mid-search; nothing waits
+on a background job, and tripping one is the only thing that makes such a bot's
+output depend on the machine it ran on — so a batch run that can never trip one is
+*more* reproducible, which is exactly what a cached result needs. (Measured: a
+runner only 2x slower would otherwise have cached a different answer for knower on
+a 40-node map.)
+
 `bot_scores` is the one table on the board the public cannot write: a read policy,
 no insert policy, no insert grant, and the worker's `service_role` key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that

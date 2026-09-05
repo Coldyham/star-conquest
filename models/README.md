@@ -34,6 +34,29 @@ launch order never matters. A file that fails to import or has no `decide` is
 skipped (it just won't appear in the dropdown), and any strategy name that isn't
 loaded falls back to `heuristic` — nothing crashes.
 
+### Optional: a wall-clock guard
+
+If your bot can take a long time on a hard position, you may want a deadline on
+one `decide` — the browser build is single-threaded, so a slow turn freezes the
+tab. `models/knower.py` has two. The catch is that tripping one makes your output
+depend on how fast the machine is, and the leaderboard caches your results as if
+they were reproducible (`tools/bot_replay.py`).
+
+Declare a module-level `BUDGET_SCALE = 1.0` and multiply your budgets by it *at
+call time*:
+
+```python
+BUDGET_SCALE = 1.0            # `ai.set_budget_scale` is the only writer
+SEARCH_BUDGET_S = 0.150
+
+deadline = time.perf_counter() + SEARCH_BUDGET_S * BUDGET_SCALE
+```
+
+An offline runner then raises it — nothing is waiting on a batch job, so the
+guard can be lifted right out of the way and your search runs to its natural,
+iteration-bounded end. It stays 1.0 in every real game, so declaring it changes
+nothing about how your bot plays. Bots without it are simply left alone.
+
 ## What you can read off `state`
 
 Import what you need from `starconquest.model`:

@@ -200,3 +200,41 @@ def test_a_tuned_replay_is_still_reproducible():
     cfg = _setup()
     assert sim.play_settings(cfg, 11, "knower", aux=12) == \
            sim.play_settings(cfg, 11, "knower", aux=12)
+
+
+def test_budget_scale_is_wired_and_only_matters_when_it_bites():
+    # knower's wall-clock guards are the one part of it that is not
+    # iteration-bounded, so tripping one makes a cached replay unreproducible.
+    # The worker lifts them (ai.set_budget_scale) rather than searching less deep.
+    # Squeezing the scale must change the answer — that is what proves the knob
+    # reaches the guard at all — while raising it must not, since a guard that
+    # never fires cannot influence anything.
+    ai.load_models()
+    cfg = _setup()
+    try:
+        base = sim.play_settings(cfg, 11, "knower", aux=12)
+        ai.set_budget_scale(0.02)
+        assert sim.play_settings(cfg, 11, "knower", aux=12) != base, \
+            "a 3ms guard changed nothing — BUDGET_SCALE is not reaching the search"
+        ai.set_budget_scale(100)
+        assert sim.play_settings(cfg, 11, "knower", aux=12) == base
+    finally:
+        ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
+
+
+def test_set_budget_scale_only_touches_bots_that_declare_one():
+    # Opt-in and declarative, like aux_spec: a bot with no wall-clock guard has
+    # nothing to scale and must be left alone.
+    ai.load_models()
+    try:
+        assert ai.set_budget_scale(50) == ["knower"]
+    finally:
+        ai.set_budget_scale(1)
+
+
+def test_budget_scale_is_one_in_an_ordinary_game():
+    # Declaring the knob must not change how the bot plays for anyone else — a
+    # browser, a desktop game, the rest of this suite.
+    ai.load_models()
+    import sys
+    assert sys.modules["sc_model_knower"].BUDGET_SCALE == 1.0

@@ -214,7 +214,11 @@ intact.
     `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
     `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` at
     search depth 12) and the value in force is stored on the row; opponents keep
-    theirs. `won`, never
+    theirs. It also lifts the bots' own per-decide wall-clock guards 100x
+    (`ai.set_budget_scale`, opt-in via a model's `BUDGET_SCALE`): those are sized
+    so the browser tab never freezes, and tripping one is the only thing that
+    makes such a bot's output depend on the clock — so a batch run that can never
+    trip one is *more* reproducible, not less. `won`, never
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's `service_role` key is its only writer.
