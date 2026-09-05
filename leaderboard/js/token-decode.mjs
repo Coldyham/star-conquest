@@ -40,6 +40,26 @@ const KEY_ALIASES = {
   "e2954098c1a26e02": "7f7fabfca0969ba4",
 };
 
+/**
+ * A stamped key resolved through KEY_ALIASES, following a chain to its end: a
+ * digest superseded twice (a map that outlived two schema changes) has an entry
+ * pointing at an entry. The visited set is not defensive tidiness — a typo that
+ * pointed two entries at each other would otherwise hang the page it is called
+ * from, and this table is edited by hand.
+ *
+ * A key with no entry is returned unchanged, which is every key on a board that
+ * has never split.
+ */
+export function aliasFor(key) {
+  let current = key;
+  const seen = new Set([current]);
+  while (KEY_ALIASES[current] && !seen.has(KEY_ALIASES[current])) {
+    current = KEY_ALIASES[current];
+    seen.add(current);
+  }
+  return current;
+}
+
 /** Everything after the '#', since people paste a whole URL, not a bare token. */
 export function fragmentOf(input) {
   const text = String(input).trim();
@@ -118,8 +138,7 @@ export async function decodeToken(input, inflate) {
 export async function gameKeyFor(dict) {
   const key = dict.challenge && dict.challenge.key;
   if (typeof key === "string" && key.trim()) {
-    const stamped = key.trim();
-    return KEY_ALIASES[stamped] || stamped;
+    return aliasFor(key.trim());
   }
 
   const { challenge, autoplay, ...setup } = dict;

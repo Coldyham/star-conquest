@@ -20,6 +20,21 @@
 -- nothing: it reports what it moved and moves nothing twice.
 --
 -- Edit the two keys, then run.
+--
+-- To find the pairs worth running it on — every map the board holds under more
+-- than one key, newest key first, which is the one to fold *to*:
+--
+--   select g.mode, g.players, g.nodes, g.seed,
+--          array_agg(g.game_key order by g.first_seen_at desc) as keys,
+--          array_agg(g.first_seen_at order by g.first_seen_at desc) as seen
+--   from public.games g
+--   group by g.mode, g.players, g.nodes, g.seed,
+--            public.sc_config_key(g.settings_json)
+--   having count(*) > 1;
+--
+-- Grouping on sc_config_key (settings_json minus seed and autoplay) plus the
+-- seed is the same identity submit.mjs matches on, so a group of two is one map
+-- under two digests and not two maps that happen to share a seed.
 
 do $$
 declare

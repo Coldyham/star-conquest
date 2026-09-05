@@ -54,10 +54,21 @@ stored.
 `findTwin` in [`js/submit.mjs`](js/submit.mjs) is the general one. Before a
 submission opens a new map page, it looks for a row on the same
 mode/players/nodes/seed whose stored `settings_json` *is* the setup being posted
-(`setupIdentity`), and files the score there. That works without anyone noticing
-the split first, and keeps working across the next schema change, because
-`Settings.token_dict` prunes every field still at its default — so a field added
-since is simply absent from both rows.
+(`setupIdentity`), and files the score there — newest matching row first, the
+same direction [`fold-game-key.sql`](fold-game-key.sql) merges in, so the site
+and the repair script never pull a map two ways. That works without anyone
+noticing the split first, and keeps working across the next schema change,
+because `Settings.token_dict` prunes every field still at its default — so a
+field added since is simply absent from both rows.
+
+It also catches two splits an alias structurally cannot: a digest that moved
+without any field being added (`challenge_keys` changed how it treats a seat
+beyond `players`, which no legacy drop can express, so those links carry a key
+*no* build recomputes), and a player posting from a stale cached build, where
+nobody changed anything at all. The gap it does not cover is a field joining
+`AiParams`: seat dicts are pruned only whole, never field by field, so both
+rows and both digests move at once — see the note by `_LEGACY_KEY_DROPS` in
+`starconquest/settings.py`.
 
 `KEY_ALIASES` in [`js/token-decode.mjs`](js/token-decode.mjs) is the narrower one:
 it maps a specific superseded checksum onto the key that map is now filed under,
@@ -69,7 +80,11 @@ before the next field joined `Settings` points at a digest nothing re-stamps.
 [`fold-game-key.sql`](fold-game-key.sql) is the repair: it moves scores already
 stored under a superseded key onto the current row — the bot column with them,
 since `bot_scores` is keyed by `game_key` too and its foreign key would otherwise
-refuse the merge outright.
+refuse the merge outright. It carries a query for finding the maps that need it.
+With `findTwin` in place a split can no longer *grow*, so this is tidying rather
+than rescue, and the folded-away key still works as a link: `js/game.mjs` reads
+an unknown key through `aliasFor` and forwards a bookmark to wherever its map
+now lives.
 
 ## Same setup, different seed
 

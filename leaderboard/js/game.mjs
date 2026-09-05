@@ -5,6 +5,7 @@ import {
   mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
+import { aliasFor } from "./token-decode.mjs";
 import { bestBot, botOrder, displayOrder, humanVsBots } from "./standings.mjs";
 
 const heading = document.getElementById("setup");
@@ -166,6 +167,18 @@ async function load() {
     target.classList.remove("loading");
 
     if (!games.length) {
+      // A key nobody knows is usually a link from before this map was folded onto
+      // its current digest (KEY_ALIASES / fold-game-key.sql). Send it on rather
+      // than telling someone their own bookmark is wrong. aliasFor resolves the
+      // whole chain, so this is one hop and cannot bounce; if the destination is
+      // missing too, it says so there.
+      const folded = aliasFor(gameKey);
+      if (folded !== gameKey) {
+        const onward = new URLSearchParams(location.search);
+        onward.set("key", folded);          // keeps ?sort= exactly as it was
+        location.replace(`game.html?${onward}`);
+        return;
+      }
       heading.textContent = "Unknown map";
       showError(target, "No map on the board has that key.");
       return;

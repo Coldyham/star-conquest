@@ -11,7 +11,7 @@ import test from "node:test";
 import { inflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-import { decodeToken, fragmentOf, setupIdentity } from "../js/token-decode.mjs";
+import { aliasFor, decodeToken, fragmentOf, setupIdentity } from "../js/token-decode.mjs";
 
 // Node 18 has no global crypto (default from 19); the browser always does.
 globalThis.crypto ??= webcrypto;
@@ -94,6 +94,24 @@ test("two versions' links to one map carry the same setup identity", async () =>
 
   const [old_, now] = await Promise.all([decodeToken(before, inflate), decodeToken(after, inflate)]);
   assert.equal(setupIdentity(old_.setup), setupIdentity(now.setup));
+});
+
+test("a key with no alias is its own answer", () => {
+  // Every key on a board that has never split, and the guarantee game.mjs relies
+  // on to know a redirect is worth making.
+  assert.equal(aliasFor("770ba09210f6127a"), "770ba09210f6127a");
+  assert.equal(aliasFor(""), "");
+});
+
+test("a superseded key resolves to the one its map is filed under", () => {
+  assert.equal(aliasFor("e2954098c1a26e02"), "7f7fabfca0969ba4");
+  // Idempotent: the answer is a key, so game.mjs can redirect to it without
+  // wondering whether it needs resolving again.
+  assert.equal(aliasFor("7f7fabfca0969ba4"), "7f7fabfca0969ba4");
+  // A key and its target land in the same place — which is what makes the table
+  // safe to extend by pointing an existing target onward rather than rewriting
+  // every entry that leads to it.
+  assert.equal(aliasFor("3e7b44384effd7b2"), aliasFor("665714b9291851c6"));
 });
 
 test("setup identity ignores key order and autoplay, but not a knob", () => {

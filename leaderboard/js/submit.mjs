@@ -30,6 +30,13 @@ function say(message, kind = "") {
  * this catches the rest, including the next schema change, by comparing what
  * the map *is* rather than what it once hashed to (see setupIdentity).
  *
+ * It also catches two the alias table structurally cannot. A digest can move
+ * without any field being added — `challenge_keys` changed how it treats a seat
+ * beyond `players` (settings.py, 2026-09-03), which no legacy drop can express,
+ * so those links stamp a key *no* build recomputes. And a player on a stale
+ * cached build posts under the older digest, which is a split that arrives with
+ * nobody having changed anything at all.
+ *
  * The four indexed columns narrow it to a handful of rows before the setup is
  * compared — the same seed and player count is already almost an identity, and
  * the limit is a bound on the query, not on the search: rows past it can only
@@ -39,11 +46,13 @@ async function findTwin(decoded) {
   const rows = await select(
     `games?select=game_key,settings_json&mode=${eq(decoded.mode)}&players=${eq(decoded.players)}` +
       `&nodes=${eq(decoded.nodes)}&seed=${eq(decoded.seed)}` +
-      `&order=first_seen_at.asc,game_key.asc&limit=50`,
+      `&order=first_seen_at.desc,game_key.asc&limit=50`,
   );
   const want = setupIdentity(decoded.setup);
-  // Oldest first, so everyone posting this map converges on the row that has
-  // been collecting its scores rather than on whichever key they arrived under.
+  // Newest first: where a map is already split across two keys, that is the one
+  // a current build stamps and the one fold-game-key.sql merges *into*, so the
+  // site and the repair script agree on which link a map ends up under instead
+  // of pulling it two ways.
   const twin = rows.find((row) => setupIdentity(row.settings_json) === want);
   return twin ? twin.game_key : null;
 }

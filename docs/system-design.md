@@ -105,6 +105,22 @@ map — `token_dict` prunes each field still at its default, so a field added si
 is absent from both — which makes this the same trade `sc_config_key` makes below,
 and the reason no future schema change needs an alias at all.
 
+It reaches two cases the alias list cannot reach even in principle. A digest can
+move with no field added: `challenge_keys` changed in 2026-09 to blank a seat
+beyond `players` rather than hash it, and a drop entry can only name a field, so
+links stamped before that carry a key *no* build recomputes. And a player on a
+stale cached build posts under the previous digest, which is a split nobody
+caused. The case it shares with the alias list is a field joining `AiParams`:
+`token_dict` prunes a seat dict only whole, so both the stored setup and the
+digest move together and neither fold sees through it — the reason the note by
+`_LEGACY_KEY_DROPS` sends a new per-bot knob to `AiParams.aux` instead.
+
+Which key a map ends up under is settled in one direction only: the newest.
+`submit.findTwin` takes the most recently created matching row and
+`fold-game-key.sql` merges into it, so the site and the repair agree; a link to
+the key that lost is not dead, since `game.mjs` resolves an unknown key through
+`aliasFor` and forwards it.
+
 The leaderboard's config grouping (same setup, different seed —
 `leaderboard/README.md`, "Same setup, different seed") deliberately sits on the
 *other* side of this trade-off. `sc_config_key` in `leaderboard/schema.sql` hashes
