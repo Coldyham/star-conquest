@@ -125,6 +125,14 @@ no insert policy, no insert grant, and the worker's `service_role` key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that
 nobody bothers; these genuinely are.
 
+Each bot is replayed at its **best** profile, not its menu default: `REPLAY_AUX`
+in [`tools/bot_replay.py`](../tools/bot_replay.py) currently runs `knower` at
+search depth 12, the top of its own slider and a far stronger player than the
+depth 1 an untuned seat gets. The setting in force is stored on the row and shown
+beside the name ("knower · search depth 12"), so the board never quietly compares
+two different versions of one bot — and changing it refills those rows on the next
+ordinary run.
+
 A bot that never took the board still gets a row — `won` is the discriminator,
 never `turns` — and is listed after every winner in plain name order, since
 lasting 600 turns is not a better result than dying on turn 40. `js/standings.mjs`

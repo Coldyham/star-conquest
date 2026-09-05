@@ -211,7 +211,10 @@ intact.
     `tests/sim.play_settings`, which goes through `settings.build_state` rather
     than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
     only funnel that pushes them into `config`. The replayed seat gets default
-    `AiParams` (slot 0 is the human's); opponents keep theirs. `won`, never
+    `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
+    `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` at
+    search depth 12) and the value in force is stored on the row; opponents keep
+    theirs. `won`, never
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's `service_role` key is its only writer.

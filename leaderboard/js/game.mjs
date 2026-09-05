@@ -1,8 +1,8 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import {
-  botChips, botSummary, clear, competitionRanks, configBadge, credit, el, mapSummary,
-  ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
+  mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
 import { bestBot, botOrder, displayOrder, humanVsBots } from "./standings.mjs";
@@ -60,7 +60,10 @@ function botRow(row, rank) {
       // A strategy name comes from a models/*.py filename, so it goes in as text
       // and links to the main list filtered to that bot — the same chip target
       // the map heading already uses.
-      el("a", { class: "nm", href: `index.html?bot=${encodeURIComponent(row.bot)}`, text: row.bot }),
+      // The label carries the profile ("knower · search depth 12") but the link
+      // still filters on the bare strategy name, which is what index.html and
+      // game_summary.bots key on.
+      el("a", { class: "nm", href: `index.html?bot=${encodeURIComponent(row.bot)}`, text: botProfile(row) }),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     el("span", { class: "result", text: botSummary(row) }),
@@ -81,7 +84,7 @@ function botRow(row, rank) {
 function botVerdict(rows, best) {
   const top = bestBot(rows);
   if (!top) return "No bot has taken this map at all.";
-  const summary = `${top.bot} — ${botSummary(top)}`;
+  const summary = `${botProfile(top)} — ${botSummary(top)}`;
   switch (humanVsBots(best, rows)) {
     case "ahead": return `The board's best beats every bot. Best of them: ${summary}.`;
     case "tied":  return `The board's best exactly matches the leading bot: ${summary}.`;
@@ -156,7 +159,7 @@ async function load() {
       // inside Promise.all would reject the whole batch and take the human score
       // table down with it. The bot section is an extra; the board is not.
       select(
-        `bot_scores?select=bot,won,turns,lost,bot_timeouts,computed_at` +
+        `bot_scores?select=bot,won,turns,lost,bot_timeouts,aux,aux_label,computed_at` +
           `&game_key=${eq(gameKey)}`,
       ).catch(() => []),
     ]);

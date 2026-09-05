@@ -223,6 +223,7 @@ def play_settings(
     cfg: Settings,
     seed: int,
     bot: str,
+    aux: float | None = None,
     max_turns: int = 600,
     bot_timeout: float = 0.0,
 ) -> ReplayResult:
@@ -249,6 +250,13 @@ def play_settings(
     strategy *and* the params the setup gave them, since those are part of the
     map's difficulty.
 
+    ``aux`` is the one exception, and the only knob a caller may set: it is the
+    bot-defined knob (``AiParams.aux``), so "this bot at its best" is a statement
+    only the caller can make — ``models/knower.py`` reads it as search depth and
+    is a substantially stronger player above the 1.0 default. ``None`` keeps that
+    default. Every other field stays untuned deliberately: they belong to the
+    built-in heuristic's own tuning, not to a bot's identity.
+
     A bot that never takes the board still returns a result: ``won`` is False and
     ``turns``/``lost`` report how long it lasted and what it spent. Never rank a
     lost game against a won one on turns alone.
@@ -261,7 +269,7 @@ def play_settings(
     # what makes `decide` run for it at all (`play` does the same for every seat).
     seat.is_human = False
     seat.ai_strategy = bot
-    seat.ai_params = AiParams()
+    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
 
     check_invariants(state)
     timeouts = [0]

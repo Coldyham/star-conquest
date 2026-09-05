@@ -177,6 +177,15 @@ create table if not exists public.bot_scores (
   -- depended on how fast the runner was that day, so the page discloses it
   -- rather than presenting it as reproducible.
   bot_timeouts integer not null default 0 check (bot_timeouts >= 0),
+  -- The bot-defined knob this answer belongs to (`AiParams.aux`), and what that
+  -- strategy calls it. 1.0 is the untuned default every bot is replayed at unless
+  -- `bot_replay.REPLAY_AUX` says otherwise — knower runs at search depth 12,
+  -- which is a materially stronger player than its default 1. Recorded rather
+  -- than implied, so a reader comparing the board against a game they played
+  -- from the menu can see which version answered; `aux_label` is empty for a bot
+  -- at its default or one that ignores aux entirely.
+  aux          real not null default 1.0,
+  aux_label    text not null default '',
   -- Digest of the simulation code that produced this row (bot_replay.engine_rev):
   -- the outcome-determining core modules plus every models/*.py. Provenance, and
   -- what `--stale` re-derives from — never part of the key, so a map only ever

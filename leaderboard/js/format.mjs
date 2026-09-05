@@ -63,6 +63,23 @@ export function botSummary(row) {
 }
 
 /**
+ * "knower · search depth 12" — a bot replayed at something other than its default
+ * profile, so the board never quietly compares two different versions of one bot.
+ * Just the name for the ordinary case, since `aux` is 1.0 nearly everywhere and a
+ * suffix on every row would say nothing (see schema.sql's bot_scores).
+ *
+ * The label is the strategy's own `AUX_LABEL`, carried on the row rather than
+ * guessed here: the knob belongs to the bot, and JS has no way to read a
+ * models/*.py declaration.
+ */
+export function botProfile(row) {
+  const aux = Number(row.aux ?? 1);
+  if (aux === 1 || !row.aux_label) return row.bot;
+  const value = Number.isInteger(aux) ? aux : aux.toFixed(2);
+  return `${row.bot} · ${row.aux_label.toLowerCase()} ${value}`;
+}
+
+/**
  * Standard competition ranking over a list already ordered best-first: equal
  * results share a rank and the next distinct one skips it (1, 1, 3).
  *

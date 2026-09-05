@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,6 +64,26 @@ _OUTCOME_MODULES = (
     "ai", "combat", "config", "engine", "geometry", "mapgen", "model",
     "settings", "starnames",
 )
+
+# Where a bot is replayed at something other than its default profile.
+#
+# `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
+# interprets it and each strategy assigns its own meaning, so "this bot at its
+# best" is a judgement only a caller can make. 1.0 is the documented untuned
+# value and stays the default for everything not named here.
+#
+# knower reads aux as search depth, and 12 is the top of its own slider
+# (`SEARCH_DEPTH_MAX`) and the setting its measurements favour — "ahead in every
+# measurement taken and behind in none". Its work is iteration-bounded, so the
+# result stays reproducible; the caveat is `knower.SEARCH_BUDGET_S`, a 150 ms
+# per-decide catastrophe guard that, if it ever trips, makes the plan depend on
+# the wall clock. Measured headroom at depth 12 is comfortable on an ordinary map
+# and thin (~1.1x) on the largest the menu can build — 40 nodes and 6 seats. Depth
+# 12 also costs ~100x depth 1 in wall clock, which is what --limit and the
+# deadline are for.
+REPLAY_AUX: dict[str, float] = {
+    "knower": 12,
+}
 
 PAGE = 1000          # PostgREST's own default ceiling; page rather than assume
 POST_TIMEOUT = 60    # seconds, per HTTP call
@@ -86,6 +107,27 @@ def engine_rev() -> str:
         digest.update(path.read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:
+    """The `aux` value this bot is replayed at (`config.AI_AUX`'s 1.0 by default)."""
+    if overrides and bot in overrides:
+        return overrides[bot]
+    return REPLAY_AUX.get(bot, 1.0)
+
+
+def aux_note(bot: str, aux: float) -> str:
+    """How to say what a non-default `aux` meant, e.g. "Search depth" for knower.
+
+    Read off the strategy's own `AUX_LABEL` through `ai.aux_spec`, the same
+    declaration the menu's slider uses, so the board never invents a name for a
+    knob it doesn't own. Empty for a bot at its default, or one that ignores aux
+    entirely — there is nothing to disclose in either case.
+    """
+    if aux == 1.0:
+        return ""
+    spec = ai.aux_spec(bot)
+    return spec[0] if spec else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -170,6 +212,7 @@ class Job:
     cfg: Settings
     seed: int
     bot: str
+    aux: float
 
 
 def _settings_for(row: dict) -> tuple[Settings, int] | None:
@@ -199,13 +242,21 @@ def _settings_for(row: dict) -> tuple[Settings, int] | None:
     return cfg, seed
 
 
-def pending(games: list[dict], done: dict[tuple[str, str], str], roster: list[str],
-            rev: str, *, recompute: bool = False, stale: bool = False) -> list[Job]:
+def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[str],
+            rev: str, aux_for: Callable[[str], float], *,
+            recompute: bool = False, stale: bool = False) -> list[Job]:
     """The (map, bot) pairs still owing an answer, in the order given.
 
-    ``done`` maps a computed pair to the ``engine_rev`` that produced it, so
-    ``--stale`` can pick out rows the simulation has moved on from without
-    recomputing the ones it hasn't.
+    ``done`` maps a computed pair to the stored row, so a cached answer can be
+    judged on more than its existence:
+
+    * a different ``engine_rev`` means the simulation has moved on — picked up by
+      ``--stale``, deliberately opt-in, since a bot changing does not make the old
+      number wrong so much as old.
+    * a different ``aux`` means the row answers a *different question* — it is
+      some other version of that bot. That one refills on an ordinary run, with
+      no flag: leaving it would put two incomparable knowers side by side on one
+      board. It only ever fires when ``REPLAY_AUX`` actually changes.
     """
     jobs: list[Job] = []
     for row in games:
@@ -215,10 +266,16 @@ def pending(games: list[dict], done: dict[tuple[str, str], str], roster: list[st
             continue
         cfg, seed = built
         for bot in roster:
+            aux = aux_for(bot)
             previous = done.get((row["game_key"], bot))
-            if previous is not None and not recompute and not (stale and previous != rev):
-                continue
-            jobs.append(Job(row["game_key"], cfg, seed, bot))
+            if previous is not None and not recompute:
+                outdated = stale and previous.get("engine_rev", "") != rev
+                # Absent on a row written before aux was recorded, which is the
+                # 1.0 every bot was replayed at then.
+                reprofiled = float(previous.get("aux", 1.0)) != float(aux)
+                if not outdated and not reprofiled:
+                    continue
+            jobs.append(Job(row["game_key"], cfg, seed, bot, aux))
     return jobs
 
 
@@ -243,6 +300,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--deadline-minutes", type=float, default=40.0,
                         help="stop starting new replays after this long, so a run "
                              "always finishes and the next one resumes")
+    parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
+                        help="override a bot's replay profile for this run, e.g. "
+                             "--aux knower=8 (default: REPLAY_AUX in this file)")
     parser.add_argument("--recompute", action="store_true",
                         help="redo pairs that already have a row")
     parser.add_argument("--stale", action="store_true",
@@ -262,6 +322,15 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
+    try:
+        overrides = {}
+        for item in args.aux:
+            name, _, value = item.partition("=")
+            overrides[name] = float(value)
+    except ValueError:
+        print(f"--aux wants BOT=VALUE pairs, got: {' '.join(args.aux)}", file=sys.stderr)
+        return 2
+
     loaded = ai.load_models()
     roster = args.bots if args.bots is not None else ai.available_strategies()
     unknown = [bot for bot in roster if bot not in ai.STRATEGIES]
@@ -269,8 +338,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Unknown strategies: {', '.join(unknown)}", file=sys.stderr)
         return 2
     rev = engine_rev()
+    aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
+    profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
     print(f"engine_rev {rev} · models {', '.join(loaded) or 'none'} · "
           f"roster {', '.join(roster)}")
+    print(f"replay profile: {profile or 'every bot at its default aux'}")
 
     api = Supabase(url, key)
     # A hand-written link's key is "j:"-prefixed (see schema.sql), so it is not
@@ -282,11 +354,11 @@ def main(argv: list[str] | None = None) -> int:
     games = api.select("games", f"select=game_key,seed,settings_json"
                                 f"&order=first_seen_at.desc,game_key.asc{where}")
     computed = api.select("bot_scores",
-                          "select=game_key,bot,engine_rev&order=game_key.asc,bot.asc")
-    done = {(row["game_key"], row["bot"]): row.get("engine_rev", "") for row in computed}
+                          "select=game_key,bot,engine_rev,aux&order=game_key.asc,bot.asc")
+    done = {(row["game_key"], row["bot"]): row for row in computed}
     print(f"{len(games)} maps on the board, {len(done)} results cached")
 
-    jobs = pending(games, done, roster, rev,
+    jobs = pending(games, done, roster, rev, aux_for,
                    recompute=args.recompute, stale=args.stale)
     if args.limit > 0:
         jobs = jobs[: args.limit]
@@ -302,11 +374,12 @@ def main(argv: list[str] | None = None) -> int:
         if time.monotonic() > deadline:
             print(f"Deadline reached after {index - 1} replays; the next run resumes.")
             break
-        result = sim.play_settings(job.cfg, job.seed, job.bot,
+        result = sim.play_settings(job.cfg, job.seed, job.bot, aux=job.aux,
                                    max_turns=args.max_turns,
                                    bot_timeout=args.bot_timeout)
         outcome = f"won in {result.turns}" if result.won else f"lost after {result.turns}"
-        print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot:<12} "
+        tuned = f"@{job.aux:g}" if job.aux != 1.0 else ""
+        print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot + tuned:<14} "
               f"{outcome} turns, {result.lost} ships lost")
         batch.append({
             "game_key": job.game_key,
@@ -315,6 +388,12 @@ def main(argv: list[str] | None = None) -> int:
             "turns": result.turns,
             "lost": result.lost,
             "bot_timeouts": result.bot_timeouts,
+            # The profile this answer belongs to. Recorded, not implied: a board
+            # showing knower at search depth 12 beside a menu default of 1 owes
+            # the reader that much, and `pending` reads it back to notice when
+            # the policy has moved.
+            "aux": job.aux,
+            "aux_label": aux_note(job.bot, job.aux),
             "engine_rev": rev,
             # Sent rather than left to the column default: on an upsert PostgREST
             # only SETs the columns present in the payload, so an omitted

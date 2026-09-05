@@ -798,6 +798,44 @@ untuned profile (`config.AI_AUX` is 1.0, `models/README.md`). Opponent seats kee
 both the strategy and the params the setup gave them — those *are* the map's
 difficulty, and changing them would answer a different question.
 
+### Each bot is replayed at its best, not its default
+
+`play_settings` hands the seat default `AiParams` with one exception: `aux`, the
+one bot-defined knob. Every other field belongs to the built-in heuristic's own
+tuning and says nothing about a drop-in's identity, but `aux` is whatever that
+strategy decides it is — so "this bot at its best" is a statement only the caller
+can make. `bot_replay.REPLAY_AUX` is where the board makes it.
+
+Today it holds one entry: `knower` at 12. That is the top of knower's own slider
+(`SEARCH_DEPTH_MAX`), the setting its measurements favour — "ahead in every
+measurement taken and behind in none" — and a materially stronger player than its
+default 1. There is no point putting a deliberately hobbled version of the best
+bot on the board.
+
+Two costs come with it, both real:
+
+* **It is roughly 100x the wall clock of depth 1.** A 40-node six-seat game goes
+  from well under a second to tens of seconds. `--limit` and the deadline exist
+  for this; the job banks each result as it goes and the next run resumes.
+* **The reproducibility margin narrows.** knower's search is *iteration*-bounded,
+  so the same board plans the same way — except for `SEARCH_BUDGET_S`, a 150 ms
+  per-decide catastrophe guard that, if it trips, makes the plan depend on the
+  wall clock. The module's own cost table measured better than 2x headroom at
+  depth 12; on a CI-class container the largest configuration the menu can build
+  (40 nodes, 6 seats) measured ~1.1x. It did not trip in testing and replays came
+  back identical, but the margin is thin enough that a slower runner is worth
+  watching. If it ever does bite, the fix is a lower `REPLAY_AUX` entry for the
+  affected setups rather than a bigger budget — the budget is sized to the WASM
+  build's needs, not the worker's.
+
+The `aux` in force is stored on the row, not implied by the code that happened to
+be running. A reader comparing the board against a game they played from the menu
+— where knower's seat defaults to depth 1 — is owed that, and `pending` reads it
+back to notice when the policy has moved: an `aux` mismatch refills on an ordinary
+run with no flag, because such a row answers a *different question* rather than
+merely an older one. That is the distinction between it and `engine_rev`, where
+`--stale` stays opt-in.
+
 ### A loss is a result, not a score
 
 `bot_scores.won` is the discriminator, never `turns`. A bot that never took the

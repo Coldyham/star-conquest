@@ -169,3 +169,34 @@ def test_balance_knobs_from_the_setup_reach_the_generated_map():
     home_a = max(s.ships for s in a.systems.values() if s.owner_id == 1)
     home_b = max(s.ships for s in b.systems.values() if s.owner_id == 1)
     assert home_a == 99 and home_b == 5
+
+
+def test_aux_reaches_the_replayed_seat_and_changes_how_it_plays():
+    # models/knower.py reads aux as search depth, and the leaderboard replays it
+    # at 12 (bot_replay.REPLAY_AUX) because that is its own slider's top end and
+    # the setting its measurements favour. If aux stopped reaching the seat the
+    # board would quietly be showing the depth-1 bot instead, which is a
+    # materially weaker player — so assert the two actually differ.
+    ai.load_models()
+    cfg = _setup()
+    default = sim.play_settings(cfg, 11, "knower")
+    deep = sim.play_settings(cfg, 11, "knower", aux=12)
+    assert (default.turns, default.lost) != (deep.turns, deep.lost)
+
+
+def test_aux_none_is_the_documented_untuned_profile():
+    # config.AI_AUX is 1.0 and that is what a stale token deserialises to, so
+    # "no aux given" and "aux=1.0" must be the same replay.
+    ai.load_models()
+    cfg = _setup()
+    assert sim.play_settings(cfg, 11, "knower") == sim.play_settings(cfg, 11, "knower", aux=1.0)
+
+
+def test_a_tuned_replay_is_still_reproducible():
+    # The whole premise of caching. knower's search is iteration-bounded, so depth
+    # 12 plans the same way twice; only its SEARCH_BUDGET_S catastrophe guard
+    # could break that, and it is sized not to fire.
+    ai.load_models()
+    cfg = _setup()
+    assert sim.play_settings(cfg, 11, "knower", aux=12) == \
+           sim.play_settings(cfg, 11, "knower", aux=12)

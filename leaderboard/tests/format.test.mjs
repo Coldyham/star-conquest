@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { competitionRanks } from "../js/format.mjs";
+import { botProfile, competitionRanks } from "../js/format.mjs";
 
 /** scores([31, 16], …) -> the {turns, lost} shape a score row ranks by. */
 const scores = (...pairs) => pairs.map(([turns, lost]) => ({ turns, lost }));
@@ -45,4 +45,20 @@ test("competitionRanks holds under a lost-first sort too, since a tie is symmetr
     competitionRanks(scores([41, 14], [31, 16], [31, 16], [75, 31])),
     [1, 2, 2, 4],
   );
+});
+
+test("a bot replayed at a tuned profile says so; a default one just gives its name", () => {
+  // knower goes on the board at search depth 12, not the depth 1 an untuned seat
+  // gets, so the row has to disclose which version answered.
+  assert.equal(
+    botProfile({ bot: "knower", aux: 12, aux_label: "Search depth" }),
+    "knower · search depth 12",
+  );
+  assert.equal(botProfile({ bot: "thinker", aux: 1, aux_label: "" }), "thinker");
+  // A strategy that ignores aux declares no AUX_LABEL, so there is nothing to name.
+  assert.equal(botProfile({ bot: "marshal", aux: 4, aux_label: "" }), "marshal");
+  // Written before aux was recorded: that board ran everything at the 1.0 default.
+  assert.equal(botProfile({ bot: "claudebot" }), "claudebot");
+  // A fractional knob is not a search depth; don't print it as one.
+  assert.equal(botProfile({ bot: "x", aux: 0.75, aux_label: "Greed" }), "x · greed 0.75");
 });
