@@ -226,6 +226,30 @@ marshal or the roster's pricing changes:
       rusherplus   36%     27%      0%      0%       —      3%
       thinker      98%     88%     16%     25%     97%       —
 
+marshal's win *share* fell here (247→219) from the pre-back-port table this one
+replaced, which reads like the re-tune regressed it — but that table's
+opponents were still pricing fights off the stale `1.1/0.9` hardcode, not
+`combat.edge_attacking()`/`edge_defending()`, so it measures old marshal against
+a weaker roster rather than against this one. Isolated with a direct A/B — the
+pre-re-tune `marshal.py` dropped into the *current*, back-ported roster as a
+seventh strategy, same seeds, same 900-game methodology, so it fights the same
+thinker/claudebot/knower the re-tuned marshal above does:
+
+    knower 291 (25%), marshal 250 (22%), marshal_old 241 (21%), thinker 187
+    (16%), claudebot 99 (9%), heuristic 46 (4%), rusherplus 42 (4%)
+
+    marshal vs marshal_old: 60%/40%       marshal vs knower:     35%
+    marshal_old vs knower:  29%           marshal vs thinker:    75%
+    marshal_old vs thinker: 74%           marshal vs claudebot:  92%
+
+New marshal beats old marshal head-to-head and is at least as good against
+every real opponent (clearly ahead against knower, a wash against thinker and
+claudebot). So the re-tune is a net improvement; the roster-wide share drop is
+the back-port making thinker/claudebot/knower stronger, not marshal getting
+weaker. Don't re-litigate this from the win-count columns alone — they aren't
+comparable across the back-port; a fresh regression claim needs its own A/B
+against the current roster, the same way.
+
 ### A stagger's nearer wave is reserved
 
 Phase 3 picks an arrival horizon, launches the far sources, and *relies* on the
