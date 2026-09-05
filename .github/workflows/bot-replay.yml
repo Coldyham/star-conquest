@@ -36,7 +36,7 @@ on:
     # Note GitHub disables a scheduled workflow after 60 days with no commits to
     # the repository. If the column silently stops updating on a quiet repo,
     # that is the first thing to check (Actions tab -> Enable workflow).
-    - cron: "17 */6 * * *"
+    - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       game_key:

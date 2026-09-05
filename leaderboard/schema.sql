@@ -342,6 +342,14 @@ grant insert on public.users, public.games, public.scores, public.configs to ano
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
 
+-- service_role bypassing RLS only skips policies — the base GRANT system
+-- underneath still applies, so tools/bot_replay.py needs its own explicit
+-- grants: SELECT on games (what it replays) and bot_scores (to see what's
+-- already cached), plus INSERT/UPDATE on bot_scores for the upsert itself
+-- (its "merge-duplicates" Prefer header is an INSERT ... ON CONFLICT DO UPDATE).
+grant select on public.games, public.bot_scores to service_role;
+grant insert, update on public.bot_scores to service_role;
+
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.
 notify pgrst, 'reload schema';
