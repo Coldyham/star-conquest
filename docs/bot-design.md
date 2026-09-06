@@ -260,26 +260,34 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-**Full roster ladder, re-run against this re-tune** (`uv run python -m tests.sim
---ladder --trials 30`, 18 nodes, default settings — 900 games, 74 timed out and
-are excluded from the percentages): knower 255 (31%), marshal 219 (27%), thinker
-173 (21%), claudebot 95 (12%), heuristic 46 (6%), rusherplus 38 (5%). The figure
-this replaces predated both the margin back-port and this re-tune; **this table
-is the current one** — update it, not the module docstring, the next time
-marshal or the roster's pricing changes:
+**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
+nodes, default settings — 900 games, 57 timed out and are excluded from the
+percentages). **This table is the current one** — update it, not the module
+docstring, the next time marshal or the roster's pricing changes:
+
+    marshal 251 (30%), knower 249 (30%), thinker 167 (20%),
+    claudebot 92 (11%), heuristic 46 (5%), rusherplus 38 (5%)
 
     head-to-head (row's win rate vs column)
-                heuris  claude  knower  marsha  rusher  thinke
-      heuristic      —     19%      0%      0%     64%      2%
-      claudebot    81%       —      5%      8%     73%     12%
-      knower      100%     95%       —     65%    100%     84%
-      marshal     100%     92%     35%       —    100%     75%
-      rusherplus   36%     27%      0%      0%       —      3%
-      thinker      98%     88%     16%     25%     97%       —
+                heuris  rusher  claude  thinke  knower  marsha
+      heuristic      —     64%     19%      2%      0%      0%
+      rusherplus   36%       —     27%      3%      0%      0%
+      claudebot    81%     73%       —     12%      5%      2%
+      thinker      98%     97%     88%       —     16%     11%
+      knower      100%    100%     95%     84%       —     50%
+      marshal     100%    100%     98%     89%     50%       —
 
-marshal's win *share* fell here (247→219) from the pre-back-port table this one
-replaced, which reads like the re-tune regressed it — but that table's
-opponents were still pricing fights off the stale `1.1/0.9` hardcode, not
+marshal took the top of the ladder here, and level with knower head-to-head, on
+the strength of dropping the jitter premium from its attack margin — see
+"Garrisons run away" below. The previous reading of this table had it second at
+219 against knower's 255, losing the head-to-head 35%. Both the 251/249 gap and
+the 50% cell are within noise of a tie; what is not noise is that a bot which
+predicts nobody now matches the oracle, having been 30 points behind it.
+
+An earlier reading of this table had marshal's win *share* fall 247→219 from a
+pre-back-port table, which read like the 2026-09 re-tune regressing it — but
+that table's opponents were still pricing fights off the stale `1.1/0.9`
+hardcode, not
 `combat.edge_attacking()`/`edge_defending()`, so it measures old marshal against
 a weaker roster rather than against this one. Isolated with a direct A/B — the
 pre-re-tune `marshal.py` dropped into the *current*, back-ported roster as a
@@ -358,6 +366,16 @@ first, then the two methodological points, which matter more than any single row
 **Adopted from it:** `ENEMY_NEAR` 1.3 -> 1.15, `ENEMY_FAR` 1.9 -> 1.5,
 `FRONTIER_GUARD` 0.40 -> 0.55. Every other constant measured null or worse and
 was left where it was.
+
+> **Superseded.** `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD` no longer exist:
+> marshal's attack margin is now the defender-advantage multiplier alone, with no
+> pad, absolute or distance ramp. See "Garrisons run away, so the jitter premium
+> buys almost nothing" below. This section is kept as the record of how the ramp
+> was tuned and of the two methodological points at the end, which still stand —
+> and note that the sweep's own finding that `ENEMY_NEAR` had a *plateau from 1.0
+> to 1.2* was the first sign of what the removal later confirmed: the level barely
+> mattered because the fight it was priced for mostly does not happen.
+> `FRONTIER_GUARD` and the guard sweep are untouched.
 
 **Only one combination beat the stock tuning.** 40 seeds over random 18n/24n/40n
 duels plus 30n/4p, at the default 6 ly/turn, `n` decided games, `z` against 50%:
@@ -477,6 +495,267 @@ much less than a 55% against a null pinned at 50%. Second, **cell choice can
 erase a result**: symmetric two-player duels time out in 64 of 80 games and
 1 ly/turn in 56 of 60, so both are unusable as measurement cells however
 interesting they are to play.
+
+### Racing a third player for the same system
+
+`_required` used to price a target against its *current* owner alone: the
+garrison, that owner's own inbound fleets (`_inbound`), and what it will build
+before we land. A **third** player's fleet already on the lane was invisible to
+it. The failure that exposes is not subtle — three seats, A holds the centre
+with 8, B launches 12 at it, A evacuates. The centre now reads as 0 ships with
+nobody reinforcing, so marshal in seat C prices it at 1, and Phase 3b — which
+pours the whole surplus into any target the gate has opened — posts all 6 of C's
+ships into a node B is holding with 12 by the time they arrive. C loses the
+strike *and* the system it launched from, which B walks into next turn.
+
+The fix is `_rival_waves` (every bloc landing on the target that belongs to
+neither us nor its owner, one per owner per turn, in arrival order) folded through
+`_after_clash`, so the price is set against the *survivor* of the fight the target
+is about to have rather than against the garrison standing there now. The clash
+estimate comes from `combat.preview_fight`, taking whichever corner of the jitter
+square leaves the most standing, so it cannot drift from the battle it predicts
+and errs toward caution. It is fed the live jitter and advantage rather than
+`TUNED_SWING`, because it predicts a real fight instead of flooring a margin.
+
+Paired permutation harness — every arrangement of `[variant, base, filler…]` over
+the seats on each seed, which for deterministic bots makes the V/B swap a
+bijection and pins the null at exactly 50.0%, the multi-seat equivalent of what
+`--ladder` gives duels for free:
+
+    cell                                   W-L      n    rate      z   timeouts
+    random 18n 3p (thinker)            247-198    445   55.5%  +2.32   121/720
+    random 24n 3p (thinker)            262-234    496   52.8%  +1.26    89/720
+    random 40n 3p (thinker)            294-269    563   52.2%  +1.05    56/720
+    random 24n 3p (knower)             239-200    439   54.4%  +1.86    44/720
+    random 30n 4p (thinker+claudebot)  389-320    709   54.9%  +2.59    80/960
+    ---- pooled                       1431-1221  2652   54.0%  +4.08
+    random 24n 3p @ 12 ly/turn         264-269    533   49.5%  -0.22    46/720
+    every 2p duel                            —      —   50.0%      —          —
+
+The knower cell is the one that matters most: a gain that only shows against a
+copy of yourself is a tuning artefact, and this one holds against the strongest
+bot in the roster. **It is inert in duels by construction**, not merely by
+measurement — with two players the only ships aimed at a rival's system are that
+rival's own, which `_inbound` already counted, so `_rival_waves` is empty and the
+600-game duel cell reads an exact 234-234. The full-roster `--ladder` table under
+"Where marshal stands" is therefore untouched by this change, and stays current.
+**It is also inert at high ship speed** for the same structural reason the
+`FRONTIER_GUARD` gain is: at 12 ly/turn almost every lane is one turn long, so
+there is no window in which an enemy fleet is on the board and visible before it
+lands. Read the 54% as a default-configuration result.
+
+**The same fix applied to neutral targets measures worse, and that is the
+interesting half.** The obvious companion — a neutral with a rival's fleet
+inbound is about to stop being neutral, so price it at the enemy margin against
+what that fleet leaves standing — costs about two points in duels (440-492,
+n=932, 47.2%, z = -1.70 at 24 nodes) while adding nothing in 3- and 4-player
+games (54.2% against this version's 54.0%, indistinguishable at n≈2700 each).
+The reason is Phase 3b: **the price is a gate, not the size of the strike.**
+Under-pricing a contested neutral opens the gate and the entire surplus goes in,
+which usually wins the race outright; pricing it honestly closes the gate and
+cedes the node to the rival for nothing. Shutting the gate only pays where the
+surplus would have lost anyway — which is the rival-held case above, where the
+node is defended by a stack that already beat its garrison. So `_required` keeps
+the static neutral branch untouched, deliberately, and
+`test_a_contested_neutral_is_deliberately_left_static` pins it that way.
+
+**Arriving *after* the rival breaks the door, measured and not shipped.** The
+sharper form of the same idea: rivals send "just enough", so a contested neutral
+is *cheaper* after their strike lands than before it. Three 12-ship homes around
+a neutral 9 — if two of them launch on the same turn neither takes it, but
+whoever lands alone holds it with about 8. So rather than joining the race, wait
+a turn and fight the remnant. Reported as most valuable on small "puzzle" maps,
+which is a regime none of the tables above measure: `WORLD_SIZE` is fixed, so a
+6-node map has median 6-turn lanes at the default speed and plays as a
+slow-motion crawl. What makes a small map a *puzzle* is short lanes, i.e. a high
+`SHIP_LY_PER_TURN` — 6 to 12 nodes at 18 ly/turn gives median 2-turn lanes, and
+a fleet visible on the board for a turn before it lands.
+
+Three implementations, each paired against the shipped bot:
+
+    variant                                W-L      n    rate      z
+    contested neutral -> post-clash    2032-2031   4063   50.0%  +0.02
+      (pooled 6/9/12n at 12-24 ly/turn)
+    opportunistic half only                  —      —    bit-identical
+    ...with the nominal remnant         1774-1733   3507   50.6%  +0.69
+      (pooled 9/12/18n at 18 ly/turn, 24n 3p and 30n 4p at 6)
+
+**Why the second one is bit-identical is the finding worth keeping.**
+`_after_clash` takes the corner of the jitter square that leaves the *most*
+standing, which is right for a requirement — but `_enemy_margin` is *already* a
+jitter-safe edge over whatever it returns, so using the pessimistic corner as
+well prices the same dice twice. A bot sending `1.25x` at a garrison leaves
+`0.75x` nominally and `1.04x` on its luckiest roll, so under the pessimistic
+corner a broken node only ever looks *dearer* afterwards, never cheaper: the
+opportunity was erased before the search could see it, firing 6 times in 9507
+neutral price lookups (0.06%). Switching that one branch to the nominal remnant
+makes the mechanism live — 240 of 9422 lookups are a "they land first"
+opportunity, 98 of them genuinely cheaper, about half a chance per game — and it
+still measures null over 3507 decided games, with a per-arm run on identical maps
+reading 294 wins against 296. Real, correctly priced, and worth about nothing:
+the survivor's defender advantage and its production regrowth roughly cancel the
+ships saved by not racing. Held to the same bar that rejected `RIVAL_WEDGE = 2.0`
+at a replicated 51.2%, it is not worth having.
+
+**Raising `DEFENDER_ADVANTAGE` makes waiting *worse*, not better, and the knob's
+own range straddles the break-even.** The advantage lands on the survivor's side
+twice: it shrinks the remnant, because the rival's attack has to beat an
+advantaged garrison — but then it squares up again when that remnant defends the
+node against us. And the rival compensates for the knob by sending more, since
+`combat.edge_attacking` reads it live. Priced through the real combat code, for a
+neutral 12 that a rival hits with exactly `edge_attacking`:
+
+    advantage   rival sends   remnant   cost before   cost after   waiting costs
+        0.75            11          6            11            6            55%
+        1.00            15          9            15           11            73%
+        1.10            17         11            17           15            88%
+        1.25            19         12            19           19           100%
+        1.50            22         13            22           24           109%
+
+Break-even is at **1.25**, well inside the slider's 0.75-1.5. So the tactic runs
+*opposite* to the knob — worth a third off below 1.0, worth nothing at 1.25, a
+penalty at the ceiling. Measured in play, the same shape: paired against the
+shipped bot at 24n 3p it reads 51.7% (z = +0.73) at 1.0, 51.0% (+0.42) at 1.25
+and 50.8% (+0.29) at 1.5, shrinking monotonically, plus 50.1% on the 12n
+18-ly/turn puzzle cell at 1.5. Null throughout, and the residue points the way
+the arithmetic says it should.
+
+**Nor does a high advantage reward *simultaneous* arrival — it never did, and the
+reason is the fold, not the multiplier.** `combat.resolve_arrival` sorts the
+sides by actual ships and folds them pairwise with `defender_owner` fixed, so two
+attackers landing on the same turn are folded **against each other first, with
+the advantage applied to neither**, and whatever survives then meets the
+still-advantaged garrison. Two "just enough" forces of 15 converging on a neutral
+12, 4000 dice a cell, asking how often the second one ends up holding it:
+
+    advantage   both land together   one waits a turn
+        0.75                  1.5%             100.0%
+        1.00                  0.0%             100.0%
+        1.25                  0.0%             100.0%
+        1.50                  0.0%              50.8%
+
+Simultaneity is not a trade-off at any setting, it is a mutual kill — which is
+exactly the standoff this whole idea starts from. (At 1.5 the *first* attack also
+fails, since 15 no longer beats an advantaged 12, so the node stays neutral and
+the waiter faces a coin flip instead of a remnant.)
+
+**Which finally explains why none of it moves marshal.** Repeat that table with
+the second player committing 30 instead of 15, and arriving together wins 100% of
+the time at every advantage setting — it just ends with fewer ships (22.8 against
+28.3 at 1.0, 18.3 against 26.0 at 1.5). The tactic is worth a fortune to a bot
+that sends *just enough* and almost nothing to one that commits its surplus, and
+Phase 3b makes marshal the latter: it is the big bloc that wins the pile-up
+anyway. Same "the price is a gate" conclusion as above, reached from the other
+end.
+
+**The shipped third-party fold does survive the knob**, which is the check worth
+having after all that: paired against the pre-fix bot at 24n 3p it reads 53.3%
+(z = +1.41) at advantage 1.25 and 55.4% (z = +1.92) at 1.5, alongside its 54.0%
+at the default. Unlike the waiting tactic, that one is not fighting the
+multiplier — it declines strikes that are doomed at *any* advantage.
+
+**A harness trap that cost two bogus readings here.** `ai.decide` falls back to
+the built-in heuristic for an unknown strategy name (deliberately — a stale save
+must never crash), so a scratch model file that has been cleaned up turns an A/B
+silently into "A versus heuristic" and reads **91.8% and 96.3%, at z = +17**. An
+effect that large in this game is a bug, never a discovery. Any measurement
+harness must assert every roster name is actually in `ai.STRATEGIES` before it
+plays a single game.
+
+**And a warning about where that idea appears to pay.** Small *symmetric* maps at
+the default speed read 70.2% and 77.3% for the first variant — and both are
+artefacts. Those cells time out in 85-94% of games (1073 of 1200; raising the cap
+to 4000 turns leaves 314 of 360), so the rate is computed over the ~6% that
+finish, which is not a random 6%. Running each arm separately over the *same*
+maps, so the timeout rate becomes a per-arm number instead of a shared one,
+settles it: 15 wins and 84.8% timeouts for the variant against 17 wins and 84.2%
+for the base. It does not break the deadlock and it does not win more; the
+paired figure was reading which of two bots in the same stuck game happened to
+come out of it. When a cell times out more than about half the time, run the arms
+separately before believing anything it says.
+
+Two variants measured and dropped along the way. Distinguishing a bloc that lands
+*before* us (fold it) from one landing *with* us (add it to what we must beat, as
+`combat.resolve_arrival` totals them) is a wash — 50.3%, z = +0.14, n = 481
+head-to-head against folding both alike — and folding everything is both simpler
+and closer to what the engine does, since a pooled sum overstates two sides that
+will in fact grind each other down first. Dropping the same-turn blocs entirely
+is also a wash (54.6% vs 53.8% on the same cell). Neither distinction is worth
+carrying, so there isn't one.
+
+The term is rare rather than hot: instrumented over 120 games it changed 1.5% of
+price lookups, and about one strike per game went from affordable to unaffordable.
+That is the shape of the whole result — a small number of decisions, each of them
+a whole army.
+
+### Garrisons run away, so the jitter premium buys almost nothing
+
+The single largest gain ever measured on this bot, and it comes from *deleting*
+three tuned constants. Instrumenting `combat.resolve_arrival` over ~12k hostile
+arrivals, split by whether the incoming force actually out-matched what the
+defender could muster:
+
+    defender      out-matched   evacuated before impact   probed   evacuated
+    knower               2477                     97.9%     1293        8.0%
+    thinker              2365                     95.0%      987        2.6%
+    marshal              3885                     94.9%     2195        7.6%
+    rusherplus           1050                     70.2%      313       17.3%
+    claudebot             717                      0.0%      236        1.3%
+    ---- pooled                                   86.7%                 7.0%
+
+**86.7% of the time, out-shipping a garrison means the garrison is not there when
+you arrive.** Every bot with a doomed/evacuate phase runs — and claudebot, the one
+that has none, stands 100% of the time. So a margin over the break-even edge is
+insurance against losing a fight that, in seven cases out of eight, never
+happens; and it is not cheap insurance, since it is roughly a quarter of every
+fleet, every strike.
+
+`_enemy_margin` is therefore now the **advantage multiplier alone** — no
+`NEAR_PAD`, no `ENEMY_NEAR`, no `ENEMY_FAR`, no distance ramp — with `_required`
+flooring the count at `defence + 1` because an exact tie breaks to the defender.
+Paired against the previous bot, every cell positive:
+
+    cell                                   W-L      n    rate      z
+    random 18n 3p (thinker)            263-193    456   57.7%  +3.28
+    random 24n 3p (thinker)            241-192    433   55.7%  +2.35
+    random 40n 3p (thinker)            265-226    491   54.0%  +1.76
+    random 24n 3p (knower)             207-163    370   55.9%  +2.29
+    random 24n 3p (claudebot)          290-223    513   56.5%  +2.96
+    random 30n 4p (thinker+claudebot)  347-300    647   53.6%  +1.85
+    ---- pooled                       1613-1297   2910   55.4%  +5.86
+    random 24n 3p, advantage 1.25      227-178    405   56.0%  +2.43
+    random 24n 3p, advantage 1.5       163-118    281   58.0%  +2.68
+    random 24n 3p at 3 ly/turn         248-145    393   63.1%  +5.20
+    random 24n 3p at 18 ly/turn        238-225    463   51.4%  +0.60
+
+Three of those cells are the ones that could have killed it and did not.
+**claudebot**, the only bot that never evacuates, is where dropping the insurance
+should hurt most — it reads 56.5%, because claudebot is being out-shipped 17 to 10
+on average and loses the fight it stands for anyway. **knower** is the
+tuning-to-a-copy check. And **3 ly/turn** is the regime where `ENEMY_FAR` was the
+only live term at all, so removing the ramp changes the most there — it is the
+best cell in the table at 63.1%, because a ramp climbing to 1.5 on a long lane
+was making marshal decline strikes against garrisons that would have run.
+
+**Dropping the advantage half as well is the worst result ever measured here.**
+Going the whole way to `defence + 1`, with no multiplier of any kind, reads 55.9%
+at advantage 1.0 (indistinguishable from the above) and **8.6%, z = -12.35** at
+advantage 1.5. The two halves of the edge are not the same kind of thing: the
+jitter half is a premium against the dice, and the dice are usually never rolled,
+but the advantage half is a premium against *the ground*, and it lands in full
+whenever a garrison does stand. A high advantage is precisely the setting at
+which a defender can hold and therefore does — the evacuate rate falls from 72%
+to 55% between advantage 1.0 and 1.5, and the number of arrivals that out-match
+anything nearly halves. Keeping the multiplier reads 58.0% there.
+
+The margin is recovered from the public edges rather than read off `config`, so it
+still cannot drift from the combat code: `edge_attacking(1) = adv * swing` and
+`edge_defending(1) = swing / adv`, so their ratio is `adv**2`. `_defend_margin`
+is untouched and still prices the jitter in full, which is the right asymmetry —
+our own garrison cannot decline the engagement.
+
+This is what took marshal to the top of the ladder and level with knower
+head-to-head; see the table under "Where marshal stands".
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 

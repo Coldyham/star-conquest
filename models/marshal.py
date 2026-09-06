@@ -26,6 +26,11 @@ What it changes, in descending order of measured value:
     pincer and relies on the nearer ones firing next turn; reserving their budget
     stops a later, poorer target — or Phase 3b — spending it first.
 
+  * **It prices a target against whoever will be holding it.** ``_required`` reads
+    the fleets a *third* player already has on the lane, not just the owner's own
+    reinforcements, so a system its owner has evacuated ahead of an incoming stack
+    is not mistaken for a free one. Structurally inert in a duel.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -34,9 +39,12 @@ and would poison it.
 
 **Everything measured about this bot lives in `docs/bot-design.md` under
 "``models/marshal.py`` and what the measurements deleted"**: where it stands
-against the roster, the guard and margin sweeps, which term of ``_enemy_margin``
-is even live at a given ship speed, the four ideas that were built, measured and
-then deleted, and the known hole in its own guard. Don't re-add one of those, or
+against the roster, the guard and margin sweeps, why the attack margin no longer
+carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
+a fight that mostly never happens), the ideas that were built, measured and then
+deleted, the known hole in its own guard, and — under "Racing a third player for
+the same system" — why the third-party reprice stops at rival-held targets and is
+deliberately not applied to neutral ones. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -49,26 +57,26 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 
-from starconquest import combat
+from starconquest import combat, config
 from starconquest.model import Order
 
 # --- margins ---------------------------------------------------------------- #
-# The pads sit over `combat`'s live jitter-safe edge; the absolutes below win at
-# the default jitter, where the edge is 1.222. Past that the floor takes over —
-# and `TUNED_SWING` is the floor the other way, so a *gentler* jitter than the one
-# these were fitted at cannot thin them.
-# `ENEMY_NEAR`, `ENEMY_FAR` and `FRONTIER_GUARD` are marshal's own, no longer
-# thinker's: see "The 2026-09 tuning sweep" in `docs/bot-design.md` for what each
-# was measured at, and note that the guard's gain is a default-ship-speed result.
+# These now cover *defending and neutrals only*. The pads sit over `combat`'s live
+# jitter-safe edge, the absolute wins at the default jitter where the edge is
+# 1.222, and `TUNED_SWING` is the floor the other way, so a gentler jitter than
+# the one they were fitted at cannot thin them.
+# The **attack** margin has no pad, absolute or floor at all: it is the defender
+# advantage and nothing else, because a garrison that can be beaten evacuates
+# rather than fighting 86.7% of the time. See `_enemy_margin`.
+# `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
+# sweep" in `docs/bot-design.md` for what it was measured at, and note that its
+# gain is a default-ship-speed result.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
 DEFEND_PAD = 0.05
 NEUTRAL_PAD = 0.05
-NEAR_PAD = 0.02
 
 NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
-ENEMY_NEAR = 1.15               # enemy margin for a 1-turn strike
-ENEMY_FAR = 1.5                 # ...rising toward this as the strike lands later
 OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
 FRONTIER_GUARD = 0.55           # fraction of the scariest adjacent enemy held home
@@ -95,9 +103,38 @@ def _neutral_margin() -> float:
     return max(NEUTRAL_MARGIN, combat.edge_attacking(TUNED_SWING) + NEUTRAL_PAD)
 
 
-def _enemy_margin(dist: int) -> float:
-    return max(combat.edge_attacking(TUNED_SWING) + NEAR_PAD,
-               min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1)))
+def _enemy_margin() -> float:
+    """The advantage multiplier alone: no jitter premium, no absolute, no ramp.
+
+    A margin over the break-even edge is insurance against losing the fight — and
+    against a garrison that can be beaten, there is usually no fight. Measured
+    over 12k arrivals, **86.7% of out-matched garrisons are gone before the blow
+    lands**: knower evacuates 97.9% of the time, thinker 95.0%, marshal itself
+    94.9%, rusherplus 70.2%. Only claudebot stands (0.0%). So the *jitter* half of
+    the edge is a premium on an event that mostly does not happen, and paying it
+    on every strike buys nothing while costing about a quarter of every fleet.
+
+    The *advantage* half is different and is kept: it is not insurance against the
+    dice but against the ground, and it applies in full whenever a garrison does
+    stand. Dropping it as well reads **8.6% (z = -12.35)** at `DEFENDER_ADVANTAGE
+    1.5` — the single worst number ever measured on this bot — because a high
+    advantage is exactly the setting at which a defender *can* hold and therefore
+    does. Keeping it reads 58.0% there.
+
+    Recovered from the two public edges rather than read off `config`, so this
+    still cannot drift from the combat code: ``edge_attacking(1) = adv * swing``
+    and ``edge_defending(1) = swing / adv``, so their ratio is ``adv^2``. Floored
+    at parity, since requiring *less* than the garrison is never right, and
+    ``_required`` floors the count itself at ``defence + 1`` because an exact tie
+    breaks to the defender.
+
+    This deletes `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD`, all three of them
+    measured figures — see "Garrisons run away, so the jitter premium buys almost
+    nothing" in `docs/bot-design.md` for the ten cells behind that, and note that
+    the ramp's own regime (3 ly/turn, where `ENEMY_FAR` was the only live term) is
+    where removing it gains the *most*, at 63.1%.
+    """
+    return max(1.0, math.sqrt(combat.edge_attacking(1.0) / combat.edge_defending(1.0)))
 
 
 # --------------------------------------------------------------------------- #
@@ -197,14 +234,78 @@ def _max_adjacent_enemy(state, pid, sysobj) -> int:
     return best
 
 
+def _rival_waves(state, pid, sid, within: int) -> list[tuple[int, int, int]]:
+    """``(turn, owner, ships)`` blocs landing on ``sid`` by ``within``, in arrival
+    order, for every player that is neither us nor ``sid``'s current owner.
+
+    One bloc per owner per turn, because that is how ``combat.resolve_arrival``
+    totals them, and in arrival order because they are folded in that order. The
+    target owner's own fleets are excluded — ``_inbound`` already counts those as
+    reinforcement — so what is left is exactly the third parties racing us for the
+    same node. Empty by construction in a duel, where the only player who can be
+    sending ships at a rival's system is that rival.
+    """
+    owner = state.systems[sid].owner_id
+    by_key: dict[tuple[int, int], int] = defaultdict(int)
+    for f in state.fleets:
+        if (f.dest_id == sid and f.owner_id != pid and f.owner_id != owner
+                and f.turns_remaining <= within):
+            by_key[(max(1, f.turns_remaining), f.owner_id)] += f.ships
+    return sorted((t, o, n) for (t, o), n in by_key.items())
+
+
+def _after_clash(garrison: int, striker: int) -> int:
+    """Ships left standing on a system once ``striker`` has hit ``garrison``.
+
+    The corner of the jitter square that leaves the *most* behind, whichever side
+    that is: this feeds a requirement, so the pessimistic corner is the safe one.
+    Straight off ``combat.preview_fight``, which runs the engine's own
+    ``_apply_advantage``/``_resolve_effective`` pair and draws no rng, so the
+    estimate cannot drift from the battle it predicts — and it is fed the *live*
+    jitter and advantage rather than ``TUNED_SWING``, because this is a prediction
+    of a real fight rather than a margin being floored against a knob.
+    """
+    if striker <= 0:
+        return garrison
+    p = combat.preview_fight(striker, garrison,
+                             config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+    return max(p.nominal.survivors, p.best.survivors, p.worst.survivors)
+
+
 def _required(state, pid, target, dist: int) -> int:
-    """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns."""
+    """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
+
+    Priced against whoever is standing there *when we land*, which is not always
+    the player holding it now. ``_inbound`` counts only the owner's own
+    reinforcements, so a **third** player's fleet already on the lane used to be
+    invisible here: a system its owner had just evacuated read as free — nothing
+    garrisoning it, nobody reinforcing it — and Phase 3b poured the whole surplus
+    into a node a 12-stack took the turn before we arrived, losing the strike and
+    leaving the source empty for the counter. ``_rival_waves`` makes those fleets
+    visible and each is folded through the fight it is about to have, so what we
+    are priced against is the *survivor* rather than the current garrison.
+
+    Deliberately not applied to a neutral target, which stays static however many
+    rivals are converging on it. That case measures worse, and the reason is
+    Phase 3b: the price is a gate, not the size of the strike. Under-pricing a
+    contested neutral opens the gate and the whole surplus goes in, which usually
+    wins the race outright; pricing it honestly closes the gate and cedes the node
+    to the rival. The gate is only worth shutting where the surplus would lose
+    anyway, which is exactly the rival-held case above. Nor does the converse pay
+    — deliberately arriving *after* a rival has broken a neutral and fighting the
+    remnant is a real opportunity, about half a chance per game, and it measures
+    null over 3500 games. See "Racing a third player for the same system" in
+    `docs/bot-design.md`, which also records why a pessimistic remnant estimate
+    hides that opportunity entirely.
+    """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
         return max(ships + 1, math.ceil(ships * _neutral_margin()))
-    reinforcements = _inbound(state, target.id, target.owner_id, dist)
-    defence = ships + reinforcements + _production_by(target, dist)
-    return max(ships + 1, math.ceil(defence * _enemy_margin(dist)))
+    defence = (ships + _inbound(state, target.id, target.owner_id, dist)
+               + _production_by(target, dist))
+    for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
+        defence = _after_clash(defence, incoming)
+    return max(defence + 1, math.ceil(defence * _enemy_margin()))
 
 
 # --------------------------------------------------------------------------- #
