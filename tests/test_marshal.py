@@ -240,6 +240,88 @@ def test_default_jitter_pins_each_term_of_the_ramp(ma):
 
 
 # --------------------------------------------------------------------------- #
+# The race for someone else's target
+# --------------------------------------------------------------------------- #
+def test_an_evacuated_system_is_priced_against_the_fleet_taking_it(ma):
+    """Three seats: P1 abandons the centre, P3's stack is a turn from landing on
+    it, and marshal is two turns away. The centre reads as 0 ships with nobody
+    reinforcing it, so the old price was 1 and Phase 3b posted the whole garrison
+    into a node that would be held by 12 ships by the time it arrived — losing the
+    strike and leaving its own system empty for the counter.
+    """
+    state = _board({1: (1, 9, 4), 2: (1, 0, 3), 3: (2, 6, 4), 4: (3, 9, 4)},
+                   [(2, 1, 1), (2, 3, 2), (2, 4, 1)])
+    state.fleets.append(Fleet(owner_id=3, source_id=4, dest_id=2, ships=12,
+                              turns_total=1, turns_remaining=1))
+
+    assert ma._required(state, 2, state.systems[2], 2) > 12, "priced as if empty"
+    assert ai.decide(state, 2) == [], "walked 6 ships into a 12-ship garrison"
+
+
+def test_a_contested_neutral_is_deliberately_left_static(ma):
+    """The rival-held case is repriced; the neutral one is knowingly not.
+
+    Measured, not overlooked: the price is a *gate*, and Phase 3b sends far more
+    than it. Under-pricing a contested neutral opens the gate and the surplus
+    usually wins the race, where honest pricing cedes the node — see "Racing a
+    third player for the same system" in `docs/bot-design.md`.
+    """
+    lanes = [(1, 2, 2), (2, 3, 1)]
+    quiet = _board({1: (2, 40, 3), 2: (0, 4, 3), 3: (3, 20, 4)}, lanes)
+    contested = _board({1: (2, 40, 3), 2: (0, 4, 3), 3: (3, 20, 4)}, lanes)
+    contested.fleets.append(Fleet(owner_id=3, source_id=3, dest_id=2, ships=20,
+                                  turns_total=1, turns_remaining=1))
+
+    static = math.ceil(4 * ma._neutral_margin())
+    assert ma._required(quiet, 2, quiet.systems[2], 2) == static
+    assert ma._required(contested, 2, contested.systems[2], 2) == static
+
+
+def test_the_reprice_is_inert_in_a_duel(ma):
+    """With two players, the only ships aimed at a rival's system are its own, and
+    `_inbound` already counts those — so a duel is bit-identical to the pricing
+    that predates this. That is what keeps the fix confined to the case it was
+    measured on.
+    """
+    state = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (1, 20, 4)},
+                   [(1, 2, 2), (2, 3, 1)], seats=2)
+    state.fleets.append(Fleet(owner_id=1, source_id=3, dest_id=2, ships=7,
+                              turns_total=1, turns_remaining=1))
+    assert ma._rival_waves(state, 2, 2, 2) == []
+
+
+def test_a_rival_landing_with_us_is_folded_too(ma):
+    """`combat.resolve_arrival` totals every owner landing this turn, so a bloc
+    arriving *with* us is one more side of the fight — not a softening-up we get
+    for free. Folded like any other wave rather than distinguished by arrival turn.
+    """
+    lanes = [(1, 2, 2), (2, 3, 2)]
+    alone = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (3, 20, 4)}, lanes)
+    shared = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (3, 20, 4)}, lanes)
+    shared.fleets.append(Fleet(owner_id=3, source_id=3, dest_id=2, ships=30,
+                               turns_total=2, turns_remaining=2))
+
+    assert (ma._required(shared, 2, shared.systems[2], 2)
+            > ma._required(alone, 2, alone.systems[2], 2))
+
+
+def test_the_owners_own_reinforcements_are_not_counted_twice(ma):
+    """`_inbound` already prices the target owner's own fleets, so `_rival_waves`
+    must exclude them — counting a garrison's reinforcement as a hostile bloc
+    besieging it would inflate every price on the board.
+    """
+    state = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (1, 20, 4)},
+                   [(1, 2, 2), (2, 3, 1)])
+    state.fleets.append(Fleet(owner_id=1, source_id=3, dest_id=2, ships=7,
+                              turns_total=1, turns_remaining=1))
+
+    assert ma._rival_waves(state, 2, 2, 2) == []
+    defence = 5 + 7 + ma._production_by(state.systems[2], 2)
+    assert ma._required(state, 2, state.systems[2], 2) == math.ceil(
+        defence * ma._enemy_margin(2))
+
+
+# --------------------------------------------------------------------------- #
 # Commitment: the square law rewards the bigger strike
 # --------------------------------------------------------------------------- #
 def test_surplus_goes_in_with_the_wave(ma):

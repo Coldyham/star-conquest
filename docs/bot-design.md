@@ -478,6 +478,83 @@ erase a result**: symmetric two-player duels time out in 64 of 80 games and
 1 ly/turn in 56 of 60, so both are unusable as measurement cells however
 interesting they are to play.
 
+### Racing a third player for the same system
+
+`_required` used to price a target against its *current* owner alone: the
+garrison, that owner's own inbound fleets (`_inbound`), and what it will build
+before we land. A **third** player's fleet already on the lane was invisible to
+it. The failure that exposes is not subtle — three seats, A holds the centre
+with 8, B launches 12 at it, A evacuates. The centre now reads as 0 ships with
+nobody reinforcing, so marshal in seat C prices it at 1, and Phase 3b — which
+pours the whole surplus into any target the gate has opened — posts all 6 of C's
+ships into a node B is holding with 12 by the time they arrive. C loses the
+strike *and* the system it launched from, which B walks into next turn.
+
+The fix is `_rival_waves` (every bloc landing on the target that belongs to
+neither us nor its owner, one per owner per turn, in arrival order) folded through
+`_after_clash`, so the price is set against the *survivor* of the fight the target
+is about to have rather than against the garrison standing there now. The clash
+estimate comes from `combat.preview_fight`, taking whichever corner of the jitter
+square leaves the most standing, so it cannot drift from the battle it predicts
+and errs toward caution. It is fed the live jitter and advantage rather than
+`TUNED_SWING`, because it predicts a real fight instead of flooring a margin.
+
+Paired permutation harness — every arrangement of `[variant, base, filler…]` over
+the seats on each seed, which for deterministic bots makes the V/B swap a
+bijection and pins the null at exactly 50.0%, the multi-seat equivalent of what
+`--ladder` gives duels for free:
+
+    cell                                   W-L      n    rate      z   timeouts
+    random 18n 3p (thinker)            247-198    445   55.5%  +2.32   121/720
+    random 24n 3p (thinker)            262-234    496   52.8%  +1.26    89/720
+    random 40n 3p (thinker)            294-269    563   52.2%  +1.05    56/720
+    random 24n 3p (knower)             239-200    439   54.4%  +1.86    44/720
+    random 30n 4p (thinker+claudebot)  389-320    709   54.9%  +2.59    80/960
+    ---- pooled                       1431-1221  2652   54.0%  +4.08
+    random 24n 3p @ 12 ly/turn         264-269    533   49.5%  -0.22    46/720
+    every 2p duel                            —      —   50.0%      —          —
+
+The knower cell is the one that matters most: a gain that only shows against a
+copy of yourself is a tuning artefact, and this one holds against the strongest
+bot in the roster. **It is inert in duels by construction**, not merely by
+measurement — with two players the only ships aimed at a rival's system are that
+rival's own, which `_inbound` already counted, so `_rival_waves` is empty and the
+600-game duel cell reads an exact 234-234. The full-roster `--ladder` table under
+"Where marshal stands" is therefore untouched by this change, and stays current.
+**It is also inert at high ship speed** for the same structural reason the
+`FRONTIER_GUARD` gain is: at 12 ly/turn almost every lane is one turn long, so
+there is no window in which an enemy fleet is on the board and visible before it
+lands. Read the 54% as a default-configuration result.
+
+**The same fix applied to neutral targets measures worse, and that is the
+interesting half.** The obvious companion — a neutral with a rival's fleet
+inbound is about to stop being neutral, so price it at the enemy margin against
+what that fleet leaves standing — costs about two points in duels (440-492,
+n=932, 47.2%, z = -1.70 at 24 nodes) while adding nothing in 3- and 4-player
+games (54.2% against this version's 54.0%, indistinguishable at n≈2700 each).
+The reason is Phase 3b: **the price is a gate, not the size of the strike.**
+Under-pricing a contested neutral opens the gate and the entire surplus goes in,
+which usually wins the race outright; pricing it honestly closes the gate and
+cedes the node to the rival for nothing. Shutting the gate only pays where the
+surplus would have lost anyway — which is the rival-held case above, where the
+node is defended by a stack that already beat its garrison. So `_required` keeps
+the static neutral branch untouched, deliberately, and
+`test_a_contested_neutral_is_deliberately_left_static` pins it that way.
+
+Two variants measured and dropped along the way. Distinguishing a bloc that lands
+*before* us (fold it) from one landing *with* us (add it to what we must beat, as
+`combat.resolve_arrival` totals them) is a wash — 50.3%, z = +0.14, n = 481
+head-to-head against folding both alike — and folding everything is both simpler
+and closer to what the engine does, since a pooled sum overstates two sides that
+will in fact grind each other down first. Dropping the same-turn blocs entirely
+is also a wash (54.6% vs 53.8% on the same cell). Neither distinction is worth
+carrying, so there isn't one.
+
+The term is rare rather than hot: instrumented over 120 games it changed 1.5% of
+price lookups, and about one strike per game went from affordable to unaffordable.
+That is the shape of the whole result — a small number of decisions, each of them
+a whole army.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/

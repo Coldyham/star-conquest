@@ -26,6 +26,11 @@ What it changes, in descending order of measured value:
     pincer and relies on the nearer ones firing next turn; reserving their budget
     stops a later, poorer target — or Phase 3b — spending it first.
 
+  * **It prices a target against whoever will be holding it.** ``_required`` reads
+    the fleets a *third* player already has on the lane, not just the owner's own
+    reinforcements, so a system its owner has evacuated ahead of an incoming stack
+    is not mistaken for a free one. Structurally inert in a duel.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -35,8 +40,10 @@ and would poison it.
 **Everything measured about this bot lives in `docs/bot-design.md` under
 "``models/marshal.py`` and what the measurements deleted"**: where it stands
 against the roster, the guard and margin sweeps, which term of ``_enemy_margin``
-is even live at a given ship speed, the four ideas that were built, measured and
-then deleted, and the known hole in its own guard. Don't re-add one of those, or
+is even live at a given ship speed, the ideas that were built, measured and then
+deleted, the known hole in its own guard, and — under "Racing a third player for
+the same system" — why the third-party reprice above stops at rival-held targets
+and is deliberately not applied to neutral ones. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -49,7 +56,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 
-from starconquest import combat
+from starconquest import combat, config
 from starconquest.model import Order
 
 # --- margins ---------------------------------------------------------------- #
@@ -197,13 +204,73 @@ def _max_adjacent_enemy(state, pid, sysobj) -> int:
     return best
 
 
+def _rival_waves(state, pid, sid, within: int) -> list[tuple[int, int, int]]:
+    """``(turn, owner, ships)`` blocs landing on ``sid`` by ``within``, in arrival
+    order, for every player that is neither us nor ``sid``'s current owner.
+
+    One bloc per owner per turn, because that is how ``combat.resolve_arrival``
+    totals them, and in arrival order because they are folded in that order. The
+    target owner's own fleets are excluded — ``_inbound`` already counts those as
+    reinforcement — so what is left is exactly the third parties racing us for the
+    same node. Empty by construction in a duel, where the only player who can be
+    sending ships at a rival's system is that rival.
+    """
+    owner = state.systems[sid].owner_id
+    by_key: dict[tuple[int, int], int] = defaultdict(int)
+    for f in state.fleets:
+        if (f.dest_id == sid and f.owner_id != pid and f.owner_id != owner
+                and f.turns_remaining <= within):
+            by_key[(max(1, f.turns_remaining), f.owner_id)] += f.ships
+    return sorted((t, o, n) for (t, o), n in by_key.items())
+
+
+def _after_clash(garrison: int, striker: int) -> int:
+    """Ships left standing on a system once ``striker`` has hit ``garrison``.
+
+    The corner of the jitter square that leaves the *most* behind, whichever side
+    that is: this feeds a requirement, so the pessimistic corner is the safe one.
+    Straight off ``combat.preview_fight``, which runs the engine's own
+    ``_apply_advantage``/``_resolve_effective`` pair and draws no rng, so the
+    estimate cannot drift from the battle it predicts — and it is fed the *live*
+    jitter and advantage rather than ``TUNED_SWING``, because this is a prediction
+    of a real fight rather than a margin being floored against a knob.
+    """
+    if striker <= 0:
+        return garrison
+    p = combat.preview_fight(striker, garrison,
+                             config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+    return max(p.nominal.survivors, p.best.survivors, p.worst.survivors)
+
+
 def _required(state, pid, target, dist: int) -> int:
-    """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns."""
+    """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
+
+    Priced against whoever is standing there *when we land*, which is not always
+    the player holding it now. ``_inbound`` counts only the owner's own
+    reinforcements, so a **third** player's fleet already on the lane used to be
+    invisible here: a system its owner had just evacuated read as free — nothing
+    garrisoning it, nobody reinforcing it — and Phase 3b poured the whole surplus
+    into a node a 12-stack took the turn before we arrived, losing the strike and
+    leaving the source empty for the counter. ``_rival_waves`` makes those fleets
+    visible and each is folded through the fight it is about to have, so what we
+    are priced against is the *survivor* rather than the current garrison.
+
+    Deliberately not applied to a neutral target, which stays static however many
+    rivals are converging on it. That case measures worse, and the reason is
+    Phase 3b: the price is a gate, not the size of the strike. Under-pricing a
+    contested neutral opens the gate and the whole surplus goes in, which usually
+    wins the race outright; pricing it honestly closes the gate and cedes the node
+    to the rival. The gate is only worth shutting where the surplus would lose
+    anyway, which is exactly the rival-held case above. See "Racing a third player
+    for the same system" in `docs/bot-design.md`.
+    """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
         return max(ships + 1, math.ceil(ships * _neutral_margin()))
-    reinforcements = _inbound(state, target.id, target.owner_id, dist)
-    defence = ships + reinforcements + _production_by(target, dist)
+    defence = (ships + _inbound(state, target.id, target.owner_id, dist)
+               + _production_by(target, dist))
+    for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
+        defence = _after_clash(defence, incoming)
     return max(ships + 1, math.ceil(defence * _enemy_margin(dist)))
 
 
