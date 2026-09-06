@@ -290,12 +290,23 @@ intact.
     incoming force by, to win the *worst* roll — read live off
     `config.COMBAT_JITTER` and `config.DEFENDER_ADVANTAGE`, both of which are
     menu sliders. They move in opposite directions, since the advantage belongs
-    to whoever holds the system. Every `models/` bot's margins are pads/absolutes
+    to whoever holds the system. Most `models/` bots' margins are pads/absolutes
     over those, with the edge's jitter half floored at each bot's `TUNED_SWING`
     (the swing it was fitted at), so a knob can only ever *raise* a margin above
     its measured figure — nothing in the roster moves at the 0.10/1.0 defaults.
     Clearing an edge is not a promise of capture: ties break to the defender and
     matched forces annihilate to neutral, hence the `target.ships + 1` floors.
+    - **The exception, and it is a measured one: `marshal._enemy_margin` carries
+      the advantage half of the edge and *none* of the jitter half.** 86.7% of
+      out-matched garrisons evacuate rather than fight (only claudebot stands),
+      so a premium against the dice is paid on a fight that mostly never
+      happens; dropping it is the largest single gain measured on any bot in the
+      roster. The advantage half is kept because it prices the ground rather
+      than the dice and applies in full whenever a garrison *does* stand —
+      dropping that too reads z = -12.35 at `DEFENDER_ADVANTAGE 1.5`. Marshal's
+      *defence* margin still prices the jitter in full, which is the asymmetry:
+      our own garrison cannot decline the engagement. See "Garrisons run away"
+      in bot-design before copying either half into another bot.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,

@@ -260,26 +260,34 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-**Full roster ladder, re-run against this re-tune** (`uv run python -m tests.sim
---ladder --trials 30`, 18 nodes, default settings — 900 games, 74 timed out and
-are excluded from the percentages): knower 255 (31%), marshal 219 (27%), thinker
-173 (21%), claudebot 95 (12%), heuristic 46 (6%), rusherplus 38 (5%). The figure
-this replaces predated both the margin back-port and this re-tune; **this table
-is the current one** — update it, not the module docstring, the next time
-marshal or the roster's pricing changes:
+**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
+nodes, default settings — 900 games, 57 timed out and are excluded from the
+percentages). **This table is the current one** — update it, not the module
+docstring, the next time marshal or the roster's pricing changes:
+
+    marshal 251 (30%), knower 249 (30%), thinker 167 (20%),
+    claudebot 92 (11%), heuristic 46 (5%), rusherplus 38 (5%)
 
     head-to-head (row's win rate vs column)
-                heuris  claude  knower  marsha  rusher  thinke
-      heuristic      —     19%      0%      0%     64%      2%
-      claudebot    81%       —      5%      8%     73%     12%
-      knower      100%     95%       —     65%    100%     84%
-      marshal     100%     92%     35%       —    100%     75%
-      rusherplus   36%     27%      0%      0%       —      3%
-      thinker      98%     88%     16%     25%     97%       —
+                heuris  rusher  claude  thinke  knower  marsha
+      heuristic      —     64%     19%      2%      0%      0%
+      rusherplus   36%       —     27%      3%      0%      0%
+      claudebot    81%     73%       —     12%      5%      2%
+      thinker      98%     97%     88%       —     16%     11%
+      knower      100%    100%     95%     84%       —     50%
+      marshal     100%    100%     98%     89%     50%       —
 
-marshal's win *share* fell here (247→219) from the pre-back-port table this one
-replaced, which reads like the re-tune regressed it — but that table's
-opponents were still pricing fights off the stale `1.1/0.9` hardcode, not
+marshal took the top of the ladder here, and level with knower head-to-head, on
+the strength of dropping the jitter premium from its attack margin — see
+"Garrisons run away" below. The previous reading of this table had it second at
+219 against knower's 255, losing the head-to-head 35%. Both the 251/249 gap and
+the 50% cell are within noise of a tie; what is not noise is that a bot which
+predicts nobody now matches the oracle, having been 30 points behind it.
+
+An earlier reading of this table had marshal's win *share* fall 247→219 from a
+pre-back-port table, which read like the 2026-09 re-tune regressing it — but
+that table's opponents were still pricing fights off the stale `1.1/0.9`
+hardcode, not
 `combat.edge_attacking()`/`edge_defending()`, so it measures old marshal against
 a weaker roster rather than against this one. Isolated with a direct A/B — the
 pre-re-tune `marshal.py` dropped into the *current*, back-ported roster as a
@@ -358,6 +366,16 @@ first, then the two methodological points, which matter more than any single row
 **Adopted from it:** `ENEMY_NEAR` 1.3 -> 1.15, `ENEMY_FAR` 1.9 -> 1.5,
 `FRONTIER_GUARD` 0.40 -> 0.55. Every other constant measured null or worse and
 was left where it was.
+
+> **Superseded.** `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD` no longer exist:
+> marshal's attack margin is now the defender-advantage multiplier alone, with no
+> pad, absolute or distance ramp. See "Garrisons run away, so the jitter premium
+> buys almost nothing" below. This section is kept as the record of how the ramp
+> was tuned and of the two methodological points at the end, which still stand —
+> and note that the sweep's own finding that `ENEMY_NEAR` had a *plateau from 1.0
+> to 1.2* was the first sign of what the removal later confirmed: the level barely
+> mattered because the fight it was priced for mostly does not happen.
+> `FRONTIER_GUARD` and the guard sweep are untouched.
 
 **Only one combination beat the stock tuning.** 40 seeds over random 18n/24n/40n
 duels plus 30n/4p, at the default 6 ly/turn, `n` decided games, `z` against 50%:
@@ -669,6 +687,75 @@ The term is rare rather than hot: instrumented over 120 games it changed 1.5% of
 price lookups, and about one strike per game went from affordable to unaffordable.
 That is the shape of the whole result — a small number of decisions, each of them
 a whole army.
+
+### Garrisons run away, so the jitter premium buys almost nothing
+
+The single largest gain ever measured on this bot, and it comes from *deleting*
+three tuned constants. Instrumenting `combat.resolve_arrival` over ~12k hostile
+arrivals, split by whether the incoming force actually out-matched what the
+defender could muster:
+
+    defender      out-matched   evacuated before impact   probed   evacuated
+    knower               2477                     97.9%     1293        8.0%
+    thinker              2365                     95.0%      987        2.6%
+    marshal              3885                     94.9%     2195        7.6%
+    rusherplus           1050                     70.2%      313       17.3%
+    claudebot             717                      0.0%      236        1.3%
+    ---- pooled                                   86.7%                 7.0%
+
+**86.7% of the time, out-shipping a garrison means the garrison is not there when
+you arrive.** Every bot with a doomed/evacuate phase runs — and claudebot, the one
+that has none, stands 100% of the time. So a margin over the break-even edge is
+insurance against losing a fight that, in seven cases out of eight, never
+happens; and it is not cheap insurance, since it is roughly a quarter of every
+fleet, every strike.
+
+`_enemy_margin` is therefore now the **advantage multiplier alone** — no
+`NEAR_PAD`, no `ENEMY_NEAR`, no `ENEMY_FAR`, no distance ramp — with `_required`
+flooring the count at `defence + 1` because an exact tie breaks to the defender.
+Paired against the previous bot, every cell positive:
+
+    cell                                   W-L      n    rate      z
+    random 18n 3p (thinker)            263-193    456   57.7%  +3.28
+    random 24n 3p (thinker)            241-192    433   55.7%  +2.35
+    random 40n 3p (thinker)            265-226    491   54.0%  +1.76
+    random 24n 3p (knower)             207-163    370   55.9%  +2.29
+    random 24n 3p (claudebot)          290-223    513   56.5%  +2.96
+    random 30n 4p (thinker+claudebot)  347-300    647   53.6%  +1.85
+    ---- pooled                       1613-1297   2910   55.4%  +5.86
+    random 24n 3p, advantage 1.25      227-178    405   56.0%  +2.43
+    random 24n 3p, advantage 1.5       163-118    281   58.0%  +2.68
+    random 24n 3p at 3 ly/turn         248-145    393   63.1%  +5.20
+    random 24n 3p at 18 ly/turn        238-225    463   51.4%  +0.60
+
+Three of those cells are the ones that could have killed it and did not.
+**claudebot**, the only bot that never evacuates, is where dropping the insurance
+should hurt most — it reads 56.5%, because claudebot is being out-shipped 17 to 10
+on average and loses the fight it stands for anyway. **knower** is the
+tuning-to-a-copy check. And **3 ly/turn** is the regime where `ENEMY_FAR` was the
+only live term at all, so removing the ramp changes the most there — it is the
+best cell in the table at 63.1%, because a ramp climbing to 1.5 on a long lane
+was making marshal decline strikes against garrisons that would have run.
+
+**Dropping the advantage half as well is the worst result ever measured here.**
+Going the whole way to `defence + 1`, with no multiplier of any kind, reads 55.9%
+at advantage 1.0 (indistinguishable from the above) and **8.6%, z = -12.35** at
+advantage 1.5. The two halves of the edge are not the same kind of thing: the
+jitter half is a premium against the dice, and the dice are usually never rolled,
+but the advantage half is a premium against *the ground*, and it lands in full
+whenever a garrison does stand. A high advantage is precisely the setting at
+which a defender can hold and therefore does — the evacuate rate falls from 72%
+to 55% between advantage 1.0 and 1.5, and the number of arrivals that out-match
+anything nearly halves. Keeping the multiplier reads 58.0% there.
+
+The margin is recovered from the public edges rather than read off `config`, so it
+still cannot drift from the combat code: `edge_attacking(1) = adv * swing` and
+`edge_defending(1) = swing / adv`, so their ratio is `adv**2`. `_defend_margin`
+is untouched and still prices the jitter in full, which is the right asymmetry —
+our own garrison cannot decline the engagement.
+
+This is what took marshal to the top of the ladder and level with knower
+head-to-head; see the table under "Where marshal stands".
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 

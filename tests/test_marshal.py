@@ -185,7 +185,12 @@ def test_margins_are_built_on_the_shared_edges(ma):
     config.COMBAT_JITTER = 0.30
     assert ma._defend_margin() == pytest.approx(combat.edge_defending() + ma.DEFEND_PAD)
     assert ma._neutral_margin() >= combat.edge_attacking()
-    assert ma._enemy_margin(1) >= combat.edge_attacking()
+
+    # The *enemy* margin deliberately does not: it carries the advantage half of
+    # the edge and none of the jitter half, because a beatable garrison usually
+    # evacuates rather than fighting. See `_enemy_margin` and bot-design.
+    config.DEFENDER_ADVANTAGE = 1.4
+    assert ma._enemy_margin() == pytest.approx(1.4)
 
 
 def test_advantage_makes_taking_dearer_and_holding_cheaper(ma):
@@ -203,40 +208,38 @@ def test_advantage_makes_taking_dearer_and_holding_cheaper(ma):
     assert hold_adv < hold_flat, "our own systems must get cheaper to hold"
 
 
-def test_required_rises_with_jitter(ma):
-    """A wilder swing must buy a bigger margin, not the hardcoded 1.222 one."""
+def test_holding_prices_the_jitter_but_taking_does_not(ma):
+    """A wilder swing must buy a bigger margin where a fight is *certain* — our
+    own garrison, which cannot decline the engagement — and must buy nothing where
+    it is not. 86.7% of out-matched garrisons evacuate, so a premium against the
+    dice on the attacking side is paid on a fight that mostly never happens.
+    """
     state = _board({1: (2, 40, 3), 2: (1, 10, 3)}, [(1, 2, 1)])
     target = state.systems[2]
-
     config.DEFENDER_ADVANTAGE = 1.0
+
     config.COMBAT_JITTER = 0.10
-    at_default = ma._required(state, 2, target, 1)
+    hold_default, take_default = ma._defend_margin(), ma._required(state, 2, target, 1)
     config.COMBAT_JITTER = 0.30
-    at_wild = ma._required(state, 2, target, 1)
-    config.COMBAT_JITTER = 0.0
-    at_none = ma._required(state, 2, target, 1)
+    hold_wild, take_wild = ma._defend_margin(), ma._required(state, 2, target, 1)
 
-    assert at_wild > at_default, "a wilder swing must buy a bigger margin"
-    assert at_none == at_default, "below default jitter the tuned absolute floors it"
-    assert at_none >= target.ships + 1, "a tie hands the system to nobody"
+    assert hold_wild > hold_default, "defending must price a wilder swing"
+    assert take_wild == take_default, "attacking must not pay for the dice"
 
-
-def test_default_jitter_pins_each_term_of_the_ramp(ma):
-    """Which of the three terms governs, at the default jitter.
-
-    The 2026-09 re-tune put `ENEMY_NEAR` at 1.15, *below* the break-even edge, so
-    a 1-turn strike is now governed by the edge floor rather than by the absolute
-    — which is exactly why the re-tune is inert at high ship speeds, where every
-    lane is one turn. The absolute governs from two turns out, and `ENEMY_FAR`
-    caps it past seven.
+def test_the_enemy_margin_is_the_advantage_and_nothing_else(ma):
+    """No pad, no absolute, no distance ramp — `ENEMY_NEAR`, `ENEMY_FAR` and
+    `NEAR_PAD` are gone, and the margin is recovered from the two public edges
+    (their ratio is `advantage**2`) rather than read off `config`.
     """
     config.COMBAT_JITTER = 0.10
+    for advantage in (0.75, 1.0, 1.25, 1.5):
+        config.DEFENDER_ADVANTAGE = advantage
+        assert ma._enemy_margin() == pytest.approx(max(1.0, advantage))
+    for name in ("ENEMY_NEAR", "ENEMY_FAR", "NEAR_PAD"):
+        assert not hasattr(ma, name), f"{name} is dead — delete it, don't strand it"
+
     config.DEFENDER_ADVANTAGE = 1.0
-    edge = combat.edge_attacking(ma.TUNED_SWING) + ma.NEAR_PAD
-    assert ma._enemy_margin(1) == pytest.approx(edge)     # floor, not ENEMY_NEAR
-    assert ma._enemy_margin(2) == pytest.approx(1.25)     # ENEMY_NEAR + one step
-    assert ma._enemy_margin(9) == pytest.approx(1.5)      # ENEMY_FAR
-    assert ma._neutral_margin() == pytest.approx(1.3)     # NEUTRAL_MARGIN
+    assert ma._neutral_margin() == pytest.approx(1.3)     # NEUTRAL_MARGIN, untouched
 
 
 # --------------------------------------------------------------------------- #
@@ -317,8 +320,8 @@ def test_the_owners_own_reinforcements_are_not_counted_twice(ma):
 
     assert ma._rival_waves(state, 2, 2, 2) == []
     defence = 5 + 7 + ma._production_by(state.systems[2], 2)
-    assert ma._required(state, 2, state.systems[2], 2) == math.ceil(
-        defence * ma._enemy_margin(2))
+    assert ma._required(state, 2, state.systems[2], 2) == max(
+        defence + 1, math.ceil(defence * ma._enemy_margin()))
 
 
 # --------------------------------------------------------------------------- #

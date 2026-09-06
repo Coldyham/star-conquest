@@ -39,12 +39,11 @@ and would poison it.
 
 **Everything measured about this bot lives in `docs/bot-design.md` under
 "``models/marshal.py`` and what the measurements deleted"**: where it stands
-against the roster, the guard and margin sweeps, why the attack margin no longer
-carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
-a fight that mostly never happens), the ideas that were built, measured and then
+against the roster, the guard and margin sweeps, which term of ``_enemy_margin``
+is even live at a given ship speed, the ideas that were built, measured and then
 deleted, the known hole in its own guard, and — under "Racing a third player for
-the same system" — why the third-party reprice stops at rival-held targets and is
-deliberately not applied to neutral ones. Don't re-add one of those, or
+the same system" — why the third-party reprice above stops at rival-held targets
+and is deliberately not applied to neutral ones. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -61,22 +60,22 @@ from starconquest import combat, config
 from starconquest.model import Order
 
 # --- margins ---------------------------------------------------------------- #
-# These now cover *defending and neutrals only*. The pads sit over `combat`'s live
-# jitter-safe edge, the absolute wins at the default jitter where the edge is
-# 1.222, and `TUNED_SWING` is the floor the other way, so a gentler jitter than
-# the one they were fitted at cannot thin them.
-# The **attack** margin has no pad, absolute or floor at all: it is the defender
-# advantage and nothing else, because a garrison that can be beaten evacuates
-# rather than fighting 86.7% of the time. See `_enemy_margin`.
-# `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
-# sweep" in `docs/bot-design.md` for what it was measured at, and note that its
-# gain is a default-ship-speed result.
+# The pads sit over `combat`'s live jitter-safe edge; the absolutes below win at
+# the default jitter, where the edge is 1.222. Past that the floor takes over —
+# and `TUNED_SWING` is the floor the other way, so a *gentler* jitter than the one
+# these were fitted at cannot thin them.
+# `ENEMY_NEAR`, `ENEMY_FAR` and `FRONTIER_GUARD` are marshal's own, no longer
+# thinker's: see "The 2026-09 tuning sweep" in `docs/bot-design.md` for what each
+# was measured at, and note that the guard's gain is a default-ship-speed result.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
 DEFEND_PAD = 0.05
 NEUTRAL_PAD = 0.05
+NEAR_PAD = 0.02
 
 NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
+ENEMY_NEAR = 1.15               # enemy margin for a 1-turn strike
+ENEMY_FAR = 1.5                 # ...rising toward this as the strike lands later
 OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
 FRONTIER_GUARD = 0.55           # fraction of the scariest adjacent enemy held home
@@ -103,38 +102,9 @@ def _neutral_margin() -> float:
     return max(NEUTRAL_MARGIN, combat.edge_attacking(TUNED_SWING) + NEUTRAL_PAD)
 
 
-def _enemy_margin() -> float:
-    """The advantage multiplier alone: no jitter premium, no absolute, no ramp.
-
-    A margin over the break-even edge is insurance against losing the fight — and
-    against a garrison that can be beaten, there is usually no fight. Measured
-    over 12k arrivals, **86.7% of out-matched garrisons are gone before the blow
-    lands**: knower evacuates 97.9% of the time, thinker 95.0%, marshal itself
-    94.9%, rusherplus 70.2%. Only claudebot stands (0.0%). So the *jitter* half of
-    the edge is a premium on an event that mostly does not happen, and paying it
-    on every strike buys nothing while costing about a quarter of every fleet.
-
-    The *advantage* half is different and is kept: it is not insurance against the
-    dice but against the ground, and it applies in full whenever a garrison does
-    stand. Dropping it as well reads **8.6% (z = -12.35)** at `DEFENDER_ADVANTAGE
-    1.5` — the single worst number ever measured on this bot — because a high
-    advantage is exactly the setting at which a defender *can* hold and therefore
-    does. Keeping it reads 58.0% there.
-
-    Recovered from the two public edges rather than read off `config`, so this
-    still cannot drift from the combat code: ``edge_attacking(1) = adv * swing``
-    and ``edge_defending(1) = swing / adv``, so their ratio is ``adv^2``. Floored
-    at parity, since requiring *less* than the garrison is never right, and
-    ``_required`` floors the count itself at ``defence + 1`` because an exact tie
-    breaks to the defender.
-
-    This deletes `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD`, all three of them
-    measured figures — see "Garrisons run away, so the jitter premium buys almost
-    nothing" in `docs/bot-design.md` for the ten cells behind that, and note that
-    the ramp's own regime (3 ly/turn, where `ENEMY_FAR` was the only live term) is
-    where removing it gains the *most*, at 63.1%.
-    """
-    return max(1.0, math.sqrt(combat.edge_attacking(1.0) / combat.edge_defending(1.0)))
+def _enemy_margin(dist: int) -> float:
+    return max(combat.edge_attacking(TUNED_SWING) + NEAR_PAD,
+               min(ENEMY_FAR, ENEMY_NEAR + 0.1 * (dist - 1)))
 
 
 # --------------------------------------------------------------------------- #
@@ -305,7 +275,7 @@ def _required(state, pid, target, dist: int) -> int:
                + _production_by(target, dist))
     for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
         defence = _after_clash(defence, incoming)
-    return max(defence + 1, math.ceil(defence * _enemy_margin()))
+    return max(ships + 1, math.ceil(defence * _enemy_margin(dist)))
 
 
 # --------------------------------------------------------------------------- #
