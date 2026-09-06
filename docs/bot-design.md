@@ -579,6 +579,71 @@ the survivor's defender advantage and its production regrowth roughly cancel the
 ships saved by not racing. Held to the same bar that rejected `RIVAL_WEDGE = 2.0`
 at a replicated 51.2%, it is not worth having.
 
+**Raising `DEFENDER_ADVANTAGE` makes waiting *worse*, not better, and the knob's
+own range straddles the break-even.** The advantage lands on the survivor's side
+twice: it shrinks the remnant, because the rival's attack has to beat an
+advantaged garrison — but then it squares up again when that remnant defends the
+node against us. And the rival compensates for the knob by sending more, since
+`combat.edge_attacking` reads it live. Priced through the real combat code, for a
+neutral 12 that a rival hits with exactly `edge_attacking`:
+
+    advantage   rival sends   remnant   cost before   cost after   waiting costs
+        0.75            11          6            11            6            55%
+        1.00            15          9            15           11            73%
+        1.10            17         11            17           15            88%
+        1.25            19         12            19           19           100%
+        1.50            22         13            22           24           109%
+
+Break-even is at **1.25**, well inside the slider's 0.75-1.5. So the tactic runs
+*opposite* to the knob — worth a third off below 1.0, worth nothing at 1.25, a
+penalty at the ceiling. Measured in play, the same shape: paired against the
+shipped bot at 24n 3p it reads 51.7% (z = +0.73) at 1.0, 51.0% (+0.42) at 1.25
+and 50.8% (+0.29) at 1.5, shrinking monotonically, plus 50.1% on the 12n
+18-ly/turn puzzle cell at 1.5. Null throughout, and the residue points the way
+the arithmetic says it should.
+
+**Nor does a high advantage reward *simultaneous* arrival — it never did, and the
+reason is the fold, not the multiplier.** `combat.resolve_arrival` sorts the
+sides by actual ships and folds them pairwise with `defender_owner` fixed, so two
+attackers landing on the same turn are folded **against each other first, with
+the advantage applied to neither**, and whatever survives then meets the
+still-advantaged garrison. Two "just enough" forces of 15 converging on a neutral
+12, 4000 dice a cell, asking how often the second one ends up holding it:
+
+    advantage   both land together   one waits a turn
+        0.75                  1.5%             100.0%
+        1.00                  0.0%             100.0%
+        1.25                  0.0%             100.0%
+        1.50                  0.0%              50.8%
+
+Simultaneity is not a trade-off at any setting, it is a mutual kill — which is
+exactly the standoff this whole idea starts from. (At 1.5 the *first* attack also
+fails, since 15 no longer beats an advantaged 12, so the node stays neutral and
+the waiter faces a coin flip instead of a remnant.)
+
+**Which finally explains why none of it moves marshal.** Repeat that table with
+the second player committing 30 instead of 15, and arriving together wins 100% of
+the time at every advantage setting — it just ends with fewer ships (22.8 against
+28.3 at 1.0, 18.3 against 26.0 at 1.5). The tactic is worth a fortune to a bot
+that sends *just enough* and almost nothing to one that commits its surplus, and
+Phase 3b makes marshal the latter: it is the big bloc that wins the pile-up
+anyway. Same "the price is a gate" conclusion as above, reached from the other
+end.
+
+**The shipped third-party fold does survive the knob**, which is the check worth
+having after all that: paired against the pre-fix bot at 24n 3p it reads 53.3%
+(z = +1.41) at advantage 1.25 and 55.4% (z = +1.92) at 1.5, alongside its 54.0%
+at the default. Unlike the waiting tactic, that one is not fighting the
+multiplier — it declines strikes that are doomed at *any* advantage.
+
+**A harness trap that cost two bogus readings here.** `ai.decide` falls back to
+the built-in heuristic for an unknown strategy name (deliberately — a stale save
+must never crash), so a scratch model file that has been cleaned up turns an A/B
+silently into "A versus heuristic" and reads **91.8% and 96.3%, at z = +17**. An
+effect that large in this game is a bug, never a discovery. Any measurement
+harness must assert every roster name is actually in `ai.STRATEGIES` before it
+plays a single game.
+
 **And a warning about where that idea appears to pay.** Small *symmetric* maps at
 the default speed read 70.2% and 77.3% for the first variant — and both are
 artefacts. Those cells time out in 85-94% of games (1073 of 1200; raising the cap
