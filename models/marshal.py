@@ -261,8 +261,12 @@ def _required(state, pid, target, dist: int) -> int:
     contested neutral opens the gate and the whole surplus goes in, which usually
     wins the race outright; pricing it honestly closes the gate and cedes the node
     to the rival. The gate is only worth shutting where the surplus would lose
-    anyway, which is exactly the rival-held case above. See "Racing a third player
-    for the same system" in `docs/bot-design.md`.
+    anyway, which is exactly the rival-held case above. Nor does the converse pay
+    — deliberately arriving *after* a rival has broken a neutral and fighting the
+    remnant is a real opportunity, about half a chance per game, and it measures
+    null over 3500 games. See "Racing a third player for the same system" in
+    `docs/bot-design.md`, which also records why a pessimistic remnant estimate
+    hides that opportunity entirely.
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
