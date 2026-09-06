@@ -541,6 +541,56 @@ node is defended by a stack that already beat its garrison. So `_required` keeps
 the static neutral branch untouched, deliberately, and
 `test_a_contested_neutral_is_deliberately_left_static` pins it that way.
 
+**Arriving *after* the rival breaks the door, measured and not shipped.** The
+sharper form of the same idea: rivals send "just enough", so a contested neutral
+is *cheaper* after their strike lands than before it. Three 12-ship homes around
+a neutral 9 — if two of them launch on the same turn neither takes it, but
+whoever lands alone holds it with about 8. So rather than joining the race, wait
+a turn and fight the remnant. Reported as most valuable on small "puzzle" maps,
+which is a regime none of the tables above measure: `WORLD_SIZE` is fixed, so a
+6-node map has median 6-turn lanes at the default speed and plays as a
+slow-motion crawl. What makes a small map a *puzzle* is short lanes, i.e. a high
+`SHIP_LY_PER_TURN` — 6 to 12 nodes at 18 ly/turn gives median 2-turn lanes, and
+a fleet visible on the board for a turn before it lands.
+
+Three implementations, each paired against the shipped bot:
+
+    variant                                W-L      n    rate      z
+    contested neutral -> post-clash    2032-2031   4063   50.0%  +0.02
+      (pooled 6/9/12n at 12-24 ly/turn)
+    opportunistic half only                  —      —    bit-identical
+    ...with the nominal remnant         1774-1733   3507   50.6%  +0.69
+      (pooled 9/12/18n at 18 ly/turn, 24n 3p and 30n 4p at 6)
+
+**Why the second one is bit-identical is the finding worth keeping.**
+`_after_clash` takes the corner of the jitter square that leaves the *most*
+standing, which is right for a requirement — but `_enemy_margin` is *already* a
+jitter-safe edge over whatever it returns, so using the pessimistic corner as
+well prices the same dice twice. A bot sending `1.25x` at a garrison leaves
+`0.75x` nominally and `1.04x` on its luckiest roll, so under the pessimistic
+corner a broken node only ever looks *dearer* afterwards, never cheaper: the
+opportunity was erased before the search could see it, firing 6 times in 9507
+neutral price lookups (0.06%). Switching that one branch to the nominal remnant
+makes the mechanism live — 240 of 9422 lookups are a "they land first"
+opportunity, 98 of them genuinely cheaper, about half a chance per game — and it
+still measures null over 3507 decided games, with a per-arm run on identical maps
+reading 294 wins against 296. Real, correctly priced, and worth about nothing:
+the survivor's defender advantage and its production regrowth roughly cancel the
+ships saved by not racing. Held to the same bar that rejected `RIVAL_WEDGE = 2.0`
+at a replicated 51.2%, it is not worth having.
+
+**And a warning about where that idea appears to pay.** Small *symmetric* maps at
+the default speed read 70.2% and 77.3% for the first variant — and both are
+artefacts. Those cells time out in 85-94% of games (1073 of 1200; raising the cap
+to 4000 turns leaves 314 of 360), so the rate is computed over the ~6% that
+finish, which is not a random 6%. Running each arm separately over the *same*
+maps, so the timeout rate becomes a per-arm number instead of a shared one,
+settles it: 15 wins and 84.8% timeouts for the variant against 17 wins and 84.2%
+for the base. It does not break the deadlock and it does not win more; the
+paired figure was reading which of two bots in the same stuck game happened to
+come out of it. When a cell times out more than about half the time, run the arms
+separately before believing anything it says.
+
 Two variants measured and dropped along the way. Distinguishing a bloc that lands
 *before* us (fold it) from one landing *with* us (add it to what we must beat, as
 `combat.resolve_arrival` totals them) is a wash — 50.3%, z = +0.14, n = 481
