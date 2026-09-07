@@ -460,6 +460,17 @@ def test_decode_rejects_junk(blob):
         replay.GameLog.decode(blob)
 
 
+def test_setup_key_pins_the_seed_actually_played():
+    """`main` resolves "roll a fresh seed" at game start and never writes it back,
+    so hashing the log's stored settings alone would file a random-seed game under
+    a key describing no particular map."""
+    rolled = Settings(nodes=18, players=3)      # seed None: rolled at start
+    log = replay.new_log(rolled, 4821)
+    pinned = Settings(nodes=18, players=3, seed=4821)
+    assert log.setup_key() == pinned.challenge_key()
+    assert log.setup_key() != rolled.challenge_key()
+
+
 def test_hand_turns_counts_the_turns_the_human_drove():
     log = replay.new_log(Settings(seed=2), 2)
     for autoplayed in (False, False, True, False, True):

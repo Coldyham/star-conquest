@@ -276,6 +276,20 @@ class GameLog:
             json.dump(self.to_dict(), fh, indent=2)
         tmp.replace(self.path)
 
+    def setup_key(self) -> str:
+        """``Settings.challenge_key`` of the setup this match was actually played on.
+
+        The seed is taken from the log rather than from its stored settings, which
+        may still say "roll a fresh one" — `main` resolves that at game start and
+        never writes it back, so hashing the settings alone would file a random-seed
+        game under a key that describes no particular map. This is the same pinning
+        `main.challenge_settings` does for a link, so a checkpoint uploaded
+        mid-game and the score posted at the end land on one key.
+        """
+        cfg = Settings.from_dict(self.settings)
+        cfg.seed = self.seed
+        return cfg.challenge_key()
+
     def encoded(self) -> str:
         """This log as one line of text: compact JSON, deflated, base64url.
 

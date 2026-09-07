@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from .paths import WEB_BESTS_KEY, WEB_SHARED_SETTINGS_KEY, data_dir, is_web
+from .paths import (WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY, WEB_SHARED_SETTINGS_KEY,
+                    data_dir, is_web)
 
 _FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
@@ -81,6 +82,24 @@ def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
 # One JSON object of key -> {"turns": int, "lost": int}, so replaying a challenge
 # can show what you already managed and a fresh result only overwrites a genuine
 # improvement (fewer turns, or the same turns with fewer losses).
+
+
+def share_games() -> bool:
+    """Whether the player has opted in to uploading their replays.
+
+    Off unless it has been switched on: an absent key, an unreadable store and a
+    fresh install all read as False, so the failure mode of a storage problem is
+    "sends nothing", never "sends without being asked". The menu's *Share replays*
+    checkbox is the only writer.
+    """
+    return get(WEB_SHARE_GAMES_KEY) == "1"
+
+
+def set_share_games(on: bool) -> bool:
+    """Store the preference. False if the store refused it (private browsing, a
+    full quota, a read-only disk), which the caller may want to say out loud —
+    an opt-in that silently forgets itself is worse than one that fails."""
+    return set(WEB_SHARE_GAMES_KEY, "1" if on else "")
 
 
 def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:

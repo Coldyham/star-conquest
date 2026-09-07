@@ -86,12 +86,22 @@ create index if not exists scores_match_id_idx
 -- by the game itself when the player presses "Post to leaderboard", which is the
 -- consent: a game merely played, abandoned or lost is never uploaded.
 --
--- This is the mirror image of bot_scores: insert and nothing else. There is no
--- select policy and no select grant, so a replay can be *given* to the board by
--- anyone and read back only by the worker's service_role key. That keeps one
--- person's game out of everybody else's reach while the thing it is for —
--- checking a posted score against the match that produced it — needs no public
--- read at all.
+-- With "Share replays" switched on in the game's menu it also stores games as
+-- they go — every 25 turns and again at the end — so the losses and the abandoned
+-- games are kept too. Those are the ones no score can ever carry, and the ones a
+-- bot is worth measuring against.
+--
+-- Neither path attaches anything identifying: a row is a match id, a setup key
+-- and the moves. There is deliberately no client id, which would be the only way
+-- to group one person's games and is a tracking identifier by any other name.
+--
+-- This table is the strictest on the board: no select policy *and* no insert
+-- policy, and no grant of either to anon. Writes come through this site's own
+-- function (`netlify/functions/log.mjs`) under the service_role key, which is
+-- what makes a size limit and a rate limit enforceable at all — every other table
+-- here takes a hundred-byte row from anyone, whereas a replay is 5-14 KiB and an
+-- open insert path would be a storage bill. Reads are the worker's alone, so
+-- uploading a game does not publish it.
 --
 -- Append-only like every other table here, which is what shapes the key: an
 -- upload is a new row, never an update, so a match played on past a first upload
@@ -108,9 +118,23 @@ create table if not exists public.game_logs (
   match_id     text not null check (match_id ~ '^[0-9a-f]{16}$'),
   game_key     text not null check (char_length(game_key) between 1 and 64),
   turns        integer not null check (turns > 0),
+  -- Claims by the client, and stored as claims: an index for finding logs
+  -- without decoding every blob (completed games, wins, games actually played by
+  -- hand), never evidence. Replaying the log settles all three, which is exactly
+  -- what tools/verify_scores.py does before a score is called verified.
+  finished     boolean not null default false,
+  won          boolean not null default false,
+  hand         integer not null default 0 check (hand >= 0),
   log          text not null check (octet_length(log) between 1 and 262144),
   submitted_at timestamptz not null default now()
 );
+
+-- For a board created before games were stored as they were played. Same
+-- drop/add spirit as configs_tags_shape above: re-pasting this file upgrades an
+-- existing table, which `create table if not exists` alone would silently skip.
+alter table public.game_logs add column if not exists finished boolean not null default false;
+alter table public.game_logs add column if not exists won      boolean not null default false;
+alter table public.game_logs add column if not exists hand     integer not null default 0;
 
 -- Longest first: that is the row a verifier wants, and the index answers the
 -- lookup by match_id at the same time.
@@ -407,7 +431,7 @@ drop policy if exists "scores public insert" on public.scores;
 drop policy if exists "configs public read"   on public.configs;
 drop policy if exists "configs public insert" on public.configs;
 drop policy if exists "bot_scores public read" on public.bot_scores;
-drop policy if exists "game_logs public insert" on public.game_logs;
+drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
 drop policy if exists "score_checks public read" on public.score_checks;
 
 create policy "users public read"    on public.users  for select using (true);
@@ -423,10 +447,10 @@ create policy "configs public insert" on public.configs for insert with check (t
 -- tools/bot_replay.py under the service_role key, which bypasses RLS.
 create policy "bot_scores public read" on public.bot_scores for select using (true);
 
--- game_logs is the exact opposite: insert and no select, so anyone may hand the
--- board a replay and only the worker may read one back. score_checks is a
+-- game_logs has neither: RLS is on and no policy exists, so every public command
+-- against it is refused outright and the only writer is netlify/functions/log.mjs
+-- under the service_role key (which bypasses RLS entirely). score_checks is a
 -- bot_scores-shaped table again — the worker writes the verdicts, everyone reads.
-create policy "game_logs public insert" on public.game_logs for insert with check (true);
 create policy "score_checks public read" on public.score_checks for select using (true);
 
 -- No update or delete policy anywhere: that is what makes every row append-only
@@ -448,8 +472,10 @@ grant select on public.users, public.games, public.scores, public.configs,
 -- policy is what keeps an uploaded replay readable only by the worker.
 -- bot_scores is absent from this list on purpose: no insert grant and no insert
 -- policy is what leaves the replay worker as its only writer.
-grant insert on public.users, public.games, public.scores, public.configs,
-  public.game_logs to anon, authenticated;
+grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;
+-- game_logs appears in neither grant: not in select (a replay is not public) and
+-- not in insert (uploads go through this site's function, which can size- and
+-- rate-limit them). It is the one table the public can neither read nor write.
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
 
@@ -464,7 +490,9 @@ grant insert, update on public.bot_scores to service_role;
 -- verdicts, and delete a game_logs row that a longer upload of the same match has
 -- superseded (the public has no delete path anywhere, worker or not).
 grant select on public.scores to service_role;
-grant select, delete on public.game_logs to service_role;
+-- select + delete for the worker (read a replay, prune one a longer upload has
+-- superseded); insert for netlify/functions/log.mjs, which holds the same key.
+grant select, insert, delete on public.game_logs to service_role;
 grant insert, update on public.score_checks to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.

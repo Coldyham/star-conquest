@@ -750,18 +750,52 @@ invalidated every challenge link ever shared. `GameLog.match_id` is minted per
 match from `settings.fresh_rng`, never `state.rng`: it must *not* be reproducible
 from the seed, or every player of one shared map would mint the same id.
 
-**Uploading is what pressing "Post to leaderboard" consents to.** Nothing is sent
-for a game merely played, abandoned or lost; `share_challenge` sends nothing
-either. `upload.py` is a platform bridge in the `webstore`/`softkeyboard` style —
-guarded everywhere, silent on failure, fire-and-forget on both sides (a `fetch`
-whose promise is never read on the web, a daemon thread off it) so a POST can
-never stall the frame after a win.
+**Two things send, and both are consented to.** Pressing *Post to leaderboard*
+uploads the match behind that score. Ticking *Share replays* on the menu
+(`webstore.share_games`, off until switched on) also uploads a game as it goes —
+every `upload.CHECKPOINT_TURNS` turns and again when it ends. The cadence is the
+whole point of the second one: a match that is *abandoned* never reaches an end,
+and abandoned and lost games are exactly what a score can never carry and what a
+bot is worth measuring against. Nothing else sends — `share_challenge` does not,
+and neither does a pure autoplay demo (`hand_turns == 0`), which is reproducible
+from its seed and so is bytes without information.
 
-**The storage shape is the mirror image of `bot_scores`.** `game_logs` grants
-insert and *nothing else*: no select policy, no select grant. Anyone may hand the
-board a replay; only the worker can read one back. That is what keeps uploading a
-game from publishing it. Rows are append-only like the rest of the board, so a
-match submitted twice lands twice and the *longest* row is the current one
+The preference is a local one (`paths.WEB_SHARE_GAMES_KEY`) rather than a
+`Settings` field, for two independent reasons: it belongs to an installation and
+not to a game setup, so it has no business in a save file or a shared link — and
+a new `Settings` field would move `challenge_key()` for every map that has ever
+existed.
+
+`upload.py` is a platform bridge in the `webstore`/`softkeyboard` style — guarded
+everywhere, silent on failure, fire-and-forget on both sides (a `fetch` whose
+promise is never read on the web, a daemon thread off it) so a POST can never
+stall the frame. It keys a row by `GameLog.setup_key()`, which pins the seed
+actually played: `main` resolves "roll a fresh seed" at game start and never
+writes it back, so hashing the live `Settings` would file a random-seed game
+under a key describing no particular map.
+
+**`game_logs` is the one table the public can neither read nor write.** RLS is on
+and it has no policies and no anon grants at all — every other table here takes a
+row from anyone, and for a hundred-byte score that is a fine trade. A replay is
+5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
+go through the leaderboard site's own function (`netlify/functions/log.mjs`),
+which validates the row, caps its size and rate-limits the caller, and holds the
+service_role key that is the table's only writer. Reads are the worker's alone,
+so uploading a game does not publish it.
+
+The rate limit is honest about itself: Netlify functions run on ephemeral,
+parallel instances, so an in-memory window stops a runaway loop and not an
+adversary. What actually bounds the table is the size cap, the check constraint
+behind it, and the fact that dropping the table is one statement in the SQL
+editor. A durable limit would mean storing everyone's IP, which is a worse thing
+to own than the abuse it prevents.
+
+**Nothing identifying is attached.** A row is a match id, a setup key and the
+moves. Grouping one person's games across sessions would need a durable client
+id — a tracking identifier by any other name, and it buys nothing here.
+
+Rows are append-only like the rest of the board, so a game that checkpoints
+repeatedly lands several times and the *longest* row is the current one
 (`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
 delete path the public does not have.
 

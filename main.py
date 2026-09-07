@@ -398,6 +398,13 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
             log.save()
         except OSError:
             pass  # a save failure must never interrupt play
+        # ...and, with "Share replays" on, upload it as the game goes: every
+        # `upload.CHECKPOINT_TURNS` turns and again on the turn it is decided. The
+        # cadence is what keeps an *abandoned* game — the kind no score ever
+        # carries — from being lost entirely. `due` holds every condition,
+        # including the opt-in itself, so this line cannot send by accident.
+        if upload.due(log, state.winner is not None):
+            upload.post_log(log, log.setup_key())
     if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
         record_best(settings, state, ui)
     ui.clear_pending()

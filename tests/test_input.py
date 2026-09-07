@@ -1654,3 +1654,56 @@ def test_sharing_a_challenge_link_uploads_nothing(monkeypatch):
         assert sent == []
     finally:
         pygame.quit()
+
+
+def test_a_checkpoint_and_a_posted_score_agree_on_the_setup_key():
+    """A game uploaded mid-play and the score posted at the end must land on one
+    key, or the replay behind a score could not be found from it."""
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)     # seed None: rolled at start
+        log = replay.new_log(settings, 4821)
+        log.path = None
+        ui.hand_turns = 2
+        state.turn = 30
+        shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert log.setup_key() == shared.challenge.key
+    finally:
+        pygame.quit()
+
+
+def _shared_game(monkeypatch, tmp_path, *, on: bool):
+    """Play six turns with "Share replays" set to ``on``, capturing uploads."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    monkeypatch.setattr(main.upload.webstore, "share_games", lambda: on)
+    monkeypatch.setattr(main.upload, "post_log",
+                        lambda log, key: sent.append((log.turn_count, key)) or True)
+    monkeypatch.setattr(main.upload, "CHECKPOINT_TURNS", 3)
+    state, ui = _setup()
+    settings = Settings(seed=1, nodes=18, players=3)
+    log = replay.new_log(settings, 1)
+    log.path = tmp_path / "game.json"
+    for _ in range(6):
+        main.resolve_turn(state, ui, log, settings)
+    return sent, log
+
+
+def test_a_shared_game_uploads_on_the_cadence(monkeypatch, tmp_path):
+    """The point of checkpointing: a game abandoned rather than finished is still
+    stored up to wherever it was left."""
+    try:
+        sent, log = _shared_game(monkeypatch, tmp_path, on=True)
+        assert [turns for turns, _ in sent] == [3, 6]
+        assert {key for _, key in sent} == {log.setup_key()}
+    finally:
+        pygame.quit()
+
+
+def test_an_unshared_game_uploads_nothing_while_it_is_played(monkeypatch, tmp_path):
+    """Off is off: the default sends nothing at all, whatever the cadence says."""
+    try:
+        sent, _ = _shared_game(monkeypatch, tmp_path, on=False)
+        assert sent == []
+    finally:
+        pygame.quit()

@@ -13,7 +13,7 @@ import json
 import pytest
 
 from starconquest import webstore
-from starconquest.paths import WEB_BESTS_KEY
+from starconquest.paths import WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +57,30 @@ def test_unwritable_location_fails_soft(monkeypatch, tmp_path):
 
 
 # --- personal bests ---------------------------------------------------------- #
+# --- the "share replays" opt-in ---------------------------------------------- #
+def test_replay_sharing_is_off_until_it_is_switched_on():
+    """The failure mode of a storage problem has to be "sends nothing", never
+    "sends without being asked", so anything but a stored "1" reads as off."""
+    assert webstore.share_games() is False
+    webstore.set(WEB_SHARE_GAMES_KEY, "yes please")
+    assert webstore.share_games() is False
+
+
+def test_replay_sharing_round_trips_and_can_be_switched_back_off():
+    assert webstore.set_share_games(True) is True
+    assert webstore.share_games() is True
+    assert webstore.set_share_games(False) is True
+    assert webstore.share_games() is False
+
+
+def test_an_unwritable_store_reports_that_the_opt_in_did_not_stick(monkeypatch, tmp_path):
+    """An opt-in that silently forgets itself is worse than one that fails: the
+    menu says so rather than redrawing an unticked box with no explanation."""
+    monkeypatch.setattr(webstore, "_file_path", lambda: tmp_path / "nope" / "kv.json")
+    assert webstore.set_share_games(True) is False
+    assert webstore.share_games() is False
+
+
 def test_no_best_recorded_yet():
     assert webstore.best("key") is None
 

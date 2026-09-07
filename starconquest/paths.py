@@ -28,6 +28,13 @@ WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 # so replaying a shared link can show what you already managed.
 WEB_BESTS_KEY = "sc_bests"
 
+# Storage key for the "share replays" preference (`webstore.share_games`): off
+# unless the player turns it on from the menu, and stored beside the other local
+# preferences rather than on `Settings` — it belongs to this installation, not to
+# a game setup, and putting it on `Settings` would both move `challenge_key()`
+# for every map that has ever existed and travel in every shared link.
+WEB_SHARE_GAMES_KEY = "sc_share_games"
+
 # The public leaderboard's score-entry page. The win overlay opens it with
 # ``#<token>`` appended, which is all the form needs to prefill itself — the same
 # challenge token the clipboard link carries, read by the site's own decoder.
@@ -37,18 +44,19 @@ WEB_BESTS_KEY = "sc_bests"
 # too, but this is the canonical URL and avoids a redirect hop.
 LEADERBOARD_SUBMIT_URL = "https://star-conquest-leaderboard.netlify.app/submit"
 
-# Where a finished match's replay is posted, so a submitted score can be checked
-# against the game that produced it (`upload.post_log`). The PostgREST endpoint of
-# the leaderboard's own Supabase project and its *publishable* (anon) key — the
-# same pair `leaderboard/js/config.mjs` already ships to every visitor, and public
-# by design: `game_logs` grants insert and nothing else, so this key can add a
-# replay and can neither read one back nor touch any other table. Never the
-# service_role key, which only the offline worker holds.
+# Where a match's replay is posted, so a score can be checked against the game
+# that produced it (`upload.post_log`).
 #
-# Either one blank disables uploading entirely, the same way a blank
-# LEADERBOARD_SUBMIT_URL disables the submit button.
-LEADERBOARD_LOG_URL = "https://vppihsnfotpdkkqxstdc.supabase.co/rest/v1/game_logs"
-LEADERBOARD_LOG_KEY = "sb_publishable_6zAnA0eBt8wAahb6rplDpg_Rik3sE29"
+# Not Supabase directly: this is the leaderboard site's own function
+# (`leaderboard/netlify/functions/log.mjs`), which validates a row, rate-limits by
+# caller, and holds the only key that may write `game_logs`. Posting straight to
+# PostgREST would mean shipping a key with insert rights in the game binary, and
+# an insert path anyone could aim a script at — the table stores whole replays, so
+# that is a storage bill rather than a few junk rows.
+#
+# Blank disables uploading entirely, the same way a blank LEADERBOARD_SUBMIT_URL
+# disables the submit button.
+LEADERBOARD_LOG_URL = "https://star-conquest-leaderboard.netlify.app/api/log"
 
 
 def _android_data_dir() -> Path | None:

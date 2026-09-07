@@ -4,8 +4,24 @@
 # itself with pygbag) and resolves publish relative to this directory.
 #
 # No build command: these are plain static files with no bundler or build step.
+# The one exception is `netlify/functions`, which Netlify bundles on its own —
+# see `functions/log.mjs` for what it is and the two environment variables it
+# needs (set them in the site's settings; one is the service_role key and must
+# never be committed).
 [build]
   publish = "."
+
+[functions]
+  directory = "netlify/functions"
+
+# The functions directory sits inside the publish dir, so its source would
+# otherwise be served as static files alongside the pages. The deployed function
+# answers on /api/log (and /.netlify/functions/log); this only hides the copy of
+# its source, which is nothing but untidy.
+[[redirects]]
+  from = "/netlify/*"
+  to = "/"
+  status = 404
 
 [[headers]]
   for = "/*"

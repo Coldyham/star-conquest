@@ -240,21 +240,37 @@ intact.
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's `service_role` key is its only writer.
-  - **Checked scores: the game uploads the replay behind a posted score.**
+  - **The game uploads replays, and the worker checks scores against them.**
     `Challenge.log` carries `GameLog.match_id` into the link, `upload.post_log`
-    puts the log itself into `game_logs`, and `tools/verify_scores.py` (the same
-    scheduled worker as the bot column) replays it and records `verified` /
-    `mismatch` / `unreadable` / `missing` in `score_checks`. The id rides on
-    `Challenge` rather than `Settings` precisely because `challenge_keys()` drops
-    that field before hashing — see the next bullet for what a `Settings` field
-    would have cost. Three rules hold this together: uploading happens **only**
-    on *Post to leaderboard* (never for a game merely played, abandoned or lost —
-    that is the consent), `game_logs` is the mirror of `bot_scores` (public
-    insert, no read policy and no read grant, so uploading a game does not
-    publish it), and the verifier binds the log to the setup (`same_setup`) or an
-    easy map's replay would back a hard map's score. It proves the *game*, never
-    that a human played it — that is what `hand` discloses, recomputed from the
-    log rather than trusted.
+    sends the log itself, and `tools/verify_scores.py` (the same scheduled worker
+    as the bot column) replays it and records `verified` / `mismatch` /
+    `unreadable` / `missing` in `score_checks`. The id rides on `Challenge` rather
+    than `Settings` precisely because `challenge_keys()` drops that field before
+    hashing — see the next bullet for what a `Settings` field would have cost.
+    Four rules hold this together:
+    - **Two things send, both consented to.** Pressing *Post to leaderboard*
+      uploads that match. With *Share replays* ticked (`webstore.share_games`, a
+      local preference — never a `Settings` field, which would travel in every
+      link and move every setup digest), a game also checkpoints every
+      `upload.CHECKPOINT_TURNS` turns and again when it ends, which is what keeps
+      the *lost and abandoned* games — the ones no score can carry. Nothing else
+      sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
+      reproducible from its seed, so it is bytes without information.
+    - **`game_logs` is the one table the public can neither read nor write.** RLS
+      on, no policies, no anon grants. Writes go through the leaderboard site's
+      own `netlify/functions/log.mjs` under the service_role key, which is what
+      makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
+      insert path is a storage bill rather than a few junk rows. Reads are the
+      worker's alone, so uploading a game does not publish it.
+    - **A row carries no identity** — a match id, a setup key and the moves.
+      Grouping one person's games would need a durable client id, which is a
+      tracking identifier by any other name.
+    - **The verifier binds the log to the setup** (`same_setup`), or an easy
+      map's replay would back a hard map's score. It proves the *game*, never
+      that a human played it — that is what `hand` discloses, recomputed from the
+      log rather than trusted. Key the log by `GameLog.setup_key()`, never the
+      live `Settings`: `main` resolves "roll a fresh seed" at game start and never
+      writes it back.
   - **Adding a field to `Settings` invalidates every key already shared.**
     `challenge_key()` hashes the full setup dict, so a new field moves the digest
     of every map that ever existed and links from before it read as edited.

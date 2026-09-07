@@ -204,9 +204,8 @@ The pieces, in the order a submission touches them:
    hashing, so unlike a new `Settings` field this moves no setup digest and
    invalidates no link anyone has already shared.
 2. `starconquest/upload.py` posts the log — deflated and base64url'd by
-   `GameLog.encoded`, the same encoding the token itself uses — straight into
-   `game_logs`. **Only when the player presses *Post to leaderboard*.** A game
-   merely played, abandoned or lost uploads nothing.
+   `GameLog.encoded`, the same encoding the token itself uses — to
+   `netlify/functions/log.mjs`, which stores it in `game_logs`.
 3. `submit.mjs` writes the id onto the score row as `match_id`. The log and the
    score arrive by different routes and either can be first, which is why there
    is no foreign key between them.
@@ -216,18 +215,51 @@ The pieces, in the order a submission touches them:
    uploaded. `missing` is stored rather than left as an absence, so the board can
    tell "nobody has looked yet" from "we looked, and there is nothing to check".
 
-Two properties are worth stating plainly, because they are what makes the trade
-work. **`game_logs` is the mirror image of `bot_scores`**: insert and nothing
-else — no select policy and no select grant — so anyone may hand the board a
-replay and only the worker's `service_role` key can read one back. A player's
-game does not become public by being uploaded. And **the verifier binds the
-replay to the setup** (`same_setup`), or an easy map's log could be attached to a
-hard map's score and would verify perfectly.
+**The verifier binds the replay to the setup** (`same_setup`), or an easy map's
+log could be attached to a hard map's score and would verify perfectly.
 
 What this does *not* do: prove a human played the game. A bot driving the seat
 produces a log that verifies like any other — which is what `hand` discloses, and
 the verifier recomputes it from the log's own per-turn autoplay flags rather than
 trusting the number in the link.
+
+### Shared replays, and where they are kept
+
+Posting a score is one of two ways a replay reaches the board. The other is the
+menu's **Share replays** checkbox, off until it is switched on: with it ticked, a
+game also uploads as it goes — every 25 turns and again when it ends. That
+cadence is the point of it. A match that is *abandoned* never reaches an end, and
+abandoned and lost games are exactly what `scores` can never hold (the game only
+offers the submit button on a win), while being the positions a bot is most worth
+measuring against. A pure autoplay demo is skipped either way: a bot-versus-bot
+game is reproducible from its seed, so storing one is bytes without information.
+
+**`game_logs` is the one table the public can neither read nor write.** RLS is on
+and it has no policies and no anon grants at all. Every other table here takes a
+row from anyone, and for a hundred-byte score that is a fine trade; a replay is
+5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
+go through this site's own function, `netlify/functions/log.mjs`, which:
+
+* answers only POST, and only for a body under the size cap;
+* rate-limits the caller (in memory, per instance — enough for a runaway loop,
+  not for an adversary, and the limits that actually hold are the size cap and
+  the check constraint behind it; a durable limit would mean storing everyone's
+  IP, which is a worse thing to own than the abuse it prevents);
+* validates every field, `match_id` above all, since that is the column the
+  verifier keys scores against;
+* forwards the row under `SUPABASE_SERVICE_KEY`, which is the table's only
+  writer. Set it in the Netlify site's environment alongside `SUPABASE_URL` — the
+  same secret the Actions worker uses, and just as much not-in-git. With either
+  unset the function answers 503 and stores nothing.
+
+Reads belong to the worker alone, so **uploading a game does not publish it**,
+and **nothing identifying is attached**: a row is a match id, a setup key and the
+moves. Grouping one person's games would need a durable client id, which is a
+tracking identifier by any other name.
+
+Uploads are append-only like everything else here, so a game that checkpoints
+repeatedly leaves several rows and the longest is the current one;
+`tools/verify_scores.py --prune` clears the rest.
 
 ## Setup
 
@@ -261,16 +293,26 @@ trusting the number in the link.
    to be, with *Run workflow* for when you want it sooner — and any run keeps a
    free Supabase project from idling into the pause noted under *Known
    limitations*.
+6. **Optional — accept replay uploads.** Set the *same two* values as
+   environment variables on this Netlify site (*Site configuration → Environment
+   variables*): `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. That is what
+   `netlify/functions/log.mjs` reads; with either unset it answers 503 and the
+   game's uploads simply go nowhere, which is a working board with no replays
+   rather than a broken one. The game posts to `/api/log` on this site — see
+   `paths.LEADERBOARD_LOG_URL` if it is deployed somewhere else.
 
 ## Local development
 
 ```sh
 cd leaderboard && python3 -m http.server 8000   # then open localhost:8000
+netlify dev                                     # ...or this, to run the function too
 ```
 
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
 PostgREST accepts any origin for the anon key. Without one, every page says so
-instead of failing obscurely.
+instead of failing obscurely. A plain static server does not run
+`netlify/functions/`, so uploads need `netlify dev` (with the two environment
+variables set); `localhost:8000` is in the function's CORS allowlist for that.
 
 ## Tests
 
@@ -287,6 +329,10 @@ load it as a module and fails before running anything.)
 Re-run the generator and commit `tests/fixtures/tokens.json` if the token format
 in `settings.py` ever changes — that fixture file is what keeps the two encoders
 from drifting apart.
+
+`tests/log-function.test.mjs` covers the upload endpoint's two pure halves —
+what `validate` accepts and how `rateLimited`'s window behaves — which is why
+both are exported rather than buried in the handler.
 
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
@@ -318,12 +364,11 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-- **Every game, not just the posted ones.** The game uploads a replay only when
-  you press *Post to leaderboard*. Storing the rest — losses and abandoned games
-  included — would give the bots a position library drawn from real play rather
-  than self-play, and is where the truncation in `scores` (only wins are postable)
-  actually bites. It needs an opt-in and a write path that can be rate-limited,
-  which is why it is not simply the same call on every turn.
+- **Doing something with the shared replays.** They are collected but not yet
+  used: the reason to have them is a position library drawn from real play rather
+  than self-play — replay to turn N, hand the seat to a bot, and see whether it
+  finishes faster from there than the player did. That is a far denser measurement
+  than one number per game, and the positions are ones a person actually reached.
 - **Watching a replay.** A verified score names its log, so "watch this game"
   is a link back into the game build with the id in the fragment: it already has
   `reconstruct` and a history scrubber. The engine is Python, so this is not a

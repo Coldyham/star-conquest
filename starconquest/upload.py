@@ -1,20 +1,38 @@
-"""Post a finished match's replay to the leaderboard, best-effort.
+"""Post a match's replay to the leaderboard, best-effort.
 
-The fourth of the platform bridges (with ``webstore``, ``softkeyboard`` and the
-web-only paths in ``main``/``menu``), written in the same defensive style: every
-call is guarded, nothing here is load-bearing, and a failure is silent by design
-— a player who has just won and pressed *Post to leaderboard* must not be shown a
-network error about a side-effect they did not ask for. The score itself travels
-in the link, exactly as it always did; this only adds the evidence behind it.
+The one platform bridge that talks to a network (with ``webstore``,
+``softkeyboard`` and the web-only paths in ``main``/``menu``), written in the same
+defensive style: every call is guarded, nothing here is load-bearing, and a
+failure is silent by design — a player who has just won must not be shown a
+network error about a side-effect they did not ask for.
 
-Why the game uploads a log at all: a score in a challenge link is unsigned and
+Why upload a log at all: a score in a challenge link is unsigned and
 unverifiable, so the board has to take it on trust. A *log* is not — it is the
 match's inputs, and replaying it through the engine either reproduces the claimed
-result or does not (``tools/verify_scores.py``). Posting the replay alongside the
-score is what lets the board say "checked" instead of "claimed".
+result or does not (``tools/verify_scores.py``). And a stored replay is a real
+mid-game position that a *person* reached, which is the one thing a bot roster
+measured against itself can never generate for itself.
 
-**Uploading happens only when the player posts a score.** Pressing that button is
-the consent: nothing is sent for a game you merely played, abandoned or lost.
+**Two things send, and both are consented to.**
+
+* Pressing *Post to leaderboard* uploads the match behind that score. Pressing
+  the button is the consent; it works whether or not the preference below is on.
+* With *Share replays* ticked on the menu (``webstore.share_games``, off until
+  switched on), a game also uploads as it goes — every ``CHECKPOINT_TURNS`` turns
+  and again when it ends, so a match that is abandoned rather than finished is
+  still recorded up to wherever it was left. That is the point of it: the games
+  worth having are the lost and abandoned ones, which no score ever carries.
+
+Nothing else sends. Sharing a challenge link does not, and neither does a pure
+autoplay demo (``hand_turns == 0``) — a bot-versus-bot game is reproducible from
+its seed, so uploading one adds bytes and no information.
+
+Uploads are append-only, so a game that checkpoints repeatedly leaves several
+rows and the longest is the current one; the worker prunes the rest
+(``tools/verify_scores.py --prune``). Nothing identifying the player is attached
+to any of it: a row is a match id, a setup key and the moves. Grouping one
+person's games across sessions would need a durable client id, which is a
+tracking identifier by any other name and buys nothing this needs.
 
 Two backends, because the browser has no sockets and the desktop has no ``fetch``:
 
@@ -35,8 +53,25 @@ from __future__ import annotations
 import json
 import threading
 
-from .paths import LEADERBOARD_LOG_KEY, LEADERBOARD_LOG_URL, is_web
+from . import webstore
+from .paths import LEADERBOARD_LOG_URL, is_web
 from .replay import GameLog
+
+# How often a shared game checkpoints, in turns. Not a `config` constant: it is
+# neither balance nor aesthetics, nothing in the menu tunes it, and it belongs to
+# this module the way `main.FAST_FORWARD_MS` belongs to the loop.
+#
+# The trade it sets is how much of an abandoned game survives against how many
+# superseded rows a finished one leaves. Measured whole games run 5-14 KiB
+# encoded; at 25 turns a 150-turn match uploads ~6 times and the intermediate
+# rows total roughly 3x the final one, which is nothing against a 500 MB database
+# and is pruned anyway.
+CHECKPOINT_TURNS = 25
+
+# The seat the player holds. `mapgen._make_players` stamps `is_human` on pid 1, so
+# a log's `winner` names a human win by being this — reconstructing the whole
+# match just to ask `state.human()` would be an absurd price for one boolean.
+_HUMAN_SEAT = 1
 
 # Long enough for a slow phone on a bad connection, short enough that the daemon
 # thread is gone well before anyone quits the game.
@@ -45,22 +80,53 @@ _TIMEOUT = 20
 
 def configured() -> bool:
     """Whether an endpoint to upload to is set at all (see ``paths``)."""
-    return bool(LEADERBOARD_LOG_URL and LEADERBOARD_LOG_KEY)
+    return bool(LEADERBOARD_LOG_URL)
+
+
+def worth_sending(log: GameLog) -> bool:
+    """Whether ``log`` is a game anyone would want stored.
+
+    An empty log has nothing in it, and a pure autoplay demo is a bot-versus-bot
+    game that its seed already describes — the human seat has to have decided at
+    least one turn for the replay to be evidence of anything.
+    """
+    return log.turn_count > 0 and log.hand_turns > 0
+
+
+def due(log: GameLog, finished: bool) -> bool:
+    """Whether a shared game should checkpoint now.
+
+    Called once per resolved turn, so this is the cadence itself: every
+    ``CHECKPOINT_TURNS`` turns, and again on the turn the match is decided so the
+    stored replay ends where the game did rather than up to 24 turns short.
+
+    Tested cheapest-first on purpose. Fast forward resolves a turn per *frame*,
+    and the preference lives in a file off the web — so the store is consulted
+    only on the turns a checkpoint could actually happen, rather than sixty times
+    a second while a decided game plays itself out.
+    """
+    if not (finished or log.turn_count % CHECKPOINT_TURNS == 0):
+        return False
+    return worth_sending(log) and webstore.share_games()
 
 
 def row_for(log: GameLog, game_key: str) -> dict:
-    """The ``game_logs`` row for ``log``, as the schema expects it.
+    """The ``game_logs`` row for ``log``, as the endpoint expects it.
 
     ``game_key`` is the setup's own checksum (``Settings.challenge_key``), stored
-    so the worker can find a log without first knowing which match a score names.
-    It carries no foreign key: the log is posted *before* the player reaches the
-    submit form, so the ``games`` row it refers to may not exist yet — and may
-    never, if they close the tab instead of posting.
+    so a replay can be found by the map it was played on without decoding every
+    blob to ask. ``finished``/``won``/``hand`` are the same kind of index — a
+    caller can pick out completed games, or wins, or games actually played by
+    hand, without opening them. They are claims by the client and the schema says
+    so; the verifier trusts none of them, it replays the log.
     """
     return {
         "match_id": log.match_id,
         "game_key": game_key,
         "turns": log.turn_count,
+        "finished": bool(log.finished),
+        "won": bool(log.finished and log.winner == _HUMAN_SEAT),
+        "hand": log.hand_turns,
         "log": log.encoded(),
     }
 
@@ -72,21 +138,16 @@ def post_log(log: GameLog, game_key: str) -> bool:
     connection and a rejected row all read the same way to the caller, because
     there is nothing useful for it to do about any of them.
     """
-    if not configured() or not log.turn_count:
+    if not configured() or not worth_sending(log):
         return False
     try:
-        body = json.dumps([row_for(log, game_key)])
+        body = json.dumps(row_for(log, game_key))
     except (TypeError, ValueError):
         return False
-    headers = {
-        "apikey": LEADERBOARD_LOG_KEY,
-        "Authorization": f"Bearer {LEADERBOARD_LOG_KEY}",
-        "Content-Type": "application/json",
-        # Nothing here reads the response, and PostgREST returns the inserted row
-        # in full unless told otherwise — which for a log means echoing back every
-        # byte we just sent.
-        "Prefer": "return=minimal",
-    }
+    # No API key: the endpoint is the leaderboard's own function, and the key that
+    # may actually write `game_logs` lives in that function's environment. There
+    # is nothing to authenticate as from here.
+    headers = {"Content-Type": "application/json"}
     return _post_web(body, headers) if is_web() else _post_desktop(body, headers)
 
 
@@ -107,9 +168,8 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     available because pygbag's own bridge needs it — a Content-Security-Policy
     strict enough to block it would stop the game booting long before this line,
     and neither ``netlify.toml`` sets one. And the request is cross-origin (the
-    game's site to Supabase's), which works because PostgREST answers the
-    preflight these headers provoke — the same crossing the leaderboard's own
-    pages already make.
+    game's site to the leaderboard's), which is why the function answers the
+    preflight and names the game's origin in its CORS headers.
     """
     import platform as _platform
 
