@@ -5,6 +5,7 @@
 // be parsed as markup.
 
 import { configTitle } from "./setup.mjs";
+import { compareScores } from "./standings.mjs";
 
 /** el("a", {href, class}, ["text", node]) -> HTMLElement */
 export function el(tag, props = {}, children = []) {
@@ -177,6 +178,26 @@ export function botChips(game) {
   if (bots.length === 1 && bots[0] === "heuristic") return [];
   return bots.map((bot) =>
     el("a", { class: "chip", href: `index.html?bot=${encodeURIComponent(bot)}`, text: bot }));
+}
+
+/**
+ * "Bot leads" — the marker a list card carries when nobody has beaten this
+ * map's best bot yet. `game.mjs`'s botVerdict spells the same "behind"/"tied"
+ * verdict out as a sentence on the map's own page; a list card only has room
+ * for a chip, and game_summary's bot_turns/bot_lost/bot_name (schema.sql) carry
+ * exactly what's needed to compute it without a second query. Null once a
+ * human score beats it, or when no bot has ever taken the map (bot_name null).
+ */
+export function botLeadBadge(game) {
+  if (!game.bot_name) return null;
+  const bot = { turns: game.bot_turns, lost: game.bot_lost };
+  const human = { turns: game.best_turns, lost: game.best_lost };
+  if (compareScores(bot, human) > 0) return null;   // a human score already beats it
+  return el("span", {
+    class: "badge bot-lead",
+    title: `${game.bot_name} — ${game.bot_turns} turns · ${game.bot_lost} lost. No human score beats it yet.`,
+    text: "Bot leads",
+  });
 }
 
 export function showError(node, message) {

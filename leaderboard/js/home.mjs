@@ -2,7 +2,7 @@ import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./ap
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, clear, configBadge, el, mapSummary, relativeTime, showError,
+  botChips, botLeadBadge, clear, configBadge, el, mapSummary, relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { configTitle } from "./setup.mjs";
@@ -16,6 +16,7 @@ const COLUMNS = [
   "game_key", "mode", "players", "nodes", "seed", "last_activity", "score_count",
   "best_turns", "best_lost", "best_hand", "best_by_name", "best_user_name", "best_holders",
   "settings_json", "config_key", "bots", "config_name", "config_tags",
+  "bot_turns", "bot_lost", "bot_name",
 ].join(",");
 
 // config_summary's columns are already a curated, fixed set (schema.sql), so
@@ -217,7 +218,7 @@ function row(game) {
 
   return el("div", { class: "card" }, [
     body,
-    el("div", { class: "card-tags" }, [configBadge(game), ...botChips(game)]),
+    el("div", { class: "card-tags" }, [configBadge(game), botLeadBadge(game), ...botChips(game)]),
   ]);
 }
 

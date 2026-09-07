@@ -289,6 +289,12 @@ h1::after {
 .chip { color: var(--dim); }
 .chip:hover { color: var(--cyan); border-color: var(--cyan); }
 
+/* No human score beats this map's best bot yet — cyan for "machine", the same
+ * convention .score.bot uses on a map's own page. Not a link: it states a
+ * result, it doesn't filter anything. */
+.badge.bot-lead { border-color: var(--cyan); color: var(--cyan); cursor: help; }
+.badge.bot-lead:hover { background: #08232a; }
+
 /* -- the main list's filter bar and a filtered config's header ------------- */
 .filters {
   display: flex;

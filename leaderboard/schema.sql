@@ -223,7 +223,15 @@ select
   public.sc_config_key(g.settings_json)      as config_key,
   public.sc_bots(g.settings_json, g.players) as bots,
   cfg.name                                   as config_name,
-  cfg.tags                                   as config_tags
+  cfg.tags                                   as config_tags,
+  -- The best *winning* bot_scores row for this map (fewest turns, ties broken
+  -- by lost — the same ordering `best` above uses for the human leader), so a
+  -- list card can tell whether any human score actually beats it without a
+  -- second per-game query. Null exactly when no bot has ever taken the map,
+  -- matching standings.mjs's bestBot() null case.
+  bot.turns as bot_turns,
+  bot.lost  as bot_lost,
+  bot.bot   as bot_name
 from public.games g
 left join lateral (
   select s.turns, s.lost, s.hand, s.by_name, u.name as user_name
@@ -240,6 +248,13 @@ left join lateral (
   from public.scores s
   where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
 ) tied on true
+left join lateral (
+  select bs.turns, bs.lost, bs.bot
+  from public.bot_scores bs
+  where bs.game_key = g.game_key and bs.won
+  order by bs.turns asc, bs.lost asc
+  limit 1
+) bot on true
 left join public.configs cfg
   on cfg.config_key = public.sc_config_key(g.settings_json);
 
