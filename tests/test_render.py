@@ -522,7 +522,7 @@ def _hud_rects(ui):
              "clear_button_rect", "quit_button_rect", "exit_history_rect",
              "rewind_button_rect", "fast_forward_rect", "route_button_rect",
              "route_cancel_rect", "route_confirm_rect", "route_mode_rect",
-             "route_auto_rect")
+             "route_auto_rect", "history_prev_rect", "history_next_rect")
     return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
 
 

@@ -1067,12 +1067,13 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (18, 20, 30), (0, by, w, config.HUD_BOTTOM_H))
     if ui.history:
         # the scrubber (drawn by _draw_scrubber, after the HUD) owns the bottom
-        # bar in history mode — zero the live buttons so no stale click resolves.
-        ui.end_turn_rect = ui.play_pause_rect = ui.history_button_rect = (0, 0, 0, 0)
-        ui.autoplay_button_rect = ui.restart_live_button_rect = ui.menu_button_rect = (0, 0, 0, 0)
-        ui.quit_button_rect = ui.clear_button_rect = (0, 0, 0, 0)
+        # bar in history mode — zero the live buttons (the whole footer strip,
+        # since _draw_footer_buttons never runs here to do it itself) so no
+        # stale click resolves and no leftover rect fools the overlap test.
+        ui.end_turn_rect = (0, 0, 0, 0)
+        for attr in _FOOTER_RECTS:
+            setattr(ui, attr, (0, 0, 0, 0))
         ui.reset_view_rect = ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
-        ui.route_button_rect = ui.route_cancel_rect = (0, 0, 0, 0)
         return
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the
@@ -1591,6 +1592,20 @@ def _draw_arrow_button(surface, rect: pygame.Rect, up: bool, enabled: bool) -> N
     pygame.draw.polygon(surface, color, pts)
 
 
+def _draw_h_arrow_button(surface, rect: pygame.Rect, left: bool, enabled: bool) -> None:
+    """A ◀/▶ step button for the history scrubber — the same drawn-triangle idiom
+    as ``_draw_arrow_button``, just turned sideways. A disabled one (at either end
+    of the history) still draws, dimmed, so the pair doesn't shift as you scrub."""
+    color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
+    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
+    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
+    cx, cy = rect.center
+    r = max(2, rect.h // 5)
+    pts = ([(cx + r // 2, cy - r), (cx + r // 2, cy + r), (cx - r, cy)] if left
+           else [(cx - r // 2, cy - r), (cx - r // 2, cy + r), (cx + r, cy)])
+    pygame.draw.polygon(surface, color, pts)
+
+
 def _draw_x_button(surface, rect, boxed: bool = False) -> None:
     """A × delete glyph inside ``rect`` (x, y, w, h). ``boxed`` draws a framed
     background so an enlarged (selected-row) delete target reads as a button."""
@@ -2054,9 +2069,10 @@ _SCRUB_FILL = (110, 140, 200)
 
 def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     """Bottom-bar turn scrubber for history mode: an Exit button, a draggable
-    track (0 .. ``ui.history_max`` turns), a turn/mode label, and a Rewind button
-    (only when viewing a turn before the latest). Records hit-rects on ``ui`` for
-    input, mirroring the store-rect-then-test handoff used across the HUD."""
+    track (0 .. ``ui.history_max`` turns) flanked by ◀/▶ step buttons, a turn/mode
+    label, and a Rewind button (only when viewing a turn before the latest).
+    Records hit-rects on ``ui`` for input, mirroring the store-rect-then-test
+    handoff used across the HUD."""
     w, h = surface.get_size()
     by = h - config.HUD_BOTTOM_H
     cy = by + config.HUD_BOTTOM_H // 2
@@ -2099,9 +2115,19 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     label_x = right_limit - font.size(widest)[0]
     _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))
 
-    # Track fills the space between the play button and the label slot.
-    track_x = pp.right + config.HUD_PAD
-    track_w = max(1, label_x - config.HUD_PAD - track_x)
+    # Step-one-turn buttons flank the track — the mouse/touch equivalent of the
+    # Left/Right arrow keys, so picking an exact turn doesn't rely on a fiddly drag
+    # once a match has run long. Square, sized to the bar's own button height.
+    prev = pygame.Rect(pp.right + gap, y, bh, bh)
+    next_ = pygame.Rect(label_x - config.HUD_PAD - bh, y, bh, bh)
+    _draw_h_arrow_button(surface, prev, left=True, enabled=ui.history_turn > 0)
+    _draw_h_arrow_button(surface, next_, left=False, enabled=ui.history_turn < ui.history_max)
+    ui.history_prev_rect = (prev.x, prev.y, prev.w, prev.h)
+    ui.history_next_rect = (next_.x, next_.y, next_.w, next_.h)
+
+    # Track fills the space between the two step buttons.
+    track_x = prev.right + gap
+    track_w = max(1, next_.x - gap - track_x)
     track = pygame.Rect(track_x, y, track_w, bh)
     ui.scrubber_rect = (track.x, track.y, track.w, track.h)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max

@@ -90,6 +90,14 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
             return "toggle_play"
         if ui.rewind_button_rect[2] and _point_in_rect(event.pos, ui.rewind_button_rect):
             return "rewind"
+        if ui.history_prev_rect[2] and _point_in_rect(event.pos, ui.history_prev_rect):
+            ui.history_turn = max(0, ui.history_turn - 1)  # touch/mouse equivalent of Left
+            ui.playing = False
+            return None
+        if ui.history_next_rect[2] and _point_in_rect(event.pos, ui.history_next_rect):
+            ui.history_turn = min(ui.history_max, ui.history_turn + 1)  # ...and Right
+            ui.playing = False
+            return None
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True
             ui.playing = False  # grabbing the scrubber pauses playback
