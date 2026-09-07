@@ -883,6 +883,71 @@ hundred-games leak, bounded on one side by decision simultaneity and on the
 other by orders already committed, too narrow to clear the noise floor at any
 cell tried.
 
+### Holding a doomed system to sacrifice-and-retake: a real mechanism, a null result
+
+The corollary to "garrisons run away" (above): if the *attacker's* best play against
+an out-matched garrison is usually to flee rather than pay the jitter premium, is
+the *defender's* best play, when it can't scrape together enough in time to hold
+for sure, ever to stand anyway — soak the attack with a garrison that's going to
+die either way, and have a trailing force already in flight retake the weakened
+remnant a turn or two later? The case for it: our own garrison, unlike an
+attacker's target, gets `DEFENDER_ADVANTAGE` on the way down, so it doesn't die
+for nothing — it thins whatever survives. And the retake is cheap relative to the
+alternative, because the enemy has only just taken the system: no time to dig in,
+one turn of its production instead of however long a full remass takes, and *we*
+get the defender-advantage-free version of the fight (well, the enemy gets the
+advantage on the retake since they now hold it — but only against the thinned
+remnant, not the original attack).
+
+Instrumented directly against `models/marshal.py`'s own Phase 1/Phase 2 boundary
+(`_probe_doomed`, on a throwaway copy): whenever a threatened system can't be
+saved in time and falls to `_evacuate` (the "doomed" branch), check whether a
+trailing force — reachable within a few turns past the defence deadline, the same
+`helpers` pool Phase 1 already builds — could clear `_enemy_margin()` against the
+predicted post-clash survivor count (`_after_clash`, the same pessimistic corner
+`_required` prices a rival-held target with). Over 240 games (4 configs, 60 seeds
+each): **15.2%** of doomed-branch decisions qualified on the pessimistic estimate,
+16.8% on the nominal one — not rare. (The count overstates *distinct incidents*
+the same way item h's did: a besieged system re-enters the doomed branch every
+turn it's re-threatened, so this is a rate over decision points, not over unique
+sieges.)
+
+Built the actual policy (`_hold_and_retake`, scratch `marshal_hold.py`): when the
+doomed branch is reached, price the retake the same way, and if a helper pool
+clears it, hold the garrison in place (no evacuation order) and commit exactly
+`_enemy_margin()`'s worth of the helper budget toward the doomed system now,
+instead of leaving it for Phase 3 to spend elsewhere. Falls back to the ordinary
+`_evacuate` whenever the retake doesn't price out.
+
+Paired against an identical `marshal_base`, null everywhere it was tried:
+
+    cell                                  W-L        n     rate      z
+    random 24n 3p (thinker), adv 1.0   131-139      270    48.5%  -0.49
+    random 18n 3p (knower),  adv 1.0   117-129      246    47.6%  -0.77
+    random 30n 4p, thinker+knower      305-319      624    48.9%  -0.56
+    random 10n 3p (thinker), adv 1.0   128-125      253    50.6%  +0.19
+    random 10n 2p duel,      adv 1.0    84-73       157    53.5%  +0.88
+
+DEFENDER_ADVANTAGE swept too, since the mechanism is priced *by* that knob and the
+remnant tactic (above) is knob-sensitive in the other direction — a first pass at
+1.5 read 57.2% (z=+2.05, but 31% timeouts, so not to be trusted on its own); a
+follow-up at double the sample size (120 seeds, 720 games, 448 decided) came back
+dead even, **224-224, z=+0.00**. 1.25 and 2.0 were also tried and were weaker
+still (the latter at 71% timeouts, unreliable on its face).
+
+**Why a real, non-rare mechanism still nets zero:** the two policies are closer in
+total ship cost than the framing suggests. Evacuating preserves the garrison
+alive in friendly territory; holding spends it as casualties but saves the
+identical-sized commitment `_hold_and_retake` would otherwise have sent to
+`_evacuate`'s destination or left for Phase 3. `_enemy_margin()` already prices
+the retake tightly (it's the same margin Phase 3 uses to strike anywhere), so
+"cheap because they haven't dug in" isn't a discount over what an ordinary attack
+already assumes — undefended targets are already marshal's default assumption,
+per "Garrisons run away" above. What holding actually buys is the casualties the
+dying garrison inflicts on the attacker; what evacuating buys is a garrison that
+survives to be spent on a *different*, self-chosen fight instead of a forced one.
+Over enough games those roughly cancel. Not shipped.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
