@@ -176,6 +176,18 @@ def _richness(state, pid, system, max_prod: int) -> float:
 
     A poor system that opens onto a rich one is worth more than its own
     production alone says; one wedged between two rivals is worth less.
+
+    Deliberately carries **no term for who owns the target**, though taking a
+    rival's system is a net +2 (one off them, one onto us) against a neutral's
+    +1, and early on a rival's systems are the cheaper target as well (0.66x the
+    garrison over the first twenty turns). Weighting that in measures null at
+    every setting tried, because Phase 3 strikes at *every* affordable target, so
+    a preference only binds when the budget forces a choice — 10.4% of the time.
+    Inverting this sort entirely costs about two points, which caps what anything
+    routed through it can be worth. See "Rushing the enemy" in
+    `docs/bot-design.md`, and note the cap applies to the *sort*: `_wedge` is
+    worth 12-14 points through this same function because it also steers
+    `_front_pull` and the `_flow_to_front` seeding.
     """
     base = max_prod - system.production + 1
     beyond = max((max_prod - state.systems[n].production + 1
@@ -294,9 +306,22 @@ def _required(state, pid, target, dist: int) -> int:
     anyway, which is exactly the rival-held case above. Nor does the converse pay
     — deliberately arriving *after* a rival has broken a neutral and fighting the
     remnant is a real opportunity, about half a chance per game, and it measures
-    null over 3500 games. See "Racing a third player for the same system" in
-    `docs/bot-design.md`, which also records why a pessimistic remnant estimate
-    hides that opportunity entirely.
+    null over 3500 games. Nor does it come alive with the gate taken away:
+    ``COMMIT_SURPLUS = False`` makes this the "sends just enough" bot the tactic
+    was supposed to reward, and it still reads 50.1% over 815 games there.
+
+    The one case where the gate argument does not apply is a neutral already at
+    ``ships == 0`` — there is no garrison to hold a discount against, so pricing
+    it against a converging rival cannot cede a fight. Real waste (marshal loses
+    51% of the races it walks into this way), but the fix cannot touch most of
+    it: half of those races are a fleet marshal already launched before the node
+    hit zero, and most of the rest are two seats independently striking the same
+    freshly-emptied node on the same turn, which ``decide()`` cannot see for
+    either side since every seat is priced against one shared, unmutated
+    start-of-turn state. Repricing the strict remainder measures null. See
+    "Racing a third player for the same system" in `docs/bot-design.md`, which
+    also records why a pessimistic remnant estimate hides the converse
+    opportunity entirely.
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement

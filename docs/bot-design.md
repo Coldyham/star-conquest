@@ -648,6 +648,15 @@ Phase 3b makes marshal the latter: it is the big bloc that wins the pile-up
 anyway. Same "the price is a gate" conclusion as above, reached from the other
 end.
 
+> **Tested since, and this explanation does not survive it.** The arithmetic
+> above is arithmetic and stands; the *inference* — that the tactic is null on
+> marshal because Phase 3b masks it — predicts it should pay once the surplus is
+> no longer committed. Setting `COMMIT_SURPLUS = False` makes marshal exactly the
+> "sends just enough" bot the claim describes, and the tactic still reads
+> **50.1% (z = +0.04) over 815 decided games** in that regime. See "The
+> combination" below: it is null on both sides of the knob it was supposed to be
+> hiding behind.
+
 **The shipped third-party fold does survive the knob**, which is the check worth
 having after all that: paired against the pre-fix bot at 24n 3p it reads 53.3%
 (z = +1.41) at advantage 1.25 and 55.4% (z = +1.92) at 1.5, alongside its 54.0%
@@ -756,6 +765,263 @@ our own garrison cannot decline the engagement.
 
 This is what took marshal to the top of the ladder and level with knower
 head-to-head; see the table under "Where marshal stands".
+
+### Rushing the enemy: right about the game, inert on this bot
+
+The reasoning is sound and both of its premises check out. Taking a neutral is a
+net +1; taking a rival's system is a net +2, since it also costs them one. And
+early on a rival's systems really are the cheaper target — instrumented over
+~110k target evaluations, mean garrison on what marshal could reach:
+
+    turns     neutral targets  mean ships   enemy targets  mean ships   enemy cost
+    1-20                 9333         7.3            983         4.8        0.66x
+    21-50                8621         7.7          15616         6.5        0.84x
+    51-120               1559         6.9          49680        11.6        1.67x
+    121+                  104         0.5          26981        19.9       36.38x
+
+Cheaper for about the first fifty turns and dearer after, which is when the
+neutrals left are the stripped leftovers nobody wanted. Add the retreat rate
+above (86.7%) and an early strike on a rival often costs nothing at all.
+
+`_richness` has no term for who owns a target, so this looks like a clear
+omission. It measures null at every weighting and every seat count:
+
+    variant                            cell         rate      z
+    base x1.5 when enemy-held      24n 3p          49.7%  -0.14
+    base x2.0 when enemy-held      24n 3p          49.8%  -0.09
+    base +1.0 when enemy-held      24n 3p          50.0%  +0.00
+    base +3.0 when enemy-held      24n 3p          50.1%  +0.05
+    enemy ranked ahead of every neutral, flat      50.3%  +0.14
+    base x2.0 when enemy-held      30n 4p          50.5%  +0.28
+    enemy ranked first             30n 4p          50.2%  +0.12
+    base x2.0 when enemy-held      40n 5p          51.2%  +0.68
+
+**Because marshal is already a rusher — it just never looked like one.** It takes
+whatever is in front of it, and its capture mix tracks availability to within a
+point at every phase of the game:
+
+    turns     enemy share of what was adjacent   enemy share of what it took
+    1-20                                  6.9%                          5.7%
+    21-50                                61.9%                         61.3%
+    51-120                               96.6%                         96.5%
+    121+                                 99.7%                          99.3%
+
+There is no economy-first bias to correct. In the opening it takes neutrals
+because 93% of what it can reach *is* neutral, not out of preference. The advice
+is aimed at a strategy this bot never had.
+
+**The strong form is actively worse.** Declining neutral expansion entirely while
+any enemy target is reachable — the literal "rush the enemy" — reads **45.1%
+(z = -2.06)**. Preferring the +2 over the +1 is only worth something when you must
+choose, and Phase 3 usually does not have to: it strikes at *every* affordable
+target. Skipping the neutral just forfeits the +1 and buys nothing.
+
+**And there is a ceiling on this whole channel, which is the part worth keeping.**
+Target priority binds rarely: of the targets affordable on their own budget, only
+**10.4%** are lost to another target having spent it first. Inverting the sort to
+the worst possible order — poorest and biggest first — costs just 49.2% (z = -0.33)
+at 24 nodes and 46.2% (-1.63) at 18. So the *target sort* is worth at most about
+two points in a duel-like field, and **no preference expressed through it can be
+worth more than that.** Note this bounds the sort, not `_richness` as a whole:
+`_wedge` reads 62-64% at four and five players through the same function, because
+it also steers `_front_pull` and the `_flow_to_front` seeding, and because what it
+discriminates is a position rather than an owner. Before weighting a new term into
+`_richness`, check which of those two channels it is actually meant to act on.
+
+### A 0-ship neutral: real waste, correctly diagnosed, still not worth fixing
+
+Late-game neutrals are almost all mutual-annihilation husks rather than
+untouched garrisons — instrumented alongside the phase table above, by whether
+the target's garrison is exactly 0:
+
+    turns     zero-ship neutrals   nonzero neutrals
+    1-20                    0.0%           9053
+    21-50                   0.4%           7236
+    51-120                  6.5%           1503
+    121+                   94.7%              4
+
+A 0-ship neutral is exactly the case the third-party fix's exclusion (above)
+declines to reprice, and here the exclusion's own reasoning does not hold: the
+rejected general reprice cost points because it shut a *gate* on a real garrison
+Phase 3b could otherwise overrun outright, and a 0-ship node has no garrison to
+give that discount against — pricing it against a converging rival is not
+ceding a winnable fight, there is no fight to cede. Confirmed as real waste, not
+a hypothetical: tracing `combat.resolve_arrival` for exactly this pattern (a
+neutral at 0, marshal *and* a rival both landing on it) over ~600 games —
+
+    races for an empty neutral      49
+    marshal lost the race           25 (51%)
+    ships thrown away               43
+
+— marshal walks its static 1-ship price into a race it loses half the time,
+for nothing. Repricing only the `ships == 0` branch through the same
+`_rival_waves`/`_after_clash`/`_enemy_margin` machinery as the rival-held case
+is a two-line change and correctly raises the price whenever the rival's fleet
+was visible at decide time.
+
+**It does not stop the waste, and the reason is what actually bounds this
+idea.** Re-running the same trace with the fix in place: still 51 races, still
+25 lost, 40 ships thrown away — no improvement. Splitting the 51 races by
+whether the rival's fleet could have been seen at all: only **27 of 51** had a
+non-empty `_rival_waves` at decide time; the other **24** are races where
+marshal's own fleet was *already in flight*, launched on an earlier turn when
+the node still had a real garrison, before it was fought over and reduced to 0
+by someone else. A launched order can't be recalled, so no repricing done
+*this* turn touches those. And the largest single case within the reachable 27
+is two players independently deciding to strike the same freshly-emptied node
+*on the same turn* — invisible to both by construction, since `decide()` runs
+for every seat against one shared, unmutated start-of-turn state (`engine.py`'s
+simultaneous-resolution rule), so neither order exists in `state.fleets` when
+the other seat is priced. The fix can only ever reach the strict remainder:
+already-in-flight fleets from a rival who committed on a *prior* turn — a
+narrower case than "a race for an empty neutral" makes it sound.
+
+Paired against the current bot, null in exactly the range this rarity predicts:
+
+    cell                              W-L        n     rate      z
+    random 24n 3p (thinker)        692-688     1380    50.1%  +0.11
+    random 18n 3p (knower)         610-603     1213    50.3%  +0.20
+    random 30n 4p                  910-912     1822    49.9%  -0.05
+
+Also not inert in a duel the way the rival-held reprice is — a neutral's
+"owner" is seat 0, so `_rival_waves` does not exclude a sole opponent's own
+fleet the way it excludes a rival-held target's owner, and the duel ladder
+reads 50/50 only by measurement (274-272 over 600 games), not by the same
+structural guarantee. Not shipped: a real, correctly-diagnosed two-ship-per-
+hundred-games leak, bounded on one side by decision simultaneity and on the
+other by orders already committed, too narrow to clear the noise floor at any
+cell tried.
+
+### Holding a doomed system to sacrifice-and-retake: a real mechanism, a null result
+
+The corollary to "garrisons run away" (above): if the *attacker's* best play against
+an out-matched garrison is usually to flee rather than pay the jitter premium, is
+the *defender's* best play, when it can't scrape together enough in time to hold
+for sure, ever to stand anyway — soak the attack with a garrison that's going to
+die either way, and have a trailing force already in flight retake the weakened
+remnant a turn or two later? The case for it: our own garrison, unlike an
+attacker's target, gets `DEFENDER_ADVANTAGE` on the way down, so it doesn't die
+for nothing — it thins whatever survives. And the retake is cheap relative to the
+alternative, because the enemy has only just taken the system: no time to dig in,
+one turn of its production instead of however long a full remass takes, and *we*
+get the defender-advantage-free version of the fight (well, the enemy gets the
+advantage on the retake since they now hold it — but only against the thinned
+remnant, not the original attack).
+
+Instrumented directly against `models/marshal.py`'s own Phase 1/Phase 2 boundary
+(`_probe_doomed`, on a throwaway copy): whenever a threatened system can't be
+saved in time and falls to `_evacuate` (the "doomed" branch), check whether a
+trailing force — reachable within a few turns past the defence deadline, the same
+`helpers` pool Phase 1 already builds — could clear `_enemy_margin()` against the
+predicted post-clash survivor count (`_after_clash`, the same pessimistic corner
+`_required` prices a rival-held target with). Over 240 games (4 configs, 60 seeds
+each): **15.2%** of doomed-branch decisions qualified on the pessimistic estimate,
+16.8% on the nominal one — not rare. (The count overstates *distinct incidents*
+the same way item h's did: a besieged system re-enters the doomed branch every
+turn it's re-threatened, so this is a rate over decision points, not over unique
+sieges.)
+
+Built the actual policy (`_hold_and_retake`, scratch `marshal_hold.py`): when the
+doomed branch is reached, price the retake the same way, and if a helper pool
+clears it, hold the garrison in place (no evacuation order) and commit exactly
+`_enemy_margin()`'s worth of the helper budget toward the doomed system now,
+instead of leaving it for Phase 3 to spend elsewhere. Falls back to the ordinary
+`_evacuate` whenever the retake doesn't price out.
+
+Paired against an identical `marshal_base`, null everywhere it was tried:
+
+    cell                                  W-L        n     rate      z
+    random 24n 3p (thinker), adv 1.0   131-139      270    48.5%  -0.49
+    random 18n 3p (knower),  adv 1.0   117-129      246    47.6%  -0.77
+    random 30n 4p, thinker+knower      305-319      624    48.9%  -0.56
+    random 10n 3p (thinker), adv 1.0   128-125      253    50.6%  +0.19
+    random 10n 2p duel,      adv 1.0    84-73       157    53.5%  +0.88
+
+DEFENDER_ADVANTAGE swept too, since the mechanism is priced *by* that knob and the
+remnant tactic (above) is knob-sensitive in the other direction — a first pass at
+1.5 read 57.2% (z=+2.05, but 31% timeouts, so not to be trusted on its own); a
+follow-up at double the sample size (120 seeds, 720 games, 448 decided) came back
+dead even, **224-224, z=+0.00**. 1.25 and 2.0 were also tried and were weaker
+still (the latter at 71% timeouts, unreliable on its face).
+
+**Why a real, non-rare mechanism still nets zero:** the two policies are closer in
+total ship cost than the framing suggests. Evacuating preserves the garrison
+alive in friendly territory; holding spends it as casualties but saves the
+identical-sized commitment `_hold_and_retake` would otherwise have sent to
+`_evacuate`'s destination or left for Phase 3. `_enemy_margin()` already prices
+the retake tightly (it's the same margin Phase 3 uses to strike anywhere), so
+"cheap because they haven't dug in" isn't a discount over what an ordinary attack
+already assumes — undefended targets are already marshal's default assumption,
+per "Garrisons run away" above. What holding actually buys is the casualties the
+dying garrison inflicts on the attacker; what evacuating buys is a garrison that
+survives to be spent on a *different*, self-chosen fight instead of a forced one.
+Over enough games those roughly cancel. Not shipped.
+
+### The combination: four null ideas together, and the masking theory tested
+
+Four ideas above each measure null on their own — the remnant tactic (waiting for
+a rival to break a contested neutral), the 0-ship neutral reprice, hold-and-
+retake, and an enemy-held bonus in `_richness`. Two of them come with a written
+explanation for *why* they are null, and both explanations blame the same thing:
+Phase 3b. The gate argument says honest pricing of a contested neutral only cedes
+a node the committed surplus would have taken anyway; the remnant argument says
+the tactic pays for a bot that sends "just enough" and marshal is not one. If
+that is right, then (a) they should combine, since each supplies what the other
+lacks — the reprice declines a race it would lose, and the remnant tactic gives
+the declined node a follow-up — and (b) they should come alive with
+`COMMIT_SURPLUS` off. Both halves are testable.
+
+Built as one flag-composable copy of the bot rather than four, so the
+combinations are the same code (`NEUTRAL_FOLD`, `ZERO_FOLD`, `HOLD_RETAKE`,
+`RUSH_BONUS`, over the existing `COMMIT_SURPLUS`). With every flag at its shipped
+default the copy is behaviourally identical to `models/marshal.py` — 30 whole
+games, same winner and same turn count — so a measured difference is the flags
+and nothing else. The neutral fold uses the *nominal* remnant and is applied only
+when it makes a target **cheaper** (the pessimistic corner double-prices the
+dice, per above), except for the 0-ship case, which is meant to raise. That
+resolution matters: it keeps the gate open where Phase 3b wants it open while
+still taking the discount when a rival lands first, so this is the sensible
+composition rather than a naive one.
+
+**They do not combine.** All three sequence ideas at once, against the identical
+baseline:
+
+    cell                                  W-L        n     rate      z
+    random 24n 3p (thinker)            193-210      403    47.9%  -0.85
+    random 30n 4p (thinker+knower)     276-303      579    47.7%  -1.12
+    random 24n 2p duel                 283-289      572    49.5%  -0.25
+    ---- pooled                        752-802     1554    48.4%  -1.27
+
+Adding the enemy-held bonus on top (`RUSH_BONUS = 2.0`) reads 49.6% (z = -0.15,
+n = 411). Each idea alone sat at about 50%; together they sit slightly *below* it.
+Not significantly so, but the direction is mild mutual interference rather than
+synergy — which is what you would expect of four separate ways to spend the same
+budget on second-order timing when the first-order rule (strike at every
+affordable target, pour the rest into a strike already going in) is already what
+wins.
+
+**And the masking theory is wrong.** Turning Phase 3b off costs marshal a great
+deal on its own — **40.4% (z = -3.77)** against the shipped bot, a useful
+reminder of how much that one rule is worth — but it does make marshal the
+"sends just enough" bot the remnant argument describes. Measured *within* that
+regime, so both arms carry the same handicap:
+
+    variant (base: COMMIT_SURPLUS off)     W-L        n     rate      z
+    + neutral fold only                 408-407      815    50.1%  +0.04
+    + all three sequence ideas          411-403      814    50.5%  +0.28
+
+Null on both sides of the knob they were supposed to be hiding behind. A first
+pass at n≈370 read 51.5% and looked like the predicted effect appearing; doubling
+the sample settled it at 50.5%, the same lesson as the 1.5-advantage reading in
+the hold-and-retake section above. So Phase 3b is not what suppresses these
+ideas — they are simply worth nothing, and the tidy mechanism story that made
+them *feel* suppressed was itself untested. The gate argument survives as a
+description of why honest pricing of a contested neutral is actively *worse*
+(that one was measured, at 47.2% in duels); what does not survive is the
+inference that removing the gate would let the converse pay.
+
+Nothing shipped. The value of the exercise is the correction: four null results
+with one shared explanation, and the explanation was checkable and false.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
