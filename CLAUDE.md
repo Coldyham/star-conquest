@@ -164,7 +164,15 @@ standing auto-forward rules (`"rules"`, `Ui.auto_forward`) with it.
 **A replay must never depend on a bot repeating itself** — that is format
 version 2, and why the orders and the dice are both in the log (version 1 stored
 the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
-into a *different match*, silently). Version-1 logs can't be replayed faithfully
+into a *different match*, silently). The corollary is load-bearing now that
+replays are kept: **retuning, rewriting or deleting a `models/` bot cannot move a
+single stored game**, so no per-model "replay floor" is needed and none should be
+added (`test_a_replay_does_not_consult_a_bot_even_a_deleted_one` pins it, and
+`bot_replay.replay_rev` is `engine_rev` minus `ai` and `models/` for the same
+reason). What *can* move one is the engine itself — phase order, how a fight
+resolves, how a map is drawn from a seed — which is what `engine.RULES_VERSION`
+is for: bumped by hand with such a change, stamped on every log, and read by the
+verifier to report `outdated` (unverifiable) rather than `mismatch` (wrong). Version-1 logs can't be replayed faithfully
 and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
 autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
 delegates to, and the leaderboard's verifier recomputes). A log also carries a

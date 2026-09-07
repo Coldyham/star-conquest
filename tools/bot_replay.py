@@ -65,6 +65,11 @@ _OUTCOME_MODULES = (
     "settings", "starnames",
 )
 
+# ...and the subset that can move a *recorded* game: `_OUTCOME_MODULES` minus
+# `ai`, and none of `models/`. Replaying a log applies its recorded orders and
+# deals its recorded dice, so no bot is ever consulted (see `replay_rev`).
+_REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
+
 # Where a bot is replayed at something other than its default profile.
 #
 # `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
@@ -104,23 +109,44 @@ POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
 
 
-def engine_rev() -> str:
-    """A digest of everything that determines a replay's outcome.
-
-    Stored on each row for provenance and read back by ``--stale``. A git SHA
-    would be the obvious choice and is the wrong one: it moves on every commit,
-    so a CSS change would invalidate the whole board. This moves when — and only
-    when — the simulation or a bot does.
-    """
+def _digest(paths: list[Path]) -> str:
+    """A short content digest of ``paths``, name-sensitive so a rename counts."""
     digest = hashlib.blake2s(digest_size=8)
-    paths = [ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
-    paths += sorted((ROOT / "models").glob("*.py"))
     for path in paths:
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def engine_rev() -> str:
+    """A digest of everything that determines a *bot replay's* outcome.
+
+    Stored on each ``bot_scores`` row for provenance and read back by ``--stale``.
+    A git SHA would be the obvious choice and is the wrong one: it moves on every
+    commit, so a CSS change would invalidate the whole board. This moves when —
+    and only when — the simulation or a bot does.
+    """
+    return _digest([ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
+                   + sorted((ROOT / "models").glob("*.py")))
+
+
+def replay_rev() -> str:
+    """A digest of everything that determines a *stored log's* replay.
+
+    Strictly smaller than ``engine_rev``, and the difference is the whole point:
+    replaying a log never asks a seat to decide anything (``end_turn(script=…)``
+    applies the recorded orders and deals the recorded dice), so neither ``ai``
+    nor any ``models/*.py`` can move the result. Pinned by
+    ``test_a_replay_does_not_consult_a_bot_even_a_deleted_one``.
+
+    Keying score verdicts off ``engine_rev`` instead would mark every check on the
+    board stale each time a bot was tuned — re-deciding hundreds of scores to
+    reach byte-identical answers, and implying in the stored row that the verdict
+    had depended on a bot.
+    """
+    return _digest([ROOT / "starconquest" / f"{name}.py" for name in _REPLAY_MODULES])
 
 
 def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:

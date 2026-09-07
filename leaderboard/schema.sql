@@ -147,6 +147,8 @@ create index if not exists game_logs_match_idx
 --
 --   verified    the log replays and reproduces the posted turns, lost and hand
 --   mismatch    it replays, and produces something else — the score is wrong
+--   outdated    it does not reproduce, and was played under older *rules*
+--               (`engine.RULES_VERSION`), so it is unverifiable rather than wrong
 --   unreadable  the blob does not decode, or does not replay at all
 --   missing     no log was ever uploaded for this score's match_id
 --
@@ -158,17 +160,24 @@ create index if not exists game_logs_match_idx
 -- ---------------------------------------------------------------------------
 create table if not exists public.score_checks (
   score_id   bigint primary key references public.scores(id) on delete cascade,
-  verdict    text not null check (verdict in ('verified', 'mismatch', 'unreadable', 'missing')),
+  verdict    text not null,
   -- What went wrong, in one line, for a mismatch or an unreadable log. Empty on
   -- a pass. Shown to nobody by default: it is for whoever is looking into a row.
   detail     text not null default '',
-  -- The simulation that produced this verdict (`bot_replay.engine_rev`). A log
-  -- records orders and dice, so it is immune to a *bot* changing — but not to an
-  -- engine rule changing, and a mismatch under new rules is not the same claim as
-  -- a mismatch under the rules the game was played by.
+  -- The simulation that produced this verdict (`bot_replay.replay_rev`) — the
+  -- core modules only, since a log records orders and dice and so is immune to a
+  -- *bot* changing. An engine rule changing is a different matter, and that is
+  -- what the `outdated` verdict above is for.
   engine_rev text not null default '',
   checked_at timestamptz not null default now()
 );
+
+-- A drop/add pair rather than a check inside `create table if not exists`, so
+-- re-pasting this file widens the set on a board created before `outdated`
+-- existed (the same shape configs_tags_shape uses to tighten one).
+alter table public.score_checks drop constraint if exists score_checks_verdict;
+alter table public.score_checks add  constraint score_checks_verdict check (
+  verdict in ('verified', 'mismatch', 'outdated', 'unreadable', 'missing'));
 
 -- ---------------------------------------------------------------------------
 -- sc_config_key / sc_bots: derive a game's setup identity and opponent roster

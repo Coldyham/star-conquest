@@ -32,6 +32,24 @@ from typing import Callable, Iterable, Optional
 from . import combat, config
 from .model import Fleet, GameState, Order, lane_key
 
+# What version of the *rules* a game is played under, stamped onto every log
+# (`replay.GameLog.rules_version`).
+#
+# Bump this — by hand, in the same commit — whenever a change here, in `combat`,
+# or in `mapgen` could make a previously recorded game replay to a different
+# board: the phase order in `end_turn`, how a fight resolves, how the dice are
+# drawn or consumed, how a map is generated from a seed. Do NOT bump it for a
+# bot, a UI change, or a default that only affects new games: a stored log
+# replays its own recorded orders and dice and never consults a strategy at all
+# (`test_a_replay_does_not_consult_a_bot_even_a_deleted_one`).
+#
+# It buys one thing, and only for logs stamped before the change: the leaderboard's
+# verifier can tell "this score does not check out" from "the rules moved under
+# it", and say the second rather than accusing an honest player
+# (`tools/verify_scores.py`). That is worth a hand-maintained integer; nothing
+# here can detect such a change on its own.
+RULES_VERSION = 1
+
 # A decision function: given the state and a player id, return that player's orders.
 DecideFn = Callable[[GameState, int], list[Order]]
 

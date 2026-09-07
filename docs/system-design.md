@@ -853,3 +853,38 @@ which only owner rights can do. Its `where` clause is the whole consent boundary
 so posting a score publishes that game and a checkpointed one stays private. The
 submit page says so at the point the decision is made, which is the only place
 saying it is worth anything.
+
+### Versioning: bots are free to move, the engine is not
+
+Keeping replays around raises an obvious worry — if the bots change, do the old
+games still replay? — and the answer is that the question has the wrong subject.
+
+**A stored log never consults a bot.** `end_turn(script=…)` applies the recorded
+orders and deals the recorded dice; `decide` is not called. So retuning marshal,
+rewriting knower or deleting a `models/` file outright cannot move a single
+stored game. This is not an inference: `test_a_replay_does_not_consult_a_bot_even
+_a_deleted_one` replaces every strategy with one that issues nonsense, removes one
+from the registry, and asserts the reconstruction is unchanged. It is also exactly
+why format version 2 exists — version 1 re-ran the AI, and a bot on a wall-clock
+budget replayed into a different match.
+
+So there is no case for a per-model "replay floor" gating which games are still
+watchable, and adding one would cost the feature most of its value in exchange for
+nothing. `bot_replay.replay_rev` is the same statement in code: `engine_rev` minus
+`ai` and every `models/*.py`, so tuning a bot cannot mark a score verdict stale.
+
+**The engine is the axis that does move a stored game**, and it is versioned by
+hand. `engine.RULES_VERSION` is bumped in the same commit as a change to the phase
+order, to how a fight resolves or how a map is drawn from a seed, and every log
+carries the version it was played under. When a replay then fails to reproduce its
+score, `verify_scores` reports `outdated` rather than `mismatch` — unverifiable,
+not wrong. The check happens *after* the replay, so the many old games a bump does
+not actually disturb keep verifying on their own merits; only the ones it broke
+are set aside, and set aside rather than accused.
+
+**Rewinding needs no versioning at all**, because it does not claim to reproduce
+anything. A rewind replays the prefix exactly, then plays *on* from there — a
+counterfactual by construction, which is why `fork` mints a new `match_id`. Both
+rewinds re-stamp `rules_version`: the kept prefix has just been replayed under
+today's rules to find that turn, so the log would be describing itself as older
+than it is.

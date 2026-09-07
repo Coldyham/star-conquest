@@ -17,17 +17,28 @@ This is the offline job that does that feeding back.
     uv run python tools/verify_scores.py --dry-run       # decide, post nothing
 
 The sibling of ``bot_replay.py`` and deliberately built out of it: the same
-Supabase client, the same ``engine_rev`` digest, the same "a pure function of the
-inputs, so compute it once and cache it" shape. The service_role key is what
+Supabase client, the same "a pure function of the inputs, so compute it once and
+cache it" shape. It keys on ``replay_rev`` rather than ``engine_rev``, because a
+replay never consults a bot and so a retuned one cannot change a verdict. The service_role key is what
 makes it possible at all — ``game_logs`` grants the public insert and *no* select,
 so the uploaded replays are readable here and nowhere else.
 
-Four verdicts, stored in ``score_checks``:
+Five verdicts, stored in ``score_checks``:
 
     verified    the log replays and reproduces the score exactly
     mismatch    it replays and produces something else, or is for another setup
+    outdated    it does not reproduce, and it was played under older *rules*
     unreadable  the blob does not decode, or cannot be replayed
     missing     nothing was ever uploaded for this score's match_id
+
+``outdated`` is the one that keeps this honest across a rules change. A stored log
+never consults a bot (see ``replay_rev``), but a change to the engine itself — the
+phase order, how a fight resolves, how a map is drawn from a seed — really can
+make an old game replay to a different board. ``engine.RULES_VERSION`` is stamped
+on every log when it is played, and a score that fails to reproduce having been
+played under an older stamp is reported as unverifiable rather than as wrong. The
+check is made *after* the replay, not before, so the many old games a rules change
+does not actually disturb still verify normally.
 
 ``missing`` is a fact, not an absence: a score posted before the game uploaded
 logs, or by someone whose upload was blocked, is unverified rather than suspect,
@@ -49,11 +60,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import replay  # noqa: E402
+from starconquest import engine, replay  # noqa: E402
 from starconquest.settings import Settings  # noqa: E402
-from tools.bot_replay import Supabase, engine_rev  # noqa: E402 — the shared client
+from tools.bot_replay import Supabase, replay_rev  # noqa: E402 — the shared client
 
-VERDICTS = ("verified", "mismatch", "unreadable", "missing")
+VERDICTS = ("verified", "mismatch", "outdated", "unreadable", "missing")
 
 
 @dataclass
@@ -82,6 +93,10 @@ def pending(scores: list[dict], done: dict[int, dict], rev: str, *,
     answer. The two exceptions are opt-in. ``--stale`` re-checks rows decided by
     an older simulation, which is the one thing that can legitimately change a
     verdict; ``--recheck`` does the lot.
+
+    ``outdated`` is re-decided on the same footing as any other stored verdict:
+    the rules only ever move forward, so a row set aside by one bump stays set
+    aside, and ``--stale`` is what looks again.
 
     ``missing`` is the exception to the exception: it is a statement about what
     had been *uploaded* by the time we looked, and that changes on its own. So a
@@ -169,10 +184,27 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
     claimed = (int(score["turns"]), int(score["lost"]), int(score["hand"]))
     actual = (state.turn, human.ships_lost, log.hand_turns)
     if claimed != actual:
-        return Check(sid, "mismatch",
-                     f"posted {claimed[0]}/{claimed[1]}/{claimed[2]} turns/lost/hand, "
-                     f"replay gives {actual[0]}/{actual[1]}/{actual[2]}")
+        detail = (f"posted {claimed[0]}/{claimed[1]}/{claimed[2]} turns/lost/hand, "
+                  f"replay gives {actual[0]}/{actual[1]}/{actual[2]}")
+        return Check(sid, *_disagreement(log, detail))
     return Check(sid, "verified")
+
+
+def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
+    """Whether a replay that did not reproduce its score is a *wrong score* or an
+    *unverifiable* one.
+
+    Asked only once the replay has already disagreed, which is what keeps a rules
+    change from wiping the board: a change to the engine disturbs some games and
+    not others, and the ones it leaves alone still verify on their own merits.
+    Only the ones it broke are set aside, and they are set aside rather than
+    accused — the score may well have been honest under the rules it was played
+    under, and nothing here can now tell.
+    """
+    if log.rules_version != engine.RULES_VERSION:
+        return "outdated", (f"played under rules v{log.rules_version}, now on "
+                            f"v{engine.RULES_VERSION} — {detail}")
+    return "mismatch", detail
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -200,8 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     api = Supabase(url, key)
-    rev = engine_rev()
-    print(f"engine_rev {rev}")
+    # `replay_rev`, not `engine_rev`: a verdict cannot depend on a bot, so tuning
+    # one must not mark every score on the board stale.
+    rev = replay_rev()
+    print(f"replay_rev {rev}")
 
     scores = api.select("scores", "select=id,game_key,turns,lost,hand,match_id&order=id.asc")
     checked = {int(r["score_id"]): r for r in

@@ -22,6 +22,14 @@ are recorded for the same reason, since skipping the AI leaves ``state.rng``
 somewhere other than where the battle found it. Version-1 logs can no longer be
 replayed faithfully and are skipped by ``latest_log``.
 
+Two consequences worth stating, because replays are now kept and shared. First,
+**a bot is never consulted**, so changing one — retuning it, rewriting it,
+deleting it — cannot alter any recorded game; the roster stays free to move.
+Second, the *engine* can: change the phase order or how a fight resolves and an
+old log may rebuild a different board. That is what ``engine.RULES_VERSION`` is
+for, stamped on every log so a leaderboard verdict can say "unverifiable under
+today's rules" instead of "wrong".
+
 ``rules`` is the human's standing auto-forward rules as they stood that turn —
 shell state (``Ui.auto_forward``), not simulation, and carried so that resuming
 or rewinding hands the player back the routes they set up rather than an empty
@@ -108,6 +116,10 @@ class GameLog:
     # it was made in (`Challenge.log`). Not derived from the seed — see
     # `_new_match_id` — and not part of what makes a replay reproduce.
     match_id: str = field(default_factory=_new_match_id)
+    # The rules this match was played under (`engine.RULES_VERSION`). Not the same
+    # thing as `version`, which is the *format* of this file: one says how to read
+    # the log, the other says whether replaying it still reproduces the game.
+    rules_version: int = field(default_factory=lambda: engine.RULES_VERSION)
     winner: Optional[int] = None
     finished: bool = False
     created_at: str = field(default_factory=_now_iso)
@@ -165,6 +177,11 @@ class GameLog:
         self.turns = self.turns[:n]
         self.winner = None
         self.finished = False
+        # The kept prefix was just replayed under today's rules to *find* this
+        # turn, so it demonstrably reproduces under them — which is exactly what
+        # the stamp claims. Play continues under them too, so re-stamping keeps
+        # the log from describing itself as older than it is.
+        self.rules_version = engine.RULES_VERSION
         self.updated_at = _now_iso()
 
     def fork(self, n: int) -> "GameLog":
@@ -181,7 +198,9 @@ class GameLog:
             turns=list(self.turns[:n]),
             version=self.version,   # the turns come with it, so the format does too
             path=_game_path(self.seed),
-        )
+        )   # `match_id` and `rules_version` are deliberately left to their
+            # defaults: a fork is a new match, played on from here under today's
+            # rules — and its prefix has just replayed under them (see `truncate`).
 
     def turn_is_ai(self, turn_index: int) -> bool:
         """Whether the human seat was AI-driven on ``turn_index`` (autoplay)."""
@@ -231,6 +250,7 @@ class GameLog:
             "version": self.version,
             "seed": self.seed,
             "match_id": self.match_id,
+            "rules_version": self.rules_version,
             "settings": self.settings,
             "turns": self.turns,
             "winner": self.winner,
@@ -256,6 +276,9 @@ class GameLog:
             settings=settings,
             turns=turns,
             match_id=match_id if _MATCH_ID_RE.match(match_id) else _new_match_id(),
+            # A log written before the field existed predates any rules bump by
+            # definition, so version 1 is the honest reading of its absence.
+            rules_version=int(data.get("rules_version", 1) or 1),
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
             created_at=str(data.get("created_at", "")),

@@ -99,6 +99,39 @@ def test_a_replay_of_another_map_cannot_back_a_score(posted):
     assert check.verdict == "mismatch" and "different setup" in check.detail
 
 
+def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monkeypatch):
+    """The one thing that can legitimately break an old replay is the *engine*
+    moving — never a bot. A score played under the old rules that no longer
+    reproduces is unverifiable, not wrong, and must be reported as such."""
+    score, blob, setup = posted
+    score = {**score, "turns": score["turns"] - 1}      # ...now it disagrees
+    # A bump raises the *current* version; the stored log keeps the one it was
+    # played under, which is what makes it older.
+    monkeypatch.setattr(verify_scores.engine, "RULES_VERSION",
+                        verify_scores.engine.RULES_VERSION + 1)
+    with _preserve_config():
+        check = verify_scores.verify(score, blob, setup)
+    assert check.verdict == "outdated"
+    assert "rules v" in check.detail and "replay gives" in check.detail
+
+
+def test_a_rules_change_does_not_excuse_a_score_that_still_reproduces(posted, monkeypatch):
+    """A bump disturbs some games and not others; the ones it leaves alone go on
+    verifying on their own merits, or one engine change would blank the board."""
+    score, blob, setup = posted
+    monkeypatch.setattr(verify_scores.engine, "RULES_VERSION",
+                        verify_scores.engine.RULES_VERSION + 1)
+    with _preserve_config():
+        assert verify_scores.verify(score, blob, setup).verdict == "verified"
+
+
+def test_a_wrong_score_played_under_current_rules_is_still_a_mismatch(posted):
+    score, blob, setup = posted
+    score = {**score, "lost": score["lost"] + 7}
+    with _preserve_config():
+        assert verify_scores.verify(score, blob, setup).verdict == "mismatch"
+
+
 def test_a_score_with_no_uploaded_log_is_missing_not_suspect(posted):
     score, _, setup = posted
     assert verify_scores.verify(score, None, setup).verdict == "missing"
