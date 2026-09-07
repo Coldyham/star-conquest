@@ -112,6 +112,15 @@ class Challenge:
     # construction, and that is the point: it is a checksum letting the menu spot
     # that the config has since been edited, so the target no longer compares.
     key: str = ""
+    # `GameLog.match_id` of the match this score was made in, so a score posted to
+    # the leaderboard can be checked against the replay that produced it. Blank
+    # for a hand-written link, a pre-field one, or a result whose log was never
+    # uploaded — the board treats it as unverified rather than invalid.
+    #
+    # Riding here rather than on `Settings` is what makes it free: `challenge_keys`
+    # drops `challenge` before hashing, so unlike a new `Settings` field this moves
+    # no setup digest and needs no `_LEGACY_KEY_DROPS` entry.
+    log: str = ""
 
     def summary(self) -> str:
         """One line: the target, as shown on the menu banner and win overlay."""

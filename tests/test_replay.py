@@ -389,3 +389,79 @@ def test_save_is_atomic_replace_on_rewrite(games_dir):
     assert log.path == first_path
     assert replay.load(first_path).turn_count == 2
     assert len(replay.list_logs()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Match identity and the wire form (what a posted score points at)
+# --------------------------------------------------------------------------- #
+def test_new_log_mints_a_match_id():
+    a = replay.new_log(Settings(seed=5), 5)
+    b = replay.new_log(Settings(seed=5), 5)
+    assert replay._MATCH_ID_RE.match(a.match_id)
+    # Same settings, same seed, different match: the id must not be derived from
+    # the seed, or every player of a shared map would collide on one id.
+    assert a.match_id != b.match_id
+
+
+def test_match_id_survives_save_and_load(games_dir):
+    log = replay.new_log(Settings(seed=3), 3)
+    log.record_turn(_record([]))
+    log.save()
+    assert replay.load(log.path).match_id == log.match_id
+
+
+def test_from_dict_replaces_a_missing_or_malformed_match_id():
+    """A log written before the field existed, or edited by hand, gets a fresh id
+    rather than carrying junk into an upload."""
+    for bad in ({}, {"match_id": ""}, {"match_id": "../../etc"}, {"match_id": 17},
+                {"match_id": "ABCDEF0123456789"}):   # uppercase is not the shape
+        assert replay._MATCH_ID_RE.match(replay.GameLog.from_dict(bad).match_id)
+
+
+def test_truncate_keeps_the_match_id_but_fork_mints_one():
+    """A rewind continues the same match; a fork starts another one."""
+    log = replay.new_log(Settings(seed=9), 9)
+    for _ in range(4):
+        log.record_turn(_record([]))
+    original = log.match_id
+    log.truncate(2)
+    assert log.match_id == original
+    assert log.fork(1).match_id != original
+
+
+def test_encoded_round_trips_through_decode():
+    with _preserve_config():
+        _, log = _play(4242, policy="mixed", max_turns=25)
+    restored = replay.GameLog.decode(log.encoded())
+    assert restored.to_dict() == log.to_dict()
+
+
+def test_encoded_is_much_smaller_than_the_saved_file():
+    """The wire form is deflated; the file stays indented for reading."""
+    with _preserve_config():
+        _, log = _play(77, policy="autoplay", max_turns=60)
+    assert len(log.encoded()) < len(json.dumps(log.to_dict(), indent=2)) / 3
+
+
+def test_decode_reads_the_uncompressed_form():
+    """Same tolerance Settings.from_token has: plain JSON starts '{', which zlib
+    output never does."""
+    import base64
+    log = replay.new_log(Settings(seed=11), 11)
+    log.record_turn(_record([Order(1, 0, 1, 2)]))
+    raw = json.dumps(log.to_dict()).encode("utf-8")
+    plain = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    assert replay.GameLog.decode(plain).to_dict() == log.to_dict()
+
+
+@pytest.mark.parametrize("blob", ["", "not base64!!", "eyJub3QiOiJhIGxvZyJ9" * 0 + "AAAA"])
+def test_decode_rejects_junk(blob):
+    with pytest.raises(ValueError):
+        replay.GameLog.decode(blob)
+
+
+def test_hand_turns_counts_the_turns_the_human_drove():
+    log = replay.new_log(Settings(seed=2), 2)
+    for autoplayed in (False, False, True, False, True):
+        log.record_turn(_record([]), human_ai=autoplayed)
+    assert log.hand_turns == 3 and log.turn_count == 5

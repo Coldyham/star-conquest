@@ -278,6 +278,16 @@ meant to hand back the position as it was, and on a big map the standing routes
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
 was lost on that turn doesn't come back to life.
 
+### `match_id`: the log's own identity
+
+A log also carries a `match_id`, which is *not* part of what makes a replay
+reproduce — it is how a score posted to the leaderboard names the match behind
+it (**Checked scores**, below). `truncate` keeps it, since a mid-game rewind
+continues the same match; `fork` mints a new one, since a finished-game rewind
+starts another. A log written before the field existed, or edited by hand into a
+shape `_MATCH_ID_RE` refuses, is given a fresh id on load rather than carrying
+that text into an upload.
+
 ## Send popup / `Ui.editing_existing`
 
 The popup commits immediately, so a fresh compose and a reopened order are
@@ -708,9 +718,9 @@ runs `--stale` on purpose, which is the same "a fix is a deliberate act" trade
 
 `bot_scores` has a read policy and no insert policy, and no insert grant. The
 worker's `service_role` key bypasses RLS entirely, which makes it the only
-writer. Human scores are unverifiable by design — the token format is public and
-unsigned — so it would be strange to let the machine column be posted by hand
-too. It also means a rerun can *replace* a row, which is why this table is not
+writer. A human score carries no proof in itself — the token format is public and
+unsigned, which is what **Checked scores** below answers — so it would be strange
+to let the machine column be posted by hand too. It also means a rerun can *replace* a row, which is why this table is not
 append-only the way the rest of the board is.
 
 A per-decision wall-clock budget (`--bot-timeout`) is off by default, because a
@@ -718,3 +728,59 @@ blown budget forfeits that turn's orders and the result would then depend on how
 fast the runner was that day. Where one is used, the count lands in
 `bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
 reproducible alongside the others.
+
+## Checked scores (`upload.py`, `tools/verify_scores.py`)
+
+The board's other pure-function-of-the-inputs job, and the answer to the oldest
+entry under `leaderboard/README.md`'s **Known limitations**: a score in a
+challenge link is a *claim*, since the token is public and unsigned and a
+hand-crafted impossible result posts exactly like a real one.
+
+A replay is not a claim. `replay.py` already records a match as its inputs —
+settings, seed, and per turn every seat's orders plus the combat draws — and
+`reconstruct` feeds them back through the engine without asking a single seat to
+decide anything. So the evidence for a score already existed; it just never left
+the player's machine. Uploading it is the whole feature.
+
+**The id rides on `Challenge`, and that is what makes it free.** `challenge_keys()`
+pops `challenge` before hashing (it is the score attached to a setup, not part of
+the setup), so a field added there moves no digest and needs no
+`_LEGACY_KEY_DROPS` entry — where the same field on `Settings` would have
+invalidated every challenge link ever shared. `GameLog.match_id` is minted per
+match from `settings.fresh_rng`, never `state.rng`: it must *not* be reproducible
+from the seed, or every player of one shared map would mint the same id.
+
+**Uploading is what pressing "Post to leaderboard" consents to.** Nothing is sent
+for a game merely played, abandoned or lost; `share_challenge` sends nothing
+either. `upload.py` is a platform bridge in the `webstore`/`softkeyboard` style —
+guarded everywhere, silent on failure, fire-and-forget on both sides (a `fetch`
+whose promise is never read on the web, a daemon thread off it) so a POST can
+never stall the frame after a win.
+
+**The storage shape is the mirror image of `bot_scores`.** `game_logs` grants
+insert and *nothing else*: no select policy, no select grant. Anyone may hand the
+board a replay; only the worker can read one back. That is what keeps uploading a
+game from publishing it. Rows are append-only like the rest of the board, so a
+match submitted twice lands twice and the *longest* row is the current one
+(`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
+delete path the public does not have.
+
+**The verifier binds the replay to the setup.** Without `same_setup`, an easy
+map's log could be attached to a hard map's score and would replay perfectly.
+Both setups are hashed in Python by the same code, so a key the *site* folded
+(`KEY_ALIASES`) or computed itself for a hand-written link never has to be
+reproduced in JS. `Settings.from_dict` is deliberately tolerant and answers a
+non-dict with a default 18-node map, which here would verify a score against the
+wrong map entirely — the same trap `bot_replay._settings_for` documents, and it
+is checked for the same way.
+
+The four verdicts land in `score_checks`, worker-written and publicly readable.
+`missing` — no log was ever uploaded — is stored rather than inferred from
+absence, because "nobody has looked yet" and "we looked, and there is nothing to
+check" are different facts about a score, and it is the one verdict that is
+retried without a flag: an upload can still arrive.
+
+What none of this proves is that a *human* played the game. A bot driving the
+seat produces a log that verifies like any other. That is what `hand` is for, and
+the verifier recomputes it from the log's own per-turn autoplay flags rather than
+trusting the number in the link.

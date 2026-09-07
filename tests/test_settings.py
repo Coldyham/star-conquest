@@ -219,6 +219,26 @@ def test_copy_from_carries_the_challenge():
     assert _challenged().challenge.turns == 137
 
 
+def test_challenge_carries_the_id_of_its_replay():
+    """`Challenge.log` names the uploaded game log behind the score, and has to
+    survive the link — it is what tools/verify_scores.py keys on."""
+    s = _challenged()
+    s.challenge.log = "00112233445566ff"
+    assert Settings.from_token(s.to_token()).challenge.log == "00112233445566ff"
+    assert Settings.from_dict(s.to_dict()).challenge.log == "00112233445566ff"
+
+
+def test_challenge_log_does_not_move_the_setup_digest():
+    """The reason the id rides on Challenge rather than Settings: `challenge_keys`
+    drops the whole field before hashing, so adding to it invalidates no link that
+    was ever shared (unlike a new Settings field, which needs a
+    `_LEGACY_KEY_DROPS` entry). `test_challenge_key_is_stable` pins the other half.
+    """
+    plain, logged = Settings(seed=7), Settings(seed=7)
+    logged.challenge = Challenge(turns=10, log="abcdef0123456789")
+    assert plain.challenge_keys() == logged.challenge_keys()
+
+
 def test_challenge_key_ignores_the_attached_score_and_autoplay():
     plain = Settings(seed=7)
     scored = Settings(seed=7)

@@ -185,6 +185,10 @@ form.addEventListener("submit", async (event) => {
       lost: decoded.challenge.lost,
       hand: decoded.challenge.hand,
       by_name: decoded.challenge.by,
+      // Names the uploaded replay behind this score, for tools/verify_scores.py.
+      // The game posts the log straight to game_logs, so this side never sees it
+      // — only the id, and the two can arrive in either order.
+      match_id: decoded.challenge.log,
       raw_token: decoded.token,
     });
     rememberName(nameField.value);

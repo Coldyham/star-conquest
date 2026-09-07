@@ -32,6 +32,8 @@ uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, computed
                                                 # but not posted (needs SUPABASE_*)
+uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
+                                                # and say whether it checks out
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
@@ -81,6 +83,14 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   - `webstore.py` is the other browser bridge, same style: the address bar and a
     small key/value store (shared-settings tokens, personal bests). See the
     challenge-link notes under Key conventions.
+  - `upload.py` is the one bridge that talks to a network, and the one that is
+    not browser-only: it posts a finished match's replay to the leaderboard so a
+    posted score can be checked against the game that produced it. Same
+    defensive style — guarded everywhere, silent on failure,
+    fire-and-forget on both backends (a `fetch` whose promise
+    is never read on the web, a daemon thread off it) so it can never stall the
+    frame. Pure of pygame, and it sends **only** when the player presses *Post to
+    leaderboard*. See "Checked scores" under Key conventions.
 
 ### Turn resolution (engine.py)
 
@@ -151,7 +161,12 @@ version 2, and why the orders and the dice are both in the log (version 1 stored
 the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
 into a *different match*, silently). Version-1 logs can't be replayed faithfully
 and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
-autoplayed) — not for replay, but for `main.hand_turns`.
+autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
+delegates to, and the leaderboard's verifier recomputes). A log also carries a
+`match_id`, minted per match from `settings.fresh_rng` and likewise not part of
+what makes a replay reproduce: it is how a posted score names its replay
+(`GameLog.encoded` is the wire form — the token's own deflate+base64url). A
+rewind (`truncate`) keeps that id; a fork mints a new one.
 
 **History mode** is a shell-only review scene (`Ui.history`, gated so it never
 enters the pure core). On entry `main.build_history` runs one `reconstruct` whose
@@ -225,6 +240,21 @@ intact.
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's `service_role` key is its only writer.
+  - **Checked scores: the game uploads the replay behind a posted score.**
+    `Challenge.log` carries `GameLog.match_id` into the link, `upload.post_log`
+    puts the log itself into `game_logs`, and `tools/verify_scores.py` (the same
+    scheduled worker as the bot column) replays it and records `verified` /
+    `mismatch` / `unreadable` / `missing` in `score_checks`. The id rides on
+    `Challenge` rather than `Settings` precisely because `challenge_keys()` drops
+    that field before hashing — see the next bullet for what a `Settings` field
+    would have cost. Three rules hold this together: uploading happens **only**
+    on *Post to leaderboard* (never for a game merely played, abandoned or lost —
+    that is the consent), `game_logs` is the mirror of `bot_scores` (public
+    insert, no read policy and no read grant, so uploading a game does not
+    publish it), and the verifier binds the log to the setup (`same_setup`) or an
+    easy map's replay would back a hard map's score. It proves the *game*, never
+    that a human played it — that is what `hand` discloses, recomputed from the
+    log rather than trusted.
   - **Adding a field to `Settings` invalidates every key already shared.**
     `challenge_key()` hashes the full setup dict, so a new field moves the digest
     of every map that ever existed and links from before it read as edited.
@@ -245,8 +275,9 @@ intact.
     `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
     rather than added as a field here — that would move `challenge_key()` for
     every map instead of only the config grouping.
-- **`webstore` is the third browser bridge** (with `softkeyboard` and the
-  web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
+- **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
+  paths in `main`/`menu`, and `upload`, which is the one that also runs off the
+  web): `get`/`set` are `localStorage` on the web and
   a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and
   no-ops off it: `link_url`, `set_url_fragment`, `copy_to_clipboard` and
   `url_token` are the primitives, and `sync_settings` / `share_token` /

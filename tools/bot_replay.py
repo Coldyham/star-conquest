@@ -216,6 +216,14 @@ class Supabase:
                    body=json.dumps(rows).encode("utf-8"),
                    extra={"Prefer": "resolution=merge-duplicates,return=minimal"})
 
+    def delete(self, table: str, query: str) -> None:
+        """Delete the rows a filter selects. Refuses an unfiltered call, which
+        PostgREST would happily read as "every row in the table"."""
+        if not query.strip():
+            raise ValueError("refusing to delete without a filter")
+        self._call(f"{table}?{query}", method="DELETE",
+                   extra={"Prefer": "return=minimal"})
+
 
 # --------------------------------------------------------------------------- #
 # Work selection

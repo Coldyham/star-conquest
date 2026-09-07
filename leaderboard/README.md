@@ -188,13 +188,55 @@ lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
 
+## Checked scores
+
+A score in a link is a claim. The *replay* behind it is not: a match is fully
+determined by its settings, its seed and, per turn, every seat's orders plus the
+combat draws — feed those back through the engine and it either reproduces the
+posted result or it does not. So the game uploads that replay when the player
+posts a score, and the worker replays it.
+
+The pieces, in the order a submission touches them:
+
+1. `replay.GameLog` mints a `match_id` per match, and `main.challenge_settings`
+   stamps it into the link as `Challenge.log`. That field rides on `Challenge`
+   rather than `Settings` on purpose: `challenge_keys()` drops `challenge` before
+   hashing, so unlike a new `Settings` field this moves no setup digest and
+   invalidates no link anyone has already shared.
+2. `starconquest/upload.py` posts the log — deflated and base64url'd by
+   `GameLog.encoded`, the same encoding the token itself uses — straight into
+   `game_logs`. **Only when the player presses *Post to leaderboard*.** A game
+   merely played, abandoned or lost uploads nothing.
+3. `submit.mjs` writes the id onto the score row as `match_id`. The log and the
+   score arrive by different routes and either can be first, which is why there
+   is no foreign key between them.
+4. `tools/verify_scores.py` (the same scheduled worker as the bot column) reads
+   both, replays the log, and records one of four verdicts in `score_checks`:
+   `verified`, `mismatch`, `unreadable`, or `missing` when no log was ever
+   uploaded. `missing` is stored rather than left as an absence, so the board can
+   tell "nobody has looked yet" from "we looked, and there is nothing to check".
+
+Two properties are worth stating plainly, because they are what makes the trade
+work. **`game_logs` is the mirror image of `bot_scores`**: insert and nothing
+else — no select policy and no select grant — so anyone may hand the board a
+replay and only the worker's `service_role` key can read one back. A player's
+game does not become public by being uploaded. And **the verifier binds the
+replay to the setup** (`same_setup`), or an easy map's log could be attached to a
+hard map's score and would verify perfectly.
+
+What this does *not* do: prove a human played the game. A bot driving the seat
+produces a log that verifies like any other — which is what `hand` discloses, and
+the verifier recomputes it from the log's own per-turn autoplay flags rather than
+trusting the number in the link.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, `configs`, the `game_summary`/`config_summary` views, and
-   the row-level security policies that make everything append-only. The whole file
+   `users`, `games`, `scores`, `configs`, `game_logs`, `score_checks`, the
+   `game_summary`/`config_summary` views, and the row-level security policies that
+   make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
    view right after pasting, PostgREST's schema cache hasn't caught up yet; the
@@ -209,7 +251,7 @@ score) carry what the badge needs without a second per-game query;
 4. **Create a second Netlify site** from this repo with **Base directory** set to
    `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
    files as-is. The root `netlify.toml` and the game's own site are untouched.
-5. **Optional — turn on the bot column.** Add two repository secrets under
+5. **Optional — turn on the bot column and score checking.** Add two repository secrets under
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
    `SUPABASE_SERVICE_KEY` set to the project's **service_role** key (*not* the
    anon key in `config.mjs` — that one is public on purpose, this one must never
@@ -257,12 +299,12 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Known limitations, accepted on purpose
 
-- **Scores are unverifiable.** The token format is public and unsigned, so a
-  hand-crafted impossible score would be accepted. RLS protects the database, not
-  the plausibility of what is in a link. Catching that needs server-side
-  re-simulation from the seed — which the bot-replay worker now does for the
-  *machine* column, and could be extended to sanity-check a human's, since it
-  already rebuilds the exact map from `settings_json` alone.
+- **A score with no replay behind it is unverifiable.** The token format is
+  public and unsigned, so a hand-crafted impossible score is accepted exactly as a
+  real one is. What answers that is the replay the game now uploads when you post
+  (see "Checked scores" above) — but only for scores that carry one. Anything
+  posted by hand, or before that existed, checks as `missing`: unverified rather
+  than suspect, and shown as such.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
@@ -276,4 +318,13 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-Nothing outstanding. The bot column below was the last item here.
+- **Every game, not just the posted ones.** The game uploads a replay only when
+  you press *Post to leaderboard*. Storing the rest — losses and abandoned games
+  included — would give the bots a position library drawn from real play rather
+  than self-play, and is where the truncation in `scores` (only wins are postable)
+  actually bites. It needs an opt-in and a write path that can be rate-limited,
+  which is why it is not simply the same call on every turn.
+- **Watching a replay.** A verified score names its log, so "watch this game"
+  is a link back into the game build with the id in the fragment: it already has
+  `reconstruct` and a history scrubber. The engine is Python, so this is not a
+  thing to reimplement here in JS.

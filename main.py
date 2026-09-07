@@ -19,7 +19,7 @@ from typing import Optional
 import pygame
 
 from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, softkeyboard, viewstate, webstore)
+                          replay, softkeyboard, upload, viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -182,13 +182,13 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
 
 
 def hand_turns(log: GameLog) -> int:
-    """How many recorded turns the human decided themselves.
+    """How many recorded turns the human decided themselves (``GameLog.hand_turns``).
 
-    The log flags autoplay per turn, so this stays honest about a game that was
-    played by hand and then autoplayed to its conclusion — which is normal once a
-    match is decided, and is disclosed on a challenge link rather than voiding it.
+    Kept as a shell-side name because that is what reads at the call sites, but
+    the count itself belongs to the log: the leaderboard's verifier recomputes it
+    from an uploaded replay, and the two must not be able to disagree.
     """
-    return sum(1 for i in range(log.turn_count) if not log.turn_is_ai(i))
+    return log.hand_turns
 
 
 def toggle_fast_forward(state: GameState, ui: Ui) -> None:
@@ -242,6 +242,7 @@ def challenge_settings(settings: Settings, state: GameState, ui: Ui,
         lost=state.players[ui.human_id].ships_lost,
         hand=hand_turns(log),
         key=shared.challenge_key(),
+        log=log.match_id,
     )
     return shared
 
@@ -293,7 +294,12 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
     """
     if not paths.LEADERBOARD_SUBMIT_URL:
         return "No leaderboard is configured"
-    token = challenge_settings(settings, state, ui, seed, log).to_token()
+    shared = challenge_settings(settings, state, ui, seed, log)
+    # Send the replay first, so it is on its way before the tab steals focus —
+    # and only here. Pressing this button is what consents to uploading a game;
+    # `share_challenge` sends nothing, and a match merely played sends nothing.
+    upload.post_log(log, shared.challenge.key if shared.challenge else "")
+    token = shared.to_token()
     url = f"{paths.LEADERBOARD_SUBMIT_URL}#{token}"
     if webstore.open_url(url):
         return "Leaderboard opened — add your name to post"

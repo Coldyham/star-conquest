@@ -38,7 +38,10 @@ after each turn so the file on disk always reflects the live match.
 
 from __future__ import annotations
 
+import base64
 import json
+import re
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,7 +50,7 @@ from typing import Callable, Optional
 from . import engine
 from .model import GameState, Order
 from .paths import data_dir
-from .settings import Settings, build_state
+from .settings import Settings, build_state, fresh_rng
 
 FORMAT_VERSION = 2   # 1 recorded the human's orders alone; see the module doc
 
@@ -57,8 +60,27 @@ FORMAT_VERSION = 2   # 1 recorded the human's orders alone; see the module doc
 GAMES_DIR = data_dir() / "games"
 
 
+# A match id is 16 lowercase hex digits. Validated on the way *in* as well as
+# minted here: a log is uploaded verbatim (`GameLog.encoded`), so a hand-edited
+# file must not be able to put arbitrary text into a request path or a database
+# column that other rows are keyed against.
+_MATCH_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _new_match_id() -> str:
+    """A fresh id for one match — what a posted score points at to find its replay.
+
+    64 bits from ``settings.fresh_rng``, never ``state.rng``: this must *not* be
+    reproducible from the seed, or every player of a shared map would mint the
+    same id and their logs would collide. Same reason the module is used for a
+    fresh map seed, and the same reason it exists rather than plain ``random``
+    (the web build can auto-seed identically on every page load).
+    """
+    return f"{fresh_rng().getrandbits(64):016x}"
 
 
 def _order_to_dict(o: Order) -> dict:
@@ -82,6 +104,10 @@ class GameLog:
     seed: int
     settings: dict  # Settings.to_dict()
     turns: list[dict] = field(default_factory=list)  # see the module docstring
+    # Minted per match, so a score posted to the leaderboard can name the replay
+    # it was made in (`Challenge.log`). Not derived from the seed — see
+    # `_new_match_id` — and not part of what makes a replay reproduce.
+    match_id: str = field(default_factory=_new_match_id)
     winner: Optional[int] = None
     finished: bool = False
     created_at: str = field(default_factory=_now_iso)
@@ -92,6 +118,18 @@ class GameLog:
     @property
     def turn_count(self) -> int:
         return len(self.turns)
+
+    @property
+    def hand_turns(self) -> int:
+        """How many recorded turns the human decided themselves.
+
+        The per-turn ``ai`` flag is what makes this honest about a game played by
+        hand and then autoplayed to its conclusion — normal once a match is
+        decided, and disclosed on a challenge link rather than voiding it. Lives
+        here rather than in the shell because the leaderboard's verifier recomputes
+        it from the log too, and both must agree on what "by hand" counts as.
+        """
+        return sum(1 for i in range(self.turn_count) if not self.turn_is_ai(i))
 
     def record_turn(self, record: engine.TurnRecord, human_ai: bool = False,
                     rules: Optional[dict[int, tuple[int, int]]] = None) -> None:
@@ -192,6 +230,7 @@ class GameLog:
         return {
             "version": self.version,
             "seed": self.seed,
+            "match_id": self.match_id,
             "settings": self.settings,
             "turns": self.turns,
             "winner": self.winner,
@@ -208,10 +247,15 @@ class GameLog:
         settings_raw = data.get("settings")
         settings = settings_raw if isinstance(settings_raw, dict) else {}
         winner = data.get("winner")
+        # A missing or malformed id is replaced rather than kept: logs written
+        # before the field existed have none, and `save` stamps the new one in on
+        # the next turn. Validated, not merely defaulted — see `_MATCH_ID_RE`.
+        match_id = str(data.get("match_id", "") or "")
         return cls(
             seed=int(data.get("seed", 0)),
             settings=settings,
             turns=turns,
+            match_id=match_id if _MATCH_ID_RE.match(match_id) else _new_match_id(),
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
             created_at=str(data.get("created_at", "")),
@@ -231,6 +275,37 @@ class GameLog:
         with open(tmp, "w") as fh:
             json.dump(self.to_dict(), fh, indent=2)
         tmp.replace(self.path)
+
+    def encoded(self) -> str:
+        """This log as one line of text: compact JSON, deflated, base64url.
+
+        Exactly the encoding ``Settings.to_token`` uses, for the same reason and
+        with the same decoder on the other side — a log is a shared link's big
+        brother. The saved *file* stays indented for reading; this form is for the
+        wire, where it is roughly a third the size (measured 5-14 KiB against
+        39-131 KiB compact for whole games).
+        """
+        raw = json.dumps(self.to_dict(), separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
+
+    @classmethod
+    def decode(cls, blob: str) -> "GameLog":
+        """The inverse of ``encoded`` (raises ``ValueError`` on anything else).
+
+        Tolerates the uncompressed form the same way ``Settings.from_token`` does
+        — plain JSON always starts ``{``, which zlib output never does — so a log
+        stored before compression, or written by hand, still reads.
+        """
+        try:
+            raw = base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4))
+            if not raw[:1] == b"{":
+                raw = zlib.decompress(raw)
+            data = json.loads(raw.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 — one bad blob, one message
+            raise ValueError(f"unreadable game log: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("unreadable game log: not an object")
+        return cls.from_dict(data)
 
 
 def _game_path(seed: int) -> Path:

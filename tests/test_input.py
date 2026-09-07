@@ -1595,3 +1595,62 @@ def test_fast_forward_is_reachable_by_key_and_by_button():
         assert _click_pos(state, ui, (110, 110)) == "toggle_fast_forward"
     finally:
         pygame.quit()
+
+
+def test_challenge_settings_names_the_replay_the_score_was_made_in():
+    """`Challenge.log` is what lets the leaderboard find the game behind a score,
+    and it has to survive the link the player actually pastes."""
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 4821)
+        log.path = None
+        ui.hand_turns = 3
+        state.turn = 40
+        shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert shared.challenge.log == log.match_id
+        assert Settings.from_token(shared.to_token()).challenge.log == log.match_id
+    finally:
+        pygame.quit()
+
+
+def test_posting_a_score_uploads_the_replay_behind_it(monkeypatch):
+    """Pressing "Post to leaderboard" is what consents to the upload, so this is
+    the one path that sends a log — and it sends it under the same setup key the
+    score is filed against."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(main.upload, "post_log",
+                        lambda log, key: sent.append((log.match_id, key)) or True)
+    monkeypatch.setattr(main.webstore, "open_url", lambda url: True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        main.post_to_leaderboard(settings, state, ui, 77, log)
+        shared = main.challenge_settings(settings, state, ui, 77, log)
+        assert sent == [(log.match_id, shared.challenge.key)]
+    finally:
+        pygame.quit()
+
+
+def test_sharing_a_challenge_link_uploads_nothing(monkeypatch):
+    """The other half of the consent rule: handing a friend a link is not posting
+    a score, and must not put the game on anyone's server."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(main.upload, "post_log",
+                        lambda log, key: sent.append((log, key)) or True)
+    monkeypatch.setattr(main.webstore, "copy_link", lambda token: True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        main.share_challenge(settings, state, ui, 77, log)
+        assert sent == []
+    finally:
+        pygame.quit()
