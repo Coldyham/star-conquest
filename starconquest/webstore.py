@@ -258,6 +258,27 @@ def close_window() -> bool:
         return False
 
 
+def trigger_resize() -> bool:
+    """Web only: replay a browser ``resize`` event.
+
+    pygbag fits the canvas to the page on its own ``resize`` listener, but never
+    proactively — so a load that lands before the browser's layout has settled
+    (e.g. a phone's URL bar hasn't collapsed yet) leaves the canvas stretched to
+    the wrong aspect ratio until the player resizes the window by hand. Firing a
+    synthetic resize once boot has (probably) settled nudges pygbag's own
+    handler to recompute the fit itself, with no fix needed here beyond that.
+    """
+    if not is_web():
+        return False
+    import platform as _platform
+
+    try:
+        _platform.window.dispatchEvent(_platform.window.Event.new("resize"))
+        return True
+    except Exception:
+        return False
+
+
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
     if not is_web():

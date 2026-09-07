@@ -213,6 +213,11 @@ class Ui:
     scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Step-one-turn buttons flanking the track, the touch/mouse equivalent of the
+    # Left/Right arrow keys — picking an exact turn by dragging alone gets fiddly
+    # once a match has a long history.
+    history_prev_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    history_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
     # rebuilt by render each frame and tested by input like the rects above.
     # `retry_button_rect` replays the very same match from the opening position

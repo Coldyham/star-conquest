@@ -421,6 +421,16 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
                          state.players[ui.human_id].ships_lost, *legacy)
 
 
+async def _kick_web_resize() -> None:
+    """Web only: fire a synthetic browser resize shortly after boot.
+
+    See the comment at the call site in ``main`` — this is a fire-and-forget
+    background task so it doesn't hold up the first frame.
+    """
+    await asyncio.sleep(0.3)
+    webstore.trigger_resize()
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser(description="Star Conquest")
     ap.add_argument("--seed", type=int, default=None, help="map seed (random if omitted)")
@@ -448,6 +458,11 @@ async def main() -> None:
         # Match pygbag's canvas framebuffer exactly so nothing is clipped; the
         # browser scales this surface to fill the window/phone.
         pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        # The canvas can land squashed to the wrong aspect ratio on first paint
+        # (pygbag's own resize handler is what fits it, and that only runs on a
+        # genuine `resize` event, never proactively) — nudge it once, after
+        # yielding a beat for the browser's layout to settle.
+        asyncio.ensure_future(_kick_web_resize())
     else:
         # Resizable: pygame grows the surface with the window, so we never re-call
         # set_mode (a redundant call fights the WM on X11 and snaps it back).
