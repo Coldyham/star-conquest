@@ -364,11 +364,6 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-- **Doing something with the shared replays.** They are collected but not yet
-  used: the reason to have them is a position library drawn from real play rather
-  than self-play — replay to turn N, hand the seat to a bot, and see whether it
-  finishes faster from there than the player did. That is a far denser measurement
-  than one number per game, and the positions are ones a person actually reached.
 - **Watching a replay.** A verified score names its log, so "watch this game"
   is a link back into the game build with the id in the fragment: it already has
   `reconstruct` and a history scrubber. The engine is Python, so this is not a

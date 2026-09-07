@@ -52,6 +52,46 @@ So sweep `--nodes` and the speed knob before concluding that a constant does
 nothing, or that a margin is tuned. This has produced a wrong "unreachable
 constant" reading before.
 
+## Positions from real games (`tools/position_suite.py`)
+
+**Every other measurement in this file is a bot against another bot**, and that
+is a real limit rather than a stylistic one. A roster playing itself only ever
+visits positions bots create; whatever a bot is systematically bad at, its
+opponents are bad at reaching, so the sweep never asks the question. The
+2026-09 sweep's own warning about tuning to a copy of yourself
+(`ENEMY_NEAR` gaining 5 points in self-play and losing 7 against thinker) is the
+same failure one level up.
+
+Stored replays answer it. The game keeps a match as its inputs, so
+`replay.reconstruct` rebuilds the exact board after N turns of somebody's real
+game — a position a *person* built, with a person's mistakes in it. Hand the seat
+to a bot from there and it plays out the rest. `sim.play_from` is the mechanic,
+`sim.positions` picks the turns, and `tools/position_suite.py` runs a whole
+corpus (the local `games/` dir by default, or `--supabase` for the shared one —
+see system-design, "Checked scores", for how games get there).
+
+**The comparison is paired, which is what makes it worth more than a win rate.**
+We know exactly how long the player took from that same board, so each position
+is a matched trial rather than an independent sample. One recorded game becomes
+dozens of them.
+
+Three numbers come out, and they must not be blurred together:
+
+    faster      of positions where BOTH finished, how often the bot was quicker
+    median gain turns saved against the person, over those same positions
+    recovered   of positions from games the person LOST, how often a bot won
+
+`recovered` is the one no leaderboard score can ever pose, because only wins are
+postable — and it is the most interesting, since a lost or abandoned game is
+precisely a position the player could not solve. It has no baseline, so it is a
+raw rate rather than a comparison; never rank it against `faster`.
+
+**Read the output as a direction, not a verdict.** The sample is whatever games
+happen to exist, on whatever setups whoever played them chose — which, per "Lane
+length across the parameter space" above, is very likely one regime of three. A
+gap found here is a hypothesis; confirming it still wants a paired sweep with a
+z-score, the same as everything else in this file.
+
 ## `models/knower.py` and simultaneous resolution
 
 Because turns resolve simultaneously — `_collect_orders` hands every seat the

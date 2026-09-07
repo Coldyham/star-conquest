@@ -34,6 +34,8 @@ uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, comput
                                                 # but not posted (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
+uv run python tools/position_suite.py           # rank bots on positions out of
+                                                # real games (local games/ dir)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
@@ -508,6 +510,16 @@ intact.
   human's seat on a stored `Settings`, going through `settings.build_state` so a
   posted setup's tuned knobs actually apply. It is what the leaderboard's bot
   column is made of (`tools/bot_replay.py`, under Key conventions).
+  - **`play_from` is the fourth, and the only one that starts anywhere but the
+    opening.** It branches a recorded match at turn N (`reconstruct` on a
+    *truncated copy* — never the caller's log) and hands the seat to a bot, so a
+    stored game yields a position every few turns instead of one number. The
+    baseline comes free: we know what the person who was there then took.
+    `sim.positions` picks the turns and `tools/position_suite.py` drives it over
+    a corpus. Read its three numbers separately — *faster* is the only paired
+    comparison, *recovered* (games the person lost, which no score can carry) has
+    no baseline at all, and both are a direction rather than a verdict, since the
+    sample is whatever games happen to exist. See bot-design.
   - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
     fixed, so a lane's length in light-years rises as the node count falls, and
     `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
