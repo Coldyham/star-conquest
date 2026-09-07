@@ -819,6 +819,70 @@ it also steers `_front_pull` and the `_flow_to_front` seeding, and because what 
 discriminates is a position rather than an owner. Before weighting a new term into
 `_richness`, check which of those two channels it is actually meant to act on.
 
+### A 0-ship neutral: real waste, correctly diagnosed, still not worth fixing
+
+Late-game neutrals are almost all mutual-annihilation husks rather than
+untouched garrisons — instrumented alongside the phase table above, by whether
+the target's garrison is exactly 0:
+
+    turns     zero-ship neutrals   nonzero neutrals
+    1-20                    0.0%           9053
+    21-50                   0.4%           7236
+    51-120                  6.5%           1503
+    121+                   94.7%              4
+
+A 0-ship neutral is exactly the case the third-party fix's exclusion (above)
+declines to reprice, and here the exclusion's own reasoning does not hold: the
+rejected general reprice cost points because it shut a *gate* on a real garrison
+Phase 3b could otherwise overrun outright, and a 0-ship node has no garrison to
+give that discount against — pricing it against a converging rival is not
+ceding a winnable fight, there is no fight to cede. Confirmed as real waste, not
+a hypothetical: tracing `combat.resolve_arrival` for exactly this pattern (a
+neutral at 0, marshal *and* a rival both landing on it) over ~600 games —
+
+    races for an empty neutral      49
+    marshal lost the race           25 (51%)
+    ships thrown away               43
+
+— marshal walks its static 1-ship price into a race it loses half the time,
+for nothing. Repricing only the `ships == 0` branch through the same
+`_rival_waves`/`_after_clash`/`_enemy_margin` machinery as the rival-held case
+is a two-line change and correctly raises the price whenever the rival's fleet
+was visible at decide time.
+
+**It does not stop the waste, and the reason is what actually bounds this
+idea.** Re-running the same trace with the fix in place: still 51 races, still
+25 lost, 40 ships thrown away — no improvement. Splitting the 51 races by
+whether the rival's fleet could have been seen at all: only **27 of 51** had a
+non-empty `_rival_waves` at decide time; the other **24** are races where
+marshal's own fleet was *already in flight*, launched on an earlier turn when
+the node still had a real garrison, before it was fought over and reduced to 0
+by someone else. A launched order can't be recalled, so no repricing done
+*this* turn touches those. And the largest single case within the reachable 27
+is two players independently deciding to strike the same freshly-emptied node
+*on the same turn* — invisible to both by construction, since `decide()` runs
+for every seat against one shared, unmutated start-of-turn state (`engine.py`'s
+simultaneous-resolution rule), so neither order exists in `state.fleets` when
+the other seat is priced. The fix can only ever reach the strict remainder:
+already-in-flight fleets from a rival who committed on a *prior* turn — a
+narrower case than "a race for an empty neutral" makes it sound.
+
+Paired against the current bot, null in exactly the range this rarity predicts:
+
+    cell                              W-L        n     rate      z
+    random 24n 3p (thinker)        692-688     1380    50.1%  +0.11
+    random 18n 3p (knower)         610-603     1213    50.3%  +0.20
+    random 30n 4p                  910-912     1822    49.9%  -0.05
+
+Also not inert in a duel the way the rival-held reprice is — a neutral's
+"owner" is seat 0, so `_rival_waves` does not exclude a sole opponent's own
+fleet the way it excludes a rival-held target's owner, and the duel ladder
+reads 50/50 only by measurement (274-272 over 600 games), not by the same
+structural guarantee. Not shipped: a real, correctly-diagnosed two-ship-per-
+hundred-games leak, bounded on one side by decision simultaneity and on the
+other by orders already committed, too narrow to clear the noise floor at any
+cell tried.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
