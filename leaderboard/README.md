@@ -203,7 +203,7 @@ The pieces, in the order a submission touches them:
    rather than `Settings` on purpose: `challenge_keys()` drops `challenge` before
    hashing, so unlike a new `Settings` field this moves no setup digest and
    invalidates no link anyone has already shared.
-2. `starconquest/upload.py` posts the log — deflated and base64url'd by
+2. `starconquest/share.py` posts the log — deflated and base64url'd by
    `GameLog.encoded`, the same encoding the token itself uses — to
    `netlify/functions/log.mjs`, which stores it in `game_logs`.
 3. `submit.mjs` writes the id onto the score row as `match_id`. The log and the
@@ -261,13 +261,35 @@ Uploads are append-only like everything else here, so a game that checkpoints
 repeatedly leaves several rows and the longest is the current one;
 `tools/verify_scores.py --prune` clears the rest.
 
+### Watching one back
+
+A score whose replay is on the board gets a **Watch** link, and it goes back into
+the *game* rather than to a player written here: the game already has the whole
+reviewer — `reconstruct`, the fog replay and the scrubber — and its engine is
+Python, so a JS viewer would be a second engine to keep in step with the first.
+The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
+`netlify/functions/replay.mjs` and opens history review on it.
+
+**Posting a score is what publishes that replay.** `public_replays` (schema.sql)
+is `game_logs` restricted to the matches a posted score points at, so a game that
+merely uploaded itself because *Share replays* was on stays unreadable. That rule
+lives in the view's `where` clause rather than in the function, which selects
+from the view and has no condition of its own to drift. `submit.html` says so on
+the form, since that is where the decision is actually made.
+
+The link is only rendered for ids `public_replays` actually returns
+(`watchableIds` in `js/game.mjs`), so it can never lead to a 404 — a score can
+name a match whose upload never arrived. That query is asked by id rather than by
+map, because a score's `game_key` and its log's are stamped by different code
+paths and a folded key would make a `game_key` lookup quietly miss.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
    `users`, `games`, `scores`, `configs`, `game_logs`, `score_checks`, the
-   `game_summary`/`config_summary` views, and the row-level security policies that
+   `game_summary`/`config_summary`/`public_replays` views, and the row-level security policies that
    make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
@@ -296,10 +318,12 @@ repeatedly leaves several rows and the longest is the current one;
 6. **Optional — accept replay uploads.** Set the *same two* values as
    environment variables on this Netlify site (*Site configuration → Environment
    variables*): `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. That is what
-   `netlify/functions/log.mjs` reads; with either unset it answers 503 and the
-   game's uploads simply go nowhere, which is a working board with no replays
-   rather than a broken one. The game posts to `/api/log` on this site — see
-   `paths.LEADERBOARD_LOG_URL` if it is deployed somewhere else.
+   both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
+   back); with either unset they answer 503, and the game's uploads simply go
+   nowhere and no replay is watchable — a working board without replays rather
+   than a broken one. The game talks to `/api/log` and `/api/replay` on this site
+   — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
+   somewhere else.
 
 ## Local development
 
@@ -330,9 +354,11 @@ Re-run the generator and commit `tests/fixtures/tokens.json` if the token format
 in `settings.py` ever changes — that fixture file is what keeps the two encoders
 from drifting apart.
 
-`tests/log-function.test.mjs` covers the upload endpoint's two pure halves —
-what `validate` accepts and how `rateLimited`'s window behaves — which is why
-both are exported rather than buried in the handler.
+`tests/functions.test.mjs` covers both Netlify functions: what `log.mjs`'s
+`validate` accepts and how its `rateLimited` window behaves (which is why both
+are exported rather than buried in the handler), and that `replay.mjs` reads
+through the `public_replays` view, refuses a malformed id before it reaches a
+query string, and answers "unpublished" and "missing" identically.
 
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
@@ -364,7 +390,4 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-- **Watching a replay.** A verified score names its log, so "watch this game"
-  is a link back into the game build with the id in the fragment: it already has
-  `reconstruct` and a history scrubber. The engine is Python, so this is not a
-  thing to reimplement here in JS.
+Nothing outstanding.

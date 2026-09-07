@@ -85,14 +85,17 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   - `webstore.py` is the other browser bridge, same style: the address bar and a
     small key/value store (shared-settings tokens, personal bests). See the
     challenge-link notes under Key conventions.
-  - `upload.py` is the one bridge that talks to a network, and the one that is
+  - `share.py` is the one bridge that talks to a network, and the one that is
     not browser-only: it posts a finished match's replay to the leaderboard so a
     posted score can be checked against the game that produced it. Same
     defensive style — guarded everywhere, silent on failure,
     fire-and-forget on both backends (a `fetch` whose promise
     is never read on the web, a daemon thread off it) so it can never stall the
     frame. Pure of pygame, and it sends **only** when the player presses *Post to
-    leaderboard*. See "Checked scores" under Key conventions.
+    leaderboard* or the player has ticked *Share replays*. Its other half
+    *fetches* a replay to watch (`fetch_log` -> a `Download` the loop polls once a
+    frame, never awaited), which is the one thing here that reads a response. See
+    "Checked scores" under Key conventions.
 
 ### Turn resolution (engine.py)
 
@@ -243,7 +246,7 @@ intact.
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's `service_role` key is its only writer.
   - **The game uploads replays, and the worker checks scores against them.**
-    `Challenge.log` carries `GameLog.match_id` into the link, `upload.post_log`
+    `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`
     sends the log itself, and `tools/verify_scores.py` (the same scheduled worker
     as the bot column) replays it and records `verified` / `mismatch` /
     `unreadable` / `missing` in `score_checks`. The id rides on `Challenge` rather
@@ -254,7 +257,7 @@ intact.
       uploads that match. With *Share replays* ticked (`webstore.share_games`, a
       local preference — never a `Settings` field, which would travel in every
       link and move every setup digest), a game also checkpoints every
-      `upload.CHECKPOINT_TURNS` turns and again when it ends, which is what keeps
+      `share.CHECKPOINT_TURNS` turns and again when it ends, which is what keeps
       the *lost and abandoned* games — the ones no score can carry. Nothing else
       sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
       reproducible from its seed, so it is bytes without information.
@@ -267,6 +270,14 @@ intact.
     - **A row carries no identity** — a match id, a setup key and the moves.
       Grouping one person's games would need a durable client id, which is a
       tracking identifier by any other name.
+    - **Posting a score publishes that replay, and only that replay.**
+      `public_replays` is `game_logs` restricted to the matches a posted score
+      points at — the one view here deliberately *not* `security_invoker`, since
+      lending out a subset of a table nobody may read takes owner rights. A
+      launch URL of `#log=<match id>` makes the game fetch it and open history
+      review on it (`main.replay_request` -> `open_replay` -> `open_history`,
+      which the H key shares), so the board's *Watch* link is a link back into
+      the game rather than a second engine in JS.
     - **The verifier binds the log to the setup** (`same_setup`), or an easy
       map's replay would back a hard map's score. It proves the *game*, never
       that a human played it — that is what `hand` discloses, recomputed from the

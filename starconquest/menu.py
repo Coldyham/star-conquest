@@ -568,7 +568,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     # The one row here that is *not* a Settings field: it belongs to this
     # installation rather than to a game setup, so it never travels in a save file
     # or a shared link, and never shows a changed-dot (`_changed` reads Settings).
-    # Off until switched on — see `webstore.share_games` and `upload`.
+    # Off until switched on — see `webstore.share_games` and `share`.
     _row_label(surface, "Share replays", left, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
 

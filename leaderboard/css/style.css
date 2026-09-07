@@ -430,6 +430,17 @@ h1::after {
 }
 
 /* Top three wear cabinet medals; the leader gets the glow. */
+/* "Watch this replay" — sits in the result cell (see scoreRow), so it is styled
+ * as a quiet trailing action rather than another column of the board. */
+.watch {
+  margin-left: 0.75rem;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+.watch:hover { color: var(--gold); }
+
 .score.rank-1 .rank, .score.rank-1 .nm { color: var(--gold); }
 .score.rank-1 .nm { text-shadow: 0 0 12px rgba(255, 210, 63, 0.5); }
 .score.rank-2 .rank, .score.rank-2 .nm { color: #d5dcf0; }

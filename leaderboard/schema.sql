@@ -302,6 +302,31 @@ create table if not exists public.bot_scores (
 );
 
 -- ---------------------------------------------------------------------------
+-- public_replays: the replays anyone may watch — and the *only* rows of
+-- game_logs that ever leave this database to a visitor.
+--
+-- The rule is one join: a replay is public exactly when a posted score points at
+-- it. Posting a score is a deliberate, public act; a game that merely uploaded
+-- itself because "Share replays" was on is not, and stays unreadable. So the
+-- consent boundary is expressed here in SQL rather than in a function's `if`.
+--
+-- Note this view is deliberately NOT security_invoker, unlike game_summary and
+-- config_summary below. Those exist so a future tightened policy still applies
+-- to their callers; this one exists to lend out a *subset* of a table nobody may
+-- read, which only owner rights can do. The where clause is the whole boundary,
+-- so change it with that in mind.
+--
+-- Longest upload per match, since a game checkpoints as it goes: distinct on
+-- picks it, and the rest are that match's own history.
+-- ---------------------------------------------------------------------------
+create or replace view public.public_replays as
+select distinct on (l.match_id)
+  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log
+from public.game_logs l
+where exists (select 1 from public.scores s where s.match_id = l.match_id)
+order by l.match_id, l.turns desc, l.id desc;
+
+-- ---------------------------------------------------------------------------
 -- game_summary: the homepage in one select — every game with its current best
 -- score and last activity. security_invoker makes it evaluate RLS as the caller
 -- rather than the owner, so a future tightened policy can't be bypassed here.
@@ -467,9 +492,11 @@ create policy "score_checks public read" on public.score_checks for select using
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
   public.game_summary, public.config_summary, public.bot_scores,
-  public.score_checks to anon, authenticated;
+  public.score_checks, public.public_replays to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
--- policy is what keeps an uploaded replay readable only by the worker.
+-- policy is what keeps an uploaded replay readable only by the worker. The
+-- public_replays view above is the one exception, and it lends out only the
+-- replays a posted score already points at.
 -- bot_scores is absent from this list on purpose: no insert grant and no insert
 -- policy is what leaves the replay worker as its only writer.
 grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;

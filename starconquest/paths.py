@@ -45,7 +45,7 @@ WEB_SHARE_GAMES_KEY = "sc_share_games"
 LEADERBOARD_SUBMIT_URL = "https://star-conquest-leaderboard.netlify.app/submit"
 
 # Where a match's replay is posted, so a score can be checked against the game
-# that produced it (`upload.post_log`).
+# that produced it (`share.post_log`).
 #
 # Not Supabase directly: this is the leaderboard site's own function
 # (`leaderboard/netlify/functions/log.mjs`), which validates a row, rate-limits by
@@ -57,6 +57,14 @@ LEADERBOARD_SUBMIT_URL = "https://star-conquest-leaderboard.netlify.app/submit"
 # Blank disables uploading entirely, the same way a blank LEADERBOARD_SUBMIT_URL
 # disables the submit button.
 LEADERBOARD_LOG_URL = "https://star-conquest-leaderboard.netlify.app/api/log"
+
+# ...and where one is fetched back, for *watching* a replay: the board links here
+# with `#log=<match id>` and the game rebuilds the match in history mode
+# (`main.open_replay`). The other side of the same function directory, and only
+# ever serves a replay that a posted score points at — see `public_replays` in
+# `leaderboard/schema.sql`. Blank disables watching; a link would then simply
+# open the menu.
+LEADERBOARD_REPLAY_URL = "https://star-conquest-leaderboard.netlify.app/api/replay"
 
 
 def _android_data_dir() -> Path | None:

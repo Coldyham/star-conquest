@@ -1619,7 +1619,7 @@ def test_posting_a_score_uploads_the_replay_behind_it(monkeypatch):
     the one path that sends a log — and it sends it under the same setup key the
     score is filed against."""
     sent: list[tuple] = []
-    monkeypatch.setattr(main.upload, "post_log",
+    monkeypatch.setattr(main.share, "post_log",
                         lambda log, key: sent.append((log.match_id, key)) or True)
     monkeypatch.setattr(main.webstore, "open_url", lambda url: True)
     state, ui = _setup()
@@ -1640,7 +1640,7 @@ def test_sharing_a_challenge_link_uploads_nothing(monkeypatch):
     """The other half of the consent rule: handing a friend a link is not posting
     a score, and must not put the game on anyone's server."""
     sent: list[tuple] = []
-    monkeypatch.setattr(main.upload, "post_log",
+    monkeypatch.setattr(main.share, "post_log",
                         lambda log, key: sent.append((log, key)) or True)
     monkeypatch.setattr(main.webstore, "copy_link", lambda token: True)
     state, ui = _setup()
@@ -1676,10 +1676,10 @@ def _shared_game(monkeypatch, tmp_path, *, on: bool):
     """Play six turns with "Share replays" set to ``on``, capturing uploads."""
     sent: list[tuple] = []
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
-    monkeypatch.setattr(main.upload.webstore, "share_games", lambda: on)
-    monkeypatch.setattr(main.upload, "post_log",
+    monkeypatch.setattr(main.share.webstore, "share_games", lambda: on)
+    monkeypatch.setattr(main.share, "post_log",
                         lambda log, key: sent.append((log.turn_count, key)) or True)
-    monkeypatch.setattr(main.upload, "CHECKPOINT_TURNS", 3)
+    monkeypatch.setattr(main.share, "CHECKPOINT_TURNS", 3)
     state, ui = _setup()
     settings = Settings(seed=1, nodes=18, players=3)
     log = replay.new_log(settings, 1)
@@ -1705,5 +1705,74 @@ def test_an_unshared_game_uploads_nothing_while_it_is_played(monkeypatch, tmp_pa
     try:
         sent, _ = _shared_game(monkeypatch, tmp_path, on=False)
         assert sent == []
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Watching a posted replay (`#log=<id>`)
+# --------------------------------------------------------------------------- #
+def test_a_log_fragment_is_read_as_a_replay_request(monkeypatch):
+    """A settings token is base64url, which cannot contain '=' except as the
+    padding the encoder strips — so the prefix is an unambiguous discriminator."""
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "log=00112233445566ff")
+    assert main.replay_request() == "00112233445566ff"
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "eNrtVNtu4jAQ")
+    assert main.replay_request() == ""
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "")
+    assert main.replay_request() == ""
+
+
+def _watchable_log(tmp_path, monkeypatch, turns=6):
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    state, ui = _setup()
+    settings = Settings(seed=1, nodes=18, players=3)
+    log = replay.new_log(settings, 1)
+    log.path = tmp_path / "game.json"
+    for _ in range(turns):
+        main.resolve_turn(state, ui, log, settings)
+    return log
+
+
+def test_a_downloaded_replay_opens_as_a_reviewable_game(tmp_path, monkeypatch):
+    """The whole feature: the blob off the wire becomes the same object a resumed
+    save is, so the existing scrubber reviews it and a rewind can fork it."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        settings = Settings()          # whatever the menu happened to be showing
+        opened = main.open_replay(log.encoded(), settings)
+        assert opened is not None
+        state, ui, restored = opened
+        assert restored.match_id == log.match_id
+        assert state.turn == log.turn_count
+        # ...and the menu now describes the replay's setup, not its own.
+        assert settings.seed == 1 and settings.nodes == 18
+    finally:
+        pygame.quit()
+
+
+def test_opening_a_replay_enters_review_at_its_last_turn(tmp_path, monkeypatch):
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        states, fog, live = main.open_history(state, ui, log)
+        assert ui.history and not ui.playing
+        assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
+        assert ui.history_max == log.turn_count
+        assert ui.history_turn == ui.history_max
+        assert live is not None          # the live fog is stashed for the way out
+    finally:
+        pygame.quit()
+
+
+def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
+    """A 404 body, a truncated download or an empty match all have to land as
+    "no replay" rather than as an exception on the first frame."""
+    try:
+        _watchable_log(tmp_path, monkeypatch, turns=0)
+        for blob in ("", "no replay", "not base64!!"):
+            assert main.open_replay(blob, Settings()) is None
+        empty = replay.new_log(Settings(seed=1), 1)
+        assert main.open_replay(empty.encoded(), Settings()) is None
     finally:
         pygame.quit()

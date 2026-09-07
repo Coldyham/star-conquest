@@ -1,4 +1,4 @@
-"""Post a match's replay to the leaderboard, best-effort.
+"""Move a match's replay between the game and the leaderboard.
 
 The one platform bridge that talks to a network (with ``webstore``,
 ``softkeyboard`` and the web-only paths in ``main``/``menu``), written in the same
@@ -44,6 +44,13 @@ Two backends, because the browser has no sockets and the desktop has no ``fetch`
 So ``post_log`` returns whether the attempt was *started*, not whether it
 arrived — the same contract ``webstore.open_url`` documents.
 
+**Fetching is the one thing here that does read a response**, because a viewer
+has nothing to show without it: ``fetch_log`` starts a download and hands back a
+``Download`` the caller polls once a frame. Same two backends, same guards, and
+the same "a failure is a state, not an exception" rule — a poll only ever answers
+pending, ok or error. Nothing awaits: the browser build's loop yields once per
+frame and blocking it on a network round trip would freeze the canvas.
+
 Pure core in the sense that matters: no pygame, and no import of anything the
 headless tests can't load.
 """
@@ -53,9 +60,11 @@ from __future__ import annotations
 import json
 import threading
 
+from typing import Optional
+
 from . import webstore
-from .paths import LEADERBOARD_LOG_URL, is_web
-from .replay import GameLog
+from .paths import LEADERBOARD_LOG_URL, LEADERBOARD_REPLAY_URL, is_web
+from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
 # neither balance nor aesthetics, nothing in the menu tunes it, and it belongs to
@@ -208,3 +217,105 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
         return True
     except RuntimeError:  # thread creation refused; not worth doing inline
         return False
+
+
+# --------------------------------------------------------------------------- #
+# Fetching (a replay to watch)
+# --------------------------------------------------------------------------- #
+# Where a browser download parks its result. A single slot, because the game
+# fetches at most one replay — the one named in the launch URL.
+_WEB_SLOT = "__sc_replay"
+
+PENDING, OK, ERROR = "pending", "ok", "error"
+
+
+class Download:
+    """An in-flight replay fetch, polled once a frame.
+
+    ``poll`` returns ``(state, body)``: ``PENDING`` while it is still going, then
+    ``OK`` with the text, or ``ERROR`` with nothing. Deliberately not a promise, a
+    coroutine or a callback — the game loop is a frame loop, and the one thing it
+    must never do is wait.
+    """
+
+    def __init__(self, web: bool) -> None:
+        self._web = web
+        self._result: list[tuple[str, str]] = []   # a one-slot mailbox for the thread
+
+    def poll(self) -> tuple[str, str]:
+        if self._web:
+            return self._poll_web()
+        return self._result[0] if self._result else (PENDING, "")
+
+    def _poll_web(self) -> tuple[str, str]:
+        """Read the slot the fetch writes into.
+
+        Everything crosses the bridge as a *string*, via ``eval``, rather than by
+        reaching into a JS object from Python: a primitive return is the one shape
+        the bridge is reliable about, and it costs a few characters of JS.
+        """
+        import platform as _platform
+
+        try:
+            state = str(_platform.window.eval(f"window.{_WEB_SLOT}_state||''"))
+            if state != OK:
+                return (ERROR if state == ERROR else PENDING), ""
+            return OK, str(_platform.window.eval(f"window.{_WEB_SLOT}_body||''"))
+        except Exception:  # noqa: BLE001 — a bridge that isn't there never arrives
+            return ERROR, ""
+
+
+def fetch_log(match_id: str) -> Optional[Download]:
+    """Start fetching the replay named ``match_id``. None if it cannot be tried.
+
+    The id is checked here rather than trusted: it arrives from a URL fragment, so
+    it goes into a request only once it looks like something the game itself
+    minted.
+    """
+    if not LEADERBOARD_REPLAY_URL or not _MATCH_ID_RE.match(match_id):
+        return None
+    url = f"{LEADERBOARD_REPLAY_URL}?id={match_id}"
+    return _fetch_web(url) if is_web() else _fetch_desktop(url)
+
+
+def _fetch_web(url: str) -> Optional[Download]:
+    """Kick off a ``fetch`` that parks its own result on ``window``.
+
+    The handlers are written to leave the slot in exactly one of the three states
+    whatever happens — a non-2xx is as much an error as a dead connection, and a
+    promise with no rejection handler would surface in the console as a crash.
+    """
+    import platform as _platform
+
+    try:
+        _platform.window.eval(
+            f"window.{_WEB_SLOT}_state='{PENDING}';window.{_WEB_SLOT}_body='';"
+            f"fetch({json.dumps(url)}).then(function(r)"
+            "{return r.ok?r.text():Promise.reject()}).then(function(t)"
+            f"{{window.{_WEB_SLOT}_body=t;window.{_WEB_SLOT}_state='{OK}'}})"
+            f".catch(function(){{window.{_WEB_SLOT}_state='{ERROR}'}})"
+        )
+        return Download(web=True)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _fetch_desktop(url: str) -> Optional[Download]:
+    """The same download on a daemon thread, posting into the mailbox when done."""
+    import urllib.request
+
+    download = Download(web=False)
+
+    def _get() -> None:
+        try:
+            with urllib.request.urlopen(url, timeout=_TIMEOUT) as response:
+                body = response.read().decode("utf-8")
+            download._result.append((OK, body))
+        except Exception:  # noqa: BLE001 — every failure is the same failure here
+            download._result.append((ERROR, ""))
+
+    try:
+        threading.Thread(target=_get, daemon=True, name="log-download").start()
+        return download
+    except RuntimeError:
+        return None

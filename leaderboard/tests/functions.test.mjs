@@ -1,10 +1,10 @@
-// The upload endpoint's two pure halves: what it accepts, and how fast.
+// The two functions this site runs: the upload endpoint and the replay endpoint.
 //
-// The handler itself is mostly plumbing (env lookup, CORS, one fetch), so what
-// is worth pinning is the validation — this is an unauthenticated endpoint whose
-// rows carry 5-14 KiB blobs and a `match_id` the score verifier keys on — and
-// the rate limiter's window arithmetic, which is easy to get subtly wrong and
-// impossible to notice in production.
+// Both handlers are mostly plumbing (env lookup, CORS, one fetch), so what is
+// worth pinning is where they make a decision. For `log.mjs` that is validation
+// — an unauthenticated endpoint whose rows carry 5-14 KiB blobs and a `match_id`
+// the score verifier keys on — plus the rate limiter's window arithmetic, which
+// is easy to get subtly wrong and impossible to notice in production.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -13,7 +13,7 @@ import { rateLimited, validate } from "../netlify/functions/log.mjs";
 
 const MATCH = "00112233445566ff";
 
-/** A row the game would really post (`upload.row_for`). */
+/** A row the game would really post (`share.row_for`). */
 function row(over = {}) {
   return {
     match_id: MATCH,
@@ -106,4 +106,76 @@ test("one caller hitting the limit does not block another", () => {
   for (let i = 0; i < 40; i += 1) rateLimited("noisy", 1000 + i, store);
   assert.equal(rateLimited("noisy", 1050, store), true);
   assert.equal(rateLimited("quiet", 1050, store), false);
+});
+
+// --- the read half ---------------------------------------------------------
+//
+// `replay.mjs` is thinner than `log.mjs` on purpose: what may be served is
+// decided by the `public_replays` view, not by a condition here. So what is
+// worth pinning is the id check (it comes off a URL fragment and goes into a
+// query string) and that a missing replay and an unpublished one are the same
+// answer — telling them apart would disclose that some unposted game exists.
+
+import replayHandler from "../netlify/functions/replay.mjs";
+
+/** Run the handler with the environment and Supabase response we choose. */
+async function callReplay(id, { rows = [], ok = true, configured = true } = {}) {
+  const env = { SUPABASE_URL: process.env.SUPABASE_URL, SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY };
+  const fetched = globalThis.fetch;
+  process.env.SUPABASE_URL = configured ? "https://p.supabase.co" : "";
+  process.env.SUPABASE_SERVICE_KEY = configured ? "service-key" : "";
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(url);
+    return { ok, status: ok ? 200 : 500, json: async () => rows, text: async () => "" };
+  };
+  try {
+    const response = await replayHandler(
+      new Request(`https://board.test/api/replay?id=${encodeURIComponent(id)}`),
+    );
+    return { response, body: await response.text(), seen };
+  } finally {
+    globalThis.fetch = fetched;
+    process.env.SUPABASE_URL = env.SUPABASE_URL ?? "";
+    process.env.SUPABASE_SERVICE_KEY = env.SUPABASE_SERVICE_KEY ?? "";
+  }
+}
+
+test("a published replay comes back as the encoded log itself", async () => {
+  const { response, body, seen } = await callReplay(MATCH, { rows: [{ log: "eNrtVNtu" }] });
+  assert.equal(response.status, 200);
+  // Plain text, because that is exactly what GameLog.decode wants; wrapping it
+  // in JSON would only make the game unwrap it again.
+  assert.match(response.headers.get("content-type"), /text\/plain/);
+  assert.equal(body, "eNrtVNtu");
+  // Read through the view, never the table: that is where "a posted score
+  // published this" is decided.
+  assert.match(seen[0], /public_replays\?select=log&match_id=eq\./);
+});
+
+test("an id of the wrong shape never reaches the query string", async () => {
+  for (const bad of ["", "nope", `${MATCH}0`, "*", "eq.anything"]) {
+    const { response, seen } = await callReplay(bad);
+    assert.equal(response.status, 400, `accepted ${bad}`);
+    assert.equal(seen.length, 0, "must not have asked the database");
+  }
+});
+
+test("an unpublished replay is indistinguishable from a missing one", async () => {
+  // Both are "there is no replay here to watch" — anything more would disclose
+  // that some game nobody posted exists under that id.
+  const { response } = await callReplay(MATCH, { rows: [] });
+  assert.equal(response.status, 404);
+});
+
+test("an unconfigured board serves nothing rather than failing oddly", async () => {
+  const { response, seen } = await callReplay(MATCH, { configured: false });
+  assert.equal(response.status, 503);
+  assert.equal(seen.length, 0);
+});
+
+test("a database error is not relayed to the caller", async () => {
+  const { response, body } = await callReplay(MATCH, { ok: false });
+  assert.equal(response.status, 502);
+  assert.equal(body, "lookup failed");
 });

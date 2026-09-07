@@ -729,7 +729,7 @@ fast the runner was that day. Where one is used, the count lands in
 `bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
 reproducible alongside the others.
 
-## Checked scores (`upload.py`, `tools/verify_scores.py`)
+## Checked scores (`share.py`, `tools/verify_scores.py`)
 
 The board's other pure-function-of-the-inputs job, and the answer to the oldest
 entry under `leaderboard/README.md`'s **Known limitations**: a score in a
@@ -753,7 +753,7 @@ from the seed, or every player of one shared map would mint the same id.
 **Two things send, and both are consented to.** Pressing *Post to leaderboard*
 uploads the match behind that score. Ticking *Share replays* on the menu
 (`webstore.share_games`, off until switched on) also uploads a game as it goes —
-every `upload.CHECKPOINT_TURNS` turns and again when it ends. The cadence is the
+every `share.CHECKPOINT_TURNS` turns and again when it ends. The cadence is the
 whole point of the second one: a match that is *abandoned* never reaches an end,
 and abandoned and lost games are exactly what a score can never carry and what a
 bot is worth measuring against. Nothing else sends — `share_challenge` does not,
@@ -766,7 +766,7 @@ not to a game setup, so it has no business in a save file or a shared link — a
 a new `Settings` field would move `challenge_key()` for every map that has ever
 existed.
 
-`upload.py` is a platform bridge in the `webstore`/`softkeyboard` style — guarded
+`share.py` is a platform bridge in the `webstore`/`softkeyboard` style — guarded
 everywhere, silent on failure, fire-and-forget on both sides (a `fetch` whose
 promise is never read on the web, a daemon thread off it) so a POST can never
 stall the frame. It keys a row by `GameLog.setup_key()`, which pins the seed
@@ -818,3 +818,38 @@ What none of this proves is that a *human* played the game. A bot driving the
 seat produces a log that verifies like any other. That is what `hand` is for, and
 the verifier recomputes it from the log's own per-turn autoplay flags rather than
 trusting the number in the link.
+
+### Watching one back
+
+A posted score names its replay, so the board can offer *Watch* — and the link
+goes back into the **game**, not into a player written here. The reviewer already
+exists: `reconstruct` rebuilds every turn, `build_history` folds the fog as it
+stood, and the scrubber walks it. The engine is Python, so a JS viewer would be a
+second engine to keep in step with the first, forever.
+
+`#log=<match id>` is the launch URL (`--watch` off the web), and it is
+distinguishable from a settings token by prefix alone: a token is base64url,
+which cannot contain `=` except as the padding the encoder strips.
+`main.open_replay` decodes the blob and goes through `resume_game`, so a watched
+replay is the same object a resumed save is — which is what makes *rewinding out
+of one* work for nothing: fork it at any turn and carry on playing from there. It
+adopts the replay's own settings, so leaving review lands on that setup rather
+than whatever the menu was showing.
+
+`open_history` is the entry the H key and a watched replay share. They differ
+only in how they came by the log, and must not differ in what review looks like.
+
+**The download is polled, never awaited.** `share.fetch_log` starts it and hands
+back a `Download` the frame loop asks once per frame; the browser build yields a
+frame at a time, so blocking on a round trip would freeze the canvas before
+anything had been drawn. Every failure is a *state* — pending, ok, error — rather
+than an exception arriving on some arbitrary frame.
+
+**What is watchable is decided in SQL.** `public_replays` is `game_logs` joined
+to the scores that point at it, and it is the one view here deliberately *not*
+`security_invoker`: the others exist so a tightened policy still binds their
+callers, while this one exists to lend out a subset of a table nobody may read,
+which only owner rights can do. Its `where` clause is the whole consent boundary,
+so posting a score publishes that game and a checkpointed one stays private. The
+submit page says so at the point the decision is made, which is the only place
+saying it is worth anything.

@@ -19,7 +19,7 @@ the player did? Sample a position every few turns and one game becomes dozens of
 paired trials instead of one number.
 
 The losses and the abandoned games matter as much as the wins, and are the reason
-the game stores more than posted scores (`starconquest/upload.py`). There is no
+the game stores more than posted scores (`starconquest/share.py`). There is no
 human finish to compare against in those, but "can any bot still take this board?"
 is a fair question, a hard one, and one no leaderboard score can ever pose —
 only wins are postable.
