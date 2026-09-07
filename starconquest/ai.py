@@ -84,9 +84,21 @@ def decide(state: GameState, pid: int) -> list[Order]:
     return strategy(state, pid)
 
 
+# The measured full-roster ladder (docs/bot-design.md "Full roster ladder"),
+# strongest to weakest. knower leads despite tests/sim.py --ladder finding
+# marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
+# noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
+# aux=12), not its default seat. A strategy missing from this list — a fresh
+# drop-in with no measured ladder placement — sorts alphabetically after it.
+LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
+
+
 def available_strategies() -> list[str]:
-    """Names for the menu dropdown: the built-in heuristic first, then the rest."""
-    return ["heuristic"] + sorted(n for n in STRATEGIES if n != "heuristic")
+    """Names for the menu dropdown: ladder order first, then any unranked
+    strategy alphabetically."""
+    ranked = [n for n in LADDER_ORDER if n in STRATEGIES]
+    unranked = sorted(n for n in STRATEGIES if n not in LADDER_ORDER)
+    return ranked + unranked
 
 
 # The one bot-defined knob, `AiParams.aux`: a strategy declares what it means by

@@ -79,13 +79,16 @@ def test_load_models_missing_dir_is_empty(tmp_path):
     assert ai.load_models(tmp_path / "does_not_exist") == []
 
 
-def test_available_strategies_lists_heuristic_first():
+def test_available_strategies_follows_ladder_order():
     ai.register("zzz_test", lambda st, pid: [])
     try:
         names = ai.available_strategies()
-        assert names[0] == "heuristic"
-        assert "zzz_test" in names
-        assert names[1:] == sorted(names[1:])     # the rest are sorted
+        ranked = [n for n in names if n in ai.LADDER_ORDER]
+        unranked = [n for n in names if n not in ai.LADDER_ORDER]
+        assert names == ranked + unranked                       # ranked names come first
+        assert ranked == [n for n in ai.LADDER_ORDER if n in names]  # in ladder order
+        assert unranked == sorted(unranked)                     # the rest are sorted
+        assert "zzz_test" in unranked
     finally:
         ai.STRATEGIES.pop("zzz_test", None)
 

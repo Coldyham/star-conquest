@@ -181,6 +181,13 @@ lasting 600 turns is not a better result than dying on turn 40. `js/standings.mj
 (`botOrder`, `bestBot`, `humanVsBots`) holds that logic, and
 `tests/standings.test.mjs` pins it.
 
+The main list carries the same verdict as a glance-able "Bot leads" badge on any
+map's card, rather than making a visitor open the map to find out nobody has
+beaten it yet. `game_summary`'s `bot_turns`/`bot_lost`/`bot_name` (schema.sql, a
+lateral join on `bot_scores` mirroring the one already used for the human best
+score) carry what the badge needs without a second per-game query;
+`js/format.mjs`'s `botLeadBadge` decides whether to show it.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and

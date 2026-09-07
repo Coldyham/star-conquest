@@ -180,8 +180,9 @@ test("winning bots rank by the game's own rule, losing ones never rank at all", 
   assert.deepEqual(
     botOrder(rows).map((row) => row.bot),
     // knower before thinker on the tie-break; the two that never won follow in
-    // name order, which claims nothing about which of them did better.
-    ["knower", "thinker", "claudebot", "marshal"],
+    // ladder order (marshal ranks above claudebot), which claims nothing about
+    // which of them did better on *this* map.
+    ["knower", "thinker", "marshal", "claudebot"],
   );
 });
 
@@ -189,8 +190,13 @@ test("a bot that lasted longer is not thereby better than one that died early", 
   // The whole reason losses are split out: 600 turns of stalemate is not a
   // better result than dying on turn 40, and ordering by turns would say it was.
   const rows = [bot("a", 600, 9, false), bot("b", 40, 9, false)];
-  assert.deepEqual(botOrder(rows).map((row) => row.bot), ["a", "b"]); // by name only
+  assert.deepEqual(botOrder(rows).map((row) => row.bot), ["a", "b"]); // neither ranked, so by name
   assert.equal(bestBot(rows), null);
+});
+
+test("a bot missing from the ladder (a fresh drop-in) sorts after every ranked one", () => {
+  const rows = [bot("zzz_test", 600, 9, false), bot("rusherplus", 40, 9, false), bot("thinker", 90, 9, false)];
+  assert.deepEqual(botOrder(rows).map((row) => row.bot), ["thinker", "rusherplus", "zzz_test"]);
 });
 
 test("botOrder does not mutate its input", () => {
