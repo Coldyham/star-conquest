@@ -152,21 +152,39 @@ export function tally(rows, roster) {
 }
 
 /**
+ * The measured full-roster ladder (docs/bot-design.md "Full roster ladder" in
+ * the Python repo, mirrored here since JS can't import it), strongest to
+ * weakest. Keep in sync with `starconquest/ai.py`'s `LADDER_ORDER`.
+ */
+export const LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
+
+/** Ladder order first, any bot missing from it (a fresh drop-in) alphabetical after. */
+function byLadderOrder(a, b) {
+  const ia = LADDER_ORDER.indexOf(a.bot);
+  const ib = LADDER_ORDER.indexOf(b.bot);
+  if (ia === -1 && ib === -1) return a.bot.localeCompare(b.bot);
+  if (ia === -1) return 1;
+  if (ib === -1) return -1;
+  return ia - ib;
+}
+
+/**
  * A map's bot replays in display order: the ones that took the board first,
- * ranked by the game's own rule, then the ones that didn't, by name.
+ * ranked by the game's own rule, then the ones that didn't, in ladder order.
  *
  * The split is the point. A bot that never won has a `turns` figure — how long
  * it lasted before it was wiped out or the replay hit its turn cap — and that
  * number is *not* a score. Sorting the failures by it would quietly rank them
  * against each other, and putting them in the same ordering as the winners would
- * rank a quick death above a slow victory. So losses sit after every win, in a
- * fixed alphabetical order that claims nothing.
+ * rank a quick death above a slow victory. So losses sit after every win, ordered
+ * by the roster's measured strength instead — a ranking that claims nothing
+ * about *this* map, only about the bots in general.
  *
  * Rows are the shape `bot_scores` stores: {bot, won, turns, lost, bot_timeouts}.
  */
 export function botOrder(rows) {
   const won = rows.filter((row) => row.won).sort(compareScores);
-  const lost = rows.filter((row) => !row.won).sort((a, b) => a.bot.localeCompare(b.bot));
+  const lost = rows.filter((row) => !row.won).sort(byLadderOrder);
   return [...won, ...lost];
 }
 
