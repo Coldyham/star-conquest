@@ -757,6 +757,68 @@ our own garrison cannot decline the engagement.
 This is what took marshal to the top of the ladder and level with knower
 head-to-head; see the table under "Where marshal stands".
 
+### Rushing the enemy: right about the game, inert on this bot
+
+The reasoning is sound and both of its premises check out. Taking a neutral is a
+net +1; taking a rival's system is a net +2, since it also costs them one. And
+early on a rival's systems really are the cheaper target — instrumented over
+~110k target evaluations, mean garrison on what marshal could reach:
+
+    turns     neutral targets  mean ships   enemy targets  mean ships   enemy cost
+    1-20                 9333         7.3            983         4.8        0.66x
+    21-50                8621         7.7          15616         6.5        0.84x
+    51-120               1559         6.9          49680        11.6        1.67x
+    121+                  104         0.5          26981        19.9       36.38x
+
+Cheaper for about the first fifty turns and dearer after, which is when the
+neutrals left are the stripped leftovers nobody wanted. Add the retreat rate
+above (86.7%) and an early strike on a rival often costs nothing at all.
+
+`_richness` has no term for who owns a target, so this looks like a clear
+omission. It measures null at every weighting and every seat count:
+
+    variant                            cell         rate      z
+    base x1.5 when enemy-held      24n 3p          49.7%  -0.14
+    base x2.0 when enemy-held      24n 3p          49.8%  -0.09
+    base +1.0 when enemy-held      24n 3p          50.0%  +0.00
+    base +3.0 when enemy-held      24n 3p          50.1%  +0.05
+    enemy ranked ahead of every neutral, flat      50.3%  +0.14
+    base x2.0 when enemy-held      30n 4p          50.5%  +0.28
+    enemy ranked first             30n 4p          50.2%  +0.12
+    base x2.0 when enemy-held      40n 5p          51.2%  +0.68
+
+**Because marshal is already a rusher — it just never looked like one.** It takes
+whatever is in front of it, and its capture mix tracks availability to within a
+point at every phase of the game:
+
+    turns     enemy share of what was adjacent   enemy share of what it took
+    1-20                                  6.9%                          5.7%
+    21-50                                61.9%                         61.3%
+    51-120                               96.6%                         96.5%
+    121+                                 99.7%                          99.3%
+
+There is no economy-first bias to correct. In the opening it takes neutrals
+because 93% of what it can reach *is* neutral, not out of preference. The advice
+is aimed at a strategy this bot never had.
+
+**The strong form is actively worse.** Declining neutral expansion entirely while
+any enemy target is reachable — the literal "rush the enemy" — reads **45.1%
+(z = -2.06)**. Preferring the +2 over the +1 is only worth something when you must
+choose, and Phase 3 usually does not have to: it strikes at *every* affordable
+target. Skipping the neutral just forfeits the +1 and buys nothing.
+
+**And there is a ceiling on this whole channel, which is the part worth keeping.**
+Target priority binds rarely: of the targets affordable on their own budget, only
+**10.4%** are lost to another target having spent it first. Inverting the sort to
+the worst possible order — poorest and biggest first — costs just 49.2% (z = -0.33)
+at 24 nodes and 46.2% (-1.63) at 18. So the *target sort* is worth at most about
+two points in a duel-like field, and **no preference expressed through it can be
+worth more than that.** Note this bounds the sort, not `_richness` as a whole:
+`_wedge` reads 62-64% at four and five players through the same function, because
+it also steers `_front_pull` and the `_flow_to_front` seeding, and because what it
+discriminates is a position rather than an owner. Before weighting a new term into
+`_richness`, check which of those two channels it is actually meant to act on.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/

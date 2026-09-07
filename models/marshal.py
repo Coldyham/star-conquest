@@ -176,6 +176,18 @@ def _richness(state, pid, system, max_prod: int) -> float:
 
     A poor system that opens onto a rich one is worth more than its own
     production alone says; one wedged between two rivals is worth less.
+
+    Deliberately carries **no term for who owns the target**, though taking a
+    rival's system is a net +2 (one off them, one onto us) against a neutral's
+    +1, and early on a rival's systems are the cheaper target as well (0.66x the
+    garrison over the first twenty turns). Weighting that in measures null at
+    every setting tried, because Phase 3 strikes at *every* affordable target, so
+    a preference only binds when the budget forces a choice — 10.4% of the time.
+    Inverting this sort entirely costs about two points, which caps what anything
+    routed through it can be worth. See "Rushing the enemy" in
+    `docs/bot-design.md`, and note the cap applies to the *sort*: `_wedge` is
+    worth 12-14 points through this same function because it also steers
+    `_front_pull` and the `_flow_to_front` seeding.
     """
     base = max_prod - system.production + 1
     beyond = max((max_prod - state.systems[n].production + 1
