@@ -292,7 +292,8 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
     If the tab is refused — a popup blocker, or no browser to hand — fall back to
     the clipboard so the link is still recoverable, mirroring ``share_challenge``.
     """
-    if not paths.LEADERBOARD_SUBMIT_URL:
+    submit = webstore.leaderboard_url(paths.LEADERBOARD_SUBMIT_PATH)
+    if not submit:
         return "No leaderboard is configured"
     shared = challenge_settings(settings, state, ui, seed, log)
     # Send the replay first, so it is on its way before the tab steals focus —
@@ -300,7 +301,7 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
     # `share_challenge` sends nothing, and a match merely played sends nothing.
     share.post_log(log, shared.challenge.key if shared.challenge else "")
     token = shared.to_token()
-    url = f"{paths.LEADERBOARD_SUBMIT_URL}#{token}"
+    url = f"{submit}#{token}"
     if webstore.open_url(url):
         return "Leaderboard opened — add your name to post"
     if webstore.copy_to_clipboard(url):

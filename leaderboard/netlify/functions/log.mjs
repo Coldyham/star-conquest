@@ -2,33 +2,58 @@
  * POST /api/log — accept one game replay from the game and store it.
  *
  * The only writer of `game_logs`. Everything else on this board inserts straight
- * into PostgREST with the public anon key, and that is fine for a score: a bad
- * row is a hundred bytes and a person with the SQL editor. A replay is 5-14 KiB,
- * so an insert path anyone can aim a script at is a storage bill rather than a
- * nuisance — hence a function in front of it, holding the only key that may write
- * the table (`schema.sql` gives `game_logs` no insert policy and no anon grant).
+ * into PostgREST with the public publishable key, and that is fine for a score: a
+ * bad row is a hundred bytes and a person with the SQL editor. A replay is 5-14
+ * KiB, so an insert path anyone can aim a script at is a storage bill rather than
+ * a nuisance — hence a function in front of it, holding the only key that may
+ * write the table (`schema.sql` gives `game_logs` no insert policy and no public
+ * grant).
  *
  * What it does, in order: reject anything but a POST, rate-limit the caller,
- * check the row's shape and size, then forward it under the service_role key.
+ * check the row's shape and size, then forward it under the secret key.
  *
  * Environment (set in the Netlify site's settings, never committed):
- *   SUPABASE_URL          https://<project>.supabase.co
- *   SUPABASE_SERVICE_KEY  the service_role key — the same secret the GitHub
- *                         Actions worker uses, and just as much not-in-git
+ *   SUPABASE_URL         https://<project>.supabase.co
+ *   SUPABASE_SECRET_KEY  Supabase's secret key (`sb_secret_…`) — the same one the
+ *                        GitHub Actions worker uses, and just as much not-in-git.
+ *                        `SUPABASE_SERVICE_KEY` is read too, for the legacy
+ *                        service_role JWT that key replaced.
  *
  * With either unset the function answers 503 and stores nothing, which is the
  * same "configured or cleanly inert" shape the rest of the board has.
  */
 
-// The game's own site. A browser upload is cross-origin (the game is a separate
-// Netlify site from this one), so the preflight has to be answered with an origin
-// the browser will accept — `*` would do, but naming them keeps the surface to
-// the two places the game actually runs. A desktop build sends no Origin header
-// at all, and CORS has nothing to say about it.
-const ALLOWED_ORIGINS = [
-  "https://star-conquest.netlify.app",
-  "http://localhost:8000",
-];
+// A browser upload is cross-origin (the game is a separate Netlify site), so the
+// preflight has to be answered with an origin the browser will accept. `*` would
+// do; this keeps the surface to the game's own deploys instead.
+//
+// Matched by shape rather than listed, because the deploys that matter are
+// contextual: `deploy-preview-42--star-conquest.netlify.app` is as real a caller
+// as production, and a preview of the game posts to the preview of this site
+// (see `config.mjs`, and `paths.sibling_host` in the game). A desktop build sends
+// no Origin header at all, and CORS has nothing to say about it.
+const GAME_SITE = "star-conquest";
+const LOCAL = ["http://localhost:8000", "http://127.0.0.1:8000"];
+
+export function allowedOrigin(origin) {
+  if (!origin) return false;
+  if (LOCAL.includes(origin)) return true;
+  let host;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "https:") return false;
+    host = url.hostname;
+  } catch {
+    return false;
+  }
+  if (!host.endsWith(".netlify.app")) return false;
+  const label = host.slice(0, -".netlify.app".length);
+  // The site name is the last `--`-separated part — and the whole label when
+  // there is no context prefix, which is production. So a prefix is allowed and a
+  // *different site* that merely ends in ours is not.
+  const cut = label.lastIndexOf("--");
+  return (cut < 0 ? label : label.slice(cut + 2)) === GAME_SITE;
+}
 
 // Generous against the 13.6 KiB worst case measured across whole games, and the
 // same bound `game_logs`' own check constraint enforces — this one exists to
@@ -116,7 +141,7 @@ export function validate(body) {
 
 function cors(origin) {
   const headers = { "Cache-Control": "no-store" };
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (allowedOrigin(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Headers"] = "Content-Type";
     headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
@@ -138,7 +163,11 @@ export default async function handler(request) {
   if (request.method !== "POST") return reply(405, { error: "POST only" }, origin);
 
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY;
+  // Supabase's secret key (`sb_secret_…`), which replaced the service_role JWT —
+  // that one is under its "Legacy API keys" tab now and still works, so both
+  // variable names are read. Either carries the `service_role` postgres role,
+  // which is what every grant in schema.sql is written against.
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return reply(503, { error: "not configured" }, origin);
 
   const length = Number(request.headers.get("content-length") || 0);

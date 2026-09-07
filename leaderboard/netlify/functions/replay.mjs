@@ -10,10 +10,10 @@
  * itself because "Share replays" was on stays unreadable. This function selects
  * from the view and nothing else; it has no `if` that could drift from that rule.
  *
- * Environment: `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`, exactly as `log.mjs`
- * needs them. The view is granted to `anon` as well, so a page can list what is
- * watchable without a key; the game comes through here because it should not
- * carry one.
+ * Environment: `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or the legacy
+ * `SUPABASE_SERVICE_KEY`), exactly as `log.mjs` needs them. The view is granted
+ * to the publishable key as well, so a page can list what is watchable without a
+ * secret; the game comes through here because it should not carry either.
  *
  * The response is the encoded log itself — `replay.GameLog.encoded` output, which
  * is base64url text — as `text/plain`, because that is precisely what
@@ -45,7 +45,11 @@ export default async function handler(request) {
   if (request.method !== "GET") return reply(405, "GET only");
 
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY;
+  // Supabase's secret key (`sb_secret_…`), which replaced the service_role JWT —
+  // that one is under its "Legacy API keys" tab now and still works, so both
+  // variable names are read. Either carries the `service_role` postgres role,
+  // which is what every grant in schema.sql is written against.
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return reply(503, "not configured");
 
   const id = new URL(request.url).searchParams.get("id") || "";

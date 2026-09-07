@@ -163,7 +163,7 @@ runner only 2x slower would otherwise have cached a different answer for knower 
 a 40-node map.)
 
 `bot_scores` is the one table on the board the public cannot write: a read policy,
-no insert policy, no insert grant, and the worker's `service_role` key bypassing
+no insert policy, no insert grant, and the worker's secret key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that
 nobody bothers; these genuinely are.
 
@@ -297,19 +297,22 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    file's own final statement (`notify pgrst, 'reload schema';`) normally makes
    that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
    here, run only when two keys need merging (see above).
-3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
-   key belongs in git — it is designed to be public, and RLS is the real boundary.
-   The `service_role` key must never go in this repo. Optionally set `GAME_URL` to
-   where the game is deployed, and each map page gains a "Play this map" link
-   (and each config page a "Play a new seed" one).
+3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and the project's
+   *publishable* key (`sb_publishable_…`; the older `anon` JWT is under Supabase's
+   "Legacy API keys" tab and works too). That key belongs in git — it is designed
+   to be public, and RLS is the real boundary. A **secret** key (`sb_secret_…`, or
+   the legacy `service_role`) must never go in this repo. `GAME_URL_FALLBACK` is
+   where the game is deployed; on a `.netlify.app` host it is usually not used at
+   all — see "Finding each other" below.
 4. **Create a second Netlify site** from this repo with **Base directory** set to
    `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
    files as-is. The root `netlify.toml` and the game's own site are untouched.
 5. **Optional — turn on the bot column and score checking.** Add two repository secrets under
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
-   `SUPABASE_SERVICE_KEY` set to the project's **service_role** key (*not* the
-   anon key in `config.mjs` — that one is public on purpose, this one must never
-   be). The workflow skips itself cleanly while they are unset, so there is
+   `SUPABASE_SECRET_KEY` set to the project's **secret** key `sb_secret_…` (*not*
+   the publishable key in `config.mjs` — that one is public on purpose, this one
+   must never be). Supabase moved the old `service_role` JWT to a "Legacy API
+   keys" tab; it still works, under either that name or `SUPABASE_SERVICE_KEY`. The workflow skips itself cleanly while they are unset, so there is
    nothing to undo if you'd rather not. It runs every six hours — a cadence set
    by Actions minutes on a private repo rather than by how fresh the column needs
    to be, with *Run workflow* for when you want it sooner — and any run keeps a
@@ -317,13 +320,41 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    limitations*.
 6. **Optional — accept replay uploads.** Set the *same two* values as
    environment variables on this Netlify site (*Site configuration → Environment
-   variables*): `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. That is what
+   variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_KEY`). That is what
    both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
    back); with either unset they answer 503, and the game's uploads simply go
    nowhere and no replay is watchable — a working board without replays rather
    than a broken one. The game talks to `/api/log` and `/api/replay` on this site
    — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
    somewhere else.
+
+## Finding each other
+
+The game and the board are two Netlify sites whose names differ by exactly
+`-leaderboard`, and Netlify names every other deploy `<context>--<site>.netlify.app`
+— `deploy-preview-42--…` for a PR, `<branch>--…` for a branch deploy. Both sites
+build from this one repository, so a PR produces the *same* context on each.
+
+That makes the sibling derivable instead of configured. Each side edits the tag
+into or out of its own hostname:
+
+    deploy-preview-42--star-conquest.netlify.app
+    deploy-preview-42--star-conquest-leaderboard.netlify.app
+
+So a deploy preview of the game uploads to, and watches replays from, the deploy
+preview of the board; a branch deploy pairs with its branch deploy; production
+with production — with no URL edited by hand between them. `sibling_host` in
+`starconquest/paths.py` is one direction (used by `webstore.leaderboard_origin`),
+`siblingGame` in `js/config.mjs` the other, and `allowedOrigin` in
+`netlify/functions/log.mjs` accepts the same shape so a preview is not refused by
+CORS. Any host the rule cannot read — a custom domain, localhost, a desktop
+build — falls back to the constant, which is the behaviour this always had.
+
+**A preview shares production's database.** Netlify gives deploy previews the
+site's environment variables, so a test upload from a preview lands in the real
+`game_logs`. If that matters, set a different `SUPABASE_URL` for the *Deploy
+previews* context (Netlify supports per-context values) and point it at a scratch
+project.
 
 ## Local development
 
@@ -333,7 +364,7 @@ netlify dev                                     # ...or this, to run the functio
 ```
 
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
-PostgREST accepts any origin for the anon key. Without one, every page says so
+PostgREST accepts any origin for the publishable key. Without one, every page says so
 instead of failing obscurely. A plain static server does not run
 `netlify/functions/`, so uploads need `netlify dev` (with the two environment
 variables set); `localhost:8000` is in the function's CORS allowlist for that.

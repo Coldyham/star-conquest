@@ -63,7 +63,7 @@ import threading
 from typing import Optional
 
 from . import webstore
-from .paths import LEADERBOARD_LOG_URL, LEADERBOARD_REPLAY_URL, is_web
+from .paths import LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH, is_web
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
@@ -87,9 +87,19 @@ _HUMAN_SEAT = 1
 _TIMEOUT = 20
 
 
+def log_url() -> str:
+    """The upload endpoint, resolved now rather than at import.
+
+    Resolved per call because on the web it depends on where the page is being
+    served from — a deploy preview posts to the matching preview of the board
+    (``webstore.leaderboard_origin``).
+    """
+    return webstore.leaderboard_url(LEADERBOARD_LOG_PATH)
+
+
 def configured() -> bool:
     """Whether an endpoint to upload to is set at all (see ``paths``)."""
-    return bool(LEADERBOARD_LOG_URL)
+    return bool(log_url())
 
 
 def worth_sending(log: GameLog) -> bool:
@@ -185,7 +195,7 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     try:
         _platform.window.eval(
             "fetch(%s,{method:'POST',headers:%s,body:%s}).catch(function(){})"
-            % (json.dumps(LEADERBOARD_LOG_URL), json.dumps(headers), json.dumps(body))
+            % (json.dumps(log_url()), json.dumps(headers), json.dumps(body))
         )
         return True
     except Exception:  # noqa: BLE001 — a bridge that isn't there is not an error
@@ -201,7 +211,7 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
     import urllib.request
 
     request = urllib.request.Request(
-        LEADERBOARD_LOG_URL, data=body.encode("utf-8"), method="POST")
+        log_url(), data=body.encode("utf-8"), method="POST")
     for name, value in headers.items():
         request.add_header(name, value)
 
@@ -272,9 +282,10 @@ def fetch_log(match_id: str) -> Optional[Download]:
     it goes into a request only once it looks like something the game itself
     minted.
     """
-    if not LEADERBOARD_REPLAY_URL or not _MATCH_ID_RE.match(match_id):
+    endpoint = webstore.leaderboard_url(LEADERBOARD_REPLAY_PATH)
+    if not endpoint or not _MATCH_ID_RE.match(match_id):
         return None
-    url = f"{LEADERBOARD_REPLAY_URL}?id={match_id}"
+    url = f"{endpoint}?id={match_id}"
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 

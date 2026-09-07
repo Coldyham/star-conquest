@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from . import paths
 from .paths import (WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY, WEB_SHARED_SETTINGS_KEY,
                     data_dir, is_web)
 
@@ -145,6 +146,39 @@ def record_best(challenge_key: str, turns: int, lost: int, *legacy: str) -> bool
     data[challenge_key] = {"turns": turns, "lost": lost}
     set(WEB_BESTS_KEY, json.dumps(data, separators=(",", ":")))
     return True
+
+
+def leaderboard_origin() -> str:
+    """Where the leaderboard lives, from where *we* are.
+
+    On the web the two sites' names differ by one string, and Netlify names every
+    deploy of both from the same context — so the board that matches this build is
+    derivable rather than configured (see ``paths.sibling_host``). A deploy
+    preview of the game therefore talks to the deploy preview of the board, with
+    nothing to edit by hand between them.
+
+    Everywhere else, and for any host the rule cannot read — a custom domain,
+    localhost, desktop, Android — the configured production origin, which is what
+    the feature has always used.
+    """
+    if is_web():
+        import platform as _platform
+
+        try:
+            host = str(_platform.window.location.hostname)
+        except Exception:  # noqa: BLE001 — no DOM, no derivation
+            host = ""
+        sibling = paths.sibling_host(host, paths.LEADERBOARD_TAG, add=True)
+        if sibling:
+            return f"https://{sibling}"
+    return paths.LEADERBOARD_ORIGIN
+
+
+def leaderboard_url(path: str) -> str:
+    """``leaderboard_origin`` plus ``path``, or ``""`` when no board is configured
+    — which is what every caller tests to decide whether the feature exists."""
+    origin = leaderboard_origin()
+    return f"{origin.rstrip('/')}{path}" if origin else ""
 
 
 def link_url(token: str) -> str:

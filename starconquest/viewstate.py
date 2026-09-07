@@ -238,7 +238,7 @@ class Ui:
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
-    # no `paths.LEADERBOARD_SUBMIT_URL` is configured.
+    # no `paths.LEADERBOARD_ORIGIN` is configured.
     leaderboard_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""  # outcome of the last share, drawn under the buttons
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only

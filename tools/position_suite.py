@@ -29,8 +29,8 @@ Where the games come from:
 * by default the local ``games/`` dir, which is every match played on this
   machine and needs no credentials at all;
 * ``--supabase`` reads the shared corpus instead (``SUPABASE_URL`` and
-  ``SUPABASE_SERVICE_KEY``, the same pair the other two workers use — ``game_logs``
-  has no public read, so the service_role key is the only way in).
+  ``SUPABASE_SECRET_KEY``, the same pair the other two workers use — ``game_logs``
+  has no public read, so a secret key is the only way in).
 
 Read the output as a *direction*, never as a verdict. The sample is however many
 games happen to exist, drawn from whoever played them, on whatever setups they
@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import os
 import statistics
 import sys
 import time
@@ -91,13 +90,13 @@ def supabase_logs(limit: int = 0) -> list[replay.GameLog]:
     Imported lazily so the local path — the one that needs no credentials — does
     not depend on the worker's HTTP client at all.
     """
-    from tools.bot_replay import Supabase          # noqa: PLC0415 — see above
+    from tools.bot_replay import (MISSING_CREDENTIALS, Supabase,  # noqa: PLC0415
+                                  credentials)
     from tools.verify_scores import best_logs      # noqa: PLC0415
 
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    url, key = credentials()
     if not url or not key:
-        raise SystemExit("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (the service_role key).")
+        raise SystemExit(MISSING_CREDENTIALS)
     rows = Supabase(url, key).select(
         "game_logs", "select=id,match_id,turns,log&order=id.desc")
     logs = []

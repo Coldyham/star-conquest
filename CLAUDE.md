@@ -252,7 +252,7 @@ intact.
     trip one is *more* reproducible, not less. `won`, never
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
-    insert path: the worker's `service_role` key is its only writer.
+    insert path: the worker's secret key is its only writer.
   - **The game uploads replays, and the worker checks scores against them.**
     `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`
     sends the log itself, and `tools/verify_scores.py` (the same scheduled worker
@@ -271,7 +271,7 @@ intact.
       reproducible from its seed, so it is bytes without information.
     - **`game_logs` is the one table the public can neither read nor write.** RLS
       on, no policies, no anon grants. Writes go through the leaderboard site's
-      own `netlify/functions/log.mjs` under the service_role key, which is what
+      own `netlify/functions/log.mjs` under the secret key, which is what
       makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
       insert path is a storage bill rather than a few junk rows. Reads are the
       worker's alone, so uploading a game does not publish it.
@@ -375,6 +375,17 @@ intact.
       *defence* margin still prices the jitter in full, which is the asymmetry:
       our own garrison cannot decline the engagement. See "Garrisons run away"
       in bot-design before copying either half into another bot.
+  - **The game and the board find each other by hostname, not by configuration.**
+    They are two Netlify sites whose names differ by `paths.LEADERBOARD_TAG`, and
+    Netlify names every deploy `<context>--<site>.netlify.app` from the same
+    context on both — so `paths.sibling_host` (via `webstore.leaderboard_origin`,
+    and `siblingGame` in `leaderboard/js/config.mjs` for the reverse) makes a
+    deploy preview of one talk to the deploy preview of the other, with no URL
+    edited by hand. Endpoints are therefore built at *call* time from
+    `LEADERBOARD_*_PATH`, never stored as whole URLs; `paths.LEADERBOARD_ORIGIN`
+    is the fallback for a host the rule cannot read (desktop, a custom domain)
+    and blanking it disables every leaderboard feature — which is what `render`
+    tests, since resolving costs a DOM read it must not do once a frame.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,

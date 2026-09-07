@@ -157,7 +157,7 @@ def test_win_overlay_pairs_the_leaderboard_button_with_sharing(monkeypatch):
         assert share[0] + share[2] <= board[0]           # no overlap
         assert share[2] == board[2]                      # common width
 
-        monkeypatch.setattr(render.paths, "LEADERBOARD_SUBMIT_URL", "")
+        monkeypatch.setattr(render.paths, "LEADERBOARD_ORIGIN", "")
         render.draw(screen, state, ui)
         assert ui.leaderboard_button_rect[2] == 0
         assert ui.share_button_rect[2] > 0               # sharing still offered

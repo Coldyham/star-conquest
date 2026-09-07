@@ -9,12 +9,14 @@
 #
 # Setup (once):
 #   Settings -> Secrets and variables -> Actions -> New repository secret
-#     SUPABASE_URL          https://<project>.supabase.co
-#     SUPABASE_SERVICE_KEY  the *service_role* key, from Supabase's API settings
+#     SUPABASE_URL         https://<project>.supabase.co
+#     SUPABASE_SECRET_KEY  Supabase's *secret* key (`sb_secret_...`), from its API
+#                          settings. The older service_role JWT is under the
+#                          "Legacy API keys" tab and works too, as either name.
 #
-# The service_role key bypasses row-level security, which is exactly why the
-# worker needs it and why it lives here rather than in leaderboard/js/config.mjs
-# (that ships the anon key on purpose — see schema.sql for which is which).
+# A secret key bypasses row-level security, which is exactly why the worker needs
+# it and why it lives here rather than in leaderboard/js/config.mjs (that ships a
+# *publishable* key on purpose — see schema.sql for which is which).
 name: Leaderboard worker
 
 on:
@@ -76,9 +78,10 @@ jobs:
         id: check
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+          if [ -z "$SUPABASE_URL" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_KEY" ]; }; then
             echo "No Supabase secrets set — skipping (see this file's header)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
@@ -89,6 +92,7 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           # Through the environment, never interpolated into the script below:
           # `${{ inputs.… }}` is substituted before bash ever sees the line, so a
@@ -124,5 +128,6 @@ jobs:
         if: always() && steps.check.outputs.ready == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python tools/verify_scores.py --prune

@@ -14,17 +14,19 @@ keeps a free Supabase project from idling into a pause, which it otherwise does
 after about a week.
 
     export SUPABASE_URL=https://<project>.supabase.co
-    export SUPABASE_SERVICE_KEY=<service_role key>       # never the anon key
+    export SUPABASE_SECRET_KEY=sb_secret_...             # never a publishable key
     uv run python tools/bot_replay.py                    # fill in what's missing
     uv run python tools/bot_replay.py --game-key abc123  # just this map
     uv run python tools/bot_replay.py --stale            # code changed; redo
     uv run python tools/bot_replay.py --dry-run          # compute, post nothing
 
-The service_role key bypasses row-level security, which is the point:
-``bot_scores`` has a read policy and no insert policy, so this worker is its only
-writer and a bot result cannot be posted by hand the way a human score can. Keep
-that key in the workflow's secrets and out of the repo — ``leaderboard/js`` ships
-the anon key precisely because it is *not* this one.
+The secret key bypasses row-level security, which is the point: ``bot_scores``
+has a read policy and no insert policy, so this worker is its only writer and a
+bot result cannot be posted by hand the way a human score can. Keep it in the
+workflow's secrets and out of the repo — ``leaderboard/js`` ships a *publishable*
+key precisely because it is not this one. (Supabase now calls these "secret" and
+"publishable"; the older ``service_role``/``anon`` JWTs are under its Legacy API
+keys tab and still work — see ``credentials``.)
 
 Nothing here imports pygame (or anything off PyPI): the simulation core is pure,
 which is what lets a plain ``python tools/bot_replay.py`` on a bare runner do the
@@ -107,6 +109,30 @@ BUDGET_SCALE = 100.0
 PAGE = 1000          # PostgREST's own default ceiling; page rather than assume
 POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
+
+
+def credentials() -> tuple[str, str]:
+    """``(url, key)`` for the project, from the environment.
+
+    Supabase reissued its API keys: a *secret* key (``sb_secret_…``) is the
+    successor to the ``service_role`` JWT, which now lives under a "Legacy API
+    keys" tab. Both still bypass row-level security by carrying the `service_role`
+    postgres role, which is what every grant in ``schema.sql`` is written against
+    — so the change is one of naming, not of what the worker can do.
+
+    Both variable names are read, new one first, so a project can migrate its keys
+    without touching two GitHub secrets and two Netlify sites on the same day.
+    """
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = (os.environ.get("SUPABASE_SECRET_KEY", "").strip()
+           or os.environ.get("SUPABASE_SERVICE_KEY", "").strip())
+    return url, key
+
+
+MISSING_CREDENTIALS = ("Set SUPABASE_URL and SUPABASE_SECRET_KEY (Supabase's secret "
+                       "key; SUPABASE_SERVICE_KEY and the legacy service_role key "
+                       "still work). Never a publishable key — it cannot read these "
+                       "tables.")
 
 
 def _digest(paths: list[Path]) -> str:
@@ -369,11 +395,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    url, key = credentials()
     if not url or not key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (the service_role key).",
-              file=sys.stderr)
+        print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
 
     try:

@@ -9,7 +9,7 @@ either reproduces the posted turns, ships lost and by-hand count or it does not.
 This is the offline job that does that feeding back.
 
     export SUPABASE_URL=https://<project>.supabase.co
-    export SUPABASE_SERVICE_KEY=<service_role key>       # never the anon key
+    export SUPABASE_SECRET_KEY=sb_secret_...             # never a publishable key
     uv run python tools/verify_scores.py                 # check what's unchecked
     uv run python tools/verify_scores.py --recheck       # check everything again
     uv run python tools/verify_scores.py --stale         # only rows from older code
@@ -19,9 +19,9 @@ This is the offline job that does that feeding back.
 The sibling of ``bot_replay.py`` and deliberately built out of it: the same
 Supabase client, the same "a pure function of the inputs, so compute it once and
 cache it" shape. It keys on ``replay_rev`` rather than ``engine_rev``, because a
-replay never consults a bot and so a retuned one cannot change a verdict. The service_role key is what
-makes it possible at all — ``game_logs`` grants the public insert and *no* select,
-so the uploaded replays are readable here and nowhere else.
+replay never consults a bot and so a retuned one cannot change a verdict. The secret key is what makes it
+possible at all — ``game_logs`` has no public read at all, so the uploaded replays
+are readable here and nowhere else.
 
 Five verdicts, stored in ``score_checks``:
 
@@ -62,7 +62,8 @@ sys.path.insert(0, str(ROOT))
 
 from starconquest import engine, replay  # noqa: E402
 from starconquest.settings import Settings  # noqa: E402
-from tools.bot_replay import Supabase, replay_rev  # noqa: E402 — the shared client
+from tools.bot_replay import (MISSING_CREDENTIALS, Supabase,  # noqa: E402
+                              credentials, replay_rev)
 
 VERDICTS = ("verified", "mismatch", "outdated", "unreadable", "missing")
 
@@ -224,11 +225,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    url, key = credentials()
     if not url or not key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (the service_role key).",
-              file=sys.stderr)
+        print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
 
     api = Supabase(url, key)

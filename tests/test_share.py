@@ -22,8 +22,13 @@ from starconquest.settings import Settings
 
 @pytest.fixture
 def configured(monkeypatch):
-    """Point the module at an endpoint, without touching the shipped constant."""
-    monkeypatch.setattr(share, "LEADERBOARD_LOG_URL", "https://example.test/api/log")
+    """Point the board somewhere harmless, without touching the shipped constant.
+
+    Patching the *origin* rather than a URL is the real seam now: every endpoint
+    is derived from it at call time, which is what lets a deploy preview reach the
+    matching preview of the board."""
+    monkeypatch.setattr(share.webstore, "leaderboard_origin",
+                        lambda: "https://example.test")
 
 
 @pytest.fixture
@@ -54,7 +59,7 @@ def _log(turns: int = 2, *, autoplayed: bool = False) -> replay.GameLog:
 # When it refuses
 # --------------------------------------------------------------------------- #
 def test_unconfigured_endpoint_sends_nothing(monkeypatch, sent):
-    monkeypatch.setattr(share, "LEADERBOARD_LOG_URL", "")
+    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
     assert not share.configured()
     assert share.post_log(_log(), "key") is False
     assert sent == []
@@ -191,7 +196,8 @@ def test_a_refused_connection_is_not_an_error(configured, monkeypatch):
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def watchable(monkeypatch):
-    monkeypatch.setattr(share, "LEADERBOARD_REPLAY_URL", "https://example.test/api/replay")
+    monkeypatch.setattr(share.webstore, "leaderboard_origin",
+                        lambda: "https://example.test")
 
 
 MATCH = "00112233445566ff"
@@ -226,7 +232,7 @@ def test_an_id_that_the_game_could_not_have_minted_is_never_requested(watchable)
 
 
 def test_no_endpoint_means_nothing_to_watch(monkeypatch):
-    monkeypatch.setattr(share, "LEADERBOARD_REPLAY_URL", "")
+    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
     assert share.fetch_log(MATCH) is None
 
 

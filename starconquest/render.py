@@ -1956,7 +1956,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     share_label = _key_hint("Challenge a friend", "C")
     board_label = _key_hint("Enter on leaderboard", "L")
     share = _shareable(state, ui)
-    board = share and bool(paths.LEADERBOARD_SUBMIT_URL)
+    # The constant, not a resolved URL: a blank one disables the feature
+    # everywhere (see `paths`), and resolving one costs a DOM read that this must
+    # not be doing once a frame.
+    board = share and bool(paths.LEADERBOARD_ORIGIN)
     bw = max(_btn_w(normal, s) for s in labels + [quit_label])
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)

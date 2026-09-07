@@ -717,7 +717,7 @@ runs `--stale` on purpose, which is the same "a fix is a deliberate act" trade
 ### The one table the public cannot write
 
 `bot_scores` has a read policy and no insert policy, and no insert grant. The
-worker's `service_role` key bypasses RLS entirely, which makes it the only
+worker's secret key bypasses RLS entirely, which makes it the only
 writer. A human score carries no proof in itself — the token format is public and
 unsigned, which is what **Checked scores** below answers — so it would be strange
 to let the machine column be posted by hand too. It also means a rerun can *replace* a row, which is why this table is not
@@ -780,7 +780,7 @@ row from anyone, and for a hundred-byte score that is a fine trade. A replay is
 5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
 go through the leaderboard site's own function (`netlify/functions/log.mjs`),
 which validates the row, caps its size and rate-limits the caller, and holds the
-service_role key that is the table's only writer. Reads are the worker's alone,
+secret key that is the table's only writer. Reads are the worker's alone,
 so uploading a game does not publish it.
 
 The rate limit is honest about itself: Netlify functions run on ephemeral,

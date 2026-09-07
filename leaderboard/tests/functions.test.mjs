@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { rateLimited, validate } from "../netlify/functions/log.mjs";
+import { allowedOrigin, rateLimited, validate } from "../netlify/functions/log.mjs";
 
 const MATCH = "00112233445566ff";
 
@@ -85,6 +85,32 @@ test("the claim flags are booleans, never whatever was sent", () => {
 test("anything that is not an object is rejected outright", () => {
   for (const bad of [null, undefined, "a string", [row()], 7]) {
     assert.equal(validate(bad), "not an object");
+  }
+});
+
+test("every deploy of the game is an allowed origin, not just production", () => {
+  // A preview of the game posts to the preview of this site, so a fixed
+  // allowlist would refuse exactly the case previews exist for.
+  assert.equal(allowedOrigin("https://star-conquest.netlify.app"), true);
+  assert.equal(allowedOrigin("https://deploy-preview-42--star-conquest.netlify.app"), true);
+  assert.equal(allowedOrigin("https://some-branch--star-conquest.netlify.app"), true);
+  assert.equal(allowedOrigin("http://localhost:8000"), true);
+});
+
+test("a site that merely ends in the game's name is not the game", () => {
+  // The site name is the last `--`-separated part, so a prefix is a context and
+  // anything else is somebody else's site.
+  for (const bad of [
+    "https://evil-star-conquest.netlify.app",
+    "https://star-conquest.netlify.app.evil.com",
+    "https://star-conquest-leaderboard.netlify.app",
+    "http://star-conquest.netlify.app",        // https only
+    "https://example.com",
+    "not a url",
+    "",
+    null,
+  ]) {
+    assert.equal(allowedOrigin(bad), false, `allowed ${bad}`);
   }
 });
 
