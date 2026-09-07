@@ -648,6 +648,15 @@ Phase 3b makes marshal the latter: it is the big bloc that wins the pile-up
 anyway. Same "the price is a gate" conclusion as above, reached from the other
 end.
 
+> **Tested since, and this explanation does not survive it.** The arithmetic
+> above is arithmetic and stands; the *inference* — that the tactic is null on
+> marshal because Phase 3b masks it — predicts it should pay once the surplus is
+> no longer committed. Setting `COMMIT_SURPLUS = False` makes marshal exactly the
+> "sends just enough" bot the claim describes, and the tactic still reads
+> **50.1% (z = +0.04) over 815 decided games** in that regime. See "The
+> combination" below: it is null on both sides of the knob it was supposed to be
+> hiding behind.
+
 **The shipped third-party fold does survive the knob**, which is the check worth
 having after all that: paired against the pre-fix bot at 24n 3p it reads 53.3%
 (z = +1.41) at advantage 1.25 and 55.4% (z = +1.92) at 1.5, alongside its 54.0%
@@ -947,6 +956,72 @@ per "Garrisons run away" above. What holding actually buys is the casualties the
 dying garrison inflicts on the attacker; what evacuating buys is a garrison that
 survives to be spent on a *different*, self-chosen fight instead of a forced one.
 Over enough games those roughly cancel. Not shipped.
+
+### The combination: four null ideas together, and the masking theory tested
+
+Four ideas above each measure null on their own — the remnant tactic (waiting for
+a rival to break a contested neutral), the 0-ship neutral reprice, hold-and-
+retake, and an enemy-held bonus in `_richness`. Two of them come with a written
+explanation for *why* they are null, and both explanations blame the same thing:
+Phase 3b. The gate argument says honest pricing of a contested neutral only cedes
+a node the committed surplus would have taken anyway; the remnant argument says
+the tactic pays for a bot that sends "just enough" and marshal is not one. If
+that is right, then (a) they should combine, since each supplies what the other
+lacks — the reprice declines a race it would lose, and the remnant tactic gives
+the declined node a follow-up — and (b) they should come alive with
+`COMMIT_SURPLUS` off. Both halves are testable.
+
+Built as one flag-composable copy of the bot rather than four, so the
+combinations are the same code (`NEUTRAL_FOLD`, `ZERO_FOLD`, `HOLD_RETAKE`,
+`RUSH_BONUS`, over the existing `COMMIT_SURPLUS`). With every flag at its shipped
+default the copy is behaviourally identical to `models/marshal.py` — 30 whole
+games, same winner and same turn count — so a measured difference is the flags
+and nothing else. The neutral fold uses the *nominal* remnant and is applied only
+when it makes a target **cheaper** (the pessimistic corner double-prices the
+dice, per above), except for the 0-ship case, which is meant to raise. That
+resolution matters: it keeps the gate open where Phase 3b wants it open while
+still taking the discount when a rival lands first, so this is the sensible
+composition rather than a naive one.
+
+**They do not combine.** All three sequence ideas at once, against the identical
+baseline:
+
+    cell                                  W-L        n     rate      z
+    random 24n 3p (thinker)            193-210      403    47.9%  -0.85
+    random 30n 4p (thinker+knower)     276-303      579    47.7%  -1.12
+    random 24n 2p duel                 283-289      572    49.5%  -0.25
+    ---- pooled                        752-802     1554    48.4%  -1.27
+
+Adding the enemy-held bonus on top (`RUSH_BONUS = 2.0`) reads 49.6% (z = -0.15,
+n = 411). Each idea alone sat at about 50%; together they sit slightly *below* it.
+Not significantly so, but the direction is mild mutual interference rather than
+synergy — which is what you would expect of four separate ways to spend the same
+budget on second-order timing when the first-order rule (strike at every
+affordable target, pour the rest into a strike already going in) is already what
+wins.
+
+**And the masking theory is wrong.** Turning Phase 3b off costs marshal a great
+deal on its own — **40.4% (z = -3.77)** against the shipped bot, a useful
+reminder of how much that one rule is worth — but it does make marshal the
+"sends just enough" bot the remnant argument describes. Measured *within* that
+regime, so both arms carry the same handicap:
+
+    variant (base: COMMIT_SURPLUS off)     W-L        n     rate      z
+    + neutral fold only                 408-407      815    50.1%  +0.04
+    + all three sequence ideas          411-403      814    50.5%  +0.28
+
+Null on both sides of the knob they were supposed to be hiding behind. A first
+pass at n≈370 read 51.5% and looked like the predicted effect appearing; doubling
+the sample settled it at 50.5%, the same lesson as the 1.5-advantage reading in
+the hold-and-retake section above. So Phase 3b is not what suppresses these
+ideas — they are simply worth nothing, and the tidy mechanism story that made
+them *feel* suppressed was itself untested. The gate argument survives as a
+description of why honest pricing of a contested neutral is actively *worse*
+(that one was measured, at 47.2% in duels); what does not survive is the
+inference that removing the gate would let the converse pay.
+
+Nothing shipped. The value of the exercise is the correction: four null results
+with one shared explanation, and the explanation was checkable and false.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 

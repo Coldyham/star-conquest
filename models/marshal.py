@@ -306,7 +306,9 @@ def _required(state, pid, target, dist: int) -> int:
     anyway, which is exactly the rival-held case above. Nor does the converse pay
     — deliberately arriving *after* a rival has broken a neutral and fighting the
     remnant is a real opportunity, about half a chance per game, and it measures
-    null over 3500 games.
+    null over 3500 games. Nor does it come alive with the gate taken away:
+    ``COMMIT_SURPLUS = False`` makes this the "sends just enough" bot the tactic
+    was supposed to reward, and it still reads 50.1% over 815 games there.
 
     The one case where the gate argument does not apply is a neutral already at
     ``ships == 0`` — there is no garrison to hold a discount against, so pricing
