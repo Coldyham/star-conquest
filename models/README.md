@@ -5,6 +5,14 @@ Drop a Python file in this folder and it becomes a selectable AI strategy. Each
 dropdown on the menu's **AI** tab); the strategy's name is the filename without
 `.py`. Every seat defaults to the built-in `heuristic`.
 
+**Not a Python programmer?** A bot can instead be a *program* in any language,
+reading a JSON board on stdin and writing JSON orders on stdout —
+[`bots/README.md`](../bots/README.md) is that guide. Everything on this page
+about the game itself (production, combat, pricing a fight, benchmarking) still
+applies; only the plumbing differs. The trade-off: a Python bot is playable in
+the app and in the browser build, while a program competes in the ladder only —
+the web build cannot start a child process.
+
 Files in this folder are **committed to the repo**: `tools/build_web.sh` bundles
 them into the browser/PWA build too, so whatever's here is what's playable on
 the deployed site's Strategy dropdown. To add a bot, commit it (or open a PR)
@@ -220,15 +228,7 @@ def decide(state, pid):
 Save that, open the game, go to the **AI** tab, and pick **rusher** for any seat.
 For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orders`).
 
-## Not Python?
-
-A bot can also be an external **program** in any language, speaking JSON over
-stdin/stdout: a board in, orders out, one message per turn. That contract is
-[`docs/bot-api.md`](../docs/bot-api.md) and those bots live in
-[`bots/`](../bots/README.md). They play in the ladder
-(`uv run python -m tests.sim --external --ladder`) rather than in the app —
-`tools/build_web.sh` ships *this* folder to the browser, and the web build cannot
-start a child process at all.
+## The roster
 
 The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
 arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
@@ -258,6 +258,9 @@ roster to all registered strategies, so neither needs `--ai`:
 uv run python -m tests.sim --ladder --trials 50   # pairwise: every pair head-to-head
 uv run python -m tests.sim --swap --trials 50     # free-for-all: everyone in one game
 ```
+
+Add `--external` to either to include the any-language bots in
+[`bots/`](../bots/README.md), which are otherwise left out entirely.
 
 `--ladder` is the one to trust for "is my bot good": it plays each pair on its own,
 both seatings, and prints a head-to-head grid, so a bot that ranks mid-table but

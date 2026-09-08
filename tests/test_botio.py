@@ -311,3 +311,63 @@ def test_the_wire_bot_plays_a_whole_game_through_the_ladder():
         assert result.turns > 1 and not strategy.degraded
     finally:
         strategy.close()
+
+
+# --------------------------------------------------------------------------- #
+# The authoring guide
+# --------------------------------------------------------------------------- #
+
+def _guide_blocks() -> list:
+    """Every ```json fence in `bots/README.md`, parsed."""
+    import re
+    text = (botproc.BOTS_DIR / "README.md").read_text(encoding="utf-8")
+    return [json.loads(block) for block in
+            re.findall(r"```json\n(.*?)```", text, re.DOTALL)]
+
+
+def test_the_authoring_guide_describes_the_real_messages():
+    """`bots/README.md` is what an interested dev is handed, and its samples are
+    the *whole* spec of a field's name from their side. A field added to the wire
+    with the guide left alone is a bot written against a board that no longer
+    exists, so pin the shapes here — the values are illustrative, the keys are
+    not.
+    """
+    state = _board(players=2)
+    documented = {block.get("type"): block for block in _guide_blocks()
+                  if isinstance(block, dict)}
+
+    live = botio.hello(state, 1, 15_000)
+    doc = documented["hello"]
+    assert set(doc) == set(live)
+    for section in ("setup", "rules", "map"):
+        assert set(doc[section]) == set(live[section]), section
+    for part in ("systems", "lanes"):
+        assert set(doc["map"][part][0]) == set(live["map"][part][0]), part
+    seat = next(s for s in doc["seats"] if not s["is_neutral"])
+    live_seat = next(s for s in live["seats"] if not s["is_neutral"])
+    assert set(seat) == set(live_seat)
+    assert set(seat["params"]) == set(live_seat["params"])
+    assert [s for s in doc["seats"] if s["is_neutral"]], "neutral seat 0 goes on the wire too"
+
+    engine.apply_order(state, ai.compute_orders(state, 2)[0])
+    live_turn = botio.turn_payload(state, 1, 15_000)
+    doc_turn = documented["turn"]
+    assert set(doc_turn) == set(live_turn)
+    for part in ("systems", "fleets", "players"):
+        assert doc_turn[part], f"the sample must show a {part} entry, not an empty list"
+        assert set(doc_turn[part][0]) == set(live_turn[part][0]), part
+
+    # The documented reply really is one the runner accepts.
+    assert botio.orders_from(documented["orders"], 1) == [Order(1, 1, 3, 12)]
+
+
+def test_the_documented_manifest_is_the_one_the_loader_reads(tmp_path):
+    manifest_block = next(block for block in _guide_blocks()
+                          if isinstance(block, dict) and "cmd" in block)
+    path = tmp_path / "documented.bot.json"
+    path.write_text(json.dumps(manifest_block))
+    loaded = botproc.Manifest.load(path)
+    assert loaded is not None
+    for field_name in manifest_block:
+        assert field_name in ("cwd", "cmd") or hasattr(loaded, field_name), field_name
+    assert loaded.name == "rusherwire" and loaded.budget_scale == 100
