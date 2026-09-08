@@ -46,7 +46,7 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
+  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
   and most of the suite run with no display. Do not add a pygame import to any of
   these. (`fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `replay` serializes a
@@ -128,6 +128,32 @@ pure core (no pygame); the render/input prohibition on importing `ai` still hold
 `models/` is committed (not gitignored) precisely so `tools/build_web.sh` can
 stage it alongside `starconquest/` and ship the same bots to the browser/PWA
 build — new bots go in via commit/PR, not local drop-in only.
+
+**Bots that aren't Python are subprocesses, and they compete without shipping.**
+`botio.py` is the wire format (`hello` once, `turn_payload` per decision,
+`orders_from` back) and `tests/botproc.py` the transport; a bot is a
+`bots/<name>.bot.json` manifest naming a command, and `docs/bot-api.md` is the
+protocol. Four rules hold it together:
+- **`botio` is pure core and owns no process.** No `subprocess` import in the
+  package, and none in the ordinary suite either — `tests/sim` imports
+  `botproc` lazily, inside `--external`.
+- **`bots/` lives outside `models/`, and that is load-bearing.**
+  `build_web.sh` stages `models/`, and the web build is CPython on WASM: it
+  cannot fork at all. So external bots run in `tests/sim` and (once decided)
+  `tools/bot_replay`, never in the app or the browser, and the in-app Strategy
+  dropdown stays Python. Registration is opt-in (`sim --external`) rather than
+  automatic, unlike `ai.load_models()`, because `bot_replay`'s roster is
+  `ai.available_strategies()`.
+- **The bot's randomness is derived, never drawn.** `botio.decide_seed(seed,
+  turn, pid)` hands a seat its own stream, so an external bot cannot shift the
+  engine's dice and every other seat's battles roll as they did without it. It
+  is the one sanctioned exception to "all randomness flows through `state.rng`",
+  and it keeps what that rule protects: a seed still reproduces every fight.
+- **A degraded seat is not a result.** A timeout holds for one turn; a dead bot
+  or `botproc.FORFEIT_TIMEOUTS` timeouts falls the seat back to `heuristic` and
+  records it (`degraded_runs`, printed by `sim`). The app's silent fallback for
+  an unknown strategy name is right there and wrong in a tournament, where a run
+  containing a fallback seat must never be scored or posted.
 
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing
@@ -455,7 +481,8 @@ intact.
   It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
   is a free-for-all (whole roster in one game, rotated through every seat via
   the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
-  every pair, both seatings, plus a head-to-head grid). Both default their
+  every pair, both seatings, plus a head-to-head grid). `--external` adds the
+  `bots/` subprocess bots to either (see the external-bot rules above). Both default their
   roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
   arguments. `play_settings` is the third entry point — one bot through the
   human's seat on a stored `Settings`, going through `settings.build_state` so a

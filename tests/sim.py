@@ -35,6 +35,7 @@ game tree; a bot that blows its budget just takes no orders that turn:
 from __future__ import annotations
 
 import argparse
+import atexit
 import itertools
 import signal
 from contextlib import contextmanager
@@ -435,6 +436,36 @@ def _summarise_ladder(games: list[SwapGame], roster: list[str], seeds: int) -> N
         print(f"  {a:<{width}}" + "  ".join(cells))
 
 
+def _register_external(args) -> None:
+    """Register `bots/` under `--external`, and report any seat that stopped
+    being its bot mid-run.
+
+    Imported here rather than at module scope so the ordinary headless suite
+    never pulls in `subprocess` — and opt-in rather than automatic, unlike
+    `ai.load_models()`, because a default `--ladder` silently spawning child
+    processes would be a surprise and `tools/bot_replay` takes its roster from
+    `ai.available_strategies()`.
+    """
+    if not getattr(args, "external", False):
+        return
+    from . import botproc
+    names = botproc.register_external()
+    print(f"external bots: {', '.join(names) if names else '(none in bots/)'}")
+    atexit.register(_report_degraded)
+
+
+def _report_degraded() -> None:
+    """A degraded seat played `heuristic` for part of a game, so nothing in this
+    run may be reported as that bot's score. Said once, at the end, loudly."""
+    from . import botproc
+    notes = botproc.degraded_runs()
+    if notes:
+        print("\nDEGRADED — a bot stopped answering and its seat fell back to "
+              "heuristic. These results are not that bot's:")
+        for note in notes:
+            print(f"  {note}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Headless AI-vs-AI simulation harness")
     ap.add_argument("--seed", type=int, default=1)
@@ -452,6 +483,7 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
     ap.add_argument("--bot-timeout", type=float, default=0.0, help="wall-clock seconds allowed per decide() call (0 = disabled)")
+    ap.add_argument("--external", action="store_true", help="also register the bots/ external bots (subprocesses speaking docs/bot-api.md); off by default, since a subprocess in an unasked-for ladder is a surprise")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -461,6 +493,7 @@ def main() -> None:
     strategies = args.ai
     if strategies:
         ai.load_models()  # register drop-in models/ strategies before we name them
+        _register_external(args)
         unknown = [n for n in strategies if n not in ai.STRATEGIES]
         if unknown:
             ap.error(f"unknown strategy: {', '.join(unknown)}. available: {', '.join(ai.available_strategies())}")
@@ -468,6 +501,7 @@ def main() -> None:
         # No roster named: rank everything registered, so a tournament over the
         # whole models/ dir needs no arguments at all.
         ai.load_models()
+        _register_external(args)
         strategies = ai.available_strategies()
 
     if args.swap or args.ladder:

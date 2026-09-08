@@ -42,6 +42,9 @@ from the AI tab's dropdown (the built-in `heuristic` is the default). See
 [`models/README.md`](models/README.md) for the authoring contract, the read-only
 `GameState` API a bot can use, and a copy-paste example.
 
+Not a Python programmer? A bot can be any program that reads a JSON board and
+writes JSON orders — [`bots/README.md`](bots/README.md).
+
 ## Controls
 
 | Action | Input |
@@ -76,6 +79,7 @@ starconquest/
   combat.py      # Lanchester-with-jitter resolution
   engine.py      # simultaneous turn resolution (pure)
   ai.py          # heuristic AI + per-seat params + strategy registry (decide/register)
+  botio.py       # JSON wire format for external (any-language) bots
   render.py      # drawing (pygame)
   input.py       # event handling (pygame)
   menu.py        # pre-game setup screen (pygame)
@@ -121,6 +125,10 @@ race/empire customisation, animations & sound, camera pan/zoom, multi-hop fleet
 routing, fog-of-war. Nearer term: exposing the remaining config knobs. **Drop-in
 user AIs** now work (`models/` + the per-seat Strategy dropdown); still wanted for
 full **head-to-head competition** is a documented public state/query API and a
-headless sim harness that assigns a strategy per seat.
+headless sim harness that assigns a strategy per seat. Bots in **other languages** now work
+too, as subprocesses speaking JSON — see [`bots/README.md`](bots/README.md) and
+the protocol in [`docs/bot-api.md`](docs/bot-api.md). They compete in the ladder
+(`--external`) rather than shipping in the browser build, which cannot fork a
+child process; the leaderboard column for them is still open.
 
 Per-seat AI tuning and selectable difficulty via the AI tab are already here.
