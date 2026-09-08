@@ -218,6 +218,18 @@ change the bot: the leaderboard column for external bots isn't built yet, and
 this is what will key its cache — it digests `starconquest/` and `models/*.py`
 to decide when a cached score is stale, and a compiled binary is in neither.
 
+## Checking it
+
+```sh
+uv run python tools/check_bot.py mybot
+```
+
+Works on an external bot as well as a Python one: it starts your process, checks
+that the orders it sends are legal and that it answers the same way twice, plays
+a few games, and prints a paste-ready block for anything wrong. If you drafted
+the bot with an AI assistant, [`docs/bot-brief.md`](../docs/bot-brief.md) is the
+page to give it — the game and the strategy notes there apply to any language.
+
 ## Measuring it
 
 Everything under "Benchmark it before you submit" in

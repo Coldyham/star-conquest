@@ -5,6 +5,11 @@ Drop a Python file in this folder and it becomes a selectable AI strategy. Each
 dropdown on the menu's **AI** tab); the strategy's name is the filename without
 `.py`. Every seat defaults to the built-in `heuristic`.
 
+**Don't want to write it yourself?** [`docs/bot-brief.md`](../docs/bot-brief.md)
+is a page you paste into an AI assistant: it asks you how you want to play,
+writes the bot, and `uv run python tools/check_bot.py <name>` tells you (and it)
+what to fix. That is the shortest path from an idea to a bot that plays.
+
 **Not a Python programmer?** A bot can instead be a *program* in any language,
 reading a JSON board on stdin and writing JSON orders on stdout —
 [`bots/README.md`](../bots/README.md) is that guide. Everything on this page
@@ -239,6 +244,19 @@ rival's own `decide` before the engine asks for it).
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating
 the configuration without them. That is the bar here — measure before you keep.
+
+## Check it, then benchmark it
+
+```sh
+uv run python tools/check_bot.py mybot
+```
+
+Run this first, whoever or whatever wrote the bot. Three of the five mistakes it
+looks for are invisible in play: an **illegal order is discarded without a word**
+(so a bot can issue orders that never happen and merely look weak), **mutating
+`state`** corrupts the match and its replay rather than failing, and drawing from
+the `random` module instead of `state.rng` only shows up later as a score nobody
+can reproduce. It prints a paste-ready block for each failure.
 
 ## Benchmark it before you submit
 

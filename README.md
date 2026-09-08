@@ -43,7 +43,10 @@ from the AI tab's dropdown (the built-in `heuristic` is the default). See
 `GameState` API a bot can use, and a copy-paste example.
 
 Not a Python programmer? A bot can be any program that reads a JSON board and
-writes JSON orders — [`bots/README.md`](bots/README.md).
+writes JSON orders — [`bots/README.md`](bots/README.md). Not a programmer at all?
+[`docs/bot-brief.md`](docs/bot-brief.md) is a page you paste into an AI
+assistant, which then interviews you and writes the bot;
+`uv run python tools/check_bot.py <name>` validates whatever comes back.
 
 ## Controls
 
