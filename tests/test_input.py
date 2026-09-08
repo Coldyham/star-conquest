@@ -1751,7 +1751,29 @@ def test_a_downloaded_replay_opens_as_a_reviewable_game(tmp_path, monkeypatch):
         pygame.quit()
 
 
-def test_opening_a_replay_enters_review_at_its_last_turn(tmp_path, monkeypatch):
+def test_a_watched_replay_is_not_ours_to_post(tmp_path, monkeypatch):
+    """Somebody else's win, on our screen with their full score under it — the one
+    result that arrives looking exactly like an earned one, because it *is* one.
+    Without the mark, posting their score as ours is a fetched link and one press.
+    """
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        state.winner = ui.human_id           # their win, replayed back in full
+        assert ui.hand_turns > 0             # ...by hand, so only `watched` stops it
+        assert ui.watched is True
+        assert ui.can_post(state) is False
+        # A retry or a rewind out of review builds a fresh Ui, and what is played
+        # from there really is ours — see `Ui.can_post` on why that stays open.
+        assert main.resume_game(log, Settings())[1].watched is False
+    finally:
+        pygame.quit()
+
+
+def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkeypatch):
+    """A watched game is one you have not seen, so it starts where it started.
+    Landing on the final board would give away the ending and leave dragging all
+    the way back as the only way to actually watch it."""
     try:
         log = _watchable_log(tmp_path, monkeypatch)
         state, ui, _ = main.open_replay(log.encoded(), Settings())
@@ -1759,8 +1781,21 @@ def test_opening_a_replay_enters_review_at_its_last_turn(tmp_path, monkeypatch):
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
         assert ui.history_max == log.turn_count
-        assert ui.history_turn == ui.history_max
+        assert ui.history_turn == 0
         assert live is not None          # the live fog is stashed for the way out
+    finally:
+        pygame.quit()
+
+
+def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
+    """The H key asks a different question — 'what just happened' — and the answer
+    is one step back from the latest turn, not a whole match away from it."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui = main.resume_game(log, Settings())
+        assert ui.watched is False
+        main.open_history(state, ui, log)
+        assert ui.history_turn == ui.history_max == log.turn_count
     finally:
         pygame.quit()
 

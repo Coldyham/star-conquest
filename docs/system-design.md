@@ -873,7 +873,31 @@ adopts the replay's own settings, so leaving review lands on that setup rather
 than whatever the menu was showing.
 
 `open_history` is the entry the H key and a watched replay share. They differ
-only in how they came by the log, and must not differ in what review looks like.
+only in how they came by the log, and must not differ in what review looks like —
+with one exception, which is where the scrubber lands. Our own review opens on
+the latest turn, because that is where the player is and looking back is a step
+away from it. A watched replay opens at turn 0, the board as generated: the
+question there is how the game was played, the answer runs forwards, and opening
+on the final board would both give away the ending and make dragging the whole
+way back the price of watching it.
+
+**A watched result is not ours to post.** Reviewing somebody's win ends on the
+same win overlay our own games end on, showing their turns and their ships lost —
+so *Challenge a friend* and *Enter on leaderboard* would sit there offering to
+send their score under our name, and a fraudulent entry would be a fetched link
+and one press. `open_replay` marks the `Ui` (`Ui.watched`), `Ui.can_post` is the
+one predicate render draws both buttons from and main fires both actions from,
+and it also stops a watched game being filed as a personal best or checkpointed
+back up under its original `match_id` — where, rows being keyed by that id and
+the longest winning, our continuation would replace the very replay their score
+is checked against.
+
+It is a lock on the button, not a proof of authorship, and deliberately so:
+rewinding a watched replay to a turn from its end and playing that turn out
+builds a fresh `Ui` and a forked match that really is ours to post. Sealing that
+would mean recording where a fork branched and carrying it through every later
+rewind, to catch someone who has gone well out of their way — a bigger idea than
+the problem.
 
 **The download is polled, never awaited.** `share.fetch_log` starts it and hands
 back a `Download` the frame loop asks once per frame; the browser build yields a

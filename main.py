@@ -356,6 +356,11 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
         return None
     ai.load_models()      # a stored match may name a drop-in strategy for a seat
     state, ui = resume_game(log, settings)
+    # Somebody else's game: the win overlay must not offer to post their result as
+    # ours, and playing on from it must not append to their uploaded match
+    # (`Ui.can_post`, `share.due`). A `Retry` or a rewind out of here builds a
+    # fresh `Ui` and so starts a match that really is ours.
+    ui.watched = True
     return state, ui, log
 
 
@@ -366,6 +371,14 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     came by the log — and must not differ in what review then looks like.
     ``live_fog`` is the board's current fog, stashed so leaving review restores it
     exactly. Returns empty lists if there is nothing to review.
+
+    Where the scrubber lands is the one thing the two entries *should* differ on,
+    because they are asking different questions. Reviewing our own game (H) opens
+    on the latest turn: that is where the player is, and looking back is a step
+    away from it. A watched replay opens at the opening position, because the
+    question there is "how was this game played" and the answer runs forwards —
+    landing on the final board instead gives away the ending and leaves the only
+    way to watch it being to drag all the way back first.
     """
     history_states, history_fog = build_history(ui, log)
     if not history_states:
@@ -377,7 +390,10 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.reset_route()
     ui.sel_forward = None
     ui.history_max = len(history_states) - 1
-    ui.history_turn = ui.history_max
+    # Turn 0 is the board as generated, before anyone moved — the frame a replay
+    # should start on, and the one that makes the first turn's changes visible as
+    # changes rather than as a position already arrived at.
+    ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
     return history_states, history_fog, live_fog
 
@@ -476,9 +492,9 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # cadence is what keeps an *abandoned* game — the kind no score ever
         # carries — from being lost entirely. `due` holds every condition,
         # including the opt-in itself, so this line cannot send by accident.
-        if share.due(log, state.winner is not None):
+        if share.due(log, state.winner is not None, ours=not ui.watched):
             share.post_log(log, log.setup_key())
-    if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
+    if ui.can_post(state) and settings is not None:
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
@@ -775,13 +791,15 @@ async def main() -> None:
                 state, ui, log = None, None, None
             elif action == "share":
                 # Game-over only (input only returns this there), and only for a
-                # result worth sending — render gates the button the same way.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                # result that is ours to publish — render gates the button on the
+                # very same call, so the C key cannot reach what the overlay
+                # declines to draw.
+                if ui.can_post(state):
                     ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
             elif action == "leaderboard":
                 # Same gate as "share": the two buttons offer one result by two
                 # channels, so neither may fire on a result that isn't yours.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                if ui.can_post(state):
                     ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log, settings)
