@@ -324,7 +324,14 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
    back); with either unset they answer 503, and the game's uploads simply go
    nowhere and no replay is watchable — a working board without replays rather
-   than a broken one. The game talks to `/api/log` and `/api/replay` on this site
+   than a broken one.
+
+   Netlify's secret scanner would otherwise fail the build over `SUPABASE_URL`,
+   because `js/config.mjs` ships that value to every visitor on purpose. It is
+   declared not-a-secret in [`netlify.toml`](netlify.toml)
+   (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
+   hand. The *key* stays scanned, so a build still fails if that ever lands in a
+   deployed file. The game talks to `/api/log` and `/api/replay` on this site
    — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
    somewhere else.
 

@@ -6,10 +6,23 @@
 # No build command: these are plain static files with no bundler or build step.
 # The one exception is `netlify/functions`, which Netlify bundles on its own —
 # see `functions/log.mjs` for what it is and the two environment variables it
-# needs (set them in the site's settings; one is the service_role key and must
+# needs (set them in the site's settings; one is Supabase's secret key and must
 # never be committed).
 [build]
   publish = "."
+
+# Netlify fails a build when the value of any environment variable appears in the
+# deployed files, and `SUPABASE_URL` does: `js/config.mjs` ships it to every
+# visitor on purpose, because a PostgREST endpoint is not a secret — the
+# publishable key beside it is designed to be public too, and row-level security
+# is the actual boundary (see schema.sql).
+#
+# So the URL is declared not-a-secret rather than the scan being switched off.
+# `SUPABASE_SECRET_KEY` is deliberately *not* listed: it is the one value that
+# genuinely must never reach a deployed file, and leaving it scanned means the
+# build still fails if it ever gets pasted into one.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
 
 [functions]
   directory = "netlify/functions"
