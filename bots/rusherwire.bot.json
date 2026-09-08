@@ -1,0 +1,9 @@
+{
+  "name": "rusherwire",
+  "cmd": ["python3", "main.py"],
+  "cwd": "rusherwire",
+  "protocol": 1,
+  "version": "1.0.0",
+  "budget_ms": 150,
+  "budget_scale": 100
+}

@@ -220,6 +220,16 @@ def decide(state, pid):
 Save that, open the game, go to the **AI** tab, and pick **rusher** for any seat.
 For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orders`).
 
+## Not Python?
+
+A bot can also be an external **program** in any language, speaking JSON over
+stdin/stdout: a board in, orders out, one message per turn. That contract is
+[`docs/bot-api.md`](../docs/bot-api.md) and those bots live in
+[`bots/`](../bots/README.md). They play in the ladder
+(`uv run python -m tests.sim --external --ladder`) rather than in the app —
+`tools/build_web.sh` ships *this* folder to the browser, and the web build cannot
+start a child process at all.
+
 The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
 arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 (scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it

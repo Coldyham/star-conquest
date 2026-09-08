@@ -1166,8 +1166,9 @@ are the reason not to rebuild it from scratch on a hunch.
 
 The successor idea, and a better-aimed one: instead of a second authoring
 language inside the app, accept a bot in *any* language over a documented wire
-protocol. The spec is [`bot-api.md`](bot-api.md); this is why it is shaped the way
-it is.
+protocol. The spec is [`bot-api.md`](bot-api.md), and the schema, transport, one
+ported bot and the parity test are built; this is why it is shaped the way it
+is.
 
 **Sell it on the ceiling, not on accessibility.** Writing a JSON-over-stdio loop
 plus a payload decoder in Rust or Go is *more* work than editing
@@ -1236,3 +1237,21 @@ one roster bot across the wire to demand *identical* orders is the only thing th
 will catch a payload quietly missing a field — the same role
 `test_export_round_trips_exactly` played on the bot-maker branch, and the same
 failure mode: a schema gap looks exactly like a bot that plays slightly worse.
+
+**And mutation-check that test rather than trusting it.** `bots/rusherwire`
+matching `models/rusherplus` proves nothing until the comparison is shown to
+fail: emptying `fleets` from the payload breaks it, and so does reversing the
+order systems are listed in — the second because `rusherplus` tie-breaks with
+`state.rng` inside a `min` key, so *ordering* is part of the contract and not
+merely presentation. Which is also why the port is Python. Matching the original
+exactly means matching its draw sequence, and the test swaps the reference's
+`state.rng` for a `Random(rng_seed)` on the payload's own seed to make the two
+comparable. A bot in another language cannot reproduce `random.Random` and does
+not have to: the test's job is to prove the payload sufficient, not to make
+determinism a cross-language requirement.
+
+**Measured, the port plays.** `--external --ladder --trials 4` over
+rusherwire/heuristic/marshal: marshal 67%, heuristic 21%, rusherwire 12%, with
+rusherwire taking 38% off heuristic head to head and 0% off marshal — which is
+roughly where `rusherplus` itself sits, and the point is that the wire changed
+nothing about where it sits.

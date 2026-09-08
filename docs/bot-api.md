@@ -1,13 +1,19 @@
-# The external bot API (not built)
+# The external bot API
 
-A wire protocol so a bot can be written in any language, judged in the ladder and
-on the leaderboard, and never need to be Python. This file is the design: where
-such a bot runs, what it is sent, what it may return, and the order to build it
-in. Why it takes this shape — and why the in-app rule-builder it replaces was not
-merged — is in [`bot-design.md`](bot-design.md) under "Bots that aren't Python".
+A wire protocol so a bot can be written in any language, judged in the ladder,
+and never need to be Python. Why it takes this shape — and why the in-app
+rule-builder it replaces was not merged — is in
+[`bot-design.md`](bot-design.md) under "Bots that aren't Python".
 
-Nothing here is implemented. The authoring contract that *is* live is
-[`models/README.md`](../models/README.md): a Python file with a `decide`.
+**Built:** the schema (`starconquest/botio.py`, pure core), the transport
+(`tests/botproc.py`), a worked example (`bots/rusherwire`, a port of
+`models/rusherplus.py`), and the parity test that keeps the two honest
+(`tests/test_botio.py`). `uv run python -m tests.sim --external --ladder` runs
+external bots in either tournament.
+
+**Not built:** the leaderboard column (see "What is left", below). The in-app
+Strategy dropdown stays Python — [`models/README.md`](../models/README.md) is
+that contract, and nothing here changes it.
 
 ## Where an external bot runs, and where it cannot
 
@@ -43,7 +49,10 @@ One JSON file per bot, `bots/<name>.bot.json`, committed like `models/`:
 }
 ```
 
-`name` is the strategy name, as a filename stem is for a drop-in model.
+`name` is the strategy name, as a filename stem is for a drop-in model. `cwd` is
+relative to the manifest, and a manifest that will not parse is skipped with a
+warning rather than being fatal — the same tolerance `ai.load_models()` shows a
+drop-in file that fails to import.
 `budget_ms` is the in-game figure the bot wants — the same thing a model's own
 `SEARCH_BUDGET_S` is — and `budget_scale` is its opt-in to having that lifted by
 a batch runner, exactly as a module-level `BUDGET_SCALE` is (see
@@ -60,8 +69,15 @@ row and compared like `aux` is.
 
 One long-lived child process per seat per run, JSON per line: the runner writes a
 message to stdin, reads exactly one reply line from stdout. stderr is the bot's
-log — captured, never parsed. Process-per-`decide` is out; a 2-seat 18-node game
-averages ~174 turns and ten of them ask for ~3,500 decisions.
+log — discarded by default, never parsed. Process-per-`decide` is out; a 2-seat
+18-node game averages ~174 turns and ten of them ask for ~3,500 decisions.
+
+A process is keyed on `(seed, seat)` and re-handshaken when the turn counter goes
+backwards, which is how a ladder playing game after game in one runner — and
+checking each seating both ways round on the same seed — gets a fresh bot per
+game without the runner having to announce game boundaries. Replies are read on a
+thread rather than with `select`, because a pipe is not selectable on Windows
+(`tests/sim` already carries one such scar).
 
 ## Handshake
 
@@ -144,11 +160,15 @@ No owner field. A seat commands its own ships and nothing else
 (`engine._own_orders`); the runner stamps `pid` itself, so a foreign order is not
 something the protocol can express rather than something it filters.
 
-Validation mirrors `engine.apply_order` exactly, because that is what will see
-these: an unknown or unheld source, a non-adjacent destination, or a non-positive
-count is dropped silently, and `ships` is clamped to the garrison at launch.
-Several orders may leave one system; they are applied in the order listed, each
-deducting as it goes.
+`botio.orders_from` validates the **shape** and nothing else: non-integer ids or
+counts are dropped rather than coerced, so a malformed reply cannot reach the
+engine as something subtly wrong. Whether a source is held, a destination
+adjacent, or a count affordable is left to `engine.apply_order`, which decides it
+for every seat alike — an unknown or unheld source and a non-adjacent destination
+are dropped there, and `ships` is clamped to the garrison at launch. A second
+copy of those rules on this side would be a second thing to keep in step for no
+change in outcome. Several orders may leave one system; they apply in the order
+listed, each deducting as it goes.
 
 ## When a bot misbehaves
 
@@ -157,10 +177,14 @@ The house rule is that nothing crashes and a bad strategy name falls back to
 since a result computed with a fallback seat is not a result:
 
 - **Malformed reply, or none inside `budget_ms`** — that turn's orders are empty
-  and the seat holds. Recorded on the run.
-- **Process dead, or a third timeout** — the seat falls back to `heuristic` for
-  the remainder and the run is flagged `degraded`. A degraded run is reported and
-  never posted to `bot_scores`.
+  and the seat holds.
+- **Process dead, or `botproc.FORFEIT_TIMEOUTS` (3) timeouts** — the seat falls
+  back to `heuristic` for the remainder, and the run is flagged: `botproc.
+  degraded_runs()` collects it and `sim` prints it at exit. A degraded run is
+  never scored as that bot's and never posted to `bot_scores`.
+- **A slow start is not a slow bot** — the handshake gets its own
+  `botproc.HANDSHAKE_MS` (10 s), since a cold interpreter or a warming JIT is not
+  the bot being slow at deciding.
 
 An overrun count belongs on the leaderboard row for the same reason
 `bot_replay` stores the `aux` in force: it is the one thing that makes the
@@ -204,27 +228,46 @@ Rival `ai_params` are sent either way. They are documented as readable on every
 seat, and `aux` in particular is meant to distinguish a shallow opponent from a
 deep one — that is tuning, not identity.
 
-## Build order
+## The parity test
 
-1. **`starconquest/botio.py`** — pure core, no pygame and no subprocess:
-   `hello(settings, state, pid, budget_ms, reveal)`, `turn_payload(state, pid,
-   rng_seed, budget_ms)`, and an `orders_from(reply, pid, state)` validator that
-   mirrors `apply_order`'s rules. Pure means the schema is testable without a
-   child process anywhere near it.
-2. **The parity test, before the second bot exists.** Port one roster bot
-   (`rusherplus` — real arithmetic, small) to read the payload, run it as a
-   subprocess, and demand orders identical to the in-process original over
-   several turns of several games with `reveal_opponents: true`. The bot-maker
-   branch's equivalent (`test_export_round_trips_exactly`, interpreter against
-   generated module) is the only reason its two halves could be trusted to mean
-   the same thing, and a schema quietly missing a field looks exactly like a bot
-   that plays slightly worse.
-3. **The adapter** — manifest discovery plus process management, living beside
-   `tests/sim` rather than in `models/`, registering each manifest through
-   `ai.register` so `--ladder` and `--swap` need no new arguments and no new
-   roster plumbing.
-4. **The leaderboard column** — `bot_replay` last, and only once `version` is
-   settled against `engine_rev` per the manifest note above.
+`bots/rusherwire` is `models/rusherplus.py` with one thing changed: it reads the
+payload instead of a `GameState`, importing nothing from `starconquest`.
+`test_wire_bot_matches_in_process_original` asks both, on the same board and
+turn, for the same seat, and demands **identical** orders — because a payload
+quietly missing a field does not look like a bug, it looks like a bot that plays
+slightly worse. It is the same job `test_export_round_trips_exactly` did on the
+bot-maker branch, and the same reason: two implementations of one algorithm are
+only trustworthy while something compares them.
+
+Tie-breaks are what make that possible. `rusherplus` draws from `state.rng`
+inside a `min` key, so the test swaps the reference's `state.rng` for a
+`Random(rng_seed)` on the seed the payload carries — the two then draw the same
+stream in the same order, and a port that consults its randomness differently
+fails. The port is Python for exactly this reason; a bot in another language
+cannot reproduce `random.Random` and does not need to. The test proves the
+payload is *sufficient*, not that determinism crosses languages.
+
+It was mutation-checked rather than assumed: emptying `fleets` from the payload,
+and reversing the order systems are listed in, each fail it. Both are changes a
+plausible refactor could make, and neither is visible any other way.
+
+## What is left
+
+**The leaderboard column.** `bot_replay` last, and only once `version` is settled
+against `engine_rev` per the manifest note above. `bot_scores` also has no column
+for "this run was degraded", which it would need before an external bot could
+post at all.
+
+**Registration is opt-in**, which is a deliberate departure from the original
+plan of "`--ladder` needs no new arguments": `--external` is required. A default
+ladder silently spawning child processes is a surprise, and `bot_replay` takes
+its roster from `ai.available_strategies()` — without the flag it would have
+started posting external bots to the leaderboard the moment one appeared in
+`bots/`.
+
+**Nothing enforces purity.** A bot that reads the clock, the network or its own
+files is unreproducible and uncacheable, and today that is a contract rather
+than a check.
 
 ## Open questions
 
