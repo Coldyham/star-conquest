@@ -36,6 +36,10 @@ uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
+uv run python tools/config_census.py            # which setups people actually
+                                                # play (public tables, no key)
+uv run python tools/setup_sweep.py              # ...and whether the roster's
+                                                # ranking moves on one of them
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
