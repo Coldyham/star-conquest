@@ -319,7 +319,12 @@ LOG_FRAGMENT = "log="
 # player, so they get different lines rather than one shrug. The console carries
 # the detail (the endpoint asked, the state it came back in) — on the web build
 # `print` reaches the browser console, which is where a report starts.
-WATCH_UNREACHABLE_MSG = "Couldn't reach the leaderboard to fetch that replay"
+# Covers no answer *and* a bad one — offline, CORS, and a 500/502/503 from the
+# endpoint all land here. Deliberately not "couldn't reach": the board answering
+# with a failure is the commonest of these and reads nothing like a network
+# problem, so naming one would send the player looking in the wrong place. The
+# console warning carries the status that tells them apart.
+WATCH_UNREACHABLE_MSG = "Couldn't fetch that replay from the leaderboard"
 WATCH_MISSING_MSG = "That replay isn't on the leaderboard — is its score still posted?"
 WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
 

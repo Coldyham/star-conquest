@@ -520,6 +520,15 @@ grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, int
 -- grants: SELECT on games (what it replays) and bot_scores (to see what's
 -- already cached), plus INSERT/UPDATE on bot_scores for the upsert itself
 -- (its "merge-duplicates" Prefer header is an INSERT ... ON CONFLICT DO UPDATE).
+--
+-- This note has been here since the first time that caught someone, and it did
+-- not stop it happening twice more below. It states the mechanism, which was
+-- never the hard part: the hard part is re-deriving *which* relations a caller
+-- reads, every time one gains a query, and a comment cannot check a list.
+-- `tests/test_schema_grants.py` does — it reads the callers and these grants and
+-- requires them to agree, so a new query with no grant fails a test rather than
+-- a production run. Add the grant beside the caller it is for; the test will say
+-- if you missed one.
 grant select on public.games, public.bot_scores to service_role;
 grant insert, update on public.bot_scores to service_role;
 -- tools/verify_scores.py: read the scores and the replays behind them, write the
