@@ -51,6 +51,14 @@ the same "a failure is a state, not an exception" rule — a poll only ever answ
 pending, ok or error. Nothing awaits: the browser build's loop yields once per
 frame and blocking it on a network round trip would freeze the canvas.
 
+On the web the result comes back through *localStorage* rather than a ``window``
+property. Three bridge calls are involved in this feature and only two of them
+are proven by the rest of the game: writing through ``window.eval`` (how a replay
+is uploaded) and reading a stored string (how every preference and shared link
+already works). ``eval`` *returning* a value is the third, is needed nowhere else,
+and if it misbehaves it does so as an unexplained failure — so the fetch stores
+its answer and the poll reads it the way everything else does.
+
 Pure core in the sense that matters: no pygame, and no import of anything the
 headless tests can't load.
 """
@@ -63,7 +71,8 @@ import threading
 from typing import Optional
 
 from . import webstore
-from .paths import LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH, is_web
+from .paths import (LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH,
+                    WEB_REPLAY_BODY_KEY, WEB_REPLAY_STATE_KEY, is_web)
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
@@ -208,6 +217,7 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
     Daemon so a hung connection cannot keep the process alive after the window
     closes; the upload is worth strictly less than quitting promptly.
     """
+    import urllib.error
     import urllib.request
 
     request = urllib.request.Request(
@@ -232,20 +242,20 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
 # --------------------------------------------------------------------------- #
 # Fetching (a replay to watch)
 # --------------------------------------------------------------------------- #
-# Where a browser download parks its result. A single slot, because the game
-# fetches at most one replay — the one named in the launch URL.
-_WEB_SLOT = "__sc_replay"
-
-PENDING, OK, ERROR = "pending", "ok", "error"
+# A poll answers with one of these. MISSING is split out from ERROR because the
+# two send the player somewhere different: the plumbing worked and the row is not
+# there, versus the plumbing did not work.
+PENDING, OK, ERROR, MISSING = "pending", "ok", "error", "missing"
 
 
 class Download:
     """An in-flight replay fetch, polled once a frame.
 
     ``poll`` returns ``(state, body)``: ``PENDING`` while it is still going, then
-    ``OK`` with the text, or ``ERROR`` with nothing. Deliberately not a promise, a
-    coroutine or a callback — the game loop is a frame loop, and the one thing it
-    must never do is wait.
+    ``OK`` with the text, ``MISSING`` if the board answered "no such replay", or
+    ``ERROR`` for anything else. Deliberately not a promise, a coroutine or a
+    callback — the game loop is a frame loop, and the one thing it must never do
+    is wait.
     """
 
     def __init__(self, web: bool) -> None:
@@ -258,21 +268,34 @@ class Download:
         return self._result[0] if self._result else (PENDING, "")
 
     def _poll_web(self) -> tuple[str, str]:
-        """Read the slot the fetch writes into.
+        """Collect whatever the fetch has parked in localStorage.
 
-        Everything crosses the bridge as a *string*, via ``eval``, rather than by
-        reaching into a JS object from Python: a primitive return is the one shape
-        the bridge is reliable about, and it costs a few characters of JS.
+        Read with ``webstore.get`` rather than by evaluating JS, because that is
+        the read path the rest of the game already proves works every launch (the
+        shared-settings token, the personal bests). Handing JavaScript a string to
+        *store* and reading it back through the accessor we trust avoids depending
+        on ``window.eval`` returning a value across the bridge, which nothing else
+        here needs and which fails as a bare "error" if it misbehaves.
+
+        The slot is cleared as soon as it is collected: a stale ``ok`` left by an
+        earlier session would otherwise be read as an instant success carrying
+        somebody else's replay.
         """
-        import platform as _platform
+        state = webstore.get(WEB_REPLAY_STATE_KEY)
+        if state == OK:
+            body = webstore.get(WEB_REPLAY_BODY_KEY)
+            _clear_web_slot()
+            return OK, body
+        if state in (ERROR, MISSING):
+            _clear_web_slot()
+            return state, ""
+        return PENDING, ""
 
-        try:
-            state = str(_platform.window.eval(f"window.{_WEB_SLOT}_state||''"))
-            if state != OK:
-                return (ERROR if state == ERROR else PENDING), ""
-            return OK, str(_platform.window.eval(f"window.{_WEB_SLOT}_body||''"))
-        except Exception:  # noqa: BLE001 — a bridge that isn't there never arrives
-            return ERROR, ""
+
+def _clear_web_slot() -> None:
+    """Empty the download mailbox. Best-effort like every other store write."""
+    webstore.set(WEB_REPLAY_STATE_KEY, "")
+    webstore.set(WEB_REPLAY_BODY_KEY, "")
 
 
 def fetch_log(match_id: str) -> Optional[Download]:
@@ -286,6 +309,11 @@ def fetch_log(match_id: str) -> Optional[Download]:
     if not endpoint or not _MATCH_ID_RE.match(match_id):
         return None
     url = f"{endpoint}?id={match_id}"
+    # Printed rather than kept quiet: on the web this reaches the browser console,
+    # and "which endpoint did it actually ask?" is the first question whenever a
+    # replay will not open — the URL is derived from the page's own host, so it
+    # differs between production, a branch deploy and a preview.
+    print(f"fetching replay: {url}")
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 
@@ -298,13 +326,15 @@ def _fetch_web(url: str) -> Optional[Download]:
     """
     import platform as _platform
 
+    state, body = json.dumps(WEB_REPLAY_STATE_KEY), json.dumps(WEB_REPLAY_BODY_KEY)
     try:
         _platform.window.eval(
-            f"window.{_WEB_SLOT}_state='{PENDING}';window.{_WEB_SLOT}_body='';"
+            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({body});"
             f"fetch({json.dumps(url)}).then(function(r)"
-            "{return r.ok?r.text():Promise.reject()}).then(function(t)"
-            f"{{window.{_WEB_SLOT}_body=t;window.{_WEB_SLOT}_state='{OK}'}})"
-            f".catch(function(){{window.{_WEB_SLOT}_state='{ERROR}'}})"
+            "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"
+            f"{{localStorage.setItem({body},t);localStorage.setItem({state},'{OK}')}})"
+            f".catch(function(e){{console.warn('replay fetch failed',e);"
+            f"localStorage.setItem({state},e===404?'{MISSING}':'{ERROR}')}})"
         )
         return Download(web=True)
     except Exception:  # noqa: BLE001
@@ -313,6 +343,7 @@ def _fetch_web(url: str) -> Optional[Download]:
 
 def _fetch_desktop(url: str) -> Optional[Download]:
     """The same download on a daemon thread, posting into the mailbox when done."""
+    import urllib.error
     import urllib.request
 
     download = Download(web=False)
@@ -322,7 +353,11 @@ def _fetch_desktop(url: str) -> Optional[Download]:
             with urllib.request.urlopen(url, timeout=_TIMEOUT) as response:
                 body = response.read().decode("utf-8")
             download._result.append((OK, body))
-        except Exception:  # noqa: BLE001 — every failure is the same failure here
+        except urllib.error.HTTPError as err:
+            # 404 is the endpoint working and saying there is no such replay,
+            # which is a different thing to tell the player than "no answer".
+            download._result.append((MISSING if err.code == 404 else ERROR, ""))
+        except Exception:  # noqa: BLE001 — anything else is simply "no answer"
             download._result.append((ERROR, ""))
 
     try:

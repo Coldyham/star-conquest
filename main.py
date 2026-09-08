@@ -315,7 +315,13 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
 # fragment is a bare settings token, which is base64url and so cannot contain '='
 # anywhere but its (stripped) padding.
 LOG_FRAGMENT = "log="
-WATCH_FAILED_MSG = "Couldn't load that replay — it may not be posted any more"
+# Three different things can go wrong and they want different answers from the
+# player, so they get different lines rather than one shrug. The console carries
+# the detail (the endpoint asked, the state it came back in) — on the web build
+# `print` reaches the browser console, which is where a report starts.
+WATCH_UNREACHABLE_MSG = "Couldn't reach the leaderboard to fetch that replay"
+WATCH_MISSING_MSG = "That replay isn't on the leaderboard — is its score still posted?"
+WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
 
 
 def replay_request() -> str:
@@ -580,7 +586,8 @@ async def main() -> None:
     wanted = args.watch.strip() or replay_request()
     pending_replay = share.fetch_log(wanted) if wanted else None
     if wanted and pending_replay is None:
-        menu.set_status(menu_state, WATCH_FAILED_MSG, False)
+        print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
+        menu.set_status(menu_state, WATCH_UNREACHABLE_MSG, False)
     elif pending_replay is not None:
         menu.set_status(menu_state, "Loading replay...", True)
 
@@ -610,8 +617,22 @@ async def main() -> None:
             if status != share.PENDING:
                 opened = open_replay(body, settings) if status == share.OK else None
                 pending_replay = None
-                if opened is None:
-                    menu.set_status(menu_state, WATCH_FAILED_MSG, False)
+                if status != share.OK:
+                    # `missing` is the board answering "no such replay" — the
+                    # plumbing worked, so the player is told to look at the score,
+                    # not at their connection. Anything else is no answer at all:
+                    # offline, CORS, an unconfigured or undeployed endpoint. The
+                    # console carries the URL that was actually asked.
+                    print(f"replay fetch ended in state {status!r}")
+                    menu.set_status(menu_state,
+                                    WATCH_MISSING_MSG if status == share.MISSING
+                                    else WATCH_UNREACHABLE_MSG, False)
+                elif opened is None:
+                    # It answered, and what came back was not a replay — an error
+                    # page, a truncated body, a log with no turns in it.
+                    print(f"replay body was not a readable log ({len(body)} bytes): "
+                          f"{body[:120]!r}")
+                    menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
                 else:
                     state, ui, log = opened
                     current_seed = log.seed

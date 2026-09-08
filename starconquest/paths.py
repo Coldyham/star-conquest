@@ -35,6 +35,16 @@ WEB_BESTS_KEY = "sc_bests"
 # for every map that has ever existed and travel in every shared link.
 WEB_SHARE_GAMES_KEY = "sc_share_games"
 
+# Where a browser download parks its result for the game loop to collect
+# (`share.fetch_log`). localStorage rather than a `window` property because
+# reading one back is the one bridge call this build cannot take for granted:
+# writing through `window.eval` is proven (that is how a replay is uploaded) and
+# so is reading a *property* (the URL fragment, these very keys), but `eval`
+# returning a value is neither. So the fetch writes here and the poll reads it
+# with `webstore.get`, which every stored preference already depends on.
+WEB_REPLAY_STATE_KEY = "sc_replay_state"
+WEB_REPLAY_BODY_KEY = "sc_replay_body"
+
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.
 #

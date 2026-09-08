@@ -1517,13 +1517,21 @@ def _settings_path(name: str) -> Path:
     return _SAVE_DIR / name
 
 
+# How long a status line stays up. A failure holds far longer than a success:
+# "saved" is confirming something the player just watched themselves do, while an
+# error is the only account they get of something that did *not* happen, and one
+# that clears before it can be read is worse than none.
+_STATUS_MS = 4000
+_STATUS_ERROR_MS = 15000
+
+
 def set_status(ms: MenuState, text: str, ok: bool) -> None:
-    """Show ``text`` under the Start row for a few seconds. Public because
-    ``main`` posts here too — it is the menu's one line for telling the player
-    what just happened (see the web quit fallback in ``main.leave_app``)."""
+    """Show ``text`` under the Start row. Public because ``main`` posts here too —
+    it is the menu's one line for telling the player what just happened (see the
+    web quit fallback in ``main.leave_app``)."""
     ms.status = text
     ms.status_ok = ok
-    ms.status_until = pygame.time.get_ticks() + 4000
+    ms.status_until = pygame.time.get_ticks() + (_STATUS_MS if ok else _STATUS_ERROR_MS)
 
 
 def _set_players(settings: Settings, n: int) -> None:

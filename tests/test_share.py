@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from starconquest import replay, share
+from starconquest import paths, replay, share
 from starconquest.model import Order
 from starconquest.settings import Settings
 
@@ -204,18 +204,24 @@ MATCH = "00112233445566ff"
 
 
 class _EvalWindow:
-    """A stand-in JS bridge: records what was evaluated, answers what it is told to."""
+    """A stand-in JS bridge: records what it was asked to run, and runs nothing.
 
-    def __init__(self, answers=None):
+    Deliberately returns nothing useful — the point of the localStorage mailbox is
+    that no value has to come *back* through `eval`.
+    """
+
+    def __init__(self):
         self.scripts = []
-        self.answers = answers or {}
 
     def eval(self, script):        # noqa: A003 - the bridge's own name
         self.scripts.append(script)
-        for needle, value in self.answers.items():
-            if needle in script:
-                return value
-        return ""
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    """Back the preference store with a tmp file, so a poll reads what the browser
+    would have written without touching the developer's own store."""
+    monkeypatch.setattr(share.webstore, "_file_path", lambda: tmp_path / "kv.json")
 
 
 def _bridge(monkeypatch, window):
@@ -236,56 +242,73 @@ def test_no_endpoint_means_nothing_to_watch(monkeypatch):
     assert share.fetch_log(MATCH) is None
 
 
-def test_the_web_fetch_parks_its_own_result_and_handles_every_ending(watchable, monkeypatch):
+def test_the_web_fetch_stores_its_own_result_and_handles_every_ending(watchable, monkeypatch):
+    """The JS is fire-and-forget, so it must leave the slot in exactly one of the
+    three states whatever happens — a non-2xx is as much an end as a dead socket,
+    and a poll that never sees one waits for ever."""
     window = _EvalWindow()
     _bridge(monkeypatch, window)
     assert share.fetch_log(MATCH) is not None
     script = window.scripts[0]
     assert f"?id={MATCH}" in script
-    # All three endings must be written, or a poll would hang on `pending` for
-    # the rest of the session: a non-2xx is as much an error as a dead socket.
-    assert "Promise.reject()" in script and ".catch(" in script
+    # Written into localStorage, not onto `window`: the poll reads it back through
+    # `webstore.get`, the one read path the rest of the game proves every launch.
+    assert "localStorage.setItem" in script
+    assert paths.WEB_REPLAY_STATE_KEY in script and paths.WEB_REPLAY_BODY_KEY in script
+    assert "Promise.reject" in script and ".catch(" in script
     assert f"'{share.OK}'" in script and f"'{share.ERROR}'" in script
 
 
-def test_polling_reports_pending_then_the_body(watchable, monkeypatch):
-    window = _EvalWindow({"_state": share.PENDING})
-    _bridge(monkeypatch, window)
+def test_polling_reports_pending_then_the_body(watchable, monkeypatch, store):
+    _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.PENDING)
     assert download.poll() == (share.PENDING, "")
-    window.answers = {"_state": share.OK, "_body": "the-encoded-log"}
+
+    share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
+    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
     assert download.poll() == (share.OK, "the-encoded-log")
 
 
-def test_a_failed_fetch_polls_as_an_error_not_an_exception(watchable, monkeypatch):
-    window = _EvalWindow({"_state": share.ERROR})
-    _bridge(monkeypatch, window)
-    assert share.fetch_log(MATCH).poll() == (share.ERROR, "")
-
-
-def test_a_bridge_that_breaks_mid_download_is_an_error_too(watchable, monkeypatch):
-    """Starting the fetch worked; reading its result does not. A poll answers
-    with a state, never by raising into the frame that called it."""
-    class _Broken(_EvalWindow):
-        def eval(self, script):    # noqa: A003
-            if "fetch(" not in script:      # ...so only the *poll* fails
-                raise RuntimeError("bridge went away")
-            return ""
-
-    window = _Broken()
-    _bridge(monkeypatch, window)
+def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, monkeypatch, store):
+    """A stale `ok` left by an earlier session would otherwise be collected as an
+    instant success carrying somebody else's replay."""
+    _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
-    assert download is not None
+    share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
+    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
+    assert download.poll()[0] == share.OK
+    assert download.poll() == (share.PENDING, "")
+    assert share.webstore.get(paths.WEB_REPLAY_BODY_KEY) == ""
+
+
+def test_a_failed_fetch_polls_as_an_error_not_an_exception(watchable, monkeypatch, store):
+    _bridge(monkeypatch, _EvalWindow())
+    download = share.fetch_log(MATCH)
+    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.ERROR)
     assert download.poll() == (share.ERROR, "")
 
 
-def test_a_bridge_that_is_not_there_at_all_never_starts_a_download(watchable, monkeypatch):
-    class _Absent(_EvalWindow):
-        def eval(self, script):    # noqa: A003
-            raise RuntimeError("no DOM here")
+def test_no_such_replay_is_its_own_answer(watchable, monkeypatch, store):
+    """"The board says there is no such replay" and "the board did not answer"
+    send the player to different places, so they are not the same state."""
+    _bridge(monkeypatch, _EvalWindow())
+    download = share.fetch_log(MATCH)
+    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.MISSING)
+    assert download.poll() == (share.MISSING, "")
 
-    _bridge(monkeypatch, _Absent())
-    assert share.fetch_log(MATCH) is None
+
+def test_the_web_fetch_tells_a_404_apart_from_a_dead_connection(watchable, monkeypatch):
+    window = _EvalWindow()
+    _bridge(monkeypatch, window)
+    share.fetch_log(MATCH)
+    assert f"e===404?'{share.MISSING}'" in window.scripts[0]
+
+
+def test_an_empty_slot_reads_as_pending_rather_than_as_a_failure(watchable, monkeypatch, store):
+    """The state between starting the fetch and the browser answering."""
+    _bridge(monkeypatch, _EvalWindow())
+    assert share.fetch_log(MATCH).poll() == (share.PENDING, "")
 
 
 def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch):
@@ -311,6 +334,23 @@ def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch)
             break
         time.sleep(0.01)
     assert download.poll() == (share.OK, "the-encoded-log")
+
+
+def test_a_desktop_404_is_missing_rather_than_an_error(watchable, monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    def _absent(*args, **kwargs):
+        raise urllib.error.HTTPError("u", 404, "no replay", {}, None)
+
+    monkeypatch.setattr(share, "is_web", lambda: False)
+    monkeypatch.setattr(urllib.request, "urlopen", _absent)
+    download = share.fetch_log(MATCH)
+    for _ in range(200):
+        if download.poll()[0] != share.PENDING:
+            break
+        time.sleep(0.01)
+    assert download.poll() == (share.MISSING, "")
 
 
 def test_a_refused_download_polls_as_an_error(watchable, monkeypatch):
