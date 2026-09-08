@@ -132,6 +132,22 @@ def best_logs(rows: list[dict]) -> dict[str, dict]:
     return best
 
 
+def _aux_widened(cfg: Settings) -> Settings:
+    """``cfg`` with every seat's ``aux`` a float.
+
+    ``settings._ai_from_dict`` keeps an int ``aux`` as one, since a knob declaring
+    ``AUX_INT`` is a whole number and ``challenge_key`` hashes JSON, where ``12``
+    and ``12.0`` are different setups. A ``games`` row cannot hold that
+    distinction — Postgres jsonb normalises ``12.0`` to ``12``, so a posted setup
+    reads back as ints whatever was sent — while an uploaded log is plain JSON and
+    keeps it. So the two sides are compared with the distinction dropped rather
+    than trusted; it is a repr, and no setup differs from another only by it.
+    """
+    for params in cfg.ai:
+        params.aux = float(params.aux)
+    return cfg
+
+
 def same_setup(log: replay.GameLog, settings_json: dict | None) -> bool:
     """Whether ``log`` was played on the setup its score is filed under.
 
@@ -144,8 +160,8 @@ def same_setup(log: replay.GameLog, settings_json: dict | None) -> bool:
     if not isinstance(settings_json, dict):
         return False
     try:
-        posted = Settings.from_dict(settings_json)
-        played = Settings.from_dict(log.settings)
+        posted = _aux_widened(Settings.from_dict(settings_json))
+        played = _aux_widened(Settings.from_dict(log.settings))
     except Exception:  # noqa: BLE001 — an unreadable setup is not the same setup
         return False
     seed = posted.seed if posted.seed is not None else log.seed

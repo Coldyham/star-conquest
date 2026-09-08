@@ -135,6 +135,42 @@ a leaderboard grouping is cosmetic (worst case, a named config splits in two and
 loses its name) where a `Challenge.key` mismatch is load-bearing (it decides
 whether a target-to-beat banner is honoured or discarded).
 
+A digest can also move without the *setup* changing at all, because the checksum
+is over JSON and JSON distinguishes `12` from `12.0`. `AiParams.aux` is declared
+a float, the AI tab's aux slider stores an int for a strategy that declares
+`AUX_INT`, and `from_dict` used to widen it back — so a link stamped over a live
+`Settings` hashed `"aux":12` while every decode of that same link hashed
+`"aux":12.0`, and the recipient's menu raised the un-challenge modal the moment
+the link opened. Seed 749187 (5 players, 33 nodes, a knower at search depth 12)
+is the instance that surfaced it, stamped `109ffcf1cf4d4260`.
+
+No legacy drop can recover that. A drop names a field, and here the field is
+present on both sides; worse, a live `Settings` holds a *mixture* — the four
+untouched seats were floats and only the dragged one an int — so accepting the
+stamped digest by re-hashing would mean enumerating the int/float subsets of
+every seat, `2^n` forms per drop entry, for a rule with no upper bound. The fix
+is at the reader instead: `_ai_from_dict` keeps whichever of int/float `aux`
+arrived as, alone among the fields. That is also the truer type, since a knob
+declaring `AUX_INT` *is* a whole number, and it makes the digest survive a token
+or save round-trip for any mixture without moving a single key already stamped.
+The remaining seam is cosmetic and downstream: two players who reach the same
+knob value by different routes — one dragging the slider to 12, one opening a
+link that carries `12.0` — still stamp different keys, which is a board split of
+exactly the kind `submit.findTwin` folds.
+
+One consumer has to drop the distinction rather than keep it, and must go on
+doing so: Postgres jsonb normalises `12.0` to `12`, so a `games` row reads back
+with integer `aux` values whatever the game sent, while an uploaded log is plain
+JSON and keeps the float. `verify_scores.same_setup` compares exactly those two,
+so it widens both through `_aux_widened` first. Without that every posted score
+whose setup carries an `aux` verifies as `mismatch` — the log's own map read as
+somebody else's.
+
+Widening any *other* float field on the way in stays correct, and deliberately
+so: doing the same for `defender_advantage` would let a hand-edited `1` and a
+slider's `1.0` hash apart, which is the split above with nothing to gain, since
+no slider writes an int there.
+
 ## Ship-speed growth
 
 `config.SHIP_SPEED_GROWTH_PCT` (Advanced → Travel, 0 by default) models tech

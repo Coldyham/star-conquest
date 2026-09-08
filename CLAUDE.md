@@ -396,7 +396,14 @@ intact.
     `ai.aux_spec`; `menu._ai_specs` appends that slider to `_AI_PARAMS` for the
     edited seat, so a strategy declaring nothing (the built-in heuristic,
     `thinker`, …) shows no aux slider at all. `models/knower.py` labels it
-    *Search depth*.
+    *Search depth*. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
+    preserves that — `aux` is the one field whose int/float form survives a
+    decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
+    it and every link carrying an int aux reads as edited the moment it opens.
+    The board is the one place that cannot hold the distinction (jsonb drops the
+    `.0`), so `verify_scores.same_setup` widens both sides through `_aux_widened`
+    before hashing — drop that and every posted score with an aux reads as a
+    different map.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so

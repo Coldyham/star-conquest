@@ -99,6 +99,19 @@ def test_a_replay_of_another_map_cannot_back_a_score(posted):
     assert check.verdict == "mismatch" and "different setup" in check.detail
 
 
+def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(posted):
+    """Postgres jsonb normalises ``12.0`` to ``12``, so `settings_json` reads back
+    with integer ``aux`` values whatever the game sent, while the uploaded log is
+    plain JSON and keeps the float. One setup, two reprs — and `challenge_key`
+    hashes JSON, so the comparison has to drop the distinction (`_aux_widened`)
+    or every posted score carrying an aux reads as somebody else's map."""
+    score, blob, setup = posted
+    as_jsonb = {**setup, "ai": [{**seat, "aux": int(seat["aux"])} for seat in setup["ai"]]}
+    assert any(isinstance(seat["aux"], float) for seat in setup["ai"])  # a real difference
+    with _preserve_config():
+        assert verify_scores.verify(score, blob, as_jsonb).verdict == "verified"
+
+
 def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monkeypatch):
     """The one thing that can legitimately break an old replay is the *engine*
     moving — never a bot. A score played under the old rules that no longer
