@@ -837,7 +837,13 @@ adopts the replay's own settings, so leaving review lands on that setup rather
 than whatever the menu was showing.
 
 `open_history` is the entry the H key and a watched replay share. They differ
-only in how they came by the log, and must not differ in what review looks like.
+only in how they came by the log, and must not differ in what review looks like —
+with one exception, which is where the scrubber lands. Our own review opens on
+the latest turn, because that is where the player is and looking back is a step
+away from it. A watched replay opens at turn 0, the board as generated: the
+question there is how the game was played, the answer runs forwards, and opening
+on the final board would both give away the ending and make dragging the whole
+way back the price of watching it.
 
 **A watched result is not ours to post.** Reviewing somebody's win ends on the
 same win overlay our own games end on, showing their turns and their ships lost —

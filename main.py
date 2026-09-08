@@ -371,6 +371,14 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     came by the log — and must not differ in what review then looks like.
     ``live_fog`` is the board's current fog, stashed so leaving review restores it
     exactly. Returns empty lists if there is nothing to review.
+
+    Where the scrubber lands is the one thing the two entries *should* differ on,
+    because they are asking different questions. Reviewing our own game (H) opens
+    on the latest turn: that is where the player is, and looking back is a step
+    away from it. A watched replay opens at the opening position, because the
+    question there is "how was this game played" and the answer runs forwards —
+    landing on the final board instead gives away the ending and leaves the only
+    way to watch it being to drag all the way back first.
     """
     history_states, history_fog = build_history(ui, log)
     if not history_states:
@@ -382,7 +390,10 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.reset_route()
     ui.sel_forward = None
     ui.history_max = len(history_states) - 1
-    ui.history_turn = ui.history_max
+    # Turn 0 is the board as generated, before anyone moved — the frame a replay
+    # should start on, and the one that makes the first turn's changes visible as
+    # changes rather than as a position already arrived at.
+    ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
     return history_states, history_fog, live_fog
 
