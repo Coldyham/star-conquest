@@ -121,6 +121,9 @@ race/empire customisation, animations & sound, camera pan/zoom, multi-hop fleet
 routing, fog-of-war. Nearer term: exposing the remaining config knobs. **Drop-in
 user AIs** now work (`models/` + the per-seat Strategy dropdown); still wanted for
 full **head-to-head competition** is a documented public state/query API and a
-headless sim harness that assigns a strategy per seat.
+headless sim harness that assigns a strategy per seat. The API half is designed
+but unbuilt — [`docs/bot-api.md`](docs/bot-api.md) is a wire protocol for bots
+written in any language, judged in the ladder and on the leaderboard rather than
+shipped in the browser build.
 
 Per-seat AI tuning and selectable difficulty via the AI tab are already here.
