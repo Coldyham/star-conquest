@@ -356,6 +356,11 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
         return None
     ai.load_models()      # a stored match may name a drop-in strategy for a seat
     state, ui = resume_game(log, settings)
+    # Somebody else's game: the win overlay must not offer to post their result as
+    # ours, and playing on from it must not append to their uploaded match
+    # (`Ui.can_post`, `share.due`). A `Retry` or a rewind out of here builds a
+    # fresh `Ui` and so starts a match that really is ours.
+    ui.watched = True
     return state, ui, log
 
 
@@ -476,9 +481,9 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # cadence is what keeps an *abandoned* game — the kind no score ever
         # carries — from being lost entirely. `due` holds every condition,
         # including the opt-in itself, so this line cannot send by accident.
-        if share.due(log, state.winner is not None):
+        if share.due(log, state.winner is not None, ours=not ui.watched):
             share.post_log(log, log.setup_key())
-    if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
+    if ui.can_post(state) and settings is not None:
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
@@ -775,13 +780,15 @@ async def main() -> None:
                 state, ui, log = None, None, None
             elif action == "share":
                 # Game-over only (input only returns this there), and only for a
-                # result worth sending — render gates the button the same way.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                # result that is ours to publish — render gates the button on the
+                # very same call, so the C key cannot reach what the overlay
+                # declines to draw.
+                if ui.can_post(state):
                     ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
             elif action == "leaderboard":
                 # Same gate as "share": the two buttons offer one result by two
                 # channels, so neither may fire on a result that isn't yours.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                if ui.can_post(state):
                     ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log, settings)

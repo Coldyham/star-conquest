@@ -285,7 +285,12 @@ intact.
       launch URL of `#log=<match id>` makes the game fetch it and open history
       review on it (`main.replay_request` -> `open_replay` -> `open_history`,
       which the H key shares), so the board's *Watch* link is a link back into
-      the game rather than a second engine in JS.
+      the game rather than a second engine in JS. A watched match is marked
+      (`Ui.watched`), because it ends on the same win overlay ours do:
+      `Ui.can_post` is the single predicate behind both sharing buttons, the
+      personal best and the checkpoint upload, so nobody's replay is one press
+      from being posted as your score. Rewinding out of one and playing on forks
+      a match that *is* yours — see system-design for why that stays open.
     - **The verifier binds the log to the setup** (`same_setup`), or an easy
       map's replay would back a hard map's score. It proves the *game*, never
       that a human played it — that is what `hand` discloses, recomputed from the

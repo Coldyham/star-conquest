@@ -105,6 +105,16 @@ def test_a_shared_demo_still_checkpoints_nothing(configured, sharing):
     assert share.due(_log(every, autoplayed=True), finished=False) is False
 
 
+def test_playing_on_from_a_watched_replay_checkpoints_nothing(configured, sharing):
+    """That log is somebody else's match and carries their ``match_id``. Rows are
+    keyed by it and the longest wins, so uploading our continuation would replace
+    the replay their posted score is checked against — with a game they never
+    played."""
+    every = share.CHECKPOINT_TURNS
+    assert share.due(_log(every), finished=False, ours=False) is False
+    assert share.due(_log(every - 1), finished=True, ours=False) is False
+
+
 # --------------------------------------------------------------------------- #
 # What it sends
 # --------------------------------------------------------------------------- #

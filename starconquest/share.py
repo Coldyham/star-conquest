@@ -121,12 +121,18 @@ def worth_sending(log: GameLog) -> bool:
     return log.turn_count > 0 and log.hand_turns > 0
 
 
-def due(log: GameLog, finished: bool) -> bool:
+def due(log: GameLog, finished: bool, *, ours: bool = True) -> bool:
     """Whether a shared game should checkpoint now.
 
     Called once per resolved turn, so this is the cadence itself: every
     ``CHECKPOINT_TURNS`` turns, and again on the turn the match is decided so the
     stored replay ends where the game did rather than up to 24 turns short.
+
+    ``ours`` is False while playing on from a *watched* replay (``Ui.watched``).
+    That log carries somebody else's ``match_id``, and rows are keyed by it — so
+    uploading would file our continuation as a longer version of their match, and
+    the verifier, which takes the longest row for a match, would then replay ours
+    against their posted score and call it a mismatch.
 
     Tested cheapest-first on purpose. Fast forward resolves a turn per *frame*,
     and the preference lives in a file off the web — so the store is consulted
@@ -135,7 +141,7 @@ def due(log: GameLog, finished: bool) -> bool:
     """
     if not (finished or log.turn_count % CHECKPOINT_TURNS == 0):
         return False
-    return worth_sending(log) and webstore.share_games()
+    return ours and worth_sending(log) and webstore.share_games()
 
 
 def row_for(log: GameLog, game_key: str) -> dict:
