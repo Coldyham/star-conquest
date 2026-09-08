@@ -12,6 +12,12 @@ touching that code, not as background reading.
 [`docs/system-design.md`](docs/system-design.md) covers the core and the shell;
 [`docs/bot-design.md`](docs/bot-design.md) covers the `models/` roster, the
 margins bots price fights with, and the measurements behind every AI constant.
+Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
+is the wire protocol for non-Python bots, and
+[`docs/bot-brief.md`](docs/bot-brief.md) is a self-contained brief a player
+pastes into an AI assistant to have a bot written — its starter bot is executed
+and its API references checked by `tests/test_bot_brief.py`, since nobody diffs
+a pasted document against the code.
 
 ## Commands
 
@@ -30,6 +36,8 @@ uv run python -m tests.sim --trials 200          # batch stats (winners, length,
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 
+uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot:
+                                                # legal orders, read-only, reproducible
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, computed
                                                 # but not posted (needs SUPABASE_*)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
