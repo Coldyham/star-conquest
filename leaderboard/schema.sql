@@ -525,11 +525,24 @@ grant insert, update on public.bot_scores to service_role;
 -- tools/verify_scores.py: read the scores and the replays behind them, write the
 -- verdicts, and delete a game_logs row that a longer upload of the same match has
 -- superseded (the public has no delete path anywhere, worker or not).
+--
+-- Every relation the key touches has to be listed, including the *views* and
+-- including a table it only reads to decide what work is left. This is the trap
+-- the note above describes and it has caught this file twice: a missing grant
+-- here does not degrade, it fails the query outright — and it fails it only for
+-- the worker, so the same row stays perfectly visible to the anon key on the
+-- site, which is exactly how it hides.
 grant select on public.scores to service_role;
+-- select: which scores already have a verdict (`verify_scores.pending`).
+grant select, insert, update on public.score_checks to service_role;
 -- select + delete for the worker (read a replay, prune one a longer upload has
 -- superseded); insert for netlify/functions/log.mjs, which holds the same key.
 grant select, insert, delete on public.game_logs to service_role;
-grant insert, update on public.score_checks to service_role;
+-- ...and the view netlify/functions/replay.mjs serves a replay out of. It is not
+-- security_invoker, so it reads game_logs with owner rights whoever asks — but
+-- the caller still needs SELECT on the view itself, which grants nothing beyond
+-- the rows its own where clause already allows anyone to read.
+grant select on public.public_replays to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.
