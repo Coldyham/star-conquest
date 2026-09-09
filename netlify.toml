@@ -20,12 +20,19 @@
 # secrets and is safe for the mirror-image reason: it fires only on schedule and
 # workflow_dispatch, neither of which a fork can trigger.
 #
-# Untrusted deploys are gated in the dashboard rather than here — Netlify's
-# default sensitive-variable policy holds a fork's preview for approval by a team
-# member, which is also what keeps a spam PR from spending the month's build
-# minutes or publishing its own content on a deploy-preview-N--<site>.netlify.app
-# subdomain that reads as ours. Keep it on "Require approval"; that gate, not
-# this file, is the boundary.
+# There is no approval gate on those previews, and it is worth knowing why not
+# rather than assuming one: Netlify's sensitive-variable policy (Project
+# configuration -> Environment variables, public repositories only, default
+# "Require approval") holds an untrusted deploy so it cannot read a secret — but
+# this site has no variables at all, so the policy gates nothing and a fork's
+# preview simply builds. That is the right trade while the list stays empty,
+# since what is left to lose is a share of the month's build minutes and a
+# stranger's content on a guessable deploy-preview-N--<site>.netlify.app
+# subdomain, both visible in the dashboard and revoked by closing the pull
+# request. Previews are worth that: a change to a game wants looking at in a
+# browser. Deploy Previews can be turned off entirely under Build & deploy ->
+# Continuous deployment -> Branches and deploy contexts. Add a variable here and
+# the policy appears — leave it on "Require approval".
 [build]
   command = "curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
   publish = "web"
