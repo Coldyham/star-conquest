@@ -21,17 +21,10 @@ name: Leaderboard worker
 
 on:
   schedule:
-    # Every six hours, off the hour: GitHub's shared cron queue is busiest at
-    # :00, and a run that starts late is worth more than one that gets dropped.
-    #
-    # The cadence is set by Actions minutes, not by freshness. On a *private*
-    # repository every run bills against the account's monthly allowance (2,000
-    # minutes on the Free plan) and GitHub rounds each job up to the whole
-    # minute — so an hourly schedule would spend 730+ minutes a month just
-    # asking whether there is anything to do. Four runs a day costs ~120 and is
-    # still far sooner than anyone needs a bot column; use the Run workflow
-    # button when you want it now. Public repositories are unmetered, so hourly
-    # is free there if this is ever made public.
+    # Hourly, off the hour: GitHub's shared cron queue is busiest at :00, and a
+    # run that starts late is worth more than one that gets dropped. Actions
+    # minutes are unmetered on a public repository, so the cadence answers to
+    # freshness alone; use the Run workflow button when you want it now.
     #
     # It also keeps a free Supabase project from idling into a pause, which it
     # otherwise does after about a week — any run touches the REST API.
@@ -39,7 +32,7 @@ on:
     # Note GitHub disables a scheduled workflow after 60 days with no commits to
     # the repository. If the column silently stops updating on a quiet repo,
     # that is the first thing to check (Actions tab -> Enable workflow).
-    - cron: "17 8 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       game_key:

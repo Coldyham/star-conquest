@@ -658,16 +658,17 @@ writes into `public.bot_scores` on a schedule and leaves no service to keep up.
 Netlify was never a candidate either way — its Functions run JavaScript and Go,
 and there is no Python runtime to put the engine in.
 
-The cadence is set by Actions minutes rather than by how fresh the column needs
-to be. This repository is **private**, so runs bill against the account's monthly
-allowance (2,000 minutes on the Free plan; public repositories are unmetered).
-GitHub rounds every job up to the whole minute, so an hourly schedule spends
-730+ minutes a month doing nothing but asking whether there is work — over a
-third of the allowance before a single replay runs. Every six hours costs ~120
-and is still far more often than a leaderboard needs, with `workflow_dispatch`
-for when it is wanted sooner. It also comfortably covers the other thing the
-schedule buys: a free Supabase project pauses after about a week idle, and any
-run touches the REST API.
+The cadence answers to how fresh the column needs to be rather than to cost:
+this repository is **public**, so Actions minutes are unmetered and the job runs
+hourly, with `workflow_dispatch` for when it is wanted sooner. Most of those
+runs find nothing to do and cost a few seconds of setup — the job installs no
+dependencies, since the simulation core imports no pygame and nothing off PyPI.
+Only a *private* repository makes the schedule a budget question: runs there
+bill against the account's monthly allowance (2,000 minutes on the Free plan)
+and GitHub rounds each job up to the whole minute, so hourly would spend 730+
+minutes a month just asking whether there is work. Either way the cadence
+comfortably covers the other thing the schedule buys: a free Supabase project
+pauses after about a week idle, and any run touches the REST API.
 
 The one capability given up is on-demand compute: a visitor cannot ask for a bot
 that hasn't been run yet and watch it appear. That only starts to matter if the

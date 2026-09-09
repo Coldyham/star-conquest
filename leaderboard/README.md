@@ -313,11 +313,13 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    the publishable key in `config.mjs` — that one is public on purpose, this one
    must never be). Supabase moved the old `service_role` JWT to a "Legacy API
    keys" tab; it still works, under either that name or `SUPABASE_SERVICE_KEY`. The workflow skips itself cleanly while they are unset, so there is
-   nothing to undo if you'd rather not. It runs every six hours — a cadence set
-   by Actions minutes on a private repo rather than by how fresh the column needs
-   to be, with *Run workflow* for when you want it sooner — and any run keeps a
-   free Supabase project from idling into the pause noted under *Known
-   limitations*.
+   nothing to undo if you'd rather not. It runs hourly — Actions minutes are
+   unmetered on a public repository, so the cadence answers to freshness, with
+   *Run workflow* for when you want it sooner. On a **private** fork every run
+   bills against the account's monthly allowance instead, so thin the schedule
+   there (`.github/workflows/bot-replay.yml`; daily is far sooner than a
+   leaderboard needs). Any run keeps a free Supabase project from idling into the
+   pause noted under *Known limitations*.
 6. **Optional — accept replay uploads.** Set the *same two* values as
    environment variables on this Netlify site (*Site configuration → Environment
    variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_KEY`). That is what
