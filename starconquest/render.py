@@ -15,13 +15,19 @@ from .model import GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
 
 _FONTS: dict[str, pygame.font.Font] = {}
+_FONTS_SCALE = 0.0   # the config.ui_scale _FONTS was built at
 
 
 def _fonts() -> dict[str, pygame.font.Font]:
-    if not _FONTS:
+    """The three UI fonts at the current scale, rebuilt if the scale has moved
+    (a resized window re-fits the UI, so these sizes are not fixed for the run)."""
+    global _FONTS_SCALE
+    if not _FONTS or _FONTS_SCALE != config.ui_scale:
+        _FONTS.clear()
         _FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
         _FONTS["normal"] = uifont.load(config.FONT_SIZE)
         _FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
+        _FONTS_SCALE = config.ui_scale
     return _FONTS
 
 

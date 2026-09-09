@@ -46,6 +46,21 @@ def build_view(state: GameState) -> WorldView:
                      pan_padding=config.map_pan_padding())
 
 
+def fit_ui(surface: pygame.Surface, touch: bool) -> None:
+    """Scale the whole UI to fit ``surface``, never below the design baseline.
+
+    Called before the first frame and again whenever the window changes size, so
+    a resize re-fits the HUD, fonts and node sizes rather than leaving them at
+    the size the window happened to open at. Touch builds additionally boost hit
+    targets to stay finger-sized. ``apply_ui_scale`` rescales from each
+    constant's baseline, so repeating this never compounds.
+    """
+    sw, sh = surface.get_size()
+    fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
+    boost = config.TOUCH_UI_SCALE if touch else 1.0
+    config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
+
+
 # Shown on the menu when a confirmed quit couldn't actually close the app.
 CANT_CLOSE_MSG = "Close the tab or app window to exit"
 
@@ -573,19 +588,15 @@ async def main() -> None:
         # set_mode (a redundant call fights the WM on X11 and snaps it back).
         pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H), pygame.RESIZABLE)
     pygame.display.set_caption("Star Conquest")
-    # Scale the whole UI to the real surface before the first frame: fit the
-    # baseline design size into the actual screen. Touch devices (Android, and
-    # touch browsers) additionally boost hit targets to stay finger-sized; the web
-    # framebuffer is now high-res (WEB_FB_*), so `fit` already scales the UI up for
-    # crispness and only *touch* browsers need the extra boost — desktop browsers
-    # report no touch points and stay compact. Fonts are built lazily from these
-    # sizes, so this must run before any draw. The same probe also tells the shell
-    # to drop keyboard-only labels/hints (config.touch_ui).
-    sw, sh = pygame.display.get_surface().get_size()
-    fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
+    # Fit the UI to the real surface before the first frame: fonts are built
+    # lazily from these sizes, so this must run before any draw. The touch probe
+    # is boot-time and rides along on `fit_ui` — it also tells the shell to drop
+    # keyboard-only labels/hints (config.touch_ui). The web framebuffer is
+    # high-res (WEB_FB_*), so the plain fit already scales the UI up there for
+    # crispness and only *touch* browsers need the extra hit-target boost;
+    # desktop browsers report no touch points and stay compact.
     touch = paths.is_android() or softkeyboard.is_touch_web()
-    boost = config.TOUCH_UI_SCALE if touch else 1.0
-    config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
+    fit_ui(pygame.display.get_surface(), touch)
     clock = pygame.time.Clock()
 
     # Two scenes share the one window: the setup menu and the game board. The
@@ -665,6 +676,7 @@ async def main() -> None:
         screen = pygame.display.get_surface()
         if screen.get_size() != (config.SCREEN_W, config.SCREEN_H):
             config.SCREEN_W, config.SCREEN_H = screen.get_size()
+            fit_ui(screen, config.touch_ui)   # re-fit fonts/HUD/nodes to the new size
             if state is not None and ui is not None:
                 ui.view = build_view(state)
                 ui.reset_view(state)   # re-frame for the new size, not the whole map

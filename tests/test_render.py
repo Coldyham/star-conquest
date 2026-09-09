@@ -765,3 +765,34 @@ def test_every_star_name_fits_the_info_panel():
         _desktop_scale()
         render._FONTS.clear()
         pygame.quit()
+
+
+def test_a_resized_window_refits_the_ui():
+    """The UI scale is fitted to the surface on every resize, not just at boot, so a
+    window that grows gets a proportionally bigger HUD, map and font instead of
+    keeping the size it opened at — and the font cache follows the scale on its own,
+    with no manual clear. Never scaled below the design baseline, and never
+    compounding: the same size always yields the same numbers."""
+    import main
+    pygame.init()
+    try:
+        render._FONTS.clear()   # an earlier test quit pygame; drop its stale fonts
+        base_size = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+        measured = []
+        for size in (base_size, (config.BASE_SCREEN_W * 2, config.BASE_SCREEN_H * 2),
+                     (800, 600), base_size):
+            screen = pygame.display.set_mode(size)
+            main.fit_ui(screen, False)
+            measured.append((config.ui_scale, config.FONT_SIZE, config.HUD_RIGHT_W,
+                             config.NODE_MAX_RADIUS,
+                             render._fonts()["normal"].get_height()))
+
+        base, big, small, again = measured
+        assert base[0] == 1.0 and big[0] == 2.0
+        for grew, was in zip(big[1:], base[1:]):
+            assert grew > was, f"a doubled window kept its baseline sizes: {big}"
+        assert small == base, "the fit scaled below the baseline"
+        assert again == base, f"the scale compounded across resizes: {again} != {base}"
+    finally:
+        _desktop_scale()
+        pygame.quit()
