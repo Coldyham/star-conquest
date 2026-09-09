@@ -42,6 +42,7 @@ def expect_for(settings: Settings) -> dict:
             "lost": challenge.lost,
             "hand": challenge.hand,
             "by": challenge.by,
+            "log": challenge.log,
         },
         "gameKey": challenge.key,
     }
@@ -75,6 +76,23 @@ def main() -> None:
     tuned.ai[1].aux = 2.0
     tuned = stamped(tuned, turns=61, lost=140, hand=12, by="Someone Else")
     cases.append({"name": "tuned-knobs", "token": tuned.to_token(), "expect": expect_for(tuned)})
+
+    # A score carrying the id of its uploaded replay (Challenge.log), which is
+    # what tools/verify_scores.py keys on. The plain and tuned cases above have
+    # none, pinning the other half of the rule: a token minted before the field
+    # existed still decodes, to a blank.
+    logged = stamped(Settings(nodes=20, seed=808), turns=33, lost=7, hand=33,
+                     by="Logged", log="00112233445566ff")
+    cases.append({"name": "with-log", "token": logged.to_token(),
+                  "expect": expect_for(logged)})
+
+    # A malformed id must not reach the database column the verifier keys on.
+    forged = Settings(seed=55)
+    forged.challenge = Challenge(turns=12, lost=1, hand=12, by="", log="'; drop table--")
+    forged.challenge.key = forged.challenge_key()
+    cases.append({"name": "bad-log-id", "token": forged.to_token(),
+                  "expect": {**expect_for(forged), "challenge":
+                             {"turns": 12, "lost": 1, "hand": 12, "by": "", "log": ""}}})
 
     # The pre-compression form real early links used; from_token still reads it.
     legacy = stamped(Settings(players=2, nodes=9, seed=7), turns=14, lost=0, hand=14, by="")

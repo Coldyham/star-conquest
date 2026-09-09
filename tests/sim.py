@@ -41,7 +41,7 @@ import signal
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from starconquest import ai, config, engine, mapgen, settings
+from starconquest import ai, config, engine, mapgen, replay, settings
 from starconquest.model import AiParams, GameState
 from starconquest.settings import Settings
 
@@ -119,6 +119,39 @@ class ReplayResult:
     lost: int
     timed_out: bool
     bot_timeouts: int = 0
+
+
+@dataclass
+class PositionResult:
+    """One bot's attempt to finish a *stored game* from partway through it.
+
+    ``turn`` is the position it was handed — the board exactly as it stood after
+    that many turns of the recorded match. ``turns_from`` is how many more turns
+    the bot then needed (``None`` if it never finished), and ``human_turns_from``
+    what the player who was really there needed from the same board (``None`` if
+    they never won it either, which is the whole reason the losses are worth
+    keeping). ``gain`` is the difference, negative when the bot was faster.
+    """
+
+    bot: str
+    match_id: str
+    turn: int
+    won: bool
+    turns_from: int | None
+    lost: int
+    human_won: bool
+    human_turns_from: int | None
+    timed_out: bool
+    bot_timeouts: int = 0
+
+    @property
+    def gain(self) -> int | None:
+        """Turns saved (negative) or spent (positive) against the human's own
+        finish, or ``None`` when the two are not comparable — which is any
+        position where either side never took the board."""
+        if self.turns_from is None or self.human_turns_from is None:
+            return None
+        return self.turns_from - self.human_turns_from
 
 
 @dataclass
@@ -286,6 +319,101 @@ def play_settings(
         timed_out=state.winner is None,
         bot_timeouts=timeouts[0],
     )
+
+
+def play_from(
+    log: replay.GameLog,
+    turn: int,
+    bot: str,
+    aux: float | None = None,
+    max_turns: int = 600,
+    bot_timeout: float = 0.0,
+) -> PositionResult:
+    """Hand ``bot`` the player's seat partway through a recorded match.
+
+    The third question this harness answers, and the densest one. ``play_settings``
+    puts a bot on a stored *setup* and asks how it does from the opening; this
+    puts it on a stored *position* — the board as it actually stood after ``turn``
+    turns of somebody's real game — and asks whether it finishes faster from there
+    than that person did. One game yields a position every few turns, so a single
+    recorded match is dozens of paired trials rather than one.
+
+    Why that is worth having: a roster measured against itself only ever visits
+    positions bots create. These are positions a *person* built — different
+    shapes, different mistakes — and they are the one thing self-play cannot
+    generate. Losses and abandoned games count for as much as wins here (more,
+    arguably): there is no human finish to compare against, but "can any bot still
+    take this board?" is a fair question and a hard one.
+
+    The position is rebuilt by ``replay.reconstruct`` on a *copy* truncated to
+    ``turn``, so no seat is asked to re-decide anything and the caller's log is
+    untouched. From there the seat is handed over exactly as ``play_settings``
+    does it — default ``AiParams`` but for ``aux``, opponents left alone — and the
+    two functions therefore measure the same bot the same way.
+
+    ``max_turns`` counts from the position, not from turn zero: a board handed
+    over on turn 300 gets the same allowance as one handed over on turn 3.
+    """
+    if not 0 <= turn < log.turn_count:
+        raise ValueError(f"turn {turn} is not inside a {log.turn_count}-turn log")
+    branch = replay.GameLog.from_dict(log.to_dict())
+    branch.truncate(turn)
+    state, _ = replay.reconstruct(branch)
+    seat = state.human()
+    if seat is None:
+        raise ValueError("this log has no human seat to take over")
+
+    human_won = log.winner == seat.id
+    # What the person actually needed from here. `turn_count` is where their game
+    # ended, so this is only a finish line when they won it.
+    human_from = log.turn_count - turn if human_won else None
+    if state.winner is not None:
+        # Already decided on the very turn we branched at: nothing to play, and
+        # nothing to learn. Reported rather than skipped so a caller sampling
+        # blindly sees why the row is empty.
+        return PositionResult(bot, log.match_id, turn, state.winner == seat.id, 0,
+                              seat.ships_lost, human_won, human_from, False)
+
+    seat.is_human = False
+    seat.ai_strategy = bot
+    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+
+    check_invariants(state)
+    timeouts = [0]
+    decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
+    limit = turn + max_turns
+    while state.winner is None and state.turn < limit:
+        engine.end_turn(state, decide=decide)
+        check_invariants(state)
+    won = state.winner == seat.id
+    return PositionResult(
+        bot=bot,
+        match_id=log.match_id,
+        turn=turn,
+        won=won,
+        turns_from=(state.turn - turn) if state.winner is not None else None,
+        lost=seat.ships_lost,
+        human_won=human_won,
+        human_turns_from=human_from,
+        timed_out=state.winner is None,
+        bot_timeouts=timeouts[0],
+    )
+
+
+def positions(log: replay.GameLog, every: int, skip_last: int = 0) -> list[int]:
+    """Which turns of ``log`` are worth handing to a bot.
+
+    Every ``every`` turns, starting at the first one (turn 0 is the opening
+    position, which is what ``play_settings`` already measures — included so the
+    two can be compared on the same footing).
+
+    ``skip_last`` drops the endgame, where a won match is a formality and every
+    bot "wins in three turns from here" regardless of skill. It is a blunt
+    instrument and the right value depends on the map, which is why it is a
+    parameter rather than a constant.
+    """
+    usable = log.turn_count - max(0, skip_last)
+    return list(range(0, max(usable, 0), max(1, every)))
 
 
 def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0) -> list[SimResult]:

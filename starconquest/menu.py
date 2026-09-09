@@ -563,6 +563,14 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     fog_changed = _changed(settings, "fog_sight") or _changed(settings, "fog_scout")
     _row_label(surface, "Fog of war", left, y, fog_changed)
     _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
+    y += _ROW_H
+
+    # The one row here that is *not* a Settings field: it belongs to this
+    # installation rather than to a game setup, so it never travels in a save file
+    # or a shared link, and never shows a changed-dot (`_changed` reads Settings).
+    # Off until switched on — see `webstore.share_games` and `share`.
+    _row_label(surface, "Share replays", left, y, False)
+    _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -1410,6 +1418,13 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.seed_text = str(settings.seed)
     elif hit == "autoplay":
         settings.autoplay = not settings.autoplay
+    elif hit == "share_games":
+        # A preference the store might refuse (private browsing, a full quota).
+        # Say so rather than redrawing an unticked box with no explanation: an
+        # opt-in that silently forgets itself is worse than one that fails loudly.
+        want = not webstore.share_games()
+        if not webstore.set_share_games(want) and want:
+            set_status(ms, "Couldn't save that here — replays stay private", False)
     elif hit == "fog_of_war":
         if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT
@@ -1502,13 +1517,21 @@ def _settings_path(name: str) -> Path:
     return _SAVE_DIR / name
 
 
+# How long a status line stays up. A failure holds far longer than a success:
+# "saved" is confirming something the player just watched themselves do, while an
+# error is the only account they get of something that did *not* happen, and one
+# that clears before it can be read is worse than none.
+_STATUS_MS = 4000
+_STATUS_ERROR_MS = 15000
+
+
 def set_status(ms: MenuState, text: str, ok: bool) -> None:
-    """Show ``text`` under the Start row for a few seconds. Public because
-    ``main`` posts here too — it is the menu's one line for telling the player
-    what just happened (see the web quit fallback in ``main.leave_app``)."""
+    """Show ``text`` under the Start row. Public because ``main`` posts here too —
+    it is the menu's one line for telling the player what just happened (see the
+    web quit fallback in ``main.leave_app``)."""
     ms.status = text
     ms.status_ok = ok
-    ms.status_until = pygame.time.get_ticks() + 4000
+    ms.status_until = pygame.time.get_ticks() + (_STATUS_MS if ok else _STATUS_ERROR_MS)
 
 
 def _set_players(settings: Settings, n: int) -> None:

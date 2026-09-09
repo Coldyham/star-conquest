@@ -133,6 +133,14 @@ def test_win_overlay_offers_sharing_only_for_an_earned_human_win():
         state.winner = 2             # someone else's win is not yours to send
         render.draw(screen, state, ui)
         assert ui.share_button_rect[2] == 0
+
+        # ...and neither is someone else's win that we merely watched, which
+        # arrives looking exactly like our own: their seat, their hand turns.
+        state.winner = 1
+        ui.watched = True
+        render.draw(screen, state, ui)
+        assert ui.share_button_rect[2] == 0
+        assert ui.leaderboard_button_rect[2] == 0
     finally:
         pygame.quit()
 
@@ -157,7 +165,7 @@ def test_win_overlay_pairs_the_leaderboard_button_with_sharing(monkeypatch):
         assert share[0] + share[2] <= board[0]           # no overlap
         assert share[2] == board[2]                      # common width
 
-        monkeypatch.setattr(render.paths, "LEADERBOARD_SUBMIT_URL", "")
+        monkeypatch.setattr(render.paths, "LEADERBOARD_ORIGIN", "")
         render.draw(screen, state, ui)
         assert ui.leaderboard_button_rect[2] == 0
         assert ui.share_button_rect[2] > 0               # sharing still offered
@@ -215,6 +223,24 @@ def test_result_lines_verdict_is_three_way():
 
     ui.challenge_by = ""      # an anonymous challenge names no one
     assert verdict((31, 16))[0] == "Matched 31 turns / 16 lost"
+
+
+def test_a_watched_result_says_whose_it_is():
+    """The overlay is otherwise indistinguishable from our own win, and the two
+    missing buttons would read as a broken feature rather than as the rule."""
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = _make_ui(state)
+    state.winner, state.turn, ui.hand_turns = 1, 31, 31
+
+    assert not any("replayed" in text for _k, text, _c in render._result_lines(state, ui))
+    ui.watched = True
+    lines = render._result_lines(state, ui)
+    # It leads, qualifying the "X wins!" above it rather than trailing the score.
+    assert "replayed" in lines[0][1]
+    assert "Conquered in 31 turns" in lines[1][1]
+    # ...and it is said on a loss too, where there is no score line at all.
+    state.winner = 2
+    assert [text for _k, text, _c in render._result_lines(state, ui)] == [lines[0][1]]
 
 
 def test_scoreboard_full_table_and_eliminated():

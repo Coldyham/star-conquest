@@ -112,6 +112,15 @@ class Challenge:
     # construction, and that is the point: it is a checksum letting the menu spot
     # that the config has since been edited, so the target no longer compares.
     key: str = ""
+    # `GameLog.match_id` of the match this score was made in, so a score posted to
+    # the leaderboard can be checked against the replay that produced it. Blank
+    # for a hand-written link, a pre-field one, or a result whose log was never
+    # uploaded — the board treats it as unverified rather than invalid.
+    #
+    # Riding here rather than on `Settings` is what makes it free: `challenge_keys`
+    # drops `challenge` before hashing, so unlike a new `Settings` field this moves
+    # no setup digest and needs no `_LEGACY_KEY_DROPS` entry.
+    log: str = ""
 
     def summary(self) -> str:
         """One line: the target, as shown on the menu banner and win overlay."""
@@ -450,12 +459,24 @@ def _coerce(value, default):
 
 
 def _ai_from_dict(d) -> AiParams:
-    """One seat's AiParams from a dict, coercing each field (defaults elsewhere)."""
+    """One seat's AiParams from a dict, coercing each field (defaults elsewhere).
+
+    ``aux`` keeps whichever of int/float it arrived as, alone among the fields: a
+    strategy declaring ``AUX_INT`` means its knob *is* a whole number (a search
+    depth of 12, not 12.0), and the menu's slider stores one. Widening it to
+    float would lose that, and with it the one thing ``challenge_key`` is not
+    free to round: ``json.dumps`` writes ``12`` and ``12.0`` differently, so a
+    decoded link would hash to a digest its sender never stamped and the setup
+    would read as edited the moment it was opened.
+    """
     out = AiParams()
     if isinstance(d, dict):
         for f in fields(AiParams):
             if f.name in d:
                 setattr(out, f.name, _coerce(d[f.name], getattr(out, f.name)))
+        aux = d.get("aux")
+        if isinstance(aux, int) and not isinstance(aux, bool):
+            out.aux = aux
     return out
 
 

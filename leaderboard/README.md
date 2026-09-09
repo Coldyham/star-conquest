@@ -163,7 +163,7 @@ runner only 2x slower would otherwise have cached a different answer for knower 
 a 40-node map.)
 
 `bot_scores` is the one table on the board the public cannot write: a read policy,
-no insert policy, no insert grant, and the worker's `service_role` key bypassing
+no insert policy, no insert grant, and the worker's secret key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that
 nobody bothers; these genuinely are.
 
@@ -188,47 +188,193 @@ lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
 
+## Checked scores
+
+A score in a link is a claim. The *replay* behind it is not: a match is fully
+determined by its settings, its seed and, per turn, every seat's orders plus the
+combat draws — feed those back through the engine and it either reproduces the
+posted result or it does not. So the game uploads that replay when the player
+posts a score, and the worker replays it.
+
+The pieces, in the order a submission touches them:
+
+1. `replay.GameLog` mints a `match_id` per match, and `main.challenge_settings`
+   stamps it into the link as `Challenge.log`. That field rides on `Challenge`
+   rather than `Settings` on purpose: `challenge_keys()` drops `challenge` before
+   hashing, so unlike a new `Settings` field this moves no setup digest and
+   invalidates no link anyone has already shared.
+2. `starconquest/share.py` posts the log — deflated and base64url'd by
+   `GameLog.encoded`, the same encoding the token itself uses — to
+   `netlify/functions/log.mjs`, which stores it in `game_logs`.
+3. `submit.mjs` writes the id onto the score row as `match_id`. The log and the
+   score arrive by different routes and either can be first, which is why there
+   is no foreign key between them.
+4. `tools/verify_scores.py` (the same scheduled worker as the bot column) reads
+   both, replays the log, and records one of four verdicts in `score_checks`:
+   `verified`, `mismatch`, `unreadable`, or `missing` when no log was ever
+   uploaded. `missing` is stored rather than left as an absence, so the board can
+   tell "nobody has looked yet" from "we looked, and there is nothing to check".
+
+**The verifier binds the replay to the setup** (`same_setup`), or an easy map's
+log could be attached to a hard map's score and would verify perfectly.
+
+What this does *not* do: prove a human played the game. A bot driving the seat
+produces a log that verifies like any other — which is what `hand` discloses, and
+the verifier recomputes it from the log's own per-turn autoplay flags rather than
+trusting the number in the link.
+
+### Shared replays, and where they are kept
+
+Posting a score is one of two ways a replay reaches the board. The other is the
+menu's **Share replays** checkbox, off until it is switched on: with it ticked, a
+game also uploads as it goes — every 25 turns and again when it ends. That
+cadence is the point of it. A match that is *abandoned* never reaches an end, and
+abandoned and lost games are exactly what `scores` can never hold (the game only
+offers the submit button on a win), while being the positions a bot is most worth
+measuring against. A pure autoplay demo is skipped either way: a bot-versus-bot
+game is reproducible from its seed, so storing one is bytes without information.
+
+**`game_logs` is the one table the public can neither read nor write.** RLS is on
+and it has no policies and no anon grants at all. Every other table here takes a
+row from anyone, and for a hundred-byte score that is a fine trade; a replay is
+5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
+go through this site's own function, `netlify/functions/log.mjs`, which:
+
+* answers only POST, and only for a body under the size cap;
+* rate-limits the caller (in memory, per instance — enough for a runaway loop,
+  not for an adversary, and the limits that actually hold are the size cap and
+  the check constraint behind it; a durable limit would mean storing everyone's
+  IP, which is a worse thing to own than the abuse it prevents);
+* validates every field, `match_id` above all, since that is the column the
+  verifier keys scores against;
+* forwards the row under `SUPABASE_SERVICE_KEY`, which is the table's only
+  writer. Set it in the Netlify site's environment alongside `SUPABASE_URL` — the
+  same secret the Actions worker uses, and just as much not-in-git. With either
+  unset the function answers 503 and stores nothing.
+
+Reads belong to the worker alone, so **uploading a game does not publish it**,
+and **nothing identifying is attached**: a row is a match id, a setup key and the
+moves. Grouping one person's games would need a durable client id, which is a
+tracking identifier by any other name.
+
+Uploads are append-only like everything else here, so a game that checkpoints
+repeatedly leaves several rows and the longest is the current one;
+`tools/verify_scores.py --prune` clears the rest.
+
+### Watching one back
+
+A score whose replay is on the board gets a **Watch** link, and it goes back into
+the *game* rather than to a player written here: the game already has the whole
+reviewer — `reconstruct`, the fog replay and the scrubber — and its engine is
+Python, so a JS viewer would be a second engine to keep in step with the first.
+The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
+`netlify/functions/replay.mjs` and opens history review on it.
+
+**Posting a score is what publishes that replay.** `public_replays` (schema.sql)
+is `game_logs` restricted to the matches a posted score points at, so a game that
+merely uploaded itself because *Share replays* was on stays unreadable. That rule
+lives in the view's `where` clause rather than in the function, which selects
+from the view and has no condition of its own to drift. `submit.html` says so on
+the form, since that is where the decision is actually made.
+
+The link is only rendered for ids `public_replays` actually returns
+(`watchableIds` in `js/game.mjs`), so it can never lead to a 404 — a score can
+name a match whose upload never arrived. That query is asked by id rather than by
+map, because a score's `game_key` and its log's are stamped by different code
+paths and a folded key would make a `game_key` lookup quietly miss.
+
 ## Setup
 
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, `configs`, the `game_summary`/`config_summary` views, and
-   the row-level security policies that make everything append-only. The whole file
+   `users`, `games`, `scores`, `configs`, `game_logs`, `score_checks`, the
+   `game_summary`/`config_summary`/`public_replays` views, and the row-level security policies that
+   make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
    view right after pasting, PostgREST's schema cache hasn't caught up yet; the
    file's own final statement (`notify pgrst, 'reload schema';`) normally makes
    that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
    here, run only when two keys need merging (see above).
-3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and anon key. The anon
-   key belongs in git — it is designed to be public, and RLS is the real boundary.
-   The `service_role` key must never go in this repo. Optionally set `GAME_URL` to
-   where the game is deployed, and each map page gains a "Play this map" link
-   (and each config page a "Play a new seed" one).
+3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and the project's
+   *publishable* key (`sb_publishable_…`; the older `anon` JWT is under Supabase's
+   "Legacy API keys" tab and works too). That key belongs in git — it is designed
+   to be public, and RLS is the real boundary. A **secret** key (`sb_secret_…`, or
+   the legacy `service_role`) must never go in this repo. `GAME_URL_FALLBACK` is
+   where the game is deployed; on a `.netlify.app` host it is usually not used at
+   all — see "Finding each other" below.
 4. **Create a second Netlify site** from this repo with **Base directory** set to
    `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
    files as-is. The root `netlify.toml` and the game's own site are untouched.
-5. **Optional — turn on the bot column.** Add two repository secrets under
+5. **Optional — turn on the bot column and score checking.** Add two repository secrets under
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
-   `SUPABASE_SERVICE_KEY` set to the project's **service_role** key (*not* the
-   anon key in `config.mjs` — that one is public on purpose, this one must never
-   be). The workflow skips itself cleanly while they are unset, so there is
+   `SUPABASE_SECRET_KEY` set to the project's **secret** key `sb_secret_…` (*not*
+   the publishable key in `config.mjs` — that one is public on purpose, this one
+   must never be). Supabase moved the old `service_role` JWT to a "Legacy API
+   keys" tab; it still works, under either that name or `SUPABASE_SERVICE_KEY`. The workflow skips itself cleanly while they are unset, so there is
    nothing to undo if you'd rather not. It runs every six hours — a cadence set
    by Actions minutes on a private repo rather than by how fresh the column needs
    to be, with *Run workflow* for when you want it sooner — and any run keeps a
    free Supabase project from idling into the pause noted under *Known
    limitations*.
+6. **Optional — accept replay uploads.** Set the *same two* values as
+   environment variables on this Netlify site (*Site configuration → Environment
+   variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_KEY`). That is what
+   both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
+   back); with either unset they answer 503, and the game's uploads simply go
+   nowhere and no replay is watchable — a working board without replays rather
+   than a broken one.
+
+   Netlify's secret scanner would otherwise fail the build over `SUPABASE_URL`,
+   because `js/config.mjs` ships that value to every visitor on purpose. It is
+   declared not-a-secret in [`netlify.toml`](netlify.toml)
+   (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
+   hand. The *key* stays scanned, so a build still fails if that ever lands in a
+   deployed file. The game talks to `/api/log` and `/api/replay` on this site
+   — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
+   somewhere else.
+
+## Finding each other
+
+The game and the board are two Netlify sites whose names differ by exactly
+`-leaderboard`, and Netlify names every other deploy `<context>--<site>.netlify.app`
+— `deploy-preview-42--…` for a PR, `<branch>--…` for a branch deploy. Both sites
+build from this one repository, so a PR produces the *same* context on each.
+
+That makes the sibling derivable instead of configured. Each side edits the tag
+into or out of its own hostname:
+
+    deploy-preview-42--star-conquest.netlify.app
+    deploy-preview-42--star-conquest-leaderboard.netlify.app
+
+So a deploy preview of the game uploads to, and watches replays from, the deploy
+preview of the board; a branch deploy pairs with its branch deploy; production
+with production — with no URL edited by hand between them. `sibling_host` in
+`starconquest/paths.py` is one direction (used by `webstore.leaderboard_origin`),
+`siblingGame` in `js/config.mjs` the other, and `allowedOrigin` in
+`netlify/functions/log.mjs` accepts the same shape so a preview is not refused by
+CORS. Any host the rule cannot read — a custom domain, localhost, a desktop
+build — falls back to the constant, which is the behaviour this always had.
+
+**A preview shares production's database.** Netlify gives deploy previews the
+site's environment variables, so a test upload from a preview lands in the real
+`game_logs`. If that matters, set a different `SUPABASE_URL` for the *Deploy
+previews* context (Netlify supports per-context values) and point it at a scratch
+project.
 
 ## Local development
 
 ```sh
 cd leaderboard && python3 -m http.server 8000   # then open localhost:8000
+netlify dev                                     # ...or this, to run the function too
 ```
 
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
-PostgREST accepts any origin for the anon key. Without one, every page says so
-instead of failing obscurely.
+PostgREST accepts any origin for the publishable key. Without one, every page says so
+instead of failing obscurely. A plain static server does not run
+`netlify/functions/`, so uploads need `netlify dev` (with the two environment
+variables set); `localhost:8000` is in the function's CORS allowlist for that.
 
 ## Tests
 
@@ -246,6 +392,12 @@ Re-run the generator and commit `tests/fixtures/tokens.json` if the token format
 in `settings.py` ever changes — that fixture file is what keeps the two encoders
 from drifting apart.
 
+`tests/functions.test.mjs` covers both Netlify functions: what `log.mjs`'s
+`validate` accepts and how its `rateLimited` window behaves (which is why both
+are exported rather than buried in the handler), and that `replay.mjs` reads
+through the `public_replays` view, refuses a malformed id before it reaches a
+query string, and answers "unpublished" and "missing" identically.
+
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
 is why that logic sits in a module with no DOM or fetch in it. It also covers the
@@ -257,12 +409,12 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Known limitations, accepted on purpose
 
-- **Scores are unverifiable.** The token format is public and unsigned, so a
-  hand-crafted impossible score would be accepted. RLS protects the database, not
-  the plausibility of what is in a link. Catching that needs server-side
-  re-simulation from the seed — which the bot-replay worker now does for the
-  *machine* column, and could be extended to sanity-check a human's, since it
-  already rebuilds the exact map from `settings_json` alone.
+- **A score with no replay behind it is unverifiable.** The token format is
+  public and unsigned, so a hand-crafted impossible score is accepted exactly as a
+  real one is. What answers that is the replay the game now uploads when you post
+  (see "Checked scores" above) — but only for scores that carry one. Anything
+  posted by hand, or before that existed, checks as `missing`: unverified rather
+  than suspect, and shown as such.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
@@ -276,4 +428,4 @@ pasting the file into a scratch Postgres or Supabase project and querying
 
 ## Not built yet
 
-Nothing outstanding. The bot column below was the last item here.
+Nothing outstanding.

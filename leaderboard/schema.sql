@@ -65,6 +65,121 @@ create index if not exists scores_game_key_rank_idx
   on public.scores (game_key, turns, lost, submitted_at);
 
 -- ---------------------------------------------------------------------------
+-- scores.match_id: `GameLog.match_id` out of the token (`Challenge.log`), naming
+-- the replay this score was made in. Added rather than declared in the table
+-- above so re-pasting this file upgrades an existing board; blank for every score
+-- posted before the game uploaded logs, and for any hand-written link.
+--
+-- Deliberately no foreign key to game_logs: the log is posted by the *game* and
+-- the score by this *site*, so either can arrive first, and a score whose upload
+-- was blocked must still post. An unmatched match_id means unverified, never
+-- invalid.
+-- ---------------------------------------------------------------------------
+alter table public.scores add column if not exists match_id text not null default '';
+
+create index if not exists scores_match_id_idx
+  on public.scores (match_id) where match_id <> '';
+
+-- ---------------------------------------------------------------------------
+-- game_logs: the replay behind a score — settings, seed, and every turn's orders
+-- and combat draws, deflated and base64url'd by `replay.GameLog.encoded`. Posted
+-- by the game itself when the player presses "Post to leaderboard", which is the
+-- consent: a game merely played, abandoned or lost is never uploaded.
+--
+-- With "Share replays" switched on in the game's menu it also stores games as
+-- they go — every 25 turns and again at the end — so the losses and the abandoned
+-- games are kept too. Those are the ones no score can ever carry, and the ones a
+-- bot is worth measuring against.
+--
+-- Neither path attaches anything identifying: a row is a match id, a setup key
+-- and the moves. There is deliberately no client id, which would be the only way
+-- to group one person's games and is a tracking identifier by any other name.
+--
+-- This table is the strictest on the board: no select policy *and* no insert
+-- policy, and no grant of either to anon. Writes come through this site's own
+-- function (`netlify/functions/log.mjs`) under the service_role key, which is
+-- what makes a size limit and a rate limit enforceable at all — every other table
+-- here takes a hundred-byte row from anyone, whereas a replay is 5-14 KiB and an
+-- open insert path would be a storage bill. Reads are the worker's alone, so
+-- uploading a game does not publish it.
+--
+-- Append-only like every other table here, which is what shapes the key: an
+-- upload is a new row, never an update, so a match played on past a first upload
+-- lands beside its earlier self and the *longest* row is the current one. The
+-- worker prunes what it supersedes; the public cannot delete anything.
+--
+-- The size bound is the real defence on a table anyone may insert into: measured
+-- whole games run 5-14 KiB encoded (a 4-player 24-node match of 295 turns is the
+-- worst yet seen at 13.6 KiB), so 256 KiB is generous for a very long game and
+-- still refuses a blob posted to fill the database.
+-- ---------------------------------------------------------------------------
+create table if not exists public.game_logs (
+  id           bigint generated always as identity primary key,
+  match_id     text not null check (match_id ~ '^[0-9a-f]{16}$'),
+  game_key     text not null check (char_length(game_key) between 1 and 64),
+  turns        integer not null check (turns > 0),
+  -- Claims by the client, and stored as claims: an index for finding logs
+  -- without decoding every blob (completed games, wins, games actually played by
+  -- hand), never evidence. Replaying the log settles all three, which is exactly
+  -- what tools/verify_scores.py does before a score is called verified.
+  finished     boolean not null default false,
+  won          boolean not null default false,
+  hand         integer not null default 0 check (hand >= 0),
+  log          text not null check (octet_length(log) between 1 and 262144),
+  submitted_at timestamptz not null default now()
+);
+
+-- For a board created before games were stored as they were played. Same
+-- drop/add spirit as configs_tags_shape above: re-pasting this file upgrades an
+-- existing table, which `create table if not exists` alone would silently skip.
+alter table public.game_logs add column if not exists finished boolean not null default false;
+alter table public.game_logs add column if not exists won      boolean not null default false;
+alter table public.game_logs add column if not exists hand     integer not null default 0;
+
+-- Longest first: that is the row a verifier wants, and the index answers the
+-- lookup by match_id at the same time.
+create index if not exists game_logs_match_idx
+  on public.game_logs (match_id, turns desc);
+
+-- ---------------------------------------------------------------------------
+-- score_checks: what happened when the worker replayed a score's log
+-- (`tools/verify_scores.py`). One row per score, keyed by it.
+--
+--   verified    the log replays and reproduces the posted turns, lost and hand
+--   mismatch    it replays, and produces something else — the score is wrong
+--   outdated    it does not reproduce, and was played under older *rules*
+--               (`engine.RULES_VERSION`), so it is unverifiable rather than wrong
+--   unreadable  the blob does not decode, or does not replay at all
+--   missing     no log was ever uploaded for this score's match_id
+--
+-- Written by the worker alone (read policy, no insert policy — same shape as
+-- bot_scores) but publicly readable, because "checked" is the whole point of
+-- having it. `missing` is stored rather than inferred from absence so the board
+-- can tell "nobody has looked at this yet" from "we looked, and there is nothing
+-- to check" — the first is silence, the second is a fact about the score.
+-- ---------------------------------------------------------------------------
+create table if not exists public.score_checks (
+  score_id   bigint primary key references public.scores(id) on delete cascade,
+  verdict    text not null,
+  -- What went wrong, in one line, for a mismatch or an unreadable log. Empty on
+  -- a pass. Shown to nobody by default: it is for whoever is looking into a row.
+  detail     text not null default '',
+  -- The simulation that produced this verdict (`bot_replay.replay_rev`) — the
+  -- core modules only, since a log records orders and dice and so is immune to a
+  -- *bot* changing. An engine rule changing is a different matter, and that is
+  -- what the `outdated` verdict above is for.
+  engine_rev text not null default '',
+  checked_at timestamptz not null default now()
+);
+
+-- A drop/add pair rather than a check inside `create table if not exists`, so
+-- re-pasting this file widens the set on a board created before `outdated`
+-- existed (the same shape configs_tags_shape uses to tighten one).
+alter table public.score_checks drop constraint if exists score_checks_verdict;
+alter table public.score_checks add  constraint score_checks_verdict check (
+  verdict in ('verified', 'mismatch', 'outdated', 'unreadable', 'missing'));
+
+-- ---------------------------------------------------------------------------
 -- sc_config_key / sc_bots: derive a game's setup identity and opponent roster
 -- straight from settings_json, so grouping by "same setup, different seed"
 -- needs no new field on Settings and no change to Challenge.key (see
@@ -196,6 +311,31 @@ create table if not exists public.bot_scores (
 );
 
 -- ---------------------------------------------------------------------------
+-- public_replays: the replays anyone may watch — and the *only* rows of
+-- game_logs that ever leave this database to a visitor.
+--
+-- The rule is one join: a replay is public exactly when a posted score points at
+-- it. Posting a score is a deliberate, public act; a game that merely uploaded
+-- itself because "Share replays" was on is not, and stays unreadable. So the
+-- consent boundary is expressed here in SQL rather than in a function's `if`.
+--
+-- Note this view is deliberately NOT security_invoker, unlike game_summary and
+-- config_summary below. Those exist so a future tightened policy still applies
+-- to their callers; this one exists to lend out a *subset* of a table nobody may
+-- read, which only owner rights can do. The where clause is the whole boundary,
+-- so change it with that in mind.
+--
+-- Longest upload per match, since a game checkpoints as it goes: distinct on
+-- picks it, and the rest are that match's own history.
+-- ---------------------------------------------------------------------------
+create or replace view public.public_replays as
+select distinct on (l.match_id)
+  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log
+from public.game_logs l
+where exists (select 1 from public.scores s where s.match_id = l.match_id)
+order by l.match_id, l.turns desc, l.id desc;
+
+-- ---------------------------------------------------------------------------
 -- game_summary: the homepage in one select — every game with its current best
 -- score and last activity. security_invoker makes it evaluate RLS as the caller
 -- rather than the owner, so a future tightened policy can't be bypassed here.
@@ -313,6 +453,8 @@ alter table public.games   enable row level security;
 alter table public.scores  enable row level security;
 alter table public.configs enable row level security;
 alter table public.bot_scores enable row level security;
+alter table public.game_logs enable row level security;
+alter table public.score_checks enable row level security;
 
 drop policy if exists "users public read"    on public.users;
 drop policy if exists "users public insert"  on public.users;
@@ -323,6 +465,8 @@ drop policy if exists "scores public insert" on public.scores;
 drop policy if exists "configs public read"   on public.configs;
 drop policy if exists "configs public insert" on public.configs;
 drop policy if exists "bot_scores public read" on public.bot_scores;
+drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
+drop policy if exists "score_checks public read" on public.score_checks;
 
 create policy "users public read"    on public.users  for select using (true);
 create policy "users public insert"  on public.users  for insert with check (true);
@@ -337,6 +481,12 @@ create policy "configs public insert" on public.configs for insert with check (t
 -- tools/bot_replay.py under the service_role key, which bypasses RLS.
 create policy "bot_scores public read" on public.bot_scores for select using (true);
 
+-- game_logs has neither: RLS is on and no policy exists, so every public command
+-- against it is refused outright and the only writer is netlify/functions/log.mjs
+-- under the service_role key (which bypasses RLS entirely). score_checks is a
+-- bot_scores-shaped table again — the worker writes the verdicts, everyone reads.
+create policy "score_checks public read" on public.score_checks for select using (true);
+
 -- No update or delete policy anywhere: that is what makes every row append-only
 -- — for configs, that's what makes the first name posted for a setup permanent.
 -- bot_scores is append-only to the public in the strongest sense (it has no
@@ -350,10 +500,18 @@ create policy "bot_scores public read" on public.bot_scores for select using (tr
 -- Explicit rather than relying on the project's default privileges, so this file
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
-  public.game_summary, public.config_summary, public.bot_scores to anon, authenticated;
+  public.game_summary, public.config_summary, public.bot_scores,
+  public.score_checks, public.public_replays to anon, authenticated;
+-- game_logs is deliberately absent from that list: no select grant and no select
+-- policy is what keeps an uploaded replay readable only by the worker. The
+-- public_replays view above is the one exception, and it lends out only the
+-- replays a posted score already points at.
 -- bot_scores is absent from this list on purpose: no insert grant and no insert
 -- policy is what leaves the replay worker as its only writer.
 grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;
+-- game_logs appears in neither grant: not in select (a replay is not public) and
+-- not in insert (uploads go through this site's function, which can size- and
+-- rate-limit them). It is the one table the public can neither read nor write.
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
 
@@ -362,8 +520,38 @@ grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, int
 -- grants: SELECT on games (what it replays) and bot_scores (to see what's
 -- already cached), plus INSERT/UPDATE on bot_scores for the upsert itself
 -- (its "merge-duplicates" Prefer header is an INSERT ... ON CONFLICT DO UPDATE).
+--
+-- This note has been here since the first time that caught someone, and it did
+-- not stop it happening twice more below. It states the mechanism, which was
+-- never the hard part: the hard part is re-deriving *which* relations a caller
+-- reads, every time one gains a query, and a comment cannot check a list.
+-- `tests/test_schema_grants.py` does — it reads the callers and these grants and
+-- requires them to agree, so a new query with no grant fails a test rather than
+-- a production run. Add the grant beside the caller it is for; the test will say
+-- if you missed one.
 grant select on public.games, public.bot_scores to service_role;
 grant insert, update on public.bot_scores to service_role;
+-- tools/verify_scores.py: read the scores and the replays behind them, write the
+-- verdicts, and delete a game_logs row that a longer upload of the same match has
+-- superseded (the public has no delete path anywhere, worker or not).
+--
+-- Every relation the key touches has to be listed, including the *views* and
+-- including a table it only reads to decide what work is left. This is the trap
+-- the note above describes and it has caught this file twice: a missing grant
+-- here does not degrade, it fails the query outright — and it fails it only for
+-- the worker, so the same row stays perfectly visible to the anon key on the
+-- site, which is exactly how it hides.
+grant select on public.scores to service_role;
+-- select: which scores already have a verdict (`verify_scores.pending`).
+grant select, insert, update on public.score_checks to service_role;
+-- select + delete for the worker (read a replay, prune one a longer upload has
+-- superseded); insert for netlify/functions/log.mjs, which holds the same key.
+grant select, insert, delete on public.game_logs to service_role;
+-- ...and the view netlify/functions/replay.mjs serves a replay out of. It is not
+-- security_invoker, so it reads game_logs with owner rights whoever asks — but
+-- the caller still needs SELECT on the view itself, which grants nothing beyond
+-- the rows its own where clause already allows anyone to read.
+grant select on public.public_replays to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.

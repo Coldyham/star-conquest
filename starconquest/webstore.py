@@ -22,7 +22,9 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from .paths import WEB_BESTS_KEY, WEB_SHARED_SETTINGS_KEY, data_dir, is_web
+from . import paths
+from .paths import (WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY, WEB_SHARED_SETTINGS_KEY,
+                    data_dir, is_web)
 
 _FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
@@ -83,6 +85,24 @@ def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
 # improvement (fewer turns, or the same turns with fewer losses).
 
 
+def share_games() -> bool:
+    """Whether the player has opted in to uploading their replays.
+
+    Off unless it has been switched on: an absent key, an unreadable store and a
+    fresh install all read as False, so the failure mode of a storage problem is
+    "sends nothing", never "sends without being asked". The menu's *Share replays*
+    checkbox is the only writer.
+    """
+    return get(WEB_SHARE_GAMES_KEY) == "1"
+
+
+def set_share_games(on: bool) -> bool:
+    """Store the preference. False if the store refused it (private browsing, a
+    full quota, a read-only disk), which the caller may want to say out loud —
+    an opt-in that silently forgets itself is worse than one that fails."""
+    return set(WEB_SHARE_GAMES_KEY, "1" if on else "")
+
+
 def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:
     """Your best ``(turns, lost)`` on this setup, or None if you've not won it.
 
@@ -126,6 +146,39 @@ def record_best(challenge_key: str, turns: int, lost: int, *legacy: str) -> bool
     data[challenge_key] = {"turns": turns, "lost": lost}
     set(WEB_BESTS_KEY, json.dumps(data, separators=(",", ":")))
     return True
+
+
+def leaderboard_origin() -> str:
+    """Where the leaderboard lives, from where *we* are.
+
+    On the web the two sites' names differ by one string, and Netlify names every
+    deploy of both from the same context — so the board that matches this build is
+    derivable rather than configured (see ``paths.sibling_host``). A deploy
+    preview of the game therefore talks to the deploy preview of the board, with
+    nothing to edit by hand between them.
+
+    Everywhere else, and for any host the rule cannot read — a custom domain,
+    localhost, desktop, Android — the configured production origin, which is what
+    the feature has always used.
+    """
+    if is_web():
+        import platform as _platform
+
+        try:
+            host = str(_platform.window.location.hostname)
+        except Exception:  # noqa: BLE001 — no DOM, no derivation
+            host = ""
+        sibling = paths.sibling_host(host, paths.LEADERBOARD_TAG, add=True)
+        if sibling:
+            return f"https://{sibling}"
+    return paths.LEADERBOARD_ORIGIN
+
+
+def leaderboard_url(path: str) -> str:
+    """``leaderboard_origin`` plus ``path``, or ``""`` when no board is configured
+    — which is what every caller tests to decide whether the feature exists."""
+    origin = leaderboard_origin()
+    return f"{origin.rstrip('/')}{path}" if origin else ""
 
 
 def link_url(token: str) -> str:

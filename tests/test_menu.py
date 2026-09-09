@@ -744,3 +744,33 @@ def test_slider_drag_is_not_interrupted_mid_gesture():
         assert settings.node_jitter == before
     finally:
         pygame.quit()
+
+
+def test_share_replays_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """The one Basic-tab row that is not a Settings field: it belongs to this
+    installation, so it writes the local store and never the config."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.share_games() is False
+        _click_key(screen, ms, settings, "share_games")
+        assert menu.webstore.share_games() is True
+        _click_key(screen, ms, settings, "share_games")
+        assert menu.webstore.share_games() is False
+        # ...and nothing about the game setup moved with it, so it can neither
+        # reach a save file nor a shared link nor raise the un-challenge modal.
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
+def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_path):
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "no" / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "share_games")
+        assert menu.webstore.share_games() is False
+        assert "private" in ms.status and not ms.status_ok
+    finally:
+        pygame.quit()

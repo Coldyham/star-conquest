@@ -135,6 +135,42 @@ a leaderboard grouping is cosmetic (worst case, a named config splits in two and
 loses its name) where a `Challenge.key` mismatch is load-bearing (it decides
 whether a target-to-beat banner is honoured or discarded).
 
+A digest can also move without the *setup* changing at all, because the checksum
+is over JSON and JSON distinguishes `12` from `12.0`. `AiParams.aux` is declared
+a float, the AI tab's aux slider stores an int for a strategy that declares
+`AUX_INT`, and `from_dict` used to widen it back — so a link stamped over a live
+`Settings` hashed `"aux":12` while every decode of that same link hashed
+`"aux":12.0`, and the recipient's menu raised the un-challenge modal the moment
+the link opened. Seed 749187 (5 players, 33 nodes, a knower at search depth 12)
+is the instance that surfaced it, stamped `109ffcf1cf4d4260`.
+
+No legacy drop can recover that. A drop names a field, and here the field is
+present on both sides; worse, a live `Settings` holds a *mixture* — the four
+untouched seats were floats and only the dragged one an int — so accepting the
+stamped digest by re-hashing would mean enumerating the int/float subsets of
+every seat, `2^n` forms per drop entry, for a rule with no upper bound. The fix
+is at the reader instead: `_ai_from_dict` keeps whichever of int/float `aux`
+arrived as, alone among the fields. That is also the truer type, since a knob
+declaring `AUX_INT` *is* a whole number, and it makes the digest survive a token
+or save round-trip for any mixture without moving a single key already stamped.
+The remaining seam is cosmetic and downstream: two players who reach the same
+knob value by different routes — one dragging the slider to 12, one opening a
+link that carries `12.0` — still stamp different keys, which is a board split of
+exactly the kind `submit.findTwin` folds.
+
+One consumer has to drop the distinction rather than keep it, and must go on
+doing so: Postgres jsonb normalises `12.0` to `12`, so a `games` row reads back
+with integer `aux` values whatever the game sent, while an uploaded log is plain
+JSON and keeps the float. `verify_scores.same_setup` compares exactly those two,
+so it widens both through `_aux_widened` first. Without that every posted score
+whose setup carries an `aux` verifies as `mismatch` — the log's own map read as
+somebody else's.
+
+Widening any *other* float field on the way in stays correct, and deliberately
+so: doing the same for `defender_advantage` would let a hand-edited `1` and a
+slider's `1.0` hash apart, which is the split above with nothing to gain, since
+no slider writes an int there.
+
 ## Ship-speed growth
 
 `config.SHIP_SPEED_GROWTH_PCT` (Advanced → Travel, 0 by default) models tech
@@ -277,6 +313,16 @@ meant to hand back the position as it was, and on a big map the standing routes
 `prune_forward`, i.e. the rules the turn was actually played with, and
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
 was lost on that turn doesn't come back to life.
+
+### `match_id`: the log's own identity
+
+A log also carries a `match_id`, which is *not* part of what makes a replay
+reproduce — it is how a score posted to the leaderboard names the match behind
+it (**Checked scores**, below). `truncate` keeps it, since a mid-game rewind
+continues the same match; `fork` mints a new one, since a finished-game rewind
+starts another. A log written before the field existed, or edited by hand into a
+shape `_MATCH_ID_RE` refuses, is given a fresh id on load rather than carrying
+that text into an upload.
 
 ## Send popup / `Ui.editing_existing`
 
@@ -707,10 +753,10 @@ runs `--stale` on purpose, which is the same "a fix is a deliberate act" trade
 ### The one table the public cannot write
 
 `bot_scores` has a read policy and no insert policy, and no insert grant. The
-worker's `service_role` key bypasses RLS entirely, which makes it the only
-writer. Human scores are unverifiable by design — the token format is public and
-unsigned — so it would be strange to let the machine column be posted by hand
-too. It also means a rerun can *replace* a row, which is why this table is not
+worker's secret key bypasses RLS entirely, which makes it the only
+writer. A human score carries no proof in itself — the token format is public and
+unsigned, which is what **Checked scores** below answers — so it would be strange
+to let the machine column be posted by hand too. It also means a rerun can *replace* a row, which is why this table is not
 append-only the way the rest of the board is.
 
 A per-decision wall-clock budget (`--bot-timeout`) is off by default, because a
@@ -718,3 +764,187 @@ blown budget forfeits that turn's orders and the result would then depend on how
 fast the runner was that day. Where one is used, the count lands in
 `bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
 reproducible alongside the others.
+
+## Checked scores (`share.py`, `tools/verify_scores.py`)
+
+The board's other pure-function-of-the-inputs job, and the answer to the oldest
+entry under `leaderboard/README.md`'s **Known limitations**: a score in a
+challenge link is a *claim*, since the token is public and unsigned and a
+hand-crafted impossible result posts exactly like a real one.
+
+A replay is not a claim. `replay.py` already records a match as its inputs —
+settings, seed, and per turn every seat's orders plus the combat draws — and
+`reconstruct` feeds them back through the engine without asking a single seat to
+decide anything. So the evidence for a score already existed; it just never left
+the player's machine. Uploading it is the whole feature.
+
+**The id rides on `Challenge`, and that is what makes it free.** `challenge_keys()`
+pops `challenge` before hashing (it is the score attached to a setup, not part of
+the setup), so a field added there moves no digest and needs no
+`_LEGACY_KEY_DROPS` entry — where the same field on `Settings` would have
+invalidated every challenge link ever shared. `GameLog.match_id` is minted per
+match from `settings.fresh_rng`, never `state.rng`: it must *not* be reproducible
+from the seed, or every player of one shared map would mint the same id.
+
+**Two things send, and both are consented to.** Pressing *Post to leaderboard*
+uploads the match behind that score. Ticking *Share replays* on the menu
+(`webstore.share_games`, off until switched on) also uploads a game as it goes —
+every `share.CHECKPOINT_TURNS` turns and again when it ends. The cadence is the
+whole point of the second one: a match that is *abandoned* never reaches an end,
+and abandoned and lost games are exactly what a score can never carry and what a
+bot is worth measuring against. Nothing else sends — `share_challenge` does not,
+and neither does a pure autoplay demo (`hand_turns == 0`), which is reproducible
+from its seed and so is bytes without information.
+
+The preference is a local one (`paths.WEB_SHARE_GAMES_KEY`) rather than a
+`Settings` field, for two independent reasons: it belongs to an installation and
+not to a game setup, so it has no business in a save file or a shared link — and
+a new `Settings` field would move `challenge_key()` for every map that has ever
+existed.
+
+`share.py` is a platform bridge in the `webstore`/`softkeyboard` style — guarded
+everywhere, silent on failure, fire-and-forget on both sides (a `fetch` whose
+promise is never read on the web, a daemon thread off it) so a POST can never
+stall the frame. It keys a row by `GameLog.setup_key()`, which pins the seed
+actually played: `main` resolves "roll a fresh seed" at game start and never
+writes it back, so hashing the live `Settings` would file a random-seed game
+under a key describing no particular map.
+
+**`game_logs` is the one table the public can neither read nor write.** RLS is on
+and it has no policies and no anon grants at all — every other table here takes a
+row from anyone, and for a hundred-byte score that is a fine trade. A replay is
+5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
+go through the leaderboard site's own function (`netlify/functions/log.mjs`),
+which validates the row, caps its size and rate-limits the caller, and holds the
+secret key that is the table's only writer. Reads are the worker's alone,
+so uploading a game does not publish it.
+
+The rate limit is honest about itself: Netlify functions run on ephemeral,
+parallel instances, so an in-memory window stops a runaway loop and not an
+adversary. What actually bounds the table is the size cap, the check constraint
+behind it, and the fact that dropping the table is one statement in the SQL
+editor. A durable limit would mean storing everyone's IP, which is a worse thing
+to own than the abuse it prevents.
+
+**Nothing identifying is attached.** A row is a match id, a setup key and the
+moves. Grouping one person's games across sessions would need a durable client
+id — a tracking identifier by any other name, and it buys nothing here.
+
+Rows are append-only like the rest of the board, so a game that checkpoints
+repeatedly lands several times and the *longest* row is the current one
+(`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
+delete path the public does not have.
+
+**The verifier binds the replay to the setup.** Without `same_setup`, an easy
+map's log could be attached to a hard map's score and would replay perfectly.
+Both setups are hashed in Python by the same code, so a key the *site* folded
+(`KEY_ALIASES`) or computed itself for a hand-written link never has to be
+reproduced in JS. `Settings.from_dict` is deliberately tolerant and answers a
+non-dict with a default 18-node map, which here would verify a score against the
+wrong map entirely — the same trap `bot_replay._settings_for` documents, and it
+is checked for the same way.
+
+The four verdicts land in `score_checks`, worker-written and publicly readable.
+`missing` — no log was ever uploaded — is stored rather than inferred from
+absence, because "nobody has looked yet" and "we looked, and there is nothing to
+check" are different facts about a score, and it is the one verdict that is
+retried without a flag: an upload can still arrive.
+
+What none of this proves is that a *human* played the game. A bot driving the
+seat produces a log that verifies like any other. That is what `hand` is for, and
+the verifier recomputes it from the log's own per-turn autoplay flags rather than
+trusting the number in the link.
+
+### Watching one back
+
+A posted score names its replay, so the board can offer *Watch* — and the link
+goes back into the **game**, not into a player written here. The reviewer already
+exists: `reconstruct` rebuilds every turn, `build_history` folds the fog as it
+stood, and the scrubber walks it. The engine is Python, so a JS viewer would be a
+second engine to keep in step with the first, forever.
+
+`#log=<match id>` is the launch URL (`--watch` off the web), and it is
+distinguishable from a settings token by prefix alone: a token is base64url,
+which cannot contain `=` except as the padding the encoder strips.
+`main.open_replay` decodes the blob and goes through `resume_game`, so a watched
+replay is the same object a resumed save is — which is what makes *rewinding out
+of one* work for nothing: fork it at any turn and carry on playing from there. It
+adopts the replay's own settings, so leaving review lands on that setup rather
+than whatever the menu was showing.
+
+`open_history` is the entry the H key and a watched replay share. They differ
+only in how they came by the log, and must not differ in what review looks like —
+with one exception, which is where the scrubber lands. Our own review opens on
+the latest turn, because that is where the player is and looking back is a step
+away from it. A watched replay opens at turn 0, the board as generated: the
+question there is how the game was played, the answer runs forwards, and opening
+on the final board would both give away the ending and make dragging the whole
+way back the price of watching it.
+
+**A watched result is not ours to post.** Reviewing somebody's win ends on the
+same win overlay our own games end on, showing their turns and their ships lost —
+so *Challenge a friend* and *Enter on leaderboard* would sit there offering to
+send their score under our name, and a fraudulent entry would be a fetched link
+and one press. `open_replay` marks the `Ui` (`Ui.watched`), `Ui.can_post` is the
+one predicate render draws both buttons from and main fires both actions from,
+and it also stops a watched game being filed as a personal best or checkpointed
+back up under its original `match_id` — where, rows being keyed by that id and
+the longest winning, our continuation would replace the very replay their score
+is checked against.
+
+It is a lock on the button, not a proof of authorship, and deliberately so:
+rewinding a watched replay to a turn from its end and playing that turn out
+builds a fresh `Ui` and a forked match that really is ours to post. Sealing that
+would mean recording where a fork branched and carrying it through every later
+rewind, to catch someone who has gone well out of their way — a bigger idea than
+the problem.
+
+**The download is polled, never awaited.** `share.fetch_log` starts it and hands
+back a `Download` the frame loop asks once per frame; the browser build yields a
+frame at a time, so blocking on a round trip would freeze the canvas before
+anything had been drawn. Every failure is a *state* — pending, ok, error — rather
+than an exception arriving on some arbitrary frame.
+
+**What is watchable is decided in SQL.** `public_replays` is `game_logs` joined
+to the scores that point at it, and it is the one view here deliberately *not*
+`security_invoker`: the others exist so a tightened policy still binds their
+callers, while this one exists to lend out a subset of a table nobody may read,
+which only owner rights can do. Its `where` clause is the whole consent boundary,
+so posting a score publishes that game and a checkpointed one stays private. The
+submit page says so at the point the decision is made, which is the only place
+saying it is worth anything.
+
+### Versioning: bots are free to move, the engine is not
+
+Keeping replays around raises an obvious worry — if the bots change, do the old
+games still replay? — and the answer is that the question has the wrong subject.
+
+**A stored log never consults a bot.** `end_turn(script=…)` applies the recorded
+orders and deals the recorded dice; `decide` is not called. So retuning marshal,
+rewriting knower or deleting a `models/` file outright cannot move a single
+stored game. This is not an inference: `test_a_replay_does_not_consult_a_bot_even
+_a_deleted_one` replaces every strategy with one that issues nonsense, removes one
+from the registry, and asserts the reconstruction is unchanged. It is also exactly
+why format version 2 exists — version 1 re-ran the AI, and a bot on a wall-clock
+budget replayed into a different match.
+
+So there is no case for a per-model "replay floor" gating which games are still
+watchable, and adding one would cost the feature most of its value in exchange for
+nothing. `bot_replay.replay_rev` is the same statement in code: `engine_rev` minus
+`ai` and every `models/*.py`, so tuning a bot cannot mark a score verdict stale.
+
+**The engine is the axis that does move a stored game**, and it is versioned by
+hand. `engine.RULES_VERSION` is bumped in the same commit as a change to the phase
+order, to how a fight resolves or how a map is drawn from a seed, and every log
+carries the version it was played under. When a replay then fails to reproduce its
+score, `verify_scores` reports `outdated` rather than `mismatch` — unverifiable,
+not wrong. The check happens *after* the replay, so the many old games a bump does
+not actually disturb keep verifying on their own merits; only the ones it broke
+are set aside, and set aside rather than accused.
+
+**Rewinding needs no versioning at all**, because it does not claim to reproduce
+anything. A rewind replays the prefix exactly, then plays *on* from there — a
+counterfactual by construction, which is why `fork` mints a new `match_id`. Both
+rewinds re-stamp `rules_version`: the kept prefix has just been replayed under
+today's rules to find that turn, so the log would be describing itself as older
+than it is.

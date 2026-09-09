@@ -31,7 +31,7 @@ function nameCell(score) {
     : el("span", { class: "nm", text: credit(score) });
 }
 
-function scoreRow(score, rank) {
+function scoreRow(score, rank, watchable) {
   return el("li", { class: rank <= 3 ? `score rank-${rank}` : "score" }, [
     el("span", { class: "rank", text: ordinal(rank) }),
     // The dot leader is its own flexible element rather than trailing dots on the
@@ -40,9 +40,37 @@ function scoreRow(score, rank) {
       nameCell(score),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
-    el("span", { class: "result", text: scoreSummary(score) }),
+    // Watch rides *inside* the result cell rather than becoming a fifth column:
+    // .score is a four-track grid and a bot row has four children, so a fifth
+    // track would leave every bot row carrying an empty column and its gap.
+    el("span", { class: "result" }, [
+      el("span", { text: scoreSummary(score) }),
+      ...(watchable.has(score.match_id) ? [watchLink(score.match_id)] : []),
+    ]),
     el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
   ]);
+}
+
+/**
+ * "Watch" on a score whose replay is actually there.
+ *
+ * The link goes back into the *game*, not into a player here: the engine is
+ * Python and the game already has the whole reviewer — `reconstruct`, the fog
+ * replay and the scrubber. Reimplementing any of that in JS would be a second
+ * engine to keep in step with the first.
+ *
+ * Shown only for ids `public_replays` actually returned, so it can never lead to
+ * a 404: a score can name a match whose upload never arrived.
+ */
+function watchLink(matchId) {
+  return el("a", {
+    class: "watch",
+    href: `${GAME_URL}#log=${matchId}`,
+    target: "_blank",
+    rel: "noopener",
+    title: "Replay this game in the browser",
+    text: "Watch",
+  });
 }
 
 /**
@@ -135,6 +163,27 @@ function sortToggle() {
   return el("div", { class: "sorts" }, [linkFor("turns", "Fewest turns"), linkFor("lost", "Fewest lost")]);
 }
 
+/**
+ * Which of these scores have a replay anyone can watch.
+ *
+ * Asked by id rather than by map: a score's `game_key` and its log's are stamped
+ * by different code paths (the token's `Challenge.key` and `GameLog.setup_key`),
+ * and a folded key would make a `game_key` lookup quietly miss.
+ *
+ * Fails quietly like the bot query does — a board on an older schema.sql has no
+ * `public_replays` view, and a missing "Watch" link is not worth taking the score
+ * table down for. Needs GAME_URL too: without somewhere to send a watcher there
+ * is nothing to link to.
+ */
+async function watchableIds(scores) {
+  const ids = [...new Set(scores.map((s) => s.match_id).filter(Boolean))];
+  if (!GAME_URL || !ids.length) return new Set();
+  const rows = await select(
+    `public_replays?select=match_id&match_id=in.(${ids.map(encodeURIComponent).join(",")})`,
+  ).catch(() => []);
+  return new Set(rows.map((r) => r.match_id));
+}
+
 async function load() {
   mountMyScores();
   if (!configured()) {
@@ -152,7 +201,7 @@ async function load() {
     const [games, scores, bots] = await Promise.all([
       select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
       select(
-        `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,users(name)` +
+        `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
           `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
       ),
       // The one query allowed to fail quietly. A board running an older
@@ -199,8 +248,9 @@ async function load() {
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
+    const watchable = await watchableIds(scores);
     clear(target).append(
-      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i]))),
+      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], watchable))),
       ...(link ? [link] : []),
     );
 
