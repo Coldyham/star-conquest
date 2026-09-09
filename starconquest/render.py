@@ -1099,7 +1099,10 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
                 continue
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
-    # ...and, for the second or so a playback marks a fight, what that fight cost
+    # ...and, for the second or so a playback marks a fight, what that fight cost.
+    # Only ever while one is actually showing: `_flash_marks` yields nothing
+    # without a film, and there is no film at all unless turn animation is switched
+    # on, so with it off names are placed exactly as they always were.
     for center, _color, _phase, cost, victor in _flash_marks(state, ui):
         if cost > 0 and victor is not None:
             taken.append(_pill_rect(font, f"−{cost}", _loss_center(center)))

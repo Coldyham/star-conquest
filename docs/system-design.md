@@ -366,7 +366,14 @@ would need three.
 The accounting figure survives beside it as `destroyed`, because it is the test:
 what everyone brought less what the winner kept is `combat._record_losses` read from
 the other end, so summed over a turn's events it must equal what the scoreboard
-charged every player. `Landed.sides` is what makes both derivable — arrivals are
+charged every player. The name pass's share of this is scoped by the same generator that draws the
+labels (`_flash_marks`), which yields nothing without a film — and there is no film
+unless turn animation is on. So a star name only ever yields ground for the moment
+a burst is actually up, and with the feature off names are placed exactly as they
+always were. Sharing the generator is the point: the space reserved and the label
+drawn cannot come apart.
+
+`Landed.sides` is what makes both derivable — arrivals are
 pooled per owner before anything fights, so every side appears in `steps` exactly
 once (the strongest as the first step's carried force, the others as each step's
 defender), which is the per-side detail the pooling in `_record_losses` used to

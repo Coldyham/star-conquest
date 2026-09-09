@@ -1028,3 +1028,39 @@ def test_which_fights_get_a_mark_and_what_it_says():
         assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
     finally:
         pygame.quit()
+
+
+def test_a_loss_label_only_stands_in_a_star_names_way_while_it_shows():
+    """The name pass avoids the loss pill for the same reason it avoids lane times
+    and a rule's "keep N" — but only for the moment one is up.
+
+    Both halves matter. Nothing is reserved once the burst has faded, and nothing
+    at all with turn animation off, since there is then no film to read: the name
+    pass and `_draw_film_flashes` share `_flash_marks` precisely so the space
+    reserved and the label drawn cannot come apart.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        ui.film = turnfilm.film([landed])
+        at = next(cue for cue, e in ui.film.cues if e is landed)
+
+        ui.film_ms = at + 1
+        assert list(render._flash_marks(state, ui))          # showing: reserve it
+        ui.film_ms = at + config.FILM_FLASH_MS + 1
+        assert list(render._flash_marks(state, ui)) == []    # faded: hand it back
+
+        ui.stop_film()      # ...and with animation off there is never a film
+        ui.film_ms = at + 1
+        assert list(render._flash_marks(state, ui)) == []
+    finally:
+        pygame.quit()
