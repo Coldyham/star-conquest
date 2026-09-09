@@ -16,10 +16,12 @@ other, before layout was switched to measure-then-place.
 ## `config.touch_ui`
 
 The one place `TOUCH_MIN_TARGET` gives way is the send popup's own height:
-seven tap-floored rows can outgrow the band it's placed in on a window shrunk
-after boot (the scale is probed once). Because the clamp pins an oversized
-panel to the top, the row that falls out of `draw`'s clip is the destructive
-Delete — invisible but still live, since input hit-tests the recorded rect.
+seven tap-floored rows can outgrow the band it's placed in on a window smaller
+than the design baseline (`main.fit_ui` re-fits on resize but is floored at 1x,
+so shrinking past the baseline doesn't shrink the UI). Because the clamp pins
+an oversized panel to the top, the row that falls out of `draw`'s clip is the
+destructive Delete — invisible but still live, since input hit-tests the
+recorded rect.
 Hence the popup shrinks its rows to their labels first, against a budget
 measured from the placement band rather than the viewport.
 

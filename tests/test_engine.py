@@ -57,6 +57,31 @@ def test_production_cadence():
     assert s.systems[0].ships == 2        # after 6 turns
 
 
+def test_a_hull_finished_this_turn_defends_its_own_system():
+    """Production resolves before arrivals, so a ship completing on the turn its
+    system is attacked is in the garrison for the fight. Sized against the garrison
+    the attacker can see rather than the one it meets: 4 v 3 takes the system, 4 v 4
+    annihilates to neutral."""
+    with no_jitter():
+        s = make_state([(0, 1, 4, 100), (1, 2, 3, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1        # one turn from its next ship
+        engine.apply_order(s, Order(1, 0, 1, 4))
+        engine.end_turn(s)
+        assert (s.systems[1].owner_id, s.systems[1].ships) == (0, 0)
+
+
+def test_a_system_that_falls_this_turn_accrues_from_the_next_one():
+    """The flip side of the phase order: capture resets the progress bar, and the
+    turn's accrual has already happened, so a captor starts from zero."""
+    with no_jitter():
+        s = make_state([(0, 1, 10, 100), (1, 2, 1, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.end_turn(s)
+        assert s.systems[1].owner_id == 1     # the extra hull wasn't enough
+        assert s.systems[1].prod_progress == 0
+
+
 def test_fleet_arrives_after_exactly_travel_turns():
     # a second player keeps the game alive so the win check doesn't freeze it
     s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],

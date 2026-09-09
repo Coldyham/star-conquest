@@ -13,10 +13,12 @@ everything the turn consumed — and accepting one back in ``script`` to replay 
     2. Advance fleets  — every in-transit fleet counts down one turn.
     3. Lane battles    — (opt-in) enemy fleets whose paths cross in transit fight
                          pairwise, nearest crossing first; winners fly on as they were.
-    4. Arrivals+combat — fleets that reach their destination are grouped by node
+    4. Production      — systems accrue toward their next ship (before combat, so a
+                         hull that finishes this turn defends the system it was
+                         built at; a system captured this turn accrues from next
+                         turn, since capture resets its progress).
+    5. Arrivals+combat — fleets that reach their destination are grouped by node
                          and resolved together (fair regardless of launch order).
-    5. Production      — systems accrue toward their next ship (after combat, so
-                         a system captured this turn produces for its new owner).
     6. Win check       — a player is alive if it holds a system or has a fleet in
                          transit; the game ends when <= 1 remain.
     7. turn += 1.
@@ -48,7 +50,7 @@ from .model import Fleet, GameState, Order, lane_key
 # it", and say the second rather than accusing an honest player
 # (`tools/verify_scores.py`). That is worth a hand-maintained integer; nothing
 # here can detect such a change on its own.
-RULES_VERSION = 1
+RULES_VERSION = 2
 
 # A decision function: given the state and a player id, return that player's orders.
 DecideFn = Callable[[GameState, int], list[Order]]
@@ -153,8 +155,8 @@ def end_turn(
     dice = _Dice(state.rng, script.dice if script is not None else None)
     _advance_fleets(state)
     _resolve_lane_battles(state, dice)
-    _resolve_arrivals(state, dice)
     _production(state)
+    _resolve_arrivals(state, dice)
     _check_win(state)
     state.turn += 1
     return TurnRecord(orders, dice.drawn)

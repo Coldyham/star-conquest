@@ -115,10 +115,14 @@ Turns resolve **simultaneously**: `end_turn` collects every player's orders
 against the *same* unchanged start-of-turn state, then applies them together, so
 there is no turn-order advantage. The phase order inside `end_turn` is
 deliberate and combat/production correctness depends on it: AI decisions →
-advance fleets → lane battles (opt-in; see below) → arrivals+combat (fleets
-arriving at a node are grouped and resolved together, launch-order independent)
-→ production (after combat, so a system captured this turn produces for its new
-owner) → win check → `turn += 1`.
+advance fleets → lane battles (opt-in; see below) → production (**before**
+combat, so a hull that finishes this turn is in the garrison for the fight and
+defends the system it was built at; the flip side is that a system captured this
+turn accrues from next turn, since capture resets its progress) →
+arrivals+combat (fleets arriving at a node are grouped and resolved together,
+launch-order independent) → win check → `turn += 1`. Nothing in the roster
+prices that pending hull, so a bot sizing an attack off `target.ships` alone can
+meet one more ship than it counted — `prod_progress`/`production` say when.
 
 **In-lane battles** (`config.IN_LANE_BATTLES`, off by default, on the menu's
 Combat tab) are the one thing that breaks "fleets on lanes never interact". Two
@@ -244,6 +248,11 @@ intact.
   (`render._row_h`), a modal's stack is measured then centred
   (`render._draw_modal`), and help prose is reflowed to the panel it sits in
   (`render._wrap`). One-off layout literals still go through `config.s()`.
+  **Nor is the scale itself fixed for the run:** `main.fit_ui` re-fits the UI to
+  the surface at boot *and* on every window resize (floored at the design
+  baseline), so anything cached off a font size must be keyed on
+  `config.ui_scale` rather than built once (`render._fonts`,
+  `menu._modal_fonts`).
 - **`config.touch_ui` is the input modality**, set beside the scale in
   `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
   browser). On a touch build the shell drops every keyboard-only string — the
