@@ -189,8 +189,12 @@ def _fog_state(ui: Ui, sid: int) -> str:
     """Fog-of-war state of a system from the human's viewpoint: ``"visible"`` (full
     detail), ``"fogged"`` (grey "?" — currently scouted or remembered), or
     ``"hidden"`` (never seen, not drawn). With fog off, ``visible`` holds every
-    system so this is always ``"visible"``."""
-    if sid in ui.visible:
+    system so this is always ``"visible"``.
+
+    Asks `Ui.sees` rather than reading `visible`, so a turn playback also shows
+    what was visible when that turn began — the map layer's one rule for this,
+    shared with the fleets and the fight bursts."""
+    if ui.sees(sid):
         return "visible"
     if sid in ui.seen:
         return "fogged"
@@ -352,7 +356,7 @@ def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
         # your own fleets always show; an enemy fleet shows only where at least
         # one end of its lane is in full view, so rival movements appear only as
         # they near your space
-        if f.owner_id != ui.human_id and f.source_id not in ui.visible and f.dest_id not in ui.visible:
+        if f.owner_id != ui.human_id and not ui.sees(f.source_id) and not ui.sees(f.dest_id):
             continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
@@ -926,10 +930,25 @@ def _draw_burst(surface, center, color, phase: float) -> None:
              cy + uy * (reach + config.FILM_BURST_R * 0.4)), width)
 
 
-def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
-    """Mark this turn's fights while they are still fresh.
+def _loss_center(center) -> tuple[int, int]:
+    """Where a fight's cost is written: a fixed step above whatever the burst marks.
 
-    Purely derived from the film and the clock — nothing is stored and nothing
+    Fixed rather than measured off the burst's current reach, which grows over the
+    flash — a label riding that outward would read as a second moving thing.
+    """
+    return (int(center[0]),
+            int(center[1]) - config.FILM_BURST_R - config.FILM_LOSS_GAP)
+
+
+def _flash_marks(state: GameState, ui: Ui):
+    """This turn's visible fights, as ``(centre, colour, phase, ships destroyed)``.
+
+    The one place the film's fights are turned into places on screen, because two
+    passes need them: the bursts themselves, and the star-name pass, which has to
+    treat a loss label as occupied space for the same reason it already avoids lane
+    times and a rule's "keep N" — those carry information a name doesn't.
+
+    Purely derived from the film and the clock; nothing is stored and nothing
     expires, in the same spirit as the rule conveyor's phase.
     """
     if ui.film is None:
@@ -937,24 +956,38 @@ def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
     for at, event in ui.film.flashes(ui.film_ms):
         phase = min(1.0, max(0.0, (ui.film_ms - at) / max(1, config.FILM_FLASH_MS)))
         if isinstance(event, turnfilm.Clashed):
-            if event.low_id not in ui.visible and event.high_id not in ui.visible:
+            if not ui.sees(event.low_id) and not ui.sees(event.high_id):
                 continue
             a = state.systems[event.low_id].pos
             b = state.systems[event.high_id].pos
             center = ui.view.to_screen(lerp(a, b, event.at))
-            _draw_burst(surface, center, config.COLOR_TEXT, phase)
+            yield center, config.COLOR_TEXT, phase, event.destroyed
         else:  # a Landed: concentric on the node, expanding past its rim
             # `steps` holds the engagements that actually happened, and is empty
             # for a reinforcement or a walk into an empty system. Neither is a
             # fight, so neither gets a fight's mark — the garrison count changing
             # is the whole of what happened.
-            if not event.steps or event.node_id not in ui.visible:
+            if not event.steps or not ui.sees(event.node_id):
                 continue
-            node = state.systems[event.node_id]
-            center = ui.view.to_screen(node.pos)
+            center = ui.view.to_screen(state.systems[event.node_id].pos)
             color = (config.COLOR_TEXT if event.owner_id == event.was_owner
                      else config.player_color(event.owner_id))
-            _draw_burst(surface, center, color, phase)
+            yield center, color, phase, event.destroyed
+
+
+def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
+    """Mark this turn's fights while they are still fresh, and what each cost.
+
+    Both sides' losses as one number rather than a figure per side: what a player
+    reads off a burst is how expensive the fight was, and the square law makes that
+    the surprising part. The per-side split stays in the event either way
+    (`turnfilm.Clashed`, `turnfilm.Fold`) for a readout that ever wants it.
+    """
+    for center, color, phase, destroyed in _flash_marks(state, ui):
+        _draw_burst(surface, center, color, phase)
+        if destroyed > 0:
+            _label_pill(surface, _fonts()["small"], f"−{destroyed}", _BTN_DANGER[1],
+                        _loss_center(center))
 
 
 def _draw_film_caption(surface, ui: Ui) -> None:
@@ -1062,6 +1095,10 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
                 continue
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
+    # ...and, for the second or so a playback marks a fight, what that fight cost
+    for center, _color, _phase, destroyed in _flash_marks(state, ui):
+        if destroyed > 0:
+            taken.append(_pill_rect(font, f"−{destroyed}", _loss_center(center)))
 
     def rank(sys) -> tuple[int, int]:
         if sys.id == ui.selected:

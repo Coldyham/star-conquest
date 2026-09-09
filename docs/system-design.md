@@ -319,14 +319,47 @@ draws animates the tick for free. The consequence worth sizing: that tick is the
 *last* visible change, so `FILM_END_MS` is what makes it readable at all, which is
 why it is 250ms rather than the 120ms first drafted.
 
-**Fog is the destination turn's, in both scenes.** Holding the earlier fog would
-have an inbound fleet pop into existence halfway down its lane, which is precisely
-the discontinuity the feature exists to remove. The framing that makes it
-defensible: a film is a report on a turn that has already happened, drawn with the
-fog of the board you are about to be handed. The cost is real but narrow —
-`visible` is not monotone, so a system lost this turn draws as a grey "?" while the
-fight that took it plays out. That needs `sight = 1` and a frontier system with no
-surviving owned neighbour; it cannot arise in the default fog-off config.
+**Fog is both turns', and that is not the same as either one.** The destination
+turn's alone was the first cut, and right about the direction: holding the *earlier*
+fog would have an inbound fleet pop into existence halfway down its lane, which is
+precisely the discontinuity the feature exists to remove. A film is a report on a
+turn that has already happened, drawn with the fog of the board you are about to be
+handed. But `visible` is not monotone, so the destination turn on its own drew a
+system lost this turn as a grey "?" *while the fight that took it played out* —
+needing `sight = 1` and a frontier system with no surviving owned neighbour, so it
+could not arise at the fog-off default, but wrong wherever it could.
+
+The fix is a union rather than a swap. `Ui.film_visible` carries what was visible
+when the played-back turn began, `Ui.sees` is `visible` plus that, and the map layer
+— nodes, fleets, bursts — asks it instead of reading `visible`. Additive is the
+whole point: `visible` is never overwritten, so there is nothing to put back when a
+film ends or is skipped, and a missed restore cannot leak a system you can no longer
+see into the board you play the next turn on. The HUD keeps reading `visible`
+directly, since the scoreboard and the info panel describe the position you are
+being handed rather than the one being drawn.
+
+**The reveal on the deciding turn waits for the film.** `resolve_turn` snaps the
+camera out to the whole map on the turn the game is decided or the human seat is
+knocked out, and doing that *before* the playback meant the last turn — the one
+worth watching — played out on a map that had already given its ending away, with
+the frame yanked out from under the fight as well. So the snap is deferred:
+`Ui.deferred_view_snap` records the debt and `main.land_film` pays it. What makes
+one function enough is that both endings pass through it — the clock running out and
+a press skipping (`input` calls `Ui.stop_film`, which deliberately leaves the debt
+unpaid, precisely so a skip cannot lose the reveal). A turn whose film has nothing
+in it (`Film.plays` false, e.g. a decided board with nothing left in transit) snaps
+immediately, exactly as before films existed.
+
+**One loss figure per fight, not one per side.** `Clashed` carries both strengths
+and the survivor count, and each `Landed.steps` entry carries a fold step's before
+and after, so `destroyed` is arithmetic on the event and not a second reading of the
+rules — it is the sum of what everyone brought less what the winner kept, which is
+`combat._record_losses` from the other end. That identity is the test: summed over a
+turn's events it must equal what the scoreboard charged every player. Both sides
+together rather than a figure each, because what a player reads off a burst is how
+expensive the fight was, and under the square law that is the surprising part; the
+per-side split stays in the event for a readout that ever wants it. `−0` never
+appears — a reinforcement has no steps, and so no burst either.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn
@@ -367,10 +400,10 @@ says it.
 **What is deliberately not animated.** The AI's decision phase (invisible by
 nature; the orders show up as launches). Camera moves toward the action, which would
 fight `ui.view` — the one thing `input` owns — and put mutation in the film path.
-Per-fight loss labels, which the fold steps now make derivable but which nothing yet
-asks for. And `Player.ships_lost` rides on the closing event as a whole-table
-snapshot rather than per-engagement deltas, which is what keeps `_record_losses` and
-the rest of `combat` out of this entirely.
+And `Player.ships_lost` rides on the closing event as a whole-table snapshot rather
+than per-engagement deltas, which is what keeps `_record_losses` and the rest of
+`combat` out of this entirely — the loss labels are derived from the fold instead,
+which is why they cost `combat` nothing.
 
 ## Map viewport margins
 

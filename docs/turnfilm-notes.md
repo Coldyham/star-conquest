@@ -12,7 +12,7 @@ heading for why they hold.
 
 ## Where it stands
 
-Landed on this branch, in three commits:
+Landed on this branch, in four commits:
 
 - **Prep.** `Fleet.progress_at` as the one sub-turn position formula,
   `engine._lane_span` refactored onto it, and `engine._lane_crossings` returning
@@ -24,11 +24,16 @@ Landed on this branch, in three commits:
   layers, the skip, the local preference, and history playback.
 - **Two fixes the playback exposed**: lane slots are claimed rather than shared
   out, and a burst marks a fight rather than any arrival.
+- **Three of the polish items**, each with its own tests: the map's fog during a
+  playback is now the union of both turns (`Ui.sees`), the camera reveal on the
+  deciding turn waits for the film to land (`main.land_film`), and a burst is
+  labelled with what the fight cost (`turnfilm.Clashed.destroyed`,
+  `turnfilm.Landed.destroyed`).
 
 To re-verify from a clean clone:
 
 ```sh
-uv run pytest                                    # 729 tests
+uv run pytest                                    # 742 tests
 uv run python -m tests.sim --film --trials 50    # the playback oracle, every turn
 ```
 
@@ -65,32 +70,38 @@ a re-measure of the roster (`sim --ladder`). What it would *not* cost is any
 presentation work — a film is assembled from the order the engine emitted events,
 so it depicts whatever the rule is.
 
-## Open: polish, all small and all optional
+## Open: polish, both small and both optional
+
+Two of the five are left, and both are arguments for leaving them alone as much as
+for doing them.
 
 - **Give production a dwell.** `config.FILM_PRODUCE_MS` is 0, so production lands
   at its true point with no pause. The progress ring in `render._draw_systems`
   already animates the tick, so this constant only adds a moment on it. Note that
   `FILM_END_MS` currently carries the job of making that tick readable, since in
   the present phase order it is the last thing to change; if production moves ahead
-  of the arrivals, that pressure goes away.
-- **Per-fight loss labels.** Now derivable and previously not: `Clashed` carries
-  both sides' ships and the survivors, and each `Landed.steps` entry carries a
-  fold step's before and after. `combat._record_losses` pools per owner, which is
-  what used to make a multi-owner arrival's per-side losses unrecoverable.
+  of the arrivals, that pressure goes away. Deliberately still 0: the case for a
+  dwell is weakest while production genuinely is the last thing that happens.
 - **Lane slots re-pack when a fleet arrives.** `render._lane_slot` ranks from the
   oldest fleet on the lane, which is what makes *launching* free — the case that
   actually looked wrong. The remaining case is that a fleet arriving shifts its
   lane-mates one slot inward. Ranking from the newest instead would simply trade
   one for the other; stable in both directions needs per-fleet identity, which
   `Fleet` has none of (no id, unhashable, and two equal fleets compare equal).
-- **`reset_view` fires before the final film.** `main.resolve_turn` snaps the
-  camera out on the turn the game is decided or the human seat is knocked out, so
-  the last turn plays out on an already-revealed map. Watching it revealed is
-  defensible; deferring the snap means threading a flag back through the call
-  sites.
-- **Fog is the destination turn's throughout.** `visible` is not monotone, so a
-  system lost this turn draws as a grey "?" while the fight that took it plays out.
-  It needs `sight = 1` and a frontier system with no surviving owned neighbour, so
-  it cannot arise at the fog-off default. The fix, if ever wanted, is one shared
-  helper taking the union — `visible` from both turns, `seen`/`intel` from the
-  later — applied identically in the live and history paths.
+  Adding one is a core model change for a presentation artifact that coincides
+  with a fleet leaving the board, which is why it has not been done.
+
+## Done: the other three polish items
+
+Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
+`system-design.md` under the matching heading:
+
+- **Fog during a playback is both turns'.** `Ui.film_visible` + `Ui.sees`, unioned
+  at the map layer and additive, so nothing is swapped and nothing needs putting
+  back. The HUD still reads `visible`.
+- **The camera reveal waits for the film.** `Ui.deferred_view_snap`, paid by
+  `main.land_film` — the one place the clock running out and a skip both pass
+  through. `Ui.stop_film` leaves the debt alone on purpose.
+- **A burst says what the fight cost.** `destroyed` on `Clashed` and `Landed`,
+  drawn by `render._draw_loss`. Oracle: summed over a turn's events it equals what
+  `combat._record_losses` charged the players.

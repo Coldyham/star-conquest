@@ -232,6 +232,17 @@ Four rules hold it together:
   and that decides which fight is dealt the turn's dice first, so letting the
   crossing *position* into the comparison would move stored replays with nothing
   prompting a `RULES_VERSION` bump. Hence the explicit `key=`.
+- **The map layer sees both turns' fog; nothing gets swapped.** `Ui.film_visible`
+  holds what was visible when the played-back turn began and `Ui.sees` unions it
+  onto `visible`, which every map-layer read goes through (nodes, fleets, bursts).
+  `visible` itself is never overwritten, so a film has nothing to put back and a
+  system you can no longer see cannot leak past one. The HUD reads `visible`
+  directly: it describes the position you are handed, not the one being drawn.
+- **Whatever a film defers, `main.land_film` pays.** The camera snap that reveals
+  the board on the deciding turn waits for the playback (`Ui.deferred_view_snap`),
+  and `land_film` is the one place the clock running out and a press skipping both
+  pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
+  Anything else a playback holds back belongs there too, never at a call site.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at

@@ -345,3 +345,70 @@ def test_a_reinforcement_reports_no_engagement():
     assert (landed[0].was_owner, landed[0].owner_id) == (1, 1)
     assert landed[0].ships == 9        # 3 already there, 6 arriving
     assert landed[0].steps == ()       # nothing fought
+
+
+# --------------------------------------------------------------------------- #
+# What a fight cost
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("seed", [3, 11, 26])
+def test_a_fights_cost_matches_what_the_scoreboard_was_charged(seed):
+    """The oracle for `destroyed` is `Player.ships_lost`, which the engine writes
+    from the other end (`combat._record_losses`, charging each side what it
+    brought less what it kept).
+
+    Every ship that dies in a turn dies at a clash or at an arrival, so the two
+    totals have to agree turn by turn — a label derived from the events cannot be
+    allowed to disagree with the number the scoreboard shows.
+    """
+    state = _game(seed)
+    with in_lane_battles():
+        for _ in range(60):
+            if state.winner is not None:
+                break
+            before = {pid: p.ships_lost for pid, p in state.players.items()}
+            events: list[turnfilm.Event] = []
+            engine.end_turn(state, decide=ai.decide, on_event=events.append)
+            charged = sum(p.ships_lost - before[pid]
+                          for pid, p in state.players.items())
+            shown = sum(e.destroyed for e in events
+                        if isinstance(e, (turnfilm.Clashed, turnfilm.Landed)))
+            assert shown == charged, f"turn {state.turn}"
+
+
+def test_a_pile_ups_cost_survives_the_per_owner_pooling():
+    """The case that used to be unrecoverable: three owners at one node. Their
+    per-side losses are pooled by owner before the scoreboard sees them, but the
+    fold's own steps still add up to the whole engagement.
+    """
+    s = make_state([(0, 1, 10, 100), (1, 2, 11, 100), (2, 3, 6, 100)],
+                   [(0, 1, 1), (0, 2, 1)])
+    with no_jitter():
+        engine.apply_order(s, engine.Order(2, 1, 0, 11))
+        engine.apply_order(s, engine.Order(3, 2, 0, 6))
+        events: list[turnfilm.Event] = []
+        engine.end_turn(s, on_event=events.append)
+
+    landed = next(e for e in events if isinstance(e, turnfilm.Landed))
+    assert len(landed.steps) == 2                 # 11 v 10, then the winner v 6
+    # everyone brought 27 hulls between them, and only the survivors are left
+    assert landed.destroyed == 27 - s.systems[0].ships
+    assert landed.destroyed == sum(p.ships_lost for p in s.players.values())
+
+
+def test_a_landing_that_did_not_fight_cost_nothing():
+    """A reinforcement and a walk into an empty system have no steps, and so no
+    losses to label — the same test that keeps them from drawing combat's burst."""
+    landed = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=3,
+                             owner_id=1, ships=9, prod_progress=0, steps=())
+    assert landed.destroyed == 0
+
+
+def test_a_clash_that_annihilates_reports_every_ship():
+    """Nobody holds open space, so matched fleets wipe each other out — and the
+    label has to say so rather than reading zero off the missing survivor."""
+    clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.5, at=0.5, a=0, b=1,
+                             a_ships=7, b_ships=7, survivor=None, survivors=0,
+                             dead=(0, 1))
+    assert clash.destroyed == 14

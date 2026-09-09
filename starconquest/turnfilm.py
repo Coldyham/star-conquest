@@ -81,6 +81,16 @@ class Clashed:
     survivors: int
     dead: tuple[int, ...]
 
+    @property
+    def destroyed(self) -> int:
+        """Ships both sides lost together.
+
+        Derived rather than reported: the loser is wiped out and the winner is
+        thinned to ``survivors``, so the two strengths carried in and that one
+        figure are the whole of the attrition. Annihilation reports every ship.
+        """
+        return self.a_ships + self.b_ships - self.survivors
+
 
 @dataclass(frozen=True)
 class Fold:
@@ -110,6 +120,23 @@ class Landed:
     ships: int
     prod_progress: int
     steps: tuple[Fold, ...]  # empty for a reinforcement or an unopposed landing
+
+    @property
+    def destroyed(self) -> int:
+        """Ships lost in this node's fight, every owner together.
+
+        Each side that fought appears in ``steps`` exactly once — the strongest as
+        the first step's carried force, each of the rest as one step's defender —
+        so their total less the last step's survivors is the attrition, without
+        `combat._record_losses`'s per-owner pooling in the way. Zero where there
+        are no steps: a reinforcement or a walk into an empty system is not a
+        fight, and lost nothing.
+        """
+        if not self.steps:
+            return 0
+        return (self.steps[0].attacker_ships
+                + sum(step.defender_ships for step in self.steps)
+                - self.steps[-1].survivors)
 
 
 @dataclass(frozen=True)

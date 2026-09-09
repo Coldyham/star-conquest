@@ -212,6 +212,10 @@ FILM_FLASH_MS = 260      # ms a fight's burst stays up (a film always outlives i
 FILM_BURST_R = 22        # px a burst reaches past whatever it marks
 FILM_BURST_W = 2         # px: its stroke
 FILM_BURST_SPOKES = 6    # radial strokes in one
+FILM_LOSS_GAP = 12       # px above a burst's centre for the ships it cost. Fixed
+                         # rather than measured off the burst's reach, which grows
+                         # with the flash — a label that drifted outward with it
+                         # would read as a second moving thing
 FILM_ARRIVAL_GAP = 4     # px between a landed fleet's tip and its node, so the
                          # garrison count underneath stays readable
 FILM_CAPTION_GAP = 22    # px clearance between the phase caption and the map's floor
@@ -291,6 +295,7 @@ _SCALABLE = (
     "RULE_LABEL_GAP",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
     "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
+    "FILM_LOSS_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",

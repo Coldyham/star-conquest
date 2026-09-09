@@ -147,8 +147,20 @@ class Ui:
     # main from the loop's own `dt` rather than the wall clock, so a test can drive
     # a frame by setting it. The *board* being mutated is a main-loop local, exactly
     # like the reconstructed history boards, and reaches render as `state`.
+    #   film_visible — what the human could see at the *start* of the turn being
+    #     played back, which the map layer adds to `visible` for the film's
+    #     duration (`sees`). `visible` is not monotone, so without it a system
+    #     lost this turn would draw as a grey "?" while the fight that took it
+    #     played out. Additive rather than a swap, so nothing has to be put back
+    #     when a film ends or is skipped.
+    #   deferred_view_snap — the camera re-frame `main.resolve_turn` owes once the
+    #     film lands (see `main.land_film`): the turn that decides the game reveals
+    #     the whole board, and doing that first would play the last turn out on a
+    #     map it had already given away.
     film: Optional[turnfilm.Film] = None
     film_ms: float = 0.0
+    film_visible: frozenset[int] = frozenset()
+    deferred_view_snap: bool = False
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -299,9 +311,25 @@ class Ui:
     def stop_film(self) -> None:
         """Abandon a playback. Main drops its reel whenever there is no film, so
         this is the whole of "skip" — safe at any moment, because the turn it was
-        showing has already been resolved."""
+        showing has already been resolved.
+
+        Deliberately does *not* clear `deferred_view_snap`: `input` skips by
+        calling this, and what the film was holding back is still owed. Main
+        applies it wherever it drops the reel (`main.land_film`), which is the one
+        place both the skip and the natural end pass through.
+        """
         self.film = None
         self.film_ms = 0.0
+        self.film_visible = frozenset()
+
+    def sees(self, sid: int) -> bool:
+        """Whether the map may draw ``sid`` in full detail.
+
+        `visible` on its own everywhere but during a turn playback, which also
+        gets the systems that were visible when that turn began — see
+        `film_visible`.
+        """
+        return sid in self.visible or sid in self.film_visible
 
     def reset_view(self, state: GameState) -> None:
         """Recompute the camera's resting position: framed to just the systems

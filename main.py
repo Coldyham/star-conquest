@@ -494,6 +494,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # would cost a DOM call every frame.
     filming = not ui.autoplay and not ui.fast_forward and webstore.animate_turns()
     before = turnfilm.copy_board(state) if filming else None
+    # What the human could see going in. `visible` is not monotone — a system lost
+    # this turn drops out of it — so the film draws the union of both turns rather
+    # than have the fight that took it play out under a grey "?" (`Ui.film_visible`).
+    was_visible = frozenset(ui.visible) if filming else frozenset()
     events: list[turnfilm.Event] = []
     record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
                              on_event=events.append if filming else None)
@@ -527,17 +531,35 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # Snap the camera out to the whole map right as there stops being anything left
     # to hide — but only on the turn that crosses into it, not every turn a
     # spectator keeps fast-forwarding through an already-decided match.
-    if (state.winner is not None and not was_over) or (
-            state.is_defeated(ui.human_id) and not was_defeated):
-        ui.reset_view(state)
+    snap = ((state.winner is not None and not was_over)
+            or (state.is_defeated(ui.human_id) and not was_defeated))
 
-    if before is None:
+    film = turnfilm.film(events) if before is not None else None
+    # A turn with nothing to watch isn't worth a pause, and neither is one nobody
+    # asked to see: both land the snap now, exactly as before there were films.
+    if film is None or not film.plays:
+        if snap:
+            ui.reset_view(state)
         return None
-    film = turnfilm.film(events)
-    if not film.plays:      # a turn with nothing to watch isn't worth a pause
-        return None
-    ui.film, ui.film_ms = film, 0.0
+    ui.film, ui.film_ms, ui.film_visible = film, 0.0, was_visible
+    # ...but a film runs in the frame the player was watching it in: the reveal is
+    # the last turn's ending, not its opening (`land_film`).
+    ui.deferred_view_snap = snap
     return turnfilm.Reel(before, film)
+
+
+def land_film(state: GameState, ui: Ui) -> None:
+    """Finish a playback, however it ended: drop the film and pay what it deferred.
+
+    The one place both endings meet — the clock running out and a press skipping it
+    (`input` calls `Ui.stop_film`, which leaves the debt deliberately unpaid) — so
+    the camera reveal a decided turn owes cannot be lost by skipping it. Idempotent,
+    and a no-op when nothing was deferred.
+    """
+    ui.stop_film()
+    if ui.deferred_view_snap:
+        ui.deferred_view_snap = False
+        ui.reset_view(state)
 
 
 def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
@@ -921,8 +943,9 @@ async def main() -> None:
             # the film (in `input`) also drops the board it was playing onto.
             if reel is not None and ui.film is None:
                 reel = None                 # skipped: input cleared the film
+                land_film(state, ui)        # ...which still leaves the snap owed
             elif reel is None and ui.film is not None:
-                ui.film = None              # unreachable, but a stranded film would
+                land_film(state, ui)        # unreachable, but a stranded film would
                                             # hide the End Turn button for good
             elif reel is not None and not confirm_quit and not confirm_rewind:
                 ui.film_ms += dt
@@ -935,7 +958,7 @@ async def main() -> None:
                         ui.history_turn = min(ui.history_max, ui.history_turn + 1)
                         if ui.history_turn >= ui.history_max:
                             ui.playing = False
-                    ui.stop_film()
+                    land_film(state, ui)
                     reel = None
                     play_accum = 0
 
@@ -954,6 +977,9 @@ async def main() -> None:
                         film = turnfilm.film(history_events[nxt])
                         if film.plays:
                             ui.film, ui.film_ms = film, 0.0
+                            # the same union as live play: the turn's own fog on
+                            # top of the one it lands in (`Ui.film_visible`)
+                            ui.film_visible = frozenset(history_fog[ui.history_turn][0])
                             # a copy, so scrubbing back to this turn still finds
                             # the board it really was
                             reel = turnfilm.Reel(

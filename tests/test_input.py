@@ -18,6 +18,7 @@ import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
 from starconquest import config, engine, mapgen, replay, turnfilm  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
+from starconquest.model import Fleet  # noqa: E402
 from starconquest.settings import Challenge, Settings  # noqa: E402
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
 
@@ -884,10 +885,16 @@ def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
         pygame.quit()
 
 
-def test_defeat_snaps_the_camera_out_once_not_every_turn():
+def test_defeat_snaps_the_camera_out_once_not_every_turn(monkeypatch):
     """The turn the human is knocked out (but the match continues without
     them) should snap the camera to the whole map exactly once — a later turn
-    spent merely spectating must leave a manual zoom alone."""
+    spent merely spectating must leave a manual zoom alone.
+
+    Pinned to animation off, which is what these two assert: with it on the snap
+    waits for the film to land (see the deferred-snap tests below), so the
+    machine's own stored preference must not decide which behaviour is tested.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
         for sid, s in state.systems.items():
@@ -908,7 +915,8 @@ def test_defeat_snaps_the_camera_out_once_not_every_turn():
         pygame.quit()
 
 
-def test_winning_snaps_the_camera_out_to_the_whole_map():
+def test_winning_snaps_the_camera_out_to_the_whole_map(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
         for s in state.systems.values():
@@ -1882,5 +1890,97 @@ def test_hovering_or_zooming_leaves_a_film_running():
         game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=pos,
                                                    button=1), state, ui)
         assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def _won_with_animation(monkeypatch):
+    """A human win *worth watching*, with turn animation on: the reel plus its Ui.
+
+    The last rival holds one system and a fleet is one turn out from it, so the
+    turn that decides the game has a move and a fight in it. A board with nothing
+    left in transit resolves to a film of instants (`Film.plays` is False) and
+    would never defer anything — which is right, and no test of the deferral.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    last = state.systems[home].neighbors[0]
+    for s in state.systems.values():
+        s.owner_id = 1                     # hand the human all but one system
+    state.systems[last].owner_id, state.systems[last].ships = 2, 1
+    state.fleets = [Fleet(owner_id=1, source_id=home, dest_id=last, ships=40,
+                          turns_total=2, turns_remaining=1)]
+    ui.view.zoom_at((600, 460), 2.0)       # ...watching the corner it happens in
+    reel = main.resolve_turn(state, ui, log=None)
+    assert state.winner == 1
+    assert reel is not None and ui.film is not None
+    return state, ui, reel
+
+
+def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkeypatch):
+    """The snap that reveals the whole board is the deciding turn's *ending*.
+    Doing it first would play the last turn out on a map it had already given
+    away, and yank the frame out from under the fight being watched."""
+    state, ui, reel = _won_with_animation(monkeypatch)
+    try:
+        assert ui.deferred_view_snap
+        assert ui.view.zoom == 2.0          # still framed where you were watching
+        main.land_film(state, ui)
+        assert ui.view.zoom == 1.0          # ...and revealed once it lands
+        assert not ui.deferred_view_snap and ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_skipping_the_last_film_still_reveals_the_board(monkeypatch):
+    """A skip must not be able to lose the reveal: `Ui.stop_film` deliberately
+    leaves the debt, and `main.land_film` — which both endings pass through —
+    pays it."""
+    state, ui, _ = _won_with_animation(monkeypatch)
+    try:
+        ui.stop_film()                      # what a press does, in `input`
+        assert ui.deferred_view_snap        # ...which is not the whole of it
+        assert ui.view.zoom == 2.0
+        main.land_film(state, ui)           # what the loop does on dropping the reel
+        assert ui.view.zoom == 1.0
+    finally:
+        pygame.quit()
+
+
+def test_an_ordinary_turns_film_owes_no_snap(monkeypatch):
+    """Only the turn that crosses into a decided game (or a knocked-out human)
+    defers anything; every other film lands with the camera left alone."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        ui.view.zoom_at((600, 460), 2.0)
+        main.resolve_turn(state, ui, log=None)
+        assert state.winner is None
+        assert not ui.deferred_view_snap
+        main.land_film(state, ui)
+        assert ui.view.zoom == 2.0
+    finally:
+        pygame.quit()
+
+
+def test_a_film_carries_the_fog_the_turn_began_with(monkeypatch):
+    """`resolve_turn` refreshes the fog to the board it hands back, so the film
+    needs the earlier one alongside it — `Ui.sees` draws the union."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        main.refresh_fog(state, ui)
+        before = set(ui.visible)
+        for _ in range(12):     # play on until a turn has something to watch
+            reel = main.resolve_turn(state, ui, log=None)
+            if reel is not None:
+                break
+            before = set(ui.visible)
+        assert reel is not None
+        assert ui.film_visible == frozenset(before)
+        assert all(ui.sees(sid) for sid in before)
+        main.land_film(state, ui)
+        assert ui.film_visible == frozenset()   # additive: nothing to put back
     finally:
         pygame.quit()
