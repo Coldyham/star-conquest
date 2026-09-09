@@ -219,6 +219,26 @@ def test_copy_from_carries_the_challenge():
     assert _challenged().challenge.turns == 137
 
 
+def test_challenge_carries_the_id_of_its_replay():
+    """`Challenge.log` names the uploaded game log behind the score, and has to
+    survive the link — it is what tools/verify_scores.py keys on."""
+    s = _challenged()
+    s.challenge.log = "00112233445566ff"
+    assert Settings.from_token(s.to_token()).challenge.log == "00112233445566ff"
+    assert Settings.from_dict(s.to_dict()).challenge.log == "00112233445566ff"
+
+
+def test_challenge_log_does_not_move_the_setup_digest():
+    """The reason the id rides on Challenge rather than Settings: `challenge_keys`
+    drops the whole field before hashing, so adding to it invalidates no link that
+    was ever shared (unlike a new Settings field, which needs a
+    `_LEGACY_KEY_DROPS` entry). `test_challenge_key_is_stable` pins the other half.
+    """
+    plain, logged = Settings(seed=7), Settings(seed=7)
+    logged.challenge = Challenge(turns=10, log="abcdef0123456789")
+    assert plain.challenge_keys() == logged.challenge_keys()
+
+
 def test_challenge_key_ignores_the_attached_score_and_autoplay():
     plain = Settings(seed=7)
     scored = Settings(seed=7)
@@ -339,6 +359,41 @@ def test_a_pre_defender_advantage_challenge_link_still_matches():
     s = Settings.from_token(token)
     assert s.challenge is not None and s.challenge.matches(s)
     assert s.challenge.key != s.challenge_key()
+
+
+def test_an_int_aux_keeps_its_type_but_the_other_knobs_do_not():
+    """`aux` is the one field whose int/float form is preserved on the way in —
+    the menu stores an int for an `AUX_INT` strategy, and `challenge_key` hashes
+    the JSON, where `12` and `12.0` are different setups."""
+    loaded = Settings.from_dict({"ai": [{"aux": 12, "reserve_fraction": 0, "expand_margin": 2}]})
+    assert isinstance(loaded.ai[0].aux, int)
+    assert isinstance(loaded.ai[0].reserve_fraction, float)
+    assert isinstance(loaded.ai[0].expand_margin, float)
+    assert isinstance(Settings.from_dict({"ai": [{"aux": 1.5}]}).ai[0].aux, float)
+
+
+def test_challenge_key_survives_a_round_trip_of_an_int_aux():
+    """A digest stamped over a live `Settings` has to be one its own link
+    recomputes, or the recipient's menu reads the setup as edited on open."""
+    s = _customised()
+    s.ai[4] = AiParams(aux=12)             # what the aux slider stores at AUX_INT
+    s.ai_strategy[4] = "knower"
+    assert Settings.from_dict(s.to_dict()).challenge_key() == s.challenge_key()
+    assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
+
+
+def test_a_challenge_link_with_an_int_aux_still_matches():
+    """5 players, 33 nodes, seed 749187, a knower at search depth 12 — a real link
+    whose key was stamped over the int the slider left in `aux`."""
+    token = ("eNrlU1tuwyAQvMt-W5GdOC9fpaoQgcXQ2IAWnIci371LZEXpASpV6t_uLDsz2MMDxqAROiDpdRihgjjIO1KCbluB5xlXm00F"
+             "CVFDt2-PzWFfAd4ySYG6R2FIquyCh65e7ficdVEMdxGRRJ6I4c1qu8ApMonoKVyzFVHlsrLmoQ0jikhBTwvTugIVxpPM4svl"
+             "jFQO1ocKNBr0mpmlvkifZc_Om1XNFCb0IrneMmezdCpM3LF16aD7eABhQrr8NFzUX_gQAj218Rb5a4hRUu98USgkOUt1fsOe"
+             "m86bQApfMC_L6fY0NVd_RrL-D5f8Ncn1_FkyJBJHPmN_5zCBxYlcyk7xg6EpWaQ4TImb9wEzJSsHrs4-XDnFzKMYGNCX4D6g"
+             "vI9UFDjaQ0gluy3_K8uOF_TEalAIsBRNfTRGmUaZVrfrXQ3z_A36DT7h")
+    s = Settings.from_token(token)
+    assert s.challenge is not None and s.challenge.matches(s)
+    s.nodes += 1
+    assert not s.challenge.matches(s)
 
 
 def test_build_state_ignores_the_challenge():

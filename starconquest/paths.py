@@ -28,14 +28,84 @@ WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 # so replaying a shared link can show what you already managed.
 WEB_BESTS_KEY = "sc_bests"
 
-# The public leaderboard's score-entry page. The win overlay opens it with
-# ``#<token>`` appended, which is all the form needs to prefill itself — the same
-# challenge token the clipboard link carries, read by the site's own decoder.
-# Blank disables the feature: the overlay simply doesn't offer the button.
+# Storage key for the "share replays" preference (`webstore.share_games`): off
+# unless the player turns it on from the menu, and stored beside the other local
+# preferences rather than on `Settings` — it belongs to this installation, not to
+# a game setup, and putting it on `Settings` would both move `challenge_key()`
+# for every map that has ever existed and travel in every shared link.
+WEB_SHARE_GAMES_KEY = "sc_share_games"
+
+# Where a browser download parks its result for the game loop to collect
+# (`share.fetch_log`). localStorage rather than a `window` property because
+# reading one back is the one bridge call this build cannot take for granted:
+# writing through `window.eval` is proven (that is how a replay is uploaded) and
+# so is reading a *property* (the URL fragment, these very keys), but `eval`
+# returning a value is neither. So the fetch writes here and the poll reads it
+# with `webstore.get`, which every stored preference already depends on.
+WEB_REPLAY_STATE_KEY = "sc_replay_state"
+WEB_REPLAY_BODY_KEY = "sc_replay_body"
+
+# ---------------------------------------------------------------------------
+# The public leaderboard, and how the game finds it.
 #
-# Written without the ``.html``, the way the host serves it: that form answers
-# too, but this is the canonical URL and avoids a redirect hop.
-LEADERBOARD_SUBMIT_URL = "https://star-conquest-leaderboard.netlify.app/submit"
+# The two halves are separate Netlify sites whose names differ by exactly one
+# string: `star-conquest` and `star-conquest-leaderboard`. Netlify names every
+# other deploy `<context>--<site>.netlify.app` — `deploy-preview-42--…` for a PR,
+# `<branch>--…` for a branch deploy — and both sites build from this one
+# repository, so a PR produces the same `<context>` on each.
+#
+# That makes the sibling derivable at runtime rather than configured: insert the
+# tag into our own site name and a deploy preview of the game talks to the
+# matching preview of the board, a branch deploy to its branch deploy, and
+# production to production, with nothing to edit by hand between them. See
+# `sibling_host`, and `webstore.leaderboard_origin` for the DOM half.
+#
+# The constant below is the fallback for everywhere that reasoning does not
+# reach: desktop, Android, a local server, or a custom domain that is not a
+# `.netlify.app` name at all. Blank disables every leaderboard feature — the win
+# overlay stops offering the button, uploads no-op, replays are unwatchable.
+LEADERBOARD_ORIGIN = "https://star-conquest-leaderboard.netlify.app"
+LEADERBOARD_TAG = "-leaderboard"     # what the board's site name has and ours does not
+_NETLIFY_SUFFIX = ".netlify.app"
+
+# Paths on that origin. `/submit` is written without the `.html` the way the host
+# serves it: that form answers too, but this is the canonical URL and avoids a
+# redirect hop. The two `/api` paths are the site's own functions
+# (`leaderboard/netlify/functions/`), which hold the only key that may touch
+# `game_logs` — posting straight to PostgREST would mean shipping a key with
+# insert rights inside the game.
+LEADERBOARD_SUBMIT_PATH = "/submit"    # the score-entry form, opened with #<token>
+LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
+LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
+
+
+def sibling_host(host: str, tag: str, *, add: bool) -> str:
+    """``host`` with ``tag`` added to or removed from its Netlify *site name*.
+
+    The site name is the last `--`-separated part of the label before
+    ``.netlify.app``, which is what makes this work across contexts:
+
+        star-conquest.netlify.app                  -> star-conquest-leaderboard.…
+        deploy-preview-42--star-conquest.netlify…  -> deploy-preview-42--star-conquest-leaderboard.…
+
+    Returns ``""`` for anything it cannot reason about — a custom domain,
+    localhost, a host already in the wanted state — and the caller then falls
+    back to the configured origin. Deliberately pure, so the string rule is
+    testable without a browser.
+    """
+    if not host.endswith(_NETLIFY_SUFFIX):
+        return ""
+    label = host[: -len(_NETLIFY_SUFFIX)]
+    prefix, sep, site = label.rpartition("--")
+    if add:
+        if site.endswith(tag):
+            return ""                      # already the sibling; nothing to add
+        site += tag
+    else:
+        if not site.endswith(tag):
+            return ""                      # already the sibling; nothing to remove
+        site = site[: -len(tag)]
+    return f"{prefix}{sep}{site}{_NETLIFY_SUFFIX}" if site else ""
 
 
 def _android_data_dir() -> Path | None:

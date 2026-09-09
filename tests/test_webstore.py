@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from starconquest import webstore
-from starconquest.paths import WEB_BESTS_KEY
+from starconquest import paths, webstore
+from starconquest.paths import WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +57,30 @@ def test_unwritable_location_fails_soft(monkeypatch, tmp_path):
 
 
 # --- personal bests ---------------------------------------------------------- #
+# --- the "share replays" opt-in ---------------------------------------------- #
+def test_replay_sharing_is_off_until_it_is_switched_on():
+    """The failure mode of a storage problem has to be "sends nothing", never
+    "sends without being asked", so anything but a stored "1" reads as off."""
+    assert webstore.share_games() is False
+    webstore.set(WEB_SHARE_GAMES_KEY, "yes please")
+    assert webstore.share_games() is False
+
+
+def test_replay_sharing_round_trips_and_can_be_switched_back_off():
+    assert webstore.set_share_games(True) is True
+    assert webstore.share_games() is True
+    assert webstore.set_share_games(False) is True
+    assert webstore.share_games() is False
+
+
+def test_an_unwritable_store_reports_that_the_opt_in_did_not_stick(monkeypatch, tmp_path):
+    """An opt-in that silently forgets itself is worse than one that fails: the
+    menu says so rather than redrawing an unticked box with no explanation."""
+    monkeypatch.setattr(webstore, "_file_path", lambda: tmp_path / "nope" / "kv.json")
+    assert webstore.set_share_games(True) is False
+    assert webstore.share_games() is False
+
+
 def test_no_best_recorded_yet():
     assert webstore.best("key") is None
 
@@ -169,3 +193,58 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
     monkeypatch.setattr(main.webstore, "close_window", lambda: tried.append(True) or True)
     assert main.leave_app() is False
     assert tried == [True], "a web quit must at least attempt to close the window"
+
+
+# --- finding the leaderboard from where we are -------------------------------- #
+#
+# The two halves are separate Netlify sites whose names differ by one string, and
+# Netlify names every deploy `<context>--<site>.netlify.app` from the same context
+# on both — so a preview can find its own sibling instead of being configured.
+def test_the_sibling_site_is_derived_across_every_deploy_context():
+    add = lambda host: paths.sibling_host(host, "-leaderboard", add=True)   # noqa: E731
+    assert add("star-conquest.netlify.app") == "star-conquest-leaderboard.netlify.app"
+    assert (add("deploy-preview-42--star-conquest.netlify.app")
+            == "deploy-preview-42--star-conquest-leaderboard.netlify.app")
+    assert (add("some-branch--star-conquest.netlify.app")
+            == "some-branch--star-conquest-leaderboard.netlify.app")
+
+
+def test_the_rule_runs_backwards_for_the_board_finding_the_game():
+    """`leaderboard/js/config.mjs` implements the same rule the other way; this
+    pins that the two are inverses, since nothing can check them against each
+    other at runtime."""
+    drop = lambda host: paths.sibling_host(host, "-leaderboard", add=False)  # noqa: E731
+    for host in ("star-conquest.netlify.app",
+                 "deploy-preview-42--star-conquest.netlify.app"):
+        assert drop(paths.sibling_host(host, "-leaderboard", add=True)) == host
+
+
+def test_a_host_the_rule_cannot_read_falls_back_rather_than_guessing():
+    """A custom domain, a local server or a host already in the wanted state: the
+    caller uses the configured origin instead, which is what desktop always does."""
+    for host in ("example.com", "localhost", "starconquest.example.org", "",
+                 "star-conquest-leaderboard.netlify.app"):   # already the board
+        assert paths.sibling_host(host, "-leaderboard", add=True) == ""
+
+
+def test_off_the_web_the_configured_origin_is_used():
+    assert webstore.leaderboard_origin() == paths.LEADERBOARD_ORIGIN
+    assert webstore.leaderboard_url("/api/log") == f"{paths.LEADERBOARD_ORIGIN}/api/log"
+
+
+def test_a_blank_origin_disables_every_leaderboard_feature(monkeypatch):
+    monkeypatch.setattr(paths, "LEADERBOARD_ORIGIN", "")
+    assert webstore.leaderboard_url("/api/log") == ""
+
+
+def test_on_the_web_the_endpoint_follows_the_page(monkeypatch):
+    """The whole point: a deploy preview of the game posts to the deploy preview
+    of the board, with nothing edited by hand between them."""
+    class _Window:
+        location = type("L", (), {"hostname": "deploy-preview-7--star-conquest.netlify.app"})
+
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setitem(__import__("sys").modules, "platform",
+                        type("P", (), {"window": _Window()}))
+    assert webstore.leaderboard_url("/api/log") == (
+        "https://deploy-preview-7--star-conquest-leaderboard.netlify.app/api/log")

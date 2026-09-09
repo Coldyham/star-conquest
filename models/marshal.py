@@ -26,6 +26,20 @@ What it changes, in descending order of measured value:
     pincer and relies on the nearer ones firing next turn; reserving their budget
     stops a later, poorer target — or Phase 3b — spending it first.
 
+  * **A retreat is a move, not a shrug.** Three fixes in one place, worth 52.0%
+    and 51.7% (z = +3.34, +3.21) against the bot without them. ``_evacuate`` ranked
+    refuges by garrison size alone, so a doomed garrison could be posted down a
+    six-turn lane to the biggest stack we own while a refuge one turn away went
+    unused; it now goes to the nearest one first. And nothing in the doomed
+    branch knew which *other* systems were being abandoned this turn — for each
+    of two doomed neighbours the biggest friendly garrison is the other one, so
+    the pair traded garrisons down the lane between them and both systems fell to
+    fleets that were already on their way. ``_consolidate`` offers the doomed to
+    each other first, since a garrison too small to save its own system is often
+    exactly what the one next door is short of and is lost where it stands
+    either way, and whatever is still being abandoned is passed to ``_evacuate`` as
+    a place not to retreat into.
+
   * **It prices a target against whoever will be holding it.** ``_required`` reads
     the fleets a *third* player already has on the lane, not just the owner's own
     reinforcements, so a system its owner has evacuated ahead of an incoming stack
@@ -42,9 +56,11 @@ and would poison it.
 against the roster, the guard and margin sweeps, why the attack margin no longer
 carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
 a fight that mostly never happens), the ideas that were built, measured and then
-deleted, the known hole in its own guard, and — under "Racing a third player for
-the same system" — why the third-party reprice stops at rival-held targets and is
-deliberately not applied to neutral ones. Don't re-add one of those, or
+deleted, the known hole in its own guard, why — under "Two doomed neighbours" —
+the retreat rule leads on distance and the doomed are offered to each other
+before anyone else, and — under "Racing a third player for the same system" —
+why the third-party reprice stops at rival-held targets and is deliberately not
+applied to neutral ones. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -86,6 +102,9 @@ RIVAL_WEDGE = 1.0               # penalty per rival past the first bordering a t
 WEDGE_MIN_PLAYERS = 4           # ...applied only in a field this crowded
 COMMIT_SURPLUS = True           # Phase 3b: pour leftovers into a strike going in
 RESERVE_PINCER = True           # hold a stagger's nearer wave for its own target
+CONSOLIDATE = True              # Phase 2: the doomed relieve each other
+AVOID_ABANDONED = True          # ...and never retreat into one that is still doomed
+RETREAT_NEAREST = True          # ...and retreat by travel time, not garrison size
 
 
 # --------------------------------------------------------------------------- #
@@ -336,8 +355,17 @@ def _required(state, pid, target, dist: int) -> int:
 # --------------------------------------------------------------------------- #
 # Movement
 # --------------------------------------------------------------------------- #
-def _evacuate(state, pid, s, max_prod: int):
-    """Route a doomed system's whole garrison to the most useful place — or hold."""
+def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
+    """Route a doomed system's whole garrison to the most useful place — or hold.
+
+    ``abandoned`` is the rest of this turn's doomed set (minus whatever
+    consolidation has just saved), and branch (b) will not retreat into it: a
+    system whose own garrison is leaving, or is about to be over-run, is not a
+    refuge. Left empty the pathology is mutual — ``_evacuate`` picks the friend
+    with the biggest garrison, which for each of two doomed neighbours is the
+    other, so the pair trades garrisons down one lane and both systems end the
+    turn empty in front of the fleets that were already coming.
+    """
     sysmap = state.systems
     ships = s.ships
     if ships <= 0:
@@ -355,13 +383,20 @@ def _evacuate(state, pid, s, max_prod: int):
         caps.sort(reverse=True)
         return Order(pid, s.id, caps[0][2], ships)
 
-    # (b) Retreat to the most defensible friend (biggest garrison, richest front).
-    friends = [n for n in s.neighbors if sysmap[n].owner_id == pid]
+    # (b) Retreat to the nearest refuge, then the most defensible one (biggest
+    #     garrison, richest front). Distance leads because a retreat is the one
+    #     move with no timing to it: the ships are not racing an arrival, they are
+    #     simply out of the game until they land, and thinker's rule ranked on
+    #     garrison size alone — so a whole garrison could be posted down a
+    #     six-turn lane to the biggest stack we own while a refuge one turn away
+    #     went unused. Worth more than the pooling below (52.0%, z = +3.34); see
+    #     "Two doomed neighbours" in `docs/bot-design.md`.
+    friends = [n for n in s.neighbors
+               if sysmap[n].owner_id == pid and n not in abandoned]
     if friends:
-        friends.sort(
-            key=lambda n: (sysmap[n].ships, _front_pull(state, pid, n, max_prod), -n),
-            reverse=True,
-        )
+        friends.sort(key=lambda n: (
+            (state.travel_turns(s.id, n) or 99) if RETREAT_NEAREST else 0,
+            -sysmap[n].ships, -_front_pull(state, pid, n, max_prod), n))
         return Order(pid, s.id, friends[0], ships)
 
     # (c) Cornered. Only sortie if truly overwhelmed; otherwise hold — a garrison
@@ -374,6 +409,73 @@ def _evacuate(state, pid, s, max_prod: int):
             weakest = min(enemies, key=lambda n: (sysmap[n].ships, n))
             return Order(pid, s.id, weakest, ships)
     return None
+
+
+def _consolidate(state, pid, doomed, deficits, threatened_set, budget, sends):
+    """Let the doomed relieve each other. Returns ``(saved, donated)``.
+
+    Phase 1 sizes relief out of the *rear* only — its helper pool excludes every
+    threatened system, since a garrison holding off its own siege is not spare —
+    and gives a system up the moment that pool falls short. But a system it has
+    already given up is not holding anything off: its garrison is lost where it
+    stands, so those ships are free, and they are frequently exactly what the
+    system next door is short of. Two doomed neighbours can often hold one of the
+    two, which beats losing both and beats trading garrisons down the lane
+    between them.
+
+    Richest first, and a system that donates cannot also receive, so the trade
+    can never happen: whichever of a pair is worth more is the one held, and the
+    other empties into it. Donors are taken largest-first and only until the
+    deficit is covered, so a garrison that isn't needed here is still free to
+    take a system of its own back in ``_evacuate``. Phase 1's leftover rear
+    budget is topped up on the end for the same reason it was passed over: it was
+    left for Phase 3 to spend elsewhere, and holding a system beats spending it
+    on a strike.
+
+    Every donation is checked against the deadline Phase 1 measured — the
+    *earliest* horizon showing a deficit — so ships that arrive after the system
+    has already fallen are never counted as relief.
+    """
+    saved: set[int] = set()
+    donated: set[int] = set()
+    if not CONSOLIDATE:
+        return saved, donated
+    sysmap = state.systems
+    doomed_set = set(doomed)
+    order = sorted(doomed, key=lambda sid: (-sysmap[sid].production,
+                                            -sysmap[sid].ships, sid))
+    for sid in order:
+        if sid in donated:
+            continue
+        need, deadline = deficits[sid]
+        in_range = [n for n in sysmap[sid].neighbors
+                    if (state.travel_turns(sid, n) or 99) <= deadline]
+        donors = sorted((n for n in in_range
+                         if n in doomed_set and n not in saved and n not in donated
+                         and sysmap[n].ships > 0),
+                        key=lambda n: (-sysmap[n].ships, n))
+        rear = sorted((n for n in in_range
+                       if sysmap[n].owner_id == pid and n not in threatened_set
+                       and budget.get(n, 0) > 0),
+                      key=lambda n: (-budget[n], n))
+        if (sum(sysmap[n].ships for n in donors)
+                + sum(budget[n] for n in rear) < need):
+            continue                    # still cannot be held — abandon it below
+        saved.add(sid)
+        for n in donors:
+            if need <= 0:
+                break
+            sends[(n, sid)] += sysmap[n].ships   # doomed: the whole garrison or nothing
+            need -= sysmap[n].ships
+            donated.add(n)
+        for n in rear:
+            if need <= 0:
+                break
+            send = min(budget[n], need)
+            sends[(n, sid)] += send
+            budget[n] -= send
+            need -= send
+    return saved, donated
 
 
 def _front_pull(state, pid, sid, max_prod: int) -> float:
@@ -447,6 +549,7 @@ def decide(state, pid):
     threatened.sort(key=lambda sid: (_first_strike(state, pid, sid),
                                      -_incoming(state, sid, pid, hostile=True)))
     doomed: list[int] = []
+    deficits: dict[int, tuple[int, int]] = {}   # doomed sid -> (ships short, deadline)
     for sid in threatened:
         s = sysmap[sid]
         margin = _defend_margin()
@@ -474,7 +577,11 @@ def decide(state, pid):
             key=lambda n: (-budget[n], n),
         )
         if sum(budget[n] for n in helpers) < need:
-            doomed.append(sid)        # can't be saved in time — abandon it below
+            # Can't be saved out of the rear. Phase 2 gets one more go at it with
+            # the doomed themselves as donors, so keep what it would have to
+            # cover and by when; failing that, it is abandoned there.
+            doomed.append(sid)
+            deficits[sid] = (need, deadline)
             continue
         budget[sid] = 0               # hold the whole garrison and pull the rest
         for h in helpers:
@@ -485,11 +592,21 @@ def decide(state, pid):
             budget[h] -= send
             need -= send
 
-    # --- Phase 2: abandon the doomed ----------------------------------------- #
+    # --- Phase 2: consolidate what can still be held, abandon the rest ------- #
+    # A garrison too small to save its own system is often exactly what the
+    # system next door is short of, and it is free: those ships are lost where
+    # they stand. `_consolidate` spends them that way where they hold a system,
+    # and every system it does not save is passed to `_evacuate` as a place not
+    # to retreat into.
+    saved, donated = _consolidate(state, pid, doomed, deficits,
+                                  threatened_set, budget, sends)
+    abandoned = (frozenset(sid for sid in doomed if sid not in saved)
+                 if AVOID_ABANDONED else frozenset())
     for sid in doomed:
-        order = _evacuate(state, pid, sysmap[sid], max_prod)
-        if order is not None:
-            sends[(order.source_id, order.dest_id)] += order.ships
+        if sid not in saved and sid not in donated:
+            order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned)
+            if order is not None:
+                sends[(order.source_id, order.dest_id)] += order.ships
         budget[sid] = 0  # retreat or hold to inflict casualties — don't drain it
 
     # --- Phase 3: focus fire with staggered pincers -------------------------- #

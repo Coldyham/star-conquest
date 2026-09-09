@@ -14,17 +14,19 @@ keeps a free Supabase project from idling into a pause, which it otherwise does
 after about a week.
 
     export SUPABASE_URL=https://<project>.supabase.co
-    export SUPABASE_SERVICE_KEY=<service_role key>       # never the anon key
+    export SUPABASE_SECRET_KEY=sb_secret_...             # never a publishable key
     uv run python tools/bot_replay.py                    # fill in what's missing
     uv run python tools/bot_replay.py --game-key abc123  # just this map
     uv run python tools/bot_replay.py --stale            # code changed; redo
     uv run python tools/bot_replay.py --dry-run          # compute, post nothing
 
-The service_role key bypasses row-level security, which is the point:
-``bot_scores`` has a read policy and no insert policy, so this worker is its only
-writer and a bot result cannot be posted by hand the way a human score can. Keep
-that key in the workflow's secrets and out of the repo — ``leaderboard/js`` ships
-the anon key precisely because it is *not* this one.
+The secret key bypasses row-level security, which is the point: ``bot_scores``
+has a read policy and no insert policy, so this worker is its only writer and a
+bot result cannot be posted by hand the way a human score can. Keep it in the
+workflow's secrets and out of the repo — ``leaderboard/js`` ships a *publishable*
+key precisely because it is not this one. (Supabase now calls these "secret" and
+"publishable"; the older ``service_role``/``anon`` JWTs are under its Legacy API
+keys tab and still work — see ``credentials``.)
 
 Nothing here imports pygame (or anything off PyPI): the simulation core is pure,
 which is what lets a plain ``python tools/bot_replay.py`` on a bare runner do the
@@ -65,6 +67,11 @@ _OUTCOME_MODULES = (
     "settings", "starnames",
 )
 
+# ...and the subset that can move a *recorded* game: `_OUTCOME_MODULES` minus
+# `ai`, and none of `models/`. Replaying a log applies its recorded orders and
+# deals its recorded dice, so no bot is ever consulted (see `replay_rev`).
+_REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
+
 # Where a bot is replayed at something other than its default profile.
 #
 # `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
@@ -104,23 +111,68 @@ POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
 
 
-def engine_rev() -> str:
-    """A digest of everything that determines a replay's outcome.
+def credentials() -> tuple[str, str]:
+    """``(url, key)`` for the project, from the environment.
 
-    Stored on each row for provenance and read back by ``--stale``. A git SHA
-    would be the obvious choice and is the wrong one: it moves on every commit,
-    so a CSS change would invalidate the whole board. This moves when — and only
-    when — the simulation or a bot does.
+    Supabase reissued its API keys: a *secret* key (``sb_secret_…``) is the
+    successor to the ``service_role`` JWT, which now lives under a "Legacy API
+    keys" tab. Both still bypass row-level security by carrying the `service_role`
+    postgres role, which is what every grant in ``schema.sql`` is written against
+    — so the change is one of naming, not of what the worker can do.
+
+    Both variable names are read, new one first, so a project can migrate its keys
+    without touching two GitHub secrets and two Netlify sites on the same day.
     """
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = (os.environ.get("SUPABASE_SECRET_KEY", "").strip()
+           or os.environ.get("SUPABASE_SERVICE_KEY", "").strip())
+    return url, key
+
+
+MISSING_CREDENTIALS = ("Set SUPABASE_URL and SUPABASE_SECRET_KEY (Supabase's secret "
+                       "key; SUPABASE_SERVICE_KEY and the legacy service_role key "
+                       "still work). Never a publishable key — it cannot read these "
+                       "tables.")
+
+
+def _digest(paths: list[Path]) -> str:
+    """A short content digest of ``paths``, name-sensitive so a rename counts."""
     digest = hashlib.blake2s(digest_size=8)
-    paths = [ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
-    paths += sorted((ROOT / "models").glob("*.py"))
     for path in paths:
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def engine_rev() -> str:
+    """A digest of everything that determines a *bot replay's* outcome.
+
+    Stored on each ``bot_scores`` row for provenance and read back by ``--stale``.
+    A git SHA would be the obvious choice and is the wrong one: it moves on every
+    commit, so a CSS change would invalidate the whole board. This moves when —
+    and only when — the simulation or a bot does.
+    """
+    return _digest([ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
+                   + sorted((ROOT / "models").glob("*.py")))
+
+
+def replay_rev() -> str:
+    """A digest of everything that determines a *stored log's* replay.
+
+    Strictly smaller than ``engine_rev``, and the difference is the whole point:
+    replaying a log never asks a seat to decide anything (``end_turn(script=…)``
+    applies the recorded orders and deals the recorded dice), so neither ``ai``
+    nor any ``models/*.py`` can move the result. Pinned by
+    ``test_a_replay_does_not_consult_a_bot_even_a_deleted_one``.
+
+    Keying score verdicts off ``engine_rev`` instead would mark every check on the
+    board stale each time a bot was tuned — re-deciding hundreds of scores to
+    reach byte-identical answers, and implying in the stored row that the verdict
+    had depended on a bot.
+    """
+    return _digest([ROOT / "starconquest" / f"{name}.py" for name in _REPLAY_MODULES])
 
 
 def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:
@@ -215,6 +267,14 @@ class Supabase:
         self._call(table, method="POST",
                    body=json.dumps(rows).encode("utf-8"),
                    extra={"Prefer": "resolution=merge-duplicates,return=minimal"})
+
+    def delete(self, table: str, query: str) -> None:
+        """Delete the rows a filter selects. Refuses an unfiltered call, which
+        PostgREST would happily read as "every row in the table"."""
+        if not query.strip():
+            raise ValueError("refusing to delete without a filter")
+        self._call(f"{table}?{query}", method="DELETE",
+                   extra={"Prefer": "return=minimal"})
 
 
 # --------------------------------------------------------------------------- #
@@ -335,11 +395,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    url, key = credentials()
     if not url or not key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (the service_role key).",
-              file=sys.stderr)
+        print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
 
     try:

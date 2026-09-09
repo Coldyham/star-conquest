@@ -34,6 +34,15 @@
 
     <p class="hint" id="preview" hidden></p>
 
+    <!-- Said here because this is where the decision is made. Posting a score
+         publishes that game's replay: `public_replays` is exactly the logs a
+         posted score points at, which is what puts a "Watch" link beside it. A
+         game that merely uploaded itself is not published by it. -->
+    <p class="hint">
+      Posting a score also publishes that game's replay, so anyone can watch it
+      back on the map's page.
+    </p>
+
     <button id="go" type="submit">Enter</button>
     <p class="status" id="status" role="status" aria-live="polite"></p>
   </form>

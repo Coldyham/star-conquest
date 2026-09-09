@@ -1955,8 +1955,11 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     quit_label = _key_hint("Quit", "Esc")
     share_label = _key_hint("Challenge a friend", "C")
     board_label = _key_hint("Enter on leaderboard", "L")
-    share = _shareable(state, ui)
-    board = share and bool(paths.LEADERBOARD_SUBMIT_URL)
+    share = ui.can_post(state)
+    # The constant, not a resolved URL: a blank one disables the feature
+    # everywhere (see `paths`), and resolving one costs a DOM read that this must
+    # not be doing once a frame.
+    board = share and bool(paths.LEADERBOARD_ORIGIN)
     bw = max(_btn_w(normal, s) for s in labels + [quit_label])
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)
@@ -2019,12 +2022,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
-def _shareable(state: GameState, ui: Ui) -> bool:
-    """Whether this result can become a challenge link: the human won it, and
-    decided at least one turn themselves (a pure autoplay demo is not a score)."""
-    return state.winner == ui.human_id and ui.hand_turns > 0
-
-
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:
     """(font kind, text, colour) for the score under the win message: turns first,
     ships lost as the tiebreak, then the verdict against any challenge.
@@ -2033,11 +2030,19 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     compare against a challenge, in watching two bots fight. When the match came
     from a challenge link, say outright whether the target fell. Returned rather
     than drawn so the overlay can measure the block before placing it.
+
+    A watched replay says whose result this is, because it is otherwise an overlay
+    identical to our own win with the two sharing buttons missing from it — which
+    reads as a broken feature rather than as the rule it is (``Ui.can_post``). It
+    leads rather than trails: it qualifies the "X wins!" above it, and leaving the
+    verdict last keeps it the line callers read off the end.
     """
+    note = ([("small", "Someone else's game, replayed", config.COLOR_TEXT_DIM)]
+            if ui.watched else [])
     if state.winner != ui.human_id:
         if ui.challenge_target is not None:
-            return [("normal", "Challenge failed", (214, 130, 110))]
-        return []
+            return note + [("normal", "Challenge failed", (214, 130, 110))]
+        return note
 
     lost = state.players[ui.human_id].ships_lost
     line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
@@ -2046,7 +2051,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     lines = [("normal", line, config.COLOR_TEXT)]
 
     if ui.challenge_target is None:
-        return lines
+        return note + lines
     # Same ordering the score uses: fewer turns wins, ties broken on losses, and
     # equal on both is a dead heat.
     target = ui.challenge_target
@@ -2060,7 +2065,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     else:
         verdict, colour = f"Short of{who} {against}", _VERDICT_MISS
     lines.append(("small", verdict, colour))
-    return lines
+    return note + lines
 
 
 # Scrubber fill — a bright blue on the shared _SLIDER_TROUGH, echoing the play button.

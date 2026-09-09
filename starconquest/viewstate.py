@@ -233,12 +233,17 @@ class Ui:
     # voiding the score. `challenge_target` is the (turns, lost) this match was set
     # to beat, if it came from a challenge link, so render can say whether you did.
     hand_turns: int = 0
+    # Set when this match was *downloaded* rather than played here — a leaderboard
+    # `#log=` link or `--watch` (`main.open_replay`). The result on screen is then
+    # somebody else's, so none of the sharing below is offered for it: watching a
+    # replay must not be one press away from posting its score as your own.
+    watched: bool = False
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
-    # no `paths.LEADERBOARD_SUBMIT_URL` is configured.
+    # no `paths.LEADERBOARD_ORIGIN` is configured.
     leaderboard_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""  # outcome of the last share, drawn under the buttons
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
@@ -310,6 +315,27 @@ class Ui:
         disagree about when fast forward means anything.
         """
         return state.winner is None and state.is_defeated(self.human_id)
+
+    def can_post(self, state: GameState) -> bool:
+        """Is this result the player's own to publish — as a challenge link or as
+        a leaderboard entry?
+
+        Three things must hold: the human's seat won it, at least one turn was
+        decided by hand (a pure autoplay demo is a bot's win, not a score), and the
+        match was played here rather than downloaded to watch. Render gates both
+        overlay buttons on this and main gates both actions on it, so a keyboard
+        shortcut can never reach a result the overlay declines to offer.
+
+        The third condition is not airtight and is not meant to be: rewinding a
+        watched replay to a turn from its end and playing that turn out forks a
+        match of your own (`resume_game` builds a fresh `Ui`), which this will then
+        happily let you post. Sealing that would mean recording where a fork
+        branched and carrying it through every later rewind — a bigger idea than
+        the problem. What this stops is a posted score being one button-press away
+        from any replay on the board.
+        """
+        return (state.winner == self.human_id and self.hand_turns > 0
+                and not self.watched)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

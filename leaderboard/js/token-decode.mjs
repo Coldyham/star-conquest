@@ -61,6 +61,9 @@ export function aliasFor(key) {
 }
 
 /** Everything after the '#', since people paste a whole URL, not a bare token. */
+/** `replay._MATCH_ID_RE` — 16 hex digits, the shape the game mints. */
+const MATCH_ID = /^[0-9a-f]{16}$/;
+
 export function fragmentOf(input) {
   const text = String(input).trim();
   const hash = text.indexOf("#");
@@ -72,7 +75,7 @@ export function fragmentOf(input) {
  *
  * @param input    the pasted URL or token
  * @param inflate  (Uint8Array) => Uint8Array | Promise<Uint8Array>, zlib-wrapped
- * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by}, gameKey, token}
+ * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by, log}, gameKey, token}
  * @throws Error  'malformed token' or 'not a challenge link'
  */
 export async function decodeToken(input, inflate) {
@@ -113,6 +116,12 @@ export async function decodeToken(input, inflate) {
       lost: requireCount(challenge.lost, "lost"),
       hand: requireCount(challenge.hand, "hand"),
       by: typeof challenge.by === "string" ? challenge.by : "",
+      // Challenge.log: the id of the replay this score was made in, uploaded by
+      // the game when the player pressed "Post to leaderboard". Absent from a
+      // hand-written link and from every token minted before the field existed,
+      // so a blank is ordinary — it means unverified, not invalid. Shape-checked
+      // rather than trusted: it is written to a column the verifier keys on.
+      log: MATCH_ID.test(challenge.log) ? challenge.log : "",
     },
     gameKey: await gameKeyFor(dict),
     setup: setupOf(dict),

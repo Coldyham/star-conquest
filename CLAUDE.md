@@ -40,6 +40,14 @@ uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bo
                                                 # legal orders, read-only, reproducible
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, computed
                                                 # but not posted (needs SUPABASE_*)
+uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
+                                                # and say whether it checks out
+uv run python tools/position_suite.py           # rank bots on positions out of
+                                                # real games (local games/ dir)
+uv run python tools/config_census.py            # which setups people actually
+                                                # play (public tables, no key)
+uv run python tools/setup_sweep.py              # ...and whether the roster's
+                                                # ranking moves on one of them
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
@@ -89,6 +97,17 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   - `webstore.py` is the other browser bridge, same style: the address bar and a
     small key/value store (shared-settings tokens, personal bests). See the
     challenge-link notes under Key conventions.
+  - `share.py` is the one bridge that talks to a network, and the one that is
+    not browser-only: it posts a finished match's replay to the leaderboard so a
+    posted score can be checked against the game that produced it. Same
+    defensive style — guarded everywhere, silent on failure,
+    fire-and-forget on both backends (a `fetch` whose promise
+    is never read on the web, a daemon thread off it) so it can never stall the
+    frame. Pure of pygame, and it sends **only** when the player presses *Post to
+    leaderboard* or the player has ticked *Share replays*. Its other half
+    *fetches* a replay to watch (`fetch_log` -> a `Download` the loop polls once a
+    frame, never awaited), which is the one thing here that reads a response. See
+    "Checked scores" under Key conventions.
 
 ### Turn resolution (engine.py)
 
@@ -183,9 +202,22 @@ standing auto-forward rules (`"rules"`, `Ui.auto_forward`) with it.
 **A replay must never depend on a bot repeating itself** — that is format
 version 2, and why the orders and the dice are both in the log (version 1 stored
 the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
-into a *different match*, silently). Version-1 logs can't be replayed faithfully
+into a *different match*, silently). The corollary is load-bearing now that
+replays are kept: **retuning, rewriting or deleting a `models/` bot cannot move a
+single stored game**, so no per-model "replay floor" is needed and none should be
+added (`test_a_replay_does_not_consult_a_bot_even_a_deleted_one` pins it, and
+`bot_replay.replay_rev` is `engine_rev` minus `ai` and `models/` for the same
+reason). What *can* move one is the engine itself — phase order, how a fight
+resolves, how a map is drawn from a seed — which is what `engine.RULES_VERSION`
+is for: bumped by hand with such a change, stamped on every log, and read by the
+verifier to report `outdated` (unverifiable) rather than `mismatch` (wrong). Version-1 logs can't be replayed faithfully
 and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
-autoplayed) — not for replay, but for `main.hand_turns`.
+autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
+delegates to, and the leaderboard's verifier recomputes). A log also carries a
+`match_id`, minted per match from `settings.fresh_rng` and likewise not part of
+what makes a replay reproduce: it is how a posted score names its replay
+(`GameLog.encoded` is the wire form — the token's own deflate+base64url). A
+rewind (`truncate`) keeps that id; a fork mints a new one.
 
 **History mode** is a shell-only review scene (`Ui.history`, gated so it never
 enters the pure core). On entry `main.build_history` runs one `reconstruct` whose
@@ -258,7 +290,51 @@ intact.
     trip one is *more* reproducible, not less. `won`, never
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
-    insert path: the worker's `service_role` key is its only writer.
+    insert path: the worker's secret key is its only writer.
+  - **The game uploads replays, and the worker checks scores against them.**
+    `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`
+    sends the log itself, and `tools/verify_scores.py` (the same scheduled worker
+    as the bot column) replays it and records `verified` / `mismatch` /
+    `unreadable` / `missing` in `score_checks`. The id rides on `Challenge` rather
+    than `Settings` precisely because `challenge_keys()` drops that field before
+    hashing — see the next bullet for what a `Settings` field would have cost.
+    Four rules hold this together:
+    - **Two things send, both consented to.** Pressing *Post to leaderboard*
+      uploads that match. With *Share replays* ticked (`webstore.share_games`, a
+      local preference — never a `Settings` field, which would travel in every
+      link and move every setup digest), a game also checkpoints every
+      `share.CHECKPOINT_TURNS` turns and again when it ends, which is what keeps
+      the *lost and abandoned* games — the ones no score can carry. Nothing else
+      sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
+      reproducible from its seed, so it is bytes without information.
+    - **`game_logs` is the one table the public can neither read nor write.** RLS
+      on, no policies, no anon grants. Writes go through the leaderboard site's
+      own `netlify/functions/log.mjs` under the secret key, which is what
+      makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
+      insert path is a storage bill rather than a few junk rows. Reads are the
+      worker's alone, so uploading a game does not publish it.
+    - **A row carries no identity** — a match id, a setup key and the moves.
+      Grouping one person's games would need a durable client id, which is a
+      tracking identifier by any other name.
+    - **Posting a score publishes that replay, and only that replay.**
+      `public_replays` is `game_logs` restricted to the matches a posted score
+      points at — the one view here deliberately *not* `security_invoker`, since
+      lending out a subset of a table nobody may read takes owner rights. A
+      launch URL of `#log=<match id>` makes the game fetch it and open history
+      review on it (`main.replay_request` -> `open_replay` -> `open_history`,
+      which the H key shares), so the board's *Watch* link is a link back into
+      the game rather than a second engine in JS. A watched match is marked
+      (`Ui.watched`), because it ends on the same win overlay ours do:
+      `Ui.can_post` is the single predicate behind both sharing buttons, the
+      personal best and the checkpoint upload, so nobody's replay is one press
+      from being posted as your score. Rewinding out of one and playing on forks
+      a match that *is* yours — see system-design for why that stays open.
+    - **The verifier binds the log to the setup** (`same_setup`), or an easy
+      map's replay would back a hard map's score. It proves the *game*, never
+      that a human played it — that is what `hand` discloses, recomputed from the
+      log rather than trusted. Key the log by `GameLog.setup_key()`, never the
+      live `Settings`: `main` resolves "roll a fresh seed" at game start and never
+      writes it back.
   - **Adding a field to `Settings` invalidates every key already shared.**
     `challenge_key()` hashes the full setup dict, so a new field moves the digest
     of every map that ever existed and links from before it read as edited.
@@ -279,8 +355,9 @@ intact.
     `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
     rather than added as a field here — that would move `challenge_key()` for
     every map instead of only the config grouping.
-- **`webstore` is the third browser bridge** (with `softkeyboard` and the
-  web-only paths in `main`/`menu`): `get`/`set` are `localStorage` on the web and
+- **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
+  paths in `main`/`menu`, and `upload`, which is the one that also runs off the
+  web): `get`/`set` are `localStorage` on the web and
   a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and
   no-ops off it: `link_url`, `set_url_fragment`, `copy_to_clipboard` and
   `url_token` are the primitives, and `sync_settings` / `share_token` /
@@ -341,6 +418,17 @@ intact.
       *defence* margin still prices the jitter in full, which is the asymmetry:
       our own garrison cannot decline the engagement. See "Garrisons run away"
       in bot-design before copying either half into another bot.
+  - **The game and the board find each other by hostname, not by configuration.**
+    They are two Netlify sites whose names differ by `paths.LEADERBOARD_TAG`, and
+    Netlify names every deploy `<context>--<site>.netlify.app` from the same
+    context on both — so `paths.sibling_host` (via `webstore.leaderboard_origin`,
+    and `siblingGame` in `leaderboard/js/config.mjs` for the reverse) makes a
+    deploy preview of one talk to the deploy preview of the other, with no URL
+    edited by hand. Endpoints are therefore built at *call* time from
+    `LEADERBOARD_*_PATH`, never stored as whole URLs; `paths.LEADERBOARD_ORIGIN`
+    is the fallback for a host the rule cannot read (desktop, a custom domain)
+    and blanking it disables every leaderboard feature — which is what `render`
+    tests, since resolving costs a DOM read it must not do once a frame.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,
@@ -351,7 +439,14 @@ intact.
     `ai.aux_spec`; `menu._ai_specs` appends that slider to `_AI_PARAMS` for the
     edited seat, so a strategy declaring nothing (the built-in heuristic,
     `thinker`, …) shows no aux slider at all. `models/knower.py` labels it
-    *Search depth*.
+    *Search depth*. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
+    preserves that — `aux` is the one field whose int/float form survives a
+    decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
+    it and every link carrying an int aux reads as edited the moment it opens.
+    The board is the one place that cannot hold the distinction (jsonb drops the
+    `.0`), so `verify_scores.same_setup` widens both sides through `_aux_widened`
+    before hashing — drop that and every posted score with an aux reads as a
+    different map.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
@@ -496,6 +591,16 @@ intact.
   human's seat on a stored `Settings`, going through `settings.build_state` so a
   posted setup's tuned knobs actually apply. It is what the leaderboard's bot
   column is made of (`tools/bot_replay.py`, under Key conventions).
+  - **`play_from` is the fourth, and the only one that starts anywhere but the
+    opening.** It branches a recorded match at turn N (`reconstruct` on a
+    *truncated copy* — never the caller's log) and hands the seat to a bot, so a
+    stored game yields a position every few turns instead of one number. The
+    baseline comes free: we know what the person who was there then took.
+    `sim.positions` picks the turns and `tools/position_suite.py` drives it over
+    a corpus. Read its three numbers separately — *faster* is the only paired
+    comparison, *recovered* (games the person lost, which no score can carry) has
+    no baseline at all, and both are a direction rather than a verdict, since the
+    sample is whatever games happen to exist. See bot-design.
   - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
     fixed, so a lane's length in light-years rises as the node count falls, and
     `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —

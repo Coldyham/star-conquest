@@ -1,20 +1,23 @@
-# Fill in the leaderboard's "how would each bot have done?" column.
+# The leaderboard's whole backend: fill in the "how would each bot have done?"
+# column, then check each posted score against the replay uploaded with it.
 #
-# The whole backend for that feature is this file plus tools/bot_replay.py: the
-# result of putting a bot in the player's seat is a pure function of the setup,
-# the seed and the code, so it only ever needs computing once and there is
-# nothing to serve live. A scheduled job that writes its answers into Supabase
-# leaves no service to keep up.
+# Both answers are pure functions of the setup, the seed and the code, so each
+# only ever needs computing once and there is nothing to serve live — one
+# scheduled job that writes into Supabase leaves no service to keep up. They
+# share a runner because the second is nearly free beside the first: replaying a
+# log asks no seat to decide anything.
 #
 # Setup (once):
 #   Settings -> Secrets and variables -> Actions -> New repository secret
-#     SUPABASE_URL          https://<project>.supabase.co
-#     SUPABASE_SERVICE_KEY  the *service_role* key, from Supabase's API settings
+#     SUPABASE_URL         https://<project>.supabase.co
+#     SUPABASE_SECRET_KEY  Supabase's *secret* key (`sb_secret_...`), from its API
+#                          settings. The older service_role JWT is under the
+#                          "Legacy API keys" tab and works too, as either name.
 #
-# The service_role key bypasses row-level security, which is exactly why the
-# worker needs it and why it lives here rather than in leaderboard/js/config.mjs
-# (that ships the anon key on purpose — see schema.sql for which is which).
-name: Bot replay
+# A secret key bypasses row-level security, which is exactly why the worker needs
+# it and why it lives here rather than in leaderboard/js/config.mjs (that ships a
+# *publishable* key on purpose — see schema.sql for which is which).
+name: Leaderboard worker
 
 on:
   schedule:
@@ -75,9 +78,10 @@ jobs:
         id: check
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+          if [ -z "$SUPABASE_URL" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_KEY" ]; }; then
             echo "No Supabase secrets set — skipping (see this file's header)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
@@ -88,6 +92,7 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           # Through the environment, never interpolated into the script below:
           # `${{ inputs.… }}` is substituted before bash ever sees the line, so a
@@ -111,3 +116,18 @@ jobs:
           # and report rather than being killed mid-batch; whatever it doesn't
           # reach, the next run picks up.
           python tools/bot_replay.py --deadline-minutes 20 "${args[@]}"
+
+      # Check each posted score against the replay the game uploaded with it.
+      # Cheap next to the bot column — replaying a log asks no seat to decide
+      # anything — so it rides the same schedule and the same checkout rather
+      # than paying for a second job's setup.
+      #
+      # `if: always()` so a bot-replay batch that times out or fails still gets
+      # the scores checked: the two jobs share a runner, not a purpose.
+      - name: Verify posted scores
+        if: always() && steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python tools/verify_scores.py --prune

@@ -43,7 +43,8 @@ def _clean_registry():
 @pytest.fixture(autouse=True)
 def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
-    names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER")
+    names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
+             "CONSOLIDATE", "AVOID_ABANDONED")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -457,3 +458,88 @@ def test_a_dead_rival_stops_counting(ma):
     assert ma._wedge(state, 2, state.systems[4]) == 1
     state.players[4].alive = False
     assert ma._wedge(state, 2, state.systems[4]) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Two doomed neighbours
+# --------------------------------------------------------------------------- #
+def _besieged(lane=3, ours=(6, 7), incoming=(9, 9), prods=(3, 2)):
+    """Our 1 and 2 side by side, each with a stack inbound that out-guns it.
+
+    Enemy 3 and 4 sit behind 20-ship garrisons, so `_evacuate` can never step
+    forward and the choice really is between holding, retreating and pooling.
+    """
+    a, b = ours
+    pa, pb = prods
+    state = _board({1: (2, a, pa), 2: (2, b, pb), 3: (1, 20, 3), 4: (1, 20, 3)},
+                   [(1, 2, lane), (1, 3, 4), (2, 4, 4)])
+    for dest, (src, ships) in zip((1, 2), zip((3, 4), incoming)):
+        state.fleets.append(Fleet(owner_id=1, source_id=src, dest_id=dest,
+                                  ships=ships, turns_total=4, turns_remaining=4))
+    return state
+
+
+def test_two_doomed_neighbours_do_not_trade_garrisons(ma):
+    """The bug this phase exists for, kept as the null case beside the fix.
+
+    `_evacuate` retreats to the friend with the biggest garrison, which for each
+    of a pair of doomed neighbours is the other one — so both empty into the lane
+    between them and both systems are taken by fleets that were already on their
+    way.
+    """
+    ma.CONSOLIDATE = False
+    ma.AVOID_ABANDONED = False
+    swapped = {(o.source_id, o.dest_id) for o in ai.decide(_besieged(), 2)}
+    assert swapped == {(1, 2), (2, 1)}, "the board no longer reproduces the bug"
+
+    ma.CONSOLIDATE = True
+    ma.AVOID_ABANDONED = True
+    orders = ai.decide(_besieged(), 2)
+    moves = {(o.source_id, o.dest_id) for o in orders}
+    assert (1, 2) not in moves or (2, 1) not in moves, f"still trading: {moves}"
+
+
+def test_the_richer_of_two_doomed_neighbours_is_the_one_held(ma):
+    """Pooled, the pair holds one of the two systems; separately it holds neither.
+
+    1 produces faster, so 1 is the system kept and 2 is the garrison spent on it.
+    """
+    state = _besieged()
+    need, deadline = 11 - 6, 4          # ceil(9 * defend margin) - production - ships
+    assert ma._defend_margin() > 1.0 and state.systems[2].ships >= need
+    assert (state.travel_turns(1, 2) or 99) <= deadline
+
+    orders = ai.decide(state, 2)
+    assert [(o.source_id, o.dest_id, o.ships) for o in orders] == [(2, 1, 7)]
+
+
+def test_consolidation_will_not_send_ships_that_arrive_too_late(ma):
+    """Relief has to land by the deadline Phase 1 measured, or it is not relief.
+
+    Same board, but the lane between the two runs longer than the siege does.
+    Neither can help the other, and neither may retreat into the other either.
+    """
+    orders = ai.decide(_besieged(lane=5), 2)
+    assert not [o for o in orders if {o.source_id, o.dest_id} == {1, 2}], orders
+
+
+def test_a_retreat_never_goes_into_a_system_being_abandoned(ma):
+    """Consolidation off: the garrison still has to leave, but not into the pair.
+
+    3 is a small rear system and 2 is a big doomed one. The old rule ranked
+    refuges by garrison size alone and picked 2, which was emptying itself.
+    """
+    ma.CONSOLIDATE = False
+    state = _board({1: (2, 3, 3), 2: (2, 20, 3), 3: (2, 2, 3), 4: (1, 40, 3)},
+                   [(1, 2, 1), (1, 3, 1), (1, 4, 1), (2, 4, 1)])
+    for dest, ships in ((1, 20), (2, 40)):
+        state.fleets.append(Fleet(owner_id=1, source_id=4, dest_id=dest, ships=ships,
+                                  turns_total=1, turns_remaining=1))
+
+    ma.AVOID_ABANDONED = False
+    assert (1, 2) in {(o.source_id, o.dest_id) for o in ai.decide(state, 2)}, \
+        "the board no longer reproduces the bug"
+
+    ma.AVOID_ABANDONED = True
+    moves = {(o.source_id, o.dest_id) for o in ai.decide(state, 2)}
+    assert (1, 3) in moves and (1, 2) not in moves, f"retreated into the rout: {moves}"

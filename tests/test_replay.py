@@ -389,3 +389,149 @@ def test_save_is_atomic_replace_on_rewrite(games_dir):
     assert log.path == first_path
     assert replay.load(first_path).turn_count == 2
     assert len(replay.list_logs()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Match identity and the wire form (what a posted score points at)
+# --------------------------------------------------------------------------- #
+def test_new_log_mints_a_match_id():
+    a = replay.new_log(Settings(seed=5), 5)
+    b = replay.new_log(Settings(seed=5), 5)
+    assert replay._MATCH_ID_RE.match(a.match_id)
+    # Same settings, same seed, different match: the id must not be derived from
+    # the seed, or every player of a shared map would collide on one id.
+    assert a.match_id != b.match_id
+
+
+def test_match_id_survives_save_and_load(games_dir):
+    log = replay.new_log(Settings(seed=3), 3)
+    log.record_turn(_record([]))
+    log.save()
+    assert replay.load(log.path).match_id == log.match_id
+
+
+def test_from_dict_replaces_a_missing_or_malformed_match_id():
+    """A log written before the field existed, or edited by hand, gets a fresh id
+    rather than carrying junk into an upload."""
+    for bad in ({}, {"match_id": ""}, {"match_id": "../../etc"}, {"match_id": 17},
+                {"match_id": "ABCDEF0123456789"}):   # uppercase is not the shape
+        assert replay._MATCH_ID_RE.match(replay.GameLog.from_dict(bad).match_id)
+
+
+def test_truncate_keeps_the_match_id_but_fork_mints_one():
+    """A rewind continues the same match; a fork starts another one."""
+    log = replay.new_log(Settings(seed=9), 9)
+    for _ in range(4):
+        log.record_turn(_record([]))
+    original = log.match_id
+    log.truncate(2)
+    assert log.match_id == original
+    assert log.fork(1).match_id != original
+
+
+def test_encoded_round_trips_through_decode():
+    with _preserve_config():
+        _, log = _play(4242, policy="mixed", max_turns=25)
+    restored = replay.GameLog.decode(log.encoded())
+    assert restored.to_dict() == log.to_dict()
+
+
+def test_encoded_is_much_smaller_than_the_saved_file():
+    """The wire form is deflated; the file stays indented for reading."""
+    with _preserve_config():
+        _, log = _play(77, policy="autoplay", max_turns=60)
+    assert len(log.encoded()) < len(json.dumps(log.to_dict(), indent=2)) / 3
+
+
+def test_decode_reads_the_uncompressed_form():
+    """Same tolerance Settings.from_token has: plain JSON starts '{', which zlib
+    output never does."""
+    import base64
+    log = replay.new_log(Settings(seed=11), 11)
+    log.record_turn(_record([Order(1, 0, 1, 2)]))
+    raw = json.dumps(log.to_dict()).encode("utf-8")
+    plain = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    assert replay.GameLog.decode(plain).to_dict() == log.to_dict()
+
+
+@pytest.mark.parametrize("blob", ["", "not base64!!", "eyJub3QiOiJhIGxvZyJ9" * 0 + "AAAA"])
+def test_decode_rejects_junk(blob):
+    with pytest.raises(ValueError):
+        replay.GameLog.decode(blob)
+
+
+def test_a_replay_does_not_consult_a_bot_even_a_deleted_one():
+    """The invariant the whole replay feature rests on, and the reason format 2
+    records every seat's orders and the dice.
+
+    A stored log is *not* a re-run: `end_turn(script=...)` applies the recorded
+    orders verbatim and deals the recorded draws back, so `decide` is never
+    called. Rewriting a bot, retuning it, or deleting it outright therefore cannot
+    move a single stored game — which is what makes it safe to keep replays around
+    while the roster keeps changing, and why no "replay floor" per model is needed.
+
+    Version 1 was the opposite and that was the bug: it re-ran the AI, so a bot on
+    a wall-clock budget replayed into a different match (see the module docstring).
+    """
+    with _preserve_config():
+        original, log = _play(4242, policy="autoplay", max_turns=40,
+                              strategies=["heuristic"] * 3)
+        before = _snapshot(replay.reconstruct(log)[0])
+
+        saved = dict(ai.STRATEGIES)
+        try:
+            # The worst "model change" available: every strategy replaced by one
+            # that issues nonsense, and one removed from the registry entirely.
+            for name in list(ai.STRATEGIES):
+                ai.register(name, lambda state, pid: [Order(pid, 0, 1, 9999)])
+            ai.STRATEGIES.pop("heuristic", None)
+            after = _snapshot(replay.reconstruct(log)[0])
+        finally:
+            ai.STRATEGIES.clear()
+            ai.STRATEGIES.update(saved)
+
+    assert after == before
+    assert before == _snapshot(original)
+
+
+def test_every_log_records_the_rules_it_was_played_under():
+    """Not the same field as `version`, which is the *format*: one says how to read
+    the file, the other whether replaying it still reproduces the game."""
+    log = replay.new_log(Settings(seed=5), 5)
+    assert log.rules_version == engine.RULES_VERSION
+    assert replay.GameLog.from_dict(log.to_dict()).rules_version == engine.RULES_VERSION
+    # A log written before the field existed predates any bump by definition.
+    assert replay.GameLog.from_dict({}).rules_version == 1
+    assert replay.GameLog.from_dict({"rules_version": 0}).rules_version == 1
+
+
+def test_a_rewind_restamps_the_rules_it_now_replays_under(monkeypatch):
+    """Both rewinds just proved the kept prefix reconstructs under today's rules —
+    and play continues under them — so the log must not describe itself as older
+    than it is."""
+    log = replay.new_log(Settings(seed=5), 5)
+    for _ in range(4):
+        log.record_turn(_record([]))
+    was = log.rules_version
+    monkeypatch.setattr(engine, "RULES_VERSION", was + 1)
+    assert log.fork(2).rules_version == was + 1
+    log.truncate(2)
+    assert log.rules_version == was + 1
+
+
+def test_setup_key_pins_the_seed_actually_played():
+    """`main` resolves "roll a fresh seed" at game start and never writes it back,
+    so hashing the log's stored settings alone would file a random-seed game under
+    a key describing no particular map."""
+    rolled = Settings(nodes=18, players=3)      # seed None: rolled at start
+    log = replay.new_log(rolled, 4821)
+    pinned = Settings(nodes=18, players=3, seed=4821)
+    assert log.setup_key() == pinned.challenge_key()
+    assert log.setup_key() != rolled.challenge_key()
+
+
+def test_hand_turns_counts_the_turns_the_human_drove():
+    log = replay.new_log(Settings(seed=2), 2)
+    for autoplayed in (False, False, True, False, True):
+        log.record_turn(_record([]), human_ai=autoplayed)
+    assert log.hand_turns == 3 and log.turn_count == 5

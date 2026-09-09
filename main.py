@@ -19,7 +19,7 @@ from typing import Optional
 import pygame
 
 from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, softkeyboard, viewstate, webstore)
+                          replay, share, softkeyboard, viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -182,13 +182,13 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
 
 
 def hand_turns(log: GameLog) -> int:
-    """How many recorded turns the human decided themselves.
+    """How many recorded turns the human decided themselves (``GameLog.hand_turns``).
 
-    The log flags autoplay per turn, so this stays honest about a game that was
-    played by hand and then autoplayed to its conclusion — which is normal once a
-    match is decided, and is disclosed on a challenge link rather than voiding it.
+    Kept as a shell-side name because that is what reads at the call sites, but
+    the count itself belongs to the log: the leaderboard's verifier recomputes it
+    from an uploaded replay, and the two must not be able to disagree.
     """
-    return sum(1 for i in range(log.turn_count) if not log.turn_is_ai(i))
+    return log.hand_turns
 
 
 def toggle_fast_forward(state: GameState, ui: Ui) -> None:
@@ -242,6 +242,7 @@ def challenge_settings(settings: Settings, state: GameState, ui: Ui,
         lost=state.players[ui.human_id].ships_lost,
         hand=hand_turns(log),
         key=shared.challenge_key(),
+        log=log.match_id,
     )
     return shared
 
@@ -291,16 +292,110 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
     If the tab is refused — a popup blocker, or no browser to hand — fall back to
     the clipboard so the link is still recoverable, mirroring ``share_challenge``.
     """
-    if not paths.LEADERBOARD_SUBMIT_URL:
+    submit = webstore.leaderboard_url(paths.LEADERBOARD_SUBMIT_PATH)
+    if not submit:
         return "No leaderboard is configured"
-    token = challenge_settings(settings, state, ui, seed, log).to_token()
-    url = f"{paths.LEADERBOARD_SUBMIT_URL}#{token}"
+    shared = challenge_settings(settings, state, ui, seed, log)
+    # Send the replay first, so it is on its way before the tab steals focus —
+    # and only here. Pressing this button is what consents to uploading a game;
+    # `share_challenge` sends nothing, and a match merely played sends nothing.
+    share.post_log(log, shared.challenge.key if shared.challenge else "")
+    token = shared.to_token()
+    url = f"{submit}#{token}"
     if webstore.open_url(url):
         return "Leaderboard opened — add your name to post"
     if webstore.copy_to_clipboard(url):
         return "Leaderboard link copied — open it to post"
     print(f"Leaderboard entry link:\n{url}")
     return "Couldn't open a browser — link printed to the console"
+
+
+# A launch URL of the form `#log=<match id>` asks the game to watch a replay
+# rather than to load a setup. Distinguished by prefix because the other kind of
+# fragment is a bare settings token, which is base64url and so cannot contain '='
+# anywhere but its (stripped) padding.
+LOG_FRAGMENT = "log="
+# Three different things can go wrong and they want different answers from the
+# player, so they get different lines rather than one shrug. The console carries
+# the detail (the endpoint asked, the state it came back in) — on the web build
+# `print` reaches the browser console, which is where a report starts.
+# Covers no answer *and* a bad one — offline, CORS, and a 500/502/503 from the
+# endpoint all land here. Deliberately not "couldn't reach": the board answering
+# with a failure is the commonest of these and reads nothing like a network
+# problem, so naming one would send the player looking in the wrong place. The
+# console warning carries the status that tells them apart.
+WATCH_UNREACHABLE_MSG = "Couldn't fetch that replay from the leaderboard"
+WATCH_MISSING_MSG = "That replay isn't on the leaderboard — is its score still posted?"
+WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
+
+
+def replay_request() -> str:
+    """The match id in a ``#log=<id>`` launch URL, or ``""``.
+
+    Web only, like every other fragment read: off the browser there is no URL to
+    carry one, and ``--watch`` is the equivalent there.
+    """
+    token = webstore.url_token()
+    return token[len(LOG_FRAGMENT):] if token.startswith(LOG_FRAGMENT) else ""
+
+
+def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
+    """Rebuild a downloaded match, ready to review. None if the blob is not one.
+
+    Goes through ``resume_game``, so a watched replay is the same object a resumed
+    save is — which is what makes *rewinding* out of one work for free: fork it at
+    any turn and carry on playing from there. It adopts the replay's own settings
+    (``resume_game`` copies them onto ``settings``), so leaving history lands on
+    that setup rather than whatever the menu happened to be showing.
+    """
+    try:
+        log = replay.GameLog.decode(blob)
+    except ValueError:
+        return None
+    if not log.turn_count:
+        return None
+    ai.load_models()      # a stored match may name a drop-in strategy for a seat
+    state, ui = resume_game(log, settings)
+    # Somebody else's game: the win overlay must not offer to post their result as
+    # ours, and playing on from it must not append to their uploaded match
+    # (`Ui.can_post`, `share.due`). A `Retry` or a rewind out of here builds a
+    # fresh `Ui` and so starts a match that really is ours.
+    ui.watched = True
+    return state, ui, log
+
+
+def open_history(state: GameState, ui: Ui, log: GameLog):
+    """Enter history review on ``log``, returning ``(states, fog, live_fog)``.
+
+    Shared by the H key and by a watched replay, which differ only in how they
+    came by the log — and must not differ in what review then looks like.
+    ``live_fog`` is the board's current fog, stashed so leaving review restores it
+    exactly. Returns empty lists if there is nothing to review.
+
+    Where the scrubber lands is the one thing the two entries *should* differ on,
+    because they are asking different questions. Reviewing our own game (H) opens
+    on the latest turn: that is where the player is, and looking back is a step
+    away from it. A watched replay opens at the opening position, because the
+    question there is "how was this game played" and the answer runs forwards —
+    landing on the final board instead gives away the ending and leaves the only
+    way to watch it being to drag all the way back first.
+    """
+    history_states, history_fog = build_history(ui, log)
+    if not history_states:
+        return [], [], None
+    live_fog = (set(ui.visible), set(ui.seen), dict(ui.player_intel))
+    ui.history = True
+    ui.playing = False
+    ui.reset_selection()
+    ui.reset_route()
+    ui.sel_forward = None
+    ui.history_max = len(history_states) - 1
+    # Turn 0 is the board as generated, before anyone moved — the frame a replay
+    # should start on, and the one that makes the first turn's changes visible as
+    # changes rather than as a position already arrived at.
+    ui.history_turn = 0 if ui.watched else ui.history_max
+    ui.history_reveal = state.winner is not None
+    return history_states, history_fog, live_fog
 
 
 def build_history(ui: Ui, log: GameLog) -> tuple[
@@ -392,7 +487,14 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
             log.save()
         except OSError:
             pass  # a save failure must never interrupt play
-    if (state.winner == ui.human_id and ui.hand_turns > 0 and settings is not None):
+        # ...and, with "Share replays" on, upload it as the game goes: every
+        # `share.CHECKPOINT_TURNS` turns and again on the turn it is decided. The
+        # cadence is what keeps an *abandoned* game — the kind no score ever
+        # carries — from being lost entirely. `due` holds every condition,
+        # including the opt-in itself, so this line cannot send by accident.
+        if share.due(log, state.winner is not None, ours=not ui.watched):
+            share.post_log(log, log.setup_key())
+    if ui.can_post(state) and settings is not None:
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
@@ -438,6 +540,9 @@ async def main() -> None:
     ap.add_argument("--players", type=int, default=config.DEFAULT_PLAYERS)
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")
+    ap.add_argument("--watch", default="", metavar="MATCH_ID",
+                    help="download a posted replay and open it in history review "
+                         "(the desktop equivalent of a #log=<id> link)")
     ap.add_argument("--no-menu", action="store_true",
                     help="skip the setup menu and start straight away with these args")
     # On Android the launcher may pass argv the parser doesn't recognise, and a
@@ -495,9 +600,21 @@ async def main() -> None:
         current_seed = resolve_seed(settings)
         state, ui, log = start_game(settings, current_seed, settings.autoplay)
 
+    # A `#log=<id>` link (or --watch) asks to watch a posted replay. The download
+    # runs alongside the menu and is polled once a frame: the browser loop yields
+    # per frame, so waiting on a round trip here would freeze the canvas before
+    # anything had been drawn.
+    wanted = args.watch.strip() or replay_request()
+    pending_replay = share.fetch_log(wanted) if wanted else None
+    if wanted and pending_replay is None:
+        print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
+        menu.set_status(menu_state, WATCH_UNREACHABLE_MSG, False)
+    elif pending_replay is not None:
+        menu.set_status(menu_state, "Loading replay...", True)
+
     # If the last saved match was left unfinished, offer to resume it on the menu.
     resume_prompt: GameLog | None = None
-    if not args.no_menu:
+    if not args.no_menu and pending_replay is None:
         candidate = replay.latest_log()
         if candidate is not None and not candidate.finished and candidate.turn_count > 0:
             resume_prompt = candidate
@@ -516,6 +633,34 @@ async def main() -> None:
     windowed_size = (config.SCREEN_W, config.SCREEN_H)  # restored when leaving fullscreen
     while running:
         dt = clock.tick(config.FPS)
+        if pending_replay is not None:
+            status, body = pending_replay.poll()
+            if status != share.PENDING:
+                opened = open_replay(body, settings) if status == share.OK else None
+                pending_replay = None
+                if status != share.OK:
+                    # `missing` is the board answering "no such replay" — the
+                    # plumbing worked, so the player is told to look at the score,
+                    # not at their connection. Anything else is no answer at all:
+                    # offline, CORS, an unconfigured or undeployed endpoint. The
+                    # console carries the URL that was actually asked.
+                    print(f"replay fetch ended in state {status!r}")
+                    menu.set_status(menu_state,
+                                    WATCH_MISSING_MSG if status == share.MISSING
+                                    else WATCH_UNREACHABLE_MSG, False)
+                elif opened is None:
+                    # It answered, and what came back was not a replay — an error
+                    # page, a truncated body, a log with no turns in it.
+                    print(f"replay body was not a readable log ({len(body)} bytes): "
+                          f"{body[:120]!r}")
+                    menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
+                else:
+                    state, ui, log = opened
+                    current_seed = log.seed
+                    history_states, history_fog, live_fog = open_history(state, ui, log)
+                    # Nothing to review means nothing to watch: fall back to the
+                    # menu rather than dropping into a board with no history.
+                    scene = "game" if history_states else "menu"
         # Reflow to fill the window whenever its size changes.
         screen = pygame.display.get_surface()
         if screen.get_size() != (config.SCREEN_W, config.SCREEN_H):
@@ -646,13 +791,15 @@ async def main() -> None:
                 state, ui, log = None, None, None
             elif action == "share":
                 # Game-over only (input only returns this there), and only for a
-                # result worth sending — render gates the button the same way.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                # result that is ours to publish — render gates the button on the
+                # very same call, so the C key cannot reach what the overlay
+                # declines to draw.
+                if ui.can_post(state):
                     ui.share_msg = share_challenge(settings, state, ui, current_seed, log)
             elif action == "leaderboard":
                 # Same gate as "share": the two buttons offer one result by two
                 # channels, so neither may fire on a result that isn't yours.
-                if state.winner == ui.human_id and ui.hand_turns > 0:
+                if ui.can_post(state):
                     ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 resolve_turn(state, ui, log, settings)
@@ -713,17 +860,9 @@ async def main() -> None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
                 elif log is not None and log.turn_count > 0:
-                    history_states, history_fog = build_history(ui, log)
-                    if history_states:
-                        live_fog = (set(ui.visible), set(ui.seen), dict(ui.player_intel))
-                        ui.history = True
-                        ui.playing = False
-                        ui.reset_selection()
-                        ui.reset_route()
-                        ui.sel_forward = None
-                        ui.history_max = len(history_states) - 1
-                        ui.history_turn = ui.history_max
-                        ui.history_reveal = state.winner is not None
+                    history_states, history_fog, entered = open_history(state, ui, log)
+                    if entered is not None:
+                        live_fog = entered
             elif action == "rewind":
                 if ui.history_reveal:
                     # finished game — fork a new save so the completed record stays

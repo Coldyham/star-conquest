@@ -1595,3 +1595,219 @@ def test_fast_forward_is_reachable_by_key_and_by_button():
         assert _click_pos(state, ui, (110, 110)) == "toggle_fast_forward"
     finally:
         pygame.quit()
+
+
+def test_challenge_settings_names_the_replay_the_score_was_made_in():
+    """`Challenge.log` is what lets the leaderboard find the game behind a score,
+    and it has to survive the link the player actually pastes."""
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 4821)
+        log.path = None
+        ui.hand_turns = 3
+        state.turn = 40
+        shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert shared.challenge.log == log.match_id
+        assert Settings.from_token(shared.to_token()).challenge.log == log.match_id
+    finally:
+        pygame.quit()
+
+
+def test_posting_a_score_uploads_the_replay_behind_it(monkeypatch):
+    """Pressing "Post to leaderboard" is what consents to the upload, so this is
+    the one path that sends a log — and it sends it under the same setup key the
+    score is filed against."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(main.share, "post_log",
+                        lambda log, key: sent.append((log.match_id, key)) or True)
+    monkeypatch.setattr(main.webstore, "open_url", lambda url: True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        main.post_to_leaderboard(settings, state, ui, 77, log)
+        shared = main.challenge_settings(settings, state, ui, 77, log)
+        assert sent == [(log.match_id, shared.challenge.key)]
+    finally:
+        pygame.quit()
+
+
+def test_sharing_a_challenge_link_uploads_nothing(monkeypatch):
+    """The other half of the consent rule: handing a friend a link is not posting
+    a score, and must not put the game on anyone's server."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(main.share, "post_log",
+                        lambda log, key: sent.append((log, key)) or True)
+    monkeypatch.setattr(main.webstore, "copy_link", lambda token: True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        main.share_challenge(settings, state, ui, 77, log)
+        assert sent == []
+    finally:
+        pygame.quit()
+
+
+def test_a_checkpoint_and_a_posted_score_agree_on_the_setup_key():
+    """A game uploaded mid-play and the score posted at the end must land on one
+    key, or the replay behind a score could not be found from it."""
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)     # seed None: rolled at start
+        log = replay.new_log(settings, 4821)
+        log.path = None
+        ui.hand_turns = 2
+        state.turn = 30
+        shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert log.setup_key() == shared.challenge.key
+    finally:
+        pygame.quit()
+
+
+def _shared_game(monkeypatch, tmp_path, *, on: bool):
+    """Play six turns with "Share replays" set to ``on``, capturing uploads."""
+    sent: list[tuple] = []
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    monkeypatch.setattr(main.share.webstore, "share_games", lambda: on)
+    monkeypatch.setattr(main.share, "post_log",
+                        lambda log, key: sent.append((log.turn_count, key)) or True)
+    monkeypatch.setattr(main.share, "CHECKPOINT_TURNS", 3)
+    state, ui = _setup()
+    settings = Settings(seed=1, nodes=18, players=3)
+    log = replay.new_log(settings, 1)
+    log.path = tmp_path / "game.json"
+    for _ in range(6):
+        main.resolve_turn(state, ui, log, settings)
+    return sent, log
+
+
+def test_a_shared_game_uploads_on_the_cadence(monkeypatch, tmp_path):
+    """The point of checkpointing: a game abandoned rather than finished is still
+    stored up to wherever it was left."""
+    try:
+        sent, log = _shared_game(monkeypatch, tmp_path, on=True)
+        assert [turns for turns, _ in sent] == [3, 6]
+        assert {key for _, key in sent} == {log.setup_key()}
+    finally:
+        pygame.quit()
+
+
+def test_an_unshared_game_uploads_nothing_while_it_is_played(monkeypatch, tmp_path):
+    """Off is off: the default sends nothing at all, whatever the cadence says."""
+    try:
+        sent, _ = _shared_game(monkeypatch, tmp_path, on=False)
+        assert sent == []
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Watching a posted replay (`#log=<id>`)
+# --------------------------------------------------------------------------- #
+def test_a_log_fragment_is_read_as_a_replay_request(monkeypatch):
+    """A settings token is base64url, which cannot contain '=' except as the
+    padding the encoder strips — so the prefix is an unambiguous discriminator."""
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "log=00112233445566ff")
+    assert main.replay_request() == "00112233445566ff"
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "eNrtVNtu4jAQ")
+    assert main.replay_request() == ""
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "")
+    assert main.replay_request() == ""
+
+
+def _watchable_log(tmp_path, monkeypatch, turns=6):
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    state, ui = _setup()
+    settings = Settings(seed=1, nodes=18, players=3)
+    log = replay.new_log(settings, 1)
+    log.path = tmp_path / "game.json"
+    for _ in range(turns):
+        main.resolve_turn(state, ui, log, settings)
+    return log
+
+
+def test_a_downloaded_replay_opens_as_a_reviewable_game(tmp_path, monkeypatch):
+    """The whole feature: the blob off the wire becomes the same object a resumed
+    save is, so the existing scrubber reviews it and a rewind can fork it."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        settings = Settings()          # whatever the menu happened to be showing
+        opened = main.open_replay(log.encoded(), settings)
+        assert opened is not None
+        state, ui, restored = opened
+        assert restored.match_id == log.match_id
+        assert state.turn == log.turn_count
+        # ...and the menu now describes the replay's setup, not its own.
+        assert settings.seed == 1 and settings.nodes == 18
+    finally:
+        pygame.quit()
+
+
+def test_a_watched_replay_is_not_ours_to_post(tmp_path, monkeypatch):
+    """Somebody else's win, on our screen with their full score under it — the one
+    result that arrives looking exactly like an earned one, because it *is* one.
+    Without the mark, posting their score as ours is a fetched link and one press.
+    """
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        state.winner = ui.human_id           # their win, replayed back in full
+        assert ui.hand_turns > 0             # ...by hand, so only `watched` stops it
+        assert ui.watched is True
+        assert ui.can_post(state) is False
+        # A retry or a rewind out of review builds a fresh Ui, and what is played
+        # from there really is ours — see `Ui.can_post` on why that stays open.
+        assert main.resume_game(log, Settings())[1].watched is False
+    finally:
+        pygame.quit()
+
+
+def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkeypatch):
+    """A watched game is one you have not seen, so it starts where it started.
+    Landing on the final board would give away the ending and leave dragging all
+    the way back as the only way to actually watch it."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        states, fog, live = main.open_history(state, ui, log)
+        assert ui.history and not ui.playing
+        assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
+        assert ui.history_max == log.turn_count
+        assert ui.history_turn == 0
+        assert live is not None          # the live fog is stashed for the way out
+    finally:
+        pygame.quit()
+
+
+def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
+    """The H key asks a different question — 'what just happened' — and the answer
+    is one step back from the latest turn, not a whole match away from it."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        state, ui = main.resume_game(log, Settings())
+        assert ui.watched is False
+        main.open_history(state, ui, log)
+        assert ui.history_turn == ui.history_max == log.turn_count
+    finally:
+        pygame.quit()
+
+
+def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
+    """A 404 body, a truncated download or an empty match all have to land as
+    "no replay" rather than as an exception on the first frame."""
+    try:
+        _watchable_log(tmp_path, monkeypatch, turns=0)
+        for blob in ("", "no replay", "not base64!!"):
+            assert main.open_replay(blob, Settings()) is None
+        empty = replay.new_log(Settings(seed=1), 1)
+        assert main.open_replay(empty.encoded(), Settings()) is None
+    finally:
+        pygame.quit()
