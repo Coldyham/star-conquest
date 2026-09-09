@@ -1,0 +1,9 @@
+{
+  "name": "severance",
+  "cmd": ["./target/release/severance"],
+  "cwd": "severance",
+  "protocol": 1,
+  "version": "0.1.0",
+  "budget_ms": 150,
+  "budget_scale": 100
+}
