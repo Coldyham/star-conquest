@@ -1,0 +1,15 @@
+[package]
+name = "severance"
+version = "0.1.0"
+edition = "2021"
+
+# No dependencies, deliberately: the manifest names a compiled binary, and a
+# build that needs no registry is one a fresh CI runner can reproduce offline.
+[dependencies]
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+
+[features]
+trace = []
