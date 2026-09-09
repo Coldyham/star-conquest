@@ -307,37 +307,6 @@ def _label_pill(surface, font, s: str, color, center) -> None:
     surface.blit(img, rect)
 
 
-def _lane_slot(rank: int) -> int:
-    """The ``rank``-th perpendicular slot on a lane: 0, -1, +1, -2, +2, ...
-
-    Claimed outward from the centre line rather than spread symmetrically across
-    however many fleets are currently on the lane, so a slot depends only on how
-    many fleets were already there — launching another cannot shift the ones
-    already flying, which would have them visibly step sideways in mid-flight.
-    """
-    if rank <= 0:
-        return 0
-    return -((rank + 1) // 2) if rank % 2 else (rank + 1) // 2
-
-
-def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
-    """Assign each in-transit fleet a perpendicular slot so stacks split.
-
-    Fleets are ranked in launch order — ``state.fleets`` is appended to at launch
-    and only ever filtered, so its order is that — and each takes the next free
-    slot outward from the lane's centre. Fleets running opposite ways down one
-    lane therefore stay told apart even while they pass through each other.
-    """
-    groups: dict[frozenset[int], list[int]] = {}
-    for i, f in enumerate(state.fleets):
-        groups.setdefault(frozenset((f.source_id, f.dest_id)), []).append(i)
-    offset: dict[int, tuple[int, int]] = {}
-    for idxs in groups.values():
-        for rank, i in enumerate(idxs):
-            offset[i] = (_lane_slot(rank), 0)  # perpendicular slot, scaled later
-    return offset
-
-
 def _travel(ui: Ui) -> float:
     """How far through the turn's step to draw the fleets.
 
@@ -350,9 +319,8 @@ def _travel(ui: Ui) -> float:
 
 
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
-    offsets = _lane_offsets(state)
     travel = _travel(ui)
-    for i, f in enumerate(state.fleets):
+    for f in state.fleets:
         # your own fleets always show; an enemy fleet shows only where at least
         # one end of its lane is in full view, so rival movements appear only as
         # they near your space
@@ -373,12 +341,14 @@ def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
             gap = (config.node_radius(state.systems[f.dest_id].production)
                    + config.FILM_ARRIVAL_GAP)
             x, y = int(x - ux * gap), int(y - uy * gap)
-        # split stacked fleets, and sit the count clear of the triangle — both
-        # offsets scale, so the label never lands on the glyph on a big display
+        # Hold each fleet off the lane's centre line by the track it was given at
+        # launch (`model.free_lane_slot`) — read off the fleet rather than ranked
+        # here, so a lane-mate launching or arriving cannot shift it. The count
+        # sits clear of the triangle; both offsets scale, so the label never lands
+        # on the glyph on a big display.
         spread = config.FLEET_SIZE + config.s(3)
-        rank = offsets.get(i, (0, 0))[0]
-        x += int(px * rank * spread)
-        y += int(py * rank * spread)
+        x += int(px * f.lane_slot * spread)
+        y += int(py * f.lane_slot * spread)
         _draw_triangle(surface, (x, y), (ux, uy), config.player_color(f.owner_id))
         _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT, center=(x + int(px * spread), y + int(py * spread)))
 

@@ -168,7 +168,8 @@ def test_travel_is_one_outside_the_move_beat():
     after it the advance has landed, so `progress_at(1.0)` is right at both ends."""
     film = turnfilm.film([
         turnfilm.Launched(fleet=0, owner_id=1, source_id=0, dest_id=1, ships=2,
-                          turns_total=4, turns_remaining=4, source_ships=1),
+                          turns_total=4, turns_remaining=4, source_ships=1,
+                          lane_slot=0),
         turnfilm.Advanced(((0, 3),)),
         _landed(),
     ])

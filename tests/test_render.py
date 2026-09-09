@@ -857,38 +857,37 @@ def test_end_turn_is_unreachable_while_a_film_plays():
         pygame.quit()
 
 
-def test_launching_another_fleet_does_not_shove_the_ones_already_flying():
-    """Slots are claimed outward from the lane's centre in launch order, so an
-    in-flight fleet holds the line it is on. Spreading the group symmetrically
-    across its current size made every existing fleet step sideways whenever one
-    more set off down the same lane."""
-    state = mapgen.generate_random(2, num_nodes=16, num_players=2)
-    src = next(s.id for s in state.systems.values() if s.owner_id == 1)
-    dst = state.systems[src].neighbors[0]
-    state.systems[src].ships = 30
+def test_a_fleets_track_is_read_off_the_fleet_and_moves_it():
+    """render's whole share of lane tracks: multiply the fleet's own `lane_slot`
+    by the spread. Two boards differing only in that field must draw differently,
+    and a fleet on track 0 must sit on the lane's centre line."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        src = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        dst = state.systems[src].neighbors[0]
+        state.systems[src].ships = 30
+        engine.apply_order(state, Order(1, src, dst, 4))
+        fleet = state.fleets[0]
+        assert fleet.lane_slot == 0        # alone on the lane, so down the middle
+        # ...and out into the lane, since a fleet still on its source is drawn
+        # under that node's circle, where no offset this small is visible
+        fleet.turns_total, fleet.turns_remaining = 4, 2
 
-    engine.apply_order(state, Order(1, src, dst, 3))
-    first = render._lane_offsets(state)[0][0]
-    engine.apply_order(state, Order(1, src, dst, 3))
-    engine.apply_order(state, Order(1, src, dst, 3))
-    after = render._lane_offsets(state)
-    assert after[0][0] == first == 0            # unmoved, and still on the centre
-    assert [after[i][0] for i in range(3)] == [0, -1, 1]
+        def frame(slot: int) -> bytes:
+            fleet.lane_slot = slot
+            render.draw(screen, state, ui)
+            return pygame.image.tobytes(screen, "RGB")
 
-
-def test_fleets_running_opposite_ways_still_get_their_own_slots():
-    """The reason the offsets exist at all: two fleets can occupy the same point
-    on one lane heading in opposite directions."""
-    state = mapgen.generate_random(2, num_nodes=16, num_players=2)
-    a = next(s.id for s in state.systems.values() if s.owner_id == 1)
-    b = state.systems[a].neighbors[0]
-    state.systems[a].ships = state.systems[b].ships = 20
-    state.systems[b].owner_id = 2
-
-    engine.apply_order(state, Order(1, a, b, 4))
-    engine.apply_order(state, Order(2, b, a, 4))
-    slots = [render._lane_offsets(state)[i][0] for i in range(2)]
-    assert slots[0] != slots[1], "one lane, both directions: they must not overlap"
+        centred = frame(0)
+        assert frame(-1) != centred
+        assert frame(1) != centred
+        assert frame(0) == centred          # ...and nothing else moved it
+    finally:
+        pygame.quit()
 
 
 def _flash_frame(screen, state, ui, landed) -> bytes:

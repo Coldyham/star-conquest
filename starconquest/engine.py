@@ -30,7 +30,7 @@ from itertools import combinations
 from typing import Callable, Iterable, NamedTuple, Optional
 
 from . import combat, config, turnfilm
-from .model import Fleet, GameState, Order, lane_key
+from .model import Fleet, GameState, Order, free_lane_slot, lane_key
 
 # What version of the *rules* a game is played under, stamped onto every log
 # (`replay.GameLog.rules_version`).
@@ -117,6 +117,9 @@ def apply_order(state: GameState, order: Order) -> Optional[Fleet]:
         ships=ships,
         turns_total=turns,
         turns_remaining=turns,
+        # Cosmetic, and deterministic: orders are applied in a fixed sequence, so a
+        # replay hands out the same tracks. Nothing in the rules reads one.
+        lane_slot=free_lane_slot(state.fleets, order.source_id, order.dest_id),
     )
     state.fleets.append(fleet)
     return fleet

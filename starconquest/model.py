@@ -205,6 +205,11 @@ class Fleet:
     turns_total: int
     turns_remaining: int
     route: Optional[list[int]] = None
+    # Which parallel track of the lane this fleet flies on — see `free_lane_slot`,
+    # which hands one out at launch. Held for the whole flight, and the only
+    # cosmetic field here: nothing in the rules reads it, and it is deliberately
+    # not on the wire to external bots (`botio`).
+    lane_slot: int = 0
 
     def progress(self) -> float:
         """Fraction of the journey completed, in [0, 1] — for rendering."""
@@ -221,6 +226,48 @@ class Fleet:
         if self.turns_total <= 0:
             return 1.0
         return 1.0 - (self.turns_remaining + (1.0 - t)) / self.turns_total
+
+
+def lane_slot_at(rank: int) -> int:
+    """The ``rank``-th track outward from a lane's centre line: 0, -1, +1, -2, +2 …
+
+    Outward from the centre rather than spread across however many fleets there
+    are, so a track's position never depends on how many others exist.
+    """
+    if rank <= 0:
+        return 0
+    return -((rank + 1) // 2) if rank % 2 else (rank + 1) // 2
+
+
+def free_lane_slot(fleets: list[Fleet], a: int, b: int) -> int:
+    """The lowest unused track on the ``a``-``b`` lane, for a fleet launching now.
+
+    A fleet is *given* a track and keeps it until it leaves the board, which is the
+    whole point of storing one: a slot computed from a fleet's rank among whoever
+    happens to be on the lane re-packs the moment a lane-mate launches or arrives,
+    and every fleet still in transit visibly steps sideways. Since a track is only
+    freed by the fleet holding it leaving, two fleets on a lane never share one.
+
+    Both directions draw from the same pool, because fleets running opposite ways
+    pass through each other and that is the case the separation exists for.
+
+    The cost of holding a track is that a fleet whose lane-mates have gone keeps
+    flying one step off the centre line rather than sliding back onto it — a
+    stationary offset instead of a jump, and it heals as soon as the next fleet
+    launches into the freed centre.
+
+    Cannot be derived instead of stored: the launch turn is recoverable from
+    ``turn - (turns_total - turns_remaining)``, but turn playback applies those two
+    at different cues, so a track derived from it would shift mid-animation.
+    """
+    lane = lane_key(a, b)
+    taken = {f.lane_slot for f in fleets
+             if lane_key(f.source_id, f.dest_id) == lane}
+    for rank in range(len(taken) + 1):   # distinct candidates, so one must be free
+        slot = lane_slot_at(rank)
+        if slot not in taken:
+            return slot
+    return 0  # pragma: no cover - unreachable by the count above
 
 
 @dataclass

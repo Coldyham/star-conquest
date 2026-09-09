@@ -47,6 +47,8 @@ class Launched:
     turns_total: int
     turns_remaining: int
     source_ships: int  # the garrison *after* the deduction
+    lane_slot: int     # ...and the lane track it was given, which a film must
+                       # reproduce or its fleets would jump sideways at the end
 
 
 @dataclass(frozen=True)
@@ -414,6 +416,7 @@ class Reel:
                 ships=event.ships,
                 turns_total=event.turns_total,
                 turns_remaining=event.turns_remaining,
+                lane_slot=event.lane_slot,
             )
             self.board.fleets.append(fleet)
             self._fleets[event.fleet] = fleet
@@ -501,6 +504,7 @@ class Watch:
             turns_total=fleet.turns_total,
             turns_remaining=fleet.turns_remaining,
             source_ships=state.systems[fleet.source_id].ships,
+            lane_slot=fleet.lane_slot,
         ))
 
     def advanced(self, state: GameState) -> None:

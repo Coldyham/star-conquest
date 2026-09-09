@@ -70,10 +70,7 @@ a re-measure of the roster (`sim --ladder`). What it would *not* cost is any
 presentation work — a film is assembled from the order the engine emitted events,
 so it depicts whatever the rule is.
 
-## Open: polish, both small and both optional
-
-Two of the five are left, and both are arguments for leaving them alone as much as
-for doing them.
+## Open: one polish item, and an argument for leaving it
 
 - **Give production a dwell.** `config.FILM_PRODUCE_MS` is 0, so production lands
   at its true point with no pause. The progress ring in `render._draw_systems`
@@ -82,16 +79,8 @@ for doing them.
   the present phase order it is the last thing to change; if production moves ahead
   of the arrivals, that pressure goes away. Deliberately still 0: the case for a
   dwell is weakest while production genuinely is the last thing that happens.
-- **Lane slots re-pack when a fleet arrives.** `render._lane_slot` ranks from the
-  oldest fleet on the lane, which is what makes *launching* free — the case that
-  actually looked wrong. The remaining case is that a fleet arriving shifts its
-  lane-mates one slot inward. Ranking from the newest instead would simply trade
-  one for the other; stable in both directions needs per-fleet identity, which
-  `Fleet` has none of (no id, unhashable, and two equal fleets compare equal).
-  Adding one is a core model change for a presentation artifact that coincides
-  with a fleet leaving the board, which is why it has not been done.
 
-## Done: the other three polish items
+## Done: the other four polish items
 
 Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 `system-design.md` under the matching heading:
@@ -102,6 +91,12 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 - **The camera reveal waits for the film.** `Ui.deferred_view_snap`, paid by
   `main.land_film` — the one place the clock running out and a skip both pass
   through. `Ui.stop_film` leaves the debt alone on purpose.
+- **A lane track is held rather than ranked.** `Fleet.lane_slot`, handed out by
+  `model.free_lane_slot` at launch — which is what the notes said would need
+  per-fleet identity, and it does; the field *is* the identity. Reported from play:
+  a fleet arriving re-packed the ranks behind it, so the fleets still strung down
+  the lane jumped sideways as the leader landed. `turnfilm.Launched` carries it,
+  and both film oracles' digests now compare it.
 - **A burst says what the fight cost its winner.** `cost`/`victor` on `Clashed`
   and `Landed`, labelled in the victor's colour; `destroyed` (everyone's losses)
   stays as the oracle, since summed over a turn's events it equals what

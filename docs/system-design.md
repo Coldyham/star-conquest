@@ -395,17 +395,32 @@ one. Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
 hung 6px out of the fixed 560x496 panel and failed
 `test_tab_content_stays_inside_the_panel`.
 
-**Lane slots are claimed, not shared out.** `_lane_offsets` used to spread a
-lane's fleets symmetrically across however many were currently on it, so
-launching one more re-centred the group and every fleet already in flight stepped
-sideways — invisible when the board jumped a whole turn at a time, obvious once
-they glide. Slots are now taken outward from the centre line in launch order
-(`_lane_slot`: 0, -1, +1, -2, +2, ...), so a fleet holds the line it is on for its
-whole flight and only the newcomer moves. Ranking from the oldest is what makes
-*adding* free; the remaining case is that a fleet arriving re-packs its lane-mates
-one slot inward, which coincides with it leaving the board. Ranking from the
-newest instead would trade exactly one of those for the other, and the launch is
-the common event.
+**A lane track is held, not ranked.** `_lane_offsets` used to spread a lane's
+fleets symmetrically across however many were currently on it, so launching one
+more re-centred the group and every fleet already in flight stepped sideways —
+invisible when the board jumped a whole turn at a time, obvious once they glide.
+Claiming slots outward from the centre line *in launch order* fixed the launch and
+left the mirror case: a fleet **arriving** re-packed the ranks behind it, so the
+fleets still strung down the lane jumped sideways as the leader landed. Ranking
+from the newest would only have traded one for the other.
+
+Both go away once a fleet is *given* a track and keeps it: `Fleet.lane_slot`,
+handed out by `model.free_lane_slot` at launch and read straight off the fleet by
+`render`. A track is freed only by the fleet holding it leaving the board, so no
+two fleets on a lane ever share one, and the next launch reuses the freed centre.
+Both directions draw from one pool, since fleets running opposite ways pass
+through each other and that is the case the separation exists for.
+
+Two things this cost, both accepted deliberately. A fleet whose lane-mates have
+gone keeps flying one step off the centre line instead of sliding back onto it —
+a stationary offset rather than a jump, and it heals as soon as anything launches
+into the freed centre. And it is a stored field on a core dataclass whose only
+reader is `render`: the alternative was deriving a track from the launch turn,
+which `turn - (turns_total - turns_remaining)` recovers exactly, but turn playback
+applies those two at different cues (`Advanced`, then `Ended`), so every fleet
+would shift a track mid-animation. Storing it also means `turnfilm.Launched` has
+to carry it, or a film's own fleets would jump sideways at the moment it ended —
+which is why `lane_slot` is in the board digest both film oracles compare.
 
 **A burst marks a fight, and `Landed.steps` is the test for one.** The first
 version marked every arrival, which flashed combat over your own fleets

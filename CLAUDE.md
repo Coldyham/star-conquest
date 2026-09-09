@@ -540,6 +540,17 @@ intact.
   on, ships compound faster each turn, so always ask `state.travel_turns(a, b)` — it
   re-times through `config.travel_turns_at` for the *current* turn. Growth bites
   at launch only: a fleet in transit keeps its `turns_total`.
+- **A fleet's lane track is stored, never ranked.** `Fleet.lane_slot` is which
+  parallel line of the lane a fleet flies on (0 is the centre, then -1, +1, …),
+  handed out at launch by `model.free_lane_slot` and held until the fleet leaves
+  the board; `render` multiplies it by a spread and draws. Do not go back to
+  deriving it from a fleet's rank among whoever is on the lane — that is what made
+  every fleet in transit step sideways whenever a lane-mate launched *or* arrived.
+  It is the one cosmetic field on a core dataclass, it is deliberately not on the
+  wire to external bots (`botio`), and nothing in the rules reads it. Because it is
+  stored, `turnfilm.Launched` must carry it: a film that invented its own tracks
+  would pop every fleet sideways as it ended, which is why `lane_slot` is in the
+  board digest both film oracles compare.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
