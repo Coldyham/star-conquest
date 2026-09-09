@@ -301,21 +301,28 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 900 games, 57 timed out and are excluded from the
+nodes, default settings — 900 games, 58 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
 docstring, the next time marshal or the roster's pricing changes:
 
-    marshal 251 (30%), knower 249 (30%), thinker 167 (20%),
+    marshal 251 (30%), knower 248 (29%), thinker 167 (20%),
     claudebot 92 (11%), heuristic 46 (5%), rusherplus 38 (5%)
 
     head-to-head (row's win rate vs column)
-                heuris  rusher  claude  thinke  knower  marsha
-      heuristic      —     64%     19%      2%      0%      0%
-      rusherplus   36%       —     27%      3%      0%      0%
-      claudebot    81%     73%       —     12%      5%      2%
-      thinker      98%     97%     88%       —     16%     11%
-      knower      100%    100%     95%     84%       —     50%
-      marshal     100%    100%     98%     89%     50%       —
+                knower  marsha  thinke  claude  heuris  rusher
+      knower         —     49%     84%     95%    100%    100%
+      marshal      51%       —     89%     98%    100%    100%
+      thinker      16%     11%       —     88%     98%     97%
+      claudebot     5%      2%     12%       —     81%     73%
+      heuristic     0%      0%      2%     19%       —     64%
+      rusherplus    0%      0%      3%     27%     36%       —
+
+Re-run after the retreat fixes below and it did not move: 251/248 against
+251/249, the knower head-to-head 51% against 50%, one more timeout. That is not
+a null result about those fixes — this cell is 60 games a pair against opponents
+marshal already beats 89-100% of the time, so it has no resolution at the
+1-2 point scale their own paired sweep measures them at. It is here as a
+regression check, and what it says is that nothing regressed.
 
 marshal took the top of the ladder here, and level with knower head-to-head, on
 the strength of dropping the jitter premium from its attack margin — see
@@ -805,6 +812,130 @@ our own garrison cannot decline the engagement.
 
 This is what took marshal to the top of the ladder and level with knower
 head-to-head; see the table under "Where marshal stands".
+
+### Two doomed neighbours, and what a retreat is worth
+
+Reported from a real game rather than found in a sweep: a human attacked two
+adjacent marshal systems on the same turn, and both garrisons "retreated" — into
+each other, down the one lane between them, passing in mid-flight. Both systems
+sat empty in front of fleets that were already on their way, and both fell. Held
+where they stood the pair would at least have made the attacker pay for them;
+pooled into one of the two they would have held it outright, since the relief
+lane was three turns and the attack was four.
+
+Two faults in the doomed branch, and a third found while measuring them.
+
+**Nothing in the doomed branch knew what else was being abandoned.** Branch (b)
+ranks refuges by garrison size, and for each of two doomed neighbours the biggest
+friendly garrison in reach is the other one — so the swap is not bad luck, it is
+what the rule says to do. Instrumented over 25 games (24 nodes, 3 players,
+thinker opponents): 2603 doomed-branch decisions, **62 retreats into a system
+that was itself being abandoned that turn (2.4%), 20 of them mutual swaps** —
+about one swap and 2.5 wasted retreats a game. Phase 2 now computes the set that
+is really being given up (the doomed, minus whatever consolidation has just
+saved) and passes it to `_evacuate`, which will not retreat into it.
+
+**A garrison that cannot save its own system is often exactly what the one next
+door is short of.** Phase 1 sizes relief out of the rear only — its helper pool
+excludes every threatened system, since a garrison holding off its own siege is
+not spare — and gives a system up the moment that pool falls short. But a system
+it has *already given up* is not holding anything off: those ships are lost where
+they stand, so they are free. `_consolidate` runs before the evacuations, richest
+first, and holds whichever doomed system the pooled garrison covers by the
+deadline Phase 1 measured; a system that donates can never also receive, so the
+swap cannot come back as a pooling decision. Phase 1's leftover rear budget is
+topped up on the end, since holding a system beats leaving those ships for Phase
+3 to spend on a strike.
+
+It fires rarely, and the reason is worth recording: over 40 games, marshal hits
+**10.2 situations a game where a doomed system has a doomed neighbour, but 8.6 of
+them the neighbour cannot reach in time** — the deadline is the *earliest*
+horizon showing a deficit, and by the time a blind bot can see the fleets, it is
+usually one turn. Of the 1.6 that are in time, **0.4-0.7 a game are covered** and
+become a system held instead of two lost. The reported game was the long-lane
+case, which is where the mechanism lives.
+
+**And a retreat had no notion of distance at all**, which turned out to be worth
+more than either fix. Ranking refuges by garrison size sends a doomed garrison to
+the biggest stack we own however far away it is: over 25 games, of 471 retreats
+with a real choice of refuge, **the old rule took the long way 43.1% of the
+time**, 3.11 turns against 2.57 for the nearest — half a turn per retreat, on
+whole garrisons. Unlike a strike, a retreat is racing nothing: the ships are
+simply out of the game until they land. Branch (b) now leads on travel turns and
+keeps garrison size and front pull as the tie-breaks.
+
+Measured paired — both variants in the *same* game, rotated through every seat,
+so map and luck are shared — against a copy of the bot with the flags off:
+
+    cell                                    W-L        n     rate      z
+    null (base vs base) 24n 3p          458-457      915    50.1%  +0.03
+    avoid-abandoned only                456-457      913    49.9%  -0.03
+    consolidate only                    463-447      910    50.9%  +0.53
+    both                                461-452      913    50.5%  +0.30
+    ---- the same two cells, ten times the sample ----
+    null (base vs base)                4652-4578    9230    50.4%  +0.77
+    both                               4796-4487    9283    51.7%  +3.21
+    nearest-first retreat (on top)     3623-3344    6967    52.0%  +3.34
+
+The first four rows are the lesson. At n≈900 the two defensive fixes are
+invisible — 50.5% is the null cell to within noise — and on that evidence they
+would have been written up as another entry in the null-results list above. Read
+against its own null at ten times the sample they are worth about **1.3 points
+(51.7% against a 50.4% null, so ~z = 1.8 on the difference)**: real by direction
+and consistent with the four whole-package cells below, but on its own that pair
+of fixes is suggestive rather than settled. The retreat-distance rule is the
+solid one, and it is also the one with volume behind it.
+
+Two procedural notes, both of which nearly went the wrong way here. Budget n in
+the thousands on this branch of the bot before reading anything into a result;
+and keep a null cell *at the same sample size*, because the null is not 50% —
+it reads 50.1% at n≈900 and 50.4% at n≈9200, and the note above records it
+drifting between 43% and 52% on smaller sweeps. Quoting the 51.7% against a
+nominal 50% would have overstated the fix by a third.
+
+All three shipped together, against the bot before them, swept over the node
+count, the field size and the speed knob — all three rules are keyed off travel
+time, and the speed knob decides how much of that a map has:
+
+    cell                                    W-L        n     rate      z
+    random 24n 3p (thinker)            3134-2690    5824    53.8%  +5.82
+    random 30n 4p (thinker x2)         1122-972     2094    53.6%  +3.28
+    random 40n 5p (thinker x3)          724-675     1399    51.8%  +1.31
+    random 18n 2p duel                 1497-1352    2849    52.5%  +2.72
+    random 24n 3p, 2 ly/turn            842-735     1577    53.4%  +2.69
+    random 24n 3p, 18 ly/turn          1009-925     1934    52.2%  +1.91
+
+Positive in all six, and the speed knob says which of the three is carrying it.
+Fire rates per game, 40 games a row at 24 nodes and 3 players:
+
+    ly/turn   doomed decisions   pooled a system   refuge ruled out   long way avoided
+    2                    233.6              0.33              11.38              24.32
+    6 (default)           74.2              0.38               1.98               6.33
+    18                     2.7              0.03               0.05               0.53
+
+The distance rule is the one with volume in every regime, and it is the only one
+still firing at 18 ly/turn, where a lane is almost always a single turn and a
+siege is over before a neighbour can be told about it — so the 52.2% there is
+essentially that rule alone. The two defensive fixes are long-lane mechanisms:
+at 2 ly/turn the avoid-abandoned rule strikes a refuge off the candidate list
+eleven times a game (against a measured 2.4% of doomed decisions actually
+retreating into one at the default speed), which is the end of the knob the
+reported game sat at. Pooling never gets past half a system a game
+anywhere, which is what its 51.7%-against-a-50.4%-null deserves.
+
+Not a stalemate trade either, which the guard sweep above is a reminder to
+check: 150 mirror matches a side at 24 nodes and 3 players, every seat the same
+bot, come back at 8 timeouts and 147.6 turns for the new one against 7 and 155.3
+for the old. Shorter games, the same timeout rate.
+
+The flags (`CONSOLIDATE`, `AVOID_ABANDONED`, `RETREAT_NEAREST`) are kept because
+turning all three off has to be *exactly* the old bot, and that is checkable
+rather than assertable: 1174 consecutive decisions across ten games, order for
+order identical to the file before the change.
+
+`models/thinker.py` and `models/knower.py` have the same `_evacuate` and the same
+two defensive faults; neither is ported and neither has been measured. knower's
+copy is threaded through `Posture`, so the port is not a copy-paste.
 
 ### Rushing the enemy: right about the game, inert on this bot
 
