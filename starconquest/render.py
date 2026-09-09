@@ -941,7 +941,9 @@ def _loss_center(center) -> tuple[int, int]:
 
 
 def _flash_marks(state: GameState, ui: Ui):
-    """This turn's visible fights, as ``(centre, colour, phase, ships destroyed)``.
+    """This turn's visible fights, as ``(centre, colour, phase, cost, victor)`` —
+    where ``cost`` is what the fight cost whoever came out of it and ``victor`` is
+    who that was (None if nobody did, which is when ``cost`` is 0).
 
     The one place the film's fights are turned into places on screen, because two
     passes need them: the bursts themselves, and the star-name pass, which has to
@@ -961,7 +963,7 @@ def _flash_marks(state: GameState, ui: Ui):
             a = state.systems[event.low_id].pos
             b = state.systems[event.high_id].pos
             center = ui.view.to_screen(lerp(a, b, event.at))
-            yield center, config.COLOR_TEXT, phase, event.destroyed
+            yield center, config.COLOR_TEXT, phase, event.cost, event.victor
         else:  # a Landed: concentric on the node, expanding past its rim
             # `steps` holds the engagements that actually happened, and is empty
             # for a reinforcement or a walk into an empty system. Neither is a
@@ -972,22 +974,24 @@ def _flash_marks(state: GameState, ui: Ui):
             center = ui.view.to_screen(state.systems[event.node_id].pos)
             color = (config.COLOR_TEXT if event.owner_id == event.was_owner
                      else config.player_color(event.owner_id))
-            yield center, color, phase, event.destroyed
+            yield center, color, phase, event.cost, event.victor
 
 
 def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
     """Mark this turn's fights while they are still fresh, and what each cost.
 
-    Both sides' losses as one number rather than a figure per side: what a player
-    reads off a burst is how expensive the fight was, and the square law makes that
-    the surprising part. The per-side split stays in the event either way
-    (`turnfilm.Clashed`, `turnfilm.Fold`) for a readout that ever wants it.
+    The label is the *victor's* own losses, in the victor's colour — not both
+    sides' together. The beaten side is wiped out by definition and its garrison
+    or triangle visibly goes, so a combined figure mostly restates what the board
+    already shows while burying the one number the square law makes hard to guess:
+    what the winner paid. Whose loss it is has to be said in the one language this
+    map already uses for that, which is the player's colour.
     """
-    for center, color, phase, destroyed in _flash_marks(state, ui):
+    for center, color, phase, cost, victor in _flash_marks(state, ui):
         _draw_burst(surface, center, color, phase)
-        if destroyed > 0:
-            _label_pill(surface, _fonts()["small"], f"−{destroyed}", _BTN_DANGER[1],
-                        _loss_center(center))
+        if cost > 0 and victor is not None:
+            _label_pill(surface, _fonts()["small"], f"−{cost}",
+                        config.player_color(victor), _loss_center(center))
 
 
 def _draw_film_caption(surface, ui: Ui) -> None:
@@ -1096,9 +1100,9 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
     # ...and, for the second or so a playback marks a fight, what that fight cost
-    for center, _color, _phase, destroyed in _flash_marks(state, ui):
-        if destroyed > 0:
-            taken.append(_pill_rect(font, f"−{destroyed}", _loss_center(center)))
+    for center, _color, _phase, cost, victor in _flash_marks(state, ui):
+        if cost > 0 and victor is not None:
+            taken.append(_pill_rect(font, f"−{cost}", _loss_center(center)))
 
     def rank(sys) -> tuple[int, int]:
         if sys.id == ui.selected:

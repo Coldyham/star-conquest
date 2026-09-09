@@ -350,16 +350,28 @@ unpaid, precisely so a skip cannot lose the reveal). A turn whose film has nothi
 in it (`Film.plays` false, e.g. a decided board with nothing left in transit) snaps
 immediately, exactly as before films existed.
 
-**One loss figure per fight, not one per side.** `Clashed` carries both strengths
-and the survivor count, and each `Landed.steps` entry carries a fold step's before
-and after, so `destroyed` is arithmetic on the event and not a second reading of the
-rules — it is the sum of what everyone brought less what the winner kept, which is
-`combat._record_losses` from the other end. That identity is the test: summed over a
-turn's events it must equal what the scoreboard charged every player. Both sides
-together rather than a figure each, because what a player reads off a burst is how
-expensive the fight was, and under the square law that is the surprising part; the
-per-side split stays in the event for a readout that ever wants it. `−0` never
-appears — a reinforcement has no steps, and so no burst either.
+**The loss label is the victor's own, in the victor's colour.** Both sides'
+losses together was the first cut and it was the wrong number: 9 ships taking a
+6-ship system read `−8`, which is almost entirely the defender's garrison — wiped
+out by definition, and visible anyway as the count on the node changing — while
+burying the 2 the attacker actually paid, which is the figure the square law makes
+hard to guess. So `cost` is what the fight cost whoever came out of it holding the
+ground (or still flying), and it is drawn in that player's colour, since colour is
+the one language this map already uses for whose something is. Nobody's, on
+annihilation: matched forces leave no victor to charge, and the emptied board says
+it. A per-side pair of numbers was the other candidate; it doubles the label's width
+at a node for a second figure the board already shows, and a multi-owner pile-up
+would need three.
+
+The accounting figure survives beside it as `destroyed`, because it is the test:
+what everyone brought less what the winner kept is `combat._record_losses` read from
+the other end, so summed over a turn's events it must equal what the scoreboard
+charged every player. `Landed.sides` is what makes both derivable — arrivals are
+pooled per owner before anything fights, so every side appears in `steps` exactly
+once (the strongest as the first step's carried force, the others as each step's
+defender), which is the per-side detail the pooling in `_record_losses` used to
+lose. And a `Clashed` has to carry `survivor_owner` outright: a fleet id cannot be
+resolved to a player from a board the fleet has already left.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn

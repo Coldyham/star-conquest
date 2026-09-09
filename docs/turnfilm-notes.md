@@ -102,6 +102,7 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 - **The camera reveal waits for the film.** `Ui.deferred_view_snap`, paid by
   `main.land_film` — the one place the clock running out and a skip both pass
   through. `Ui.stop_film` leaves the debt alone on purpose.
-- **A burst says what the fight cost.** `destroyed` on `Clashed` and `Landed`,
-  drawn by `render._draw_loss`. Oracle: summed over a turn's events it equals what
+- **A burst says what the fight cost its winner.** `cost`/`victor` on `Clashed`
+  and `Landed`, labelled in the victor's colour; `destroyed` (everyone's losses)
+  stays as the oracle, since summed over a turn's events it equals what
   `combat._record_losses` charged the players.

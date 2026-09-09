@@ -969,9 +969,9 @@ def test_a_playback_still_shows_what_the_turn_began_with():
 
 
 def test_a_fight_is_labelled_with_what_it_cost():
-    """Both sides' losses, over the burst. Two fights differing only in their
-    survivors must draw differently — otherwise the label isn't reading
-    `destroyed` at all."""
+    """The victor's own losses, over the burst. Two fights differing only in their
+    survivors must draw differently — otherwise the label isn't reading `cost` at
+    all."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -1021,7 +1021,9 @@ def test_which_fights_get_a_mark_and_what_it_says():
             return out
 
         every = set(state.systems)
-        assert [m[3] for m in marks((fold,), every)] == [9 + 6 - 7]
+        # the attacker brought 9 and kept 7, so the label is its own 2 — not the
+        # 8 that died between them, most of which is the beaten garrison
+        assert [(m[3], m[4]) for m in marks((fold,), every)] == [(2, 2)]
         assert marks((), every) == []                  # a reinforcement is no fight
         assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
     finally:

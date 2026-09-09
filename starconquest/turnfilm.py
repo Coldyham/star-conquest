@@ -78,18 +78,37 @@ class Clashed:
     a_ships: int
     b_ships: int
     survivor: Optional[int]  # the fleet that flew on; None on annihilation
+    survivor_owner: Optional[int]  # ...and whose it was, which `survivor` can't say
     survivors: int
     dead: tuple[int, ...]
 
     @property
     def destroyed(self) -> int:
-        """Ships both sides lost together.
+        """Ships both sides lost together — the accounting figure, which is what
+        `combat._record_losses` charges between them.
 
         Derived rather than reported: the loser is wiped out and the winner is
         thinned to ``survivors``, so the two strengths carried in and that one
         figure are the whole of the attrition. Annihilation reports every ship.
         """
         return self.a_ships + self.b_ships - self.survivors
+
+    @property
+    def cost(self) -> int:
+        """What flying on cost the fleet that did — the figure the map labels.
+
+        Zero when nobody survived: both sides visibly vanish, and there is no
+        winner whose attrition it could be.
+        """
+        if self.survivor is None:
+            return 0
+        brought = self.a_ships if self.survivor == self.a else self.b_ships
+        return brought - self.survivors
+
+    @property
+    def victor(self) -> Optional[int]:
+        """Whose ships flew on, for the colour of that label."""
+        return self.survivor_owner
 
 
 @dataclass(frozen=True)
@@ -122,21 +141,54 @@ class Landed:
     steps: tuple[Fold, ...]  # empty for a reinforcement or an unopposed landing
 
     @property
-    def destroyed(self) -> int:
-        """Ships lost in this node's fight, every owner together.
+    def sides(self) -> tuple[tuple[int, int], ...]:
+        """Each owner's strength going in, strongest first: ``(owner, ships)``.
 
-        Each side that fought appears in ``steps`` exactly once — the strongest as
-        the first step's carried force, each of the rest as one step's defender —
-        so their total less the last step's survivors is the attrition, without
-        `combat._record_losses`'s per-owner pooling in the way. Zero where there
-        are no steps: a reinforcement or a walk into an empty system is not a
-        fight, and lost nothing.
+        Recovered from the fold rather than reported, and it is exactly recoverable:
+        arrivals are pooled per owner before anything fights, so every side appears
+        in ``steps`` once — the strongest as the first step's carried force, each of
+        the others as one step's defender. A later step's attacker is the previous
+        step's winner, i.e. a side already listed, which is why only the first one
+        counts. Empty where nothing fought.
+        """
+        if not self.steps:
+            return ()
+        return ((self.steps[0].attacker, self.steps[0].attacker_ships),
+                *((step.defender, step.defender_ships) for step in self.steps))
+
+    @property
+    def destroyed(self) -> int:
+        """Ships lost here, every owner together — the accounting figure, equal to
+        what `combat._record_losses` charges the players between them.
+
+        What everyone brought less what the last step's winner kept. This is the
+        number `_record_losses`'s per-owner pooling used to make unrecoverable.
         """
         if not self.steps:
             return 0
-        return (self.steps[0].attacker_ships
-                + sum(step.defender_ships for step in self.steps)
-                - self.steps[-1].survivors)
+        return sum(ships for _, ships in self.sides) - self.steps[-1].survivors
+
+    @property
+    def cost(self) -> int:
+        """What taking (or holding) the system cost whoever ended up with it — the
+        figure the map labels, and the one the square law makes hard to guess.
+
+        Deliberately not ``destroyed``: most of that is the beaten side, which is
+        wiped out by definition and whose disappearance the garrison count already
+        shows. Zero when nobody held the ground at the end — matched forces
+        annihilate to neutral, and there is no victor to charge.
+        """
+        if not self.steps or self.ships <= 0:
+            return 0
+        return dict(self.sides).get(self.owner_id, 0) - self.ships
+
+    @property
+    def victor(self) -> Optional[int]:
+        """Who holds the system now, for the colour of that label; None if nobody
+        came out of it."""
+        if not self.steps or self.ships <= 0:
+            return None
+        return self.owner_id
 
 
 @dataclass(frozen=True)
@@ -473,6 +525,7 @@ class Watch:
             a_ships=a_ships,
             b_ships=b_ships,
             survivor=None if survivor is None else self._id(survivor),
+            survivor_owner=None if survivor is None else survivor.owner_id,
             survivors=survivors,
             dead=tuple(self._id(f) for f in dead),
         ))

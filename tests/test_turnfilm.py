@@ -122,7 +122,8 @@ def test_consecutive_events_of_one_kind_share_a_beat():
 def test_a_clash_rides_inside_the_move_beat_where_it_happened():
     advanced = turnfilm.Advanced(((0, 4),))
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.25, at=0.4, a=0, b=1,
-                             a_ships=5, b_ships=3, survivor=0, survivors=4, dead=(1,))
+                             a_ships=5, b_ships=3, survivor=0, survivor_owner=1,
+                             survivors=4, dead=(1,))
     film = turnfilm.film([advanced, clash])
     move = film.beats[0]
     assert move.kind == "move"
@@ -136,7 +137,8 @@ def test_a_clash_with_no_move_beat_still_gets_shown():
     """Defensive: clashes are attached to a move beat, so they must not vanish if
     there somehow isn't one."""
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.5, at=0.5, a=0, b=1,
-                             a_ships=1, b_ships=1, survivor=None, survivors=0, dead=(0, 1))
+                             a_ships=1, b_ships=1, survivor=None,
+                             survivor_owner=None, survivors=0, dead=(0, 1))
     film = turnfilm.film([clash])
     assert clash in [e for _, e in film.cues]
 
@@ -377,10 +379,10 @@ def test_a_fights_cost_matches_what_the_scoreboard_was_charged(seed):
             assert shown == charged, f"turn {state.turn}"
 
 
-def test_a_pile_ups_cost_survives_the_per_owner_pooling():
+def test_a_pile_ups_sides_and_losses_survive_the_per_owner_pooling():
     """The case that used to be unrecoverable: three owners at one node. Their
-    per-side losses are pooled by owner before the scoreboard sees them, but the
-    fold's own steps still add up to the whole engagement.
+    losses are pooled by owner before the scoreboard sees them, but the fold's own
+    steps still name every side that fought and what each brought.
     """
     s = make_state([(0, 1, 10, 100), (1, 2, 11, 100), (2, 3, 6, 100)],
                    [(0, 1, 1), (0, 2, 1)])
@@ -392,9 +394,32 @@ def test_a_pile_ups_cost_survives_the_per_owner_pooling():
 
     landed = next(e for e in events if isinstance(e, turnfilm.Landed))
     assert len(landed.steps) == 2                 # 11 v 10, then the winner v 6
+    assert dict(landed.sides) == {1: 10, 2: 11, 3: 6}   # every side, once each
     # everyone brought 27 hulls between them, and only the survivors are left
     assert landed.destroyed == 27 - s.systems[0].ships
     assert landed.destroyed == sum(p.ships_lost for p in s.players.values())
+    # ...of which the label shows only what it cost whoever kept the ground
+    holder = s.systems[0].owner_id
+    assert landed.victor == holder
+    assert landed.cost == dict(landed.sides)[holder] - s.systems[0].ships
+    assert landed.cost == s.players[holder].ships_lost
+    assert landed.cost < landed.destroyed
+
+
+def test_the_label_is_the_victors_loss_not_the_wiped_out_garrisons():
+    """The complaint this replaced: 9 ships taking a 6-ship system read "−8",
+    which is almost all the defender's garrison — visible anyway as the count on
+    the node — and buried the 2 the attacker actually paid."""
+    s = make_state([(0, 0, 6, 100), (1, 2, 9, 100)], [(0, 1, 1)])
+    with no_jitter():
+        engine.apply_order(s, engine.Order(2, 1, 0, 9))
+        events: list[turnfilm.Event] = []
+        engine.end_turn(s, on_event=events.append)
+
+    landed = next(e for e in events if isinstance(e, turnfilm.Landed))
+    assert (landed.owner_id, landed.ships) == (2, 7)   # sqrt(81 - 36) rounds to 7
+    assert landed.destroyed == 8                        # 6 of them the garrison's
+    assert (landed.cost, landed.victor) == (2, 2)
 
 
 def test_a_landing_that_did_not_fight_cost_nothing():
@@ -402,13 +427,43 @@ def test_a_landing_that_did_not_fight_cost_nothing():
     losses to label — the same test that keeps them from drawing combat's burst."""
     landed = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=3,
                              owner_id=1, ships=9, prod_progress=0, steps=())
-    assert landed.destroyed == 0
+    assert landed.sides == ()
+    assert landed.destroyed == landed.cost == 0
+    assert landed.victor is None
 
 
-def test_a_clash_that_annihilates_reports_every_ship():
-    """Nobody holds open space, so matched fleets wipe each other out — and the
-    label has to say so rather than reading zero off the missing survivor."""
+def test_annihilation_charges_everyone_and_labels_nobody():
+    """Matched forces wipe each other out, at a system and in open space alike.
+    Every ship is charged, and there is no victor whose attrition the label could
+    be — so it says nothing, which is what the emptied board shows anyway."""
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.5, at=0.5, a=0, b=1,
-                             a_ships=7, b_ships=7, survivor=None, survivors=0,
-                             dead=(0, 1))
+                             a_ships=7, b_ships=7, survivor=None,
+                             survivor_owner=None, survivors=0, dead=(0, 1))
     assert clash.destroyed == 14
+    assert clash.cost == 0 and clash.victor is None
+
+    fold = turnfilm.Fold(attacker=2, attacker_ships=6, defender=1,
+                         defender_ships=6, winner=0, survivors=0)
+    landed = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=6,
+                             owner_id=0, ships=0, prod_progress=0, steps=(fold,))
+    assert landed.destroyed == 12
+    assert landed.cost == 0 and landed.victor is None
+
+
+def test_a_clash_charges_the_fleet_that_flew_on_for_what_it_lost():
+    """In open space the survivor is a fleet rather than a garrison, so the cost is
+    what it launched with less what is left flying — and the owner has to ride on
+    the event, since a fleet id cannot be resolved to a player from the board it
+    has already left."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100)], [(0, 1, 2)])
+    with no_jitter(), in_lane_battles():
+        engine.apply_order(s, engine.Order(1, 0, 1, 12))
+        engine.apply_order(s, engine.Order(2, 1, 0, 5))
+        events: list[turnfilm.Event] = []
+        engine.end_turn(s, on_event=events.append)
+
+    clash = next(e for e in events if isinstance(e, turnfilm.Clashed))
+    assert clash.victor == 1                    # the 12 beat the 5
+    assert clash.cost == 12 - clash.survivors
+    assert clash.cost == s.players[1].ships_lost
+    assert clash.destroyed == clash.cost + 5
