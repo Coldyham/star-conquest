@@ -15,7 +15,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 
 import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, engine, mapgen, replay  # noqa: E402
+from starconquest import config, engine, mapgen, replay, turnfilm  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.settings import Challenge, Settings  # noqa: E402
@@ -1777,7 +1777,7 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
     try:
         log = _watchable_log(tmp_path, monkeypatch)
         state, ui, _ = main.open_replay(log.encoded(), Settings())
-        states, fog, live = main.open_history(state, ui, log)
+        states, fog, events, live = main.open_history(state, ui, log)
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
         assert ui.history_max == log.turn_count
@@ -1809,5 +1809,78 @@ def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
             assert main.open_replay(blob, Settings()) is None
         empty = replay.new_log(Settings(seed=1), 1)
         assert main.open_replay(empty.encoded(), Settings()) is None
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Skipping a turn playback
+# --------------------------------------------------------------------------- #
+
+
+def _a_film() -> turnfilm.Film:
+    """A film with something in it, so `plays` and the beats are real."""
+    return turnfilm.film([
+        turnfilm.Advanced(((0, 2),)),
+        turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=3,
+                        owner_id=1, ships=3, prod_progress=0, steps=()),
+    ])
+
+
+def test_a_press_skips_a_live_film_and_does_nothing_else():
+    """The press is consumed. The footer is still drawn during a playback (the
+    board's winner stays None until the turn closes), so a press that fell through
+    could resolve a second turn underneath the one still being drawn."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.film_ms = _a_film(), 100.0
+        ui.end_turn_rect = (0, 0, 0, 0)   # render takes the button away meanwhile
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r")
+        assert game_input.handle_event(ev, state, ui) is None
+        assert ui.film is None and ui.film_ms == 0.0
+        # ...and a click is swallowed rather than selecting anything
+        state, ui = _setup()
+        ui.film = _a_film()
+        assert _click(state, ui, 0) is None
+        assert ui.film is None
+        assert ui.selected is None and ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_a_press_in_history_drops_the_film_and_still_seeks():
+    """In review the film is a transition and the controls are a scrubber, so the
+    press must fall through — swallowing it would mean a drag never started."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.history_max, ui.history_turn = True, 8, 3
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT, mod=0, unicode="")
+        game_input.handle_event(ev, state, ui)
+        assert ui.film is None            # dropped
+        assert ui.history_turn == 4       # ...and the seek still happened
+        assert ui.playing is False
+    finally:
+        pygame.quit()
+
+
+def test_hovering_or_zooming_leaves_a_film_running():
+    """Only a press skips. A wheel zoom or a mouse move must not throw away the
+    playback you are watching."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        pos = ui.view.to_screen(state.systems[0].pos)
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=pos,
+                                                   rel=(1, 1), buttons=(0, 0, 0)),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, y=1, x=0,
+                                                   flipped=False, which=0),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=pos,
+                                                   button=1), state, ui)
+        assert ui.film is not None
     finally:
         pygame.quit()

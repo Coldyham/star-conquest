@@ -192,6 +192,30 @@ LANE_PICK_DIST = 10         # px: click within this of a queued order's lane sel
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
+# Turn playback (see `turnfilm.py`): the optional animated end of turn, off unless
+# switched on (`webstore.animate_turns`). Presentation only — none of it can move a
+# result and none of it is recorded. Durations are per *beat*; the events inside a
+# beat are spread across it, so a turn with forty orders compresses rather than
+# running long and a whole film is bounded by these numbers.
+FILM_LAUNCH_MS = 220     # ms: fleets appear at their source and its garrison drops
+FILM_MOVE_MS = 560       # ...and glide one turn's step, clashes firing where they meet
+FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in the
+                         # engine's sequence with no pause of its own, which is all
+                         # this cut shows; the progress ring already draws the tick,
+                         # so raising this only adds a moment on it
+FILM_COMBAT_MS = 300     # ms: arrival fights, one node after another (and, at a
+                         # multi-owner pile-up, subdivided again across its fold)
+FILM_END_MS = 250        # ms held on the resolved board. Long enough to read the
+                         # production tick, which lands last in the current ordering
+FILM_FLASH_MS = 260      # ms a fight's burst stays up (a film always outlives its
+                         # last cue by at least this, so the final burst isn't cut)
+FILM_BURST_R = 22        # px a burst reaches past whatever it marks
+FILM_BURST_W = 2         # px: its stroke
+FILM_BURST_SPOKES = 6    # radial strokes in one
+FILM_ARRIVAL_GAP = 4     # px between a landed fleet's tip and its node, so the
+                         # garrison count underneath stays readable
+FILM_CAPTION_GAP = 22    # px clearance between the phase caption and the map's floor
+
 # Send popup: the little action panel that opens on the map when a destination
 # is picked (commit send-all, then retune count / forward / cancel).
 SEND_POPUP_W = 184          # px: panel width
@@ -266,6 +290,7 @@ _SCALABLE = (
     "ARROWHEAD_SIZE", "ARROW_GAP", "RULE_CHEVRON_SIZE", "RULE_CHEVRON_GAP",
     "RULE_LABEL_GAP",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
+    "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",

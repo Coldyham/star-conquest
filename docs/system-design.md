@@ -259,6 +259,98 @@ the same lane on the same turn. Measured over 30 four-player games, as
 0.5% → (49%, 58); 1% → (79%, 36); 2% → (95%, 13). The two settings are close to
 mutually exclusive at the top of the growth slider.
 
+## Animated end of turn (`turnfilm.py`)
+
+The turn phase order is deliberate and load-bearing, and it was invisible. That is
+the whole motivation: a change of real consequence — moving `_production` ahead of
+`_resolve_arrivals`, so a hull finished this turn defends the system it was built
+at — left no trace on screen, and nothing distinguished "fleets moved, then fought"
+from "everything happened at once". So this is a legibility feature, not eye candy,
+and every decision below follows from that.
+
+**It animates the past.** `end_turn` still resolves a turn atomically and the live
+board is always fully resolved; the film is a playback onto a deep copy. That was
+chosen over interpolating the engine mid-phase because it gives away nothing: no
+state is observable mid-flight, so no invariant can be caught broken, skipping is
+trivially correct at any instant, and `RULES_VERSION` never moves. The alternative
+— pausing the engine between phases — would have put a wall clock inside the pure
+core and made every seeded test's timing load-bearing.
+
+**Events carry results, not rules.** `Advanced` carries each fleet's *new*
+`turns_remaining` rather than meaning "decrement", and `Landed` carries the node's
+new owner and garrison rather than the forces that fought for it. The alternative
+is an applier that re-derives outcomes, i.e. the rules written down twice, and the
+first version of anything like that drifts. Because applying is pure assignment,
+`Reel` can assert something much stronger than "looks right": it never touches
+`GameState.rng`, which is checked directly, so a film cannot invent a fight.
+
+**Why its own module rather than more of `engine.py`.** The applier has to be in
+the pure core, because it is the one piece of code both the shell animates with and
+the tests assert on — in `main.py` the oracle test would need pygame, and
+`tests/sim` is deliberately display-free. `fog` is the precedent in the other
+direction: presentation-only, pure, and never consulted by the engine. `turnfilm`
+is the same deal reversed — the engine writes into it and never reads it back.
+
+**The riskiest line in the feature is a sort key.** `_lane_crossings` already
+solved for the sub-turn instant two fleets meet and used it only to order the
+fights; surfacing it costs nothing. But it appended `(when, a_i, b_i)` and called
+`crossings.sort()`, so ties broke on fleet order — order of launch. Widening that
+tuple to carry the crossing *position* would have reordered simultaneous crossings,
+and since order decides which fight is dealt the turn's dice first, that silently
+moves every stored replay with nothing prompting a version bump. Disjoint
+simultaneous pairs make no difference to who wins, which is exactly why it would
+have gone unnoticed: the damage is to the dice stream, not the outcome. Hence an
+explicit `key=lambda c: (c.when, c.a, c.b)`, and a test that pins it.
+
+**The garrison ticking up at the start is the lesson, not a glitch.**
+`_draw_systems` shows deployable ships (garrison minus `Ui.committed`) for your own
+systems, and `resolve_turn` clears the pending orders, so a film frame always has
+an empty queue and shows the real garrison. The last live frame therefore reads
+`12 − 5 = 7` and the film opens on `12`, ticking back to `7` as each launch
+applies. That step *up* was initially read as a bug and then kept: the deduction at
+launch is one of the rules the animation exists to show. `FILM_LAUNCH_MS = 0` is
+the one-constant retreat if it ever grates.
+
+**Production gets no dwell, and needs no drawing code.** `FILM_PRODUCE_MS` is 0, so
+production lands at its true point in the sequence without a pause. In the current
+ordering it is genuinely the last thing that happens, so numbers settling at the end
+is accurate rather than a compromise — and the progress ring `_draw_systems` already
+draws animates the tick for free. The consequence worth sizing: that tick is the
+*last* visible change, so `FILM_END_MS` is what makes it readable at all, which is
+why it is 250ms rather than the 120ms first drafted.
+
+**Fog is the destination turn's, in both scenes.** Holding the earlier fog would
+have an inbound fleet pop into existence halfway down its lane, which is precisely
+the discontinuity the feature exists to remove. The framing that makes it
+defensible: a film is a report on a turn that has already happened, drawn with the
+fog of the board you are about to be handed. The cost is real but narrow —
+`visible` is not monotone, so a system lost this turn draws as a grey "?" while the
+fight that took it plays out. That needs `sight = 1` and a frontier system with no
+surviving owned neighbour; it cannot arise in the default fog-off config.
+
+**The scrubber advances at a transition's end, not its start.** The top bar reads
+the board being drawn, so a leading playhead would have the scrubber and the turn
+counter disagree for a second at a time. A position readout that clicks over on
+arrival is the better of the two, and it also means `history_states[i]` is never
+mutated — a transition gets its own copy.
+
+**No in-game toggle.** `_draw_footer_buttons` is squeeze-ranked, dropping the least
+essential controls when the strip is narrow, so a once-set display preference would
+rank below Clear and vanish exactly on the phone where it matters most — while
+costing a rank slot for every button that stayed. The menu checkbox is enough, and
+the immediate needs are already served: any press skips a playback, and P pauses
+one. Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
+hung 6px out of the fixed 560x496 panel and failed
+`test_tab_content_stays_inside_the_panel`.
+
+**What is deliberately not animated.** The AI's decision phase (invisible by
+nature; the orders show up as launches). Camera moves toward the action, which would
+fight `ui.view` — the one thing `input` owns — and put mutation in the film path.
+Per-fight loss labels, which the fold steps now make derivable but which nothing yet
+asks for. And `Player.ships_lost` rides on the closing event as a whole-table
+snapshot rather than per-engagement deltas, which is what keeps `_record_losses` and
+the rest of `combat` out of this entirely.
+
 ## Map viewport margins
 
 The floor at `config.node_clearance()` exists because a node's circle is

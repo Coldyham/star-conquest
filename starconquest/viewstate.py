@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import config
+from . import config, turnfilm
 from .geometry import WorldView
 from . import model
 from .model import GameState, Order
@@ -141,6 +141,14 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
+    # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
+    # being replayed and `film_ms` where in it we are — the read-only half, so a
+    # frame stays a pure function of GameState + Ui + time. `film_ms` is advanced by
+    # main from the loop's own `dt` rather than the wall clock, so a test can drive
+    # a frame by setting it. The *board* being mutated is a main-loop local, exactly
+    # like the reconstructed history boards, and reaches render as `state`.
+    film: Optional[turnfilm.Film] = None
+    film_ms: float = 0.0
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -288,6 +296,13 @@ class Ui:
     zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- camera ------------------------------------------------------------- #
+    def stop_film(self) -> None:
+        """Abandon a playback. Main drops its reel whenever there is no film, so
+        this is the whole of "skip" — safe at any moment, because the turn it was
+        showing has already been resolved."""
+        self.film = None
+        self.film_ms = 0.0
+
     def reset_view(self, state: GameState) -> None:
         """Recompute the camera's resting position: framed to just the systems
         seen so far, or the whole map once there is nothing left to hide (the

@@ -19,7 +19,8 @@ from typing import Optional
 import pygame
 
 from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, share, softkeyboard, viewstate, webstore)
+                          replay, share, softkeyboard, turnfilm, viewstate,
+                          webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -365,7 +366,7 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
 
 
 def open_history(state: GameState, ui: Ui, log: GameLog):
-    """Enter history review on ``log``, returning ``(states, fog, live_fog)``.
+    """Enter history review on ``log``, returning ``(states, fog, events, live_fog)``.
 
     Shared by the H key and by a watched replay, which differ only in how they
     came by the log — and must not differ in what review then looks like.
@@ -380,9 +381,9 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     landing on the final board instead gives away the ending and leaves the only
     way to watch it being to drag all the way back first.
     """
-    history_states, history_fog = build_history(ui, log)
+    history_states, history_fog, history_events = build_history(ui, log)
     if not history_states:
-        return [], [], None
+        return [], [], [], None
     live_fog = (set(ui.visible), set(ui.seen), dict(ui.player_intel))
     ui.history = True
     ui.playing = False
@@ -395,11 +396,12 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # changes rather than as a position already arrived at.
     ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
-    return history_states, history_fog, live_fog
+    return history_states, history_fog, history_events, live_fog
 
 
 def build_history(ui: Ui, log: GameLog) -> tuple[
-        list[GameState], list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]]]:
+        list[GameState], list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]],
+        list[list[turnfilm.Event]]]:
     """Reconstruct one board (and the human's fog memory) per recorded turn.
 
     Replays the log once, deep-copying the state at the opening position and after
@@ -414,14 +416,21 @@ def build_history(ui: Ui, log: GameLog) -> tuple[
     fog: list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]] = []
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}
+    events: list[turnfilm.Event] = []
+    buckets: list[list[turnfilm.Event]] = []
 
     def capture(s: GameState) -> None:
         states.append(copy.deepcopy(s))
+        # `reconstruct` calls this at the opening position and once after each
+        # turn, before the next one starts, which is exactly the cut a per-turn
+        # film needs — so the events since the last cut are this turn's.
+        buckets.append(events.copy())
+        events.clear()
         visible = _accumulate_fog(s, ui.human_id, seen, intel)
         fog.append((set(visible), set(seen), dict(intel)))
 
-    replay.reconstruct(log, on_turn=capture)
-    return states, fog
+    replay.reconstruct(log, on_turn=capture, on_event=events.append)
+    return states, fog, buckets
 
 
 def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState, Ui]:
@@ -458,13 +467,18 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
 
 
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
-                 settings: Settings | None = None) -> None:
+                 settings: Settings | None = None) -> turnfilm.Reel | None:
     """Advance one turn. In autoplay the human seat is also driven by the AI.
 
     The human orders actually applied are recorded into ``log`` and the file is
     rewritten, so the on-disk log always matches the live game (and a crash loses
     at most the turn in progress). Given ``settings``, a win the human earned is
     also filed as their best on this setup, so replaying a challenge can show it.
+
+    Returns a `turnfilm.Reel` when the turn is to be played back — the board it
+    started from, plus what happened to it — and None otherwise. The live state is
+    resolved either way, and completely, before this returns: a film is a report on
+    a turn already finished, never on one in progress.
     """
     was_over = state.winner is not None
     was_defeated = state.is_defeated(ui.human_id)
@@ -473,7 +487,16 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide)
+    # One gate, here rather than at the three call sites. Never under autoplay —
+    # there is nothing you decided to have explained — and never while
+    # fast-forwarding, the whole point of which is to skip. The preference is read
+    # once a turn, like `share.due`, and never in `render`, where reading the store
+    # would cost a DOM call every frame.
+    filming = not ui.autoplay and not ui.fast_forward and webstore.animate_turns()
+    before = turnfilm.copy_board(state) if filming else None
+    events: list[turnfilm.Event] = []
+    record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
+                             on_event=events.append if filming else None)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
@@ -507,6 +530,14 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     if (state.winner is not None and not was_over) or (
             state.is_defeated(ui.human_id) and not was_defeated):
         ui.reset_view(state)
+
+    if before is None:
+        return None
+    film = turnfilm.film(events)
+    if not film.plays:      # a turn with nothing to watch isn't worth a pause
+        return None
+    ui.film, ui.film_ms = film, 0.0
+    return turnfilm.Reel(before, film)
 
 
 def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
@@ -624,8 +655,10 @@ async def main() -> None:
     confirm_rewind = False  # showing the destructive mid-game rewind confirm modal
     # History-review snapshots, built on entering history mode and dropped on exit;
     # `live_fog` stashes the live fog triple so it survives a history visit intact.
+    reel: turnfilm.Reel | None = None   # the turn being played back, if any
     history_states: list[GameState] = []
     history_fog: list[tuple[set[int], set[int], dict[int, tuple[int, int, float]]]] = []
+    history_events: list[list[turnfilm.Event]] = []   # index-aligned with the above
     live_fog: tuple[set[int], set[int], dict[int, tuple[int, int, float]]] | None = None
     auto_accum = 0
     play_accum = 0
@@ -657,7 +690,7 @@ async def main() -> None:
                 else:
                     state, ui, log = opened
                     current_seed = log.seed
-                    history_states, history_fog, live_fog = open_history(state, ui, log)
+                    history_states, history_fog, history_events, live_fog = open_history(state, ui, log)
                     # Nothing to review means nothing to watch: fall back to the
                     # menu rather than dropping into a board with no history.
                     scene = "game" if history_states else "menu"
@@ -721,7 +754,7 @@ async def main() -> None:
                 if do_rewind:
                     assert log is not None and ui is not None   # confirm_rewind ⇒ in-game
                     state, ui = apply_rewind(log, settings, ui.history_turn)
-                    history_states, history_fog, live_fog = [], [], None
+                    history_states, history_fog, history_events, live_fog = [], [], [], None
                     confirm_rewind = False
                     auto_accum = 0
                 continue
@@ -802,7 +835,7 @@ async def main() -> None:
                 if ui.can_post(state):
                     ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
-                resolve_turn(state, ui, log, settings)
+                reel = resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step
             elif action == "toggle_play":
                 # In history mode this drives the replay scrubber; starting it while
@@ -838,7 +871,7 @@ async def main() -> None:
                     pass
                 current_seed = log.seed
                 state, ui = resume_game(log, settings)
-                history_states, history_fog, live_fog = [], [], None
+                history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":
                 # Route mode: multi-select a group of systems and forward them all
@@ -855,12 +888,12 @@ async def main() -> None:
                     ui.history = False
                     ui.dragging_scrubber = False
                     ui.playing = False   # replay playback must not carry into live play
-                    history_states, history_fog = [], []
+                    history_states, history_fog, history_events = [], [], []
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
                 elif log is not None and log.turn_count > 0:
-                    history_states, history_fog, entered = open_history(state, ui, log)
+                    history_states, history_fog, history_events, entered = open_history(state, ui, log)
                     if entered is not None:
                         live_fog = entered
             elif action == "rewind":
@@ -874,24 +907,62 @@ async def main() -> None:
                         pass
                     current_seed = log.seed
                     state, ui = resume_game(log, settings)
-                    history_states, history_fog, live_fog = [], [], None
+                    history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
                 else:
                     confirm_rewind = True   # mid-game rewind is destructive: confirm
 
         if scene == "game":
             assert state is not None and ui is not None and log is not None
-            if (ui.history and ui.playing
+            # A playback holds the board for its duration, and nothing below may
+            # resolve or seek while it runs — under play mode the next turn would
+            # otherwise be resolved out from under the one still being drawn.
+            # `ui.film` and `reel` are kept in lockstep, so the skip that clears
+            # the film (in `input`) also drops the board it was playing onto.
+            if reel is not None and ui.film is None:
+                reel = None                 # skipped: input cleared the film
+            elif reel is None and ui.film is not None:
+                ui.film = None              # unreachable, but a stranded film would
+                                            # hide the End Turn button for good
+            elif reel is not None and not confirm_quit and not confirm_rewind:
+                ui.film_ms += dt
+                reel.run_to(ui.film_ms)
+                if ui.film_ms >= ui.film.total_ms:
+                    if ui.history:
+                        # The scrubber moves at the film's *end*, so it and the top
+                        # bar's turn counter (which reads the board being drawn)
+                        # never disagree mid-transition.
+                        ui.history_turn = min(ui.history_max, ui.history_turn + 1)
+                        if ui.history_turn >= ui.history_max:
+                            ui.playing = False
+                    ui.stop_film()
+                    reel = None
+                    play_accum = 0
+
+            if (reel is None and ui.history and ui.playing
                     and not confirm_quit and not confirm_rewind):
-                # Replay playback: step the scrubber one turn per PLAY_MS, stopping when
-                # it reaches the final recorded turn (like a video reaching the end).
+                # Replay playback: one turn per PLAY_MS, stopping when it reaches
+                # the final recorded turn (like a video reaching the end). With
+                # turn animation on, the step becomes a film and the scrubber
+                # advances when that finishes instead of here.
                 play_accum += dt
                 if play_accum >= PLAY_MS:
                     play_accum = 0
-                    ui.history_turn = min(ui.history_max, ui.history_turn + 1)
-                    if ui.history_turn >= ui.history_max:
-                        ui.playing = False
-            elif (state.winner is None
+                    nxt = ui.history_turn + 1
+                    if (nxt <= ui.history_max and nxt < len(history_events)
+                            and history_events[nxt] and webstore.animate_turns()):
+                        film = turnfilm.film(history_events[nxt])
+                        if film.plays:
+                            ui.film, ui.film_ms = film, 0.0
+                            # a copy, so scrubbing back to this turn still finds
+                            # the board it really was
+                            reel = turnfilm.Reel(
+                                turnfilm.copy_board(history_states[ui.history_turn]), film)
+                    if reel is None:
+                        ui.history_turn = min(ui.history_max, nxt)
+                        if ui.history_turn >= ui.history_max:
+                            ui.playing = False
+            elif (reel is None and state.winner is None
                     and not confirm_quit and not confirm_rewind and not ui.history
                     and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
@@ -903,7 +974,7 @@ async def main() -> None:
                     play_accum += dt
                     if play_accum >= step_delay(ui, PLAY_MS):
                         play_accum = 0
-                        resolve_turn(state, ui, log, settings)
+                        reel = resolve_turn(state, ui, log, settings)
 
         if scene == "menu":
             # Soft-keyboard typing arrives outside the SDL event queue, so the
@@ -918,8 +989,16 @@ async def main() -> None:
                 # Draw the reconstructed past board with the fog for that turn — or, for
                 # a finished game, everything revealed. `render` just draws the state and
                 # fog it's handed; it neither knows nor cares the board is historical.
+                #
+                # Mid-transition it is handed the film's board instead, and the fog of
+                # the turn being moved *to*: a film is a report on a turn that has
+                # already happened, and holding the earlier fog would have an inbound
+                # fleet pop into existence halfway down its lane.
                 i = max(0, min(ui.history_turn, len(history_states) - 1))
                 view_state = history_states[i]
+                if reel is not None:
+                    view_state = reel.board
+                    i = min(i + 1, len(history_fog) - 1)
                 if ui.history_reveal:
                     all_ids = set(view_state.systems)
                     ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
@@ -927,7 +1006,10 @@ async def main() -> None:
                     ui.visible, ui.seen, ui.player_intel = history_fog[i]
                 render.draw(screen, view_state, ui)
             else:
-                render.draw(screen, state, ui)
+                # Live play, and the same substitution: `resolve_turn` has already
+                # refreshed the fog, so a film runs under the fog of the board it is
+                # about to hand back — the same choice as above.
+                render.draw(screen, reel.board if reel is not None else state, ui)
             if confirm_rewind:   # only ever set in-game, so ui is live here
                 render.draw_confirm_rewind(screen, ui.history_turn)
         if confirm_quit:

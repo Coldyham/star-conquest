@@ -9,7 +9,7 @@ import math
 
 import pygame
 
-from . import config, fog, paths, uifont
+from . import config, fog, paths, turnfilm, uifont
 from .geometry import lerp
 from .model import GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -159,6 +159,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_route_preview(surface, state, ui)  # the route plan being composed
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    _draw_film_flashes(surface, state, ui)
     _draw_node_names(surface, state, ui)
     if not ui.history and ui.drag_active and ui.drag_src is not None:
         _draw_drag(surface, state, ui)
@@ -168,6 +169,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         # the send popup draws last of the map layer so nodes/fleets never occlude
         # it (it must stay visible and clickable); it early-outs when closed
         _draw_send_popup(surface, state, ui)
+    _draw_film_caption(surface, ui)
     surface.set_clip(None)
     if not ui.history:
         _draw_zoom_controls(surface, ui)
@@ -313,8 +315,20 @@ def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
     return offset
 
 
+def _travel(ui: Ui) -> float:
+    """How far through the turn's step to draw the fleets.
+
+    1.0 unless a film is mid-move, which is what makes this a no-op for the live
+    board and for a history snapshot: both already carry the schedule they mean.
+    """
+    if ui.film is None:
+        return 1.0
+    return ui.film.travel(ui.film_ms)
+
+
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     offsets = _lane_offsets(state)
+    travel = _travel(ui)
     for i, f in enumerate(state.fleets):
         # your own fleets always show; an enemy fleet shows only where at least
         # one end of its lane is in full view, so rival movements appear only as
@@ -323,12 +337,19 @@ def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
             continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
-        wp = lerp(a, b, f.progress())
+        wp = lerp(a, b, f.progress_at(travel))
         x, y = ui.view.to_screen(wp)
         dx, dy = b[0] - a[0], b[1] - a[1]
         length = math.hypot(dx, dy) or 1.0
         ux, uy = dx / length, dy / length
         px, py = -uy, ux  # perpendicular
+        # A fleet that has reached its destination sits on the node and would
+        # cover its garrison count, so hold it off the rim. Only a film ever draws
+        # one: the engine takes an arrived fleet off the board in the same turn.
+        if f.progress_at(travel) >= 1.0:
+            gap = (config.node_radius(state.systems[f.dest_id].production)
+                   + config.FILM_ARRIVAL_GAP)
+            x, y = int(x - ux * gap), int(y - uy * gap)
         # split stacked fleets, and sit the count clear of the triangle — both
         # offsets scale, so the label never lands on the glyph on a big display
         spread = config.FLEET_SIZE + config.s(3)
@@ -864,6 +885,73 @@ def _draw_return_glyph(surface, rect, color) -> None:
     pygame.draw.lines(surface, color, False, [(x + a, by - a), (x, by), (x + a, by + a)], lw)
 
 
+def _draw_burst(surface, center, color, phase: float) -> None:
+    """A fight, marked where it happened.
+
+    Neither of this file's two established glyphs: a filled wedge means real ships
+    and an open chevron means an intention, so a fight is an expanding open ring
+    with radial spokes — it cannot be mistaken for either, nor for a node.
+    ``phase`` runs 0..1 over `config.FILM_FLASH_MS`, so it thins as it grows.
+    """
+    reach = config.FILM_BURST_R * (0.35 + 0.65 * phase)
+    width = max(1, round(config.FILM_BURST_W * (1.0 - phase * 0.5)))
+    cx, cy = center
+    pygame.draw.circle(surface, color, (int(cx), int(cy)), int(reach), width)
+    for i in range(config.FILM_BURST_SPOKES):
+        angle = math.tau * i / config.FILM_BURST_SPOKES + phase
+        ux, uy = math.cos(angle), math.sin(angle)
+        pygame.draw.line(
+            surface, color,
+            (cx + ux * reach, cy + uy * reach),
+            (cx + ux * (reach + config.FILM_BURST_R * 0.4),
+             cy + uy * (reach + config.FILM_BURST_R * 0.4)), width)
+
+
+def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
+    """Mark this turn's fights while they are still fresh.
+
+    Purely derived from the film and the clock — nothing is stored and nothing
+    expires, in the same spirit as the rule conveyor's phase.
+    """
+    if ui.film is None:
+        return
+    for event in ui.film.flashes(ui.film_ms):
+        cue = [ms for ms, e in ui.film.cues if e is event]
+        phase = min(1.0, max(0.0, (ui.film_ms - cue[0]) / max(1, config.FILM_FLASH_MS)))
+        if isinstance(event, turnfilm.Clashed):
+            if event.low_id not in ui.visible and event.high_id not in ui.visible:
+                continue
+            a = state.systems[event.low_id].pos
+            b = state.systems[event.high_id].pos
+            center = ui.view.to_screen(lerp(a, b, event.at))
+            _draw_burst(surface, center, config.COLOR_TEXT, phase)
+        else:  # a Landed: concentric on the node, expanding past its rim
+            if event.node_id not in ui.visible:
+                continue
+            node = state.systems[event.node_id]
+            center = ui.view.to_screen(node.pos)
+            color = (config.COLOR_TEXT if event.owner_id == event.was_owner
+                     else config.player_color(event.owner_id))
+            _draw_burst(surface, center, color, phase)
+
+
+def _draw_film_caption(surface, ui: Ui) -> None:
+    """Name the phase being shown. A gliding fleet does not say which part of the
+    turn it belongs to, and that is the whole point of the animation.
+
+    On the map layer rather than the top bar: a caption there would shift the
+    measured scoreboard in and out as its width changed.
+    """
+    if ui.film is None:
+        return
+    label = ui.film.label(ui.film_ms)
+    if not label:
+        return
+    x, y, w, h = config.play_rect()
+    _label_pill(surface, _fonts()["small"], label, config.COLOR_TEXT_DIM,
+                (x + w // 2, y + h - config.FILM_CAPTION_GAP))
+
+
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:
     valid_dests = set()
     if ui.selected is not None:
@@ -1114,7 +1202,10 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _draw_footer_buttons(surface, state, ui, by)
         return
 
-    ui.end_turn_rect = (br.x, br.y, br.w, br.h)
+    # A film is a playback of a turn already resolved, so the button that would
+    # resolve the next one goes away for its duration — the same take-it-away
+    # rather than guard-it treatment route mode gets just above.
+    ui.end_turn_rect = (0, 0, 0, 0) if ui.film is not None else (br.x, br.y, br.w, br.h)
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
     pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:

@@ -119,6 +119,20 @@ def _over_side_panel(pos) -> bool:
 
 
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    # A turn playback is running: any press skips it. Checked before everything
+    # else, and the two scenes differ on purpose.
+    #
+    # In live play the press is *consumed*. The footer strip is still drawn during
+    # a film (the film board's winner stays None until the turn closes), so a
+    # press that fell through could resolve a second turn underneath a running
+    # one. In history the press falls through instead, because there the film is
+    # a transition between turns and the controls are a scrubber: swallowing it
+    # would mean a drag never started.
+    if ui.film is not None and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+        ui.stop_film()
+        if not ui.history:
+            return None
+
     # History mode is a modal review scene (entered mid-game or after a win):
     # scrub / rewind / exit only, no board interaction. Checked first so it wins
     # over the game-over branch when reviewing a finished match.

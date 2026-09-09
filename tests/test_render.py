@@ -15,7 +15,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 import pytest  # noqa: E402
 
-from starconquest import ai, config, engine, fog, mapgen, render, starnames  # noqa: E402
+from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.model import Order  # noqa: E402
 from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
@@ -764,4 +764,94 @@ def test_every_star_name_fits_the_info_panel():
     finally:
         _desktop_scale()
         render._FONTS.clear()
+        pygame.quit()
+
+
+def _filmed_turn(state, ui):
+    """Resolve one turn on a copy, returning the reel the shell would draw."""
+    before = turnfilm.copy_board(state)
+    events: list[turnfilm.Event] = []
+    engine.end_turn(state, decide=ai.decide, on_event=events.append)
+    film = turnfilm.film(events)
+    ui.film, ui.film_ms = film, 0.0
+    return turnfilm.Reel(before, film)
+
+
+def test_a_fleet_glides_rather_than_jumping():
+    """Two moments inside the move beat must draw different pixels — that is the
+    whole feature. Note there is no clock to monkeypatch: `film_ms` is a `Ui`
+    field, so a test drives a frame by setting it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        reel = None
+        for _ in range(30):     # play on until a turn actually moves something
+            reel = _filmed_turn(state, ui)
+            if any(b.kind == "move" for b in reel.film.beats):
+                break
+            reel.run()
+        move = next(b for b in reel.film.beats if b.kind == "move")
+
+        def frame(ms: float) -> bytes:
+            reel.run_to(ms)          # as the loop does: advance, then draw
+            ui.film_ms = ms
+            render.draw(screen, reel.board, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        # early in the beat the fleets are barely off their sources; late in it
+        # they have covered a whole turn's step
+        assert frame(move.start + 1) != frame(move.end - 1)
+    finally:
+        pygame.quit()
+
+
+def test_a_film_frame_draws_in_every_beat():
+    """Every beat, plus the hold at the end, has to survive being drawn — bursts,
+    caption, landed fleets held off their node, the lot."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(5, num_nodes=16, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        drawn = 0
+        for _ in range(40):
+            reel = _filmed_turn(state, ui)
+            ms = 0.0
+            while ms <= reel.film.total_ms:
+                reel.run_to(ms)
+                ui.film_ms = ms
+                render.draw(screen, reel.board, ui)
+                drawn += 1
+                ms += 24.0
+            reel.run()
+            ui.stop_film()
+        assert drawn > 100
+    finally:
+        pygame.quit()
+
+
+def test_end_turn_is_unreachable_while_a_film_plays():
+    """Taking the button away rather than guarding the action, the way route mode
+    does — a press during a playback must not be able to resolve another turn."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(7, num_nodes=14, num_players=2)
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0
+        reel = _filmed_turn(state, ui)
+        render.draw(screen, reel.board, ui)
+        assert ui.end_turn_rect[2] == 0
+        ui.stop_film()
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0      # ...and comes straight back
+    finally:
         pygame.quit()

@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Callable, Iterable, NamedTuple, Optional
 
-from . import combat, config
+from . import combat, config, turnfilm
 from .model import Fleet, GameState, Order, lane_key
 
 # What version of the *rules* a game is played under, stamped onto every log
@@ -130,6 +130,7 @@ def end_turn(
     human_orders: Optional[list[Order]] = None,
     decide: Optional[DecideFn] = None,
     script: Optional[TurnRecord] = None,
+    on_event: Optional[turnfilm.EventFn] = None,
 ) -> TurnRecord:
     """Resolve one turn with simultaneous decision-making.
 
@@ -145,18 +146,25 @@ def end_turn(
     if state.winner is not None:
         return TurnRecord()
 
+    watch = turnfilm.watcher(on_event)
+    watch.open(state)
+
     orders = (list(script.orders) if script is not None
               else _collect_orders(state, human_orders, decide))
     for order in orders:  # order-independent: each system has a single owner
-        apply_order(state, order)
+        watch.launched(state, apply_order(state, order))
 
     dice = _Dice(state.rng, script.dice if script is not None else None)
     _advance_fleets(state)
-    _resolve_lane_battles(state, dice)
-    _resolve_arrivals(state, dice)
+    watch.advanced(state)
+    _resolve_lane_battles(state, dice, watch)
+    _resolve_arrivals(state, dice, watch)
+    watch.mark(state)
     _production(state)
+    watch.produced(state)
     _check_win(state)
     state.turn += 1
+    watch.ended(state)
     return TurnRecord(orders, dice.drawn)
 
 
@@ -261,7 +269,7 @@ def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[_Cro
     return crossings
 
 
-def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
+def _resolve_lane_battles(state: GameState, dice: _Dice, watch: turnfilm.Watch) -> None:
     """Fight the fleets that actually meet in transit (opt-in via IN_LANE_BATTLES).
 
     Fleets in transit normally never interact. When enabled, two enemy fleets
@@ -291,21 +299,25 @@ def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
             if a_i in destroyed or b_i in destroyed:
                 continue  # killed at an earlier crossing this same turn
             a, b = state.fleets[a_i], state.fleets[b_i]
+            a_ships, b_ships = a.ships, b.ships
             winner, survivors = combat.resolve_lane_clash(state, a, b, dice)
             if winner == a.owner_id:
-                a.ships = survivors
+                a.ships, survivor, dead = survivors, a, (b,)
                 destroyed.add(b_i)
             elif winner == b.owner_id:
-                b.ships = survivors
+                b.ships, survivor, dead = survivors, b, (a,)
                 destroyed.add(a_i)
             else:  # matched forces, and no ground to break the tie
+                survivor, dead = None, (a, b)
                 destroyed.update((a_i, b_i))
+            watch.clashed(crossing, lane, a, b, a_ships, b_ships,
+                          survivor, survivors, dead)
 
     if destroyed:
         state.fleets = [f for i, f in enumerate(state.fleets) if i not in destroyed]
 
 
-def _resolve_arrivals(state: GameState, dice: _Dice) -> None:
+def _resolve_arrivals(state: GameState, dice: _Dice, watch: turnfilm.Watch) -> None:
     arrived: dict[int, list[Fleet]] = defaultdict(list)
     still_flying: list[Fleet] = []
     for fleet in state.fleets:
@@ -316,7 +328,11 @@ def _resolve_arrivals(state: GameState, dice: _Dice) -> None:
     state.fleets = still_flying
 
     for node_id, fleets in arrived.items():
-        combat.resolve_arrival(state, node_id, fleets, dice)
+        node = state.systems[node_id]
+        was_owner, was_ships = node.owner_id, node.ships
+        folds = watch.folds()
+        combat.resolve_arrival(state, node_id, fleets, dice, on_step=folds)
+        watch.landed(state, node_id, fleets, was_owner, was_ships, folds)
 
 
 def _production(state: GameState) -> None:

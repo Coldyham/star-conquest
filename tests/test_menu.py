@@ -774,3 +774,21 @@ def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_
         assert "private" in ms.status and not ms.status_ok
     finally:
         pygame.quit()
+
+
+def test_animate_turns_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """The second Basic-tab row that is not a Settings field. It must not move the
+    setup: a display preference on `Settings` would change `challenge_key()` for
+    every map that has ever existed and travel in every shared link."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.animate_turns() is False
+        _click_key(screen, ms, settings, "animate_turns")
+        assert menu.webstore.animate_turns() is True
+        _click_key(screen, ms, settings, "animate_turns")
+        assert menu.webstore.animate_turns() is False
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
