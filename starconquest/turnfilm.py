@@ -197,7 +197,21 @@ class Landed:
 class Produced:
     """Systems accrued toward their next hull, and some finished one."""
 
-    ticks: tuple[tuple[int, int, int], ...]  # (system id, ships, prod_progress)
+    # (system id, ships, prod_progress, hulls finished this turn). The first three
+    # are what `Reel` assigns; the fourth is a *delta*, and the one thing here that
+    # cannot be recovered from the board afterwards — the count it was added to is
+    # already gone by the time anything draws.
+    ticks: tuple[tuple[int, int, int, int], ...]
+
+    @property
+    def hulls(self) -> tuple[tuple[int, int], ...]:
+        """Just the systems that actually finished something, as ``(id, hulls)``.
+
+        Most ticks are progress accruing with no ship to show for it — the ring in
+        `render._draw_systems` is what draws those — so this is the subset worth
+        marking on the map.
+        """
+        return tuple((sid, hulls) for sid, _, _, hulls in self.ticks if hulls > 0)
 
 
 @dataclass(frozen=True)
@@ -294,6 +308,22 @@ class Film:
         if beat is None or beat.kind != "move":
             return 1.0
         return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
+
+    def hulls(self, ms: float) -> tuple[tuple[int, int], ...]:
+        """The ships finished this turn that are still worth marking, as
+        ``(system id, hulls)``.
+
+        Production's beat is an instant at `config.FILM_PRODUCE_MS` of 0, so unlike
+        a fight there is no phase to report — a tick is inside its window or gone.
+        The window is `FILM_FLASH_MS`, the same one a burst gets, and a film always
+        outlives its last cue by at least that, so the mark is never cut off.
+        """
+        return tuple(
+            pair
+            for at, event in self.cues
+            if isinstance(event, Produced) and 0.0 <= ms - at <= config.FILM_FLASH_MS
+            for pair in event.hulls
+        )
 
     def flashes(self, ms: float) -> tuple[tuple[float, Event], ...]:
         """The fights close enough behind ``ms`` to still be showing, as
@@ -435,7 +465,7 @@ class Reel:
             node.owner_id, node.ships = event.owner_id, event.ships
             node.prod_progress = event.prod_progress
         elif isinstance(event, Produced):
-            for sid, ships, progress in event.ticks:
+            for sid, ships, progress, _hulls in event.ticks:
                 system = self.board.systems[sid]
                 system.ships, system.prod_progress = ships, progress
         elif isinstance(event, Ended):
@@ -565,7 +595,8 @@ class Watch:
         if self._sink is None:
             return
         ticks = tuple(
-            (s.id, s.ships, s.prod_progress)
+            (s.id, s.ships, s.prod_progress,
+             s.ships - self._before.get(s.id, (s.ships, 0))[0])
             for s in state.systems.values()
             if self._before.get(s.id) != (s.ships, s.prod_progress)
         )

@@ -6,6 +6,7 @@ triangles for fleets, numbers for ship counts.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple, Optional
 
 import pygame
 
@@ -900,8 +901,8 @@ def _draw_burst(surface, center, color, phase: float) -> None:
              cy + uy * (reach + config.FILM_BURST_R * 0.4)), width)
 
 
-def _loss_center(center) -> tuple[int, int]:
-    """Where a fight's cost is written: a fixed step above whatever the burst marks.
+def _mark_center(center) -> tuple[int, int]:
+    """Where a playback writes a number about a place: a fixed step above it.
 
     Fixed rather than measured off the burst's current reach, which grows over the
     flash — a label riding that outward would read as a second moving thing.
@@ -910,17 +911,23 @@ def _loss_center(center) -> tuple[int, int]:
             int(center[1]) - config.FILM_BURST_R - config.FILM_LOSS_GAP)
 
 
+class _Mark(NamedTuple):
+    """One fight a playback is currently showing, placed on screen."""
+
+    center: tuple[float, float]
+    color: tuple[int, int, int]
+    phase: float
+    cost: int                   # what it cost whoever came out of it
+    victor: Optional[int]       # ...and who that was; None when nobody did
+    node_id: Optional[int]      # the system it happened at, if it was not in open space
+
+
 def _flash_marks(state: GameState, ui: Ui):
-    """This turn's visible fights, as ``(centre, colour, phase, cost, victor)`` —
-    where ``cost`` is what the fight cost whoever came out of it and ``victor`` is
-    who that was (None if nobody did, which is when ``cost`` is 0).
+    """This turn's visible fights, as `_Mark`s.
 
-    The one place the film's fights are turned into places on screen, because two
-    passes need them: the bursts themselves, and the star-name pass, which has to
-    treat a loss label as occupied space for the same reason it already avoids lane
-    times and a rule's "keep N" — those carry information a name doesn't.
-
-    Purely derived from the film and the clock; nothing is stored and nothing
+    The one place the film's fights are turned into places on screen, so the
+    bursts, the labels over them and the star-name pass all agree about where they
+    are. Purely derived from the film and the clock; nothing is stored and nothing
     expires, in the same spirit as the rule conveyor's phase.
     """
     if ui.film is None:
@@ -933,7 +940,7 @@ def _flash_marks(state: GameState, ui: Ui):
             a = state.systems[event.low_id].pos
             b = state.systems[event.high_id].pos
             center = ui.view.to_screen(lerp(a, b, event.at))
-            yield center, config.COLOR_TEXT, phase, event.cost, event.victor
+            yield _Mark(center, config.COLOR_TEXT, phase, event.cost, event.victor, None)
         else:  # a Landed: concentric on the node, expanding past its rim
             # `steps` holds the engagements that actually happened, and is empty
             # for a reinforcement or a walk into an empty system. Neither is a
@@ -944,24 +951,56 @@ def _flash_marks(state: GameState, ui: Ui):
             center = ui.view.to_screen(state.systems[event.node_id].pos)
             color = (config.COLOR_TEXT if event.owner_id == event.was_owner
                      else config.player_color(event.owner_id))
-            yield center, color, phase, event.cost, event.victor
+            yield _Mark(center, color, phase, event.cost, event.victor, event.node_id)
+
+
+def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, tuple[int, int, int]]]:
+    """Every number a playback writes over the map this frame, already placed:
+    ``(centre, text, colour)``.
+
+    Two kinds share that spot above a system. A fight's cost is the *victor's* own
+    losses, in the victor's colour — not both sides' together: the beaten side is
+    wiped out by definition and its garrison or triangle visibly goes, so a
+    combined figure mostly restates what the board already shows while burying the
+    one number the square law makes hard to guess. And a hull finished this turn is
+    ``+N`` in its owner's colour, which is what makes production visible at all
+    without giving it a dwell of its own (`config.FILM_PRODUCE_MS` is 0).
+
+    They collide by design rather than by accident: production runs *after* combat,
+    so a system captured this turn produces for its new owner and earns both marks
+    at once. The gain stacks a row above the cost when that happens, by the font's
+    own line height. One list, because the star-name pass has to treat these as
+    occupied space (the same rule that already keeps names off lane times and a
+    rule's "keep N") and must not have to re-derive where they went.
+    """
+    if ui.film is None:
+        return []
+    labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
+    charged: set[int] = set()
+    for mark in _flash_marks(state, ui):
+        if mark.cost > 0 and mark.victor is not None:
+            labels.append((_mark_center(mark.center), f"−{mark.cost}",
+                           config.player_color(mark.victor)))
+            if mark.node_id is not None:
+                charged.add(mark.node_id)
+    for sid, hulls in ui.film.hulls(ui.film_ms):
+        if not ui.sees(sid):   # a rival's yard is not ours to report
+            continue
+        system = state.systems[sid]
+        x, y = _mark_center(ui.view.to_screen(system.pos))
+        if sid in charged:
+            y -= _row_h("small")
+        labels.append(((x, y), f"+{hulls}", config.player_color(system.owner_id)))
+    return labels
 
 
 def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
-    """Mark this turn's fights while they are still fresh, and what each cost.
-
-    The label is the *victor's* own losses, in the victor's colour — not both
-    sides' together. The beaten side is wiped out by definition and its garrison
-    or triangle visibly goes, so a combined figure mostly restates what the board
-    already shows while burying the one number the square law makes hard to guess:
-    what the winner paid. Whose loss it is has to be said in the one language this
-    map already uses for that, which is the player's colour.
-    """
-    for center, color, phase, cost, victor in _flash_marks(state, ui):
-        _draw_burst(surface, center, color, phase)
-        if cost > 0 and victor is not None:
-            _label_pill(surface, _fonts()["small"], f"−{cost}",
-                        config.player_color(victor), _loss_center(center))
+    """Mark this turn's fights while they are still fresh, and write the numbers
+    that go with them (plus any hull finished — see `_film_labels`)."""
+    for mark in _flash_marks(state, ui):
+        _draw_burst(surface, mark.center, mark.color, mark.phase)
+    for center, text, color in _film_labels(state, ui):
+        _label_pill(surface, _fonts()["small"], text, color, center)
 
 
 def _draw_film_caption(surface, ui: Ui) -> None:
@@ -1069,13 +1108,12 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
                 continue
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
-    # ...and, for the second or so a playback marks a fight, what that fight cost.
-    # Only ever while one is actually showing: `_flash_marks` yields nothing
+    # ...and, for the second or so a playback is writing numbers on the map, those.
+    # Only ever while one is actually showing: `_film_labels` returns nothing
     # without a film, and there is no film at all unless turn animation is switched
     # on, so with it off names are placed exactly as they always were.
-    for center, _color, _phase, cost, victor in _flash_marks(state, ui):
-        if cost > 0 and victor is not None:
-            taken.append(_pill_rect(font, f"−{cost}", _loss_center(center)))
+    for center, text, _color in _film_labels(state, ui):
+        taken.append(_pill_rect(font, text, center))
 
     def rank(sys) -> tuple[int, int]:
         if sys.id == ui.selected:

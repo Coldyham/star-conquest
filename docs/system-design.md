@@ -311,13 +311,30 @@ applies. That step *up* was initially read as a bug and then kept: the deduction
 launch is one of the rules the animation exists to show. `FILM_LAUNCH_MS = 0` is
 the one-constant retreat if it ever grates.
 
-**Production gets no dwell, and needs no drawing code.** `FILM_PRODUCE_MS` is 0, so
-production lands at its true point in the sequence without a pause. In the current
-ordering it is genuinely the last thing that happens, so numbers settling at the end
-is accurate rather than a compromise — and the progress ring `_draw_systems` already
-draws animates the tick for free. The consequence worth sizing: that tick is the
-*last* visible change, so `FILM_END_MS` is what makes it readable at all, which is
-why it is 250ms rather than the 120ms first drafted.
+**Production gets a mark, not a dwell.** `FILM_PRODUCE_MS` is 0, so production
+lands at its true point in the sequence without a pause; what makes it legible is
+a `+N` over each system that finished a hull, in that system's colour, sharing the
+spot the loss labels use. Time was the obvious lever and the wrong one, for a
+reason worth keeping: `Film.plays` is "does any beat have a duration", and a turn
+where nothing launches, moves or fights emits only `Produced` — so at 0 such a turn
+has no playback and End Turn stays instant, while any dwell makes *every* quiet turn
+cost around half a second for a couple of ships appearing. Measured: 0ms gives
+`plays` False, 250ms gives a 510ms film.
+
+The mark costs nothing in time because it rides the hold that was already there.
+A film outlives its last cue by `max(FILM_END_MS, FILM_FLASH_MS)`, and production
+*is* the last cue in the current ordering, so the mark is up for exactly that hold
+and cannot be cut off. `FILM_END_MS` was 250 rather than the 120 first drafted
+precisely to make the tick readable; the mark is now what does that job, and the
+constant only sets a floor under the pause.
+
+Only ticks that finished something are marked. `Produced.ticks` reports every
+system whose ships or progress moved, which is most of the map, and the progress
+ring `_draw_systems` already draws is what shows the rest inching along —
+labelling those would bury the board. That is why the event carries the hull count
+as a *delta* (`Produced.hulls`): it is the one figure here unrecoverable
+afterwards, since the count the ship was added to is gone by the time anything
+draws.
 
 **Fog is both turns', and that is not the same as either one.** The destination
 turn's alone was the first cut, and right about the direction: holding the *earlier*
@@ -379,6 +396,16 @@ once (the strongest as the first step's carried force, the others as each step's
 defender), which is the per-side detail the pooling in `_record_losses` used to
 lose. And a `Clashed` has to carry `survivor_owner` outright: a fleet id cannot be
 resolved to a player from a board the fleet has already left.
+
+**The two marks share one spot, and one of them moves.** A fight's cost and a
+finished hull are both written a fixed step above the system, which collides by
+design rather than by accident: production runs *after* combat, so a system
+captured this turn produces for its new owner and earns both. The gain stacks a
+row above the cost — by the font's own line height, per the no-fixed-pixel-sizes
+rule — and `render._film_labels` returns both already placed, so the star-name
+pass reserves the space they actually occupy without re-deriving it. Reaching the
+case takes two arrivals: cues spread across the combat beat, so a lone fight fires
+at its start and its burst has faded by the time production lands.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn

@@ -1022,7 +1022,7 @@ def test_which_fights_get_a_mark_and_what_it_says():
         every = set(state.systems)
         # the attacker brought 9 and kept 7, so the label is its own 2 — not the
         # 8 that died between them, most of which is the beaten garrison
-        assert [(m[3], m[4]) for m in marks((fold,), every)] == [(2, 2)]
+        assert [(m.cost, m.victor, m.node_id) for m in marks((fold,), every)] == [(2, 2, node)]
         assert marks((), every) == []                  # a reinforcement is no fight
         assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
     finally:
@@ -1061,5 +1061,95 @@ def test_a_loss_label_only_stands_in_a_star_names_way_while_it_shows():
         ui.stop_film()      # ...and with animation off there is never a film
         ui.film_ms = at + 1
         assert list(render._flash_marks(state, ui)) == []
+    finally:
+        pygame.quit()
+
+
+def _labels(state, ui, events, at_event):
+    """The placed labels a playback is writing, at the instant ``at_event`` fires."""
+    ui.film = turnfilm.film(events)
+    ui.film_ms = next(cue for cue, e in ui.film.cues if e is at_event) + 1
+    out = [(text, color) for _, text, color in render._film_labels(state, ui)]
+    placed = {text: center for center, text, _ in render._film_labels(state, ui)}
+    ui.stop_film()
+    return out, placed
+
+
+def test_a_finished_hull_is_marked_over_its_system():
+    """The production half of the labels: `+N` in the owner's colour, which is
+    what makes the tick visible without giving production a dwell of its own."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 4, 0, 1),))
+        events = [turnfilm.Advanced(((0, 2),)), produced]
+
+        out, _ = _labels(state, ui, events, produced)
+        assert out == [("+1", config.player_color(1))]
+
+        # a rival's yard is not ours to report, so fog gates it like a burst
+        ui.visible = set(state.systems) - {node}
+        out, _ = _labels(state, ui, events, produced)
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_progress_with_no_hull_to_show_is_left_to_the_ring():
+    """Most ticks are a system inching toward its next ship. The ring in
+    `_draw_systems` draws those; labelling every one would bury the map."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 3, 2, 0),))     # progress, no hull
+        out, _ = _labels(state, ui, [turnfilm.Advanced(((0, 2),)), produced], produced)
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_a_captured_system_that_produces_stacks_its_two_marks():
+    """Production runs *after* combat, so a system taken this turn produces for
+    its new owner — the one case where both marks are earned at the same spot, and
+    they must not be drawn on top of each other.
+
+    It takes two arrivals to reach, which is worth knowing: cues are spread across
+    the combat beat, so a lone fight fires at its start and its burst has already
+    faded by the time production lands. Only a node resolving later in the beat is
+    still marked when the hull appears.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[node].owner_id = 2                     # ...as the film ends it
+        first = turnfilm.Landed(node_id=state.systems[node].neighbors[0], fleets=(),
+                                was_owner=1, was_ships=2, owner_id=1, ships=5,
+                                prod_progress=0, steps=())   # a reinforcement: no mark
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        produced = turnfilm.Produced(((node, 8, 0, 1),))
+
+        out, placed = _labels(state, ui, [first, landed, produced], produced)
+        assert sorted(t for t, _ in out) == ["+1", "−2"]
+        assert placed["+1"][0] == placed["−2"][0], "same column"
+        assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
+        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
+        # both belong to the new owner, so both are drawn in its colour
+        assert {c for _, c in out} == {config.player_color(2)}
     finally:
         pygame.quit()

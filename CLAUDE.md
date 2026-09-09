@@ -222,8 +222,12 @@ Four rules hold it together:
 - **The order is the engine's, never one written down in `turnfilm`.** `film()`
   groups *consecutive* events of one class into a beat, so moving `_production`
   ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-  `config.FILM_PRODUCE_MS` is 0: production lands at its true place with no dwell,
-  and the progress ring already draws the tick.
+  `config.FILM_PRODUCE_MS` is 0: production lands at its true place with no dwell
+  of its own, and is shown by a `+N` over each system that finished a hull
+  (`Produced.hulls` -> `Film.hulls` -> `render._film_labels`) rather than by time.
+  Keep it at 0 unless production stops being the last phase: `Film.plays` is
+  "does any beat have a duration", so a dwell would make every otherwise-quiet
+  turn pause instead of resolving instantly.
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the

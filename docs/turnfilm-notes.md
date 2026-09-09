@@ -70,17 +70,14 @@ a re-measure of the roster (`sim --ladder`). What it would *not* cost is any
 presentation work — a film is assembled from the order the engine emitted events,
 so it depicts whatever the rule is.
 
-## Open: one polish item, and an argument for leaving it
+## Open: nothing on the polish list
 
-- **Give production a dwell.** `config.FILM_PRODUCE_MS` is 0, so production lands
-  at its true point with no pause. The progress ring in `render._draw_systems`
-  already animates the tick, so this constant only adds a moment on it. Note that
-  `FILM_END_MS` currently carries the job of making that tick readable, since in
-  the present phase order it is the last thing to change; if production moves ahead
-  of the arrivals, that pressure goes away. Deliberately still 0: the case for a
-  dwell is weakest while production genuinely is the last thing that happens.
+The five items are all resolved (below). What is left on the feature is the one
+deferred rule change above, which belongs on another branch by decision, so this
+file is down to a record of how the open items were settled and can go with the
+branch.
 
-## Done: the other four polish items
+## Done: the polish list
 
 Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 `system-design.md` under the matching heading:
@@ -91,6 +88,12 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 - **The camera reveal waits for the film.** `Ui.deferred_view_snap`, paid by
   `main.land_film` — the one place the clock running out and a skip both pass
   through. `Ui.stop_film` leaves the debt alone on purpose.
+- **Production is marked rather than dwelt on.** `FILM_PRODUCE_MS` stays 0; a
+  `+N` over each system that finished a hull is what makes the tick visible
+  (`Produced.hulls` -> `Film.hulls` -> `render._film_labels`, sharing the spot and
+  the window the loss labels use). Time was the wrong lever: `Film.plays` keys off
+  beat durations, so a dwell would have made every otherwise-quiet turn pause
+  (measured: 0ms -> no film, 250ms -> a 510ms one) instead of resolving instantly.
 - **A lane track is held rather than ranked.** `Fleet.lane_slot`, handed out by
   `model.free_lane_slot` at launch — which is what the notes said would need
   per-fleet identity, and it does; the field *is* the identity. Reported from play:

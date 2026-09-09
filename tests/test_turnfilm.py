@@ -94,8 +94,8 @@ def _landed(node_id=0):
                            owner_id=1, ships=2, prod_progress=0, steps=())
 
 
-def _produced(sid=0):
-    return turnfilm.Produced(((sid, 3, 0),))
+def _produced(sid=0, hulls=1):
+    return turnfilm.Produced(((sid, 3, 0, hulls),))
 
 
 def test_beats_follow_the_engines_own_emission_order():
@@ -159,7 +159,8 @@ def test_cues_at_one_instant_keep_emission_order():
     """A zero-length beat guarantees ties, and the engine's order is the only
     order that can be right."""
     first, second = _produced(0), _produced(1)
-    film = turnfilm.film([turnfilm.Produced(((0, 3, 0),)), turnfilm.Produced(((1, 3, 0),))])
+    film = turnfilm.film([turnfilm.Produced(((0, 3, 0, 1),)),
+                          turnfilm.Produced(((1, 3, 0, 1),))])
     assert [e for _, e in film.cues] == [first, second]
 
 
@@ -468,3 +469,51 @@ def test_a_clash_charges_the_fleet_that_flew_on_for_what_it_lost():
     assert clash.cost == 12 - clash.survivors
     assert clash.cost == s.players[1].ships_lost
     assert clash.destroyed == clash.cost + 5
+
+
+# --------------------------------------------------------------------------- #
+# Hulls finished, for the mark over the system
+# --------------------------------------------------------------------------- #
+
+
+def test_production_reports_the_hulls_it_finished_not_just_the_new_total():
+    """A tick's fourth number is a *delta*, and it is the one thing here that
+    cannot be recovered afterwards: by the time anything draws, the count the ship
+    was added to is gone. Most ticks are progress with nothing to show for them,
+    and `hulls` is the subset that finished something."""
+    # production 1 emits every turn; production 3 takes three to get there
+    s = make_state([(0, 1, 0, 1), (1, 2, 0, 3)], [(0, 1, 5)])
+    events: list[turnfilm.Event] = []
+    engine.end_turn(s, on_event=events.append)
+    tick = next(e for e in events if isinstance(e, turnfilm.Produced))
+    assert dict((sid, hulls) for sid, _, _, hulls in tick.ticks) == {0: 1, 1: 0}
+    assert tick.hulls == ((0, 1),), "only the system that finished one is marked"
+    assert s.systems[0].ships == 1 and s.systems[1].ships == 0
+
+    events.clear()
+    engine.end_turn(s, on_event=events.append)
+    tick = next(e for e in events if isinstance(e, turnfilm.Produced))
+    assert tick.hulls == ((0, 1),)      # ...again, while the other still accrues
+
+
+def test_a_hull_is_marked_for_as_long_as_a_burst_is():
+    """`Film.hulls` is the production half of `flashes`: in its window or gone.
+    A film always outlives its last cue by at least that window, so the mark
+    cannot be cut off — which matters because production lands last."""
+    produced = _produced(0, hulls=2)
+    film = turnfilm.film([turnfilm.Advanced(((0, 3),)), produced])
+    at = next(cue for cue, e in film.cues if e is produced)
+
+    assert film.hulls(at) == ((0, 2),)
+    assert film.hulls(at + config.FILM_FLASH_MS) == ((0, 2),)
+    assert film.hulls(at + config.FILM_FLASH_MS + 1) == ()
+    assert film.hulls(at - 1) == (), "not before it happened"
+    assert film.total_ms >= at + config.FILM_FLASH_MS, "the mark is never cut off"
+
+
+def test_a_turn_that_only_produced_still_does_not_play():
+    """The mark rides on a playback; it is not a reason to start one. Production
+    alone is a film of instants (`FILM_PRODUCE_MS` is 0), so a quiet turn stays
+    instant instead of costing half a second for a couple of ships appearing."""
+    assert config.FILM_PRODUCE_MS == 0
+    assert not turnfilm.film([_produced(0)]).plays
