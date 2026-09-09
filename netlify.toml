@@ -6,6 +6,26 @@
 # image's own Python/Node versions don't matter. The build also curls the
 # pygame-ce WASM wheel from the pygame-web CDN into web/cdn/ (network is available
 # during Netlify builds), keeping the published site self-contained.
+#
+# This site must never be given a secret environment variable, and the build
+# below is why. On a public repository a pull request from a fork gets a deploy
+# preview built from *that fork's* tree — including its netlify.toml and its
+# tools/build_web.sh — so the command line here is whatever a stranger wrote,
+# running as a shell in the build container. Nothing above needs a credential
+# (uv, pygbag and a wheel download), so there is nothing for such a build to
+# read, and it should stay that way: the leaderboard's Supabase keys live in
+# leaderboard/js/config.mjs (the anon key, public on purpose) and in the
+# bot-replay workflow's Actions secrets (the service_role key, which no Netlify
+# build ever sees). Contrast .github/workflows/bot-replay.yml, which does hold
+# secrets and is safe for the mirror-image reason: it fires only on schedule and
+# workflow_dispatch, neither of which a fork can trigger.
+#
+# Untrusted deploys are gated in the dashboard rather than here — Netlify's
+# default sensitive-variable policy holds a fork's preview for approval by a team
+# member, which is also what keeps a spam PR from spending the month's build
+# minutes or publishing its own content on a deploy-preview-N--<site>.netlify.app
+# subdomain that reads as ours. Keep it on "Require approval"; that gate, not
+# this file, is the boundary.
 [build]
   command = "curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
   publish = "web"
