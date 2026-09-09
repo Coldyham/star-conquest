@@ -208,9 +208,19 @@ class Fleet:
 
     def progress(self) -> float:
         """Fraction of the journey completed, in [0, 1] — for rendering."""
+        return self.progress_at(1.0)
+
+    def progress_at(self, t: float) -> float:
+        """Progress part-way through this turn's step: where the fleet stood when
+        the step began at ``t == 0``, and ``progress()`` at ``t == 1``.
+
+        The single place this arithmetic lives. ``engine._lane_span`` measures an
+        in-lane meeting with it and ``render`` draws with it, so a fight happens
+        exactly where the triangles are seen to touch.
+        """
         if self.turns_total <= 0:
             return 1.0
-        return 1.0 - self.turns_remaining / self.turns_total
+        return 1.0 - (self.turns_remaining + (1.0 - t)) / self.turns_total
 
 
 @dataclass

@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, NamedTuple, Optional
 
 from . import combat, config
 from .model import Fleet, GameState, Order, lane_key
@@ -198,6 +198,20 @@ def _advance_fleets(state: GameState) -> None:
         fleet.turns_remaining -= 1
 
 
+class _Crossing(NamedTuple):
+    """Two fleets meeting on one lane during this turn's step.
+
+    ``when`` is the fraction of the step at which their gap reached zero and
+    ``at`` the lane fraction, measured from ``min(lane_key)``, where that
+    happened — the point the two fleets share at that instant.
+    """
+
+    when: float
+    at: float
+    a: int  # indices into `state.fleets`
+    b: int
+
+
 def _lane_span(fleet: Fleet, low_id: int) -> tuple[float, float]:
     """Where ``fleet`` was when this turn's step began and where it is now, as
     fractions of its lane measured from ``low_id``.
@@ -207,15 +221,13 @@ def _lane_span(fleet: Fleet, low_id: int) -> tuple[float, float]:
     are measured on one ruler. A fleet that launched this turn starts at 0.0 (or
     1.0, heading the other way), i.e. on its source system.
     """
-    total = fleet.turns_total
-    if total <= 0:
+    if fleet.turns_total <= 0:
         return 1.0, 1.0
-    was = 1.0 - (fleet.turns_remaining + 1) / total
-    now = 1.0 - fleet.turns_remaining / total
+    was, now = fleet.progress_at(0.0), fleet.progress_at(1.0)
     return (was, now) if fleet.source_id == low_id else (1.0 - was, 1.0 - now)
 
 
-def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tuple[int, int]]:
+def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[_Crossing]:
     """Every enemy pair on one lane that meets during this turn's step, in the
     order the meetings happen.
 
@@ -230,7 +242,7 @@ def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tupl
     Simultaneous crossings break on fleet order, which is order of launch, so a
     replay fights them in the sequence the live game did.
     """
-    crossings: list[tuple[float, int, int]] = []
+    crossings: list[_Crossing] = []
     for a_i, b_i in combinations(idxs, 2):
         a, b = state.fleets[a_i], state.fleets[b_i]
         if a.owner_id == b.owner_id:
@@ -241,9 +253,12 @@ def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tupl
         if gap_was * gap_now > 0:
             continue  # one stayed ahead of the other all step: they never met
         when = 0.0 if gap_was == gap_now else gap_was / (gap_was - gap_now)
-        crossings.append((when, a_i, b_i))
-    crossings.sort()
-    return [(a_i, b_i) for _, a_i, b_i in crossings]
+        crossings.append(_Crossing(when, a_was + when * (a_now - a_was), a_i, b_i))
+    # Sorted on an explicit key rather than the whole tuple: `at` must not reach
+    # the comparison, or simultaneous crossings would break on where they met
+    # instead of on fleet order, which is order of launch.
+    crossings.sort(key=lambda c: (c.when, c.a, c.b))
+    return crossings
 
 
 def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
@@ -271,7 +286,8 @@ def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
     for lane, idxs in by_lane.items():
         if len({state.fleets[i].owner_id for i in idxs}) < 2:
             continue  # no enemy out here, so there is nobody to meet
-        for a_i, b_i in _lane_crossings(state, min(lane), idxs):
+        for crossing in _lane_crossings(state, min(lane), idxs):
+            a_i, b_i = crossing.a, crossing.b
             if a_i in destroyed or b_i in destroyed:
                 continue  # killed at an earlier crossing this same turn
             a, b = state.fleets[a_i], state.fleets[b_i]
