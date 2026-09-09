@@ -855,3 +855,77 @@ def test_end_turn_is_unreachable_while_a_film_plays():
         assert ui.end_turn_rect[2] > 0      # ...and comes straight back
     finally:
         pygame.quit()
+
+
+def test_launching_another_fleet_does_not_shove_the_ones_already_flying():
+    """Slots are claimed outward from the lane's centre in launch order, so an
+    in-flight fleet holds the line it is on. Spreading the group symmetrically
+    across its current size made every existing fleet step sideways whenever one
+    more set off down the same lane."""
+    state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+    src = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    dst = state.systems[src].neighbors[0]
+    state.systems[src].ships = 30
+
+    engine.apply_order(state, Order(1, src, dst, 3))
+    first = render._lane_offsets(state)[0][0]
+    engine.apply_order(state, Order(1, src, dst, 3))
+    engine.apply_order(state, Order(1, src, dst, 3))
+    after = render._lane_offsets(state)
+    assert after[0][0] == first == 0            # unmoved, and still on the centre
+    assert [after[i][0] for i in range(3)] == [0, -1, 1]
+
+
+def test_fleets_running_opposite_ways_still_get_their_own_slots():
+    """The reason the offsets exist at all: two fleets can occupy the same point
+    on one lane heading in opposite directions."""
+    state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+    a = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    b = state.systems[a].neighbors[0]
+    state.systems[a].ships = state.systems[b].ships = 20
+    state.systems[b].owner_id = 2
+
+    engine.apply_order(state, Order(1, a, b, 4))
+    engine.apply_order(state, Order(2, b, a, 4))
+    slots = [render._lane_offsets(state)[i][0] for i in range(2)]
+    assert slots[0] != slots[1], "one lane, both directions: they must not overlap"
+
+
+def _flash_frame(screen, state, ui, landed) -> bytes:
+    """Just the burst layer, over a blank field, at the instant the event fires."""
+    film = turnfilm.film([landed])
+    ui.film = film
+    ui.film_ms = next(at for at, e in film.cues if e is landed) + 1
+    screen.fill((0, 0, 0))
+    render._draw_film_flashes(screen, state, ui)
+    ui.stop_film()
+    return pygame.image.tobytes(screen, "RGB")
+
+
+def test_a_reinforcement_is_not_marked_as_a_fight():
+    """Your own fleet arriving at your own system is not combat, so it must not
+    draw combat's burst. `Landed.steps` holds the engagements that happened, and
+    is empty exactly when nothing fought."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        def landed(steps):
+            return turnfilm.Landed(node_id=node, fleets=(), was_owner=1, was_ships=4,
+                                   owner_id=1, ships=9, prod_progress=0, steps=steps)
+
+        blank = pygame.Surface((config.SCREEN_W, config.SCREEN_H))
+        blank.fill((0, 0, 0))
+        nothing = pygame.image.tobytes(blank, "RGB")
+
+        assert _flash_frame(screen, state, ui, landed(())) == nothing
+        fight = (turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                               defender_ships=4, winner=1, survivors=2),)
+        assert _flash_frame(screen, state, ui, landed(fight)) != nothing
+    finally:
+        pygame.quit()

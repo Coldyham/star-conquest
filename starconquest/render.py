@@ -303,15 +303,34 @@ def _label_pill(surface, font, s: str, color, center) -> None:
     surface.blit(img, rect)
 
 
+def _lane_slot(rank: int) -> int:
+    """The ``rank``-th perpendicular slot on a lane: 0, -1, +1, -2, +2, ...
+
+    Claimed outward from the centre line rather than spread symmetrically across
+    however many fleets are currently on the lane, so a slot depends only on how
+    many fleets were already there — launching another cannot shift the ones
+    already flying, which would have them visibly step sideways in mid-flight.
+    """
+    if rank <= 0:
+        return 0
+    return -((rank + 1) // 2) if rank % 2 else (rank + 1) // 2
+
+
 def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
-    """Assign each in-transit fleet a small perpendicular offset so stacks split."""
+    """Assign each in-transit fleet a perpendicular slot so stacks split.
+
+    Fleets are ranked in launch order — ``state.fleets`` is appended to at launch
+    and only ever filtered, so its order is that — and each takes the next free
+    slot outward from the lane's centre. Fleets running opposite ways down one
+    lane therefore stay told apart even while they pass through each other.
+    """
     groups: dict[frozenset[int], list[int]] = {}
     for i, f in enumerate(state.fleets):
         groups.setdefault(frozenset((f.source_id, f.dest_id)), []).append(i)
     offset: dict[int, tuple[int, int]] = {}
     for idxs in groups.values():
         for rank, i in enumerate(idxs):
-            offset[i] = (rank - (len(idxs) - 1) / 2, 0)  # perpendicular rank, scaled later
+            offset[i] = (_lane_slot(rank), 0)  # perpendicular slot, scaled later
     return offset
 
 
@@ -915,9 +934,8 @@ def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
     """
     if ui.film is None:
         return
-    for event in ui.film.flashes(ui.film_ms):
-        cue = [ms for ms, e in ui.film.cues if e is event]
-        phase = min(1.0, max(0.0, (ui.film_ms - cue[0]) / max(1, config.FILM_FLASH_MS)))
+    for at, event in ui.film.flashes(ui.film_ms):
+        phase = min(1.0, max(0.0, (ui.film_ms - at) / max(1, config.FILM_FLASH_MS)))
         if isinstance(event, turnfilm.Clashed):
             if event.low_id not in ui.visible and event.high_id not in ui.visible:
                 continue
@@ -926,7 +944,11 @@ def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
             center = ui.view.to_screen(lerp(a, b, event.at))
             _draw_burst(surface, center, config.COLOR_TEXT, phase)
         else:  # a Landed: concentric on the node, expanding past its rim
-            if event.node_id not in ui.visible:
+            # `steps` holds the engagements that actually happened, and is empty
+            # for a reinforcement or a walk into an empty system. Neither is a
+            # fight, so neither gets a fight's mark — the garrison count changing
+            # is the whole of what happened.
+            if not event.steps or event.node_id not in ui.visible:
                 continue
             node = state.systems[event.node_id]
             center = ui.view.to_screen(node.pos)

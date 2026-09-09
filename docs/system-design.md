@@ -343,6 +343,27 @@ one. Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
 hung 6px out of the fixed 560x496 panel and failed
 `test_tab_content_stays_inside_the_panel`.
 
+**Lane slots are claimed, not shared out.** `_lane_offsets` used to spread a
+lane's fleets symmetrically across however many were currently on it, so
+launching one more re-centred the group and every fleet already in flight stepped
+sideways — invisible when the board jumped a whole turn at a time, obvious once
+they glide. Slots are now taken outward from the centre line in launch order
+(`_lane_slot`: 0, -1, +1, -2, +2, ...), so a fleet holds the line it is on for its
+whole flight and only the newcomer moves. Ranking from the oldest is what makes
+*adding* free; the remaining case is that a fleet arriving re-packs its lane-mates
+one slot inward, which coincides with it leaving the board. Ranking from the
+newest instead would trade exactly one of those for the other, and the launch is
+the common event.
+
+**A burst marks a fight, and `Landed.steps` is the test for one.** The first
+version marked every arrival, which flashed combat over your own fleets
+reinforcing your own system. `steps` holds the engagements that actually happened
+and is empty precisely when nothing fought — a reinforcement, or a walk into an
+empty system. Neither draws a mark; the garrison count changing is the whole of
+what happened. Note that this deliberately covers the bloodless capture too:
+taking an undefended neutral system is not combat, and the node changing colour
+says it.
+
 **What is deliberately not animated.** The AI's decision phase (invisible by
 nature; the orders show up as launches). Camera moves toward the action, which would
 fight `ui.view` — the one thing `input` owns — and put mutation in the film path.

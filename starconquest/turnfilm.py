@@ -214,10 +214,13 @@ class Film:
             return 1.0
         return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
 
-    def flashes(self, ms: float) -> tuple[Event, ...]:
-        """The fights close enough behind ``ms`` to still be showing."""
+    def flashes(self, ms: float) -> tuple[tuple[float, Event], ...]:
+        """The fights close enough behind ``ms`` to still be showing, as
+        ``(cue time, event)`` — the caller needs the time to know how far through
+        the flash it is, and hunting it back out of `cues` would be a scan a
+        frame."""
         return tuple(
-            event
+            (at, event)
             for at, event in self.cues
             if isinstance(event, (Clashed, Landed)) and 0.0 <= ms - at <= config.FILM_FLASH_MS
         )

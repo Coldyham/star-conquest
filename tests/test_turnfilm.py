@@ -184,6 +184,7 @@ def test_a_film_outlives_its_last_fight_so_the_burst_is_never_cut():
     last = max(ms for ms, _ in film.cues)
     assert film.total_ms - last >= config.FILM_FLASH_MS
     assert film.flashes(last)                     # showing at the moment it fires
+    assert film.flashes(last)[0][0] == last       # ...and says when it fired
     assert not film.flashes(last + config.FILM_FLASH_MS + 1)
 
 
@@ -329,3 +330,18 @@ def test_reconstruct_without_an_observer_is_unchanged():
     plain, _ = replay.reconstruct(log)
     watched, _ = replay.reconstruct(log, on_event=[].append)
     assert _digest(plain) == _digest(watched) == _digest(state)
+
+
+def test_a_reinforcement_reports_no_engagement():
+    """Flying into your own system is not a fight, and the film has to be able to
+    tell — otherwise it marks a reinforcement as combat."""
+    s = make_state([(0, 1, 12, 100), (1, 1, 3, 100)], [(0, 1, 1)])
+    with no_jitter():
+        engine.apply_order(s, engine.Order(1, 0, 1, 6))
+        events: list[turnfilm.Event] = []
+        engine.end_turn(s, on_event=events.append)
+    landed = [e for e in events if isinstance(e, turnfilm.Landed)]
+    assert len(landed) == 1
+    assert (landed[0].was_owner, landed[0].owner_id) == (1, 1)
+    assert landed[0].ships == 9        # 3 already there, 6 arriving
+    assert landed[0].steps == ()       # nothing fought
