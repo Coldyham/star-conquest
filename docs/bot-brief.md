@@ -2,8 +2,9 @@
 
 **If you are a person:** copy this whole page into a chat with an AI assistant
 (Claude, or any capable model) and say *"I want to make a bot for this game."*
-It will ask you a few questions about how you want to play, then write you a bot.
-Save what it gives you as `models/<yourname>.py`, then run:
+It will ask you how you want to play before it writes anything — those answers
+are the whole point, so answer them your way rather than the way you think the
+game wants. Save what it gives you as `models/<yourname>.py`, then run:
 
 ```sh
 uv run python tools/check_bot.py yourname
@@ -34,7 +35,9 @@ the rest are neutral (owner `0` — neutral is a real player, not an absence).
   moves both sides a little. **Ties break to the defender**, and near-matched
   forces annihilate each other and leave the system *neutral*.
 - **You win by owning every system.** A rival with no systems and nothing in
-  transit is eliminated.
+  transit is eliminated. There is no other victory condition, no points and no
+  draw — which is why a bot that never attacks a rival cannot win at all. One
+  that only held, reinforced and took neutrals won **0 of 300** games here.
 - Turns resolve **simultaneously**. Every seat decides against the same
   unchanged board and nothing is applied until all have decided, so no opponent
   can react to your move this turn, and the order you list your own orders in
@@ -74,10 +77,16 @@ silent about all of them:
 4. **Don't ask for ships you don't have.** An over-large count is clamped to the
    garrison at launch, so it "works" but not as you intended. Several orders may
    leave one system; they apply in listed order, each deducting as it goes.
-5. **Handle the awkward board.** A system with no ships, no neighbours you can
-   attack, a rival already eliminated, turn 0 with nothing in transit. The bot is
-   asked for a decision every turn of a game that runs to a hundred turns or
-   more.
+5. **Handle the empty board state.** Nearly every crash here is `min()` or
+   `max()` over an empty sequence, or a division by a count that turned out to
+   be zero. All of these really occur: a system you own with **0 ships** (you
+   emptied it, or spent everything capturing it), an **interior system** whose
+   every neighbour is already yours (so the target list is empty), a **rival
+   still in `state.players` but eliminated** (`alive=False`, owns nothing, and
+   still not `is_neutral`), and **turn 0, where `state.fleets` is empty**. On one
+   24-node board the first two happened together by turn 4. `decide` runs every
+   turn of a game lasting a hundred turns or more, so a board arising 1% of the
+   time is a certainty.
 
 ## What you can read
 
@@ -114,11 +123,102 @@ Never call `ai.load_models()` from inside a bot, and read `ai.STRATEGIES` (if at
 all) inside `decide` rather than at import time — files load in sorted order, so
 the registry is incomplete while yours is importing.
 
-## A working starting point
 
-This is a real, tested bot: **57% against the built-in `heuristic` over 200
-games, both seatings**. Modify it rather than starting from nothing, and treat
-the three constants as the first things to tune.
+## Start by asking
+
+Ask before writing anything. The person you are working for wants *their* bot,
+and the roster already has six bots that all think alike (see the next section)
+— your job is to get an idea out of them, not to fit them to the template at the
+bottom of this page.
+
+1. **Aggression.** Attack as soon as the odds are even, or wait for a
+   comfortable margin?
+2. **Expansion.** Take neutral systems first, or go straight at the nearest
+   rival?
+3. **Defence.** Garrison everything, or leave the rear bare and keep it all at
+   the front?
+4. **A doomed system.** Reinforce it, evacuate its ships to a neighbour, or
+   spend them on one last attack?
+5. **Target choice.** The weakest neighbour, the richest (lowest `production`),
+   or the one that opens the most lanes?
+6. **A signature idea** — the important one. Anything they want the bot to be
+   *known* for. If they have none, offer some of these, none of which any
+   existing bot does:
+
+   - **Solve the whole board at once.** Every bot in the roster decides system
+     by system, in isolation. Treat a turn as one pool of ships against every
+     target and allocate it globally — an assignment or flow problem rather than
+     a loop. (`marshal` needed a whole extra phase to recover leftovers a global
+     solve would never have created.)
+   - **Play the graph, not the fight.** Aim at articulation points and cut the
+     enemy's territory in two; value a system for what it disconnects rather than
+     for its garrison.
+   - **Play the economy.** `production` is the only long-run resource. Rank
+     strictly by output per ship invested, concede ground early, win late. Every
+     current bot is military-first.
+   - **Know the score.** Every margin in the roster is a worst-case break-even,
+     and nothing in it knows whether it is winning. Take coin-flips when behind
+     and only certainties when ahead.
+   - **Feint.** The built-in bots defend in proportion to the threat they can
+     see, so a visible build-up at one front pulls ships away from another. You
+     may model what an opponent is *likely* to do; you may not read another
+     bot's code.
+   - **Bring a trained policy.** Nothing stops weights learned offline from
+     being baked into the file as constants — only reading files or the network
+     *at decision time* is forbidden.
+
+   Say honestly whether their idea is reachable in one `decide` call that sees
+   only the current board: a plan spanning turns has to be re-derived from the
+   board each turn, because nothing is remembered between calls.
+
+Then write the bot, keep their answers as named constants at the top, and say in
+a line or two what each does — they will want to tune them.
+
+## What the incumbents already do — and where they are blind
+
+Six bots ship with the game, and five of them are the same idea: *walk my
+systems, score the neighbours, launch when a margin is cleared.* Three are
+literally forks of one another. The measurements below are real and worth
+respecting — but they are measurements of **that** frame, and the frame is not
+the game.
+
+The evidence is `knower`, the strongest bot here, which searches by trying
+several candidate plans and keeping the best. Over 1128 contested decisions, the
+winner was its own four-phase plan only 54.8% of the time; the rest came from
+other, cruder policies it had borrowed as candidates. Its own docstring: *nearly
+a third of real decisions are moves knower's own four phases cannot express.*
+A third of the best available moves are outside the frame that every bot here
+shares.
+
+So take these as the state of the art to beat, not as instructions:
+
+- **Send the surplus, not the break-even count.** The starter below wins 1 game
+  in 10 against the built-in if it launches exactly the price of a capture, and 6
+  in 10 if it sends everything spare — the square law barely punishes overkill,
+  and a system taken with two survivors is handed straight back.
+- **Neutrals and rivals want different margins.** Folding both into one
+  split-the-difference number cost 13 percentage points when tried. A neutral
+  garrison does not grow and nothing reinforces it; a rival's does both.
+- **Most out-matched garrisons run away** — 86.7% of them evacuate rather than
+  stand, so a large premium against bad dice on an *attack* buys a fight that
+  mostly never happens. Your own garrisons cannot decline, so price *defence* in
+  full. This asymmetry was the single biggest measured gain on any bot here.
+- **Distances vary hugely between setups.** Node count and fleet speed together
+  move a lane from ~1 turn to ~36. Never hardcode a distance or a "far away"
+  threshold; read `state.travel_turns` and scale.
+- **Stalemate is the failure mode of caution.** Both sides produce
+  symmetrically, so a careful bot can hold forever without winning. Around 20%
+  unfinished games is normal between evenly matched bots; much more means yours
+  is not committing.
+
+## One frame, worked: a starting point
+
+This is a real, tested bot — 57% against the built-in `heuristic` over 200 games,
+both seatings. It is the *common* frame, written out plainly, so treat it as
+something to depart from once you have the person's answers. If their idea is one
+of the six above, most of this file is the wrong shape for it and you should
+write theirs instead; if their answers are refinements of aggression, reserve and
+target choice, start here and change the constants.
 
 ```python
 """Starter bot: hold what is threatened, take what is affordable."""
@@ -173,60 +273,6 @@ def decide(state, pid):
     return orders
 ```
 
-## What measurably works
-
-Every figure here was measured in this repo, most of it the hard way. Full
-detail and method in [`bot-design.md`](bot-design.md).
-
-- **A bot that never attacks a rival cannot win.** An earlier experiment with
-  hold / reinforce / take-neutrals / send-to-the-front rules — a
-  complete-looking defensive bot — won **0 of 300** games, because taking every
-  enemy system is the win condition. It reached 77% the moment one attack rule
-  was added. If the person you are working for describes a purely defensive bot,
-  build it *and* tell them this.
-- **Send the surplus, not the break-even count.** Removing that one line from the
-  starter above takes it from 6/10 against the heuristic to **0/10**: it still
-  captures systems, then loses them straight back. The square law barely punishes
-  overkill on a weak garrison, so concentration is cheap and hesitation is not.
-- **Neutrals and rivals deserve different margins.** Folding both into one
-  split-the-difference number cost 13 percentage points when it was tried. A
-  neutral garrison does not grow (unless `neutral_produces` is on) and nothing
-  reinforces it; a rival's does both.
-- **Most out-matched garrisons run away.** 86.7% of them evacuate rather than
-  stand, so paying a large premium against bad dice on an *attack* buys a fight
-  that mostly never happens — that premium's removal was the single biggest
-  measured gain on the strongest hand-written bot in the roster. Your own
-  garrisons cannot decline a fight, so price *defence* in full.
-- **Distances vary hugely between setups.** Node count and fleet speed together
-  move a lane from ~1 turn to ~36. Never hardcode a distance or a
-  "far away" threshold; read `state.travel_turns` and scale.
-- **Watch out for stalemate.** Both sides produce symmetrically, so a cautious
-  bot can hold forever without winning. Around 20% unfinished games is normal for
-  two evenly matched bots; much more than that means yours is not committing.
-
-## Ask first
-
-Before writing anything, ask the person about four or five of these — the
-answers are what make their bot theirs rather than a copy of the starter:
-
-1. **Aggression.** Attack as soon as the odds are even, or wait for a
-   comfortable margin? (Sets `AGGRESSION`.)
-2. **Expansion.** Grab neutral systems first, or go straight at the nearest
-   rival? (Sets `EXPAND_FIRST`.)
-3. **Defence.** Garrison every system, or leave the rear bare and keep
-   everything at the front? (Sets `RESERVE`, and whether rear systems forward.)
-4. **A doomed system.** Reinforce it, evacuate its ships to a neighbour, or
-   spend them on one last attack?
-5. **Target choice.** The weakest neighbour, the richest (lowest `production`),
-   or the one that opens the most lanes?
-6. **A signature idea.** Anything they want the bot to be *known* for — feint at
-   one front while massing on another, always take the map's centre, never fight
-   two rivals at once. Say honestly whether it is reachable in one `decide` call
-   that sees only the current board.
-
-Then write the bot, keep their choices as named constants at the top, and say in
-one or two lines what each does — they will want to tune them.
-
 ## Verify, then measure
 
 ```sh
@@ -237,9 +283,15 @@ uv run python -m tests.sim --ladder --trials 20    # against the whole roster
 
 `check_bot` answers *is it valid*; only the ladder answers *is it good*. Use
 `--swap` or `--ladder` rather than a single game: both play every seating, so a
-result is not just a report on which corner of the map is stronger. Beating
+result is not merely a report on which corner of the map is stronger. Beating
 `heuristic` is the first bar. The roster above it, weakest to strongest, is
 `rusherplus`, `claudebot`, `thinker`, `marshal`, `knower`.
+
+**Read the head-to-head grid, not just the ranking.** `--ladder` prints who beat
+whom, and a bot that finishes fifth overall while taking games off `marshal` is a
+more interesting result than one that finishes third by playing like everything
+above it. If the bot you have written is a genuinely new idea, that grid is where
+it will show up first — an overall ranking will hide it for a long time.
 
 If a check fails, `check_bot` prints a ready-made block — take it literally, fix
 the bot, run it again.
