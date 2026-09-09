@@ -135,3 +135,12 @@ the protocol in [`docs/bot-api.md`](docs/bot-api.md). They compete in the ladder
 child process; the leaderboard column for them is still open.
 
 Per-seat AI tuning and selectable difficulty via the AI tab are already here.
+
+## License
+
+[MIT](LICENSE). The bundled assets keep their own, both redistributable: the
+DejaVu Sans Mono faces under
+[`starconquest/assets/`](starconquest/assets/DejaVuSansMono-LICENSE.txt) and
+Press Start 2P under the [SIL Open Font License](leaderboard/fonts/OFL.txt).
+pygame-ce, fetched unmodified by [`tools/build_web.sh`](tools/build_web.sh) into
+the web build, is LGPL.
