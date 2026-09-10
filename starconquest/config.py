@@ -194,51 +194,48 @@ STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the ac
 
 # Turn playback (see `turnfilm.py`): the optional animated end of turn, off unless
 # switched on (`webstore.animate_turns`). Presentation only — none of it can move a
-# result and none of it is recorded. Durations are per *beat*; the events inside a
-# beat are spread across it, so a turn with forty orders compresses rather than
-# running long and a whole film is bounded by these numbers.
-FILM_LAUNCH_MS = 0       # ms: fleets appear at their source and its garrison drops.
-                         # 0 == folded into the move beat with no pause of its own —
-                         # `Fleet.progress_at` combined with `Film.travel` already
-                         # starts a launched fleet's glide at progress 0, so a
-                         # separate beat only bought a stutter before movement began.
-                         # This is the retreat `system-design.md` names for the
-                         # garrison-drop-at-launch legibility that a held beat used
-                         # to give: watched turn after turn, continuous movement
-                         # mattered more than a paused view of the deduction
-FILM_MOVE_MS = 560       # ...and glide one turn's step, clashes firing where they meet
-FILM_PRODUCE_MS = 200    # production's own dwell, spent *only* when a combat beat
-                         # follows it directly (`turnfilm.film`) — production now
-                         # runs before arrivals, so a hull finished this turn
-                         # defends the system it was built at, and this is the gap
-                         # that lets it register before the fight it fed instead of
-                         # blurring into the same instant. A turn with nothing
-                         # arriving still ticks production at 0 dwell, same as
-                         # ever: the progress ring already draws the plain tick, so
-                         # raising this only ever buys the fight-adjacent case
-FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
-                         # sequence with no dwell of their own — the default, used
-FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
-                         # sequence with no dwell of their own — the default, used
-                         # for history playback, where a run of animated turns
-                         # must glide continuously rather than stop-start for
-                         # every fight (a mark now outlives the film that made it
-                         # anyway, below, so nothing needed a held beat to be
-                         # read). `FILM_LINGER_COMBAT_MS` is the other one: a
-                         # single live End Turn is worth watching resolve, so it
-                         # uses that instead (`turnfilm.film`'s `linger` flag,
-                         # set by `main.resolve_turn`) — fights shown one node
-                         # after another, same as this used to do at 300
-FILM_LINGER_COMBAT_MS = 300   # ms a live End Turn's fights get instead of the
-                         # above — see `FILM_COMBAT_MS`. History playback never
-                         # uses this: it would put the stop-start back exactly
-                         # where continuous movement matters most
-FILM_LINGER_HOLD_MS = 250     # ms held on the resolved board after a live End
-                         # Turn's last beat, for the same reason `FILM_LINGER_
-                         # COMBAT_MS` exists — watching your own move resolve is
-                         # worth a pause before control returns. History chains
-                         # straight through instead (`main._next_history_film`);
-                         # `Ui.fading_fights`/`fading_hulls` keep marks up
+# result and none of it is recorded. The events inside a beat are spread across it,
+# so a turn with forty orders compresses rather than running long. Only movement
+# spends time: every other beat is an instant, and its number here is a *lead* —
+# how far ahead of what follows it fires, borrowed from the stretch it lands in
+# rather than added to the film (`turnfilm.film`).
+FILM_LAUNCH_MS = 0       # ms of lead for a launch. 0, and nothing to borrow
+                         # anyway: launches open a turn, so there is no stretch
+                         # behind them — and none is wanted, since
+                         # `Fleet.progress_at` with `Film.travel` already starts
+                         # a launched fleet's glide at progress 0
+FILM_MOVE_MS = 560       # ms fleets take to glide one turn's step. The one beat
+                         # that spends time of its own, so a film's length is
+                         # this — clashes firing where the triangles meet inside
+                         # it, and every other beat borrowing from it
+FILM_PRODUCE_MS = 200    # ms of lead for production: the `+1`s land this far
+                         # ahead of whatever follows, *during* the glide rather
+                         # than stopping it. Production runs before arrivals, so
+                         # a hull finished this turn defends the system it was
+                         # built at, and this is the gap that lets it register
+                         # before the fight it fed. A turn with no movement to
+                         # borrow from spends nothing and still resolves instantly
+FILM_COMBAT_MS = 0       # ms of lead for arrival fights — 0, and it has to stay
+                         # 0: a fight cannot be shown before the fleets that
+                         # fought it have arrived. So fights land on the film's
+                         # closing instant, which is the frame the next turn's
+                         # glide starts on; `Ui.fading_fights` keeps the burst up
+                         # across the join. `FILM_LINGER_COMBAT_MS` is the
+                         # opposite choice, for a turn ended by hand
+FILM_LINGER_COMBAT_MS = 300   # ms of *dwell* — time added to the film, not
+                         # borrowed — that the fights of a turn ended *by hand*
+                         # get instead of the instant above, shown one node after
+                         # another (`turnfilm.film`'s `linger` flag, which
+                         # `main.resolve_turn` sets as `not ui.playing`). Neither
+                         # continuous run asks for it — live play or history
+                         # playback — since it would put a stop-start back
+                         # exactly where continuous movement matters most
+FILM_LINGER_HOLD_MS = 250     # ms held on the resolved board after the last
+                         # beat of a hand-ended turn, for the same reason
+                         # `FILM_LINGER_COMBAT_MS` exists — watching your own move
+                         # resolve is worth a pause before control returns. A run
+                         # of turns chains straight through instead;
+                         # `Ui.fading_fights` / `fading_hulls` keep marks up
                          # regardless of which of these a turn used
 FILM_FLASH_MS = 260      # ms a mark (its burst, and the number with it) stays
                          # fully up before it starts to fade — also how long the

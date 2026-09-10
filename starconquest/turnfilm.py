@@ -235,12 +235,19 @@ _KINDS: dict[type, tuple[str, str]] = {
     Produced: ("produce", "Production"),
     Landed: ("combat", "Combat"),
 }
+# Each beat's own number in `config`. For a motion beat that is the stretch it
+# runs for; for every other beat it is a *lead* — how far ahead of what follows
+# it fires, borrowed from the stretch it lands in rather than added to the film.
 _DURATIONS: dict[str, str] = {
     "launch": "FILM_LAUNCH_MS",
     "move": "FILM_MOVE_MS",
     "produce": "FILM_PRODUCE_MS",
     "combat": "FILM_COMBAT_MS",
 }
+# The beats fleets are actually moving during, which is what `Film.travel`
+# sweeps and what everything else borrows its lead from. Kinds, not a phase
+# order: the engine still decides what comes when.
+_MOTION = frozenset({"move"})
 
 
 # ---------------------------------------------------------------------------- #
@@ -280,9 +287,9 @@ class Film:
     def plays(self) -> bool:
         """Whether there is anything here to watch.
 
-        Every beat can be an instant — a turn where only production happened, at
-        `config.FILM_PRODUCE_MS` of 0 — and holding the finished board for one of
-        those is dead air rather than an animation.
+        Every beat can be an instant — a turn where only production happened, with
+        no movement anywhere for its lead to borrow from — and holding the finished
+        board for one of those is dead air rather than an animation.
         """
         return any(beat.ms > 0 for beat in self.beats)
 
@@ -304,10 +311,10 @@ class Film:
         is where each fleet started the step, and after it the advance has been
         applied, so the same call is where each fleet finished.
         """
-        beat = self.beat_at(ms)
-        if beat is None or beat.kind != "move":
-            return 1.0
-        return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
+        for beat in self.beats:
+            if beat.kind in _MOTION and beat.holds(ms):
+                return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
+        return 1.0
 
 
 def film(events: list[Event], linger: bool = False) -> Film:
@@ -318,27 +325,32 @@ def film(events: list[Event], linger: bool = False) -> Film:
     Events inside a beat are spread across it, which bounds a film's length by the
     duration constants however busy the turn was.
 
-    ``linger`` swaps the combat beat's duration for `config.FILM_LINGER_COMBAT_MS`
-    and adds a trailing `config.FILM_LINGER_HOLD_MS` pause, instead of resolving
-    combat at 0 dwell with no pad at all. `main.resolve_turn` sets it for a live
-    End Turn, worth watching resolve; history playback (`main._next_history_film`)
-    leaves it off, since a run of animated turns there must glide continuously
-    rather than stop-start for every fight — a mark's own visibility
-    (`Ui.archive_marks`/`age_fading_marks`) outlives either kind of film, so
-    nothing here is lost by not lingering.
+    **Only movement spends time.** The move beat is the film; every other beat is
+    an instant, and its number in `config` is a *lead* — how far ahead of what
+    follows it fires, borrowed from the stretch it lands in rather than added to
+    the film. So production shows `config.FILM_PRODUCE_MS` before the fight it
+    fed while the fleets are still gliding, instead of stopping the board to say
+    the same thing, and a fight lands on the film's closing instant, which is the
+    frame the next turn's glide begins on: chained back to back (history
+    playback, `main._next_history_film`) the fleets never stop. A lead is clamped
+    to the room actually there — nothing is pulled back past the stretch it
+    borrows from or past the beat placed ahead of it — so a turn with no
+    movement to borrow from is all instants and does not play at all.
 
-    A produce beat only ever spends `config.FILM_PRODUCE_MS` when a combat beat
-    follows it directly — the one case worth spacing out, since the engine now
-    runs production *before* arrivals and a hull finished this turn is in the
-    garrison for the fight right after it. Elsewhere it stays an instant, same as
-    launch: most turns tick production with nothing arriving at all, and giving
-    every one of those a dwell would turn "otherwise quiet" back into "pauses
-    every turn".
+    ``linger`` is the live End Turn's opposite choice (`main.resolve_turn`):
+    combat swaps its instant for `config.FILM_LINGER_COMBAT_MS` of real dwell,
+    fights shown one node after another, and the film holds
+    `config.FILM_LINGER_HOLD_MS` on the resolved board before handing control
+    back. History playback never asks for either — it would put a stop-start back
+    exactly where continuous movement matters most, and a mark's own visibility
+    (`Ui.archive_marks`/`age_fading_marks`) outlives whichever kind of film made
+    it, so nothing is lost by not lingering.
     """
     beats: list[Beat] = []
     cues: list[tuple[float, Event]] = []
     clashes: list[Clashed] = []
-    at = 0.0
+    at = 0.0     # where the next beat lands: the end of the last timed stretch
+    floor = 0.0  # ...and the earliest a lead may reach back to
 
     # Group into runs of one class, holding clashes back until the move beat they
     # belong to has a start and a length to place them in.
@@ -355,25 +367,28 @@ def film(events: list[Event], linger: bool = False) -> Film:
         else:
             runs.append((kind, label, [event]))
 
-    for i, (kind, label, run) in enumerate(runs):
-        if kind == "combat" and linger:
-            ms = float(config.FILM_LINGER_COMBAT_MS)
-        elif kind == "produce":
-            follows_into_combat = i + 1 < len(runs) and runs[i + 1][0] == "combat"
-            ms = float(config.FILM_PRODUCE_MS) if follows_into_combat else 0.0
+    for kind, label, run in runs:
+        own = float(getattr(config, _DURATIONS[kind]))
+        if kind in _MOTION:
+            dwell, lead = own, 0.0
+        elif kind == "combat" and linger:
+            dwell, lead = float(config.FILM_LINGER_COMBAT_MS), 0.0
         else:
-            ms = float(getattr(config, _DURATIONS[kind]))
-        beat = Beat(kind, label, at, ms)
+            dwell, lead = 0.0, min(own, at - floor)
+        beat = Beat(kind, label, at - lead, dwell)
         beats.append(beat)
         # At the *start* of each event's slot: the advance has to land on the move
         # beat's first frame, since `travel` sweeps the schedule it applies.
         for i, event in enumerate(run):
-            cues.append((at + ms * i / len(run), event))
-        if kind == "move" and clashes:
+            cues.append((beat.start + dwell * i / len(run), event))
+        if kind in _MOTION and clashes:
             for clash in clashes:
-                cues.append((at + ms * min(1.0, max(0.0, clash.when)), clash))
+                cues.append((beat.start + dwell * min(1.0, max(0.0, clash.when)), clash))
             clashes = []
-        at = beat.end
+        # A lead borrows from the stretch behind it, so that stretch's start is
+        # how far back the *next* one may reach; a dwell pushes everything after
+        # it later, the way a move beat does.
+        floor, at = beat.start, max(at, beat.end)
 
     for clash in clashes:  # no move beat to ride in: give them the closing instant
         cues.append((at, clash))

@@ -18,7 +18,7 @@ import pytest  # noqa: E402
 
 from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import Order  # noqa: E402
+from starconquest.model import Fleet, Order  # noqa: E402
 from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
 
 
@@ -744,6 +744,79 @@ def test_star_name_labels_stay_in_the_map_and_off_the_nodes():
         pygame.quit()
 
 
+def test_a_star_name_keeps_off_the_space_a_playback_writes_into():
+    """A fight's cost and a finished hull's `+N` land in a fixed slot above a
+    system (`render._mark_slot`), so that slot is reserved whether or not one is
+    showing: a name allowed into the gap between fights would be shoved off the
+    map the moment one fired, which reads as the name flickering rather than as
+    the number arriving. Names go below their system instead, or nowhere.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=24, num_players=3)
+        ui = _make_ui(state)
+        drawn: list[tuple[str, pygame.Rect]] = []
+        real_text = render._text
+        names = {sys.name: sys for sys in state.systems.values()}
+
+        def spy(surface, font, s, color, **kw):
+            if "topleft" in kw and s in names:
+                drawn.append((s, pygame.Rect(kw["topleft"], font.size(s))))
+            return real_text(surface, font, s, color, **kw)
+
+        try:
+            render._text = spy
+            screen.set_clip(pygame.Rect(config.play_rect()))
+            render._draw_node_names(screen, state, ui)
+        finally:
+            render._text = real_text
+            screen.set_clip(None)
+
+        font = render._fonts()["small"]
+        slots = [render._mark_slot(font, ui.view.to_screen(sys.pos))
+                 for sys in state.systems.values()]
+        assert drawn, "no star names were drawn at all"
+        for name, rect in drawn:
+            centre = ui.view.to_screen(names[name].pos)
+            assert rect.top > centre[1], f"{name} is labelled above its system"
+            assert rect.collidelist(slots) == -1, f"{name} sits where a mark goes"
+    finally:
+        pygame.quit()
+
+
+def test_an_arriving_fleets_approach_stops_instead_of_snapping_back():
+    """A fleet closing on its destination has to *stop* at the rim. Drawing it at
+    the node's centre until the move beat's last frame and only then holding it
+    off jumps the triangle backwards by a whole radius, which is the one place a
+    playback ever moves a fleet the wrong way."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        lane = next(iter(state.lanes.values()))
+        # mid-film: the advance has already landed, so the fleet arrives this step
+        f = Fleet(owner_id=1, source_id=lane.a, dest_id=lane.b, ships=3,
+                  turns_total=3, turns_remaining=0, lane_slot=0)
+        dest = ui.view.to_screen(state.systems[lane.b].pos)
+        gap = (config.node_radius(state.systems[lane.b].production)
+               + config.FILM_ARRIVAL_GAP)
+
+        away = []
+        for step in range(21):
+            x, y, _, _ = render._fleet_at(state, ui, f, step / 20)
+            away.append(math.hypot(dest[0] - x, dest[1] - y))
+
+        assert away == sorted(away, reverse=True), "the approach went backwards"
+        assert away[-1] == pytest.approx(gap), "it must park clear of the rim"
+        assert away[0] > away[-1], "...having actually moved to get there"
+    finally:
+        pygame.quit()
+
+
 def test_every_star_name_fits_the_info_panel():
     """The panel heading holds a name whose length we don't control, so it drops to
     the small font when the normal one would overrun — and at that size every name
@@ -1140,11 +1213,12 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
     someone else. When the extra ship still isn't enough, the very same system
     earns a combat mark right after.
 
-    The two no longer land on the very same instant (`config.FILM_PRODUCE_MS`
-    buys the gap that lets the `+1` register as having contributed to the fight
-    rather than blurring into it), so this archives them one call apart, the way
-    two separate `Reel.run_to` calls would — but neither expires quickly, so both
-    are still up together and must not be drawn on top of each other.
+    The two never land on the same instant — `config.FILM_PRODUCE_MS` of lead,
+    borrowed from the glide, is what lets the `+1` register as having contributed
+    to the fight rather than blurring into it — so this archives them one call
+    apart, the way two separate `Reel.run_to` calls would. Neither expires
+    quickly, so both are still up together and must not be drawn on top of each
+    other.
     """
     pygame.init()
     render._FONTS.clear()

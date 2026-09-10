@@ -12,7 +12,7 @@ import pygame
 
 from . import config, fog, paths, turnfilm, uifont
 from .geometry import lerp
-from .model import GameState, lane_key
+from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
 
 _FONTS: dict[str, pygame.font.Font] = {}
@@ -319,6 +319,40 @@ def _travel(ui: Ui) -> float:
     return ui.film.travel(ui.film_ms)
 
 
+def _fleet_at(state: GameState, ui: Ui, f: Fleet,
+              travel: float) -> tuple[float, float, float, float]:
+    """Where a fleet is drawn this frame and which way it points, in screen
+    space: ``(x, y, ux, uy)``, its lane track already applied.
+
+    Split out of the drawing so the approach can be checked on its own — an
+    arriving fleet has to close on its destination and stop, never reach the
+    centre and be pushed back off it.
+    """
+    a = state.systems[f.source_id].pos
+    b = state.systems[f.dest_id].pos
+    x, y = ui.view.to_screen(lerp(a, b, f.progress_at(travel)))
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    # A fleet that reaches its destination sits on the node and would cover its
+    # garrison count, so its approach stops at the rim. Clamped over the last few
+    # pixels rather than applied once it has landed: the triangle closes on the
+    # centre for the whole glide, so subtracting the gap only at the end jumps it
+    # backwards by a whole radius on the move beat's last frame. Only a film ever
+    # draws an arrived fleet — the engine takes one off the board the same turn.
+    if f.turns_remaining <= 0:
+        bx, by = ui.view.to_screen(b)
+        gap = (config.node_radius(state.systems[f.dest_id].production)
+               + config.FILM_ARRIVAL_GAP)
+        if math.hypot(bx - x, by - y) < gap:
+            x, y = bx - ux * gap, by - uy * gap
+    # Hold each fleet off the lane's centre line by the track it was given at
+    # launch (`model.free_lane_slot`) — read off the fleet rather than ranked
+    # here, so a lane-mate launching or arriving cannot shift it.
+    spread = config.FLEET_SIZE + config.s(3)
+    return x - uy * f.lane_slot * spread, y + ux * f.lane_slot * spread, ux, uy
+
+
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     travel = _travel(ui)
     for f in state.fleets:
@@ -327,31 +361,14 @@ def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
         # they near your space
         if f.owner_id != ui.human_id and not ui.sees(f.source_id) and not ui.sees(f.dest_id):
             continue
-        a = state.systems[f.source_id].pos
-        b = state.systems[f.dest_id].pos
-        wp = lerp(a, b, f.progress_at(travel))
-        x, y = ui.view.to_screen(wp)
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        length = math.hypot(dx, dy) or 1.0
-        ux, uy = dx / length, dy / length
-        px, py = -uy, ux  # perpendicular
-        # A fleet that has reached its destination sits on the node and would
-        # cover its garrison count, so hold it off the rim. Only a film ever draws
-        # one: the engine takes an arrived fleet off the board in the same turn.
-        if f.progress_at(travel) >= 1.0:
-            gap = (config.node_radius(state.systems[f.dest_id].production)
-                   + config.FILM_ARRIVAL_GAP)
-            x, y = int(x - ux * gap), int(y - uy * gap)
-        # Hold each fleet off the lane's centre line by the track it was given at
-        # launch (`model.free_lane_slot`) — read off the fleet rather than ranked
-        # here, so a lane-mate launching or arriving cannot shift it. The count
-        # sits clear of the triangle; both offsets scale, so the label never lands
-        # on the glyph on a big display.
-        spread = config.FLEET_SIZE + config.s(3)
-        x += int(px * f.lane_slot * spread)
-        y += int(py * f.lane_slot * spread)
+        fx, fy, ux, uy = _fleet_at(state, ui, f, travel)
+        x, y = int(fx), int(fy)
         _draw_triangle(surface, (x, y), (ux, uy), config.player_color(f.owner_id))
-        _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT, center=(x + int(px * spread), y + int(py * spread)))
+        # The count sits clear of the triangle; both offsets scale, so the label
+        # never lands on the glyph on a big display.
+        spread = config.FLEET_SIZE + config.s(3)
+        _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT,
+              center=(x - int(uy * spread), y + int(ux * spread)))
 
 
 def _draw_triangle(surface, center, direction, color) -> None:
@@ -923,6 +940,19 @@ def _mark_center(center) -> tuple[int, int]:
             int(center[1]) - config.FILM_BURST_R - config.FILM_LOSS_GAP)
 
 
+def _mark_slot(font, center) -> pygame.Rect:
+    """The space over a system a playback writes numbers into: a mark's own row
+    and the row a second number stacks into above it (`_film_labels`).
+
+    Sized off a representative label rather than a real one, because the star-name
+    pass reserves this whether or not anything is showing there right now. A name
+    allowed into the gap between fights would be pushed off the map the moment one
+    fired, which reads as the name flickering rather than as the number arriving.
+    """
+    base = _pill_rect(font, "+00", _mark_center(center))
+    return base.union(base.move(0, -_row_h("small")))
+
+
 class _Mark(NamedTuple):
     """One fight a playback is currently showing, placed on screen."""
 
@@ -986,11 +1016,10 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     combined figure mostly restates what the board already shows while burying the
     one number the square law makes hard to guess. And a hull finished this turn is
     ``+N`` in its owner's colour, which is what makes production visible at all
-    without giving it a dwell of its own most of the time — `config.FILM_PRODUCE_MS`
-    is spent only when a combat beat follows it directly (`turnfilm.film`), never
-    for a quiet tick with nothing arriving. Each fades toward the background on its
-    own fixed clock (`_mark_fade`) rather than being cut off, or tied to how long
-    any particular turn's film runs.
+    without ever stopping the board to say it: `config.FILM_PRODUCE_MS` is a lead
+    borrowed from the glide (`turnfilm.film`), not a dwell. Each fades toward the
+    background on its own fixed clock (`_mark_fade`) rather than being cut off, or
+    tied to how long any particular turn's film runs.
 
     They can still collide, on purpose: production now runs *before* combat, so a
     hull finished this turn defends the system it was built at and its ``+N``
@@ -1118,6 +1147,8 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         pos = ui.view.to_screen(sys.pos)
         r = config.node_radius(sys.production)
         taken.append(pygame.Rect(pos[0] - r, pos[1] - r, r * 2, r * 2))
+        taken.append(_mark_slot(font, pos))   # ...and so is the space a playback
+                                              # writes its numbers into, always
     # ...and so is every label already on the map: a name landing on a lane's
     # travel time or a rule's "keep N" makes both of them unreadable, and those
     # carry information a name doesn't.
@@ -1136,10 +1167,9 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
                 continue
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
-    # ...and, for the second or so a playback is writing numbers on the map, those.
-    # Only ever while one is actually showing: `_film_labels` returns nothing
-    # without a film, and there is no film at all unless turn animation is switched
-    # on, so with it off names are placed exactly as they always were.
+    # ...and a playback's own numbers where they are not over a system at all: an
+    # open-space clash is marked at the lane fraction it happened at, which no
+    # node's reserved slot covers.
     for center, text, _color in _film_labels(state, ui):
         taken.append(_pill_rect(font, text, center))
 
@@ -1157,7 +1187,9 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         r = config.node_radius(sys.production)
         pad = config.NODE_LABEL_PAD
         placement = None
-        # below the node by preference, above it when that side is taken or off-map
+        # Below the node, which is where a name belongs: the space above is held
+        # for a playback's numbers (`_mark_slot`), so the fallback above only
+        # opens up if that slot is ever tuned smaller than the label gap.
         for side in (1, -1):
             rect = pygame.Rect((0, 0), font.size(sys.name))
             edge = pos[1] + side * (r + config.NODE_LABEL_GAP)

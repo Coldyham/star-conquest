@@ -1911,16 +1911,20 @@ def test_hovering_or_zooming_leaves_a_film_running():
         pygame.quit()
 
 
-def _won_with_animation(monkeypatch):
+def _won_with_animation(monkeypatch, playing: bool = False):
     """A human win *worth watching*, with turn animation on: the reel plus its Ui.
 
     The last rival holds one system and a fleet is one turn out from it, so the
     turn that decides the game has a move and a fight in it. A board with nothing
     left in transit resolves to a film of instants (`Film.plays` is False) and
     would never defer anything — which is right, and no test of the deferral.
+
+    ``playing`` resolves the turn as play mode's own loop does rather than as a
+    press of End Turn, which is the one thing `resolve_turn` reads it for.
     """
     monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
     state, ui = _setup()
+    ui.playing = playing
     home = next(s.id for s in state.systems.values() if s.owner_id == 1)
     last = state.systems[home].neighbors[0]
     for s in state.systems.values():
@@ -1943,6 +1947,31 @@ def test_resolve_turn_lets_its_combat_linger(monkeypatch):
     combat = next(b for b in ui.film.beats if b.kind == "combat")
     assert combat.ms == config.FILM_LINGER_COMBAT_MS
     assert ui.film.total_ms > combat.end   # a trailing hold, not an instant end
+
+
+def test_play_mode_asks_for_a_film_that_glides_instead_of_lingering(monkeypatch):
+    """Play mode and history playback are one behaviour from two sources: a *run*
+    of turns has to glide, so only a turn ended by hand lingers. Lingering here
+    stopped the run dead for every fight (`FILM_LINGER_COMBAT_MS`) and held the
+    board after it (`FILM_LINGER_HOLD_MS`), on top of the `PLAY_MS` gap the loop
+    now chains past."""
+    _state, ui, _reel = _won_with_animation(monkeypatch, playing=True)
+    combat = next(b for b in ui.film.beats if b.kind == "combat")
+    assert combat.ms == config.FILM_COMBAT_MS == 0
+    assert ui.film.total_ms == combat.end      # nothing left to wait out
+
+
+def test_a_reel_comes_back_already_at_its_first_instant(monkeypatch):
+    """`main._primed`. A chained turn — play mode's or history's — is built inside
+    the per-frame update, past the point where a running film is stepped, so it is
+    drawn once before any `run_to` reaches it. Un-advanced, that frame draws every
+    continuing fleet a whole turn's worth of progress behind where it just was."""
+    _state, ui, reel = _won_with_animation(monkeypatch, playing=True)
+    due = [e for at, e in reel.film.cues if at <= 0.0]
+    assert due and reel.at == len(due)
+    assert reel.run_to(0.0) == []              # ...nothing of it left to apply
+    flying = next(f for f in reel.board.fleets if f.owner_id == 1)
+    assert flying.turns_remaining == 0         # advanced, not still one turn out
 
 
 def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkeypatch):

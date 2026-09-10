@@ -228,29 +228,38 @@ Rules that hold it together:
 - **The order is the engine's, never one written down in `turnfilm`.** `film()`
   groups *consecutive* events of one class into a beat, so moving `_production`
   ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-  `config.FILM_LAUNCH_MS` is always 0: a launched fleet lands at its true place in
-  the sequence with no dwell of its own — `Fleet.progress_at` combined with
-  `Film.travel` already starts its glide at progress 0, so a held launch beat only
-  bought a stutter before movement began, and a finished hull is made visible by a
-  mark (below), not by holding the board still to show one. `config.FILM_PRODUCE_MS`
-  is the one duration `turnfilm.film` spends conditionally: 0 for a plain tick, but
-  its full value when a combat beat follows the produce beat directly, since
-  production now runs *before* arrivals (see Turn resolution) and a hull finished
-  this turn is in the garrison for the fight right after it — the gap is what lets
-  the `+1` register as having contributed instead of landing on the same instant as
-  the fight it fed. Keep it at 0 everywhere else: `Film.plays` is "does any beat
-  have a duration", and production ticks on nearly every turn regardless of
-  whether anything else happens, so spending it unconditionally would turn every
-  otherwise-quiet turn into a pause instead of resolving instantly.
-  Combat is the one beat with two speeds: `config.FILM_COMBAT_MS` is 0 by
-  default, but `film(events, linger=True)` swaps in `FILM_LINGER_COMBAT_MS` and
-  adds a trailing `FILM_LINGER_HOLD_MS` — `main.resolve_turn` asks for that on a
-  live End Turn, worth watching resolve, while `main._next_history_film` never
-  does, since a run of animated turns there must glide continuously rather than
-  stop-start for every fight. Neither path pads `total_ms` beyond what `linger`
-  asks for: a non-lingering film ends the instant its last beat does, which is
-  what lets the *next* turn's move beat start immediately with nothing left to
-  wait out (see history chaining, below).
+- **Only movement spends time; every other beat is an instant with a *lead*.**
+  The move beat (`config.FILM_MOVE_MS`) is the whole of a non-lingering film, and
+  every other kind's constant is how far ahead of *what follows* it fires,
+  borrowed from the stretch it lands in rather than added to the film — clamped to
+  the room actually there, so nothing is ever pulled back past the stretch it
+  borrows from or past the beat ahead of it. `config.FILM_PRODUCE_MS` (200) is
+  therefore spent mid-glide and costs the turn nothing: production runs *before*
+  arrivals (see Turn resolution) and a hull finished this turn is in the garrison
+  for the fight right after it, so the `+1` has to register as having contributed
+  rather than landing on the same instant as the fight it fed.
+  `config.FILM_LAUNCH_MS` is 0 and opens a turn, so it has nothing behind it to
+  borrow anyway; `config.FILM_COMBAT_MS` **must stay 0**, since a fight cannot be
+  shown before the fleets that fought it have arrived. Fights land on the film's
+  closing instant, which is the frame the next turn's glide starts on — chained
+  back to back (live play and history playback alike), the fleets never stop, and
+  the burst carries across the join on its own clock (below). A turn with no movement to borrow from
+  is all instants and does not play at all (`Film.plays`), so a quiet production
+  tick still resolves instantly instead of costing a pause.
+  Combat is the one beat with a second speed: `film(events, linger=True)` gives it
+  `FILM_LINGER_COMBAT_MS` of real dwell — time *added*, fights shown one node
+  after another — plus a trailing `FILM_LINGER_HOLD_MS`. That is for a turn ended
+  **by hand** and nothing else: `main.resolve_turn` passes `linger=not ui.playing`
+  and `main._next_history_film` never lingers, so a *run* of turns — live play or
+  history playback — glides continuously rather than stop-starting for every
+  fight.
+- **A fleet's approach stops at the rim; it never reaches the centre.**
+  `render._fleet_at` is the one function that decides where a fleet is drawn (lane
+  track included), and it clamps an arriving fleet — `turns_remaining <= 0` —
+  to `node_radius + config.FILM_ARRIVAL_GAP` short of its destination over the last
+  few pixels of the glide. Subtracting that gap only once the fleet has *landed*
+  instead jumps the triangle backwards by a whole radius on the move beat's last
+  frame, which is the one place a playback ever moves a fleet the wrong way.
 - **A mark outlives the film that made it, fading on its own clock.**
   `Ui.fading_fights`/`fading_hulls` hold every still-showing fight or finished
   hull as plain data (`viewstate.FadingFight`/`FadingHull`), independent of
@@ -268,7 +277,10 @@ Rules that hold it together:
   does afterward. A "jump" rather than a step (entering/leaving history,
   scrubbing, rewinding) calls `Ui.clear_fading_marks()`, since a mark belongs to
   a specific point in a specific playback and jumping away from it makes it
-  stale rather than merely old.
+  stale rather than merely old. A second mark at one system supersedes the first:
+  turns chain straight into each other, so the previous turn's is often still
+  fading when this one fires, and two bursts with two numbers on one node read as
+  a garbled figure rather than as two events.
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the
@@ -296,24 +308,24 @@ Rules that hold it together:
   in) rather than whenever a film merely happens to be up — a manually-triggered
   film runs with `Ui.playing` False throughout, so toggling play *on* while it
   plays must leave it alone rather than freezing it on the first frame.
-- **History playback chains an animated turn straight into the next one, and
-  never lingers.** Both serve the same end: a run of animated turns glides
-  continuously instead of stuttering. `main._next_history_film` is tried
-  immediately once a film lands, before the `PLAY_MS` pacing below it — which
-  only ever fires for a turn with nothing to animate, or with the preference off
-  — and it never passes `linger=True`, so combat there is always the instant,
-  unpadded default. A live End Turn is the opposite on purpose: watching your own
-  move resolve is worth a pause, which is what `main.resolve_turn`'s
-  `linger=True` buys (above). Neither path loses anything by choosing either way
+- **A run of turns chains one animated turn straight into the next, and never
+  lingers.** Live play and history playback are the same behaviour from two
+  sources, and both take the same path: the moment a film lands the loop starts
+  the next turn — `main._next_history_film` in history, `resolve_turn` in live
+  play (on the same terms the `PLAY_MS` branch below it would have resolved on) —
+  before the `PLAY_MS` pacing gets a chance to run. That pacing now only ever
+  fires for a turn with nothing to animate, or with the preference off. A turn
+  ended by hand is the deliberate opposite: watching your own move resolve is
+  worth a pause, which is what `linger` buys (above). Nothing is lost either way
   — a mark's visibility no longer depends on `film` still being current (above),
-  so lingering or not only changes how long `film` itself holds the board, never
-  how long a mark stays up. **`_next_history_film` must run its new reel to `0.0`
-  before returning it**, unlike a live End Turn's reel, which always gets a
-  `run_to` call in the same frame it's built (`main`'s per-frame update runs
-  right after the event that creates it, this one is built *inside* that
-  update). Skip it and a continuing fleet draws one frame at last turn's
-  un-advanced `turns_remaining` — a visible snap back by a whole turn's worth of
-  progress before the next frame's `run_to` catches it back up.
+  so lingering only changes how long `film` itself holds the board.
+  **Every reel goes through `main._primed`**, which runs it to `0.0` (archiving
+  whatever marks that makes) before it is handed back. A chained reel is built
+  *inside* the per-frame update, past the point where a running film is stepped,
+  so it is drawn once before any `run_to` reaches it: un-advanced, that frame
+  draws a continuing fleet a whole turn's worth of progress behind where it just
+  was. Priming only the path that visibly needed it leaves the trap set for the
+  next caller — which is exactly what live-play chaining then walked into.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at
@@ -664,8 +676,11 @@ intact.
   nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
   `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
   `render._draw_node_names` places labels collision-first and drops what doesn't
-  fit (see system-design); ids stay on the mechanical readouts — the queued list,
-  `tests/sim` logs, tokens.
+  fit (see system-design) — including the fixed slot above every system that a
+  playback writes its numbers into (`render._mark_slot`), reserved whether or not
+  one is showing, so a name sits below its system or nowhere rather than
+  flickering out the moment a `+1` or a fight's cost appears. Ids stay on the
+  mechanical readouts — the queued list, `tests/sim` logs, tokens.
 - **The menu's Combat tab teaches the square law from the real code.**
   `combat.preview_fight` sits beside `resolve_fight` and shares its
   `_apply_advantage`/`_resolve_effective`/`_survivors` helpers, so the page

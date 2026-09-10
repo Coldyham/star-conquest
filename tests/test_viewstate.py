@@ -179,6 +179,43 @@ def test_archive_marks_turns_visible_hulls_into_fading_hulls():
     assert (hull.age_ms, hull.node_id, hull.hulls, hull.owner_id) == (0.0, 0, 1, 1)
 
 
+def test_a_second_mark_at_one_system_supersedes_the_first():
+    """Turns chain straight into each other, so a system fought over (or finishing
+    a hull) two turns running can still be showing last turn's mark when this
+    turn's fires. Two bursts and two numbers stacked on one node read as one
+    garbled figure, so the older one goes rather than both being drawn."""
+    state = _state([System(id=0, pos=(0.0, 0.0), owner_id=1)])
+    ui = _ui(seen={0})
+    ui.visible = {0}
+    ui.fading_fights = [_fading_fight(age_ms=400.0)]
+    ui.fading_hulls = [_fading_hull(age_ms=400.0)]
+    landed = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=6,
+                             owner_id=2, ships=7, prod_progress=0, steps=(_fold(),))
+
+    ui.archive_marks(state, [turnfilm.Produced(((0, 4, 0, 1),)), landed])
+
+    assert [f.age_ms for f in ui.fading_fights] == [0.0]
+    assert [h.age_ms for h in ui.fading_hulls] == [0.0]
+
+
+def test_a_mark_elsewhere_leaves_a_fading_one_alone():
+    """Superseding is per system: a fight at one node says nothing about a mark
+    still dissolving over another."""
+    state = _state([
+        System(id=0, pos=(0.0, 0.0), owner_id=1),
+        System(id=1, pos=(10.0, 0.0), owner_id=1),
+    ])
+    ui = _ui(seen={0, 1})
+    ui.visible = {0, 1}
+    ui.fading_fights = [_fading_fight(age_ms=400.0)]        # at system 0
+    landed = turnfilm.Landed(node_id=1, fleets=(), was_owner=1, was_ships=6,
+                             owner_id=2, ships=7, prod_progress=0, steps=(_fold(),))
+
+    ui.archive_marks(state, [landed])
+
+    assert sorted(f.node_id for f in ui.fading_fights) == [0, 1]
+
+
 def test_age_fading_marks_ages_and_prunes_at_the_end_of_its_life():
     ui = _ui(seen=set())
     life = config.FILM_FLASH_MS + config.FILM_FADE_MS
