@@ -1029,14 +1029,15 @@ def test_which_fights_get_a_mark_and_what_it_says():
         pygame.quit()
 
 
-def test_a_loss_label_only_stands_in_a_star_names_way_while_it_shows():
+def test_a_loss_label_keeps_its_ground_until_the_turn_itself_ends():
     """The name pass avoids the loss pill for the same reason it avoids lane times
-    and a rule's "keep N" — but only for the moment one is up.
+    and a rule's "keep N" — for as long as one is up, which is now the whole rest
+    of the turn: a fight fades toward the background rather than being cut off on
+    a fixed clock (`Film.fade`), so there is nothing to hand back early.
 
-    Both halves matter. Nothing is reserved once the burst has faded, and nothing
-    at all with turn animation off, since there is then no film to read: the name
-    pass and `_draw_film_flashes` share `_flash_marks` precisely so the space
-    reserved and the label drawn cannot come apart.
+    Both halves matter. Reserved space and the fading mark cannot come apart (the
+    name pass and `_draw_film_flashes` share `_flash_marks`), and nothing is
+    reserved at all with turn animation off, since there is then no film to read.
     """
     pygame.init()
     render._FONTS.clear()
@@ -1054,9 +1055,13 @@ def test_a_loss_label_only_stands_in_a_star_names_way_while_it_shows():
         at = next(cue for cue, e in ui.film.cues if e is landed)
 
         ui.film_ms = at + 1
-        assert list(render._flash_marks(state, ui))          # showing: reserve it
+        assert list(render._flash_marks(state, ui))              # fresh: reserve it
         ui.film_ms = at + config.FILM_FLASH_MS + 1
-        assert list(render._flash_marks(state, ui)) == []    # faded: hand it back
+        assert list(render._flash_marks(state, ui))               # well past the old
+                                                                    # fixed window, still up
+        ui.film_ms = ui.film.total_ms
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 1.0    # faded almost away, but not dropped
 
         ui.stop_film()      # ...and with animation off there is never a film
         ui.film_ms = at + 1
@@ -1087,9 +1092,11 @@ def test_a_finished_hull_is_marked_over_its_system():
         node = next(s.id for s in state.systems.values() if s.owner_id == 1)
         produced = turnfilm.Produced(((node, 4, 0, 1),))
         events = [turnfilm.Advanced(((0, 2),)), produced]
+        film = turnfilm.film(events)
+        at = next(cue for cue, e in film.cues if e is produced)
 
         out, _ = _labels(state, ui, events, produced)
-        assert out == [("+1", config.player_color(1))]
+        assert out == [("+1", render._faded(config.player_color(1), film.fade(at, at + 1)))]
 
         # a rival's yard is not ours to report, so fog gates it like a burst
         ui.visible = set(state.systems) - {node}
@@ -1121,10 +1128,12 @@ def test_a_captured_system_that_produces_stacks_its_two_marks():
     its new owner — the one case where both marks are earned at the same spot, and
     they must not be drawn on top of each other.
 
-    It takes two arrivals to reach, which is worth knowing: cues are spread across
-    the combat beat, so a lone fight fires at its start and its burst has already
-    faded by the time production lands. Only a node resolving later in the beat is
-    still marked when the hull appears.
+    A single arrival reaches it reliably now: marks used to expire on a fixed
+    `FILM_FLASH_MS` after their cue, so a lone fight's burst had already faded by
+    the time production landed and only a node resolving later in a busy combat
+    beat stayed marked long enough to collide. Now that a mark fades across the
+    rest of the turn instead (`Film.fade`), nothing expires early, so the loss and
+    the gain are simply both still up once the second of the two has fired.
     """
     pygame.init()
     render._FONTS.clear()
@@ -1134,9 +1143,6 @@ def test_a_captured_system_that_produces_stacks_its_two_marks():
         ui = _make_ui(state)
         node = next(s.id for s in state.systems.values() if s.owner_id == 1)
         state.systems[node].owner_id = 2                     # ...as the film ends it
-        first = turnfilm.Landed(node_id=state.systems[node].neighbors[0], fleets=(),
-                                was_owner=1, was_ships=2, owner_id=1, ships=5,
-                                prod_progress=0, steps=())   # a reinforcement: no mark
         landed = turnfilm.Landed(
             node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
             prod_progress=0,
@@ -1144,12 +1150,22 @@ def test_a_captured_system_that_produces_stacks_its_two_marks():
                                  defender_ships=6, winner=2, survivors=7),))
         produced = turnfilm.Produced(((node, 8, 0, 1),))
 
-        out, placed = _labels(state, ui, [first, landed, produced], produced)
+        events = [landed, produced]
+        film = turnfilm.film(events)
+        landed_at = next(cue for cue, e in film.cues if e is landed)
+        produced_at = next(cue for cue, e in film.cues if e is produced)
+        film_ms = produced_at + 1   # what `_labels` drives the frame to
+
+        out, placed = _labels(state, ui, events, produced)
         assert sorted(t for t, _ in out) == ["+1", "−2"]
         assert placed["+1"][0] == placed["−2"][0], "same column"
         assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
         assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
-        # both belong to the new owner, so both are drawn in its colour
-        assert {c for _, c in out} == {config.player_color(2)}
+        # both belong to the new owner, so both are drawn in its colour — just
+        # faded by however long each has been up, which differs since the fight
+        # fired earlier than the hull it fed into
+        color = dict(out)
+        assert color["−2"] == render._faded(config.player_color(2), film.fade(landed_at, film_ms))
+        assert color["+1"] == render._faded(config.player_color(2), film.fade(produced_at, film_ms))
     finally:
         pygame.quit()

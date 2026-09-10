@@ -209,11 +209,13 @@ immediately and atomically, so the live `GameState` is always the fully-resolved
 board; the film is a *playback of a finished turn* onto a deep copy, held as a
 main-loop local and drawn through the same `render.draw(screen, view_state, ui)`
 swap history mode uses. Nothing is observable mid-flight and skipping is therefore
-always safe (any press; `Ui.stop_film`). `RULES_VERSION` does not move for any of
-it, and nothing is recorded — a film is derived per turn and discarded, so the log
-format is untouched.
+always safe (any press but Play/Pause; `Ui.stop_film`) — pausing freezes it in
+place instead (`Ui.film_paused`), so a paused review keeps showing what the turn
+did rather than reverting to the plain board a skip leaves behind. `RULES_VERSION`
+does not move for any of it, and nothing is recorded — a film is derived per turn
+and discarded, so the log format is untouched.
 
-Four rules hold it together:
+Rules that hold it together:
 - **Events carry results, not rules.** `engine.end_turn(on_event=…)` reports
   outcomes (`Advanced` carries each fleet's *new* `turns_remaining`, `Landed` the
   node's new owner/ships), so `turnfilm.Reel` assigns and never re-simulates: it
@@ -227,7 +229,21 @@ Four rules hold it together:
   (`Produced.hulls` -> `Film.hulls` -> `render._film_labels`) rather than by time.
   Keep it at 0 unless production stops being the last phase: `Film.plays` is
   "does any beat have a duration", so a dwell would make every otherwise-quiet
-  turn pause instead of resolving instantly.
+  turn pause instead of resolving instantly. `config.FILM_LAUNCH_MS` is 0 for the
+  same reason on the other end of the turn: `Fleet.progress_at` combined with
+  `Film.travel` already starts a launched fleet's glide at progress 0, so a
+  separate held beat only bought a stutter before movement began — watched turn
+  after turn, that stutter is the more visible cost.
+- **A mark fades across whatever is left of the turn, not on a fixed clock.**
+  `Film.fade(at, ms)` spans `total_ms - at`, so an early fight gets a long, slow
+  dissolve and a late one a short, quick one — either way gone by the time the
+  turn itself is, never cut off early and never lingering past it.
+  `render._faded` blends the mark's colour toward `config.COLOR_BG` (the main
+  surface has no per-pixel alpha, and a label's own pill backing is already that
+  colour, so its text sinks into its own backing rather than shifting hue).
+  `config.FILM_FLASH_MS` still exists, but only for a burst's pop-in geometry now
+  (its rings settle and its spokes retract over that window) — reusing it as an
+  expiry would make a mark vanish long before the turn that produced it does.
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the
@@ -247,6 +263,20 @@ Four rules hold it together:
   and `land_film` is the one place the clock running out and a press skipping both
   pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
   Anything else a playback holds back belongs there too, never at a call site.
+- **Play/Pause freezes a film; every other press still skips it.**
+  `input._toggles_play` exempts that one control (the P key, or its footer
+  button) from the blanket "any press skips" rule, and `main.apply_toggle_play`
+  is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
+  set only when *pausing an already-running* playthrough (`was_playing` going
+  in) rather than whenever a film merely happens to be up — a manually-triggered
+  film runs with `Ui.playing` False throughout, so toggling play *on* while it
+  plays must leave it alone rather than freezing it on the first frame.
+- **History playback chains an animated turn straight into the next one.**
+  `main._next_history_film` is tried immediately once a film lands, before the
+  `PLAY_MS` pacing below it — which only ever fires for a turn with nothing to
+  animate, or with the preference off. A gap stitched between every turn
+  regardless would stutter exactly where continuous movement matters most: a
+  run of animated turns played back to back.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at

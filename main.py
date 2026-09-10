@@ -562,6 +562,56 @@ def land_film(state: GameState, ui: Ui) -> None:
         ui.reset_view(state)
 
 
+def _next_history_film(ui: Ui, history_states: list[GameState],
+                       history_fog: list, history_events: list) -> Optional[turnfilm.Reel]:
+    """Build the reel for the history turn after ``ui.history_turn``, if there is
+    anything in it worth animating.
+
+    Returns None when the next turn has nothing to show — no recorded events, turn
+    animation off, or a film that turns out to be all instants — in which case the
+    caller falls back to stepping it on its own, paced by `PLAY_MS`.
+
+    Shared by the two moments history playback advances: right after a film lands
+    (so back-to-back animated turns chain immediately, with no dead gap between
+    them) and the `PLAY_MS`-paced step for whenever the turn after that turns out
+    to be quiet.
+    """
+    nxt = ui.history_turn + 1
+    if not (nxt <= ui.history_max and nxt < len(history_events)
+            and history_events[nxt] and webstore.animate_turns()):
+        return None
+    film = turnfilm.film(history_events[nxt])
+    if not film.plays:
+        return None
+    ui.film, ui.film_ms, ui.film_paused = film, 0.0, False
+    # the same union as live play: the turn's own fog on top of the one it lands in
+    ui.film_visible = frozenset(history_fog[ui.history_turn][0])
+    # a copy, so scrubbing back to this turn still finds the board it really was
+    return turnfilm.Reel(turnfilm.copy_board(history_states[ui.history_turn]), film)
+
+
+def apply_toggle_play(ui: Ui) -> None:
+    """What the "toggle_play" action does: flip `Ui.playing`, and freeze or leave
+    alone whatever film is currently running.
+
+    In history mode this drives the replay scrubber; starting it while parked on
+    the final frame replays from the opening position.
+
+    `input` no longer skips a playback on this particular press (see the note
+    there), so pausing an *already running* playthrough must freeze the film
+    itself (`Ui.film_paused`) rather than only stop the next turn from starting —
+    and starting one from a standstill must leave a manually-triggered film that
+    is already running alone, which is why the trigger is the button's own state
+    going in (``was_playing``) rather than whether a film merely happens to exist.
+    """
+    if ui.history and not ui.playing and ui.history_turn >= ui.history_max:
+        ui.history_turn = 0
+    was_playing = ui.playing
+    ui.playing = not ui.playing
+    if ui.film is not None:
+        ui.film_paused = was_playing
+
+
 def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
     """File the human's win as their best on this setup, if it beats the last one.
 
@@ -860,11 +910,7 @@ async def main() -> None:
                 reel = resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step
             elif action == "toggle_play":
-                # In history mode this drives the replay scrubber; starting it while
-                # parked on the final frame replays from the opening position.
-                if ui.history and not ui.playing and ui.history_turn >= ui.history_max:
-                    ui.history_turn = 0
-                ui.playing = not ui.playing
+                apply_toggle_play(ui)
                 play_accum = 0   # first step after PLAY_MS, then every PLAY_MS
             elif action == "toggle_autoplay":
                 ui.autoplay = not ui.autoplay
@@ -948,8 +994,11 @@ async def main() -> None:
                 land_film(state, ui)        # unreachable, but a stranded film would
                                             # hide the End Turn button for good
             elif reel is not None and not confirm_quit and not confirm_rewind:
-                ui.film_ms += dt
-                reel.run_to(ui.film_ms)
+                # Frozen rather than advanced while paused (see `Ui.film_paused`),
+                # so pausing keeps showing what the turn did instead of losing it.
+                if not ui.film_paused:
+                    ui.film_ms += dt
+                    reel.run_to(ui.film_ms)
                 if ui.film_ms >= ui.film.total_ms:
                     if ui.history:
                         # The scrubber moves at the film's *end*, so it and the top
@@ -961,30 +1010,28 @@ async def main() -> None:
                     land_film(state, ui)
                     reel = None
                     play_accum = 0
+                    if ui.history and ui.playing:
+                        # Chain straight into the next turn's film with no gap, so
+                        # a run of animated turns glides rather than stuttering —
+                        # the PLAY_MS pacing below is only for a quiet turn with
+                        # nothing to chain into.
+                        reel = _next_history_film(ui, history_states, history_fog,
+                                                  history_events)
 
             if (reel is None and ui.history and ui.playing
                     and not confirm_quit and not confirm_rewind):
                 # Replay playback: one turn per PLAY_MS, stopping when it reaches
                 # the final recorded turn (like a video reaching the end). With
                 # turn animation on, the step becomes a film and the scrubber
-                # advances when that finishes instead of here.
+                # advances when that finishes instead of here — and the turn after
+                # that one chains immediately (just above), so this pacing is only
+                # ever felt on a turn with nothing to animate.
                 play_accum += dt
                 if play_accum >= PLAY_MS:
                     play_accum = 0
-                    nxt = ui.history_turn + 1
-                    if (nxt <= ui.history_max and nxt < len(history_events)
-                            and history_events[nxt] and webstore.animate_turns()):
-                        film = turnfilm.film(history_events[nxt])
-                        if film.plays:
-                            ui.film, ui.film_ms = film, 0.0
-                            # the same union as live play: the turn's own fog on
-                            # top of the one it lands in (`Ui.film_visible`)
-                            ui.film_visible = frozenset(history_fog[ui.history_turn][0])
-                            # a copy, so scrubbing back to this turn still finds
-                            # the board it really was
-                            reel = turnfilm.Reel(
-                                turnfilm.copy_board(history_states[ui.history_turn]), film)
+                    reel = _next_history_film(ui, history_states, history_fog, history_events)
                     if reel is None:
+                        nxt = ui.history_turn + 1
                         ui.history_turn = min(ui.history_max, nxt)
                         if ui.history_turn >= ui.history_max:
                             ui.playing = False

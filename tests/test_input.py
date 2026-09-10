@@ -1948,6 +1948,141 @@ def test_skipping_the_last_film_still_reveals_the_board(monkeypatch):
         pygame.quit()
 
 
+# --------------------------------------------------------------------------- #
+# Pausing a playback (rather than skipping it)
+# --------------------------------------------------------------------------- #
+
+
+def test_play_toggle_does_not_skip_a_running_film():
+    """P (and its footer button) used to fall under the blanket "any press skips
+    a playback" rule, so pausing lost the animation just like any other key would.
+    It must not: `input` special-cases it so the film survives the press, and
+    `main.apply_toggle_play` is what actually freezes it (see the tests below)."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+
+        ui.play_pause_rect = (100, 100, 120, 32)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_play_toggle_in_history_still_falls_through_to_the_scrubber():
+    """The history dispatch must still see this press — it is what actually flips
+    `ui.playing` — even though `input`'s top guard no longer discards the film for
+    it."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.playing = True, True
+        ui.film = _a_film()
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_pausing_an_active_playthrough_freezes_the_film():
+    """Toggling play *off* while a film is running must not lose it — it should
+    freeze in place instead, so a paused review still shows what the turn did
+    rather than the plain board a skip leaves behind."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        main.apply_toggle_play(ui)
+        assert ui.playing is False
+        assert ui.film is not None
+        assert ui.film_paused is True
+    finally:
+        pygame.quit()
+
+
+def test_starting_play_while_a_manual_film_runs_does_not_freeze_it():
+    """A single manually-triggered film runs with `playing` False throughout (it
+    was never "playing" a sequence). Toggling play *on* in that state must leave it
+    running rather than pausing it — the button reads "Play", not "Pause"."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), False
+        main.apply_toggle_play(ui)
+        assert ui.playing is True
+        assert ui.film is not None
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_stop_film_clears_a_pause_too():
+    _state, ui = _setup()
+    try:
+        ui.film, ui.film_paused = _a_film(), True
+        ui.stop_film()
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Chaining animated history turns with no gap between them
+# --------------------------------------------------------------------------- #
+
+
+def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
+    """Right after one turn's film lands, the turn after it should be ready to go
+    immediately if it also has something to show — no `PLAY_MS` gap stitched
+    between two animated turns."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+
+        result = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert result is not None
+        assert ui.film is not None and ui.film.plays
+        assert ui.film_ms == 0.0
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_is_none_for_a_quiet_turn():
+    """A turn with no events (or events that resolve to no watchable beats) must
+    not manufacture a film — the caller falls back to stepping it instantly."""
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_respects_the_animate_preference(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
 def test_an_ordinary_turns_film_owes_no_snap(monkeypatch):
     """Only the turn that crosses into a decided game (or a knocked-out human)
     defers anything; every other film lands with the camera left alone."""

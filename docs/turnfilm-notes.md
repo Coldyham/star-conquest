@@ -29,11 +29,19 @@ Landed on this branch, in four commits:
   deciding turn waits for the film to land (`main.land_film`), and a burst is
   labelled with what the fight cost (`turnfilm.Clashed.destroyed`,
   `turnfilm.Landed.destroyed`).
+- **A smoothing pass**, once the feature had been lived with a while: `FILM_LAUNCH_MS`
+  dropped to 0 (folded into the move beat, matching `FILM_PRODUCE_MS`), a mark now
+  fades across the rest of the turn instead of expiring on a fixed `FILM_FLASH_MS`
+  window (`Film.fade`, `render._faded`), history playback chains an animated turn
+  straight into the next one instead of pacing every transition at `PLAY_MS`
+  (`main._next_history_film`), and Play/Pause actually pauses a running film now
+  instead of silently skipping it like every other key (`Ui.film_paused`,
+  `input._toggles_play`, `main.apply_toggle_play`).
 
 To re-verify from a clean clone:
 
 ```sh
-uv run pytest                                    # 742 tests
+uv run pytest                                    # 764 tests
 uv run python -m tests.sim --film --trials 50    # the playback oracle, every turn
 ```
 
@@ -72,10 +80,10 @@ so it depicts whatever the rule is.
 
 ## Open: nothing on the polish list
 
-The five items are all resolved (below). What is left on the feature is the one
-deferred rule change above, which belongs on another branch by decision, so this
-file is down to a record of how the open items were settled and can go with the
-branch.
+Every polish item raised so far is resolved (below). What is left on the feature
+is the one deferred rule change above, which belongs on another branch by
+decision, so this file is down to a record of how the open items were settled and
+can go with the branch.
 
 ## Done: the polish list
 
@@ -104,3 +112,16 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
   and `Landed`, labelled in the victor's colour; `destroyed` (everyone's losses)
   stays as the oracle, since summed over a turn's events it equals what
   `combat._record_losses` charged the players.
+- **Dwells reduced, marks fade instead of cutting off, history chains, and
+  Play/Pause actually pauses.** `FILM_LAUNCH_MS` is 0, matching `FILM_PRODUCE_MS`
+  — a launched fleet already starts its glide at progress 0, so the held beat
+  only bought a stutter before movement began, and it mattered more watched turn
+  after turn than in isolation. `Film.fade` replaces the fixed `FILM_FLASH_MS`
+  expiry with a dissolve toward the background across whatever is left of the
+  turn, so a mark is never cut off early and two marks at one system now stack
+  reliably rather than only when timing happened to overlap. `main._next_history_film`
+  is tried immediately once a film lands, so an animated turn chains straight into
+  the next one instead of waiting out `PLAY_MS` regardless. And `Ui.film_paused`
+  (with `input._toggles_play` exempting Play/Pause from the blanket skip rule)
+  means pausing freezes a playback in place instead of silently discarding it —
+  the docs had already claimed "P pauses one" before this; it just wasn't true.

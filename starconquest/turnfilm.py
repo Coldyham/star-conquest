@@ -309,32 +309,50 @@ class Film:
             return 1.0
         return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
 
-    def hulls(self, ms: float) -> tuple[tuple[int, int], ...]:
-        """The ships finished this turn that are still worth marking, as
-        ``(system id, hulls)``.
+    def hulls(self, ms: float) -> tuple[tuple[float, int, int], ...]:
+        """The ships finished this turn that have happened by ``ms`` and are still
+        worth marking, as ``(cue time, system id, hulls)``.
 
-        Production's beat is an instant at `config.FILM_PRODUCE_MS` of 0, so unlike
-        a fight there is no phase to report — a tick is inside its window or gone.
-        The window is `FILM_FLASH_MS`, the same one a burst gets, and a film always
-        outlives its last cue by at least that, so the mark is never cut off.
+        The cue time rides along for the same reason `flashes`' does: so a caller
+        can fade the mark relative to *when it actually happened* (`fade`) rather
+        than expiring it on a fixed window. No upper bound — `ms` never runs past
+        `total_ms` in practice, and a caller's own fade has reached the background
+        by then anyway, so there is nothing left to cut off.
         """
         return tuple(
-            pair
+            (at, sid, hulls)
             for at, event in self.cues
-            if isinstance(event, Produced) and 0.0 <= ms - at <= config.FILM_FLASH_MS
-            for pair in event.hulls
+            if isinstance(event, Produced) and ms >= at
+            for sid, hulls in event.hulls
         )
 
     def flashes(self, ms: float) -> tuple[tuple[float, Event], ...]:
-        """The fights close enough behind ``ms`` to still be showing, as
-        ``(cue time, event)`` — the caller needs the time to know how far through
-        the flash it is, and hunting it back out of `cues` would be a scan a
-        frame."""
+        """The fights that have happened by ``ms``, as ``(cue time, event)`` — the
+        caller needs the time to know how far a mark has faded (`fade`), and
+        hunting it back out of `cues` would be a scan a frame.
+
+        No upper bound: a fight is never dropped early, only faded — see `fade`.
+        """
         return tuple(
             (at, event)
             for at, event in self.cues
-            if isinstance(event, (Clashed, Landed)) and 0.0 <= ms - at <= config.FILM_FLASH_MS
+            if isinstance(event, (Clashed, Landed)) and ms >= at
         )
+
+    def fade(self, at: float, ms: float) -> float:
+        """How far a mark that fired at ``at`` has dissolved toward invisible by
+        ``ms``, in [0, 1] — 0 fresh, 1 gone.
+
+        Spans whatever is left of the turn (``total_ms - at``) rather than a fixed
+        window, so a mark dissolves gradually across the rest of the playback
+        instead of popping up and vanishing on a clock of its own — an early cue
+        gets a long, slow fade and a late one a short, quick one, and either way it
+        is gone by the time the turn itself is. `render` is the one place this
+        becomes a colour; kept here because it is the film's own clock the fade is
+        measured against, the same reason `travel` lives here rather than there.
+        """
+        span = max(1.0, self.total_ms - at)
+        return min(1.0, max(0.0, (ms - at) / span))
 
 
 def film(events: list[Event]) -> Film:

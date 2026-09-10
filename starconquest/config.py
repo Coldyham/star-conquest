@@ -197,7 +197,15 @@ STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the ac
 # result and none of it is recorded. Durations are per *beat*; the events inside a
 # beat are spread across it, so a turn with forty orders compresses rather than
 # running long and a whole film is bounded by these numbers.
-FILM_LAUNCH_MS = 220     # ms: fleets appear at their source and its garrison drops
+FILM_LAUNCH_MS = 0       # ms: fleets appear at their source and its garrison drops.
+                         # 0 == folded into the move beat with no pause of its own —
+                         # `Fleet.progress_at` combined with `Film.travel` already
+                         # starts a launched fleet's glide at progress 0, so a
+                         # separate beat only bought a stutter before movement began.
+                         # This is the retreat `system-design.md` names for the
+                         # garrison-drop-at-launch legibility that a held beat used
+                         # to give: watched turn after turn, continuous movement
+                         # mattered more than a paused view of the deduction
 FILM_MOVE_MS = 560       # ...and glide one turn's step, clashes firing where they meet
 FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in the
                          # engine's sequence with no pause of its own, which is all
@@ -207,8 +215,14 @@ FILM_COMBAT_MS = 300     # ms: arrival fights, one node after another (and, at a
                          # multi-owner pile-up, subdivided again across its fold)
 FILM_END_MS = 250        # ms held on the resolved board. Long enough to read the
                          # production tick, which lands last in the current ordering
-FILM_FLASH_MS = 260      # ms a fight's burst stays up (a film always outlives its
-                         # last cue by at least this, so the final burst isn't cut)
+FILM_FLASH_MS = 260      # ms a burst takes to finish popping in — its rings settle
+                         # and its spokes retract over this window (a film always
+                         # outlives its last cue by at least this, so the pop is
+                         # never cut off mid-way). The mark itself does not expire
+                         # here: it fades toward the background across whatever is
+                         # left of the turn instead (`Film.fade`, `render._faded`),
+                         # so it dissolves gradually rather than popping then
+                         # vanishing on a fixed clock
 FILM_BURST_R = 22        # px a burst reaches past whatever it marks
 FILM_BURST_W = 2         # px: its stroke
 FILM_BURST_SPOKES = 6    # radial strokes in one

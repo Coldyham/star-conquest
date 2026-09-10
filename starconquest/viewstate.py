@@ -157,9 +157,17 @@ class Ui:
     #     film lands (see `main.land_film`): the turn that decides the game reveals
     #     the whole board, and doing that first would play the last turn out on a
     #     map it had already given away.
+    #   film_paused — freezes `film_ms` in place without discarding the film, so
+    #     pausing mid-playback (the Play/Pause control, `main`'s "toggle_play")
+    #     keeps showing what the turn actually did instead of reverting to the
+    #     plain board a skip leaves behind. Distinct from `playing`, which governs
+    #     whether *further* turns start — a single manually-triggered film runs
+    #     with `playing` False throughout, so gating its advance on that would
+    #     freeze it on the first frame.
     film: Optional[turnfilm.Film] = None
     film_ms: float = 0.0
     film_visible: frozenset[int] = frozenset()
+    film_paused: bool = False
     deferred_view_snap: bool = False
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
@@ -321,6 +329,7 @@ class Ui:
         self.film = None
         self.film_ms = 0.0
         self.film_visible = frozenset()
+        self.film_paused = False
 
     def sees(self, sid: int) -> bool:
         """Whether the map may draw ``sid`` in full detail.

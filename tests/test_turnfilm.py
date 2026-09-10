@@ -164,9 +164,17 @@ def test_cues_at_one_instant_keep_emission_order():
     assert [e for _, e in film.cues] == [first, second]
 
 
-def test_travel_is_one_outside_the_move_beat():
+def test_travel_is_one_outside_the_move_beat(monkeypatch):
     """Before the move beat the board still carries pre-advance schedules and
-    after it the advance has landed, so `progress_at(1.0)` is right at both ends."""
+    after it the advance has landed, so `progress_at(1.0)` is right at both ends.
+
+    `FILM_LAUNCH_MS` is 0 in this cut (see `test_launch_is_folded_into_the_move`),
+    which collapses the launch beat's start into the move beat's — nothing then
+    ever samples travel *inside* a standalone launch beat. Patched back to a
+    positive value here so that case still gets checked; the constant remains
+    tunable even though the shipped default retreats to 0.
+    """
+    monkeypatch.setattr(config, "FILM_LAUNCH_MS", 220)
     film = turnfilm.film([
         turnfilm.Launched(fleet=0, owner_id=1, source_id=0, dest_id=1, ships=2,
                           turns_total=4, turns_remaining=4, source_ships=1,
@@ -183,13 +191,36 @@ def test_travel_is_one_outside_the_move_beat():
     assert film.travel(film.total_ms) == 1.0
 
 
-def test_a_film_outlives_its_last_fight_so_the_burst_is_never_cut():
+def test_launch_is_folded_into_the_move_with_no_pause_of_its_own():
+    """`FILM_LAUNCH_MS` is 0, matching `FILM_PRODUCE_MS`: a launched fleet already
+    starts its glide at progress 0 (`Fleet.progress_at` combined with `travel`), so
+    a separate held beat only bought a stutter before movement began."""
+    assert config.FILM_LAUNCH_MS == 0
+    film = turnfilm.film([
+        turnfilm.Launched(fleet=0, owner_id=1, source_id=0, dest_id=1, ships=2,
+                          turns_total=4, turns_remaining=4, source_ships=1,
+                          lane_slot=0),
+        turnfilm.Advanced(((0, 3),)),
+    ])
+    launch = next(b for b in film.beats if b.kind == "launch")
+    assert launch.ms == 0
+    assert launch.holds(launch.start) is False       # an instant, not a stretch
+    assert film.travel(0.0) == 0.0                   # the glide starts at once
+
+
+def test_a_fight_fades_across_the_rest_of_the_turn_never_cut_off():
+    """`flashes` no longer expires a fight on a fixed window — it fades toward the
+    background over whatever is left of the turn instead (`fade`), so it is never
+    dropped early and is only ever fully gone right as the turn itself ends."""
     film = turnfilm.film([_landed()])
     last = max(ms for ms, _ in film.cues)
-    assert film.total_ms - last >= config.FILM_FLASH_MS
     assert film.flashes(last)                     # showing at the moment it fires
-    assert film.flashes(last)[0][0] == last       # ...and says when it fired
-    assert not film.flashes(last + config.FILM_FLASH_MS + 1)
+    assert film.flashes(last)[0][0] == last        # ...and says when it fired
+    assert film.fade(last, last) == 0.0            # fresh
+    assert film.flashes(last + config.FILM_FLASH_MS + 1)   # well past the old window, still up
+    assert 0.0 < film.fade(last, last + (film.total_ms - last) / 2) < 1.0
+    assert film.flashes(film.total_ms)             # never cut off early...
+    assert film.fade(last, film.total_ms) == 1.0   # ...but fully dissolved by the end
 
 
 def test_a_turn_with_nothing_in_transit_has_no_move_beat():
@@ -496,19 +527,19 @@ def test_production_reports_the_hulls_it_finished_not_just_the_new_total():
     assert tick.hulls == ((0, 1),)      # ...again, while the other still accrues
 
 
-def test_a_hull_is_marked_for_as_long_as_a_burst_is():
-    """`Film.hulls` is the production half of `flashes`: in its window or gone.
-    A film always outlives its last cue by at least that window, so the mark
-    cannot be cut off — which matters because production lands last."""
+def test_a_hull_is_marked_for_the_rest_of_the_turn():
+    """`Film.hulls` is the production half of `flashes`: it rides along until the
+    turn itself ends rather than expiring on a fixed window (`render` fades it via
+    the cue time this carries) — which matters because production lands last."""
     produced = _produced(0, hulls=2)
     film = turnfilm.film([turnfilm.Advanced(((0, 3),)), produced])
     at = next(cue for cue, e in film.cues if e is produced)
 
-    assert film.hulls(at) == ((0, 2),)
-    assert film.hulls(at + config.FILM_FLASH_MS) == ((0, 2),)
-    assert film.hulls(at + config.FILM_FLASH_MS + 1) == ()
+    assert film.hulls(at) == ((at, 0, 2),)
+    assert film.hulls(at + config.FILM_FLASH_MS) == ((at, 0, 2),)
+    assert film.hulls(at + config.FILM_FLASH_MS + 1) == ((at, 0, 2),)   # still up
+    assert film.hulls(film.total_ms) == ((at, 0, 2),)                   # ...to the end
     assert film.hulls(at - 1) == (), "not before it happened"
-    assert film.total_ms >= at + config.FILM_FLASH_MS, "the mark is never cut off"
 
 
 def test_a_turn_that_only_produced_still_does_not_play():

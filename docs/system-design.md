@@ -302,14 +302,24 @@ simultaneous pairs make no difference to who wins, which is exactly why it would
 have gone unnoticed: the damage is to the dice stream, not the outcome. Hence an
 explicit `key=lambda c: (c.when, c.a, c.b)`, and a test that pins it.
 
-**The garrison ticking up at the start is the lesson, not a glitch.**
-`_draw_systems` shows deployable ships (garrison minus `Ui.committed`) for your own
-systems, and `resolve_turn` clears the pending orders, so a film frame always has
-an empty queue and shows the real garrison. The last live frame therefore reads
-`12 − 5 = 7` and the film opens on `12`, ticking back to `7` as each launch
-applies. That step *up* was initially read as a bug and then kept: the deduction at
-launch is one of the rules the animation exists to show. `FILM_LAUNCH_MS = 0` is
-the one-constant retreat if it ever grates.
+**The garrison ticking up at the start is the lesson, not a glitch — and it is now
+shown without a beat of its own.** `_draw_systems` shows deployable ships (garrison
+minus `Ui.committed`) for your own systems, and `resolve_turn` clears the pending
+orders, so a film frame always has an empty queue and shows the real garrison. The
+last live frame therefore reads `12 − 5 = 7` and the film opens on `12`, ticking
+down to `7` as the launch applies. That step *up* was initially read as a bug and
+then kept: the deduction at launch is one of the rules the animation exists to
+show. What changed is *when*: `FILM_LAUNCH_MS` was 220 at first — a held beat
+before movement began, so the drop was its own visible moment — and is 0 now, the
+retreat this constant was named for from the start. Watched one turn in isolation
+the held beat read fine; watched turn after turn, particularly in history's own
+"play" (`main`'s `ui.playing`), it was a stutter before every glide, and continuous
+movement mattered more than a paused view of the deduction. The tick is still
+there — a launch still visibly costs the source — but at zero length every launch
+this turn lands on the same instant now, the same way `Produced`'s ticks already
+do: several launches read as one drop to the post-launch garrison rather than a
+visible countdown, because there is no longer a beat wide enough to spread them
+across.
 
 **Production gets a mark, not a dwell.** `FILM_PRODUCE_MS` is 0, so production
 lands at its true point in the sequence without a pause; what makes it legible is
@@ -323,10 +333,12 @@ cost around half a second for a couple of ships appearing. Measured: 0ms gives
 
 The mark costs nothing in time because it rides the hold that was already there.
 A film outlives its last cue by `max(FILM_END_MS, FILM_FLASH_MS)`, and production
-*is* the last cue in the current ordering, so the mark is up for exactly that hold
-and cannot be cut off. `FILM_END_MS` was 250 rather than the 120 first drafted
-precisely to make the tick readable; the mark is now what does that job, and the
-constant only sets a floor under the pause.
+*is* the last cue in the current ordering, so the mark is up for at least that
+hold and cannot be cut off. `FILM_END_MS` was 250 rather than the 120 first drafted
+precisely to make the tick readable — that was true when the constant *was* the
+floor under a hard cutoff (below), and it still holds now that it is only the
+*minimum* fade window every mark is guaranteed, since production lands last and its
+own dissolve would otherwise be the shortest of the turn.
 
 Only ticks that finished something are marked. `Produced.ticks` reports every
 system whose ships or progress moved, which is most of the map, and the progress
@@ -335,6 +347,27 @@ labelling those would bury the board. That is why the event carries the hull cou
 as a *delta* (`Produced.hulls`): it is the one figure here unrecoverable
 afterwards, since the count the ship was added to is gone by the time anything
 draws.
+
+**A mark fades across the rest of the turn instead of being cut off on a fixed
+clock.** The first cut of both the loss label and the hull mark expired on a flat
+`FILM_FLASH_MS` (260ms) after the cue that made them, regardless of how long the
+turn's own playback still had to run — fine for a single fight read in isolation,
+but read back to back (a busy combat beat, or several turns played in a row) a
+number would visibly vanish mid-turn while the board was still very much
+mid-sentence, and a system that both fought and produced this turn only stacked
+its two marks when timing happened to make the windows overlap. `Film.fade(at,
+ms)` replaces the cutoff with a dissolve toward the background stretched across
+whatever is actually left of the turn (`total_ms - at`), so a mark is never gone
+before the turn itself is, and a late one dissolves faster than an early one
+purely because it has less runway — no faster than the eye can read either, since
+`FILM_END_MS` floors how little runway the *last* cue ever gets. `render._faded`
+does the blending (there is no per-pixel alpha on the main surface, and a pill's
+own backing is already `COLOR_BG`, so its text sinks into its own backing rather
+than shifting hue), and it is what a burst's stroke fades with too.
+`config.FILM_FLASH_MS` is kept, but demoted to what it was always partly doing
+double duty for: how long a burst's rings take to finish popping in. Reusing it as
+an expiry again would put the old flash back, and with it the old two-marks-collide
+only sometimes and only briefly.
 
 **Fog is both turns', and that is not the same as either one.** The destination
 turn's alone was the first cut, and right about the direction: holding the *earlier*
@@ -363,9 +396,43 @@ the frame yanked out from under the fight as well. So the snap is deferred:
 `Ui.deferred_view_snap` records the debt and `main.land_film` pays it. What makes
 one function enough is that both endings pass through it — the clock running out and
 a press skipping (`input` calls `Ui.stop_film`, which deliberately leaves the debt
-unpaid, precisely so a skip cannot lose the reveal). A turn whose film has nothing
-in it (`Film.plays` false, e.g. a decided board with nothing left in transit) snaps
+unpaid, precisely so a skip cannot lose the reveal — Play/Pause is the one press
+that does something else instead, see below, and it never reaches this deferral at
+all since pausing does not end the playback). A turn whose film has nothing in it
+(`Film.plays` false, e.g. a decided board with nothing left in transit) snaps
 immediately, exactly as before films existed.
+
+**Pausing freezes a film; it does not skip it.** The blanket "any press skips a
+playback" rule existed because a film has nothing worth keeping once you have
+looked away — but Play/Pause is pressed *to keep looking*, and skipping on it read
+exactly like the bug it was: the turn's marks and mid-flight fleets vanished,
+replaced by the plain fully-resolved board, the moment you tried to pause on them.
+`input._toggles_play` is the one exemption from the skip rule (the P key, or a
+click on the shared Play/Pause button), and `Ui.film_paused` is what a paused frame
+actually rests on: the main loop's per-frame `film_ms += dt` is skipped while it is
+set, so the board stays exactly where it was — mid-glide, mid-fade, whatever was on
+screen — rather than jumping anywhere. It is deliberately not the same flag as
+`Ui.playing`: `playing` decides whether *further* turns start once this one ends,
+and a manually-triggered film (a single End Turn press, outside any "play through
+turns" mode) runs with `playing` False the whole time it plays, so gating the
+freeze on that would pause it on its very first frame. `main.apply_toggle_play`
+reads the button's own state going in (`was_playing`) to tell the two cases apart:
+pausing an *already running* sequence freezes the film in front of you, while
+starting one from a standstill — the button reads "Play", not "Pause" — leaves a
+film already in flight alone and only arms auto-advance for whatever comes next.
+
+**History playback chains an animated turn straight into the next one.** Turn
+resolution itself is instant; only the film is timed, so once launch and the old
+per-turn hold stopped costing anything (above), the one dead stretch left in a
+back-to-back review was the gap `main` inserted *between* two turns' playbacks —
+`PLAY_MS` (350ms) of nothing, paced for stepping through turns with no animation at
+all, applied unconditionally regardless of what came next. `main._next_history_film`
+is now tried the instant a film lands, before that pacing ever gets a chance to
+run, so a turn that also animates starts moving immediately and a run of them
+glides as one continuous playback rather than a stutter of holds. The `PLAY_MS`
+step still exists and still matters — it is what paces a *quiet* turn (nothing to
+animate, or the preference off), where there is no film to chain into and a human
+still needs long enough to read the board before it moves on.
 
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
@@ -403,9 +470,13 @@ design rather than by accident: production runs *after* combat, so a system
 captured this turn produces for its new owner and earns both. The gain stacks a
 row above the cost — by the font's own line height, per the no-fixed-pixel-sizes
 rule — and `render._film_labels` returns both already placed, so the star-name
-pass reserves the space they actually occupy without re-deriving it. Reaching the
-case takes two arrivals: cues spread across the combat beat, so a lone fight fires
-at its start and its burst has faded by the time production lands.
+pass reserves the space they actually occupy without re-deriving it. Before marks
+faded across the rest of the turn instead of expiring on `FILM_FLASH_MS`, reaching
+this case took two arrivals — a lone fight's burst had already faded by the time
+production landed, so only a node resolving later in the combat beat was still
+marked when the hull appeared. Now that nothing expires early, a single arrival
+that both wins its fight and finishes a hull stacks the two reliably, for as long
+as either mark is still up.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn
@@ -417,8 +488,10 @@ mutated — a transition gets its own copy.
 essential controls when the strip is narrow, so a once-set display preference would
 rank below Clear and vanish exactly on the phone where it matters most — while
 costing a rank slot for every button that stayed. The menu checkbox is enough, and
-the immediate needs are already served: any press skips a playback, and P pauses
-one. Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
+the immediate needs are already served: any press skips a playback, and P (or its
+footer button) actually pauses one now — freezing it in place rather than
+discarding it, which is what `Ui.film_paused` and `input._toggles_play` are for.
+Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
 hung 6px out of the fixed 560x496 panel and failed
 `test_tab_content_stays_inside_the_panel`.
 
