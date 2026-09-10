@@ -50,6 +50,8 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     knob drifts away from the pointer toward the extremes."""
     x, _y, w, _h = ui.scrubber_rect
     travel = w - 2 * config.SLIDER_KNOB_R
+    ui.clear_fading_marks()   # jumping, not stepping: a mark from wherever we
+                              # were scrubbing away from would be stale here
     if travel <= 0 or ui.history_max <= 0:
         ui.history_turn = 0
         return
@@ -68,15 +70,19 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
+            ui.clear_fading_marks()   # jumping, not stepping: they'd be stale here
         elif event.key == pygame.K_RIGHT:
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_HOME:
             ui.history_turn = 0
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_END:
             ui.history_turn = ui.history_max
             ui.playing = False
+            ui.clear_fading_marks()
         return None
     if event.type == pygame.MOUSEMOTION:
         ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
@@ -93,10 +99,12 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if ui.history_prev_rect[2] and _point_in_rect(event.pos, ui.history_prev_rect):
             ui.history_turn = max(0, ui.history_turn - 1)  # touch/mouse equivalent of Left
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.history_next_rect[2] and _point_in_rect(event.pos, ui.history_next_rect):
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)  # ...and Right
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True

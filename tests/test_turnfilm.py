@@ -208,19 +208,27 @@ def test_launch_is_folded_into_the_move_with_no_pause_of_its_own():
     assert film.travel(0.0) == 0.0                   # the glide starts at once
 
 
-def test_a_fight_fades_across_the_rest_of_the_turn_never_cut_off():
-    """`flashes` no longer expires a fight on a fixed window — it fades toward the
-    background over whatever is left of the turn instead (`fade`), so it is never
-    dropped early and is only ever fully gone right as the turn itself ends."""
-    film = turnfilm.film([_landed()])
-    last = max(ms for ms, _ in film.cues)
-    assert film.flashes(last)                     # showing at the moment it fires
-    assert film.flashes(last)[0][0] == last        # ...and says when it fired
-    assert film.fade(last, last) == 0.0            # fresh
-    assert film.flashes(last + config.FILM_FLASH_MS + 1)   # well past the old window, still up
-    assert 0.0 < film.fade(last, last + (film.total_ms - last) / 2) < 1.0
-    assert film.flashes(film.total_ms)             # never cut off early...
-    assert film.fade(last, film.total_ms) == 1.0   # ...but fully dissolved by the end
+def test_run_to_returns_what_it_just_applied():
+    """`Reel.run_to` hands back the events it applied on *this* call, not the
+    whole history — `Ui.archive_marks` turns those into fading marks, and it must
+    never see the same fight or tick twice."""
+    film = turnfilm.film([turnfilm.Advanced(()), _landed()])
+    reel = turnfilm.Reel(make_state([(0, 1, 2, 100)], []), film)
+    first = reel.run_to(0.0)
+    assert first == [e for at, e in film.cues if at <= 0.0]
+    assert first and not reel.done          # the Landed cue is still ahead, in
+                                             # the (zero-length) combat beat
+    assert reel.run_to(0.0) == []           # nothing new due yet
+    rest = reel.run_to(film.total_ms)
+    assert rest == [e for at, e in film.cues if at > 0.0]
+    assert reel.done
+
+
+def test_run_returns_every_cue_in_order():
+    film = turnfilm.film([turnfilm.Advanced(()), _landed()])
+    reel = turnfilm.Reel(make_state([(0, 1, 2, 100)], []), film)
+    assert reel.run() == [e for _, e in film.cues]
+    assert reel.done
 
 
 def test_a_turn_with_nothing_in_transit_has_no_move_beat():
@@ -311,9 +319,16 @@ def test_a_pile_up_rides_in_the_landed_event():
 
 def test_a_film_of_nothing_but_instants_does_not_play():
     """Production alone, at a zero dwell, leaves nothing to watch — so the board
-    should jump as it always did rather than hold on the finished position."""
+    should jump as it always did rather than hold on the finished position.
+
+    Combat is an instant now too (`FILM_COMBAT_MS` is 0, like launch and
+    production), so a `Landed` alone would not play either — but that never
+    happens for real: an arrival always follows an `Advanced` the same turn
+    (`_advance_fleets` processes it before `_resolve_arrivals` ever sees it), so
+    `plays` is carried by the move beat whenever there is a fight to show.
+    """
     assert not turnfilm.film([_produced()]).plays
-    assert turnfilm.film([_landed()]).plays
+    assert turnfilm.film([turnfilm.Advanced(((0, 3),)), _landed()]).plays
 
 
 # ---------------------------------------------------------------------------- #
@@ -527,19 +542,18 @@ def test_production_reports_the_hulls_it_finished_not_just_the_new_total():
     assert tick.hulls == ((0, 1),)      # ...again, while the other still accrues
 
 
-def test_a_hull_is_marked_for_the_rest_of_the_turn():
-    """`Film.hulls` is the production half of `flashes`: it rides along until the
-    turn itself ends rather than expiring on a fixed window (`render` fades it via
-    the cue time this carries) — which matters because production lands last."""
+def test_a_produced_cue_carries_its_hulls_for_the_reel_to_hand_onward():
+    """A finished hull no longer has its own expiry inside `turnfilm` — a mark's
+    lifetime is `Ui`'s concern now (`archive_marks`/`age_fading_marks`), reached
+    through whatever `Reel.run_to` returns. This just pins that the `Produced`
+    cue `run_to` hands back still carries `.hulls` intact, which is all `Ui` needs
+    to build a `FadingHull` from it."""
     produced = _produced(0, hulls=2)
-    film = turnfilm.film([turnfilm.Advanced(((0, 3),)), produced])
-    at = next(cue for cue, e in film.cues if e is produced)
-
-    assert film.hulls(at) == ((at, 0, 2),)
-    assert film.hulls(at + config.FILM_FLASH_MS) == ((at, 0, 2),)
-    assert film.hulls(at + config.FILM_FLASH_MS + 1) == ((at, 0, 2),)   # still up
-    assert film.hulls(film.total_ms) == ((at, 0, 2),)                   # ...to the end
-    assert film.hulls(at - 1) == (), "not before it happened"
+    film = turnfilm.film([turnfilm.Advanced(()), produced])
+    reel = turnfilm.Reel(make_state([(0, 1, 3, 100)], []), film)
+    applied = reel.run()
+    tick = next(e for e in applied if isinstance(e, turnfilm.Produced))
+    assert tick.hulls == ((0, 2),)
 
 
 def test_a_turn_that_only_produced_still_does_not_play():

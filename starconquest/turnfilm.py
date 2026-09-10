@@ -309,51 +309,6 @@ class Film:
             return 1.0
         return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
 
-    def hulls(self, ms: float) -> tuple[tuple[float, int, int], ...]:
-        """The ships finished this turn that have happened by ``ms`` and are still
-        worth marking, as ``(cue time, system id, hulls)``.
-
-        The cue time rides along for the same reason `flashes`' does: so a caller
-        can fade the mark relative to *when it actually happened* (`fade`) rather
-        than expiring it on a fixed window. No upper bound — `ms` never runs past
-        `total_ms` in practice, and a caller's own fade has reached the background
-        by then anyway, so there is nothing left to cut off.
-        """
-        return tuple(
-            (at, sid, hulls)
-            for at, event in self.cues
-            if isinstance(event, Produced) and ms >= at
-            for sid, hulls in event.hulls
-        )
-
-    def flashes(self, ms: float) -> tuple[tuple[float, Event], ...]:
-        """The fights that have happened by ``ms``, as ``(cue time, event)`` — the
-        caller needs the time to know how far a mark has faded (`fade`), and
-        hunting it back out of `cues` would be a scan a frame.
-
-        No upper bound: a fight is never dropped early, only faded — see `fade`.
-        """
-        return tuple(
-            (at, event)
-            for at, event in self.cues
-            if isinstance(event, (Clashed, Landed)) and ms >= at
-        )
-
-    def fade(self, at: float, ms: float) -> float:
-        """How far a mark that fired at ``at`` has dissolved toward invisible by
-        ``ms``, in [0, 1] — 0 fresh, 1 gone.
-
-        Spans whatever is left of the turn (``total_ms - at``) rather than a fixed
-        window, so a mark dissolves gradually across the rest of the playback
-        instead of popping up and vanishing on a clock of its own — an early cue
-        gets a long, slow fade and a late one a short, quick one, and either way it
-        is gone by the time the turn itself is. `render` is the one place this
-        becomes a colour; kept here because it is the film's own clock the fade is
-        measured against, the same reason `travel` lives here rather than there.
-        """
-        span = max(1.0, self.total_ms - at)
-        return min(1.0, max(0.0, (ms - at) / span))
-
 
 def film(events: list[Event]) -> Film:
     """Schedule one turn's events.
@@ -406,8 +361,12 @@ def film(events: list[Event]) -> Film:
     # Stable, and on the time alone, so cues sharing an instant — which a
     # zero-length beat guarantees — keep the order the engine emitted them in.
     cues.sort(key=lambda c: c[0])
-    hold = max(config.FILM_END_MS, config.FILM_FLASH_MS) if cues else 0.0
-    return Film(tuple(beats), tuple(cues), at + hold)
+    # No trailing hold: a mark's own visibility (`Ui.archive_marks` /
+    # `age_fading_marks`) outlives whichever film produced it, so the film itself
+    # need not pad its `total_ms` to give one time to be read — it can end the
+    # instant its last beat does, which is what lets the *next* turn's move beat
+    # start immediately instead of waiting out a pause with nothing left to show.
+    return Film(tuple(beats), tuple(cues), at)
 
 
 # ---------------------------------------------------------------------------- #
@@ -437,14 +396,21 @@ class Reel:
     def __post_init__(self) -> None:
         self._fleets = dict(enumerate(self.board.fleets))
 
-    def run_to(self, ms: float) -> None:
-        """Apply every cue due by ``ms``, in cue order."""
+    def run_to(self, ms: float) -> list[Event]:
+        """Apply every cue due by ``ms``, in cue order, and return what was just
+        applied — so a caller can react to a newly-fired event (`Ui.archive_marks`
+        does, to turn a fight or a finished hull into a mark that outlives this
+        film) without re-scanning `film.cues` itself."""
+        applied: list[Event] = []
         while self.at < len(self.film.cues) and self.film.cues[self.at][0] <= ms:
-            self._apply(self.film.cues[self.at][1])
+            event = self.film.cues[self.at][1]
+            self._apply(event)
+            applied.append(event)
             self.at += 1
+        return applied
 
-    def run(self) -> None:
-        self.run_to(float("inf"))
+    def run(self) -> list[Event]:
+        return self.run_to(float("inf"))
 
     @property
     def done(self) -> bool:

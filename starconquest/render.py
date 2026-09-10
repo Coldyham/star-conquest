@@ -935,39 +935,45 @@ class _Mark(NamedTuple):
     node_id: Optional[int]      # the system it happened at, if it was not in open space
 
 
-def _flash_marks(state: GameState, ui: Ui):
-    """This turn's visible fights, as `_Mark`s.
+def _mark_phase(age_ms: float) -> float:
+    """A burst's own pop-in geometry: rings settle and spokes retract over
+    `config.FILM_FLASH_MS`, counted from when the mark fired."""
+    return min(1.0, max(0.0, age_ms / max(1, config.FILM_FLASH_MS)))
 
-    The one place the film's fights are turned into places on screen, so the
-    bursts, the labels over them and the star-name pass all agree about where they
-    are. Purely derived from the film and the clock; nothing is stored, in the same
-    spirit as the rule conveyor's phase — a fight is never dropped early, only
-    faded toward invisible (`fade`), so it keeps being yielded for the rest of the
-    turn regardless of how far gone it looks.
+
+def _mark_fade(age_ms: float) -> float:
+    """How far a mark has dissolved toward invisible, 0 fresh, 1 gone.
+
+    Fully visible for `config.FILM_FLASH_MS` (matching how long a burst took to
+    settle before this cut ever faded anything), then fades over the next
+    `config.FILM_FADE_MS` — both counted from when the mark fired and neither
+    tied to any film's own length, which is what lets one keep dissolving on top
+    of whatever the next turn's glide is doing.
     """
-    if ui.film is None:
-        return
-    for at, event in ui.film.flashes(ui.film_ms):
-        phase = min(1.0, max(0.0, (ui.film_ms - at) / max(1, config.FILM_FLASH_MS)))
-        fade = ui.film.fade(at, ui.film_ms)
-        if isinstance(event, turnfilm.Clashed):
-            if not ui.sees(event.low_id) and not ui.sees(event.high_id):
-                continue
-            a = state.systems[event.low_id].pos
-            b = state.systems[event.high_id].pos
-            center = ui.view.to_screen(lerp(a, b, event.at))
-            yield _Mark(center, config.COLOR_TEXT, phase, fade, event.cost, event.victor, None)
-        else:  # a Landed: concentric on the node, expanding past its rim
-            # `steps` holds the engagements that actually happened, and is empty
-            # for a reinforcement or a walk into an empty system. Neither is a
-            # fight, so neither gets a fight's mark — the garrison count changing
-            # is the whole of what happened.
-            if not event.steps or not ui.sees(event.node_id):
-                continue
-            center = ui.view.to_screen(state.systems[event.node_id].pos)
-            color = (config.COLOR_TEXT if event.owner_id == event.was_owner
-                     else config.player_color(event.owner_id))
-            yield _Mark(center, color, phase, fade, event.cost, event.victor, event.node_id)
+    if age_ms <= config.FILM_FLASH_MS:
+        return 0.0
+    return min(1.0, (age_ms - config.FILM_FLASH_MS) / max(1, config.FILM_FADE_MS))
+
+
+def _flash_marks(state: GameState, ui: Ui):
+    """Every fading fight, as `_Mark`s.
+
+    The one place `Ui.fading_fights` is turned into places on screen, so the
+    bursts, the labels over them and the star-name pass all agree about where
+    they are. A fight is never dropped early, only faded toward invisible
+    (`fade`) — pruning is `Ui.age_fading_marks`' job, not this one's, and it runs
+    whether or not a playback is currently active.
+    """
+    for f in ui.fading_fights:
+        phase, fade = _mark_phase(f.age_ms), _mark_fade(f.age_ms)
+        if f.node_id is None:
+            a = state.systems[f.low_id].pos
+            b = state.systems[f.high_id].pos
+            center = ui.view.to_screen(lerp(a, b, f.at))
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, None)
+        else:
+            center = ui.view.to_screen(state.systems[f.node_id].pos)
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, f.node_id)
 
 
 def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, tuple[int, int, int]]]:
@@ -981,20 +987,17 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     one number the square law makes hard to guess. And a hull finished this turn is
     ``+N`` in its owner's colour, which is what makes production visible at all
     without giving it a dwell of its own (`config.FILM_PRODUCE_MS` is 0). Each
-    fades toward the background across whatever is left of the turn (`Film.fade`)
-    rather than being cut off on a fixed clock.
+    fades toward the background on its own fixed clock (`_mark_fade`) rather than
+    being cut off, or tied to how long any particular turn's film runs.
 
     They collide by design rather than by accident: production runs *after* combat,
     so a system captured this turn produces for its new owner and earns both marks
-    at once — and once a fight has happened there is no more expiry to separate
-    them, so the gain reliably stacks a row above the cost for the rest of the turn
-    whenever that happens, by the font's own line height. One list, because the
-    star-name pass has to treat these as occupied space (the same rule that already
-    keeps names off lane times and a rule's "keep N") and must not have to re-derive
-    where they went.
+    at once — and since neither expires early, the gain reliably stacks a row above
+    the cost whenever that happens, by the font's own line height. One list,
+    because the star-name pass has to treat these as occupied space (the same rule
+    that already keeps names off lane times and a rule's "keep N") and must not
+    have to re-derive where they went.
     """
-    if ui.film is None:
-        return []
     labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
     charged: set[int] = set()
     for mark in _flash_marks(state, ui):
@@ -1003,21 +1006,21 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
             labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
             if mark.node_id is not None:
                 charged.add(mark.node_id)
-    for at, sid, hulls in ui.film.hulls(ui.film_ms):
-        if not ui.sees(sid):   # a rival's yard is not ours to report
-            continue
-        system = state.systems[sid]
+    for h in ui.fading_hulls:
+        system = state.systems[h.node_id]
         x, y = _mark_center(ui.view.to_screen(system.pos))
-        if sid in charged:
+        if h.node_id in charged:
             y -= _row_h("small")
-        color = _faded(config.player_color(system.owner_id), ui.film.fade(at, ui.film_ms))
-        labels.append(((x, y), f"+{hulls}", color))
+        color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
+        labels.append(((x, y), f"+{h.hulls}", color))
     return labels
 
 
 def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
-    """Mark this turn's fights while they are still fresh, and write the numbers
-    that go with them (plus any hull finished — see `_film_labels`)."""
+    """Mark every still-fading fight, and write the numbers that go with them
+    (plus any hull finished — see `_film_labels`). Independent of whether a film
+    is currently playing: a mark keeps showing on top of live/history play alike
+    until `Ui.age_fading_marks` prunes it."""
     for mark in _flash_marks(state, ui):
         _draw_burst(surface, mark.center, _faded(mark.color, mark.fade), mark.phase)
     for center, text, color in _film_labels(state, ui):

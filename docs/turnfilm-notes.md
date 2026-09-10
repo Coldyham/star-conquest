@@ -30,19 +30,34 @@ Landed on this branch, in four commits:
   labelled with what the fight cost (`turnfilm.Clashed.destroyed`,
   `turnfilm.Landed.destroyed`).
 - **A smoothing pass**, once the feature had been lived with a while: `FILM_LAUNCH_MS`
-  dropped to 0 (folded into the move beat, matching `FILM_PRODUCE_MS`), a mark now
-  fades across the rest of the turn instead of expiring on a fixed `FILM_FLASH_MS`
-  window (`Film.fade`, `render._faded`), history playback chains an animated turn
-  straight into the next one instead of pacing every transition at `PLAY_MS`
-  (`main._next_history_film`), and Play/Pause actually pauses a running film now
-  instead of silently skipping it like every other key (`Ui.film_paused`,
-  `input._toggles_play`, `main.apply_toggle_play`).
+  dropped to 0 (folded into the move beat, matching `FILM_PRODUCE_MS`), a mark
+  faded across the rest of the turn instead of expiring on a fixed `FILM_FLASH_MS`
+  window, history playback chained an animated turn straight into the next one
+  instead of pacing every transition at `PLAY_MS` (`main._next_history_film`), and
+  Play/Pause actually paused a running film instead of silently skipping it like
+  every other key (`Ui.film_paused`, `input._toggles_play`,
+  `main.apply_toggle_play`).
+- **A second smoothing pass**, once the first one still stuttered: movement still
+  paused for every fight to be read, because a mark's fade was tied to the film's
+  own `total_ms`, and that meant the film had to stay "current" for as long as a
+  mark needed to be visible. A mark now lives entirely off `Film` —
+  `Ui.fading_fights`/`fading_hulls`, populated from whatever `Reel.run_to` just
+  applied (`Ui.archive_marks`) and aged every frame regardless of what's playing
+  (`Ui.age_fading_marks`), fully visible for `FILM_FLASH_MS` then fading over a new
+  `FILM_FADE_MS`, both counted from when it fired rather than from any turn's
+  length. That let `FILM_COMBAT_MS` join launch and production at 0 (a fight no
+  longer needs a held beat to be read at all) and let `film()` drop its trailing
+  pad entirely (`total_ms` now ends the instant its last beat does) — so the next
+  turn's move beat can start on the very next frame, with the previous turn's
+  marks still dissolving on top of it. `Reel.run_to`/`run` now hand back what they
+  just applied, which is how `archive_marks` gets at newly-fired events without
+  rescanning `film.cues`.
 
 To re-verify from a clean clone:
 
 ```sh
-uv run pytest                                    # 764 tests
-uv run python -m tests.sim --film --trials 50    # the playback oracle, every turn
+uv run pytest                                    # 771 tests
+uv run python -m tests.sim --film --trials 80    # the playback oracle, every turn
 ```
 
 ## Open: the multi-owner pile-up rule change
@@ -96,12 +111,13 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
 - **The camera reveal waits for the film.** `Ui.deferred_view_snap`, paid by
   `main.land_film` — the one place the clock running out and a skip both pass
   through. `Ui.stop_film` leaves the debt alone on purpose.
-- **Production is marked rather than dwelt on.** `FILM_PRODUCE_MS` stays 0; a
-  `+N` over each system that finished a hull is what makes the tick visible
-  (`Produced.hulls` -> `Film.hulls` -> `render._film_labels`, sharing the spot and
-  the window the loss labels use). Time was the wrong lever: `Film.plays` keys off
-  beat durations, so a dwell would have made every otherwise-quiet turn pause
-  (measured: 0ms -> no film, 250ms -> a 510ms one) instead of resolving instantly.
+- **Production (and now combat) is marked rather than dwelt on.**
+  `FILM_PRODUCE_MS`/`FILM_COMBAT_MS` are both 0; a `+N` over each system that
+  finished a hull is what makes the tick visible (`Produced.hulls` ->
+  `Ui.archive_marks` -> `Ui.fading_hulls` -> `render._film_labels`). Time was the
+  wrong lever for production specifically: `Film.plays` keys off beat durations,
+  so a dwell would have made every otherwise-quiet turn pause (measured: 0ms -> no
+  film, 250ms -> a 510ms one) instead of resolving instantly.
 - **A lane track is held rather than ranked.** `Fleet.lane_slot`, handed out by
   `model.free_lane_slot` at launch — which is what the notes said would need
   per-fleet identity, and it does; the field *is* the identity. Reported from play:
@@ -112,16 +128,25 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
   and `Landed`, labelled in the victor's colour; `destroyed` (everyone's losses)
   stays as the oracle, since summed over a turn's events it equals what
   `combat._record_losses` charged the players.
-- **Dwells reduced, marks fade instead of cutting off, history chains, and
-  Play/Pause actually pauses.** `FILM_LAUNCH_MS` is 0, matching `FILM_PRODUCE_MS`
-  — a launched fleet already starts its glide at progress 0, so the held beat
-  only bought a stutter before movement began, and it mattered more watched turn
-  after turn than in isolation. `Film.fade` replaces the fixed `FILM_FLASH_MS`
-  expiry with a dissolve toward the background across whatever is left of the
-  turn, so a mark is never cut off early and two marks at one system now stack
-  reliably rather than only when timing happened to overlap. `main._next_history_film`
-  is tried immediately once a film lands, so an animated turn chains straight into
-  the next one instead of waiting out `PLAY_MS` regardless. And `Ui.film_paused`
-  (with `input._toggles_play` exempting Play/Pause from the blanket skip rule)
-  means pausing freezes a playback in place instead of silently discarding it —
-  the docs had already claimed "P pauses one" before this; it just wasn't true.
+- **Dwells reduced, history chains, and Play/Pause actually pauses.**
+  `FILM_LAUNCH_MS` is 0, matching `FILM_PRODUCE_MS` — a launched fleet already
+  starts its glide at progress 0, so the held beat only bought a stutter before
+  movement began, and it mattered more watched turn after turn than in isolation.
+  `main._next_history_film` is tried immediately once a film lands, so an animated
+  turn chains straight into the next one instead of waiting out `PLAY_MS`
+  regardless. And `Ui.film_paused` (with `input._toggles_play` exempting
+  Play/Pause from the blanket skip rule) means pausing freezes a playback in place
+  instead of silently discarding it — the docs had already claimed "P pauses one"
+  before this; it just wasn't true.
+- **A mark outlives the film that made it, so combat could go to 0 too and every
+  turn's motion could finally be continuous.** Fading a mark against the film's
+  own `total_ms` (previous bullet's era) still meant the film had to stay current
+  for as long as a mark needed reading — `Ui.fading_fights`/`fading_hulls` move
+  that entirely off `Film`, populated by `Ui.archive_marks` from whatever
+  `Reel.run_to` just applied and aged every frame by `Ui.age_fading_marks`
+  regardless of what's playing. Fully visible for `FILM_FLASH_MS`, then fading
+  over a new `FILM_FADE_MS`, on their own clock. That let `FILM_COMBAT_MS` join
+  the others at 0 and let `film()` drop its trailing pad outright, so the next
+  turn's move beat starts on the very next frame with the previous turn's marks
+  still dissolving on top of it — the actual continuous glide across turns that
+  the previous pass only approximated.

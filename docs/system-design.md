@@ -321,24 +321,23 @@ do: several launches read as one drop to the post-launch garrison rather than a
 visible countdown, because there is no longer a beat wide enough to spread them
 across.
 
-**Production gets a mark, not a dwell.** `FILM_PRODUCE_MS` is 0, so production
-lands at its true point in the sequence without a pause; what makes it legible is
-a `+N` over each system that finished a hull, in that system's colour, sharing the
-spot the loss labels use. Time was the obvious lever and the wrong one, for a
-reason worth keeping: `Film.plays` is "does any beat have a duration", and a turn
-where nothing launches, moves or fights emits only `Produced` — so at 0 such a turn
-has no playback and End Turn stays instant, while any dwell makes *every* quiet turn
-cost around half a second for a couple of ships appearing. Measured: 0ms gives
-`plays` False, 250ms gives a 510ms film.
-
-The mark costs nothing in time because it rides the hold that was already there.
-A film outlives its last cue by `max(FILM_END_MS, FILM_FLASH_MS)`, and production
-*is* the last cue in the current ordering, so the mark is up for at least that
-hold and cannot be cut off. `FILM_END_MS` was 250 rather than the 120 first drafted
-precisely to make the tick readable — that was true when the constant *was* the
-floor under a hard cutoff (below), and it still holds now that it is only the
-*minimum* fade window every mark is guaranteed, since production lands last and its
-own dissolve would otherwise be the shortest of the turn.
+**Combat and production are marks, not dwells — and neither holds `total_ms` open
+either.** `FILM_COMBAT_MS` and `FILM_PRODUCE_MS` are both 0, so a fight and a
+finished hull land at their true point in the sequence with no pause of their own;
+what makes each legible is a mark over the map instead (a burst and a `−N` for a
+fight, a `+N` for a hull, sharing the spot above a system) — and marks are not the
+film's problem to keep visible (below), which is the part that changed twice.
+`FILM_PRODUCE_MS` was the first to go to 0, and for a reason worth keeping on its
+own: `Film.plays` is "does any beat have a duration", and a turn where nothing
+launches, moves or fights emits only `Produced` — so at 0 such a turn has no
+playback and End Turn stays instant, while any dwell makes *every* quiet turn cost
+around half a second for a couple of ships appearing (measured: 0ms gives `plays`
+False, 250ms gave a 510ms film). `FILM_COMBAT_MS` followed once marks stopped
+needing the film's own time to be read at all: it used to stagger several fights
+one node after another over 300ms, purely so each could be read before the next
+came up; now that a mark persists on its own regardless of what `film` is doing
+(below), every fight on a turn can simply pop at once, which reads fine since each
+still keeps its own mark.
 
 Only ticks that finished something are marked. `Produced.ticks` reports every
 system whose ships or progress moved, which is most of the map, and the progress
@@ -348,26 +347,52 @@ as a *delta* (`Produced.hulls`): it is the one figure here unrecoverable
 afterwards, since the count the ship was added to is gone by the time anything
 draws.
 
-**A mark fades across the rest of the turn instead of being cut off on a fixed
-clock.** The first cut of both the loss label and the hull mark expired on a flat
-`FILM_FLASH_MS` (260ms) after the cue that made them, regardless of how long the
-turn's own playback still had to run — fine for a single fight read in isolation,
-but read back to back (a busy combat beat, or several turns played in a row) a
-number would visibly vanish mid-turn while the board was still very much
-mid-sentence, and a system that both fought and produced this turn only stacked
-its two marks when timing happened to make the windows overlap. `Film.fade(at,
-ms)` replaces the cutoff with a dissolve toward the background stretched across
-whatever is actually left of the turn (`total_ms - at`), so a mark is never gone
-before the turn itself is, and a late one dissolves faster than an early one
-purely because it has less runway — no faster than the eye can read either, since
-`FILM_END_MS` floors how little runway the *last* cue ever gets. `render._faded`
-does the blending (there is no per-pixel alpha on the main surface, and a pill's
-own backing is already `COLOR_BG`, so its text sinks into its own backing rather
-than shifting hue), and it is what a burst's stroke fades with too.
-`config.FILM_FLASH_MS` is kept, but demoted to what it was always partly doing
-double duty for: how long a burst's rings take to finish popping in. Reusing it as
-an expiry again would put the old flash back, and with it the old two-marks-collide
-only sometimes and only briefly.
+**A mark outlives the film that made it, which is what finally let the dwells go
+to zero without losing anything.** Two things were tried before this one stuck.
+First, the loss label and the hull mark simply expired on a flat `FILM_FLASH_MS`
+(260ms) after the cue that made them — fine for a single fight read in isolation,
+but a number visibly vanished mid-turn on a busy combat beat, and a system that
+both fought and produced only stacked its two marks when timing happened to make
+the windows overlap. Second, that was replaced with a dissolve stretched across
+whatever was left of the *film's own* `total_ms` — better, but it meant a film had
+to keep `total_ms` open long enough for its marks to be read, which was still a
+pause however short, and it could not survive the very next idea: once combat and
+production stopped needing the film's time at all (above), a mark firing right at
+a film's end had almost no runway left to fade in, and the *next* turn's playback
+had nowhere to put a still-fading mark once the film that made it was replaced.
+
+So a mark was moved off `Film` entirely. `Ui.fading_fights`/`fading_hulls` hold
+every still-showing fight or finished hull as plain data
+(`viewstate.FadingFight`/`FadingHull`) — populated by `Ui.archive_marks(board,
+events)` from whatever `Reel.run_to` just applied (which is why `run_to`/`run`
+hand that list back instead of nothing) and aged every frame by
+`Ui.age_fading_marks(dt)` regardless of whether a playback is currently running at
+all. Each is fully visible for `config.FILM_FLASH_MS`, then fades over
+`config.FILM_FADE_MS` (`render._mark_fade`) — both counted from when it fired, on
+its own clock, never from any film's length. `render._faded` does the blending
+(there is no per-pixel alpha on the main surface, and a pill's own backing is
+already `COLOR_BG`, so its text sinks into its own backing rather than shifting
+hue), and it is what a burst's stroke fades with too; `config.FILM_FLASH_MS` also
+still times a burst's own pop-in geometry (its rings settle and its spokes retract
+over that same window), which is why the two coincide rather than needing a third
+constant. Visibility (`Ui.sees`) is checked once, at archive time, rather than
+every frame a mark is drawn: a fight you saw fire keeps fading regardless of what
+fog does afterward, instead of blinking out mid-dissolve because the *next*
+turn's own fog happens to differ. And because a mark's life is no longer any
+film's business, a "jump" rather than a step through the turns — entering or
+leaving history, scrubbing, rewinding — calls `Ui.clear_fading_marks()`
+explicitly: a mark belongs to a specific point in a specific playback, and
+jumping away from it makes it stale rather than merely old.
+
+The payoff is what let every beat go to zero without losing legibility anywhere:
+`film()` no longer pads `total_ms` at all (it used to outlive its last cue by
+`max(FILM_END_MS, FILM_FLASH_MS)`, which both constants existed for) — a film now
+ends the instant its last beat does, and the *next* turn's move beat can start on
+the very next frame, with whatever marks the previous turn produced still
+dissolving on top of it. That is what makes a run of animated turns in history
+playback (`main._next_history_film`, chained the instant a film lands rather than
+waiting out `PLAY_MS`) glide continuously instead of visibly stopping for every
+fight to be read.
 
 **Fog is both turns', and that is not the same as either one.** The destination
 turn's alone was the first cut, and right about the direction: holding the *earlier*
@@ -470,13 +495,15 @@ design rather than by accident: production runs *after* combat, so a system
 captured this turn produces for its new owner and earns both. The gain stacks a
 row above the cost — by the font's own line height, per the no-fixed-pixel-sizes
 rule — and `render._film_labels` returns both already placed, so the star-name
-pass reserves the space they actually occupy without re-deriving it. Before marks
-faded across the rest of the turn instead of expiring on `FILM_FLASH_MS`, reaching
-this case took two arrivals — a lone fight's burst had already faded by the time
-production landed, so only a node resolving later in the combat beat was still
-marked when the hull appeared. Now that nothing expires early, a single arrival
-that both wins its fight and finishes a hull stacks the two reliably, for as long
-as either mark is still up.
+pass reserves the space they actually occupy without re-deriving it. Reaching this
+case used to take two arrivals: a lone fight's burst had faded by a fixed
+`FILM_FLASH_MS` before production landed 300ms later, so only a node resolving
+later in a busy combat beat was still marked when the hull appeared. With
+`FILM_COMBAT_MS` and `FILM_PRODUCE_MS` both 0 now, a `Landed` and the `Produced` it
+feeds are cues at the very same instant, and marks no longer expire on any film's
+clock at all (above) — so a single arrival that both wins its fight and finishes a
+hull stacks the two every time, and keeps them stacked for as long as either is
+still fading.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn

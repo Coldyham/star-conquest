@@ -211,18 +211,28 @@ FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in 
                          # engine's sequence with no pause of its own, which is all
                          # this cut shows; the progress ring already draws the tick,
                          # so raising this only adds a moment on it
-FILM_COMBAT_MS = 300     # ms: arrival fights, one node after another (and, at a
-                         # multi-owner pile-up, subdivided again across its fold)
-FILM_END_MS = 250        # ms held on the resolved board. Long enough to read the
-                         # production tick, which lands last in the current ordering
-FILM_FLASH_MS = 260      # ms a burst takes to finish popping in — its rings settle
-                         # and its spokes retract over this window (a film always
-                         # outlives its last cue by at least this, so the pop is
-                         # never cut off mid-way). The mark itself does not expire
-                         # here: it fades toward the background across whatever is
-                         # left of the turn instead (`Film.fade`, `render._faded`),
-                         # so it dissolves gradually rather than popping then
-                         # vanishing on a fixed clock
+FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
+                         # sequence with no dwell of their own, same as launch and
+                         # production — a mark now outlives the film that made it
+                         # (below), so nothing was left for a held beat to buy but
+                         # a pause in the middle of a glide. Was 300 (fights shown
+                         # one node after another); now every fight on a turn pops
+                         # at once, which reads fine since each keeps its own mark
+FILM_FLASH_MS = 260      # ms a mark (its burst, and the number with it) stays
+                         # fully up before it starts to fade — also how long the
+                         # burst's own rings take to settle and its spokes to
+                         # retract, since the two coincide. Counted from the
+                         # moment the mark fires and unrelated to any film's own
+                         # length (`Ui.fading_fights`/`fading_hulls`,
+                         # `Ui.age_fading_marks`), so it stays lit exactly this
+                         # long whether or not the next turn's film has already
+                         # started gliding on top of it
+FILM_FADE_MS = 500       # ms a mark then takes to dissolve into the background,
+                         # after its `FILM_FLASH_MS` hold — `render._faded`
+                         # blends its colour toward `COLOR_BG` over this window.
+                         # Also independent of any film's length, for the same
+                         # reason: it is what lets movement carry on underneath
+                         # a fading mark instead of pausing for it to be read
 FILM_BURST_R = 22        # px a burst reaches past whatever it marks
 FILM_BURST_W = 2         # px: its stroke
 FILM_BURST_SPOKES = 6    # radial strokes in one

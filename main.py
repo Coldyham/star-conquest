@@ -956,11 +956,13 @@ async def main() -> None:
                     ui.history = False
                     ui.dragging_scrubber = False
                     ui.playing = False   # replay playback must not carry into live play
+                    ui.clear_fading_marks()   # they belonged to a review that just ended
                     history_states, history_fog, history_events = [], [], []
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
                 elif log is not None and log.turn_count > 0:
+                    ui.clear_fading_marks()   # entering fresh: nothing from live play carries in
                     history_states, history_fog, history_events, entered = open_history(state, ui, log)
                     if entered is not None:
                         live_fog = entered
@@ -982,6 +984,10 @@ async def main() -> None:
 
         if scene == "game":
             assert state is not None and ui is not None and log is not None
+            # A mark keeps fading whether or not a playback is currently running
+            # (that's the whole point — see `Ui.age_fading_marks`), so this runs
+            # unconditionally, every frame, regardless of what `reel` is doing.
+            ui.age_fading_marks(dt)
             # A playback holds the board for its duration, and nothing below may
             # resolve or seek while it runs — under play mode the next turn would
             # otherwise be resolved out from under the one still being drawn.
@@ -998,7 +1004,7 @@ async def main() -> None:
                 # so pausing keeps showing what the turn did instead of losing it.
                 if not ui.film_paused:
                     ui.film_ms += dt
-                    reel.run_to(ui.film_ms)
+                    ui.archive_marks(reel.board, reel.run_to(ui.film_ms))
                 if ui.film_ms >= ui.film.total_ms:
                     if ui.history:
                         # The scrubber moves at the film's *end*, so it and the top

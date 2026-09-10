@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -892,12 +893,10 @@ def test_a_fleets_track_is_read_off_the_fleet_and_moves_it():
 
 def _flash_frame(screen, state, ui, landed) -> bytes:
     """Just the burst layer, over a blank field, at the instant the event fires."""
-    film = turnfilm.film([landed])
-    ui.film = film
-    ui.film_ms = next(at for at, e in film.cues if e is landed) + 1
+    ui.archive_marks(state, [landed])
     screen.fill((0, 0, 0))
     render._draw_film_flashes(screen, state, ui)
-    ui.stop_film()
+    ui.clear_fading_marks()
     return pygame.image.tobytes(screen, "RGB")
 
 
@@ -1013,10 +1012,9 @@ def test_which_fights_get_a_mark_and_what_it_says():
                                      was_ships=6, owner_id=2, ships=7,
                                      prod_progress=0, steps=steps)
             ui.visible, ui.seen = visible, set(state.systems)
-            ui.film = turnfilm.film([landed])
-            ui.film_ms = next(at for at, e in ui.film.cues if e is landed) + 1
+            ui.archive_marks(state, [landed])
             out = list(render._flash_marks(state, ui))
-            ui.stop_film()
+            ui.clear_fading_marks()
             return out
 
         every = set(state.systems)
@@ -1029,15 +1027,19 @@ def test_which_fights_get_a_mark_and_what_it_says():
         pygame.quit()
 
 
-def test_a_loss_label_keeps_its_ground_until_the_turn_itself_ends():
+def test_a_loss_label_keeps_its_ground_through_its_hold_and_fade():
     """The name pass avoids the loss pill for the same reason it avoids lane times
-    and a rule's "keep N" — for as long as one is up, which is now the whole rest
-    of the turn: a fight fades toward the background rather than being cut off on
-    a fixed clock (`Film.fade`), so there is nothing to hand back early.
+    and a rule's "keep N" — for as long as one is up. A fight stays fully visible
+    for `FILM_FLASH_MS` and then fades over `FILM_FADE_MS` (`render._mark_fade`),
+    entirely on its own clock — independent of any film's length, so it dissolves
+    the same way whether or not the next turn has already started gliding on top
+    of it. `_flash_marks` itself never drops one early or late; pruning a fully
+    dissolved mark is `Ui.age_fading_marks`' job, not this one's.
 
     Both halves matter. Reserved space and the fading mark cannot come apart (the
     name pass and `_draw_film_flashes` share `_flash_marks`), and nothing is
-    reserved at all with turn animation off, since there is then no film to read.
+    reserved once a mark is cleared (leaving history, scrubbing, or simply never
+    having fired one).
     """
     pygame.init()
     render._FONTS.clear()
@@ -1051,32 +1053,41 @@ def test_a_loss_label_keeps_its_ground_until_the_turn_itself_ends():
             prod_progress=0,
             steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
                                  defender_ships=6, winner=2, survivors=7),))
-        ui.film = turnfilm.film([landed])
-        at = next(cue for cue, e in ui.film.cues if e is landed)
+        ui.archive_marks(state, [landed])
+        fight = ui.fading_fights[0]
+        assert fight.age_ms == 0.0
 
-        ui.film_ms = at + 1
-        assert list(render._flash_marks(state, ui))              # fresh: reserve it
-        ui.film_ms = at + config.FILM_FLASH_MS + 1
-        assert list(render._flash_marks(state, ui))               # well past the old
-                                                                    # fixed window, still up
-        ui.film_ms = ui.film.total_ms
+        assert list(render._flash_marks(state, ui))            # fresh: reserve it
+
+        ui.fading_fights[0] = replace(fight, age_ms=config.FILM_FLASH_MS)
         marks = list(render._flash_marks(state, ui))
-        assert marks and marks[0].fade == 1.0    # faded almost away, but not dropped
+        assert marks and marks[0].fade == 0.0    # still fully up at the hold's edge
 
-        ui.stop_film()      # ...and with animation off there is never a film
-        ui.film_ms = at + 1
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS / 2)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and 0.0 < marks[0].fade < 1.0    # mid-fade, not dropped
+
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 1.0    # fully dissolved, but still handed
+                                                  # back — `_flash_marks` doesn't prune
+
+        ui.clear_fading_marks()
         assert list(render._flash_marks(state, ui)) == []
     finally:
         pygame.quit()
 
 
-def _labels(state, ui, events, at_event):
-    """The placed labels a playback is writing, at the instant ``at_event`` fires."""
-    ui.film = turnfilm.film(events)
-    ui.film_ms = next(cue for cue, e in ui.film.cues if e is at_event) + 1
+def _labels(state, ui, events):
+    """The placed labels a playback is writing, the instant ``events`` fire —
+    fresh, as `Ui.archive_marks` leaves them (age 0), mirroring what one
+    `Reel.run_to` call hands it when several land on the same instant."""
+    ui.archive_marks(state, events)
     out = [(text, color) for _, text, color in render._film_labels(state, ui)]
     placed = {text: center for center, text, _ in render._film_labels(state, ui)}
-    ui.stop_film()
+    ui.clear_fading_marks()
     return out, placed
 
 
@@ -1092,15 +1103,13 @@ def test_a_finished_hull_is_marked_over_its_system():
         node = next(s.id for s in state.systems.values() if s.owner_id == 1)
         produced = turnfilm.Produced(((node, 4, 0, 1),))
         events = [turnfilm.Advanced(((0, 2),)), produced]
-        film = turnfilm.film(events)
-        at = next(cue for cue, e in film.cues if e is produced)
 
-        out, _ = _labels(state, ui, events, produced)
-        assert out == [("+1", render._faded(config.player_color(1), film.fade(at, at + 1)))]
+        out, _ = _labels(state, ui, events)
+        assert out == [("+1", config.player_color(1))]   # fresh: no fade yet
 
         # a rival's yard is not ours to report, so fog gates it like a burst
         ui.visible = set(state.systems) - {node}
-        out, _ = _labels(state, ui, events, produced)
+        out, _ = _labels(state, ui, events)
         assert out == []
     finally:
         pygame.quit()
@@ -1117,7 +1126,7 @@ def test_progress_with_no_hull_to_show_is_left_to_the_ring():
         ui = _make_ui(state)
         node = next(s.id for s in state.systems.values() if s.owner_id == 1)
         produced = turnfilm.Produced(((node, 3, 2, 0),))     # progress, no hull
-        out, _ = _labels(state, ui, [turnfilm.Advanced(((0, 2),)), produced], produced)
+        out, _ = _labels(state, ui, [turnfilm.Advanced(((0, 2),)), produced])
         assert out == []
     finally:
         pygame.quit()
@@ -1128,12 +1137,11 @@ def test_a_captured_system_that_produces_stacks_its_two_marks():
     its new owner — the one case where both marks are earned at the same spot, and
     they must not be drawn on top of each other.
 
-    A single arrival reaches it reliably now: marks used to expire on a fixed
-    `FILM_FLASH_MS` after their cue, so a lone fight's burst had already faded by
-    the time production landed and only a node resolving later in a busy combat
-    beat stayed marked long enough to collide. Now that a mark fades across the
-    rest of the turn instead (`Film.fade`), nothing expires early, so the loss and
-    the gain are simply both still up once the second of the two has fired.
+    A single arrival reaches it reliably now, and both marks age in lockstep:
+    `FILM_COMBAT_MS`/`FILM_PRODUCE_MS` are both 0, so a `Landed` and the
+    `Produced` it feeds are cues at the very same instant and `Reel.run_to` hands
+    them to `Ui.archive_marks` together — there is no longer a window in which
+    one has fired and the other hasn't.
     """
     pygame.init()
     render._FONTS.clear()
@@ -1150,22 +1158,13 @@ def test_a_captured_system_that_produces_stacks_its_two_marks():
                                  defender_ships=6, winner=2, survivors=7),))
         produced = turnfilm.Produced(((node, 8, 0, 1),))
 
-        events = [landed, produced]
-        film = turnfilm.film(events)
-        landed_at = next(cue for cue, e in film.cues if e is landed)
-        produced_at = next(cue for cue, e in film.cues if e is produced)
-        film_ms = produced_at + 1   # what `_labels` drives the frame to
-
-        out, placed = _labels(state, ui, events, produced)
+        out, placed = _labels(state, ui, [landed, produced])
         assert sorted(t for t, _ in out) == ["+1", "−2"]
         assert placed["+1"][0] == placed["−2"][0], "same column"
         assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
         assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
-        # both belong to the new owner, so both are drawn in its colour — just
-        # faded by however long each has been up, which differs since the fight
-        # fired earlier than the hull it fed into
-        color = dict(out)
-        assert color["−2"] == render._faded(config.player_color(2), film.fade(landed_at, film_ms))
-        assert color["+1"] == render._faded(config.player_color(2), film.fade(produced_at, film_ms))
+        # both belong to the new owner, and both are fresh, so both are drawn in
+        # its colour at full strength
+        assert dict(out) == {"−2": config.player_color(2), "+1": config.player_color(2)}
     finally:
         pygame.quit()

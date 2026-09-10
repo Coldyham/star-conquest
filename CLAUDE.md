@@ -224,26 +224,36 @@ Rules that hold it together:
 - **The order is the engine's, never one written down in `turnfilm`.** `film()`
   groups *consecutive* events of one class into a beat, so moving `_production`
   ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-  `config.FILM_PRODUCE_MS` is 0: production lands at its true place with no dwell
-  of its own, and is shown by a `+N` over each system that finished a hull
-  (`Produced.hulls` -> `Film.hulls` -> `render._film_labels`) rather than by time.
-  Keep it at 0 unless production stops being the last phase: `Film.plays` is
+  `config.FILM_PRODUCE_MS`, `FILM_COMBAT_MS` and `FILM_LAUNCH_MS` are all 0:
+  launch, combat and production each land at their true place in the sequence
+  with no dwell of their own — `Fleet.progress_at` combined with `Film.travel`
+  already starts a launched fleet's glide at progress 0, so a held launch beat
+  only bought a stutter before movement began, and a fight or a finished hull is
+  made visible by a mark (below), not by holding the board still to show one.
+  Keep production at 0 unless it stops being the last phase: `Film.plays` is
   "does any beat have a duration", so a dwell would make every otherwise-quiet
-  turn pause instead of resolving instantly. `config.FILM_LAUNCH_MS` is 0 for the
-  same reason on the other end of the turn: `Fleet.progress_at` combined with
-  `Film.travel` already starts a launched fleet's glide at progress 0, so a
-  separate held beat only bought a stutter before movement began — watched turn
-  after turn, that stutter is the more visible cost.
-- **A mark fades across whatever is left of the turn, not on a fixed clock.**
-  `Film.fade(at, ms)` spans `total_ms - at`, so an early fight gets a long, slow
-  dissolve and a late one a short, quick one — either way gone by the time the
-  turn itself is, never cut off early and never lingering past it.
-  `render._faded` blends the mark's colour toward `config.COLOR_BG` (the main
-  surface has no per-pixel alpha, and a label's own pill backing is already that
-  colour, so its text sinks into its own backing rather than shifting hue).
-  `config.FILM_FLASH_MS` still exists, but only for a burst's pop-in geometry now
-  (its rings settle and its spokes retract over that window) — reusing it as an
-  expiry would make a mark vanish long before the turn that produced it does.
+  turn pause instead of resolving instantly. A film built this way carries no
+  trailing pad either — `total_ms` ends the instant its last beat does — which is
+  what lets the *next* turn's move beat start immediately with nothing left to
+  wait out (see history chaining, below).
+- **A mark outlives the film that made it, fading on its own clock.**
+  `Ui.fading_fights`/`fading_hulls` hold every still-showing fight or finished
+  hull as plain data (`viewstate.FadingFight`/`FadingHull`), independent of
+  `film`/`film_ms` — populated by `Ui.archive_marks(board, events)` from
+  whatever `Reel.run_to` just applied (which is why `run_to`/`run` return that
+  list rather than nothing), and aged every frame by `Ui.age_fading_marks(dt)`
+  regardless of whether a playback is currently running. A mark is fully visible
+  for `config.FILM_FLASH_MS`, then fades over `config.FILM_FADE_MS`
+  (`render._mark_fade`, `_faded` blending its colour toward `config.COLOR_BG`)
+  — both counted from when it fired, never from any film's own length, which is
+  what lets it keep dissolving on top of whatever the *next* turn's glide is
+  already doing instead of being cut off the moment `film` is replaced.
+  Visibility (`Ui.sees`) is checked once, at archive time, not on every frame a
+  mark is drawn — a fight you saw happen keeps fading regardless of what fog
+  does afterward. A "jump" rather than a step (entering/leaving history,
+  scrubbing, rewinding) calls `Ui.clear_fading_marks()`, since a mark belongs to
+  a specific point in a specific playback and jumping away from it makes it
+  stale rather than merely old.
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the
@@ -271,12 +281,16 @@ Rules that hold it together:
   in) rather than whenever a film merely happens to be up — a manually-triggered
   film runs with `Ui.playing` False throughout, so toggling play *on* while it
   plays must leave it alone rather than freezing it on the first frame.
-- **History playback chains an animated turn straight into the next one.**
-  `main._next_history_film` is tried immediately once a film lands, before the
-  `PLAY_MS` pacing below it — which only ever fires for a turn with nothing to
-  animate, or with the preference off. A gap stitched between every turn
-  regardless would stutter exactly where continuous movement matters most: a
-  run of animated turns played back to back.
+- **History playback chains an animated turn straight into the next one, and a
+  film no longer has to pad itself for a mark to be read.** Both changes serve
+  the same end: a run of animated turns glides continuously instead of
+  stuttering. `main._next_history_film` is tried immediately once a film lands,
+  before the `PLAY_MS` pacing below it — which only ever fires for a turn with
+  nothing to animate, or with the preference off. And since a mark's visibility
+  no longer depends on `film` still being current (above), `film()` need not
+  hold `total_ms` open at all once its last beat ends — so the *next* turn's
+  move beat can start on literally the next frame, with whatever marks the
+  previous turn produced still fading on top of it.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at
