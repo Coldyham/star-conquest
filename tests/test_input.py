@@ -1821,6 +1821,23 @@ def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
         pygame.quit()
 
 
+def test_an_outdated_replay_is_declined_rather_than_misreplayed(tmp_path, monkeypatch):
+    """A log stamped under rules the engine has since moved past would silently
+    rebuild a different game than the one actually played (`GameLog.is_current`),
+    so it is turned away exactly like an unreadable blob — never shown as if it
+    still reproduced the match."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        log.rules_version = engine.RULES_VERSION + 1
+        assert main.open_replay(log.encoded(), Settings()) is None
+        # ...and told apart from a genuinely unreadable blob, for the status line.
+        decoded = main._decode_log(log.encoded())
+        assert decoded is not None and decoded.is_current is False
+        assert main._decode_log("not base64!!") is None
+    finally:
+        pygame.quit()
+
+
 # --------------------------------------------------------------------------- #
 # Skipping a turn playback
 # --------------------------------------------------------------------------- #

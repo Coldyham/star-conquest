@@ -427,6 +427,17 @@ pasting the file into a scratch Postgres or Supabase project and querying
   seed" above.
 - **Supabase pauses free projects after about a week idle**, which needs a manual
   unpause. A weekly scheduled request against the REST API would prevent it.
+- **A replay recorded under rules the engine has since moved past loses its
+  Watch link rather than keeping it.** `GameLog.is_current` (a `rules_version`
+  claim, same shape as `finished`/`won`/`hand`) is compared against
+  `CURRENT_RULES_VERSION` before a replay is offered, since reconstructing an
+  outdated one can silently show a different game than the one actually played
+  — but nothing here regenerates or re-verifies it under the rules it *was*
+  played with, so a genuine rules change quietly retires every replay it
+  touches instead of preserving them. Storing a full board snapshot per turn
+  would survive any future rules change instead of just being caught by one;
+  set aside for now (see "Checked scores" in `docs/system-design.md`) rather
+  than ruled out.
 
 ## Not built yet
 

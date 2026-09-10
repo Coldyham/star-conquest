@@ -125,6 +125,13 @@ create table if not exists public.game_logs (
   finished     boolean not null default false,
   won          boolean not null default false,
   hand         integer not null default 0 check (hand >= 0),
+  -- The rules this match was played under (`engine.RULES_VERSION` at the time),
+  -- one more claim of the same kind: it lets a caller tell a replay that can
+  -- still be reconstructed exactly from one that can't (`GameLog.is_current`)
+  -- without decoding the blob to find out. Every row before this column existed
+  -- really was played under rules v1 — it is the only version there has ever
+  -- been until now — so the default below is historical fact, not a guess.
+  rules_version integer not null default 1 check (rules_version >= 1),
   log          text not null check (octet_length(log) between 1 and 262144),
   submitted_at timestamptz not null default now()
 );
@@ -135,6 +142,7 @@ create table if not exists public.game_logs (
 alter table public.game_logs add column if not exists finished boolean not null default false;
 alter table public.game_logs add column if not exists won      boolean not null default false;
 alter table public.game_logs add column if not exists hand     integer not null default 0;
+alter table public.game_logs add column if not exists rules_version integer not null default 1;
 
 -- Longest first: that is the row a verifier wants, and the index answers the
 -- lookup by match_id at the same time.
@@ -330,7 +338,7 @@ create table if not exists public.bot_scores (
 -- ---------------------------------------------------------------------------
 create or replace view public.public_replays as
 select distinct on (l.match_id)
-  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log
+  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.rules_version, l.log
 from public.game_logs l
 where exists (select 1 from public.scores s where s.match_id = l.match_id)
 order by l.match_id, l.turns desc, l.id desc;

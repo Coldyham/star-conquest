@@ -486,6 +486,28 @@ intact.
       log rather than trusted. Key the log by `GameLog.setup_key()`, never the
       live `Settings`: `main` resolves "roll a fresh seed" at game start and never
       writes it back.
+  - **A replay is never shown as if it still reproduced the game once the engine
+    has moved past it.** `GameLog.is_current` (`rules_version == engine.
+    RULES_VERSION`) is the same check on both sides of the wire, and both were
+    silent about it until this was added — `main.open_replay`/`resume_game` would
+    happily reconstruct an outdated log through today's engine and show whatever
+    that produced, with nothing to say it might not be the game that was actually
+    played. `replay.latest_log` and `tools/position_suite.local_logs` decline such
+    a log the same way they already decline a version-1 one; `main.open_replay`
+    returns `None` for one too (a dedicated status line, `WATCH_OUTDATED_MSG`,
+    tells it apart from a genuinely unreadable blob). The board's half is
+    `game_logs.rules_version` — one more claim stored alongside the blob, same as
+    `finished`/`won`/`hand` (`share.row_for` sends it, `log.mjs` defaults a
+    missing one to `1`, the only version there ever was before this column
+    existed) — compared against `leaderboard/js/config.mjs`'s
+    `CURRENT_RULES_VERSION` in `game.mjs`'s `watchableIds`, so an outdated replay
+    simply has no *Watch* link rather than one that lies. That JS constant has no
+    build step to keep it honest, only a hand bump alongside `RULES_VERSION` and
+    `tests/test_leaderboard_sync.py` pinning the two together. This is a cheaper
+    half-measure chosen over storing full board snapshots (which would let a
+    replay outlive *any* future rules change, at the cost of the size and
+    bot-independence properties `replay.py`'s module doc argues for) — worth
+    revisiting if snapshotting ever happens, but not before.
   - **Adding a field to `Settings` invalidates every key already shared.**
     `challenge_key()` hashes the full setup dict, so a new field moves the digest
     of every map that ever existed and links from before it read as edited.

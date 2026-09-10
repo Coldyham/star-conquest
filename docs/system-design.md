@@ -1205,6 +1205,32 @@ repeatedly lands several times and the *longest* row is the current one
 (`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
 delete path the public does not have.
 
+**A rules change had never actually moved `RULES_VERSION` until the production/
+combat reorder, so "the engine outran an old replay" had never been a real case
+to handle — only a documented possibility.** The verifier already had the right
+shape for it (`outdated` versus `mismatch`, decided *after* the replay so a
+change that leaves most games alone does not flag them anyway), but nothing
+outside `tools/verify_scores.py` ever asked the question: the game's own
+`main.open_replay`/`resume_game` and `tools/position_suite.local_logs` would
+reconstruct an outdated log through whichever engine happened to be running and
+show the result with no caveat, and the board's Watch link had no way to know a
+log's rules at all short of decoding its blob. `GameLog.is_current` is one
+property shared by every one of those; the board's half of it
+(`game_logs.rules_version`, exposed through `public_replays`) is deliberately
+the same *claim, not evidence* shape as `finished`/`won`/`hand` — an index
+letting `game.mjs` decide without paying for a blob it would otherwise have to
+throw away unread.
+
+The alternative — storing a full board snapshot per turn, so a replay survives
+*any* future rules change rather than just being caught by one — was considered
+and set aside for now, not ruled out. It reverses a deliberately argued design
+choice (`replay.py`'s module doc: a match is never snapshotted, which is what
+keeps a log 5-14 KiB and keeps a retuned bot from being able to move a stored
+game), and backfilling every already-uploaded log would mean resurrecting the
+exact engine each one was stamped under to re-simulate it once. The cheap fix
+costs a column and a client-side comparison, and it is what `RULES_VERSION` was
+already *for* — it just was not wired to anything but the verifier.
+
 **The verifier binds the replay to the setup.** Without `same_setup`, an easy
 map's log could be attached to a hard map's score and would replay perfectly.
 Both setups are hashed in Python by the same code, so a key the *site* folded

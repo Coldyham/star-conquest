@@ -22,6 +22,7 @@ function row(over = {}) {
     finished: true,
     won: true,
     hand: 40,
+    rules_version: 2,
     log: "eNrtVNtu4jAQ",
     ...over,
   };
@@ -36,8 +37,17 @@ test("a well-formed row is accepted and normalised", () => {
     finished: true,
     won: true,
     hand: 40,
+    rules_version: 2,
     log: "eNrtVNtu4jAQ",
   });
+});
+
+test("rules_version is a positive integer, or defaults to 1 (the only version there ever was before this field existed)", () => {
+  assert.equal(validate({ ...row(), rules_version: undefined }).rules_version, 1);
+  assert.equal(validate(row({ rules_version: 0 })), "bad rules_version");
+  assert.equal(validate(row({ rules_version: -1 })), "bad rules_version");
+  assert.equal(validate(row({ rules_version: 1.5 })), "bad rules_version");
+  assert.equal(validate(row({ rules_version: "2" })), "bad rules_version");
 });
 
 test("a match_id of the wrong shape never reaches the database", () => {

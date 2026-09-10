@@ -328,6 +328,7 @@ LOG_FRAGMENT = "log="
 WATCH_UNREACHABLE_MSG = "Couldn't fetch that replay from the leaderboard"
 WATCH_MISSING_MSG = "That replay isn't on the leaderboard — is its score still posted?"
 WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
+WATCH_OUTDATED_MSG = "That replay was recorded under older rules and can't be shown exactly anymore"
 
 
 def replay_request() -> str:
@@ -340,8 +341,24 @@ def replay_request() -> str:
     return token[len(LOG_FRAGMENT):] if token.startswith(LOG_FRAGMENT) else ""
 
 
+def _decode_log(blob: str) -> Optional[GameLog]:
+    """``blob`` as a replayable log, or None if it can't be one at all — an
+    unreadable/truncated encoding, or nothing recorded. Shared by ``open_replay``
+    and its caller, which needs the same decode a second time only to tell an
+    unreadable blob apart from an outdated one for the status line.
+    """
+    try:
+        log = replay.GameLog.decode(blob)
+    except ValueError:
+        return None
+    return log if log.turn_count else None
+
+
 def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
-    """Rebuild a downloaded match, ready to review. None if the blob is not one.
+    """Rebuild a downloaded match, ready to review. None if the blob is not one,
+    or if it was recorded under rules this engine has since moved past
+    (``GameLog.is_current``) — reconstructing it would silently show a game other
+    than the one that was actually played, rather than the one asked for.
 
     Goes through ``resume_game``, so a watched replay is the same object a resumed
     save is — which is what makes *rewinding* out of one work for free: fork it at
@@ -349,11 +366,8 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
     (``resume_game`` copies them onto ``settings``), so leaving history lands on
     that setup rather than whatever the menu happened to be showing.
     """
-    try:
-        log = replay.GameLog.decode(blob)
-    except ValueError:
-        return None
-    if not log.turn_count:
+    log = _decode_log(blob)
+    if log is None or not log.is_current:
         return None
     ai.load_models()      # a stored match may name a drop-in strategy for a seat
     state, ui = resume_game(log, settings)
@@ -768,11 +782,20 @@ async def main() -> None:
                                     WATCH_MISSING_MSG if status == share.MISSING
                                     else WATCH_UNREACHABLE_MSG, False)
                 elif opened is None:
-                    # It answered, and what came back was not a replay — an error
-                    # page, a truncated body, a log with no turns in it.
-                    print(f"replay body was not a readable log ({len(body)} bytes): "
-                          f"{body[:120]!r}")
-                    menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
+                    # It answered, and what came back either isn't a replay at all
+                    # (an error page, a truncated body, a log with no turns in it)
+                    # or is one recorded under rules the engine has since moved
+                    # past — decoded again here only to tell the two apart for the
+                    # status line; `open_replay` already made the same call.
+                    stale = _decode_log(body)
+                    if stale is not None and not stale.is_current:
+                        print(f"replay was recorded under rules v{stale.rules_version}, "
+                              f"this build plays v{engine.RULES_VERSION}")
+                        menu.set_status(menu_state, WATCH_OUTDATED_MSG, False)
+                    else:
+                        print(f"replay body was not a readable log ({len(body)} bytes): "
+                              f"{body[:120]!r}")
+                        menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
                 else:
                     state, ui, log = opened
                     current_seed = log.seed

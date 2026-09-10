@@ -69,7 +69,10 @@ def local_logs(directory: Path | None = None) -> list[replay.GameLog]:
     Version-1 logs are skipped for the same reason ``replay.latest_log`` skips
     them: they recorded the human's orders alone and re-ran the AI, so they cannot
     be replayed faithfully and the position they rebuild is not the one that was
-    played (see ``replay``'s module docstring).
+    played (see ``replay``'s module docstring). A log stamped under rules the
+    engine has since moved past (``GameLog.is_current``) is skipped for the same
+    reason: the position ``sim.play_from`` would branch from is not the one that
+    was actually reached.
     """
     paths = replay.list_logs() if directory is None else sorted(
         directory.glob("game_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -79,7 +82,7 @@ def local_logs(directory: Path | None = None) -> list[replay.GameLog]:
             log = replay.load(path)
         except (OSError, ValueError):
             continue
-        if log.version >= replay.FORMAT_VERSION and log.turn_count:
+        if log.version >= replay.FORMAT_VERSION and log.turn_count and log.is_current:
             out.append(log)
     return out
 

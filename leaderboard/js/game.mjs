@@ -1,5 +1,5 @@
 import { configured, eq, select } from "./api.mjs";
-import { GAME_URL } from "./config.mjs";
+import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import {
   botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
   mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
@@ -164,24 +164,32 @@ function sortToggle() {
 }
 
 /**
- * Which of these scores have a replay anyone can watch.
+ * Which of these scores have a replay anyone can watch *and reconstruct
+ * exactly* — a `rules_version` behind `CURRENT_RULES_VERSION` means the game's
+ * own engine has moved past the rules that replay was recorded under, so
+ * reconstructing it would show a different game than the one actually played
+ * (`GameLog.is_current`, the same check the game itself uses to gate its own
+ * Watch/resume). Rather than link to a replay it can no longer show right, the
+ * board simply doesn't offer it.
  *
  * Asked by id rather than by map: a score's `game_key` and its log's are stamped
  * by different code paths (the token's `Challenge.key` and `GameLog.setup_key`),
  * and a folded key would make a `game_key` lookup quietly miss.
  *
  * Fails quietly like the bot query does — a board on an older schema.sql has no
- * `public_replays` view, and a missing "Watch" link is not worth taking the score
- * table down for. Needs GAME_URL too: without somewhere to send a watcher there
- * is nothing to link to.
+ * `public_replays` view (or no `rules_version` column on it yet), and a missing
+ * "Watch" link is not worth taking the score table down for. Needs GAME_URL too:
+ * without somewhere to send a watcher there is nothing to link to.
  */
 async function watchableIds(scores) {
   const ids = [...new Set(scores.map((s) => s.match_id).filter(Boolean))];
   if (!GAME_URL || !ids.length) return new Set();
   const rows = await select(
-    `public_replays?select=match_id&match_id=in.(${ids.map(encodeURIComponent).join(",")})`,
+    `public_replays?select=match_id,rules_version&match_id=in.(${ids.map(encodeURIComponent).join(",")})`,
   ).catch(() => []);
-  return new Set(rows.map((r) => r.match_id));
+  return new Set(
+    rows.filter((r) => r.rules_version === CURRENT_RULES_VERSION).map((r) => r.match_id),
+  );
 }
 
 async function load() {

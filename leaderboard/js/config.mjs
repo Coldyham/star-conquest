@@ -39,3 +39,16 @@ function siblingGame() {
 }
 
 export const GAME_URL = siblingGame() || GAME_URL_FALLBACK;
+
+// Mirrors `starconquest.engine.RULES_VERSION` by hand — there is no shared build
+// step between this site and the game's Python, so the two can only be kept in
+// step by convention (bump this in the same commit that bumps that) and a test:
+// `tests/test_leaderboard_sync.py` fails the moment they drift.
+//
+// What it buys: `game.mjs`'s Watch link is decided from `public_replays.
+// rules_version` (a claim stored alongside the blob, same as `finished`/`won`/
+// `hand` — see `schema.sql`) compared against this constant, so a replay stamped
+// under rules this build no longer plays by is never offered as if it still
+// reproduced the game (`GameLog.is_current` is the same check, on the Python
+// side, for the game's own Watch/resume).
+export const CURRENT_RULES_VERSION = 2;
