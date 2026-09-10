@@ -297,7 +297,13 @@ Rules that hold it together:
   `linger=True` buys (above). Neither path loses anything by choosing either way
   — a mark's visibility no longer depends on `film` still being current (above),
   so lingering or not only changes how long `film` itself holds the board, never
-  how long a mark stays up.
+  how long a mark stays up. **`_next_history_film` must run its new reel to `0.0`
+  before returning it**, unlike a live End Turn's reel, which always gets a
+  `run_to` call in the same frame it's built (`main`'s per-frame update runs
+  right after the event that creates it, this one is built *inside* that
+  update). Skip it and a continuing fleet draws one frame at last turn's
+  un-advanced `turns_remaining` — a visible snap back by a whole turn's worth of
+  progress before the next frame's `run_to` catches it back up.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at

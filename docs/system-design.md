@@ -480,6 +480,25 @@ step still exists and still matters — it is what paces a *quiet* turn (nothing
 animate, or the preference off), where there is no film to chain into and a human
 still needs long enough to read the board before it moves on.
 
+**Chaining hid a one-frame snap, because the new reel wasn't advanced before it
+was drawn.** A live End Turn's reel always gets a `run_to` call in the very frame
+it's built — `main`'s per-frame update runs right after the event handler that
+calls `resolve_turn`, in the same pass through the loop — so by the time that
+frame draws, whatever fires at the very first instant (a launch, and the turn's
+first `Advanced`) has already been applied. `_next_history_film`'s reel is built
+*inside* that same per-frame update, as a side effect of the previous reel
+finishing, so there is no second pass through it left this frame to apply
+anything — it used to sit there with `film_ms == 0` and nothing yet applied
+until the *next* frame. For a fleet that only continues (never launches or
+lands this turn), that is a real, visible regression: its `turns_remaining` is
+still last turn's value for that one frame, and `Fleet.progress_at(0)` with the
+old value reads a whole turn *behind* where the previous turn's last frame just
+left it — a snap backward by exactly `1 / turns_total`, corrected again the very
+next frame once `run_to` caught up. The fix is for `_next_history_film` to call
+`reel.run_to(0.0)` (and `Ui.archive_marks` whatever that applies) itself before
+returning the reel, so the frame that draws it never sees the un-advanced
+board at all.
+
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
 6-ship system read `−8`, which is almost entirely the defender's garrison — wiped

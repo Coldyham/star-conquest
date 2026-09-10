@@ -2050,6 +2050,9 @@ def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
     monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
     state, ui = _setup()
     try:
+        dest = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
         ui.history_turn, ui.history_max = 0, 2
         history_states = [state, state, state]
         history_fog = [(set(state.systems), set(), {})] * 3
@@ -2064,6 +2067,37 @@ def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
         pygame.quit()
 
 
+def test_next_history_film_does_not_snap_a_continuing_fleet_back_a_turn(monkeypatch):
+    """A chained reel is handed straight to `render.draw` in the same frame it's
+    built — unlike a live End Turn, which always gets a `run_to` call first (see
+    `main`'s per-frame update) — so without applying this turn's launch/first
+    advance immediately, a continuing fleet would draw one frame at *last*
+    turn's un-advanced position: a visible snap back by a whole turn's worth of
+    progress before the next frame caught it back up. `_next_history_film` must
+    leave the reel already caught up to this instant.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        dest = state.systems[0].neighbors[0]
+        # At the end of the turn just watched: 2 of 4 steps remaining.
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
+        end_of_last_turn_progress = state.fleets[0].progress_at(1.0)
+
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 1),))]]   # 2 -> 1 this turn
+
+        reel = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert reel is not None
+        travel = ui.film.travel(0.0)   # what `render._travel` reads on this exact frame
+        assert reel.board.fleets[0].progress_at(travel) == end_of_last_turn_progress
+    finally:
+        pygame.quit()
+
+
 def test_next_history_film_never_lingers_on_combat(monkeypatch):
     """History playback must glide continuously even through a fight — unlike a
     live End Turn (`test_resolve_turn_lets_its_combat_linger`), it never asks
@@ -2071,8 +2105,11 @@ def test_next_history_film_never_lingers_on_combat(monkeypatch):
     monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
     state, ui = _setup()
     try:
+        source = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=2, source_id=source, dest_id=0, ships=7,
+                              turns_total=3, turns_remaining=1)]
         landed = turnfilm.Landed(
-            node_id=0, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            node_id=0, fleets=(0,), was_owner=1, was_ships=6, owner_id=2, ships=3,
             prod_progress=0,
             steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
                                  defender_ships=6, winner=2, survivors=3),))

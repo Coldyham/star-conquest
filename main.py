@@ -592,7 +592,16 @@ def _next_history_film(ui: Ui, history_states: list[GameState],
     # the same union as live play: the turn's own fog on top of the one it lands in
     ui.film_visible = frozenset(history_fog[ui.history_turn][0])
     # a copy, so scrubbing back to this turn still finds the board it really was
-    return turnfilm.Reel(turnfilm.copy_board(history_states[ui.history_turn]), film)
+    reel = turnfilm.Reel(turnfilm.copy_board(history_states[ui.history_turn]), film)
+    # Apply whatever fires at this exact instant (a launch, and the first
+    # Advanced) before this frame ever draws. A chained reel is built and handed
+    # straight to `render.draw` in the same frame — unlike a live End Turn, which
+    # always gets a `run_to` call first (see `main`'s per-frame update) — so
+    # without this, a continuing fleet would be drawn one frame at *last* turn's
+    # un-advanced `turns_remaining`: a visible snap back by one turn's worth of
+    # progress before the next frame's `run_to` catches it back up.
+    ui.archive_marks(reel.board, reel.run_to(0.0))
+    return reel
 
 
 def apply_toggle_play(ui: Ui) -> None:

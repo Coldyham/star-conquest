@@ -63,11 +63,26 @@ Landed on this branch, across these commits:
   about `Ui.fading_fights`/`fading_hulls` changes either way — a mark's own
   lifetime was already independent of the film, so `linger` only changes how long
   *the film* holds the board, never how long a mark stays visible on it.
+- **A one-frame snap on every chained turn, reported from play.** Even with
+  combat never lingering in history, a run of animated turns still visibly
+  hitched: a continuing fleet snapped back by roughly a turn's worth of progress
+  for one frame at each boundary, then jumped forward again. Cause: a live End
+  Turn's reel always gets a `run_to` call in the same frame it's built (`main`'s
+  per-frame update runs right after the event that creates it), but
+  `main._next_history_film`'s reel is built *inside* that same update as a side
+  effect of the previous one finishing, so it used to sit un-advanced
+  (`film_ms == 0`, nothing applied) for the one frame that draws it before the
+  *next* frame's `run_to` caught it up — and a fleet's `turns_remaining` a turn
+  behind reads as a whole turn's worth of progress behind, per
+  `Fleet.progress_at`. Fixed by having `_next_history_film` call
+  `reel.run_to(0.0)` (and `Ui.archive_marks`) on the reel itself before handing
+  it back, so the launch/first-advance instant is always already applied by the
+  time anything draws it.
 
 To re-verify from a clean clone:
 
 ```sh
-uv run pytest                                    # 776 tests
+uv run pytest                                    # 777 tests
 uv run python -m tests.sim --film --trials 80    # the playback oracle, every turn
 ```
 
