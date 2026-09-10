@@ -169,16 +169,31 @@ def test_a_clash_with_no_move_beat_still_gets_shown():
     assert clash in [e for _, e in film.cues]
 
 
-def test_production_applies_in_place_at_zero_length():
-    """`FILM_PRODUCE_MS` is 0 in this cut: production still lands at its own point
-    in the sequence, it just gets no dwell of its own."""
-    assert config.FILM_PRODUCE_MS == 0
+def test_production_applies_in_place_at_zero_length_when_nothing_follows():
+    """A produce beat only spends `FILM_PRODUCE_MS` when a combat beat comes right
+    after it (see the next test) — anywhere else, including here where it comes
+    *after* combat, it still lands at its own point in the sequence with no dwell
+    of its own."""
     film = turnfilm.film([_landed(), _produced()])
     produce = [b for b in film.beats if b.kind == "produce"][0]
     assert produce.ms == 0
     assert produce.holds(produce.start) is False   # an instant, not a stretch
     assert film.label(produce.start) == ""         # ...so it captions nothing
     assert dict((e, ms) for ms, e in film.cues)[_produced()] == produce.start
+
+
+def test_production_gets_a_dwell_only_right_before_combat():
+    """Production now runs before arrivals, so a hull finished this turn is in the
+    garrison for the fight that follows it — and the two must not land on the same
+    instant, or the `+1` reads as simultaneous with the fight it just fed instead of
+    as having contributed to it. `FILM_PRODUCE_MS` buys exactly that gap, and only
+    when a combat beat is what follows."""
+    assert config.FILM_PRODUCE_MS > 0
+    film = turnfilm.film([_produced(), _landed()])
+    produce, combat_beat = film.beats
+    assert (produce.kind, combat_beat.kind) == ("produce", "combat")
+    assert produce.ms == config.FILM_PRODUCE_MS
+    assert combat_beat.start == produce.end > 0
 
 
 def test_cues_at_one_instant_keep_emission_order():
@@ -344,14 +359,15 @@ def test_a_pile_up_rides_in_the_landed_event():
 
 
 def test_a_film_of_nothing_but_instants_does_not_play():
-    """Production alone, at a zero dwell, leaves nothing to watch — so the board
-    should jump as it always did rather than hold on the finished position.
+    """Production alone, with no combat beat right after it to butt up against,
+    stays a zero dwell and leaves nothing to watch — so the board should jump as
+    it always did rather than hold on the finished position.
 
-    Combat is an instant now too (`FILM_COMBAT_MS` is 0, like launch and
-    production), so a `Landed` alone would not play either — but that never
-    happens for real: an arrival always follows an `Advanced` the same turn
-    (`_advance_fleets` processes it before `_resolve_arrivals` ever sees it), so
-    `plays` is carried by the move beat whenever there is a fight to show.
+    Combat is an instant too (`FILM_COMBAT_MS` is 0, like launch), so a `Landed`
+    alone would not play either — but that never happens for real: an arrival
+    always follows an `Advanced` the same turn (`_advance_fleets` processes it
+    before `_resolve_arrivals` ever sees it), so `plays` is carried by the move
+    beat whenever there is a fight to show.
     """
     assert not turnfilm.film([_produced()]).plays
     assert turnfilm.film([turnfilm.Advanced(((0, 3),)), _landed()]).plays
@@ -583,8 +599,8 @@ def test_a_produced_cue_carries_its_hulls_for_the_reel_to_hand_onward():
 
 
 def test_a_turn_that_only_produced_still_does_not_play():
-    """The mark rides on a playback; it is not a reason to start one. Production
-    alone is a film of instants (`FILM_PRODUCE_MS` is 0), so a quiet turn stays
-    instant instead of costing half a second for a couple of ships appearing."""
-    assert config.FILM_PRODUCE_MS == 0
+    """The mark rides on a playback; it is not a reason to start one. With no
+    combat beat to butt up against, a produce beat stays a zero-length instant
+    regardless of `FILM_PRODUCE_MS`, so a quiet turn stays instant instead of
+    costing time for a couple of ships appearing."""
     assert not turnfilm.film([_produced(0)]).plays

@@ -326,6 +326,14 @@ def film(events: list[Event], linger: bool = False) -> Film:
     rather than stop-start for every fight — a mark's own visibility
     (`Ui.archive_marks`/`age_fading_marks`) outlives either kind of film, so
     nothing here is lost by not lingering.
+
+    A produce beat only ever spends `config.FILM_PRODUCE_MS` when a combat beat
+    follows it directly — the one case worth spacing out, since the engine now
+    runs production *before* arrivals and a hull finished this turn is in the
+    garrison for the fight right after it. Elsewhere it stays an instant, same as
+    launch: most turns tick production with nothing arriving at all, and giving
+    every one of those a dwell would turn "otherwise quiet" back into "pauses
+    every turn".
     """
     beats: list[Beat] = []
     cues: list[tuple[float, Event]] = []
@@ -347,9 +355,12 @@ def film(events: list[Event], linger: bool = False) -> Film:
         else:
             runs.append((kind, label, [event]))
 
-    for kind, label, run in runs:
+    for i, (kind, label, run) in enumerate(runs):
         if kind == "combat" and linger:
             ms = float(config.FILM_LINGER_COMBAT_MS)
+        elif kind == "produce":
+            follows_into_combat = i + 1 < len(runs) and runs[i + 1][0] == "combat"
+            ms = float(config.FILM_PRODUCE_MS) if follows_into_combat else 0.0
         else:
             ms = float(getattr(config, _DURATIONS[kind]))
         beat = Beat(kind, label, at, ms)

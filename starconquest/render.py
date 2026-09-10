@@ -986,17 +986,21 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     combined figure mostly restates what the board already shows while burying the
     one number the square law makes hard to guess. And a hull finished this turn is
     ``+N`` in its owner's colour, which is what makes production visible at all
-    without giving it a dwell of its own (`config.FILM_PRODUCE_MS` is 0). Each
-    fades toward the background on its own fixed clock (`_mark_fade`) rather than
-    being cut off, or tied to how long any particular turn's film runs.
+    without giving it a dwell of its own most of the time — `config.FILM_PRODUCE_MS`
+    is spent only when a combat beat follows it directly (`turnfilm.film`), never
+    for a quiet tick with nothing arriving. Each fades toward the background on its
+    own fixed clock (`_mark_fade`) rather than being cut off, or tied to how long
+    any particular turn's film runs.
 
-    They collide by design rather than by accident: production runs *after* combat,
-    so a system captured this turn produces for its new owner and earns both marks
-    at once — and since neither expires early, the gain reliably stacks a row above
-    the cost whenever that happens, by the font's own line height. One list,
-    because the star-name pass has to treat these as occupied space (the same rule
-    that already keeps names off lane times and a rule's "keep N") and must not
-    have to re-derive where they went.
+    They can still collide, on purpose: production now runs *before* combat, so a
+    hull finished this turn defends the system it was built at and its ``+N``
+    credits whoever held the system going in — the defender, not whoever ends up
+    with it. When the extra ship still isn't enough the system falls right after,
+    and the two marks land moments apart rather than the same instant, but neither
+    expires early, so the gain reliably stacks a row above the cost whenever both
+    are still up. One list, because the star-name pass has to treat these as
+    occupied space (the same rule that already keeps names off lane times and a
+    rule's "keep N") and must not have to re-derive where they went.
     """
     labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
     charged: set[int] = set()

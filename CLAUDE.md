@@ -228,14 +228,20 @@ Rules that hold it together:
 - **The order is the engine's, never one written down in `turnfilm`.** `film()`
   groups *consecutive* events of one class into a beat, so moving `_production`
   ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-  `config.FILM_PRODUCE_MS` and `FILM_LAUNCH_MS` are always 0: launch and
-  production land at their true place in the sequence with no dwell of their own
-  — `Fleet.progress_at` combined with `Film.travel` already starts a launched
-  fleet's glide at progress 0, so a held launch beat only bought a stutter before
-  movement began, and a finished hull is made visible by a mark (below), not by
-  holding the board still to show one. Keep production at 0 unless it stops being
-  the last phase: `Film.plays` is "does any beat have a duration", so a dwell
-  would make every otherwise-quiet turn pause instead of resolving instantly.
+  `config.FILM_LAUNCH_MS` is always 0: a launched fleet lands at its true place in
+  the sequence with no dwell of its own — `Fleet.progress_at` combined with
+  `Film.travel` already starts its glide at progress 0, so a held launch beat only
+  bought a stutter before movement began, and a finished hull is made visible by a
+  mark (below), not by holding the board still to show one. `config.FILM_PRODUCE_MS`
+  is the one duration `turnfilm.film` spends conditionally: 0 for a plain tick, but
+  its full value when a combat beat follows the produce beat directly, since
+  production now runs *before* arrivals (see Turn resolution) and a hull finished
+  this turn is in the garrison for the fight right after it — the gap is what lets
+  the `+1` register as having contributed instead of landing on the same instant as
+  the fight it fed. Keep it at 0 everywhere else: `Film.plays` is "does any beat
+  have a duration", and production ticks on nearly every turn regardless of
+  whether anything else happens, so spending it unconditionally would turn every
+  otherwise-quiet turn into a pause instead of resolving instantly.
   Combat is the one beat with two speeds: `config.FILM_COMBAT_MS` is 0 by
   default, but `film(events, linger=True)` swaps in `FILM_LINGER_COMBAT_MS` and
   adds a trailing `FILM_LINGER_HOLD_MS` — `main.resolve_turn` asks for that on a

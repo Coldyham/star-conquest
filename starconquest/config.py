@@ -207,10 +207,17 @@ FILM_LAUNCH_MS = 0       # ms: fleets appear at their source and its garrison dr
                          # to give: watched turn after turn, continuous movement
                          # mattered more than a paused view of the deduction
 FILM_MOVE_MS = 560       # ...and glide one turn's step, clashes firing where they meet
-FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in the
-                         # engine's sequence with no pause of its own, which is all
-                         # this cut shows; the progress ring already draws the tick,
-                         # so raising this only adds a moment on it
+FILM_PRODUCE_MS = 200    # production's own dwell, spent *only* when a combat beat
+                         # follows it directly (`turnfilm.film`) — production now
+                         # runs before arrivals, so a hull finished this turn
+                         # defends the system it was built at, and this is the gap
+                         # that lets it register before the fight it fed instead of
+                         # blurring into the same instant. A turn with nothing
+                         # arriving still ticks production at 0 dwell, same as
+                         # ever: the progress ring already draws the plain tick, so
+                         # raising this only ever buys the fight-adjacent case
+FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
+                         # sequence with no dwell of their own — the default, used
 FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
                          # sequence with no dwell of their own — the default, used
                          # for history playback, where a run of animated turns

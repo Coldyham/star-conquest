@@ -138,12 +138,25 @@ Kept here only until this file goes, since each moved a rule into `CLAUDE.md` or
   `main.land_film` — the one place the clock running out and a skip both pass
   through. `Ui.stop_film` leaves the debt alone on purpose.
 - **Production (and now combat) is marked rather than dwelt on.**
-  `FILM_PRODUCE_MS`/`FILM_COMBAT_MS` are both 0; a `+N` over each system that
-  finished a hull is what makes the tick visible (`Produced.hulls` ->
-  `Ui.archive_marks` -> `Ui.fading_hulls` -> `render._film_labels`). Time was the
-  wrong lever for production specifically: `Film.plays` keys off beat durations,
-  so a dwell would have made every otherwise-quiet turn pause (measured: 0ms -> no
-  film, 250ms -> a 510ms one) instead of resolving instantly.
+  `FILM_COMBAT_MS` is 0; a `+N` over each system that finished a hull is what
+  makes the tick visible (`Produced.hulls` -> `Ui.archive_marks` ->
+  `Ui.fading_hulls` -> `render._film_labels`). Time was the wrong lever for
+  production *unconditionally*: `Film.plays` keys off beat durations, so a flat
+  dwell would have made every otherwise-quiet turn pause (measured: 0ms -> no
+  film, 250ms -> a 510ms one) instead of resolving instantly. `FILM_PRODUCE_MS`
+  stayed 0 for exactly that reason on this branch — see the next bullet for how
+  merging with `resolve_production_before_combat` changed the calculus.
+- **Merged with `resolve_production_before_combat` (below), and `FILM_PRODUCE_MS`
+  stopped being unconditionally 0.** Production now runs before arrivals, so a
+  hull finished this turn is in the garrison for the fight right after it in the
+  very same turn — and at 0 dwell the `+1` and the fight it fed land on the same
+  instant, reading as simultaneous rather than as cause and effect. `turnfilm.film`
+  now spends `FILM_PRODUCE_MS` (200) only when the run right after `produce` is
+  `combat`; every other turn, including a quiet tick with nothing arriving, still
+  gets the 0-dwell instant the measurement above justified. The multi-owner
+  pile-up item right below is unaffected and still open — this only closed the
+  production/combat *film-timing* half of what this file used to flag as
+  deferred.
 - **A lane track is held rather than ranked.** `Fleet.lane_slot`, handed out by
   `model.free_lane_slot` at launch — which is what the notes said would need
   per-fleet identity, and it does; the field *is* the identity. Reported from play:

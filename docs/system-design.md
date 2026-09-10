@@ -323,17 +323,30 @@ do: several launches read as one drop to the post-launch garrison rather than a
 visible countdown, because there is no longer a beat wide enough to spread them
 across.
 
-**Production is a mark, not a dwell — and does not hold `total_ms` open either.**
-`FILM_PRODUCE_MS` is 0, so a finished hull lands at its true point in the sequence
-with no pause of its own; what makes it legible is a `+N` over the map instead,
-sharing the spot above a system that a fight's `−N` uses — and a mark is not the
-film's problem to keep visible (below), which is the part that changed twice. This
-was the first beat to go to 0, and for a reason worth keeping on its own:
-`Film.plays` is "does any beat have a duration", and a turn where nothing
-launches, moves or fights emits only `Produced` — so at 0 such a turn has no
-playback and End Turn stays instant, while any dwell makes *every* quiet turn cost
-around half a second for a couple of ships appearing (measured: 0ms gives `plays`
-False, 250ms gave a 510ms film).
+**Production is a mark, not a dwell — except for the one moment it is worth a
+breath.** `FILM_PRODUCE_MS` lands at 0 by default, so a finished hull lands at its
+true point in the sequence with no pause of its own; what makes it legible is a
+`+N` over the map instead, sharing the spot above a system that a fight's `−N`
+uses — and a mark is not the film's problem to keep visible (below), which is the
+part that changed twice. This was the first beat to go to 0, and for a reason
+worth keeping on its own: `Film.plays` is "does any beat have a duration", and a
+turn where nothing launches or moves still emits `Produced` on almost every turn
+— any system with production left is ticking — so at 0 such a turn has no
+playback and End Turn stays instant, while any *unconditional* dwell makes nearly
+every turn cost time for a tick nobody needed watching (measured: 0ms gives
+`plays` False, 250ms gave a 510ms film).
+
+Production moving *before* arrivals (see the phase-order section below) reopened
+the question: a hull finished this turn is now in the garrison for the fight that
+follows it in the very same turn, and at 0 dwell the two marks land on the same
+instant — the `+1` and the fight it fed read as one indistinguishable flash rather
+than as cause and effect. `turnfilm.film` now spends `FILM_PRODUCE_MS` (200)
+*only* when the run right after the produce beat is a combat run — every other
+turn, including one where production ticks with nothing arriving at all, still
+gets the 0-dwell instant above. That keeps the measurement that justified 0 in the
+first place (most turns have no combat beat to butt up against) while giving the
+one case that motivated the reorder — a defender's new hull, contested the moment
+it's built — room to be seen before the fight it contributed to.
 
 **Combat is the one beat with two speeds, because watching your own move resolve
 and reviewing a run of past turns want different things.** Once a mark stopped
@@ -533,22 +546,26 @@ resolved to a player from a board the fleet has already left.
 
 **The two marks share one spot, and one of them moves.** A fight's cost and a
 finished hull are both written a fixed step above the system, which collides by
-design rather than by accident: production runs *after* combat, so a system
-captured this turn produces for its new owner and earns both. The gain stacks a
-row above the cost — by the font's own line height, per the no-fixed-pixel-sizes
-rule — and `render._film_labels` returns both already placed, so the star-name
-pass reserves the space they actually occupy without re-deriving it. Reaching this
-case used to take two arrivals: a lone fight's burst had faded by a fixed
-`FILM_FLASH_MS` before production landed 300ms later, so only a node resolving
-later in a busy combat beat was still marked when the hull appeared. Now that a
-mark lives on `Ui`, not `Film` (above), the two need not even fire at the same
-instant to stack — non-lingering, `Landed` and `Produced` usually *are* the same
-instant (both cues land right where combat's zero-length beat ends), but even
-lingering, where `Landed` can fire anywhere across the 300ms combat beat well
-before `Produced` closes it out, the fight's own mark is still nowhere near the
-end of its ~760ms life (`FILM_FLASH_MS + FILM_FADE_MS`) by the time the hull's
-mark joins it. Either way, a single arrival that both wins its fight and
-finishes a hull stacks the two reliably, for as long as either is still up.
+design rather than by accident: production now runs *before* combat, so a hull
+finished this turn is credited to whoever held the system going in — the
+defender, per `Ui.archive_marks`' own rule that a `Produced` mark's colour reads
+the board *at the time*, before any later `Landed` gets a chance to change who
+owns it — and if the extra ship still isn't enough, the very same system earns a
+combat mark moments later. The gain stacks a row above the cost — by the font's
+own line height, per the no-fixed-pixel-sizes rule — and `render._film_labels`
+returns both already placed, so the star-name pass reserves the space they
+actually occupy without re-deriving it.
+
+The two no longer fire at the same instant, and that is the point of giving
+`produce` a beat width of its own precisely when a `combat` beat follows it
+(above): a `+1` that shared its instant with the fight it just fed would read as
+one indistinguishable flash rather than as cause and effect, so `FILM_PRODUCE_MS`
+now buys a `_KINDS`-gap between the two. Since a mark lives on `Ui`, not `Film`
+(below), the gap does not have to be small for the marks to still stack: as long
+as it lands within the fight mark's own ~760ms life (`FILM_FLASH_MS +
+FILM_FADE_MS`), which 200ms comfortably does, a single arrival that both survives
+a hull's completion and then loses the system anyway still shows both, one above
+the other, for as long as either is still up.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn
