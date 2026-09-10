@@ -50,6 +50,8 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     knob drifts away from the pointer toward the extremes."""
     x, _y, w, _h = ui.scrubber_rect
     travel = w - 2 * config.SLIDER_KNOB_R
+    ui.clear_fading_marks()   # jumping, not stepping: a mark from wherever we
+                              # were scrubbing away from would be stale here
     if travel <= 0 or ui.history_max <= 0:
         ui.history_turn = 0
         return
@@ -68,15 +70,19 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
+            ui.clear_fading_marks()   # jumping, not stepping: they'd be stale here
         elif event.key == pygame.K_RIGHT:
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_HOME:
             ui.history_turn = 0
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_END:
             ui.history_turn = ui.history_max
             ui.playing = False
+            ui.clear_fading_marks()
         return None
     if event.type == pygame.MOUSEMOTION:
         ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
@@ -93,10 +99,12 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if ui.history_prev_rect[2] and _point_in_rect(event.pos, ui.history_prev_rect):
             ui.history_turn = max(0, ui.history_turn - 1)  # touch/mouse equivalent of Left
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.history_next_rect[2] and _point_in_rect(event.pos, ui.history_next_rect):
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)  # ...and Right
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True
@@ -118,7 +126,38 @@ def _over_side_panel(pos) -> bool:
     return pos[0] >= config.SCREEN_W - config.HUD_RIGHT_W
 
 
+def _toggles_play(ui: Ui, event) -> bool:
+    """Is ``event`` the Play/Pause control (the P key, or a click on its button)?
+
+    The one press during a running film that must not skip it — see the note in
+    `handle_event`. Checked ahead of the blanket "any press skips" rule so pausing
+    can freeze a playback in place instead of discarding it.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_p
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        return bool(ui.play_pause_rect[2]) and _point_in_rect(event.pos, ui.play_pause_rect)
+    return False
+
+
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    # A turn playback is running: any press skips it — except Play/Pause, which
+    # must freeze it in place rather than lose it (`main` does the freezing; this
+    # is only about not discarding the film here). Checked before everything else,
+    # and the two scenes differ on purpose for every other press.
+    #
+    # In live play the press is *consumed*. The footer strip is still drawn during
+    # a film (the film board's winner stays None until the turn closes), so a
+    # press that fell through could resolve a second turn underneath a running
+    # one. In history the press falls through instead, because there the film is
+    # a transition between turns and the controls are a scrubber: swallowing it
+    # would mean a drag never started.
+    if (ui.film is not None and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)
+            and not _toggles_play(ui, event)):
+        ui.stop_film()
+        if not ui.history:
+            return None
+
     # History mode is a modal review scene (entered mid-game or after a win):
     # scrub / rewind / exit only, no board interaction. Checked first so it wins
     # over the game-over branch when reviewing a finished match.

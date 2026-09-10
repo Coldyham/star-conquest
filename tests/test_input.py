@@ -15,9 +15,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 
 import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, engine, mapgen, replay  # noqa: E402
+from starconquest import config, engine, mapgen, replay, turnfilm  # noqa: E402
 from starconquest import input as game_input  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
+from starconquest.model import Fleet  # noqa: E402
 from starconquest.settings import Challenge, Settings  # noqa: E402
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
 
@@ -884,10 +885,16 @@ def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
         pygame.quit()
 
 
-def test_defeat_snaps_the_camera_out_once_not_every_turn():
+def test_defeat_snaps_the_camera_out_once_not_every_turn(monkeypatch):
     """The turn the human is knocked out (but the match continues without
     them) should snap the camera to the whole map exactly once — a later turn
-    spent merely spectating must leave a manual zoom alone."""
+    spent merely spectating must leave a manual zoom alone.
+
+    Pinned to animation off, which is what these two assert: with it on the snap
+    waits for the film to land (see the deferred-snap tests below), so the
+    machine's own stored preference must not decide which behaviour is tested.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
         for sid, s in state.systems.items():
@@ -908,7 +915,8 @@ def test_defeat_snaps_the_camera_out_once_not_every_turn():
         pygame.quit()
 
 
-def test_winning_snaps_the_camera_out_to_the_whole_map():
+def test_winning_snaps_the_camera_out_to_the_whole_map(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
         for s in state.systems.values():
@@ -1777,7 +1785,7 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
     try:
         log = _watchable_log(tmp_path, monkeypatch)
         state, ui, _ = main.open_replay(log.encoded(), Settings())
-        states, fog, live = main.open_history(state, ui, log)
+        states, fog, events, live = main.open_history(state, ui, log)
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
         assert ui.history_max == log.turn_count
@@ -1809,5 +1817,377 @@ def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
             assert main.open_replay(blob, Settings()) is None
         empty = replay.new_log(Settings(seed=1), 1)
         assert main.open_replay(empty.encoded(), Settings()) is None
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Skipping a turn playback
+# --------------------------------------------------------------------------- #
+
+
+def _a_film() -> turnfilm.Film:
+    """A film with something in it, so `plays` and the beats are real."""
+    return turnfilm.film([
+        turnfilm.Advanced(((0, 2),)),
+        turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=3,
+                        owner_id=1, ships=3, prod_progress=0, steps=()),
+    ])
+
+
+def test_a_press_skips_a_live_film_and_does_nothing_else():
+    """The press is consumed. The footer is still drawn during a playback (the
+    board's winner stays None until the turn closes), so a press that fell through
+    could resolve a second turn underneath the one still being drawn."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.film_ms = _a_film(), 100.0
+        ui.end_turn_rect = (0, 0, 0, 0)   # render takes the button away meanwhile
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r")
+        assert game_input.handle_event(ev, state, ui) is None
+        assert ui.film is None and ui.film_ms == 0.0
+        # ...and a click is swallowed rather than selecting anything
+        state, ui = _setup()
+        ui.film = _a_film()
+        assert _click(state, ui, 0) is None
+        assert ui.film is None
+        assert ui.selected is None and ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_a_press_in_history_drops_the_film_and_still_seeks():
+    """In review the film is a transition and the controls are a scrubber, so the
+    press must fall through — swallowing it would mean a drag never started."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.history_max, ui.history_turn = True, 8, 3
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT, mod=0, unicode="")
+        game_input.handle_event(ev, state, ui)
+        assert ui.film is None            # dropped
+        assert ui.history_turn == 4       # ...and the seek still happened
+        assert ui.playing is False
+    finally:
+        pygame.quit()
+
+
+def test_hovering_or_zooming_leaves_a_film_running():
+    """Only a press skips. A wheel zoom or a mouse move must not throw away the
+    playback you are watching."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        pos = ui.view.to_screen(state.systems[0].pos)
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=pos,
+                                                   rel=(1, 1), buttons=(0, 0, 0)),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, y=1, x=0,
+                                                   flipped=False, which=0),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=pos,
+                                                   button=1), state, ui)
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def _won_with_animation(monkeypatch):
+    """A human win *worth watching*, with turn animation on: the reel plus its Ui.
+
+    The last rival holds one system and a fleet is one turn out from it, so the
+    turn that decides the game has a move and a fight in it. A board with nothing
+    left in transit resolves to a film of instants (`Film.plays` is False) and
+    would never defer anything — which is right, and no test of the deferral.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    last = state.systems[home].neighbors[0]
+    for s in state.systems.values():
+        s.owner_id = 1                     # hand the human all but one system
+    state.systems[last].owner_id, state.systems[last].ships = 2, 1
+    state.fleets = [Fleet(owner_id=1, source_id=home, dest_id=last, ships=40,
+                          turns_total=2, turns_remaining=1)]
+    ui.view.zoom_at((600, 460), 2.0)       # ...watching the corner it happens in
+    reel = main.resolve_turn(state, ui, log=None)
+    assert state.winner == 1
+    assert reel is not None and ui.film is not None
+    return state, ui, reel
+
+
+def test_resolve_turn_lets_its_combat_linger(monkeypatch):
+    """A live End Turn asks `turnfilm.film` to linger (`main.resolve_turn`'s
+    `linger=True`) — unlike history playback, which must glide straight through
+    (see `main._next_history_film`'s own test)."""
+    _state, ui, _reel = _won_with_animation(monkeypatch)
+    combat = next(b for b in ui.film.beats if b.kind == "combat")
+    assert combat.ms == config.FILM_LINGER_COMBAT_MS
+    assert ui.film.total_ms > combat.end   # a trailing hold, not an instant end
+
+
+def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkeypatch):
+    """The snap that reveals the whole board is the deciding turn's *ending*.
+    Doing it first would play the last turn out on a map it had already given
+    away, and yank the frame out from under the fight being watched."""
+    state, ui, reel = _won_with_animation(monkeypatch)
+    try:
+        assert ui.deferred_view_snap
+        assert ui.view.zoom == 2.0          # still framed where you were watching
+        main.land_film(state, ui)
+        assert ui.view.zoom == 1.0          # ...and revealed once it lands
+        assert not ui.deferred_view_snap and ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_skipping_the_last_film_still_reveals_the_board(monkeypatch):
+    """A skip must not be able to lose the reveal: `Ui.stop_film` deliberately
+    leaves the debt, and `main.land_film` — which both endings pass through —
+    pays it."""
+    state, ui, _ = _won_with_animation(monkeypatch)
+    try:
+        ui.stop_film()                      # what a press does, in `input`
+        assert ui.deferred_view_snap        # ...which is not the whole of it
+        assert ui.view.zoom == 2.0
+        main.land_film(state, ui)           # what the loop does on dropping the reel
+        assert ui.view.zoom == 1.0
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Pausing a playback (rather than skipping it)
+# --------------------------------------------------------------------------- #
+
+
+def test_play_toggle_does_not_skip_a_running_film():
+    """P (and its footer button) used to fall under the blanket "any press skips
+    a playback" rule, so pausing lost the animation just like any other key would.
+    It must not: `input` special-cases it so the film survives the press, and
+    `main.apply_toggle_play` is what actually freezes it (see the tests below)."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+
+        ui.play_pause_rect = (100, 100, 120, 32)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_play_toggle_in_history_still_falls_through_to_the_scrubber():
+    """The history dispatch must still see this press — it is what actually flips
+    `ui.playing` — even though `input`'s top guard no longer discards the film for
+    it."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.playing = True, True
+        ui.film = _a_film()
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_pausing_an_active_playthrough_freezes_the_film():
+    """Toggling play *off* while a film is running must not lose it — it should
+    freeze in place instead, so a paused review still shows what the turn did
+    rather than the plain board a skip leaves behind."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        main.apply_toggle_play(ui)
+        assert ui.playing is False
+        assert ui.film is not None
+        assert ui.film_paused is True
+    finally:
+        pygame.quit()
+
+
+def test_starting_play_while_a_manual_film_runs_does_not_freeze_it():
+    """A single manually-triggered film runs with `playing` False throughout (it
+    was never "playing" a sequence). Toggling play *on* in that state must leave it
+    running rather than pausing it — the button reads "Play", not "Pause"."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), False
+        main.apply_toggle_play(ui)
+        assert ui.playing is True
+        assert ui.film is not None
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_stop_film_clears_a_pause_too():
+    _state, ui = _setup()
+    try:
+        ui.film, ui.film_paused = _a_film(), True
+        ui.stop_film()
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Chaining animated history turns with no gap between them
+# --------------------------------------------------------------------------- #
+
+
+def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
+    """Right after one turn's film lands, the turn after it should be ready to go
+    immediately if it also has something to show — no `PLAY_MS` gap stitched
+    between two animated turns."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        dest = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+
+        result = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert result is not None
+        assert ui.film is not None and ui.film.plays
+        assert ui.film_ms == 0.0
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_does_not_snap_a_continuing_fleet_back_a_turn(monkeypatch):
+    """A chained reel is handed straight to `render.draw` in the same frame it's
+    built — unlike a live End Turn, which always gets a `run_to` call first (see
+    `main`'s per-frame update) — so without applying this turn's launch/first
+    advance immediately, a continuing fleet would draw one frame at *last*
+    turn's un-advanced position: a visible snap back by a whole turn's worth of
+    progress before the next frame caught it back up. `_next_history_film` must
+    leave the reel already caught up to this instant.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        dest = state.systems[0].neighbors[0]
+        # At the end of the turn just watched: 2 of 4 steps remaining.
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
+        end_of_last_turn_progress = state.fleets[0].progress_at(1.0)
+
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 1),))]]   # 2 -> 1 this turn
+
+        reel = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert reel is not None
+        travel = ui.film.travel(0.0)   # what `render._travel` reads on this exact frame
+        assert reel.board.fleets[0].progress_at(travel) == end_of_last_turn_progress
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_never_lingers_on_combat(monkeypatch):
+    """History playback must glide continuously even through a fight — unlike a
+    live End Turn (`test_resolve_turn_lets_its_combat_linger`), it never asks
+    `turnfilm.film` to linger."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        source = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=2, source_id=source, dest_id=0, ships=7,
+                              turns_total=3, turns_remaining=1)]
+        landed = turnfilm.Landed(
+            node_id=0, fleets=(0,), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                                 defender_ships=6, winner=2, survivors=3),))
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 0),)), landed]]
+
+        assert main._next_history_film(ui, history_states, history_fog, history_events)
+        combat = next(b for b in ui.film.beats if b.kind == "combat")
+        assert combat.ms == 0.0
+        assert ui.film.total_ms == combat.end   # no trailing hold either
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_is_none_for_a_quiet_turn():
+    """A turn with no events (or events that resolve to no watchable beats) must
+    not manufacture a film — the caller falls back to stepping it instantly."""
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_respects_the_animate_preference(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_an_ordinary_turns_film_owes_no_snap(monkeypatch):
+    """Only the turn that crosses into a decided game (or a knocked-out human)
+    defers anything; every other film lands with the camera left alone."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        ui.view.zoom_at((600, 460), 2.0)
+        main.resolve_turn(state, ui, log=None)
+        assert state.winner is None
+        assert not ui.deferred_view_snap
+        main.land_film(state, ui)
+        assert ui.view.zoom == 2.0
+    finally:
+        pygame.quit()
+
+
+def test_a_film_carries_the_fog_the_turn_began_with(monkeypatch):
+    """`resolve_turn` refreshes the fog to the board it hands back, so the film
+    needs the earlier one alongside it — `Ui.sees` draws the union."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        main.refresh_fog(state, ui)
+        before = set(ui.visible)
+        for _ in range(12):     # play on until a turn has something to watch
+            reel = main.resolve_turn(state, ui, log=None)
+            if reel is not None:
+                break
+            before = set(ui.visible)
+        assert reel is not None
+        assert ui.film_visible == frozenset(before)
+        assert all(ui.sees(sid) for sid in before)
+        main.land_film(state, ui)
+        assert ui.film_visible == frozenset()   # additive: nothing to put back
     finally:
         pygame.quit()

@@ -73,7 +73,8 @@ _TABS = (
 )
 
 _CH = 34  # control height
-_ROW_H = 62  # vertical pitch between Basic-tab rows
+_ROW_H = 58  # vertical pitch between Basic-tab rows (eight of them fit the
+             # fixed panel at 58; at 62 the last one hangs 6px out of it)
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
@@ -571,6 +572,11 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     # Off until switched on — see `webstore.share_games` and `share`.
     _row_label(surface, "Share replays", left, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
+    y += _ROW_H
+
+    # ...and nor is this one: how a turn is *drawn* cannot move a result.
+    _row_label(surface, "Animate turns", left, y, False)
+    _checkbox(surface, ms, "animate_turns", webstore.animate_turns(), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -1425,6 +1431,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         want = not webstore.share_games()
         if not webstore.set_share_games(want) and want:
             set_status(ms, "Couldn't save that here — replays stay private", False)
+    elif hit == "animate_turns":
+        want = not webstore.animate_turns()
+        if not webstore.set_animate_turns(want) and want:
+            set_status(ms, "Couldn't save that here — turns stay instant", False)
     elif hit == "fog_of_war":
         if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT

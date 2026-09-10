@@ -5,10 +5,10 @@ stays pure. Shared by input.py (mutates it) and render.py (reads it).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
-from . import config
+from . import config, turnfilm
 from .geometry import WorldView
 from . import model
 from .model import GameState, Order
@@ -24,6 +24,41 @@ CHOOSING = "choosing"
 # or discards in one go, because it writes many rules at once and can overwrite
 # existing ones — too much to undo click-by-click the way a single send is.
 ROUTING = "routing"
+
+
+@dataclass(frozen=True)
+class FadingFight:
+    """A fight, interpreted once at the moment it fired and aged every frame
+    after — independent of whichever film/turn is currently playing, so it can
+    keep dissolving on top of the *next* turn's glide instead of vanishing the
+    moment the film that produced it is replaced.
+
+    ``node_id`` is set for an arrival (`Landed`); ``low_id``/``high_id``/``at``
+    for an open-space clash instead, mirroring the lane-fraction placement
+    `render` already draws a `Clashed` at. Screen position is still resolved
+    fresh every frame from `state.systems[...].pos` (which never moves), so
+    nothing here is display-space.
+    """
+
+    age_ms: float
+    node_id: Optional[int]
+    low_id: Optional[int]
+    high_id: Optional[int]
+    at: float
+    burst_color: tuple[int, int, int]
+    cost: int
+    victor: Optional[int]
+
+
+@dataclass(frozen=True)
+class FadingHull:
+    """A finished hull, interpreted once at the moment it fired — the
+    production half of `FadingFight`."""
+
+    age_ms: float
+    node_id: int
+    hulls: int
+    owner_id: int
 
 
 def _clip_to_play(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -141,6 +176,42 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
+    # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
+    # being replayed and `film_ms` where in it we are — the read-only half, so a
+    # frame stays a pure function of GameState + Ui + time. `film_ms` is advanced by
+    # main from the loop's own `dt` rather than the wall clock, so a test can drive
+    # a frame by setting it. The *board* being mutated is a main-loop local, exactly
+    # like the reconstructed history boards, and reaches render as `state`.
+    #   film_visible — what the human could see at the *start* of the turn being
+    #     played back, which the map layer adds to `visible` for the film's
+    #     duration (`sees`). `visible` is not monotone, so without it a system
+    #     lost this turn would draw as a grey "?" while the fight that took it
+    #     played out. Additive rather than a swap, so nothing has to be put back
+    #     when a film ends or is skipped.
+    #   deferred_view_snap — the camera re-frame `main.resolve_turn` owes once the
+    #     film lands (see `main.land_film`): the turn that decides the game reveals
+    #     the whole board, and doing that first would play the last turn out on a
+    #     map it had already given away.
+    #   film_paused — freezes `film_ms` in place without discarding the film, so
+    #     pausing mid-playback (the Play/Pause control, `main`'s "toggle_play")
+    #     keeps showing what the turn actually did instead of reverting to the
+    #     plain board a skip leaves behind. Distinct from `playing`, which governs
+    #     whether *further* turns start — a single manually-triggered film runs
+    #     with `playing` False throughout, so gating its advance on that would
+    #     freeze it on the first frame.
+    film: Optional[turnfilm.Film] = None
+    film_ms: float = 0.0
+    film_visible: frozenset[int] = frozenset()
+    film_paused: bool = False
+    deferred_view_snap: bool = False
+    # Marks (a fight's cost, a finished hull) outlive the film that produced
+    # them — see `FadingFight`/`FadingHull` and `archive_marks`/
+    # `age_fading_marks` below. Deliberately not part of `film`/`film_ms`:
+    # a mark's whole point is to keep fading on top of the *next* turn's
+    # glide, so tying its lifetime to the film that made it would erase it
+    # the moment that film is replaced.
+    fading_fights: list[FadingFight] = field(default_factory=list)
+    fading_hulls: list[FadingHull] = field(default_factory=list)
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -288,6 +359,96 @@ class Ui:
     zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- camera ------------------------------------------------------------- #
+    def stop_film(self) -> None:
+        """Abandon a playback. Main drops its reel whenever there is no film, so
+        this is the whole of "skip" — safe at any moment, because the turn it was
+        showing has already been resolved.
+
+        Deliberately does *not* clear `deferred_view_snap`: `input` skips by
+        calling this, and what the film was holding back is still owed. Main
+        applies it wherever it drops the reel (`main.land_film`), which is the one
+        place both the skip and the natural end pass through.
+        """
+        self.film = None
+        self.film_ms = 0.0
+        self.film_visible = frozenset()
+        self.film_paused = False
+
+    def sees(self, sid: int) -> bool:
+        """Whether the map may draw ``sid`` in full detail.
+
+        `visible` on its own everywhere but during a turn playback, which also
+        gets the systems that were visible when that turn began — see
+        `film_visible`.
+        """
+        return sid in self.visible or sid in self.film_visible
+
+    def archive_marks(self, board: GameState, events: list[turnfilm.Event]) -> None:
+        """Turn newly-applied film events into independent fading marks.
+
+        Interpreted once, here, rather than re-derived from the raw event every
+        frame — which is what lets a mark keep dissolving after `film` has moved
+        on to the next turn (`age_fading_marks` is what ages it from there).
+        ``board`` is the film's own board (already carrying this event), so a
+        `Produced` mark's colour reflects who owned the system *at the time*,
+        not whoever holds it by the time this is called.
+
+        Visibility is checked once, now, rather than on every frame a mark is
+        drawn: a fight or a tick you actually saw fire keeps fading regardless of
+        what fog does afterward, rather than blinking out mid-fade the moment the
+        next turn's own `film_visible` happens to differ.
+        """
+        for event in events:
+            if isinstance(event, turnfilm.Clashed):
+                if not self.sees(event.low_id) and not self.sees(event.high_id):
+                    continue
+                self.fading_fights.append(FadingFight(
+                    age_ms=0.0, node_id=None, low_id=event.low_id, high_id=event.high_id,
+                    at=event.at, burst_color=config.COLOR_TEXT,
+                    cost=event.cost, victor=event.victor))
+            elif isinstance(event, turnfilm.Landed):
+                # `steps` is empty for a reinforcement or an unopposed landing —
+                # neither is a fight, so neither earns a mark.
+                if not event.steps or not self.sees(event.node_id):
+                    continue
+                color = (config.COLOR_TEXT if event.owner_id == event.was_owner
+                         else config.player_color(event.owner_id))
+                self.fading_fights.append(FadingFight(
+                    age_ms=0.0, node_id=event.node_id, low_id=None, high_id=None,
+                    at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
+            elif isinstance(event, turnfilm.Produced):
+                for sid, hulls in event.hulls:
+                    if not self.sees(sid):   # a rival's yard is not ours to report
+                        continue
+                    self.fading_hulls.append(FadingHull(
+                        age_ms=0.0, node_id=sid, hulls=hulls,
+                        owner_id=board.systems[sid].owner_id))
+
+    def age_fading_marks(self, dt: float) -> None:
+        """Advance every fading mark's clock and drop whatever has fully
+        dissolved (`config.FILM_FLASH_MS` fully visible, then
+        `config.FILM_FADE_MS` fading out).
+
+        Independent of `film`/`playing`: a mark keeps aging, and eventually
+        goes, whether or not a playback is currently running — which is what
+        lets one outlive the film that created it and dissolve on top of
+        whatever the next turn is doing instead of disappearing the moment
+        `film` is replaced.
+        """
+        life = config.FILM_FLASH_MS + config.FILM_FADE_MS
+        self.fading_fights = [replace(f, age_ms=f.age_ms + dt)
+                              for f in self.fading_fights if f.age_ms + dt < life]
+        self.fading_hulls = [replace(h, age_ms=h.age_ms + dt)
+                             for h in self.fading_hulls if h.age_ms + dt < life]
+
+    def clear_fading_marks(self) -> None:
+        """Drop every fading mark outright — for a jump rather than a step:
+        entering/leaving history, scrubbing to a turn, or rewinding. Those marks
+        belong to a specific point in a specific playback; jumping away from it
+        makes them stale rather than merely old."""
+        self.fading_fights = []
+        self.fading_hulls = []
+
     def reset_view(self, state: GameState) -> None:
         """Recompute the camera's resting position: framed to just the systems
         seen so far, or the whole map once there is nothing left to hide (the

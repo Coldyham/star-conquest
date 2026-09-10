@@ -32,6 +32,8 @@ uv run pytest tests/test_engine.py    # one file
 uv run pytest tests/test_engine.py::test_production_cadence   # one test
 
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
+uv run python -m tests.sim --film --trials 200   # ...also checking every turn's
+                                                 # playback rebuilds that turn
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
@@ -62,10 +64,12 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`. This is what lets `tests/sim.py`
-  and most of the suite run with no display. Do not add a pygame import to any of
-  these. (`fog` is presentation-only visibility — pure hop-distance queries the
-  shell reads each turn; the engine and AI never consult it. `replay` serializes a
+  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`. This is what lets
+  `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
+  to any of these. (`fog` is presentation-only visibility — pure hop-distance queries the
+  shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
+  presentation-only playback the *engine writes into* and never reads back — see
+  Animated end of turn below. `replay` serializes a
   match to JSON and replays it back through the headless engine — see Persistence
   & replay below.)
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
@@ -73,9 +77,12 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
     reaching into `ai`. Its layout is measured rather than hardcoded — see the
-    scaling convention under Key conventions. Its one animation (the selected
-    forward rule's chevron conveyor) reads the wall clock in `_flow_phase` and
-    stores nothing, so a frame stays a pure function of `GameState` + `Ui` + time.
+    scaling convention under Key conventions. It stores nothing time-varying: the
+    selected forward rule's chevron conveyor reads the wall clock in `_flow_phase`,
+    and the turn playback reads `Ui.film`/`Ui.film_ms` (an immutable film plus a
+    clock `main` advances from the loop's own `dt`), so a frame stays a pure
+    function of `GameState` + `Ui` + time — and a test drives a film frame by
+    setting a field rather than monkeypatching a clock.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
     touches the simulation. It returns a high-level action string
     (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`, `"toggle_history"`,
@@ -185,6 +192,131 @@ protocol. Four rules hold it together:
 `apply_order` deducts ships from the source at launch, so a fleet is "off the
 board" in transit (fleets on lanes never interact); order-issuing has no bearing
 on outcomes.
+
+### Animated end of turn (turnfilm.py)
+
+Off by default, and a **local display preference** (`webstore.animate_turns`,
+`paths.WEB_ANIMATE_TURNS_KEY`) rather than a `Settings` field — how a turn is
+*drawn* cannot move a result, and a new `Settings` field would move
+`challenge_key()` for every map that ever existed. Runs after a human End Turn and
+in play mode; never under autoplay or fast-forward (the gate is in
+`main.resolve_turn`, read once a turn — never in `render`, where a store read
+costs a DOM call every frame). History playback animates too; scrubbing stays an
+instant seek.
+
+**It animates the past, not the present.** `end_turn` still resolves the turn
+immediately and atomically, so the live `GameState` is always the fully-resolved
+board; the film is a *playback of a finished turn* onto a deep copy, held as a
+main-loop local and drawn through the same `render.draw(screen, view_state, ui)`
+swap history mode uses. Nothing is observable mid-flight and skipping is therefore
+always safe (any press but Play/Pause; `Ui.stop_film`) — pausing freezes it in
+place instead (`Ui.film_paused`), so a paused review keeps showing what the turn
+did rather than reverting to the plain board a skip leaves behind. `RULES_VERSION`
+does not move for any of it, and nothing is recorded — a film is derived per turn
+and discarded, so the log format is untouched.
+
+Rules that hold it together:
+- **Events carry results, not rules.** `engine.end_turn(on_event=…)` reports
+  outcomes (`Advanced` carries each fleet's *new* `turns_remaining`, `Landed` the
+  node's new owner/ships), so `turnfilm.Reel` assigns and never re-simulates: it
+  draws no dice and does no arithmetic, which is what makes drift impossible.
+  `Reel` is strict — an unknown id is a `KeyError`, not a silent glitch.
+- **The order is the engine's, never one written down in `turnfilm`.** `film()`
+  groups *consecutive* events of one class into a beat, so moving `_production`
+  ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
+  `config.FILM_PRODUCE_MS` and `FILM_LAUNCH_MS` are always 0: launch and
+  production land at their true place in the sequence with no dwell of their own
+  — `Fleet.progress_at` combined with `Film.travel` already starts a launched
+  fleet's glide at progress 0, so a held launch beat only bought a stutter before
+  movement began, and a finished hull is made visible by a mark (below), not by
+  holding the board still to show one. Keep production at 0 unless it stops being
+  the last phase: `Film.plays` is "does any beat have a duration", so a dwell
+  would make every otherwise-quiet turn pause instead of resolving instantly.
+  Combat is the one beat with two speeds: `config.FILM_COMBAT_MS` is 0 by
+  default, but `film(events, linger=True)` swaps in `FILM_LINGER_COMBAT_MS` and
+  adds a trailing `FILM_LINGER_HOLD_MS` — `main.resolve_turn` asks for that on a
+  live End Turn, worth watching resolve, while `main._next_history_film` never
+  does, since a run of animated turns there must glide continuously rather than
+  stop-start for every fight. Neither path pads `total_ms` beyond what `linger`
+  asks for: a non-lingering film ends the instant its last beat does, which is
+  what lets the *next* turn's move beat start immediately with nothing left to
+  wait out (see history chaining, below).
+- **A mark outlives the film that made it, fading on its own clock.**
+  `Ui.fading_fights`/`fading_hulls` hold every still-showing fight or finished
+  hull as plain data (`viewstate.FadingFight`/`FadingHull`), independent of
+  `film`/`film_ms` — populated by `Ui.archive_marks(board, events)` from
+  whatever `Reel.run_to` just applied (which is why `run_to`/`run` return that
+  list rather than nothing), and aged every frame by `Ui.age_fading_marks(dt)`
+  regardless of whether a playback is currently running. A mark is fully visible
+  for `config.FILM_FLASH_MS`, then fades over `config.FILM_FADE_MS`
+  (`render._mark_fade`, `_faded` blending its colour toward `config.COLOR_BG`)
+  — both counted from when it fired, never from any film's own length, which is
+  what lets it keep dissolving on top of whatever the *next* turn's glide is
+  already doing instead of being cut off the moment `film` is replaced.
+  Visibility (`Ui.sees`) is checked once, at archive time, not on every frame a
+  mark is drawn — a fight you saw happen keeps fading regardless of what fog
+  does afterward. A "jump" rather than a step (entering/leaving history,
+  scrubbing, rewinding) calls `Ui.clear_fading_marks()`, since a mark belongs to
+  a specific point in a specific playback and jumping away from it makes it
+  stale rather than merely old.
+- **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
+  `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
+  with, so a clash flashes exactly where the triangles are seen to touch — at the
+  crossing fraction `engine._lane_crossings` already solves for. **Do not widen
+  that function's sort tuple:** ties break on `(when, a, b)` — order of launch —
+  and that decides which fight is dealt the turn's dice first, so letting the
+  crossing *position* into the comparison would move stored replays with nothing
+  prompting a `RULES_VERSION` bump. Hence the explicit `key=`.
+- **The map layer sees both turns' fog; nothing gets swapped.** `Ui.film_visible`
+  holds what was visible when the played-back turn began and `Ui.sees` unions it
+  onto `visible`, which every map-layer read goes through (nodes, fleets, bursts).
+  `visible` itself is never overwritten, so a film has nothing to put back and a
+  system you can no longer see cannot leak past one. The HUD reads `visible`
+  directly: it describes the position you are handed, not the one being drawn.
+- **Whatever a film defers, `main.land_film` pays.** The camera snap that reveals
+  the board on the deciding turn waits for the playback (`Ui.deferred_view_snap`),
+  and `land_film` is the one place the clock running out and a press skipping both
+  pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
+  Anything else a playback holds back belongs there too, never at a call site.
+- **Play/Pause freezes a film; every other press still skips it.**
+  `input._toggles_play` exempts that one control (the P key, or its footer
+  button) from the blanket "any press skips" rule, and `main.apply_toggle_play`
+  is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
+  set only when *pausing an already-running* playthrough (`was_playing` going
+  in) rather than whenever a film merely happens to be up — a manually-triggered
+  film runs with `Ui.playing` False throughout, so toggling play *on* while it
+  plays must leave it alone rather than freezing it on the first frame.
+- **History playback chains an animated turn straight into the next one, and
+  never lingers.** Both serve the same end: a run of animated turns glides
+  continuously instead of stuttering. `main._next_history_film` is tried
+  immediately once a film lands, before the `PLAY_MS` pacing below it — which
+  only ever fires for a turn with nothing to animate, or with the preference off
+  — and it never passes `linger=True`, so combat there is always the instant,
+  unpadded default. A live End Turn is the opposite on purpose: watching your own
+  move resolve is worth a pause, which is what `main.resolve_turn`'s
+  `linger=True` buys (above). Neither path loses anything by choosing either way
+  — a mark's visibility no longer depends on `film` still being current (above),
+  so lingering or not only changes how long `film` itself holds the board, never
+  how long a mark stays up. **`_next_history_film` must run its new reel to `0.0`
+  before returning it**, unlike a live End Turn's reel, which always gets a
+  `run_to` call in the same frame it's built (`main`'s per-frame update runs
+  right after the event that creates it, this one is built *inside* that
+  update). Skip it and a continuing fleet draws one frame at last turn's
+  un-advanced `turns_remaining` — a visible snap back by a whole turn's worth of
+  progress before the next frame's `run_to` catches it back up.
+- **The correctness test is the history path.** One `reconstruct` pass yields both
+  a board per turn and that turn's events, so applying turn *i*'s film to a copy of
+  board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at
+  volume via `sim.check_film` behind `python -m tests.sim --film`). A missing or
+  misapplied event would otherwise surface only as the board snapping on the last
+  frame.
+
+`combat.resolve_arrival` takes an optional `on_step` list purely so a multi-owner
+pile-up can be shown step by step — those intermediate values are locals and
+unknowable from outside, and the fold is the least legible rule in the game (every
+side pooled per owner, sorted **strongest-first**, folded pairwise, with
+`defender_owner=old_owner` applying in every step). Nothing else in `combat`
+changed for this.
 
 ### Persistence, replay & history (replay.py)
 
@@ -469,6 +601,17 @@ intact.
   on, ships compound faster each turn, so always ask `state.travel_turns(a, b)` — it
   re-times through `config.travel_turns_at` for the *current* turn. Growth bites
   at launch only: a fleet in transit keeps its `turns_total`.
+- **A fleet's lane track is stored, never ranked.** `Fleet.lane_slot` is which
+  parallel line of the lane a fleet flies on (0 is the centre, then -1, +1, …),
+  handed out at launch by `model.free_lane_slot` and held until the fleet leaves
+  the board; `render` multiplies it by a spread and draws. Do not go back to
+  deriving it from a fleet's rank among whoever is on the lane — that is what made
+  every fleet in transit step sideways whenever a lane-mate launched *or* arrived.
+  It is the one cosmetic field on a core dataclass, it is deliberately not on the
+  wire to external bots (`botio`), and nothing in the rules reads it. Because it is
+  stored, `turnfilm.Launched` must carry it: a film that invented its own tracks
+  would pop every fleet sideways as it ended, which is why `lane_slot` is in the
+  board digest both film oracles compare.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
   is a real player with `id == 0`.
@@ -581,6 +724,8 @@ intact.
   the pure core headlessly, the suite uses it to assert games actually terminate
   and never corrupt state (`check_invariants`). After changing `ai.py` or
   travel/combat balance, run a `--trials` batch and watch the timeout rate.
+  `--film` adds the turn-playback oracle to every turn of every game (see Animated
+  end of turn).
   It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
   is a free-for-all (whole roster in one game, rotated through every seat via
   the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
