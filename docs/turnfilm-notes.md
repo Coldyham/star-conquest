@@ -86,45 +86,63 @@ uv run pytest                                    # 777 tests
 uv run python -m tests.sim --film --trials 80    # the playback oracle, every turn
 ```
 
-## Open: the multi-owner pile-up rule change
+## Done: the multi-owner pile-up rule change
 
 **Decided 2026-09-09: land this on the `resolve_production_before_combat` branch as
-one combined re-tune.** Both need a `RULES_VERSION` bump and both move balance for
-the whole `models/` roster, so they should cost one revalidation instead of two.
-Deferred deliberately — not forgotten, and not a bug.
+one combined re-tune.** Both needed a `RULES_VERSION` bump and both move balance for
+the whole `models/` roster, so they cost one revalidation instead of two. Landed
+once the branches were merged — see the merge commit and the follow-up that moved
+the production mark's timing, then this fix.
 
-What `combat.resolve_arrival` does today, none of which is visible in play: every
-side is **pooled per owner** (the garrison joining its own side), sorted
-**strongest-first**, then folded **pairwise**, with `defender_owner=old_owner`
-applying in *every* step. So the garrison is not resolved last — it takes its place
-in the queue purely by size.
+What `combat.resolve_arrival` did before: every side was **pooled per owner** (the
+garrison joining its own side), sorted **strongest-first**, then folded
+**pairwise**, with `defender_owner=old_owner` applying in *every* step. So the
+garrison was not resolved last — it took its place in the queue purely by size.
 
-The expectation it violates is "the incoming fleets fight each other, then the
-survivor takes the garrison last". That is exactly what happens *when the garrison
-is the weakest side*, which is why the rule is easy to mis-read from the cases you
-happen to see.
+The expectation it violated was "the incoming fleets fight each other, then the
+survivor takes the garrison last". That was exactly what happened *when the
+garrison was the weakest side*, which is why the rule was easy to mis-read from
+the cases you happened to see.
 
-Why it is worth changing: the weakest arrival is often the best seat, because it
-fights whatever is left. Measured at zero jitter and advantage 1.0 —
+**Now:** attackers fold pairwise, strongest-first, among themselves; the garrison
+— if it's still standing, including any of its own reinforcements arriving this
+turn — faces whatever survives that, **last**, regardless of its own size.
+`defender_owner=old_owner` still only prices the step the garrison actually
+fights, which is now always the final one. Re-measured at zero jitter and
+advantage 1.0, same cells as the original table:
 
-| garrison | attackers | outcome |
-| --- | --- | --- |
-| 10 | 11, 6 | the **6**-ship arrival takes the system, holding 3 |
-| 10 | 11, 5 | annihilates to neutral |
-| 3 | 10, 9 | the attackers fight first, then the winner takes the garrison |
+| garrison | attackers | before | now |
+| --- | --- | --- | --- |
+| 10 | 11, 6 | the **6**-ship arrival takes the system, holding 3 | the garrison holds, with **4** |
+| 10 | 11, 5 | annihilates to neutral | attackers fold first (11 beats 5, ~10 left), garrison (10) then annihilates it |
+| 3 | 10, 9 | attackers fight first, then the winner takes the garrison | unchanged — the garrison was already the weakest side |
 
-What a change would cost: a `RULES_VERSION` bump, so every stored replay reports
-`outdated` (unverifiable) rather than `mismatch` from `tools/verify_scores.py`; and
-a re-measure of the roster (`sim --ladder`). What it would *not* cost is any
+Cost paid: `RULES_VERSION` stayed at 2 (the same bump the production/combat
+reorder already spent, per the decision above), so every stored replay from
+before either change reports `outdated` rather than `mismatch`. Dice draw order
+for the *ordinary* two-sided fight also changed — the attacker's jitter is now
+drawn before the defender's, always, rather than whichever side has more ships —
+which flips which recorded dice produce which outcome
+(`test_a_scripted_turn_refights_the_battle_on_the_recorded_dice`) without
+changing aggregate win rates (both draws come from the same distribution
+regardless of which is drawn first). A `sim --ladder --trials 50` re-run after
+both changes lands within noise of the pre-existing roster ranking in
+`bot-design.md` (marshal and knower essentially tied at the top, same order down
+to rusherplus) — no roster constant needed retuning. What it did *not* cost is any
 presentation work — a film is assembled from the order the engine emitted events,
 so it depicts whatever the rule is.
 
-## Open: nothing on the polish list
+`docs/bot-design.md`'s own fold-specific measurements (the "does high advantage
+reward simultaneous arrival" study) were taken under the old rule, but every cell
+in them used a garrison that was already the weakest side — the one case where old
+and new agree — so only the causal explanation needed correcting there, not the
+numbers.
 
-Every polish item raised so far is resolved (below). What is left on the feature
-is the one deferred rule change above, which belongs on another branch by
-decision, so this file is down to a record of how the open items were settled and
-can go with the branch.
+## Open: nothing left on this file
+
+Every polish item raised so far is resolved (below), and the pile-up rule change
+above is done too, so this file is down to a record of how everything was settled
+and can go.
 
 ## Done: the polish list
 

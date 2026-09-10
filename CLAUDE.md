@@ -323,10 +323,14 @@ Rules that hold it together:
 
 `combat.resolve_arrival` takes an optional `on_step` list purely so a multi-owner
 pile-up can be shown step by step — those intermediate values are locals and
-unknowable from outside, and the fold is the least legible rule in the game (every
-side pooled per owner, sorted **strongest-first**, folded pairwise, with
-`defender_owner=old_owner` applying in every step). Nothing else in `combat`
-changed for this.
+unknowable from outside. Every side is pooled per owner (a reinforcement from the
+defender's own side joins the garrison's bucket, which is exactly why it can
+defend the fight it arrives for); attackers then fold **pairwise, strongest-first
+among themselves**, and whoever survives that faces the defender **last**,
+regardless of the defender's own size — the defender is not just another side in
+the size-ranked queue, it holds the ground, which is what `defender_owner=old_owner`
+prices on every step it actually participates in. Nothing else in `combat` changed
+for this.
 
 ### Persistence, replay & history (replay.py)
 

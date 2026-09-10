@@ -412,10 +412,11 @@ def test_a_scripted_turn_refights_the_battle_on_the_recorded_dice():
         engine.end_turn(s, script=engine.TurnRecord([Order(1, 0, 1, 10)], dice))
         return s.systems[1].owner_id
 
-    # The draws are dealt in the order the fight asks for them: the side holding
-    # the node first (it is folded in as the incumbent), then the attacker.
-    assert fight([+0.9, -0.9]) == 2, "the dice favoured the defender; it should hold"
-    assert fight([-0.9, +0.9]) == 1, "and favouring the attacker should flip it"
+    # The draws are dealt in the order the fight asks for them: the attacker
+    # first, then the defender — the defender is folded in last, regardless of
+    # relative strength, since it holds the ground rather than queuing by size.
+    assert fight([+0.9, -0.9]) == 1, "the dice favoured the attacker; it should take the system"
+    assert fight([-0.9, +0.9]) == 2, "and favouring the defender should hold it"
 
 
 def test_end_turn_records_the_draws_a_live_fight_made():

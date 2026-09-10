@@ -300,20 +300,21 @@ def _pileup(garrison: int, attackers: list[tuple[int, int]]):
 
 
 def test_a_pile_up_reports_its_fold_step_by_step():
-    """The rule nothing on screen currently hints at: every side is pooled per
-    owner, sorted strongest-first, and folded pairwise — carrying its losses
-    forward. The garrison is not resolved last; it takes its place by size.
+    """Every side is pooled per owner; attackers fold pairwise, strongest-first,
+    among themselves; and the garrison — not just another side in the size-ranked
+    queue — faces whatever survives that, last, regardless of its own size.
     """
     with no_jitter():
         (owner, ships), folds = _pileup(10, [(2, 11), (3, 6)])
-    # strongest first: P2's 11 takes on the garrison's 10, then P3's 6 takes on
-    # whatever is left of it — so the *weakest* arrival ends up holding the system
+    # attackers first: P2's 11 takes on P3's 6, then whatever survives that
+    # meets the garrison's 10 last — holding the ground is worth more than
+    # queuing by size, and here it's enough to win the system back
     assert [(f.attacker, f.attacker_ships, f.defender, f.defender_ships) for f in folds] == [
-        (2, 11, 1, 10),
-        (2, 5, 3, 6),
+        (2, 11, 3, 6),
+        (2, 9, 1, 10),
     ]
-    assert [(f.winner, f.survivors) for f in folds] == [(2, 5), (3, 3)]
-    assert (owner, ships) == (3, 3)
+    assert [(f.winner, f.survivors) for f in folds] == [(2, 9), (1, 4)]
+    assert (owner, ships) == (1, 4)
     # each step's carried force is the previous step's survivors
     for earlier, later in zip(folds, folds[1:]):
         assert (later.attacker, later.attacker_ships) == (earlier.winner, earlier.survivors)
@@ -321,10 +322,10 @@ def test_a_pile_up_reports_its_fold_step_by_step():
     assert (folds[-1].winner, folds[-1].survivors) == (owner, ships)
 
 
-def test_a_weak_garrison_is_the_case_that_reads_as_expected():
-    """When the garrison is the weakest side the fold *is* "the attackers fight,
-    then the survivor takes the system" — which is why the rule is easy to
-    mis-read from the cases you happen to see."""
+def test_the_garrison_fights_last_even_when_it_is_the_weakest_side():
+    """The garrison's place in the fold is now fixed — last — rather than earned
+    by size, so this reads the same whether it happens to be the weakest side or
+    not (contrast the previous test, where it's the strongest)."""
     with no_jitter():
         _, folds = _pileup(3, [(2, 10), (3, 9)])
     assert (folds[0].attacker, folds[0].defender) == (2, 3)   # the attackers, first
