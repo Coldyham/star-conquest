@@ -29,10 +29,10 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, NamedTuple, Optional
 
-from . import combat, config
-from .model import Fleet, GameState, Order, lane_key
+from . import combat, config, turnfilm
+from .model import Fleet, GameState, Order, free_lane_slot, lane_key
 
 # What version of the *rules* a game is played under, stamped onto every log
 # (`replay.GameLog.rules_version`).
@@ -119,6 +119,9 @@ def apply_order(state: GameState, order: Order) -> Optional[Fleet]:
         ships=ships,
         turns_total=turns,
         turns_remaining=turns,
+        # Cosmetic, and deterministic: orders are applied in a fixed sequence, so a
+        # replay hands out the same tracks. Nothing in the rules reads one.
+        lane_slot=free_lane_slot(state.fleets, order.source_id, order.dest_id),
     )
     state.fleets.append(fleet)
     return fleet
@@ -132,6 +135,7 @@ def end_turn(
     human_orders: Optional[list[Order]] = None,
     decide: Optional[DecideFn] = None,
     script: Optional[TurnRecord] = None,
+    on_event: Optional[turnfilm.EventFn] = None,
 ) -> TurnRecord:
     """Resolve one turn with simultaneous decision-making.
 
@@ -147,18 +151,25 @@ def end_turn(
     if state.winner is not None:
         return TurnRecord()
 
+    watch = turnfilm.watcher(on_event)
+    watch.open(state)
+
     orders = (list(script.orders) if script is not None
               else _collect_orders(state, human_orders, decide))
     for order in orders:  # order-independent: each system has a single owner
-        apply_order(state, order)
+        watch.launched(state, apply_order(state, order))
 
     dice = _Dice(state.rng, script.dice if script is not None else None)
     _advance_fleets(state)
-    _resolve_lane_battles(state, dice)
+    watch.advanced(state)
+    _resolve_lane_battles(state, dice, watch)
+    watch.mark(state)
     _production(state)
-    _resolve_arrivals(state, dice)
+    watch.produced(state)
+    _resolve_arrivals(state, dice, watch)
     _check_win(state)
     state.turn += 1
+    watch.ended(state)
     return TurnRecord(orders, dice.drawn)
 
 
@@ -200,6 +211,20 @@ def _advance_fleets(state: GameState) -> None:
         fleet.turns_remaining -= 1
 
 
+class _Crossing(NamedTuple):
+    """Two fleets meeting on one lane during this turn's step.
+
+    ``when`` is the fraction of the step at which their gap reached zero and
+    ``at`` the lane fraction, measured from ``min(lane_key)``, where that
+    happened — the point the two fleets share at that instant.
+    """
+
+    when: float
+    at: float
+    a: int  # indices into `state.fleets`
+    b: int
+
+
 def _lane_span(fleet: Fleet, low_id: int) -> tuple[float, float]:
     """Where ``fleet`` was when this turn's step began and where it is now, as
     fractions of its lane measured from ``low_id``.
@@ -209,15 +234,13 @@ def _lane_span(fleet: Fleet, low_id: int) -> tuple[float, float]:
     are measured on one ruler. A fleet that launched this turn starts at 0.0 (or
     1.0, heading the other way), i.e. on its source system.
     """
-    total = fleet.turns_total
-    if total <= 0:
+    if fleet.turns_total <= 0:
         return 1.0, 1.0
-    was = 1.0 - (fleet.turns_remaining + 1) / total
-    now = 1.0 - fleet.turns_remaining / total
+    was, now = fleet.progress_at(0.0), fleet.progress_at(1.0)
     return (was, now) if fleet.source_id == low_id else (1.0 - was, 1.0 - now)
 
 
-def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tuple[int, int]]:
+def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[_Crossing]:
     """Every enemy pair on one lane that meets during this turn's step, in the
     order the meetings happen.
 
@@ -232,7 +255,7 @@ def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tupl
     Simultaneous crossings break on fleet order, which is order of launch, so a
     replay fights them in the sequence the live game did.
     """
-    crossings: list[tuple[float, int, int]] = []
+    crossings: list[_Crossing] = []
     for a_i, b_i in combinations(idxs, 2):
         a, b = state.fleets[a_i], state.fleets[b_i]
         if a.owner_id == b.owner_id:
@@ -243,12 +266,15 @@ def _lane_crossings(state: GameState, low_id: int, idxs: list[int]) -> list[tupl
         if gap_was * gap_now > 0:
             continue  # one stayed ahead of the other all step: they never met
         when = 0.0 if gap_was == gap_now else gap_was / (gap_was - gap_now)
-        crossings.append((when, a_i, b_i))
-    crossings.sort()
-    return [(a_i, b_i) for _, a_i, b_i in crossings]
+        crossings.append(_Crossing(when, a_was + when * (a_now - a_was), a_i, b_i))
+    # Sorted on an explicit key rather than the whole tuple: `at` must not reach
+    # the comparison, or simultaneous crossings would break on where they met
+    # instead of on fleet order, which is order of launch.
+    crossings.sort(key=lambda c: (c.when, c.a, c.b))
+    return crossings
 
 
-def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
+def _resolve_lane_battles(state: GameState, dice: _Dice, watch: turnfilm.Watch) -> None:
     """Fight the fleets that actually meet in transit (opt-in via IN_LANE_BATTLES).
 
     Fleets in transit normally never interact. When enabled, two enemy fleets
@@ -273,25 +299,30 @@ def _resolve_lane_battles(state: GameState, dice: _Dice) -> None:
     for lane, idxs in by_lane.items():
         if len({state.fleets[i].owner_id for i in idxs}) < 2:
             continue  # no enemy out here, so there is nobody to meet
-        for a_i, b_i in _lane_crossings(state, min(lane), idxs):
+        for crossing in _lane_crossings(state, min(lane), idxs):
+            a_i, b_i = crossing.a, crossing.b
             if a_i in destroyed or b_i in destroyed:
                 continue  # killed at an earlier crossing this same turn
             a, b = state.fleets[a_i], state.fleets[b_i]
+            a_ships, b_ships = a.ships, b.ships
             winner, survivors = combat.resolve_lane_clash(state, a, b, dice)
             if winner == a.owner_id:
-                a.ships = survivors
+                a.ships, survivor, dead = survivors, a, (b,)
                 destroyed.add(b_i)
             elif winner == b.owner_id:
-                b.ships = survivors
+                b.ships, survivor, dead = survivors, b, (a,)
                 destroyed.add(a_i)
             else:  # matched forces, and no ground to break the tie
+                survivor, dead = None, (a, b)
                 destroyed.update((a_i, b_i))
+            watch.clashed(crossing, lane, a, b, a_ships, b_ships,
+                          survivor, survivors, dead)
 
     if destroyed:
         state.fleets = [f for i, f in enumerate(state.fleets) if i not in destroyed]
 
 
-def _resolve_arrivals(state: GameState, dice: _Dice) -> None:
+def _resolve_arrivals(state: GameState, dice: _Dice, watch: turnfilm.Watch) -> None:
     arrived: dict[int, list[Fleet]] = defaultdict(list)
     still_flying: list[Fleet] = []
     for fleet in state.fleets:
@@ -302,7 +333,11 @@ def _resolve_arrivals(state: GameState, dice: _Dice) -> None:
     state.fleets = still_flying
 
     for node_id, fleets in arrived.items():
-        combat.resolve_arrival(state, node_id, fleets, dice)
+        node = state.systems[node_id]
+        was_owner, was_ships = node.owner_id, node.ships
+        folds = watch.folds()
+        combat.resolve_arrival(state, node_id, fleets, dice, on_step=folds)
+        watch.landed(state, node_id, fleets, was_owner, was_ships, folds)
 
 
 def _production(state: GameState) -> None:

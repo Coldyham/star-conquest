@@ -55,7 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import engine
+from . import engine, turnfilm
 from .model import GameState, Order
 from .paths import data_dir
 from .settings import Settings, build_state, fresh_rng
@@ -391,6 +391,7 @@ def latest_log() -> Optional[GameLog]:
 def reconstruct(
     log: GameLog,
     on_turn: Optional[Callable[[GameState], object]] = None,
+    on_event: Optional[turnfilm.EventFn] = None,
 ) -> tuple[GameState, Settings]:
     """Replay a log's turns through the engine to rebuild its current state.
 
@@ -406,6 +407,10 @@ def reconstruct(
     ``on_turn`` (if given) is invoked with the state at the opening position and
     again after each replayed turn — the shell uses it to rebuild fog-of-war
     memory across the whole game, not just the final frame.
+
+    ``on_event`` is handed straight to the engine, so a caller that also passes
+    ``on_turn`` gets each turn's playback events cut at that turn's boundary
+    (`main.build_history`). Neither costs anything when not asked for.
     """
     settings = Settings.from_dict(log.settings)
     state = build_state(settings, log.seed)
@@ -414,7 +419,7 @@ def reconstruct(
     for i in range(log.turn_count):
         if state.winner is not None:
             break
-        engine.end_turn(state, script=log.script_for(i))
+        engine.end_turn(state, script=log.script_for(i), on_event=on_event)
         if on_turn is not None:
             on_turn(state)
     return state, settings

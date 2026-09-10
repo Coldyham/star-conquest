@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -15,7 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402
 import pytest  # noqa: E402
 
-from starconquest import ai, config, engine, fog, mapgen, render, starnames  # noqa: E402
+from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.model import Order  # noqa: E402
 from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
@@ -764,4 +765,406 @@ def test_every_star_name_fits_the_info_panel():
     finally:
         _desktop_scale()
         render._FONTS.clear()
+        pygame.quit()
+
+
+def _filmed_turn(state, ui):
+    """Resolve one turn on a copy, returning the reel the shell would draw."""
+    before = turnfilm.copy_board(state)
+    events: list[turnfilm.Event] = []
+    engine.end_turn(state, decide=ai.decide, on_event=events.append)
+    film = turnfilm.film(events)
+    ui.film, ui.film_ms = film, 0.0
+    return turnfilm.Reel(before, film)
+
+
+def test_a_fleet_glides_rather_than_jumping():
+    """Two moments inside the move beat must draw different pixels — that is the
+    whole feature. Note there is no clock to monkeypatch: `film_ms` is a `Ui`
+    field, so a test drives a frame by setting it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        reel = None
+        for _ in range(30):     # play on until a turn actually moves something
+            reel = _filmed_turn(state, ui)
+            if any(b.kind == "move" for b in reel.film.beats):
+                break
+            reel.run()
+        move = next(b for b in reel.film.beats if b.kind == "move")
+
+        def frame(ms: float) -> bytes:
+            reel.run_to(ms)          # as the loop does: advance, then draw
+            ui.film_ms = ms
+            render.draw(screen, reel.board, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        # early in the beat the fleets are barely off their sources; late in it
+        # they have covered a whole turn's step
+        assert frame(move.start + 1) != frame(move.end - 1)
+    finally:
+        pygame.quit()
+
+
+def test_a_film_frame_draws_in_every_beat():
+    """Every beat, plus the hold at the end, has to survive being drawn — bursts,
+    caption, landed fleets held off their node, the lot."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(5, num_nodes=16, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        drawn = 0
+        for _ in range(40):
+            reel = _filmed_turn(state, ui)
+            ms = 0.0
+            while ms <= reel.film.total_ms:
+                reel.run_to(ms)
+                ui.film_ms = ms
+                render.draw(screen, reel.board, ui)
+                drawn += 1
+                ms += 24.0
+            reel.run()
+            ui.stop_film()
+        assert drawn > 100
+    finally:
+        pygame.quit()
+
+
+def test_end_turn_is_unreachable_while_a_film_plays():
+    """Taking the button away rather than guarding the action, the way route mode
+    does — a press during a playback must not be able to resolve another turn."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(7, num_nodes=14, num_players=2)
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0
+        reel = _filmed_turn(state, ui)
+        render.draw(screen, reel.board, ui)
+        assert ui.end_turn_rect[2] == 0
+        ui.stop_film()
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0      # ...and comes straight back
+    finally:
+        pygame.quit()
+
+
+def test_a_fleets_track_is_read_off_the_fleet_and_moves_it():
+    """render's whole share of lane tracks: multiply the fleet's own `lane_slot`
+    by the spread. Two boards differing only in that field must draw differently,
+    and a fleet on track 0 must sit on the lane's centre line."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        src = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        dst = state.systems[src].neighbors[0]
+        state.systems[src].ships = 30
+        engine.apply_order(state, Order(1, src, dst, 4))
+        fleet = state.fleets[0]
+        assert fleet.lane_slot == 0        # alone on the lane, so down the middle
+        # ...and out into the lane, since a fleet still on its source is drawn
+        # under that node's circle, where no offset this small is visible
+        fleet.turns_total, fleet.turns_remaining = 4, 2
+
+        def frame(slot: int) -> bytes:
+            fleet.lane_slot = slot
+            render.draw(screen, state, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        centred = frame(0)
+        assert frame(-1) != centred
+        assert frame(1) != centred
+        assert frame(0) == centred          # ...and nothing else moved it
+    finally:
+        pygame.quit()
+
+
+def _flash_frame(screen, state, ui, landed) -> bytes:
+    """Just the burst layer, over a blank field, at the instant the event fires."""
+    ui.archive_marks(state, [landed])
+    screen.fill((0, 0, 0))
+    render._draw_film_flashes(screen, state, ui)
+    ui.clear_fading_marks()
+    return pygame.image.tobytes(screen, "RGB")
+
+
+def test_a_reinforcement_is_not_marked_as_a_fight():
+    """Your own fleet arriving at your own system is not combat, so it must not
+    draw combat's burst. `Landed.steps` holds the engagements that happened, and
+    is empty exactly when nothing fought."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        def landed(steps):
+            return turnfilm.Landed(node_id=node, fleets=(), was_owner=1, was_ships=4,
+                                   owner_id=1, ships=9, prod_progress=0, steps=steps)
+
+        blank = pygame.Surface((config.SCREEN_W, config.SCREEN_H))
+        blank.fill((0, 0, 0))
+        nothing = pygame.image.tobytes(blank, "RGB")
+
+        assert _flash_frame(screen, state, ui, landed(())) == nothing
+        fight = (turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                               defender_ships=4, winner=1, survivors=2),)
+        assert _flash_frame(screen, state, ui, landed(fight)) != nothing
+    finally:
+        pygame.quit()
+
+
+def test_a_playback_still_shows_what_the_turn_began_with():
+    """`visible` is not monotone: a system lost this turn drops out of it. Without
+    the union the fight that took it would play out under a grey "?" — the map
+    layer's fog is both turns' (`Ui.sees`)."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        lost = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        # seen but no longer in sight: exactly the system a fight just took
+        ui.visible = set(state.systems) - {lost}
+        ui.seen = set(state.systems)
+        landed = turnfilm.Landed(node_id=lost, fleets=(), was_owner=1, was_ships=4,
+                                 owner_id=2, ships=3, prod_progress=0,
+                                 steps=(turnfilm.Fold(attacker=2, attacker_ships=7,
+                                                      defender=1, defender_ships=4,
+                                                      winner=2, survivors=3),))
+        film = turnfilm.film([landed])
+        ui.film_ms = next(at for at, e in film.cues if e is landed) + 1
+
+        def frame(film_visible) -> bytes:
+            ui.film, ui.film_visible = film, film_visible
+            render.draw(screen, state, ui)
+            ui.stop_film()
+            return pygame.image.tobytes(screen, "RGB")
+
+        assert frame(frozenset()) != frame(frozenset({lost})), \
+            "the film must draw a system it could see when the turn began"
+        # ...and the union is additive, so nothing has to be put back afterwards
+        assert ui.film_visible == frozenset()
+        assert lost not in ui.visible
+    finally:
+        pygame.quit()
+
+
+def test_a_fight_is_labelled_with_what_it_cost():
+    """The victor's own losses, over the burst. Two fights differing only in their
+    survivors must draw differently — otherwise the label isn't reading `cost` at
+    all."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        def cost(survivors: int) -> bytes:
+            fold = turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=survivors)
+            return _flash_frame(screen, state, ui,
+                                turnfilm.Landed(node_id=node, fleets=(), was_owner=1,
+                                                was_ships=6, owner_id=2,
+                                                ships=survivors, prod_progress=0,
+                                                steps=(fold,)))
+
+        assert cost(2) != cost(7)
+    finally:
+        pygame.quit()
+
+
+def test_which_fights_get_a_mark_and_what_it_says():
+    """`_flash_marks` is the one place a film's fights become places on screen —
+    the bursts draw from it, and the star-name pass avoids what it reports. So the
+    fog gate, the reinforcement gate and the loss figure all live here."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        fold = turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                             defender_ships=6, winner=2, survivors=7)
+
+        def marks(steps, visible):
+            landed = turnfilm.Landed(node_id=node, fleets=(), was_owner=1,
+                                     was_ships=6, owner_id=2, ships=7,
+                                     prod_progress=0, steps=steps)
+            ui.visible, ui.seen = visible, set(state.systems)
+            ui.archive_marks(state, [landed])
+            out = list(render._flash_marks(state, ui))
+            ui.clear_fading_marks()
+            return out
+
+        every = set(state.systems)
+        # the attacker brought 9 and kept 7, so the label is its own 2 — not the
+        # 8 that died between them, most of which is the beaten garrison
+        assert [(m.cost, m.victor, m.node_id) for m in marks((fold,), every)] == [(2, 2, node)]
+        assert marks((), every) == []                  # a reinforcement is no fight
+        assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
+    finally:
+        pygame.quit()
+
+
+def test_a_loss_label_keeps_its_ground_through_its_hold_and_fade():
+    """The name pass avoids the loss pill for the same reason it avoids lane times
+    and a rule's "keep N" — for as long as one is up. A fight stays fully visible
+    for `FILM_FLASH_MS` and then fades over `FILM_FADE_MS` (`render._mark_fade`),
+    entirely on its own clock — independent of any film's length, so it dissolves
+    the same way whether or not the next turn has already started gliding on top
+    of it. `_flash_marks` itself never drops one early or late; pruning a fully
+    dissolved mark is `Ui.age_fading_marks`' job, not this one's.
+
+    Both halves matter. Reserved space and the fading mark cannot come apart (the
+    name pass and `_draw_film_flashes` share `_flash_marks`), and nothing is
+    reserved once a mark is cleared (leaving history, scrubbing, or simply never
+    having fired one).
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        ui.archive_marks(state, [landed])
+        fight = ui.fading_fights[0]
+        assert fight.age_ms == 0.0
+
+        assert list(render._flash_marks(state, ui))            # fresh: reserve it
+
+        ui.fading_fights[0] = replace(fight, age_ms=config.FILM_FLASH_MS)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 0.0    # still fully up at the hold's edge
+
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS / 2)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and 0.0 < marks[0].fade < 1.0    # mid-fade, not dropped
+
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 1.0    # fully dissolved, but still handed
+                                                  # back — `_flash_marks` doesn't prune
+
+        ui.clear_fading_marks()
+        assert list(render._flash_marks(state, ui)) == []
+    finally:
+        pygame.quit()
+
+
+def _labels(state, ui, events):
+    """The placed labels a playback is writing, the instant ``events`` fire —
+    fresh, as `Ui.archive_marks` leaves them (age 0), mirroring what one
+    `Reel.run_to` call hands it when several land on the same instant."""
+    ui.archive_marks(state, events)
+    out = [(text, color) for _, text, color in render._film_labels(state, ui)]
+    placed = {text: center for center, text, _ in render._film_labels(state, ui)}
+    ui.clear_fading_marks()
+    return out, placed
+
+
+def test_a_finished_hull_is_marked_over_its_system():
+    """The production half of the labels: `+N` in the owner's colour, which is
+    what makes the tick visible without giving production a dwell of its own."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 4, 0, 1),))
+        events = [turnfilm.Advanced(((0, 2),)), produced]
+
+        out, _ = _labels(state, ui, events)
+        assert out == [("+1", config.player_color(1))]   # fresh: no fade yet
+
+        # a rival's yard is not ours to report, so fog gates it like a burst
+        ui.visible = set(state.systems) - {node}
+        out, _ = _labels(state, ui, events)
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_progress_with_no_hull_to_show_is_left_to_the_ring():
+    """Most ticks are a system inching toward its next ship. The ring in
+    `_draw_systems` draws those; labelling every one would bury the map."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 3, 2, 0),))     # progress, no hull
+        out, _ = _labels(state, ui, [turnfilm.Advanced(((0, 2),)), produced])
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_a_captured_system_that_produces_stacks_its_two_marks():
+    """Production runs *after* combat, so a system taken this turn produces for
+    its new owner — the one case where both marks are earned at the same spot, and
+    they must not be drawn on top of each other.
+
+    A single arrival reaches it reliably now, and both marks age in lockstep:
+    `FILM_COMBAT_MS`/`FILM_PRODUCE_MS` are both 0, so a `Landed` and the
+    `Produced` it feeds are cues at the very same instant and `Reel.run_to` hands
+    them to `Ui.archive_marks` together — there is no longer a window in which
+    one has fired and the other hasn't.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[node].owner_id = 2                     # ...as the film ends it
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        produced = turnfilm.Produced(((node, 8, 0, 1),))
+
+        out, placed = _labels(state, ui, [landed, produced])
+        assert sorted(t for t, _ in out) == ["+1", "−2"]
+        assert placed["+1"][0] == placed["−2"][0], "same column"
+        assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
+        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
+        # both belong to the new owner, and both are fresh, so both are drawn in
+        # its colour at full strength
+        assert dict(out) == {"−2": config.player_color(2), "+1": config.player_color(2)}
+    finally:
         pygame.quit()

@@ -354,7 +354,7 @@ def resolve_lane_clash(state: GameState, a: Fleet, b: Fleet, rng=None) -> tuple[
 
 
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
-                    rng=None) -> tuple[int, int]:
+                    rng=None, on_step: Optional[list] = None) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
 
     Handles reinforcement (single owner present), a straight attack (two owners),
@@ -363,6 +363,11 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
 
     ``rng`` is the turn's dice — ``engine`` passes one that records what it deals
     (and, on a replay, deals back what was recorded). ``state.rng`` when omitted.
+
+    Given ``on_step``, each engagement of the fold is appended to it as
+    ``(carried_owner, carried_ships, owner, ships, winner, survivors)``. Those
+    values are otherwise locals, so a pile-up cannot be shown step by step without
+    them; nothing here reads the list back, and passing none changes nothing.
     """
     node = state.systems[node_id]
     rng = state.rng if rng is None else rng
@@ -386,7 +391,10 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
         sides.sort(key=lambda s: s[1], reverse=True)
         cur_owner, cur_ships = sides[0]
         for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
+            won, left = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
+            if on_step is not None:
+                on_step.append((cur_owner, cur_ships, owner, ships, won, left))
+            cur_owner, cur_ships = won, left
         node.owner_id, node.ships = cur_owner, cur_ships
 
     _record_losses(state, forces, node.owner_id, node.ships)

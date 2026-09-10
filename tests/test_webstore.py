@@ -13,7 +13,8 @@ import json
 import pytest
 
 from starconquest import paths, webstore
-from starconquest.paths import WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
+from starconquest.paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY,
+                               WEB_SHARE_GAMES_KEY)
 
 
 @pytest.fixture(autouse=True)
@@ -248,3 +249,19 @@ def test_on_the_web_the_endpoint_follows_the_page(monkeypatch):
                         type("P", (), {"window": _Window()}))
     assert webstore.leaderboard_url("/api/log") == (
         "https://deploy-preview-7--star-conquest-leaderboard.netlify.app/api/log")
+
+
+# --- the "animate turns" display preference ---------------------------------- #
+def test_animate_turns_is_off_until_it_is_switched_on():
+    """Nobody who has not asked for it should have their turns slowed down, and
+    the ``""``-for-off encoding means anything but a stored "1" reads as off."""
+    assert webstore.animate_turns() is False
+    webstore.set(WEB_ANIMATE_TURNS_KEY, "sure")
+    assert webstore.animate_turns() is False
+
+
+def test_animate_turns_round_trips_and_can_be_switched_back_off():
+    assert webstore.set_animate_turns(True) is True
+    assert webstore.animate_turns() is True
+    assert webstore.set_animate_turns(False) is True
+    assert webstore.animate_turns() is False

@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from contextlib import contextmanager
 
+import pytest
+
 from starconquest import config, engine
 from starconquest.model import Fleet, GameState, Order, Player, System
 
@@ -425,3 +427,147 @@ def test_end_turn_records_the_draws_a_live_fight_made():
 
 def _never_called(state, pid):
     raise AssertionError("a replayed turn must not consult a seat")
+
+
+def test_progress_at_is_the_one_formula():
+    """``Fleet.progress_at`` is what both the map and a lane battle measure with,
+    so its two ends must be the positions the engine used to compute by hand."""
+    f = Fleet(owner_id=1, source_id=0, dest_id=1, ships=3,
+              turns_total=8, turns_remaining=3)
+    assert f.progress_at(1.0) == f.progress()
+    assert f.progress_at(0.0) == 1.0 - (f.turns_remaining + 1) / f.turns_total
+    assert f.progress_at(0.5) == 1.0 - (f.turns_remaining + 0.5) / f.turns_total
+    # a fleet that launched this turn starts on its source and ends one step along
+    fresh = Fleet(owner_id=1, source_id=0, dest_id=1, ships=3,
+                  turns_total=4, turns_remaining=3)
+    assert fresh.progress_at(0.0) == 0.0
+    # degenerate schedules stay pinned at the destination, unmirrored
+    stuck = Fleet(owner_id=1, source_id=1, dest_id=0, ships=1,
+                  turns_total=0, turns_remaining=0)
+    assert stuck.progress_at(0.0) == stuck.progress_at(1.0) == 1.0
+    assert engine._lane_span(stuck, 0) == (1.0, 1.0)
+
+
+def test_lane_span_measures_both_headings_from_one_end():
+    """The span is `progress_at`'s two ends, mirrored for a fleet running the
+    other way so two opposing fleets sit on a single ruler."""
+    down = Fleet(owner_id=1, source_id=0, dest_id=1, ships=1,
+                 turns_total=10, turns_remaining=4)
+    up = Fleet(owner_id=2, source_id=1, dest_id=0, ships=1,
+               turns_total=10, turns_remaining=4)
+    assert engine._lane_span(down, 0) == (0.5, 0.6)
+    assert engine._lane_span(up, 0) == (0.5, 0.4)
+
+
+def test_a_crossing_is_recorded_where_both_fleets_are():
+    """`at` is the point the two fleets share at `when`, so a fight can be shown
+    exactly where the triangles are seen to touch."""
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 10)])
+    a = _stage(s, 1, 0, 1, 5, 10, 5)   # 0.4 -> 0.5 of the lane
+    b = _stage(s, 2, 1, 0, 5, 10, 4)   # 0.5 -> 0.4, the other way
+    engine._advance_fleets(s)          # crossings are measured after the step
+    crossings = engine._lane_crossings(s, 0, [0, 1])
+    assert len(crossings) == 1
+    cross = crossings[0]
+    assert cross.when == 0.5
+    assert cross.at == pytest.approx(a.progress_at(cross.when))
+    # ...and the same point measured off the fleet running the other way
+    assert cross.at == pytest.approx(1.0 - b.progress_at(cross.when))
+
+
+def test_simultaneous_crossings_still_break_on_launch_order():
+    """Two disjoint pairs meeting at the same instant, further along the lane
+    first. Order decides which fight is dealt the turn's dice first, so it must
+    stay fleet order — order of launch — and never where the fleets met.
+    """
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 10)])
+    _stage(s, 1, 0, 1, 5, 10, 1)   # pair one, meeting at 0.85
+    _stage(s, 2, 1, 0, 5, 10, 8)
+    _stage(s, 1, 0, 1, 5, 10, 5)   # pair two, meeting at 0.45
+    _stage(s, 2, 1, 0, 5, 10, 4)
+    engine._advance_fleets(s)
+    crossings = engine._lane_crossings(s, 0, [0, 1, 2, 3])
+    assert [(c.a, c.b) for c in crossings] == [(0, 1), (2, 3)]
+    # ...and the test really is exercising the hazard: sorting on where they met
+    # would have swapped those two rows.
+    assert [c.when for c in crossings] == [0.5, 0.5]
+    assert [round(c.at, 10) for c in crossings] == [0.85, 0.45]
+
+
+# --------------------------------------------------------------------------- #
+# Lane tracks (cosmetic, but they have to hold still)
+# --------------------------------------------------------------------------- #
+
+
+def _slots(state):
+    return [f.lane_slot for f in state.fleets]
+
+
+def test_a_fleet_is_given_the_lowest_free_track_on_its_lane():
+    """Tracks run outward from the centre line, so the first fleet onto an empty
+    lane flies straight down it and later ones flank it."""
+    s = make_state([(0, 1, 30, 100), (1, 2, 1, 100)], [(0, 1, 5)])
+    for _ in range(5):
+        engine.apply_order(s, Order(1, 0, 1, 2))
+    assert _slots(s) == [0, -1, 1, -2, 2]
+
+
+def test_launching_does_not_shove_the_fleets_already_flying():
+    """Spreading a lane's fleets symmetrically across however many are currently
+    on it made every one of them step sideways whenever another set off."""
+    s = make_state([(0, 1, 30, 100), (1, 2, 1, 100)], [(0, 1, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    before = _slots(s)
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    assert _slots(s)[:1] == before == [0]
+
+
+def test_a_fleet_arriving_does_not_shove_the_ones_behind_it():
+    """The case that showed up in play: three fleets strung down one lane, the
+    leader lands, and the two behind it must not jump sideways as the rank they
+    were drawn from re-packs. A track is held, not recomputed.
+
+    Launched a turn apart, since fleets that set off together share a speed and so
+    land together — the string down the lane is the point.
+    """
+    # a third system, held by the rival, purely so the win check doesn't end the
+    # match the moment player 1 is the last one standing
+    s = make_state([(0, 1, 30, 100), (1, 0, 1, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)])
+    with no_jitter():
+        engine.apply_order(s, Order(1, 0, 1, 9))   # launched first, so lands first
+        engine.end_turn(s)
+        engine.apply_order(s, Order(1, 0, 1, 1))
+        engine.end_turn(s)
+        engine.apply_order(s, Order(1, 0, 1, 1))
+        assert _slots(s) == [0, -1, 1]
+        engine.end_turn(s)                         # ...on which the leader lands
+
+    assert [f.ships for f in s.fleets] == [1, 1], "only the leader should have landed"
+    assert s.systems[1].owner_id == 1, "...and it took the system"
+    assert _slots(s) == [-1, 1], "the fleets behind it held their tracks"
+
+    # ...and the track the leader vacated is what the next launch gets, so no two
+    # fleets on a lane are ever drawn on top of each other
+    engine.apply_order(s, Order(1, 0, 1, 1))
+    assert _slots(s) == [-1, 1, 0]
+
+
+def test_fleets_running_opposite_ways_get_their_own_tracks():
+    """The reason tracks exist at all: two fleets can be at the same point on one
+    lane heading opposite ways, so both directions draw from one pool."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100)], [(0, 1, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 4))
+    engine.apply_order(s, Order(2, 1, 0, 4))
+    assert len(set(_slots(s))) == 2, "one lane, both directions: they must not overlap"
+
+
+def test_a_track_is_only_shared_with_a_different_lane():
+    """Tracks are per lane — two fleets on unrelated lanes both fly down the
+    middle, which is what makes the common case look right."""
+    s = make_state([(0, 1, 20, 100), (1, 0, 1, 100), (2, 0, 1, 100)],
+                   [(0, 1, 5), (0, 2, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 4))
+    engine.apply_order(s, Order(1, 0, 2, 4))
+    assert _slots(s) == [0, 0]

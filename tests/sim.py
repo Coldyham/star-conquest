@@ -41,7 +41,7 @@ import signal
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from starconquest import ai, config, engine, mapgen, replay, settings
+from starconquest import ai, config, engine, mapgen, replay, settings, turnfilm
 from starconquest.model import AiParams, GameState
 from starconquest.settings import Settings
 
@@ -173,6 +173,34 @@ def check_invariants(state: GameState) -> None:
         assert f.owner_id in state.players
 
 
+def board_digest(state: GameState):
+    """Everything a frame can show, for comparing a film's board against the real
+    one. Lanes and adjacency are left out: nothing ever mutates them."""
+    return (
+        tuple((sid, s.owner_id, s.ships, s.production, s.prod_progress)
+              for sid, s in sorted(state.systems.items())),
+        tuple((f.owner_id, f.source_id, f.dest_id, f.ships, f.turns_total,
+               f.turns_remaining, f.lane_slot) for f in state.fleets),
+        state.turn,
+        state.winner,
+        tuple((pid, p.alive, p.ships_lost) for pid, p in sorted(state.players.items())),
+    )
+
+
+def check_film(before: GameState, events: list, after: GameState) -> None:
+    """One turn's playback must rebuild the board that turn produced.
+
+    The same assertion `tests/test_turnfilm.py` makes per turn, run here over
+    whole batches — an event that is missing or misapplied would otherwise show up
+    only as an animation snapping into place on its last frame.
+    """
+    rng_state = before.rng.getstate()
+    turnfilm.Reel(before, turnfilm.film(events)).run()
+    assert board_digest(before) == board_digest(after), (
+        f"the film of turn {after.turn} did not rebuild it")
+    assert before.rng.getstate() == rng_state, "the film drew from the board's rng"
+
+
 def player_stats(state: GameState) -> dict[int, tuple[int, int]]:
     """player id -> (systems owned, total ships incl. in-transit)."""
     stats: dict[int, tuple[int, int]] = {}
@@ -233,6 +261,7 @@ def play(
     verbose: bool = False,
     strategies: list[str] | None = None,
     bot_timeout: float = 0.0,
+    film: bool = False,
 ) -> SimResult:
     state = mapgen.generate(seed, mode, nodes, players)
     # AI-vs-AI: drive every slot with the AI, including the human's seat.
@@ -246,8 +275,12 @@ def play(
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=decide)
+        before = turnfilm.copy_board(state) if film else None
+        events: list = []
+        engine.end_turn(state, decide=decide, on_event=events.append if film else None)
         check_invariants(state)
+        if before is not None:
+            check_film(before, events, state)
         if verbose:
             print_state(state)
     return SimResult(seed, state.winner, state.turn, state.winner is None, timeouts[0])
@@ -416,8 +449,10 @@ def positions(log: replay.GameLog, every: int, skip_last: int = 0) -> list[int]:
     return list(range(0, max(usable, 0), max(1, every)))
 
 
-def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0) -> list[SimResult]:
-    return [play(s, mode, nodes, players, max_turns, strategies=strategies, bot_timeout=bot_timeout) for s in seeds]
+def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0,
+               film=False) -> list[SimResult]:
+    return [play(s, mode, nodes, players, max_turns, strategies=strategies,
+                 bot_timeout=bot_timeout, film=film) for s in seeds]
 
 
 def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0) -> list[SwapGame]:
@@ -612,6 +647,7 @@ def main() -> None:
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
     ap.add_argument("--bot-timeout", type=float, default=0.0, help="wall-clock seconds allowed per decide() call (0 = disabled)")
     ap.add_argument("--external", action="store_true", help="also register the bots/ external bots (subprocesses speaking docs/bot-api.md); off by default, since a subprocess in an unasked-for ladder is a surprise")
+    ap.add_argument("--film", action="store_true", help="also check that each turn's playback events rebuild the board that turn produced (see turnfilm.py)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -657,10 +693,10 @@ def main() -> None:
 
     if args.trials > 1:
         seeds = range(args.seed, args.seed + args.trials)
-        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout)
+        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout, args.film)
         _summarise(results, strategies)
     else:
-        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout)
+        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout, args.film)
         if r.winner == 0:
             winner = "draw"
         elif r.winner is None:

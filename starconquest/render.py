@@ -6,10 +6,11 @@ triangles for fleets, numbers for ship counts.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple, Optional
 
 import pygame
 
-from . import config, fog, paths, uifont
+from . import config, fog, paths, turnfilm, uifont
 from .geometry import lerp
 from .model import GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -159,6 +160,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_route_preview(surface, state, ui)  # the route plan being composed
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    _draw_film_flashes(surface, state, ui)
     _draw_node_names(surface, state, ui)
     if not ui.history and ui.drag_active and ui.drag_src is not None:
         _draw_drag(surface, state, ui)
@@ -168,6 +170,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         # the send popup draws last of the map layer so nodes/fleets never occlude
         # it (it must stay visible and clickable); it early-outs when closed
         _draw_send_popup(surface, state, ui)
+    _draw_film_caption(surface, ui)
     surface.set_clip(None)
     if not ui.history:
         _draw_zoom_controls(surface, ui)
@@ -187,8 +190,12 @@ def _fog_state(ui: Ui, sid: int) -> str:
     """Fog-of-war state of a system from the human's viewpoint: ``"visible"`` (full
     detail), ``"fogged"`` (grey "?" — currently scouted or remembered), or
     ``"hidden"`` (never seen, not drawn). With fog off, ``visible`` holds every
-    system so this is always ``"visible"``."""
-    if sid in ui.visible:
+    system so this is always ``"visible"``.
+
+    Asks `Ui.sees` rather than reading `visible`, so a turn playback also shows
+    what was visible when that turn began — the map layer's one rule for this,
+    shared with the fleets and the fight bursts."""
+    if ui.sees(sid):
         return "visible"
     if sid in ui.seen:
         return "fogged"
@@ -301,40 +308,48 @@ def _label_pill(surface, font, s: str, color, center) -> None:
     surface.blit(img, rect)
 
 
-def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
-    """Assign each in-transit fleet a small perpendicular offset so stacks split."""
-    groups: dict[frozenset[int], list[int]] = {}
-    for i, f in enumerate(state.fleets):
-        groups.setdefault(frozenset((f.source_id, f.dest_id)), []).append(i)
-    offset: dict[int, tuple[int, int]] = {}
-    for idxs in groups.values():
-        for rank, i in enumerate(idxs):
-            offset[i] = (rank - (len(idxs) - 1) / 2, 0)  # perpendicular rank, scaled later
-    return offset
+def _travel(ui: Ui) -> float:
+    """How far through the turn's step to draw the fleets.
+
+    1.0 unless a film is mid-move, which is what makes this a no-op for the live
+    board and for a history snapshot: both already carry the schedule they mean.
+    """
+    if ui.film is None:
+        return 1.0
+    return ui.film.travel(ui.film_ms)
 
 
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
-    offsets = _lane_offsets(state)
-    for i, f in enumerate(state.fleets):
+    travel = _travel(ui)
+    for f in state.fleets:
         # your own fleets always show; an enemy fleet shows only where at least
         # one end of its lane is in full view, so rival movements appear only as
         # they near your space
-        if f.owner_id != ui.human_id and f.source_id not in ui.visible and f.dest_id not in ui.visible:
+        if f.owner_id != ui.human_id and not ui.sees(f.source_id) and not ui.sees(f.dest_id):
             continue
         a = state.systems[f.source_id].pos
         b = state.systems[f.dest_id].pos
-        wp = lerp(a, b, f.progress())
+        wp = lerp(a, b, f.progress_at(travel))
         x, y = ui.view.to_screen(wp)
         dx, dy = b[0] - a[0], b[1] - a[1]
         length = math.hypot(dx, dy) or 1.0
         ux, uy = dx / length, dy / length
         px, py = -uy, ux  # perpendicular
-        # split stacked fleets, and sit the count clear of the triangle — both
-        # offsets scale, so the label never lands on the glyph on a big display
+        # A fleet that has reached its destination sits on the node and would
+        # cover its garrison count, so hold it off the rim. Only a film ever draws
+        # one: the engine takes an arrived fleet off the board in the same turn.
+        if f.progress_at(travel) >= 1.0:
+            gap = (config.node_radius(state.systems[f.dest_id].production)
+                   + config.FILM_ARRIVAL_GAP)
+            x, y = int(x - ux * gap), int(y - uy * gap)
+        # Hold each fleet off the lane's centre line by the track it was given at
+        # launch (`model.free_lane_slot`) — read off the fleet rather than ranked
+        # here, so a lane-mate launching or arriving cannot shift it. The count
+        # sits clear of the triangle; both offsets scale, so the label never lands
+        # on the glyph on a big display.
         spread = config.FLEET_SIZE + config.s(3)
-        rank = offsets.get(i, (0, 0))[0]
-        x += int(px * rank * spread)
-        y += int(py * rank * spread)
+        x += int(px * f.lane_slot * spread)
+        y += int(py * f.lane_slot * spread)
         _draw_triangle(surface, (x, y), (ux, uy), config.player_color(f.owner_id))
         _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT, center=(x + int(px * spread), y + int(py * spread)))
 
@@ -864,6 +879,171 @@ def _draw_return_glyph(surface, rect, color) -> None:
     pygame.draw.lines(surface, color, False, [(x + a, by - a), (x, by), (x + a, by + a)], lw)
 
 
+def _faded(color: tuple[int, int, int], fade: float) -> tuple[int, int, int]:
+    """``color`` blended toward the background by ``fade`` (0 untouched, 1 gone).
+
+    A dissolve rather than true alpha: the main surface has no per-pixel alpha, and
+    a pill's own background is already `config.COLOR_BG`, so fading its text toward
+    the same colour reads as it sinking into its own backing rather than a colour
+    shift. Used for a burst's stroke too, where it reads as sinking into the map.
+    """
+    bg = config.COLOR_BG
+    return tuple(round(c + (b - c) * fade) for c, b in zip(color, bg))
+
+
+def _draw_burst(surface, center, color, phase: float) -> None:
+    """A fight, marked where it happened.
+
+    Neither of this file's two established glyphs: a filled wedge means real ships
+    and an open chevron means an intention, so a fight is an expanding open ring
+    with radial spokes — it cannot be mistaken for either, nor for a node.
+    ``phase`` runs 0..1 over `config.FILM_FLASH_MS`, so it thins as it grows.
+    """
+    reach = config.FILM_BURST_R * (0.35 + 0.65 * phase)
+    width = max(1, round(config.FILM_BURST_W * (1.0 - phase * 0.5)))
+    cx, cy = center
+    pygame.draw.circle(surface, color, (int(cx), int(cy)), int(reach), width)
+    for i in range(config.FILM_BURST_SPOKES):
+        angle = math.tau * i / config.FILM_BURST_SPOKES + phase
+        ux, uy = math.cos(angle), math.sin(angle)
+        pygame.draw.line(
+            surface, color,
+            (cx + ux * reach, cy + uy * reach),
+            (cx + ux * (reach + config.FILM_BURST_R * 0.4),
+             cy + uy * (reach + config.FILM_BURST_R * 0.4)), width)
+
+
+def _mark_center(center) -> tuple[int, int]:
+    """Where a playback writes a number about a place: a fixed step above it.
+
+    Fixed rather than measured off the burst's current reach, which grows over the
+    flash — a label riding that outward would read as a second moving thing.
+    """
+    return (int(center[0]),
+            int(center[1]) - config.FILM_BURST_R - config.FILM_LOSS_GAP)
+
+
+class _Mark(NamedTuple):
+    """One fight a playback is currently showing, placed on screen."""
+
+    center: tuple[float, float]
+    color: tuple[int, int, int]
+    phase: float
+    fade: float                 # 0 fresh, 1 dissolved into the background
+    cost: int                   # what it cost whoever came out of it
+    victor: Optional[int]       # ...and who that was; None when nobody did
+    node_id: Optional[int]      # the system it happened at, if it was not in open space
+
+
+def _mark_phase(age_ms: float) -> float:
+    """A burst's own pop-in geometry: rings settle and spokes retract over
+    `config.FILM_FLASH_MS`, counted from when the mark fired."""
+    return min(1.0, max(0.0, age_ms / max(1, config.FILM_FLASH_MS)))
+
+
+def _mark_fade(age_ms: float) -> float:
+    """How far a mark has dissolved toward invisible, 0 fresh, 1 gone.
+
+    Fully visible for `config.FILM_FLASH_MS` (matching how long a burst took to
+    settle before this cut ever faded anything), then fades over the next
+    `config.FILM_FADE_MS` — both counted from when the mark fired and neither
+    tied to any film's own length, which is what lets one keep dissolving on top
+    of whatever the next turn's glide is doing.
+    """
+    if age_ms <= config.FILM_FLASH_MS:
+        return 0.0
+    return min(1.0, (age_ms - config.FILM_FLASH_MS) / max(1, config.FILM_FADE_MS))
+
+
+def _flash_marks(state: GameState, ui: Ui):
+    """Every fading fight, as `_Mark`s.
+
+    The one place `Ui.fading_fights` is turned into places on screen, so the
+    bursts, the labels over them and the star-name pass all agree about where
+    they are. A fight is never dropped early, only faded toward invisible
+    (`fade`) — pruning is `Ui.age_fading_marks`' job, not this one's, and it runs
+    whether or not a playback is currently active.
+    """
+    for f in ui.fading_fights:
+        phase, fade = _mark_phase(f.age_ms), _mark_fade(f.age_ms)
+        if f.node_id is None:
+            a = state.systems[f.low_id].pos
+            b = state.systems[f.high_id].pos
+            center = ui.view.to_screen(lerp(a, b, f.at))
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, None)
+        else:
+            center = ui.view.to_screen(state.systems[f.node_id].pos)
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, f.node_id)
+
+
+def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, tuple[int, int, int]]]:
+    """Every number a playback writes over the map this frame, already placed:
+    ``(centre, text, colour)``.
+
+    Two kinds share that spot above a system. A fight's cost is the *victor's* own
+    losses, in the victor's colour — not both sides' together: the beaten side is
+    wiped out by definition and its garrison or triangle visibly goes, so a
+    combined figure mostly restates what the board already shows while burying the
+    one number the square law makes hard to guess. And a hull finished this turn is
+    ``+N`` in its owner's colour, which is what makes production visible at all
+    without giving it a dwell of its own (`config.FILM_PRODUCE_MS` is 0). Each
+    fades toward the background on its own fixed clock (`_mark_fade`) rather than
+    being cut off, or tied to how long any particular turn's film runs.
+
+    They collide by design rather than by accident: production runs *after* combat,
+    so a system captured this turn produces for its new owner and earns both marks
+    at once — and since neither expires early, the gain reliably stacks a row above
+    the cost whenever that happens, by the font's own line height. One list,
+    because the star-name pass has to treat these as occupied space (the same rule
+    that already keeps names off lane times and a rule's "keep N") and must not
+    have to re-derive where they went.
+    """
+    labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
+    charged: set[int] = set()
+    for mark in _flash_marks(state, ui):
+        if mark.cost > 0 and mark.victor is not None:
+            color = _faded(config.player_color(mark.victor), mark.fade)
+            labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
+            if mark.node_id is not None:
+                charged.add(mark.node_id)
+    for h in ui.fading_hulls:
+        system = state.systems[h.node_id]
+        x, y = _mark_center(ui.view.to_screen(system.pos))
+        if h.node_id in charged:
+            y -= _row_h("small")
+        color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
+        labels.append(((x, y), f"+{h.hulls}", color))
+    return labels
+
+
+def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
+    """Mark every still-fading fight, and write the numbers that go with them
+    (plus any hull finished — see `_film_labels`). Independent of whether a film
+    is currently playing: a mark keeps showing on top of live/history play alike
+    until `Ui.age_fading_marks` prunes it."""
+    for mark in _flash_marks(state, ui):
+        _draw_burst(surface, mark.center, _faded(mark.color, mark.fade), mark.phase)
+    for center, text, color in _film_labels(state, ui):
+        _label_pill(surface, _fonts()["small"], text, color, center)
+
+
+def _draw_film_caption(surface, ui: Ui) -> None:
+    """Name the phase being shown. A gliding fleet does not say which part of the
+    turn it belongs to, and that is the whole point of the animation.
+
+    On the map layer rather than the top bar: a caption there would shift the
+    measured scoreboard in and out as its width changed.
+    """
+    if ui.film is None:
+        return
+    label = ui.film.label(ui.film_ms)
+    if not label:
+        return
+    x, y, w, h = config.play_rect()
+    _label_pill(surface, _fonts()["small"], label, config.COLOR_TEXT_DIM,
+                (x + w // 2, y + h - config.FILM_CAPTION_GAP))
+
+
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:
     valid_dests = set()
     if ui.selected is not None:
@@ -952,6 +1132,12 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
                 continue
             pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
             taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
+    # ...and, for the second or so a playback is writing numbers on the map, those.
+    # Only ever while one is actually showing: `_film_labels` returns nothing
+    # without a film, and there is no film at all unless turn animation is switched
+    # on, so with it off names are placed exactly as they always were.
+    for center, text, _color in _film_labels(state, ui):
+        taken.append(_pill_rect(font, text, center))
 
     def rank(sys) -> tuple[int, int]:
         if sys.id == ui.selected:
@@ -1114,7 +1300,10 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _draw_footer_buttons(surface, state, ui, by)
         return
 
-    ui.end_turn_rect = (br.x, br.y, br.w, br.h)
+    # A film is a playback of a turn already resolved, so the button that would
+    # resolve the next one goes away for its duration — the same take-it-away
+    # rather than guard-it treatment route mode gets just above.
+    ui.end_turn_rect = (0, 0, 0, 0) if ui.film is not None else (br.x, br.y, br.w, br.h)
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
     pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:

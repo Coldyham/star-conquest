@@ -23,8 +23,8 @@ import json
 from typing import Optional
 
 from . import paths
-from .paths import (WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY, WEB_SHARED_SETTINGS_KEY,
-                    data_dir, is_web)
+from .paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY,
+                    WEB_SHARED_SETTINGS_KEY, data_dir, is_web)
 
 _FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
@@ -101,6 +101,22 @@ def set_share_games(on: bool) -> bool:
     full quota, a read-only disk), which the caller may want to say out loud —
     an opt-in that silently forgets itself is worse than one that fails."""
     return set(WEB_SHARE_GAMES_KEY, "1" if on else "")
+
+
+def animate_turns() -> bool:
+    """Whether the player has switched on the animated end of turn.
+
+    Off unless it has been switched on: an absent key, an unreadable store and a
+    fresh install all read as False. Note the ``""``-for-off encoding only works
+    for a preference that defaults *off* — ``get`` cannot tell absent from off.
+    """
+    return get(WEB_ANIMATE_TURNS_KEY) == "1"
+
+
+def set_animate_turns(on: bool) -> bool:
+    """Store the preference. False if the store refused it, which the menu says out
+    loud rather than letting a setting quietly forget itself."""
+    return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "")
 
 
 def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:

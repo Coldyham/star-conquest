@@ -35,6 +35,14 @@ WEB_BESTS_KEY = "sc_bests"
 # for every map that has ever existed and travel in every shared link.
 WEB_SHARE_GAMES_KEY = "sc_share_games"
 
+# Storage key for the "animate turns" display preference (`webstore.animate_turns`):
+# off unless the player turns it on, and stored beside the other local preferences
+# for the same reason `sc_share_games` is — it belongs to this installation, not to
+# a game setup. On `Settings` it would move `challenge_key()` for every map that has
+# ever existed and travel in every shared link, and nothing about how a turn is
+# *drawn* can move a result.
+WEB_ANIMATE_TURNS_KEY = "sc_animate_turns"
+
 # Where a browser download parks its result for the game loop to collect
 # (`share.fetch_log`). localStorage rather than a `window` property because
 # reading one back is the one bridge call this build cannot take for granted:

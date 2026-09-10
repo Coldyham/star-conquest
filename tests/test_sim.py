@@ -21,6 +21,15 @@ def test_invariants_hold_and_most_games_terminate():
         assert r.winner in (0, 1, 2, 3)
 
 
+def test_the_film_rebuilds_every_turns_board():
+    """The playback oracle at volume: `sim.play(film=True)` asserts, every turn of
+    every game, that applying that turn's events to the board it started from
+    lands exactly on the board it ended on."""
+    results = [sim.play(seed, nodes=16, players=3, max_turns=300, film=True)
+               for seed in range(8)]
+    assert results and all(r.turns > 0 for r in results)
+
+
 def test_deterministic_from_seed():
     a = sim.play(5, nodes=18, players=3, max_turns=600)
     b = sim.play(5, nodes=18, players=3, max_turns=600)

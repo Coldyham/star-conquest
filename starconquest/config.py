@@ -192,6 +192,73 @@ LANE_PICK_DIST = 10         # px: click within this of a queued order's lane sel
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
+# Turn playback (see `turnfilm.py`): the optional animated end of turn, off unless
+# switched on (`webstore.animate_turns`). Presentation only — none of it can move a
+# result and none of it is recorded. Durations are per *beat*; the events inside a
+# beat are spread across it, so a turn with forty orders compresses rather than
+# running long and a whole film is bounded by these numbers.
+FILM_LAUNCH_MS = 0       # ms: fleets appear at their source and its garrison drops.
+                         # 0 == folded into the move beat with no pause of its own —
+                         # `Fleet.progress_at` combined with `Film.travel` already
+                         # starts a launched fleet's glide at progress 0, so a
+                         # separate beat only bought a stutter before movement began.
+                         # This is the retreat `system-design.md` names for the
+                         # garrison-drop-at-launch legibility that a held beat used
+                         # to give: watched turn after turn, continuous movement
+                         # mattered more than a paused view of the deduction
+FILM_MOVE_MS = 560       # ...and glide one turn's step, clashes firing where they meet
+FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in the
+                         # engine's sequence with no pause of its own, which is all
+                         # this cut shows; the progress ring already draws the tick,
+                         # so raising this only adds a moment on it
+FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
+                         # sequence with no dwell of their own — the default, used
+                         # for history playback, where a run of animated turns
+                         # must glide continuously rather than stop-start for
+                         # every fight (a mark now outlives the film that made it
+                         # anyway, below, so nothing needed a held beat to be
+                         # read). `FILM_LINGER_COMBAT_MS` is the other one: a
+                         # single live End Turn is worth watching resolve, so it
+                         # uses that instead (`turnfilm.film`'s `linger` flag,
+                         # set by `main.resolve_turn`) — fights shown one node
+                         # after another, same as this used to do at 300
+FILM_LINGER_COMBAT_MS = 300   # ms a live End Turn's fights get instead of the
+                         # above — see `FILM_COMBAT_MS`. History playback never
+                         # uses this: it would put the stop-start back exactly
+                         # where continuous movement matters most
+FILM_LINGER_HOLD_MS = 250     # ms held on the resolved board after a live End
+                         # Turn's last beat, for the same reason `FILM_LINGER_
+                         # COMBAT_MS` exists — watching your own move resolve is
+                         # worth a pause before control returns. History chains
+                         # straight through instead (`main._next_history_film`);
+                         # `Ui.fading_fights`/`fading_hulls` keep marks up
+                         # regardless of which of these a turn used
+FILM_FLASH_MS = 260      # ms a mark (its burst, and the number with it) stays
+                         # fully up before it starts to fade — also how long the
+                         # burst's own rings take to settle and its spokes to
+                         # retract, since the two coincide. Counted from the
+                         # moment the mark fires and unrelated to any film's own
+                         # length (`Ui.fading_fights`/`fading_hulls`,
+                         # `Ui.age_fading_marks`), so it stays lit exactly this
+                         # long whether or not the next turn's film has already
+                         # started gliding on top of it
+FILM_FADE_MS = 500       # ms a mark then takes to dissolve into the background,
+                         # after its `FILM_FLASH_MS` hold — `render._faded`
+                         # blends its colour toward `COLOR_BG` over this window.
+                         # Also independent of any film's length, for the same
+                         # reason: it is what lets movement carry on underneath
+                         # a fading mark instead of pausing for it to be read
+FILM_BURST_R = 22        # px a burst reaches past whatever it marks
+FILM_BURST_W = 2         # px: its stroke
+FILM_BURST_SPOKES = 6    # radial strokes in one
+FILM_LOSS_GAP = 12       # px above a burst's centre for the ships it cost. Fixed
+                         # rather than measured off the burst's reach, which grows
+                         # with the flash — a label that drifted outward with it
+                         # would read as a second moving thing
+FILM_ARRIVAL_GAP = 4     # px between a landed fleet's tip and its node, so the
+                         # garrison count underneath stays readable
+FILM_CAPTION_GAP = 22    # px clearance between the phase caption and the map's floor
+
 # Send popup: the little action panel that opens on the map when a destination
 # is picked (commit send-all, then retune count / forward / cancel).
 SEND_POPUP_W = 184          # px: panel width
@@ -266,6 +333,8 @@ _SCALABLE = (
     "ARROWHEAD_SIZE", "ARROW_GAP", "RULE_CHEVRON_SIZE", "RULE_CHEVRON_GAP",
     "RULE_LABEL_GAP",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
+    "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
+    "FILM_LOSS_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
