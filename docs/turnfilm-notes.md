@@ -12,7 +12,7 @@ heading for why they hold.
 
 ## Where it stands
 
-Landed on this branch, in four commits:
+Landed on this branch, across these commits:
 
 - **Prep.** `Fleet.progress_at` as the one sub-turn position formula,
   `engine._lane_span` refactored onto it, and `engine._lane_crossings` returning
@@ -52,11 +52,22 @@ Landed on this branch, in four commits:
   marks still dissolving on top of it. `Reel.run_to`/`run` now hand back what they
   just applied, which is how `archive_marks` gets at newly-fired events without
   rescanning `film.cues`.
+- **Combat got its dwell back, but only where it was never the problem.** The
+  second pass's "every fight pops at once" turned out to be one speed too few:
+  a live End Turn is worth watching resolve (that pause was the point), while a
+  history replay must never stop for one (that pause was the bug). `turnfilm.film`
+  takes a `linger` flag now — off by default (`FILM_COMBAT_MS` 0, no trailing
+  pad), and `main.resolve_turn` passes `linger=True` for a live turn, which swaps
+  in `FILM_LINGER_COMBAT_MS` (300, the old stagger) and adds a trailing
+  `FILM_LINGER_HOLD_MS` (250). `main._next_history_film` never lingers. Nothing
+  about `Ui.fading_fights`/`fading_hulls` changes either way — a mark's own
+  lifetime was already independent of the film, so `linger` only changes how long
+  *the film* holds the board, never how long a mark stays visible on it.
 
 To re-verify from a clean clone:
 
 ```sh
-uv run pytest                                    # 771 tests
+uv run pytest                                    # 776 tests
 uv run python -m tests.sim --film --trials 80    # the playback oracle, every turn
 ```
 

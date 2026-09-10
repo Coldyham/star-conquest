@@ -119,6 +119,32 @@ def test_consecutive_events_of_one_kind_share_a_beat():
     assert at == [0.0, config.FILM_COMBAT_MS / 3, config.FILM_COMBAT_MS * 2 / 3]
 
 
+def test_linger_gives_combat_its_own_dwell_and_a_trailing_hold():
+    """A live End Turn (`main.resolve_turn`) asks for this; history playback
+    (`main._next_history_film`) never does, since a run of animated turns there
+    must glide continuously rather than stop-start for every fight."""
+    film = turnfilm.film([_landed(0), _landed(1), _landed(2)], linger=True)
+    assert film.beats[0].ms == config.FILM_LINGER_COMBAT_MS
+    # spread across it, one after another, same as combat used to for everyone
+    at = [ms for ms, e in film.cues if isinstance(e, turnfilm.Landed)]
+    assert at == [0.0, config.FILM_LINGER_COMBAT_MS / 3, config.FILM_LINGER_COMBAT_MS * 2 / 3]
+    # ...and the film outlives its last beat, unlike the non-lingering default
+    assert film.total_ms == config.FILM_LINGER_COMBAT_MS + config.FILM_LINGER_HOLD_MS
+
+
+def test_linger_does_nothing_to_a_film_with_no_cues():
+    """No trailing hold on an empty film — there is nothing in it to linger on."""
+    assert turnfilm.film([], linger=True).total_ms == 0.0
+
+
+def test_without_linger_combat_is_instant_with_no_trailing_hold():
+    """The default: matches `test_consecutive_events_of_one_kind_share_a_beat`,
+    spelled out here to contrast directly with the lingering case above."""
+    film = turnfilm.film([_landed(0), _landed(1), _landed(2)])
+    assert film.beats[0].ms == config.FILM_COMBAT_MS == 0
+    assert film.total_ms == 0.0
+
+
 def test_a_clash_rides_inside_the_move_beat_where_it_happened():
     advanced = turnfilm.Advanced(((0, 4),))
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.25, at=0.4, a=0, b=1,

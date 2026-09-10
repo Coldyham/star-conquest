@@ -534,7 +534,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     snap = ((state.winner is not None and not was_over)
             or (state.is_defeated(ui.human_id) and not was_defeated))
 
-    film = turnfilm.film(events) if before is not None else None
+    # Lingering (see turnfilm.film): a live End Turn is worth watching resolve,
+    # unlike history playback (`_next_history_film`), which must glide straight
+    # through instead.
+    film = turnfilm.film(events, linger=True) if before is not None else None
     # A turn with nothing to watch isn't worth a pause, and neither is one nobody
     # asked to see: both land the snap now, exactly as before there were films.
     if film is None or not film.plays:
@@ -580,6 +583,8 @@ def _next_history_film(ui: Ui, history_states: list[GameState],
     if not (nxt <= ui.history_max and nxt < len(history_events)
             and history_events[nxt] and webstore.animate_turns()):
         return None
+    # Not lingering: a run of animated turns here must glide continuously, never
+    # stop-start for a fight to be read (that's what a live End Turn is for).
     film = turnfilm.film(history_events[nxt])
     if not film.plays:
         return None

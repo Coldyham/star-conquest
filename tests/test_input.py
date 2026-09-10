@@ -1918,6 +1918,16 @@ def _won_with_animation(monkeypatch):
     return state, ui, reel
 
 
+def test_resolve_turn_lets_its_combat_linger(monkeypatch):
+    """A live End Turn asks `turnfilm.film` to linger (`main.resolve_turn`'s
+    `linger=True`) — unlike history playback, which must glide straight through
+    (see `main._next_history_film`'s own test)."""
+    _state, ui, _reel = _won_with_animation(monkeypatch)
+    combat = next(b for b in ui.film.beats if b.kind == "combat")
+    assert combat.ms == config.FILM_LINGER_COMBAT_MS
+    assert ui.film.total_ms > combat.end   # a trailing hold, not an instant end
+
+
 def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkeypatch):
     """The snap that reveals the whole board is the deciding turn's *ending*.
     Doing it first would play the last turn out on a map it had already given
@@ -2050,6 +2060,31 @@ def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
         assert ui.film is not None and ui.film.plays
         assert ui.film_ms == 0.0
         assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_never_lingers_on_combat(monkeypatch):
+    """History playback must glide continuously even through a fight — unlike a
+    live End Turn (`test_resolve_turn_lets_its_combat_linger`), it never asks
+    `turnfilm.film` to linger."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        landed = turnfilm.Landed(
+            node_id=0, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                                 defender_ships=6, winner=2, survivors=3),))
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 0),)), landed]]
+
+        assert main._next_history_film(ui, history_states, history_fog, history_events)
+        combat = next(b for b in ui.film.beats if b.kind == "combat")
+        assert combat.ms == 0.0
+        assert ui.film.total_ms == combat.end   # no trailing hold either
     finally:
         pygame.quit()
 

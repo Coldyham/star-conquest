@@ -212,12 +212,27 @@ FILM_PRODUCE_MS = 0      # production's own dwell. 0 == applied at its place in 
                          # this cut shows; the progress ring already draws the tick,
                          # so raising this only adds a moment on it
 FILM_COMBAT_MS = 0       # ms: arrival fights land at their true point in the
-                         # sequence with no dwell of their own, same as launch and
-                         # production — a mark now outlives the film that made it
-                         # (below), so nothing was left for a held beat to buy but
-                         # a pause in the middle of a glide. Was 300 (fights shown
-                         # one node after another); now every fight on a turn pops
-                         # at once, which reads fine since each keeps its own mark
+                         # sequence with no dwell of their own — the default, used
+                         # for history playback, where a run of animated turns
+                         # must glide continuously rather than stop-start for
+                         # every fight (a mark now outlives the film that made it
+                         # anyway, below, so nothing needed a held beat to be
+                         # read). `FILM_LINGER_COMBAT_MS` is the other one: a
+                         # single live End Turn is worth watching resolve, so it
+                         # uses that instead (`turnfilm.film`'s `linger` flag,
+                         # set by `main.resolve_turn`) — fights shown one node
+                         # after another, same as this used to do at 300
+FILM_LINGER_COMBAT_MS = 300   # ms a live End Turn's fights get instead of the
+                         # above — see `FILM_COMBAT_MS`. History playback never
+                         # uses this: it would put the stop-start back exactly
+                         # where continuous movement matters most
+FILM_LINGER_HOLD_MS = 250     # ms held on the resolved board after a live End
+                         # Turn's last beat, for the same reason `FILM_LINGER_
+                         # COMBAT_MS` exists — watching your own move resolve is
+                         # worth a pause before control returns. History chains
+                         # straight through instead (`main._next_history_film`);
+                         # `Ui.fading_fights`/`fading_hulls` keep marks up
+                         # regardless of which of these a turn used
 FILM_FLASH_MS = 260      # ms a mark (its burst, and the number with it) stays
                          # fully up before it starts to fade — also how long the
                          # burst's own rings take to settle and its spokes to

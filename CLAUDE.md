@@ -224,16 +224,21 @@ Rules that hold it together:
 - **The order is the engine's, never one written down in `turnfilm`.** `film()`
   groups *consecutive* events of one class into a beat, so moving `_production`
   ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-  `config.FILM_PRODUCE_MS`, `FILM_COMBAT_MS` and `FILM_LAUNCH_MS` are all 0:
-  launch, combat and production each land at their true place in the sequence
-  with no dwell of their own — `Fleet.progress_at` combined with `Film.travel`
-  already starts a launched fleet's glide at progress 0, so a held launch beat
-  only bought a stutter before movement began, and a fight or a finished hull is
-  made visible by a mark (below), not by holding the board still to show one.
-  Keep production at 0 unless it stops being the last phase: `Film.plays` is
-  "does any beat have a duration", so a dwell would make every otherwise-quiet
-  turn pause instead of resolving instantly. A film built this way carries no
-  trailing pad either — `total_ms` ends the instant its last beat does — which is
+  `config.FILM_PRODUCE_MS` and `FILM_LAUNCH_MS` are always 0: launch and
+  production land at their true place in the sequence with no dwell of their own
+  — `Fleet.progress_at` combined with `Film.travel` already starts a launched
+  fleet's glide at progress 0, so a held launch beat only bought a stutter before
+  movement began, and a finished hull is made visible by a mark (below), not by
+  holding the board still to show one. Keep production at 0 unless it stops being
+  the last phase: `Film.plays` is "does any beat have a duration", so a dwell
+  would make every otherwise-quiet turn pause instead of resolving instantly.
+  Combat is the one beat with two speeds: `config.FILM_COMBAT_MS` is 0 by
+  default, but `film(events, linger=True)` swaps in `FILM_LINGER_COMBAT_MS` and
+  adds a trailing `FILM_LINGER_HOLD_MS` — `main.resolve_turn` asks for that on a
+  live End Turn, worth watching resolve, while `main._next_history_film` never
+  does, since a run of animated turns there must glide continuously rather than
+  stop-start for every fight. Neither path pads `total_ms` beyond what `linger`
+  asks for: a non-lingering film ends the instant its last beat does, which is
   what lets the *next* turn's move beat start immediately with nothing left to
   wait out (see history chaining, below).
 - **A mark outlives the film that made it, fading on its own clock.**
@@ -281,16 +286,18 @@ Rules that hold it together:
   in) rather than whenever a film merely happens to be up — a manually-triggered
   film runs with `Ui.playing` False throughout, so toggling play *on* while it
   plays must leave it alone rather than freezing it on the first frame.
-- **History playback chains an animated turn straight into the next one, and a
-  film no longer has to pad itself for a mark to be read.** Both changes serve
-  the same end: a run of animated turns glides continuously instead of
-  stuttering. `main._next_history_film` is tried immediately once a film lands,
-  before the `PLAY_MS` pacing below it — which only ever fires for a turn with
-  nothing to animate, or with the preference off. And since a mark's visibility
-  no longer depends on `film` still being current (above), `film()` need not
-  hold `total_ms` open at all once its last beat ends — so the *next* turn's
-  move beat can start on literally the next frame, with whatever marks the
-  previous turn produced still fading on top of it.
+- **History playback chains an animated turn straight into the next one, and
+  never lingers.** Both serve the same end: a run of animated turns glides
+  continuously instead of stuttering. `main._next_history_film` is tried
+  immediately once a film lands, before the `PLAY_MS` pacing below it — which
+  only ever fires for a turn with nothing to animate, or with the preference off
+  — and it never passes `linger=True`, so combat there is always the instant,
+  unpadded default. A live End Turn is the opposite on purpose: watching your own
+  move resolve is worth a pause, which is what `main.resolve_turn`'s
+  `linger=True` buys (above). Neither path loses anything by choosing either way
+  — a mark's visibility no longer depends on `film` still being current (above),
+  so lingering or not only changes how long `film` itself holds the board, never
+  how long a mark stays up.
 - **The correctness test is the history path.** One `reconstruct` pass yields both
   a board per turn and that turn's events, so applying turn *i*'s film to a copy of
   board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at

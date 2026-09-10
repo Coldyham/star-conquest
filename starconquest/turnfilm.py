@@ -310,13 +310,22 @@ class Film:
         return min(1.0, max(0.0, (ms - beat.start) / beat.ms))
 
 
-def film(events: list[Event]) -> Film:
+def film(events: list[Event], linger: bool = False) -> Film:
     """Schedule one turn's events.
 
     Consecutive events of the same class become one beat, in emission order —
     nothing here consults a phase order, so the engine's is the one that shows.
     Events inside a beat are spread across it, which bounds a film's length by the
     duration constants however busy the turn was.
+
+    ``linger`` swaps the combat beat's duration for `config.FILM_LINGER_COMBAT_MS`
+    and adds a trailing `config.FILM_LINGER_HOLD_MS` pause, instead of resolving
+    combat at 0 dwell with no pad at all. `main.resolve_turn` sets it for a live
+    End Turn, worth watching resolve; history playback (`main._next_history_film`)
+    leaves it off, since a run of animated turns there must glide continuously
+    rather than stop-start for every fight — a mark's own visibility
+    (`Ui.archive_marks`/`age_fading_marks`) outlives either kind of film, so
+    nothing here is lost by not lingering.
     """
     beats: list[Beat] = []
     cues: list[tuple[float, Event]] = []
@@ -339,7 +348,10 @@ def film(events: list[Event]) -> Film:
             runs.append((kind, label, [event]))
 
     for kind, label, run in runs:
-        ms = float(getattr(config, _DURATIONS[kind]))
+        if kind == "combat" and linger:
+            ms = float(config.FILM_LINGER_COMBAT_MS)
+        else:
+            ms = float(getattr(config, _DURATIONS[kind]))
         beat = Beat(kind, label, at, ms)
         beats.append(beat)
         # At the *start* of each event's slot: the advance has to land on the move
@@ -361,12 +373,14 @@ def film(events: list[Event]) -> Film:
     # Stable, and on the time alone, so cues sharing an instant — which a
     # zero-length beat guarantees — keep the order the engine emitted them in.
     cues.sort(key=lambda c: c[0])
-    # No trailing hold: a mark's own visibility (`Ui.archive_marks` /
+    # No trailing hold by default: a mark's own visibility (`Ui.archive_marks` /
     # `age_fading_marks`) outlives whichever film produced it, so the film itself
     # need not pad its `total_ms` to give one time to be read — it can end the
     # instant its last beat does, which is what lets the *next* turn's move beat
     # start immediately instead of waiting out a pause with nothing left to show.
-    return Film(tuple(beats), tuple(cues), at)
+    # `linger` adds one back regardless (see this function's docstring).
+    hold = config.FILM_LINGER_HOLD_MS if linger and cues else 0.0
+    return Film(tuple(beats), tuple(cues), at + hold)
 
 
 # ---------------------------------------------------------------------------- #
