@@ -1270,6 +1270,102 @@ inference that removing the gate would let the converse pay.
 Nothing shipped. The value of the exercise is the correction: four null results
 with one shared explanation, and the explanation was checkable and false.
 
+### Phase 3b re-flooding an already-covered target, and a settled dead end's stranded surplus
+
+Found by inspection of a real game, not a sweep: Phase 3's horizon search sets
+`struck[target.id]` the moment `inbound + committable >= req` for *some* horizon,
+with no check on whether `inbound` (fleets already dispatched on an earlier turn)
+covers it on its own. A neutral several turns down an otherwise-empty branch,
+already sent enough to take, stays in `targets` (still neutral) and in `struck`
+every turn until the wave lands — and Phase 3b, seeing it `struck`, was pouring
+*every* neighbouring source's entire remaining budget into it again, every one of
+those turns, on the theory that "the target was already priced and is already
+being attacked." True the turn the wave launches; false on every turn after,
+where nothing further is needed from anywhere. A tiny board makes the bug
+obvious: a 40-ship system one lane from a 6-ship neutral, 8 ships already
+in flight and sufficient — the unfixed bot sends the *other 32* into the same
+target, next turn, for no reason (`test_commitment_does_not_re_flood_an_already_
+covered_target`).
+
+`shortfall = req - inbound` was already computed for exactly this — it is the
+gap beyond what is already inbound, before this turn's commitment — so the first
+cut gated `struck`/`pincer_held` on `shortfall > 0` for *every* target, rival or
+neutral, rather than on `chosen_h` merely being found.
+
+**The same information exposes a second, distinct waste.** A frontier system's
+own leftover budget has always stayed home — `frontier` systems are
+unconditionally skipped in Phase 4's flow-to-front, reasoning that a front might
+need its own reserve for its own next strike. That reasoning does not hold for a
+system whose *only* non-owned neighbour is a neutral that is now `settled`
+(covered, per above): nothing behind a settled neutral can ever threaten or need
+reinforcing, so there is nothing left to hold a reserve *against*. Recording
+which neutral targets settle this way in the same Phase 3 pass and excluding a
+frontier system from the "keep reserve" set once every one of its non-owned
+neighbours has settled lets that surplus leapfrog to a real front instead —
+still deferring to any neighbour that borders a live rival or an unresourced
+neutral, which keeps its reserve exactly as before
+(`test_a_settled_dead_end_frontier_flows_its_surplus_onward`).
+
+**The first cut regressed hard at high `DEFENDER_ADVANTAGE`, and the two fixes
+above are not why.** Paired against a copy with both fixes reverted:
+
+    duel (run_ladder)                         W-L        n     rate      z
+    default combat, 18 nodes                402-366     768    52.3%  +1.30
+    default combat, 12 nodes                383-363     746    51.3%  +0.73
+    default combat, 30 nodes                272-292     564    48.2%  -0.84
+    DEFENDER_ADVANTAGE 1.5, 18 nodes        334-388     722    46.3%  -2.01
+    DEFENDER_ADVANTAGE 1.25, 18 nodes       409-447     856    47.8%  -1.30
+
+Splitting the two fixes apart (each alone against the reverted copy, at
+`DEFENDER_ADVANTAGE 1.5`) pinned it on one of them cleanly: the frontier-flow fix
+read a clean null (450-446, 50.2%, z=+0.13, n=896) while the re-flood gate alone
+read **394-480, 45.1%, z=-2.91, n=874** — worse than the combined reading, and
+unambiguous.
+
+**Why:** `_enemy_margin()` (marshal's price for attacking a *rival*-owned
+target) deliberately carries no jitter cushion of its own — see "Garrisons run
+away" above; a beatable garrison usually flees, so paying for the dice buys
+almost nothing. The old bug was accidentally supplying that missing cushion for
+free, every time it kept re-flooding an "already covered" siege — and that
+cushion turns out to matter exactly in the ~13% of cases the garrison *doesn't*
+flee, a share this file already measured as rising sharply with
+`DEFENDER_ADVANTAGE` ("a high advantage is exactly the setting at which a
+defender *can* hold and therefore does"). A neutral target has no such gap to
+begin with: `_neutral_margin()` prices its own jitter cushion honestly, since a
+neutral can't flee or bluff. So the fix is scoped to neutral targets only —
+`if shortfall > 0 or target.owner_id != 0`, leaving a rival-held target's
+behaviour exactly as it was before either fix existed.
+
+**Re-measured** with that scope, against the same reverted copy:
+
+    duel (run_ladder), default combat, 18n   382-381     763    50.1%  +0.04
+    DEFENDER_ADVANTAGE 1.5, 18 nodes         358-370     728    49.2%  -0.44
+    DEFENDER_ADVANTAGE 1.25, 18n, seeds 1-500  418-447    873    47.9%  -1.25
+    DEFENDER_ADVANTAGE 1.25, 18n, seeds 501-1000 433-422  855    50.6%  +0.38
+    DEFENDER_ADVANTAGE 1.25 pooled           851-877    1728    49.3%  -0.62
+
+    melee (run_swap)                        marshal   defenseonly   others         finished
+    3p: + knower, 24n                          204         192      knower 185        581
+    4p: + knower/rusherplus, 18n               220         179      knower 185, r. 3  587
+    speed=2.0 (long lanes), 24n duel           187         162                        349 (57.7%→53.6%, z=+1.34)
+
+The regression is gone (18n default duel is now an honest 50.1% null, both
+elevated-advantage cells settle near 50% once the second seed batch is pooled —
+the first adv-1.25 batch alone (47.9%) is the same false alarm this file already
+warns about under "The 2026-09 tuning sweep": don't trust a single high-timeout,
+high-advantage reading without doubling it). The trade-off is real, not free:
+narrowing the scope to neutrals-only gave back some of what the unscoped version
+measured, in duels (52.3% → 50.1%) and in the long-lane cell (57.7% → 53.6%,
+since a distant rival siege can be just as long-lived as a neutral chain and no
+longer gets the same treatment). What survives is smaller but unambiguous and
+regression-free: the melees still show a clear, repeatable gap (204 vs 192, 220
+vs 179), and the reported bug — a several-hop dead-end neutral branch soaking up
+reinforcements that could have gone to a real front — is fixed exactly as
+reported, with nothing borrowed from a mechanism that needed to stay put. Not a
+re-tune of a margin, so no `RISK_PARITY`-style constant to float against
+`DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
+exactly the case that has no jitter cushion to lose.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/

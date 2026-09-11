@@ -54,6 +54,26 @@ What it changes, in descending order of measured value:
     Worth 52.0% (z = +2.31, pooled duels) against the bot without it, and a much
     wider gap once a third owner is actually on the board to fold against.
 
+  * **A finished strike stops attracting reinforcements — for a neutral.**
+    Phase 3b used to keep pouring a source's whole remaining budget into any
+    ``struck`` target, even one already fully covered by a wave sent turns ago
+    and still travelling — a lone neutral several hops down an empty branch
+    could be re-flooded every turn until that wave landed. Gated on there being
+    a genuine gap (``shortfall > 0``) left beyond what is already inbound. The
+    same bookkeeping lets a frontier system whose only neighbours are
+    now-settled neutrals stop holding a reserve nothing can ever threaten, so
+    its surplus leapfrogs to a real front instead of idling. Deliberately
+    scoped to neutral targets only: gating a *rival*-held target the same way
+    measured a real regression at high ``DEFENDER_ADVANTAGE`` (down to 45.1%,
+    z = -2.91) — ``_enemy_margin`` prices a rival attack with no jitter cushion
+    of its own, and the old bug was accidentally supplying that cushion for
+    free on the (rarer, but advantage-correlated) fights that don't end in a
+    flee. A neutral has no such gap; ``_neutral_margin`` prices its jitter
+    honestly already. Small in a duel once correctly scoped (an honest ~50%
+    null); a real, repeatable gap in melees, where dead-end branches are more
+    common and the freed surplus has somewhere real to go (220 vs 179 in one
+    4-player cell).
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -692,6 +712,7 @@ def decide(state, pid):
 
     struck: dict[int, int] = {}
     pincer_held: set[int] = set()
+    settled: set[int] = set()   # neutral targets already covered — see Phase 4
     for target in targets:
         nbrs = [(state.travel_turns(sid, target.id), sid) for sid in owned
                 if target.id in sysmap[sid].neighbors
@@ -714,6 +735,12 @@ def decide(state, pid):
             break
         if chosen_h is None:
             continue  # can't crack it even at full stretch — leave the ships to mass
+        if shortfall <= 0 and target.owner_id == 0:
+            # Fully covered by a wave dispatched an earlier turn — nothing left
+            # for Phase 3b to feed below, and (for a neutral, which cannot be
+            # reinforced by anyone else) nothing for a bordering frontier
+            # system to keep standing reserve against either. See Phase 4.
+            settled.add(target.id)
 
         # Launch only the far wave (dist == H) now, covering the part the nearer
         # waves won't; those launch on later turns and converge, because next turn
@@ -729,18 +756,34 @@ def decide(state, pid):
             budget[sid] -= send
             need -= send
 
-        struck[target.id] = chosen_h
-        if RESERVE_PINCER:
-            # Those nearer sources are promised to next turn's converging wave.
-            # Unreserved, a later and poorer target spends them and the stagger
-            # never materialises.
-            pincer_held.update(sid for d, sid in nbrs if d < chosen_h)
+        if shortfall > 0 or target.owner_id != 0:
+            # A neutral already fully covered by a wave dispatched an earlier
+            # turn has nothing left for any of our systems to contribute, near
+            # or far, and must not be mistaken by Phase 3b below for an active
+            # strike to keep feeding — a neutral cannot reinforce itself, so
+            # there is nothing to be insured against.
+            #
+            # A *rival*-held target stays unconditional even at shortfall <= 0:
+            # `_enemy_margin` deliberately carries no jitter cushion of its own
+            # (see its docstring — a beatable garrison usually flees, so paying
+            # for the dice buys little), and measurement showed that dropping
+            # this margin's slack cost real games specifically where a garrison
+            # stands and fights anyway — a lot more of them at high
+            # DEFENDER_ADVANTAGE. Continuing to feed an already-"covered" siege
+            # is exactly where that missing cushion was coming from by accident.
+            struck[target.id] = chosen_h
+            if RESERVE_PINCER:
+                # Those nearer sources are promised to next turn's converging
+                # wave. Unreserved, a later and poorer target spends them and
+                # the stagger never materialises.
+                pincer_held.update(sid for d, sid in nbrs if d < chosen_h)
 
     # --- Phase 3b: commit the surplus ---------------------------------------- #
     # By the square law a bigger strike costs fewer ships and holds the capture
     # afterwards, so ships with no other job this turn ride along with the wave
     # rather than parking. This raises no threshold: the target was already priced
-    # and is already being attacked.
+    # and is already being attacked — a covered neutral is the one exception
+    # (see the guard above), since there is nothing there to insure against.
     # Note this cannot cost us a second front: Phase 3 has already priced and
     # launched at *every* affordable target, so a system that has just broken
     # through takes all the weak systems in front of it either way. All that is
@@ -760,9 +803,16 @@ def decide(state, pid):
                 budget[sid] = 0
 
     # --- Phase 4: leapfrog / flow to the richest front ----------------------- #
-    parent = _flow_to_front(state, set(owned), frontier, pid, max_prod)
+    # A frontier system whose every non-owned neighbour is a `settled` neutral
+    # (see Phase 3) is a dead end, not a front: nothing there can reinforce, so
+    # there is nothing left to hold a standing reserve against, and its surplus
+    # is free to leapfrog onward exactly like a rear system's.
+    live_frontier = {sid for sid in frontier
+                     if any(sysmap[n].owner_id != pid and n not in settled
+                            for n in sysmap[sid].neighbors)}
+    parent = _flow_to_front(state, set(owned), live_frontier, pid, max_prod)
     for sid in sorted(owned):
-        if sid in frontier:
+        if sid in live_frontier:
             continue  # the front's leftover stays home as the standing reserve
         b = budget.get(sid, 0)
         if b > 0 and sid in parent:

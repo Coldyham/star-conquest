@@ -365,6 +365,52 @@ def test_commitment_only_ever_adds(ma):
         engine.end_turn(state, decide=ai.decide)
 
 
+def test_commitment_does_not_re_flood_an_already_covered_target(ma):
+    """A neutral already fully covered by a wave still travelling must not be
+    topped up again every turn until it lands.
+
+    Without the `shortfall > 0` guard, Phase 3's horizon search still finds
+    `chosen_h` from pre-existing inbound alone and marks the target `struck`,
+    and Phase 3b then dumps the source's *entire* remaining budget into it —
+    every turn, for as long as the original wave is still in transit.
+    """
+    state = _board({1: (2, 32, 3), 2: (0, 6, 3)}, [(1, 2, 3)])
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+                              turns_total=3, turns_remaining=2))
+    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+        "test board's existing wave should already cover the target"
+
+    orders = [o for o in ai.decide(state, 2) if o.dest_id == 2]
+    assert orders == [], f"re-flooded an already-covered target: {orders}"
+
+
+def test_a_settled_dead_end_frontier_flows_its_surplus_onward(ma):
+    """A frontier system whose only non-owned neighbour is a neutral already
+    fully covered (see the previous test) is a dead end, not a front: nothing
+    there can ever reinforce, so there is nothing left to hold a standing
+    reserve against, and its surplus should leapfrog to a real front instead
+    of idling at home.
+
+    1 (ours) borders 2 (neutral, already covered by an in-transit wave) and 3
+    (ours); 3 borders 4 (a real rival). Without the fix, 1 is unconditionally
+    "frontier" and Phase 4 leaves its whole 40-ship surplus sitting at home;
+    with it, 1 is not a *live* front and the surplus flows to 3, the system
+    actually bordering an enemy.
+    """
+    config.DEFENDER_ADVANTAGE = 1.0
+    config.COMBAT_JITTER = 0.10
+    state = _board({1: (2, 40, 3), 2: (0, 6, 3), 3: (2, 5, 3), 4: (3, 50, 3)},
+                   [(1, 2, 3), (1, 3, 1), (3, 4, 1)])
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+                              turns_total=3, turns_remaining=2))
+    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+        "test board's existing wave should already cover the neutral"
+
+    totals = _totals(ai.decide(state, 2))
+    assert totals.get(2, 0) == 0, "must not re-flood the already-covered neutral"
+    assert totals.get(3, 0) == 40, f"1's surplus should flow to 3, the live front: {totals}"
+
+
 def test_commitment_does_not_touch_an_unstruck_target(ma):
     """Too strong to crack: the ships mass at home rather than feeding it."""
     state = _board({1: (2, 5, 3), 2: (1, 60, 3)}, [(1, 2, 1)])
