@@ -1131,7 +1131,80 @@ dying garrison inflicts on the attacker; what evacuating buys is a garrison that
 survives to be spent on a *different*, self-chosen fight instead of a forced one.
 Over enough games those roughly cancel. Not shipped.
 
-### The combination: four null ideas together, and the masking theory tested
+### Re-tuned for production-before-combat and the garrison-fights-last pile-up
+
+Two engine rules moved after the section above was written: production now runs
+*before* combat (so a hull finishing this turn is in the garrison for the fight
+right after it), and a multi-owner pile-up now folds attackers strongest-first
+*among themselves* before the survivor faces the garrison last, rather than
+folding the garrison in wherever its size placed it in the queue. Phase 1's
+threat math predates both and was measured stale against them in two distinct
+ways, fixed together as one `models/marshal.py` change (no `RISK_PARITY` /
+`_attacker_pileup` split — both moved balance for the whole doomed-system
+decision and are cheaper to revalidate once).
+
+**The pile-up half.** `_enemy_arrivals` priced every hostile fleet landing on a
+turn as one combined sum regardless of owner — correct under the old rule, where
+the garrison queued by size rather than going last, but wrong under the new one:
+two rivals arriving together fight *each other* first. Garrison 10, rivals 11 and
+10 landing the same turn, used to price as 21 incoming and evacuate; the actual
+fight leaves the 11 a ~5-ship remnant after it beats the 10, which our garrison
+comfortably holds. `_attacker_pileup` folds a turn's arrivals the same way
+`combat.resolve_arrival` does — strongest-first, no `DEFENDER_ADVANTAGE` between
+two attackers, the same pessimistic jitter corner `_after_clash` already uses —
+before the existing across-turn cumulative logic ever sees the number. Inert in a
+duel by construction: with one live rival, a turn's arrivals can only ever have
+one owner, so `_attacker_pileup` on a single-element list is a no-op. That also
+means the duel cells below measure the *other* half in isolation.
+
+**The parity half.** Phase 1 only ever asked whether a system cleared the safe,
+jitter-padded margin (`_defend_margin`); short of that, it evacuated
+unconditionally, even when the garrison — with no help borrowed from anywhere —
+already matched or beat every horizon's incoming total on the raw count alone.
+Evacuating is a certain loss of the system; standing at bare parity is a fight
+that is no worse than even (ties already break to the defender, before
+`DEFENDER_ADVANTAGE` even applies), and it costs nothing borrowed from a
+neighbour. `RISK_PARITY = 1.0` is that literal raw-count bar — deliberately not
+folding `DEFENDER_ADVANTAGE` in further to loosen it below parity, per "only take
+the risk if the count is already at least even," which is the more conservative
+reading and the one measured below. It fires only as a *last resort*: recorded
+in Phase 1 as `risk_ok` but not acted on there, so Phase 2's consolidation — the
+deliberately shipped, measured "richer of two doomed neighbours" pooling above —
+still gets first claim on the garrison. Inside `_evacuate` itself, branch (a)'s
+opportunistic capture of something else still outranks it too; `risk_ok` only
+turns a would-be retreat or cornered stand-off into a deliberate hold once
+nothing better was already going to happen to that garrison.
+
+**Measured**, paired against an unmodified copy (`marshal_base`) via
+`tests.sim.run_ladder`/`run_swap`, seeds 1..n:
+
+    duel (run_ladder), default combat unless noted   W-L        n     rate      z
+    18 nodes                                       502-452     954    52.6%  +1.62
+    12 nodes                                       495-464     959    51.6%  +1.00
+    30 nodes                                       300-260     560    53.6%  +1.69
+    18 nodes, DEFENDER_ADVANTAGE 1.5                222-222    444    50.0%  +0.00
+    18 nodes, DEFENDER_ADVANTAGE 1.25               278-263    541    51.4%  +0.64
+    ---- pooled                                   1797-1661   3458    52.0%  +2.31
+
+A duel only ever exercises the parity half (see above), and it is small but real
+once pooled — every cell sits at or above 50%, none below, and the null only
+shows up at `DEFENDER_ADVANTAGE 1.5` (exact 222-222), where the safe margin is
+already so cheap to clear that few systems ever reach the doomed-and-parity-ok
+branch at all. A free-for-all (`run_swap`, wins per strategy, same seeds run
+once per roster) is where the pile-up half actually gets exercised, since it
+needs a genuine third owner converging on the same system:
+
+    melee (run_swap)                                marshal   marshal_base   others           finished
+    3p: marshal / marshal_base / knower, 24n           210          191      knower 179           580
+    4p: + rusherplus, 30n                              228          124      knower 231, rusher 2  585
+    4p: + thinker, 12n (long lanes)                    203          177      knower 94, thinker 69 543
+
+New marshal clears old marshal in every melee cell, by a wide margin in the
+4-player ones (228 vs 124; 203 vs 177) — the regime the pile-up fix exists for.
+`marshal_base` (unmodified) is the weakest of the three real competitors in the
+`+rusherplus` cell despite otherwise being the same bot that leads the ladder
+(see "Where marshal stands"), which is the clearest sign the old pile-up pricing
+was actively costing it once a third player is actually on the board.
 
 Four ideas above each measure null on their own — the remnant tactic (waiting for
 a rival to break a contested neutral), the 0-ship neutral reprice, hold-and-
@@ -1196,6 +1269,102 @@ inference that removing the gate would let the converse pay.
 
 Nothing shipped. The value of the exercise is the correction: four null results
 with one shared explanation, and the explanation was checkable and false.
+
+### Phase 3b re-flooding an already-covered target, and a settled dead end's stranded surplus
+
+Found by inspection of a real game, not a sweep: Phase 3's horizon search sets
+`struck[target.id]` the moment `inbound + committable >= req` for *some* horizon,
+with no check on whether `inbound` (fleets already dispatched on an earlier turn)
+covers it on its own. A neutral several turns down an otherwise-empty branch,
+already sent enough to take, stays in `targets` (still neutral) and in `struck`
+every turn until the wave lands — and Phase 3b, seeing it `struck`, was pouring
+*every* neighbouring source's entire remaining budget into it again, every one of
+those turns, on the theory that "the target was already priced and is already
+being attacked." True the turn the wave launches; false on every turn after,
+where nothing further is needed from anywhere. A tiny board makes the bug
+obvious: a 40-ship system one lane from a 6-ship neutral, 8 ships already
+in flight and sufficient — the unfixed bot sends the *other 32* into the same
+target, next turn, for no reason (`test_commitment_does_not_re_flood_an_already_
+covered_target`).
+
+`shortfall = req - inbound` was already computed for exactly this — it is the
+gap beyond what is already inbound, before this turn's commitment — so the first
+cut gated `struck`/`pincer_held` on `shortfall > 0` for *every* target, rival or
+neutral, rather than on `chosen_h` merely being found.
+
+**The same information exposes a second, distinct waste.** A frontier system's
+own leftover budget has always stayed home — `frontier` systems are
+unconditionally skipped in Phase 4's flow-to-front, reasoning that a front might
+need its own reserve for its own next strike. That reasoning does not hold for a
+system whose *only* non-owned neighbour is a neutral that is now `settled`
+(covered, per above): nothing behind a settled neutral can ever threaten or need
+reinforcing, so there is nothing left to hold a reserve *against*. Recording
+which neutral targets settle this way in the same Phase 3 pass and excluding a
+frontier system from the "keep reserve" set once every one of its non-owned
+neighbours has settled lets that surplus leapfrog to a real front instead —
+still deferring to any neighbour that borders a live rival or an unresourced
+neutral, which keeps its reserve exactly as before
+(`test_a_settled_dead_end_frontier_flows_its_surplus_onward`).
+
+**The first cut regressed hard at high `DEFENDER_ADVANTAGE`, and the two fixes
+above are not why.** Paired against a copy with both fixes reverted:
+
+    duel (run_ladder)                         W-L        n     rate      z
+    default combat, 18 nodes                402-366     768    52.3%  +1.30
+    default combat, 12 nodes                383-363     746    51.3%  +0.73
+    default combat, 30 nodes                272-292     564    48.2%  -0.84
+    DEFENDER_ADVANTAGE 1.5, 18 nodes        334-388     722    46.3%  -2.01
+    DEFENDER_ADVANTAGE 1.25, 18 nodes       409-447     856    47.8%  -1.30
+
+Splitting the two fixes apart (each alone against the reverted copy, at
+`DEFENDER_ADVANTAGE 1.5`) pinned it on one of them cleanly: the frontier-flow fix
+read a clean null (450-446, 50.2%, z=+0.13, n=896) while the re-flood gate alone
+read **394-480, 45.1%, z=-2.91, n=874** — worse than the combined reading, and
+unambiguous.
+
+**Why:** `_enemy_margin()` (marshal's price for attacking a *rival*-owned
+target) deliberately carries no jitter cushion of its own — see "Garrisons run
+away" above; a beatable garrison usually flees, so paying for the dice buys
+almost nothing. The old bug was accidentally supplying that missing cushion for
+free, every time it kept re-flooding an "already covered" siege — and that
+cushion turns out to matter exactly in the ~13% of cases the garrison *doesn't*
+flee, a share this file already measured as rising sharply with
+`DEFENDER_ADVANTAGE` ("a high advantage is exactly the setting at which a
+defender *can* hold and therefore does"). A neutral target has no such gap to
+begin with: `_neutral_margin()` prices its own jitter cushion honestly, since a
+neutral can't flee or bluff. So the fix is scoped to neutral targets only —
+`if shortfall > 0 or target.owner_id != 0`, leaving a rival-held target's
+behaviour exactly as it was before either fix existed.
+
+**Re-measured** with that scope, against the same reverted copy:
+
+    duel (run_ladder), default combat, 18n   382-381     763    50.1%  +0.04
+    DEFENDER_ADVANTAGE 1.5, 18 nodes         358-370     728    49.2%  -0.44
+    DEFENDER_ADVANTAGE 1.25, 18n, seeds 1-500  418-447    873    47.9%  -1.25
+    DEFENDER_ADVANTAGE 1.25, 18n, seeds 501-1000 433-422  855    50.6%  +0.38
+    DEFENDER_ADVANTAGE 1.25 pooled           851-877    1728    49.3%  -0.62
+
+    melee (run_swap)                        marshal   defenseonly   others         finished
+    3p: + knower, 24n                          204         192      knower 185        581
+    4p: + knower/rusherplus, 18n               220         179      knower 185, r. 3  587
+    speed=2.0 (long lanes), 24n duel           187         162                        349 (57.7%→53.6%, z=+1.34)
+
+The regression is gone (18n default duel is now an honest 50.1% null, both
+elevated-advantage cells settle near 50% once the second seed batch is pooled —
+the first adv-1.25 batch alone (47.9%) is the same false alarm this file already
+warns about under "The 2026-09 tuning sweep": don't trust a single high-timeout,
+high-advantage reading without doubling it). The trade-off is real, not free:
+narrowing the scope to neutrals-only gave back some of what the unscoped version
+measured, in duels (52.3% → 50.1%) and in the long-lane cell (57.7% → 53.6%,
+since a distant rival siege can be just as long-lived as a neutral chain and no
+longer gets the same treatment). What survives is smaller but unambiguous and
+regression-free: the melees still show a clear, repeatable gap (204 vs 192, 220
+vs 179), and the reported bug — a several-hop dead-end neutral branch soaking up
+reinforcements that could have gone to a real front — is fixed exactly as
+reported, with nothing borrowed from a mechanism that needed to stay put. Not a
+re-tune of a margin, so no `RISK_PARITY`-style constant to float against
+`DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
+exactly the case that has no jitter cushion to lose.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
