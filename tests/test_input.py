@@ -2237,3 +2237,21 @@ def test_a_film_carries_the_fog_the_turn_began_with(monkeypatch):
         assert ui.film_visible == frozenset()   # additive: nothing to put back
     finally:
         pygame.quit()
+
+
+def test_a_click_at_the_origin_never_ends_the_turn_on_an_undrawn_button():
+    """Every rect test is guarded on the rect's width, including End Turn's.
+
+    `(0, 0, 0, 0)` is what a control that did not draw this frame is left as, and
+    `_point_in_rect` finds the point (0, 0) inside it — so an unguarded test is
+    live at exactly one pixel. `Ui` starts that way, and the loop polls events
+    before the first `render.draw`, so a press on the top-left pixel of the very
+    first frame used to end turn 0.
+    """
+    state, ui = _setup()
+    try:
+        assert ui.end_turn_rect == (0, 0, 0, 0)
+        assert ui.play_pause_rect == (0, 0, 0, 0)
+        assert _click_pos(state, ui, (0, 0)) is None
+    finally:
+        pygame.quit()

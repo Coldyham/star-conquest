@@ -271,7 +271,7 @@ SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
 
 # Sliders (the send popup's count slider and history mode's turn scrubber — the
-# same widget, drawn by render._draw_slider). The knob is inset by its radius at
+# same widget, drawn by widgets.slider). The knob is inset by its radius at
 # both ends of the track, so it never overhangs the box it sits in.
 SLIDER_TRACK_H = 6          # px: thickness of the track
 SLIDER_KNOB_R = 7           # px: radius of the knob

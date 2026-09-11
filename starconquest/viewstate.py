@@ -239,7 +239,7 @@ class Ui:
     # The popup's count slider: the whole row is the grab target, but the knob
     # *travels* over the row inset by `config.SLIDER_KNOB_R` at each end, so it
     # never overhangs the panel and never lags the finger (see `set_slider_from_x`,
-    # whose mapping render._draw_slider inverts exactly). Rebuilt by render each
+    # whose mapping widgets.slider inverts exactly). Rebuilt by render each
     # frame from the popup's current top-left, so it follows a dragged popup.
     slider_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     dragging_slider: bool = False
@@ -564,7 +564,7 @@ class Ui:
     def set_slider_from_x(self, state: GameState, px: int) -> None:
         """Map a press/drag x within ``slider_rect`` onto the count being edited.
 
-        Inverse of the knob placement in ``render._draw_slider``: the travel is the
+        Inverse of the knob placement in ``widgets.slider``: the travel is the
         recorded row inset by the knob radius at each end, so the knob sits exactly
         under the pointer across the whole range. Funnels into ``set_keep`` /
         ``set_send_count``, inheriting their clamping and the write-through to the

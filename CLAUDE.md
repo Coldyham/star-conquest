@@ -72,7 +72,8 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   Animated end of turn below. `replay` serializes a
   match to JSON and replays it back through the headless engine — see Persistence
   & replay below.)
-- **Shell — the only pygame modules:** `render`, `input`, `menu`, and `main`.
+- **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
+  and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
@@ -396,17 +397,29 @@ intact.
   menu tunes copies on a `Settings`, and `settings._apply_globals` (called by
   `build_state` just before generation) is the single writer that pushes them
   back into `config`.
-- **Nothing that holds text gets a fixed pixel size.** A button's width comes
-  from its measured label (`render._btn_w`, and `render._btn` draws + returns
-  the hit-rect), a stacked text row's pitch from the font's own line height
-  (`render._row_h`), a modal's stack is measured then centred
-  (`render._draw_modal`), and help prose is reflowed to the panel it sits in
-  (`render._wrap`). One-off layout literals still go through `config.s()`.
-  **Nor is the scale itself fixed for the run:** `main.fit_ui` re-fits the UI to
-  the surface at boot *and* on every window resize (floored at the design
-  baseline), so anything cached off a font size must be keyed on
-  `config.ui_scale` rather than built once (`render._fonts`,
-  `menu._modal_fonts`).
+- **Nothing that holds text gets a fixed pixel size.** The measured-layout kit
+  lives in `widgets.py` and is shared by every scene that draws on the real
+  surface: a button's width comes from its measured label (`widgets.btn_w`, and
+  `widgets.btn` draws + returns the hit-rect), a stacked text row's pitch from
+  the font's own line height (`widgets.row_h`), a modal's stack is measured then
+  centred (`widgets.draw_modal`), and help prose is reflowed to the panel it sits
+  in (`widgets.wrap`). One-off layout literals still go through `config.s()`.
+  `render` binds these to its own `_`-prefixed module globals rather than calling
+  them qualified, and that is load-bearing: the body resolves them as bare names
+  at call time, which is what lets a test swap one out (`render._text = spy`) and
+  see the drawing code use it, and what keeps `render._FONTS` the same dict a
+  test clears. **`menu` deliberately does not use the kit** — it lays out on a
+  fixed 1440x960 canvas and letterbox-blits it, so its fonts must be *unscaled*
+  (`config.FONT_SIZE*` would scale twice) and it keeps its own `_fonts`/`_text`/
+  `_button`.
+  **The scale is, however, fixed for the run:** `config.apply_ui_scale` is called
+  exactly once, inline at boot (`main.py`, after `set_mode`), floored at the
+  design baseline — so shrinking the window past the baseline does not shrink the
+  UI. A resize rewrites `config.SCREEN_W/H` and rebuilds the `WorldView`, so
+  measured layout reflows, but the font size does not move. Cache off a font size
+  anyway only if it is keyed on `config.ui_scale` (`widgets.fonts`,
+  `menu._modal_fonts` both are) — the boot-time call happens before the first
+  frame, but a cache built at import time would still be wrong.
 - **`config.touch_ui` is the input modality**, set beside the scale in
   `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
   browser). On a touch build the shell drops every keyboard-only string — the

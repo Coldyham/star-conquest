@@ -10,121 +10,50 @@ from typing import NamedTuple, Optional
 
 import pygame
 
-from . import config, fog, paths, turnfilm, uifont
+from . import config, fog, paths, turnfilm, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
 
-_FONTS: dict[str, pygame.font.Font] = {}
+# The measured-layout kit lives in `widgets` now that the map creator draws with
+# it too. Bound to module-level names here rather than called qualified, because
+# this module's body resolves them as bare globals at call time — which is what
+# lets a test swap one out (`render._text = spy`) and see the drawing code use it.
+# `_FONTS` is the same dict object, so `render._FONTS.clear()` still works.
+_FONTS = widgets._FONTS
+_fonts = widgets.fonts
+_text = widgets.text
+_row_h = widgets.row_h
+_btn_w = widgets.btn_w
+_tap_size = widgets.tap_size
+_btn = widgets.btn
+_key_hint = widgets.key_hint
+_wrap = widgets.wrap
+_draw_slider = widgets.slider
+_draw_step_button = widgets.step_button
+_draw_x_button = widgets.x_button
+_lane_style = widgets.lane_style
+_pill_rect = widgets.pill_rect
+_label_pill = widgets.label_pill
+_brighten = widgets.brighten
+_modal_buttons = widgets.modal_buttons
+_draw_modal = widgets.draw_modal
+confirm_labels = widgets.confirm_labels
 
-
-def _fonts() -> dict[str, pygame.font.Font]:
-    if not _FONTS:
-        _FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
-        _FONTS["normal"] = uifont.load(config.FONT_SIZE)
-        _FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
-    return _FONTS
-
-
-def _text(surface, font, s, color, center=None, topleft=None, midleft=None, midright=None):
-    img = font.render(s, True, color)
-    rect = img.get_rect()
-    if center:
-        rect.center = center
-    elif topleft:
-        rect.topleft = topleft
-    elif midleft:
-        rect.midleft = midleft
-    elif midright:
-        rect.midright = midright
-    surface.blit(img, rect)
-    return rect
-
-
-# --------------------------------------------------------------------------- #
-# Layout helpers
-#
-# Everything that holds text is measured rather than given a fixed pixel size: a
-# constant width or row pitch is only ever right at one font size, and the UI font
-# grows with config.ui_scale (up to ~2x on a phone). The helpers below are what keep
-# labels inside their buttons and rows clear of each other at any scale — plus the
-# two that adapt to a touch build (see config.touch_ui).
-# --------------------------------------------------------------------------- #
-# HUD button palette — (fill, edge) pairs, kept local like the scrubber's below.
-_BTN_BLUE = ((40, 52, 78), (110, 140, 200))  # ordinary action
-_BTN_ACTIVE = ((92, 70, 46), (190, 150, 96))  # a toggle that is currently on
-_BTN_AMBER = ((120, 86, 46), (200, 150, 96))  # new map / rewind
-_BTN_VIOLET = ((52, 46, 78), (150, 130, 200))  # history / review
-_BTN_RED = ((92, 46, 52), (200, 96, 104))  # quit
-_BTN_DANGER = ((120, 46, 52), (200, 96, 104))  # ...and its brighter modal confirm
-_BTN_GREEN = ((46, 92, 60), (96, 190, 120))  # end turn / confirm
-_BTN_TEAL = ((44, 62, 74), (120, 180, 200))  # share a challenge
-_BTN_GOLD = ((92, 76, 36), (210, 180, 80))  # post to the public leaderboard
+_BTN_BLUE = widgets.BTN_BLUE
+_BTN_ACTIVE = widgets.BTN_ACTIVE
+_BTN_AMBER = widgets.BTN_AMBER
+_BTN_VIOLET = widgets.BTN_VIOLET
+_BTN_RED = widgets.BTN_RED
+_BTN_DANGER = widgets.BTN_DANGER
+_BTN_GREEN = widgets.BTN_GREEN
+_BTN_TEAL = widgets.BTN_TEAL
+_BTN_GOLD = widgets.BTN_GOLD
 
 # Challenge verdict, on the win overlay: target beaten, dead-heated, missed.
 _VERDICT_BEAT = (130, 200, 150)
 _VERDICT_TIE = (190, 205, 225)
 _VERDICT_MISS = (214, 172, 92)
-
-
-def _row_h(kind: str = "small") -> int:
-    """Pitch for one line of stacked text in ``kind``'s font: the font's own line
-    height plus a gap. Derived, so rows stay legibly apart instead of colliding
-    once the font outgrows a hardcoded pitch."""
-    return _fonts()[kind].get_height() + config.ROW_GAP
-
-
-def _btn_w(font, label: str, min_w: int = 0) -> int:
-    """Width of a button that has to fit ``label``: measured text plus padding."""
-    return max(min_w, font.size(label)[0] + 2 * config.BTN_PAD_X)
-
-
-def _tap_size(px: int) -> int:
-    """``px``, raised to ``config.TOUCH_MIN_TARGET`` on a touch build so a control
-    that is merely small with a mouse doesn't become un-tappable with a finger."""
-    return max(px, config.TOUCH_MIN_TARGET) if config.touch_ui else px
-
-
-def _btn(surface, rect: pygame.Rect, label: str, fill, edge, font=None, color=None) -> tuple[int, int, int, int]:
-    """Draw a filled, outlined, centre-labelled button; return its hit-rect tuple
-    for storing on ``ui`` (the store-rect-then-test handoff input relies on).
-    Every HUD button comes through here so they share one look."""
-    radius = config.s(6)
-    pygame.draw.rect(surface, fill, rect, border_radius=radius)
-    pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=radius)
-    _text(surface, font or _fonts()["normal"], label, color or config.COLOR_TEXT, center=rect.center)
-    return (rect.x, rect.y, rect.w, rect.h)
-
-
-def _key_hint(label: str, key: str) -> str:
-    """``label`` with its keyboard shortcut appended. Dropped on a touch build:
-    there is no key to press there, and the suffix is both noise and the thing
-    that pushes these labels out of their buttons at touch scale."""
-    return label if config.touch_ui else f"{label} ({key})"
-
-
-def _wrap(font, text: str, width: int) -> list[str]:
-    """``text`` broken into lines that each fit ``width`` px in ``font``.
-
-    Paragraphs are separated by a blank line and kept as one blank line in the
-    output; line breaks *within* a paragraph are just whitespace, so the source can
-    be written at whatever width reads well and still reflow to the real panel.
-    """
-    lines: list[str] = []
-    for para in text.strip().split("\n\n"):
-        if lines:
-            lines.append("")
-        line = ""
-        for word in para.split():
-            trial = f"{line} {word}" if line else word
-            if line and font.size(trial)[0] > width:
-                lines.append(line)
-                line = word
-            else:
-                line = trial
-        if line:
-            lines.append(line)
-    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -248,20 +177,6 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
             _label_pill(surface, _fonts()["small"], str(turns), config.COLOR_TEXT_DIM, mid)
 
 
-def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
-    """Width (px) and colour for a lane from its travel time. Fast = thin+bright.
-
-    Thickness tracks travel time directly (clamped) so the spread reads at a
-    glance; colour brightens the quick lanes and mutes the slow ones.
-    """
-    width = config.s(max(2, min(6, travel_turns)))  # 2px (fast) .. 6px (slow)
-    f = (min(6, max(1, travel_turns)) - 1) / 5.0  # 0 fast .. 1 slow
-    scale = 1.3 - 0.6 * f  # 1.3x (bright) .. 0.7x (dim)
-    r, g, b = config.COLOR_LANE
-    color = (min(255, int(r * scale)), min(255, int(g * scale)), min(255, int(b * scale)))
-    return width, color
-
-
 def _lane_unit(pa, pb) -> tuple[float, float, float]:
     """Unit vector from ``pa`` toward ``pb``, plus the lane's on-screen length."""
     dx, dy = pb[0] - pa[0], pb[1] - pa[1]
@@ -290,22 +205,6 @@ def _rule_label_center(pa, pb, font) -> tuple[int, int]:
     off = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
     off = max(off, math.sqrt(max(0.0, clear * clear - along * along)))
     return (int(pa[0] + ux * along + px * off), int(pa[1] + uy * along + py * off))
-
-
-def _pill_rect(font, s: str, center) -> pygame.Rect:
-    """Bounds of the plate ``_label_pill`` would draw. Measured separately because
-    the star-name pass has to treat these labels as occupied space."""
-    rect = pygame.Rect((0, 0), font.size(s))
-    rect.center = center
-    return rect.inflate(config.s(8), config.s(4))
-
-
-def _label_pill(surface, font, s: str, color, center) -> None:
-    """Draw text centred on a small dark rounded rect so it reads over any line."""
-    img = font.render(s, True, color)
-    rect = img.get_rect(center=center)
-    pygame.draw.rect(surface, config.COLOR_BG, _pill_rect(font, s, center), border_radius=config.s(5))
-    surface.blit(img, rect)
 
 
 def _travel(ui: Ui) -> float:
@@ -805,35 +704,6 @@ def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v)) if hi >= lo else lo
 
 
-# Slider track colour, shared by the popup's count slider and the scrubber — kept
-# local to the drawing module like the HUD button palette above.
-_SLIDER_TROUGH = (40, 44, 60)
-
-
-def _draw_slider(surface, rect: pygame.Rect, t: float, fill_col, knob_col) -> None:
-    """A horizontal slider filling ``rect``: trough, filled portion, round knob at
-    fraction ``t``. Shared by the send popup's count slider and history mode's turn
-    scrubber, which are the same widget at different sizes.
-
-    The knob *travels* over ``rect`` inset by its own radius at each end, so it
-    never overhangs the box it sits in — and callers mapping a pointer x back to a
-    value must invert exactly that (see ``Ui.set_slider_from_x``), or the knob
-    drifts away from the finger at the extremes.
-    """
-    thick = config.SLIDER_TRACK_H
-    knob = config.SLIDER_KNOB_R
-    cy = rect.centery
-    travel = max(0, rect.w - 2 * knob)
-    trough = pygame.Rect(rect.x + knob, cy - thick // 2, travel, thick)
-    pygame.draw.rect(surface, _SLIDER_TROUGH, trough, border_radius=max(1, thick // 2))
-    fill_w = int(travel * max(0.0, min(1.0, t)))
-    if fill_w > 0:
-        pygame.draw.rect(surface, fill_col, pygame.Rect(trough.x, trough.y, fill_w, thick), border_radius=max(1, thick // 2))
-    hx = trough.x + fill_w
-    pygame.draw.circle(surface, knob_col, (hx, cy), knob)
-    pygame.draw.circle(surface, fill_col, (hx, cy), knob, config.s(2))
-
-
 def _draw_popup_button(surface, rect: pygame.Rect, label: str, active: bool = False, danger: bool = False, accent=config.COLOR_SELECT) -> None:
     """A small labelled button in the send popup. ``active`` lights it up in the
     mode ``accent`` (the preset matching the current value); ``danger`` tints it
@@ -869,18 +739,6 @@ def _draw_tab(surface, rect: pygame.Rect, label: str, active: bool, accent) -> N
         pygame.draw.rect(surface, (12, 14, 22), rect, border_top_left_radius=radius, border_top_right_radius=radius)
         col = config.COLOR_TEXT_DIM
     _text(surface, _fonts()["small"], label, col, center=rect.center)
-
-
-def _draw_step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
-    """A small filled −/+ button glyph inside ``rect``."""
-    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
-    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
-    cx, cy = rect.center
-    r = rect.w // 4
-    lw = config.s(2)
-    pygame.draw.line(surface, color, (cx - r, cy), (cx + r, cy), lw)  # − (and +'s bar)
-    if sign == "+":
-        pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), lw)
 
 
 def _draw_return_glyph(surface, rect, color) -> None:
@@ -1209,10 +1067,6 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         else:
             color = config.COLOR_TEXT_DIM
         _text(surface, font, sys.name, color, topleft=rect.topleft)
-
-
-def _brighten(color, amount=60):
-    return tuple(min(255, c + amount) for c in color)
 
 
 def _draw_hatch(surface, center, radius, color, step=6) -> None:
@@ -1831,21 +1685,6 @@ def _draw_h_arrow_button(surface, rect: pygame.Rect, left: bool, enabled: bool) 
     pygame.draw.polygon(surface, color, pts)
 
 
-def _draw_x_button(surface, rect, boxed: bool = False) -> None:
-    """A × delete glyph inside ``rect`` (x, y, w, h). ``boxed`` draws a framed
-    background so an enlarged (selected-row) delete target reads as a button."""
-    rx, ry, rw, rh = rect
-    if boxed:
-        radius = config.s(4)
-        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh), border_radius=radius)
-        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh), config.s(1), border_radius=radius)
-    pad = max(3, rw // 4)
-    lw = max(2, rw // 8)
-    col = config.COLOR_TEXT if boxed else config.COLOR_TEXT_DIM
-    pygame.draw.line(surface, col, (rx + pad, ry + pad), (rx + rw - pad, ry + rh - pad), lw)
-    pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), lw)
-
-
 def _row(surface, x, y, text, color) -> int:
     """One line of small panel text; returns the y for the line below it."""
     if text:
@@ -2095,48 +1934,6 @@ def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
     return friendly, enemy
 
 
-def _modal_buttons(surface, labels: tuple[str, str]) -> tuple[pygame.Rect, pygame.Rect]:
-    """The (confirm, cancel) rects for a two-button modal, sized to fit the wider
-    of ``labels`` — shared by every modal's drawer and its hit-tester, so the two
-    can never disagree about where the buttons are."""
-    w, h = surface.get_size()
-    font = _fonts()["normal"]
-    bw = max(_btn_w(font, s, config.s(200)) for s in labels)
-    bh = max(config.s(42), font.get_height() + config.s(16))
-    gap = config.s(12)
-    y = h // 2 + config.s(24)
-    return (pygame.Rect(w // 2 - bw - gap, y, bw, bh), pygame.Rect(w // 2 + gap, y, bw, bh))
-
-
-def _draw_modal(surface, title: str, detail: str, buttons) -> None:
-    """A confirm modal: veil, title, an optional detail line, and two buttons.
-    ``buttons`` is ((label, fill, edge), (label, fill, edge)) — confirm then cancel.
-    """
-    w, h = surface.get_size()
-    big, normal = _fonts()["big"], _fonts()["normal"]
-    veil = pygame.Surface((w, h), pygame.SRCALPHA)
-    veil.fill((5, 6, 12, 200))
-    surface.blit(veil, (0, 0))
-    # Stacked upward from the button row so the title and detail always clear it.
-    detail_h = _row_h() if detail else 0
-    y = h // 2 - config.s(12) - detail_h - big.get_height()
-    _text(surface, big, title, config.COLOR_TEXT, center=(w // 2, y + big.get_height() // 2))
-    if detail:
-        y += _row_h("big")
-        _text(surface, _fonts()["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, y + _fonts()["small"].get_height() // 2))
-    for rect, (label, fill, edge) in zip(_modal_buttons(surface, (buttons[0][0], buttons[1][0])), buttons):
-        _btn(surface, rect, label, fill, edge, normal)
-
-
-def confirm_labels(confirm: str) -> tuple[str, str]:
-    """(confirm, cancel) labels for a two-button modal, with the Y/N key hints
-    dropped on a touch build. Shared with ``menu``'s resume prompt so every modal
-    in the game words its answers the same way."""
-    if config.touch_ui:
-        return (confirm, "Cancel")
-    return (f"{confirm} (Y/Enter)", "Cancel (N/Esc)")
-
-
 def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(quit, cancel) button rects — shared by the drawer and the hit-tester."""
     return _modal_buttons(surface, confirm_labels("Quit"))
@@ -2293,7 +2090,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     return note + lines
 
 
-# Scrubber fill — a bright blue on the shared _SLIDER_TROUGH, echoing the play button.
+# Scrubber fill — a bright blue on the shared slider trough, echoing the play button.
 _SCRUB_FILL = (110, 140, 200)
 
 

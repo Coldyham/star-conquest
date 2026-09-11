@@ -17,9 +17,10 @@ other, before layout was switched to measure-then-place.
 
 The one place `TOUCH_MIN_TARGET` gives way is the send popup's own height:
 seven tap-floored rows can outgrow the band it's placed in on a window smaller
-than the design baseline (`main.fit_ui` re-fits on resize but is floored at 1x,
-so shrinking past the baseline doesn't shrink the UI). Because the clamp pins
-an oversized panel to the top, the row that falls out of `draw`'s clip is the
+than the design baseline (`config.apply_ui_scale` runs once at boot and is
+floored at 1x, so shrinking past the baseline doesn't shrink the UI — a resize
+reflows the measured layout but never re-fits the font scale). Because the
+clamp pins an oversized panel to the top, the row that falls out of `draw`'s clip is the
 destructive Delete — invisible but still live, since input hit-tests the
 recorded rect.
 Hence the popup shrinks its rows to their labels first, against a budget
@@ -823,7 +824,7 @@ worse — dragging them on a challenge link would raise the un-challenge modal,
 since the setup would stop matching the score.
 
 Prose is hand-broken rather than reflowed, which inverts the rule everywhere
-else in the shell. `render._wrap` exists because the *font* scales with
+else in the shell. `widgets.wrap` exists because the *font* scales with
 `config.ui_scale`; the menu canvas is fixed at 1440x960, so the risk runs the
 other way — a runtime wrap makes the page's height depend on its text, and one
 added word would push the table through the panel floor unnoticed. Broken by
