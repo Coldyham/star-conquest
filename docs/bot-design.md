@@ -1131,7 +1131,80 @@ dying garrison inflicts on the attacker; what evacuating buys is a garrison that
 survives to be spent on a *different*, self-chosen fight instead of a forced one.
 Over enough games those roughly cancel. Not shipped.
 
-### The combination: four null ideas together, and the masking theory tested
+### Re-tuned for production-before-combat and the garrison-fights-last pile-up
+
+Two engine rules moved after the section above was written: production now runs
+*before* combat (so a hull finishing this turn is in the garrison for the fight
+right after it), and a multi-owner pile-up now folds attackers strongest-first
+*among themselves* before the survivor faces the garrison last, rather than
+folding the garrison in wherever its size placed it in the queue. Phase 1's
+threat math predates both and was measured stale against them in two distinct
+ways, fixed together as one `models/marshal.py` change (no `RISK_PARITY` /
+`_attacker_pileup` split — both moved balance for the whole doomed-system
+decision and are cheaper to revalidate once).
+
+**The pile-up half.** `_enemy_arrivals` priced every hostile fleet landing on a
+turn as one combined sum regardless of owner — correct under the old rule, where
+the garrison queued by size rather than going last, but wrong under the new one:
+two rivals arriving together fight *each other* first. Garrison 10, rivals 11 and
+10 landing the same turn, used to price as 21 incoming and evacuate; the actual
+fight leaves the 11 a ~5-ship remnant after it beats the 10, which our garrison
+comfortably holds. `_attacker_pileup` folds a turn's arrivals the same way
+`combat.resolve_arrival` does — strongest-first, no `DEFENDER_ADVANTAGE` between
+two attackers, the same pessimistic jitter corner `_after_clash` already uses —
+before the existing across-turn cumulative logic ever sees the number. Inert in a
+duel by construction: with one live rival, a turn's arrivals can only ever have
+one owner, so `_attacker_pileup` on a single-element list is a no-op. That also
+means the duel cells below measure the *other* half in isolation.
+
+**The parity half.** Phase 1 only ever asked whether a system cleared the safe,
+jitter-padded margin (`_defend_margin`); short of that, it evacuated
+unconditionally, even when the garrison — with no help borrowed from anywhere —
+already matched or beat every horizon's incoming total on the raw count alone.
+Evacuating is a certain loss of the system; standing at bare parity is a fight
+that is no worse than even (ties already break to the defender, before
+`DEFENDER_ADVANTAGE` even applies), and it costs nothing borrowed from a
+neighbour. `RISK_PARITY = 1.0` is that literal raw-count bar — deliberately not
+folding `DEFENDER_ADVANTAGE` in further to loosen it below parity, per "only take
+the risk if the count is already at least even," which is the more conservative
+reading and the one measured below. It fires only as a *last resort*: recorded
+in Phase 1 as `risk_ok` but not acted on there, so Phase 2's consolidation — the
+deliberately shipped, measured "richer of two doomed neighbours" pooling above —
+still gets first claim on the garrison. Inside `_evacuate` itself, branch (a)'s
+opportunistic capture of something else still outranks it too; `risk_ok` only
+turns a would-be retreat or cornered stand-off into a deliberate hold once
+nothing better was already going to happen to that garrison.
+
+**Measured**, paired against an unmodified copy (`marshal_base`) via
+`tests.sim.run_ladder`/`run_swap`, seeds 1..n:
+
+    duel (run_ladder), default combat unless noted   W-L        n     rate      z
+    18 nodes                                       502-452     954    52.6%  +1.62
+    12 nodes                                       495-464     959    51.6%  +1.00
+    30 nodes                                       300-260     560    53.6%  +1.69
+    18 nodes, DEFENDER_ADVANTAGE 1.5                222-222    444    50.0%  +0.00
+    18 nodes, DEFENDER_ADVANTAGE 1.25               278-263    541    51.4%  +0.64
+    ---- pooled                                   1797-1661   3458    52.0%  +2.31
+
+A duel only ever exercises the parity half (see above), and it is small but real
+once pooled — every cell sits at or above 50%, none below, and the null only
+shows up at `DEFENDER_ADVANTAGE 1.5` (exact 222-222), where the safe margin is
+already so cheap to clear that few systems ever reach the doomed-and-parity-ok
+branch at all. A free-for-all (`run_swap`, wins per strategy, same seeds run
+once per roster) is where the pile-up half actually gets exercised, since it
+needs a genuine third owner converging on the same system:
+
+    melee (run_swap)                                marshal   marshal_base   others           finished
+    3p: marshal / marshal_base / knower, 24n           210          191      knower 179           580
+    4p: + rusherplus, 30n                              228          124      knower 231, rusher 2  585
+    4p: + thinker, 12n (long lanes)                    203          177      knower 94, thinker 69 543
+
+New marshal clears old marshal in every melee cell, by a wide margin in the
+4-player ones (228 vs 124; 203 vs 177) — the regime the pile-up fix exists for.
+`marshal_base` (unmodified) is the weakest of the three real competitors in the
+`+rusherplus` cell despite otherwise being the same bot that leads the ladder
+(see "Where marshal stands"), which is the clearest sign the old pile-up pricing
+was actively costing it once a third player is actually on the board.
 
 Four ideas above each measure null on their own — the remnant tactic (waiting for
 a rival to break a contested neutral), the 0-ship neutral reprice, hold-and-

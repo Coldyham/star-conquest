@@ -44,7 +44,7 @@ def _clean_registry():
 def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
-             "CONSOLIDATE", "AVOID_ABANDONED")
+             "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -489,9 +489,11 @@ def test_two_doomed_neighbours_do_not_trade_garrisons(ma):
     """
     ma.CONSOLIDATE = False
     ma.AVOID_ABANDONED = False
+    ma.RISK_PARITY = 1e9   # isolate the bug from the unrelated hold-at-parity path
     swapped = {(o.source_id, o.dest_id) for o in ai.decide(_besieged(), 2)}
     assert swapped == {(1, 2), (2, 1)}, "the board no longer reproduces the bug"
 
+    ma.RISK_PARITY = 1.0
     ma.CONSOLIDATE = True
     ma.AVOID_ABANDONED = True
     orders = ai.decide(_besieged(), 2)
