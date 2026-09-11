@@ -26,7 +26,9 @@ the rest are neutral (owner `0` — neutral is a real player, not an absence).
 
 - Each system slowly builds ships: `prod_progress` counts up every turn and
   emits one ship when it reaches that system's `production` (turns per ship, so
-  **lower is richer**).
+  **lower is richer**). That happens *before* fleets land, so a system with
+  `prod_progress + 1 >= production` defends with one more ship than it currently
+  shows — size an attack against that, not against `ships` alone.
 - An order launches ships from one system you own along **one lane** to an
   adjacent system. Ships leave the source immediately and are untouchable in
   transit; they arrive `travel_turns` later and fight whatever is there.

@@ -668,12 +668,15 @@ and 50.8% (+0.29) at 1.5, shrinking monotonically, plus 50.1% on the 12n
 the arithmetic says it should.
 
 **Nor does a high advantage reward *simultaneous* arrival — it never did, and the
-reason is the fold, not the multiplier.** `combat.resolve_arrival` sorts the
-sides by actual ships and folds them pairwise with `defender_owner` fixed, so two
-attackers landing on the same turn are folded **against each other first, with
-the advantage applied to neither**, and whatever survives then meets the
-still-advantaged garrison. Two "just enough" forces of 15 converging on a neutral
-12, 4000 dice a cell, asking how often the second one ends up holding it:
+reason is the fold, not the multiplier.** `combat.resolve_arrival` folds attackers
+pairwise against each other first — strongest-first among themselves, with the
+advantage applied to neither, since neither holds the ground — and whatever
+survives then meets the still-advantaged garrison last. (Measured back when the
+garrison was merely folded in by size rather than fixed last by rule; it was the
+weakest side in every cell below, so the numbers read the same either way — see
+`CLAUDE.md`'s note on `combat.resolve_arrival`, under Animated end of turn, for
+when that stopped being a coincidence.) Two "just enough" forces of 15 converging on a neutral 12, 4000 dice
+a cell, asking how often the second one ends up holding it:
 
     advantage   both land together   one waits a turn
         0.75                  1.5%             100.0%

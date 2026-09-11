@@ -127,6 +127,14 @@ def test_row_carries_the_match_id_turns_and_encoded_log(configured):
     assert replay.GameLog.decode(row["log"]).to_dict() == log.to_dict()
 
 
+def test_row_carries_rules_version_as_a_claim(configured):
+    """So the board can tell an outdated replay apart from a current one
+    (`GameLog.is_current`) without decoding the blob to find out."""
+    log = _log(turns=3)
+    log.rules_version = 7
+    assert share.row_for(log, "abc123")["rules_version"] == 7
+
+
 def test_row_flags_an_unfinished_game_as_neither_finished_nor_won(configured):
     row = share.row_for(_log(turns=3), "abc123")
     assert row["finished"] is False and row["won"] is False

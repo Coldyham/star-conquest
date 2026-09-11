@@ -16,10 +16,12 @@ other, before layout was switched to measure-then-place.
 ## `config.touch_ui`
 
 The one place `TOUCH_MIN_TARGET` gives way is the send popup's own height:
-seven tap-floored rows can outgrow the band it's placed in on a window shrunk
-after boot (the scale is probed once). Because the clamp pins an oversized
-panel to the top, the row that falls out of `draw`'s clip is the destructive
-Delete — invisible but still live, since input hit-tests the recorded rect.
+seven tap-floored rows can outgrow the band it's placed in on a window smaller
+than the design baseline (`main.fit_ui` re-fits on resize but is floored at 1x,
+so shrinking past the baseline doesn't shrink the UI). Because the clamp pins
+an oversized panel to the top, the row that falls out of `draw`'s clip is the
+destructive Delete — invisible but still live, since input hit-tests the
+recorded rect.
 Hence the popup shrinks its rows to their labels first, against a budget
 measured from the placement band rather than the viewport.
 
@@ -321,20 +323,60 @@ do: several launches read as one drop to the post-launch garrison rather than a
 visible countdown, because there is no longer a beat wide enough to spread them
 across.
 
-**Production is a mark, not a dwell — and does not hold `total_ms` open either.**
-`FILM_PRODUCE_MS` is 0, so a finished hull lands at its true point in the sequence
-with no pause of its own; what makes it legible is a `+N` over the map instead,
-sharing the spot above a system that a fight's `−N` uses — and a mark is not the
-film's problem to keep visible (below), which is the part that changed twice. This
-was the first beat to go to 0, and for a reason worth keeping on its own:
-`Film.plays` is "does any beat have a duration", and a turn where nothing
-launches, moves or fights emits only `Produced` — so at 0 such a turn has no
-playback and End Turn stays instant, while any dwell makes *every* quiet turn cost
-around half a second for a couple of ships appearing (measured: 0ms gives `plays`
-False, 250ms gave a 510ms film).
+**Only movement spends time, and everything else borrows from it.** The first cut
+laid beats end to end: each one's constant was a *dwell*, and a turn's film was
+their sum. That is why every beat but `move` ended up tuned to 0 — any dwell
+anywhere stopped the board, and a stopped board is what the feature exists to
+remove — which left the layout doing nothing but adding zeroes together, and the
+one beat that still needed a moment of its own (production, below) buying it as a
+stall in the middle of the glide. The model now reads the same numbers the other
+way round: the move beat is the film, and every other beat is an instant whose
+constant is a *lead* — how far ahead of whatever follows it fires, taken out of
+the stretch it lands in rather than added to the film. Production lands 200ms
+before the fight it fed *while the fleets are still gliding*; a fight lands on the
+film's closing instant, which is the very frame the next turn's glide starts on.
+A lead is clamped to the room actually there (never past the stretch it borrows
+from, never past the beat already placed ahead of it), so a turn with no movement
+at all collapses to a single instant and does not play — the property that keeps a
+quiet production tick from costing a pause. `linger` is the one thing that still
+adds time, and only where a pause is the point (below).
 
-**Combat is the one beat with two speeds, because watching your own move resolve
-and reviewing a run of past turns want different things.** Once a mark stopped
+Two consequences are worth stating plainly. `FILM_COMBAT_MS` has to stay 0 in this
+model, not as tuning but as truth: a lead on the combat beat would show a fight
+before the fleets that fought it arrived. And a film's length is now `FILM_MOVE_MS`
+and nothing else, so chained playback (`main._next_history_film`) is continuous by
+construction rather than by each beat happening to be tuned to zero — the fleets
+of turn *n+1* start moving on the frame turn *n*'s fights fire.
+
+**Production is a mark, not a dwell — except for the one moment it is worth a
+breath.** `FILM_PRODUCE_MS` lands at 0 by default, so a finished hull lands at its
+true point in the sequence with no pause of its own; what makes it legible is a
+`+N` over the map instead, sharing the spot above a system that a fight's `−N`
+uses — and a mark is not the film's problem to keep visible (below), which is the
+part that changed twice. This was the first beat to go to 0, and for a reason
+worth keeping on its own: `Film.plays` is "does any beat have a duration", and a
+turn where nothing launches or moves still emits `Produced` on almost every turn
+— any system with production left is ticking — so at 0 such a turn has no
+playback and End Turn stays instant, while any *unconditional* dwell makes nearly
+every turn cost time for a tick nobody needed watching (measured: 0ms gives
+`plays` False, 250ms gave a 510ms film).
+
+Production moving *before* arrivals (see the phase-order section below) reopened
+the question: a hull finished this turn is now in the garrison for the fight that
+follows it in the very same turn, and landing on the same instant the `+1` and the
+fight it fed read as one indistinguishable flash rather than as cause and effect.
+The first fix spent `FILM_PRODUCE_MS` (200) as a real dwell, and only when the run
+right after the produce beat was a combat run — the exception carved out purely to
+protect the measurement above, since most turns have no combat beat to butt up
+against and an unconditional dwell would have made nearly every turn cost time.
+The lead model retires the exception: the same 200 is taken out of the glide
+instead of stopping it, so the `+1` always lands that far ahead of whatever comes
+next and a turn is never longer for it. A turn with no movement to borrow from
+spends nothing, which is the old measurement's conclusion arrived at without a
+special case.
+
+**Combat is the one beat with two speeds, because watching one turn resolve and
+watching a run of them go past want different things.** Once a mark stopped
 needing the film's own time to be read at all (below), the instinct was to drop
 `FILM_COMBAT_MS` to 0 like everything else — it used to stagger several fights one
 node after another over 300ms, purely so each could be read before the next came
@@ -347,8 +389,10 @@ instant fight with no dwell at all read as the game rushing past the one moment
 that mattered. So `turnfilm.film(events, linger=True)` is the second speed:
 `FILM_LINGER_COMBAT_MS` (300, restoring the old stagger) for the combat beat, plus
 a trailing `FILM_LINGER_HOLD_MS` (250) so the resolved board holds a beat before
-control returns. `main.resolve_turn` passes `linger=True`; `main._next_history_film`
-never does. Nothing about a mark's own lifetime changes either way — `Ui.fading_
+control returns. `main.resolve_turn` passes `linger=not ui.playing` and
+`main._next_history_film` never lingers at all, so the line falls where the
+difference actually is: a turn you ended by hand pauses, and a run of turns —
+live play or history playback — never does. Nothing about a mark's own lifetime changes either way — `Ui.fading_
 fights`/`fading_hulls` keep a fight or a tick up on their own clock regardless
 of which speed the film that made it used (below), so lingering only changes how
 long *the film* holds the board, never how long the mark on it stays visible.
@@ -399,12 +443,12 @@ leaving history, scrubbing, rewinding — calls `Ui.clear_fading_marks()`
 explicitly: a mark belongs to a specific point in a specific playback, and
 jumping away from it makes it stale rather than merely old.
 
-The payoff is what let every beat go to zero *by default* without losing
-legibility anywhere: `film()` no longer pads `total_ms` on its own (it used to
-outlive its last cue by `max(FILM_END_MS, FILM_FLASH_MS)`, which both constants
-existed for) — a film now ends the instant its last beat does, and the *next*
-turn's move beat can start on the very next frame, with whatever marks the
-previous turn produced still dissolving on top of it. That is what makes a run of
+The payoff is what let every beat stop spending time of its own without losing
+legibility anywhere: `film()` no longer pads `total_ms` (it used to outlive its
+last cue by `max(FILM_END_MS, FILM_FLASH_MS)`, which both constants existed for)
+— a film now ends the instant its last beat does, and the *next* turn's move beat
+starts on the very next frame, with whatever marks the previous turn produced
+still dissolving on top of it. That is what makes a run of
 animated turns in history playback (`main._next_history_film`, chained the
 instant a film lands rather than waiting out `PLAY_MS`) glide continuously
 instead of visibly stopping for every fight to be read.
@@ -467,7 +511,7 @@ pausing an *already running* sequence freezes the film in front of you, while
 starting one from a standstill — the button reads "Play", not "Pause" — leaves a
 film already in flight alone and only arms auto-advance for whatever comes next.
 
-**History playback chains an animated turn straight into the next one.** Turn
+**Both kinds of run chain an animated turn straight into the next one.** Turn
 resolution itself is instant; only the film is timed, so once launch and the old
 per-turn hold stopped costing anything (above), the one dead stretch left in a
 back-to-back review was the gap `main` inserted *between* two turns' playbacks —
@@ -480,24 +524,39 @@ step still exists and still matters — it is what paces a *quiet* turn (nothing
 animate, or the preference off), where there is no film to chain into and a human
 still needs long enough to read the board before it moves on.
 
+Live play (`ui.playing`, the P key) is the same behaviour from a different source
+and now takes the same path: when a film lands there the loop calls `resolve_turn`
+immediately, on exactly the terms the `PLAY_MS` branch below it would have
+resolved on (not decided, not in route mode). Reviewing a recorded run and
+watching a live one are the same activity — a run of turns going past — and only
+the *source* of the next turn differs, so they had no business feeling different.
+The distinction that does survive is between a run and a single turn: `linger` is
+now `not ui.playing` in `resolve_turn`, so ending a turn by hand still gets the
+pause worth having (see "Combat is the one beat with two speeds") and a run never
+does.
+
 **Chaining hid a one-frame snap, because the new reel wasn't advanced before it
-was drawn.** A live End Turn's reel always gets a `run_to` call in the very frame
-it's built — `main`'s per-frame update runs right after the event handler that
-calls `resolve_turn`, in the same pass through the loop — so by the time that
-frame draws, whatever fires at the very first instant (a launch, and the turn's
-first `Advanced`) has already been applied. `_next_history_film`'s reel is built
-*inside* that same per-frame update, as a side effect of the previous reel
+was drawn.** A reel built from the *event* handler gets a `run_to` call in the
+very frame it's built — `main`'s per-frame update runs right after the handler
+that calls `resolve_turn`, in the same pass through the loop — so by the time
+that frame draws, whatever fires at the very first instant (a launch, and the
+turn's first `Advanced`) has already been applied. A *chained* reel is built
+inside that same per-frame update, as a side effect of the previous reel
 finishing, so there is no second pass through it left this frame to apply
-anything — it used to sit there with `film_ms == 0` and nothing yet applied
-until the *next* frame. For a fleet that only continues (never launches or
-lands this turn), that is a real, visible regression: its `turns_remaining` is
-still last turn's value for that one frame, and `Fleet.progress_at(0)` with the
-old value reads a whole turn *behind* where the previous turn's last frame just
-left it — a snap backward by exactly `1 / turns_total`, corrected again the very
-next frame once `run_to` caught up. The fix is for `_next_history_film` to call
-`reel.run_to(0.0)` (and `Ui.archive_marks` whatever that applies) itself before
-returning the reel, so the frame that draws it never sees the un-advanced
-board at all.
+anything: it used to sit there with `film_ms == 0` and nothing yet applied until
+the next frame. For a fleet that only continues (never launches or lands this
+turn), that is a real, visible regression: its `turns_remaining` is still last
+turn's value for that one frame, and `Fleet.progress_at(0)` with the old value
+reads a whole turn *behind* where the previous turn's last frame just left it — a
+snap backward by exactly `1 / turns_total`, corrected again the very next frame
+once `run_to` caught up.
+
+`main._primed` is the fix and now every reel goes through it, `resolve_turn`'s
+included: it applies whatever is due at `0.0` (and archives whatever marks that
+makes) before handing the reel back. Putting it on the one path that needed it
+would have left the same trap set for the next caller — which is exactly what
+happened when live play started chaining too, since `resolve_turn`'s own reel is
+built in that branch of the update rather than from the event handler.
 
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
@@ -531,22 +590,35 @@ resolved to a player from a board the fleet has already left.
 
 **The two marks share one spot, and one of them moves.** A fight's cost and a
 finished hull are both written a fixed step above the system, which collides by
-design rather than by accident: production runs *after* combat, so a system
-captured this turn produces for its new owner and earns both. The gain stacks a
-row above the cost — by the font's own line height, per the no-fixed-pixel-sizes
-rule — and `render._film_labels` returns both already placed, so the star-name
-pass reserves the space they actually occupy without re-deriving it. Reaching this
-case used to take two arrivals: a lone fight's burst had faded by a fixed
-`FILM_FLASH_MS` before production landed 300ms later, so only a node resolving
-later in a busy combat beat was still marked when the hull appeared. Now that a
-mark lives on `Ui`, not `Film` (above), the two need not even fire at the same
-instant to stack — non-lingering, `Landed` and `Produced` usually *are* the same
-instant (both cues land right where combat's zero-length beat ends), but even
-lingering, where `Landed` can fire anywhere across the 300ms combat beat well
-before `Produced` closes it out, the fight's own mark is still nowhere near the
-end of its ~760ms life (`FILM_FLASH_MS + FILM_FADE_MS`) by the time the hull's
-mark joins it. Either way, a single arrival that both wins its fight and
-finishes a hull stacks the two reliably, for as long as either is still up.
+design rather than by accident: production now runs *before* combat, so a hull
+finished this turn is credited to whoever held the system going in — the
+defender, per `Ui.archive_marks`' own rule that a `Produced` mark's colour reads
+the board *at the time*, before any later `Landed` gets a chance to change who
+owns it — and if the extra ship still isn't enough, the very same system earns a
+combat mark moments later. The gain stacks a row above the cost — by the font's
+own line height, per the no-fixed-pixel-sizes rule — and `render._film_labels`
+returns both already placed, so the star-name pass reserves the space they
+actually occupy without re-deriving it.
+
+The two never fire at the same instant, which is what production's `FILM_PRODUCE_MS`
+lead is for (above): a `+1` sharing its instant with the fight it just fed would
+read as one indistinguishable flash rather than as cause and effect. Since a mark
+lives on `Ui`, not `Film` (below), the gap does not have to be small for the marks
+to still stack: as long as it lands within the fight mark's own ~760ms life
+(`FILM_FLASH_MS + FILM_FADE_MS`), which 200ms comfortably does, a single arrival
+that both survives a hull's completion and then loses the system anyway still
+shows both, one above the other, for as long as either is still up.
+
+**A second mark at one system supersedes the first.** A mark outliving its film
+(below) is what makes a chained playback continuous, and it is also what makes one
+node collect them: a turn is `FILM_MOVE_MS` long and a mark lives ~760ms, so a
+system fought over — or finishing a hull — two turns running is still showing the
+older mark when the newer one fires. Two bursts at one centre with two numbers in
+one slot read as a single garbled figure rather than as two events, so
+`Ui.archive_marks` drops any fight still fading at that node when a new fight
+lands there, and likewise for hulls. Per system, not globally: a mark dissolving
+somewhere else is unrelated. Open-space clashes are exempt, since they are placed
+at the lane fraction they happened at rather than on a node.
 
 **The scrubber advances at a transition's end, not its start.** The top bar reads
 the board being drawn, so a leading playhead would have the scrubber and the turn
@@ -564,6 +636,29 @@ discarding it, which is what `Ui.film_paused` and `input._toggles_play` are for.
 Fitting that eighth Basic row is what took `_ROW_H` from 62 to 58; at 62 it
 hung 6px out of the fixed 560x496 panel and failed
 `test_tab_content_stays_inside_the_panel`.
+
+**A fleet's approach stops at the rim rather than snapping back off the centre.**
+An arrived fleet is held `node_radius + FILM_ARRIVAL_GAP` clear of its
+destination so it cannot cover the garrison count underneath it — but the glide
+draws it closing on the node's *centre*, so applying that offset only once the
+fleet had landed (`progress_at(travel) >= 1.0`, true on the move beat's last frame
+alone) jumped the triangle backwards by a whole radius, one frame before it
+vanished into the fight. It reads as the fleet bouncing off the system it just
+reached, and it was the only place a playback ever moved a fleet the wrong way.
+`render._fleet_at` clamps instead: for a fleet arriving this step
+(`turns_remaining <= 0`) the drawn point is never closer to the destination than
+that gap, so the last few pixels of the approach compress into a stop at the rim.
+Splitting the placement out of `_draw_fleets` is what makes it checkable —
+"distance to the destination never increases" is a property of a list of numbers,
+not of a screenshot — and it puts the lane track (below) in the same one place.
+
+The one thing the clamp gives up: an in-lane clash is flashed at the crossing
+fraction `engine._lane_crossings` solved for, so a fight resolved inside those
+last few pixels can be marked up to a gap away from where the clamped triangle
+is drawn. Only a fleet landing this step is ever clamped, and a clash that close
+to a node is a fight the arrival was about to end regardless, so the divergence
+is bounded by `node_radius + FILM_ARRIVAL_GAP` in the one case it can occur —
+against a backwards jump of exactly that size on every single arrival.
 
 **A lane track is held, not ranked.** `_lane_offsets` used to spread a lane's
 fleets symmetrically across however many were currently on it, so launching one
@@ -976,10 +1071,19 @@ everything else, so a replay reproduces them for free and nothing about them is
 serialized.
 
 Labels are laid out collision-first (`render._draw_node_names`): a second pass
-over the nodes, drawn after the circles, placing a name below its system or —
-failing that — above it, and dropping any that would land on a node, on another
-name, or on a label that carries actual information (a lane's travel time, a
-rule's "keep N"; hence `_pill_rect` being split out of `_label_pill`). A
+over the nodes, drawn after the circles, placing a name below its system and
+dropping any that would land on a node, on another name, or on a label that
+carries actual information (a lane's travel time, a rule's "keep N"; hence
+`_pill_rect` being split out of `_label_pill`). The space *above* a system is
+held for the numbers a playback writes there — a fight's cost, a finished hull's
+`+N`, and the row the second of those stacks into (`render._mark_slot`) —
+reserved on every visible node whether or not anything is showing in it. Reserving
+it only while a mark was up meant a name could occupy the gap between fights and
+then be shoved off the map the moment one fired, which reads as the name
+flickering rather than as the number arriving. With the slot held, the fallback
+above a node is effectively closed at every node size the map draws, and a name
+that cannot fit below is simply dropped — measured at one name lost on a 24-node
+map, which is the price of the labels that remain staying put. A
 crowded map therefore thins out to the names that fit and zooming in brings the
 rest back, rather than turning into mush. The selection and the hover are
 placed first so what you are looking at is what keeps its name. A name whose
@@ -1185,6 +1289,32 @@ Rows are append-only like the rest of the board, so a game that checkpoints
 repeatedly lands several times and the *longest* row is the current one
 (`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
 delete path the public does not have.
+
+**A rules change had never actually moved `RULES_VERSION` until the production/
+combat reorder, so "the engine outran an old replay" had never been a real case
+to handle — only a documented possibility.** The verifier already had the right
+shape for it (`outdated` versus `mismatch`, decided *after* the replay so a
+change that leaves most games alone does not flag them anyway), but nothing
+outside `tools/verify_scores.py` ever asked the question: the game's own
+`main.open_replay`/`resume_game` and `tools/position_suite.local_logs` would
+reconstruct an outdated log through whichever engine happened to be running and
+show the result with no caveat, and the board's Watch link had no way to know a
+log's rules at all short of decoding its blob. `GameLog.is_current` is one
+property shared by every one of those; the board's half of it
+(`game_logs.rules_version`, exposed through `public_replays`) is deliberately
+the same *claim, not evidence* shape as `finished`/`won`/`hand` — an index
+letting `game.mjs` decide without paying for a blob it would otherwise have to
+throw away unread.
+
+The alternative — storing a full board snapshot per turn, so a replay survives
+*any* future rules change rather than just being caught by one — was considered
+and set aside for now, not ruled out. It reverses a deliberately argued design
+choice (`replay.py`'s module doc: a match is never snapshotted, which is what
+keeps a log 5-14 KiB and keeps a retuned bot from being able to move a stored
+game), and backfilling every already-uploaded log would mean resurrecting the
+exact engine each one was stamped under to re-simulate it once. The cheap fix
+costs a column and a client-side comparison, and it is what `RULES_VERSION` was
+already *for* — it just was not wired to anything but the verifier.
 
 **The verifier binds the replay to the setup.** Without `same_setup`, an easy
 map's log could be attached to a hard map's score and would replay perfectly.

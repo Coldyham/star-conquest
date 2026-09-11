@@ -169,16 +169,51 @@ def test_a_clash_with_no_move_beat_still_gets_shown():
     assert clash in [e for _, e in film.cues]
 
 
-def test_production_applies_in_place_at_zero_length():
-    """`FILM_PRODUCE_MS` is 0 in this cut: production still lands at its own point
-    in the sequence, it just gets no dwell of its own."""
-    assert config.FILM_PRODUCE_MS == 0
+def test_production_applies_in_place_with_no_dwell_of_its_own():
+    """Production never stops the board: its beat is an instant at its own point
+    in the sequence, whatever surrounds it. Here it comes *after* combat and there
+    is no movement anywhere in the turn, so it has nothing to lead from either."""
     film = turnfilm.film([_landed(), _produced()])
     produce = [b for b in film.beats if b.kind == "produce"][0]
     assert produce.ms == 0
     assert produce.holds(produce.start) is False   # an instant, not a stretch
     assert film.label(produce.start) == ""         # ...so it captions nothing
     assert dict((e, ms) for ms, e in film.cues)[_produced()] == produce.start
+
+
+def test_production_leads_the_fight_it_fed_from_inside_the_glide():
+    """Production runs before arrivals, so a hull finished this turn is in the
+    garrison for the fight that follows it — and the two must not land on the same
+    instant, or the `+1` reads as simultaneous with the fight it just fed instead
+    of as having contributed to it. `FILM_PRODUCE_MS` buys exactly that gap as a
+    *lead*, borrowed from the move beat rather than added to the film: the board is
+    still gliding while the `+1` lands, and the turn is no longer for it."""
+    assert config.FILM_PRODUCE_MS > 0
+    film = turnfilm.film([turnfilm.Advanced(((0, 3),)), _produced(), _landed()])
+    move, produce, combat_beat = film.beats
+    assert (move.kind, produce.kind, combat_beat.kind) == ("move", "produce", "combat")
+    assert produce.ms == 0                                    # an instant, still
+    assert combat_beat.start - produce.start == config.FILM_PRODUCE_MS
+    assert move.holds(produce.start)                          # ...spent mid-glide
+    assert film.total_ms == move.end == config.FILM_MOVE_MS
+
+
+def test_a_lead_borrows_only_what_is_actually_there():
+    """No movement behind it, nothing to borrow: the whole turn collapses to one
+    instant rather than manufacturing a stretch to lead across."""
+    film = turnfilm.film([_produced(), _landed()])
+    produce, combat_beat = film.beats
+    assert (produce.start, combat_beat.start) == (0.0, 0.0)
+    assert film.total_ms == 0.0 and not film.plays
+
+
+def test_a_fight_lands_on_the_films_closing_instant():
+    """Which is the frame the next turn's glide starts on, so a chained run of
+    animated turns never stops for one (`main._next_history_film`). The burst
+    outliving the join is `Ui.fading_fights`' job, not the film's."""
+    film = turnfilm.film([turnfilm.Advanced(((0, 3),)), _landed(0), _landed(1)])
+    at = [ms for ms, e in film.cues if isinstance(e, turnfilm.Landed)]
+    assert at == [film.total_ms, film.total_ms] == [config.FILM_MOVE_MS] * 2
 
 
 def test_cues_at_one_instant_keep_emission_order():
@@ -190,17 +225,13 @@ def test_cues_at_one_instant_keep_emission_order():
     assert [e for _, e in film.cues] == [first, second]
 
 
-def test_travel_is_one_outside_the_move_beat(monkeypatch):
+def test_travel_is_one_outside_the_move_beat():
     """Before the move beat the board still carries pre-advance schedules and
     after it the advance has landed, so `progress_at(1.0)` is right at both ends.
 
-    `FILM_LAUNCH_MS` is 0 in this cut (see `test_launch_is_folded_into_the_move`),
-    which collapses the launch beat's start into the move beat's — nothing then
-    ever samples travel *inside* a standalone launch beat. Patched back to a
-    positive value here so that case still gets checked; the constant remains
-    tunable even though the shipped default retreats to 0.
+    Only movement spends time, so "outside" is the closing instants of a turn that
+    glided — and the whole of one that did not.
     """
-    monkeypatch.setattr(config, "FILM_LAUNCH_MS", 220)
     film = turnfilm.film([
         turnfilm.Launched(fleet=0, owner_id=1, source_id=0, dest_id=1, ships=2,
                           turns_total=4, turns_remaining=4, source_ships=1,
@@ -208,19 +239,20 @@ def test_travel_is_one_outside_the_move_beat(monkeypatch):
         turnfilm.Advanced(((0, 3),)),
         _landed(),
     ])
-    launch, move = film.beats[0], film.beats[1]
-    assert (launch.kind, move.kind) == ("launch", "move")
-    assert film.travel(launch.start) == 1.0
-    assert film.travel(move.start) == 0.0
-    assert film.travel(move.start + move.ms / 2) == pytest.approx(0.5)
-    assert film.travel(move.end) == 1.0          # the combat beat, and after
+    move = next(b for b in film.beats if b.kind == "move")
+    assert move.start == 0.0                     # nothing holds the board first
+    assert film.travel(0.0) == 0.0
+    assert film.travel(move.ms / 2) == pytest.approx(0.5)
+    assert film.travel(move.end) == 1.0          # the combat instant, and after
     assert film.travel(film.total_ms) == 1.0
+    assert turnfilm.film([_produced()]).travel(0.0) == 1.0   # a turn with no glide
 
 
 def test_launch_is_folded_into_the_move_with_no_pause_of_its_own():
-    """`FILM_LAUNCH_MS` is 0, matching `FILM_PRODUCE_MS`: a launched fleet already
-    starts its glide at progress 0 (`Fleet.progress_at` combined with `travel`), so
-    a separate held beat only bought a stutter before movement began."""
+    """`FILM_LAUNCH_MS` is 0, and launches open a turn so there is nothing behind
+    them to lead from anyway: a launched fleet already starts its glide at progress
+    0 (`Fleet.progress_at` combined with `travel`), so a beat of its own only
+    bought a stutter before movement began."""
     assert config.FILM_LAUNCH_MS == 0
     film = turnfilm.film([
         turnfilm.Launched(fleet=0, owner_id=1, source_id=0, dest_id=1, ships=2,
@@ -285,20 +317,21 @@ def _pileup(garrison: int, attackers: list[tuple[int, int]]):
 
 
 def test_a_pile_up_reports_its_fold_step_by_step():
-    """The rule nothing on screen currently hints at: every side is pooled per
-    owner, sorted strongest-first, and folded pairwise — carrying its losses
-    forward. The garrison is not resolved last; it takes its place by size.
+    """Every side is pooled per owner; attackers fold pairwise, strongest-first,
+    among themselves; and the garrison — not just another side in the size-ranked
+    queue — faces whatever survives that, last, regardless of its own size.
     """
     with no_jitter():
         (owner, ships), folds = _pileup(10, [(2, 11), (3, 6)])
-    # strongest first: P2's 11 takes on the garrison's 10, then P3's 6 takes on
-    # whatever is left of it — so the *weakest* arrival ends up holding the system
+    # attackers first: P2's 11 takes on P3's 6, then whatever survives that
+    # meets the garrison's 10 last — holding the ground is worth more than
+    # queuing by size, and here it's enough to win the system back
     assert [(f.attacker, f.attacker_ships, f.defender, f.defender_ships) for f in folds] == [
-        (2, 11, 1, 10),
-        (2, 5, 3, 6),
+        (2, 11, 3, 6),
+        (2, 9, 1, 10),
     ]
-    assert [(f.winner, f.survivors) for f in folds] == [(2, 5), (3, 3)]
-    assert (owner, ships) == (3, 3)
+    assert [(f.winner, f.survivors) for f in folds] == [(2, 9), (1, 4)]
+    assert (owner, ships) == (1, 4)
     # each step's carried force is the previous step's survivors
     for earlier, later in zip(folds, folds[1:]):
         assert (later.attacker, later.attacker_ships) == (earlier.winner, earlier.survivors)
@@ -306,10 +339,10 @@ def test_a_pile_up_reports_its_fold_step_by_step():
     assert (folds[-1].winner, folds[-1].survivors) == (owner, ships)
 
 
-def test_a_weak_garrison_is_the_case_that_reads_as_expected():
-    """When the garrison is the weakest side the fold *is* "the attackers fight,
-    then the survivor takes the system" — which is why the rule is easy to
-    mis-read from the cases you happen to see."""
+def test_the_garrison_fights_last_even_when_it_is_the_weakest_side():
+    """The garrison's place in the fold is now fixed — last — rather than earned
+    by size, so this reads the same whether it happens to be the weakest side or
+    not (contrast the previous test, where it's the strongest)."""
     with no_jitter():
         _, folds = _pileup(3, [(2, 10), (3, 9)])
     assert (folds[0].attacker, folds[0].defender) == (2, 3)   # the attackers, first
@@ -344,14 +377,15 @@ def test_a_pile_up_rides_in_the_landed_event():
 
 
 def test_a_film_of_nothing_but_instants_does_not_play():
-    """Production alone, at a zero dwell, leaves nothing to watch — so the board
-    should jump as it always did rather than hold on the finished position.
+    """Production alone leaves nothing to watch: its lead has no movement to
+    borrow from, so the whole turn is one instant and the board should jump as it
+    always did rather than hold on the finished position.
 
-    Combat is an instant now too (`FILM_COMBAT_MS` is 0, like launch and
-    production), so a `Landed` alone would not play either — but that never
-    happens for real: an arrival always follows an `Advanced` the same turn
-    (`_advance_fleets` processes it before `_resolve_arrivals` ever sees it), so
-    `plays` is carried by the move beat whenever there is a fight to show.
+    Combat is an instant too (`FILM_COMBAT_MS` is 0, like launch), so a `Landed`
+    alone would not play either — but that never happens for real: an arrival
+    always follows an `Advanced` the same turn (`_advance_fleets` processes it
+    before `_resolve_arrivals` ever sees it), so `plays` is carried by the move
+    beat whenever there is a fight to show.
     """
     assert not turnfilm.film([_produced()]).plays
     assert turnfilm.film([turnfilm.Advanced(((0, 3),)), _landed()]).plays
@@ -583,8 +617,7 @@ def test_a_produced_cue_carries_its_hulls_for_the_reel_to_hand_onward():
 
 
 def test_a_turn_that_only_produced_still_does_not_play():
-    """The mark rides on a playback; it is not a reason to start one. Production
-    alone is a film of instants (`FILM_PRODUCE_MS` is 0), so a quiet turn stays
-    instant instead of costing half a second for a couple of ships appearing."""
-    assert config.FILM_PRODUCE_MS == 0
+    """The mark rides on a playback; it is not a reason to start one. A produce
+    beat is an instant whose lead has nothing to borrow here, so a quiet turn
+    resolves at once instead of costing time for a couple of ships appearing."""
     assert not turnfilm.film([_produced(0)]).plays

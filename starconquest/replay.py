@@ -132,6 +132,21 @@ class GameLog:
         return len(self.turns)
 
     @property
+    def is_current(self) -> bool:
+        """Whether this log's stamped rules still match the running engine.
+
+        `False` means `reconstruct` is no longer *this game's* reconstruction: the
+        phase order, a fight's resolution, or how the dice are consumed may have
+        moved since it was played, so replaying its recorded orders and dice back
+        through today's engine can land on a different board than the one that
+        was actually reached. `latest_log` and `main.open_replay` both decline
+        such a log rather than silently rebuilding the wrong game — resuming or
+        watching it exactly is no longer possible, only re-simulating a
+        plausible-looking one.
+        """
+        return self.rules_version == engine.RULES_VERSION
+
+    @property
     def hand_turns(self) -> int:
         """How many recorded turns the human decided themselves.
 
@@ -374,16 +389,20 @@ def latest_log() -> Optional[GameLog]:
     """The most recently updated saved match that can still be replayed exactly.
 
     Skips files that fail to load (corrupt / hand-broken) rather than crashing, so
-    one bad file never blocks startup, and skips older formats: a version-1 log
-    holds no record of what the AI seats did, so resuming one would silently hand
-    the player a different game than the one they left (see the module doc).
+    one bad file never blocks startup; skips older formats, since a version-1 log
+    holds no record of what the AI seats did; and skips a log stamped under rules
+    the engine has since moved past (`GameLog.is_current`) — either way, resuming
+    one would silently hand the player a different game than the one they left
+    (see the module doc). No message for any of it: the caller only asks whether
+    there is something to offer resuming, same as it always has for a skipped
+    version-1 log.
     """
     for path in list_logs():
         try:
             log = load(path)
         except (OSError, ValueError):
             continue
-        if log.version >= FORMAT_VERSION:
+        if log.version >= FORMAT_VERSION and log.is_current:
             return log
     return None
 

@@ -365,6 +365,30 @@ def test_latest_log_skips_older_format(games_dir):
     assert replay.latest_log().seed == 8
 
 
+def test_latest_log_skips_outdated_rules(games_dir):
+    """A log stamped under rules the engine has since moved past can no longer be
+    reconstructed exactly (`GameLog.is_current`), so it is not offered — same
+    silent skip as an older format, and for the same reason."""
+    current = replay.new_log(Settings(seed=8), 8)
+    current.record_turn(_record([])); current.save()
+    stale = replay.new_log(Settings(seed=9), 9)
+    stale.record_turn(_record([]))
+    stale.rules_version = engine.RULES_VERSION - 1
+    stale.save()
+    import os, time
+    t = time.time()
+    os.utime(current.path, (t - 100, t - 100))
+    os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
+    assert replay.latest_log().seed == 8
+
+
+def test_is_current_tracks_the_running_engines_rules_version():
+    log = replay.new_log(Settings(seed=1), 1)
+    assert log.is_current is True
+    log.rules_version = engine.RULES_VERSION + 1
+    assert log.is_current is False
+
+
 def test_latest_log_none_when_empty(games_dir):
     assert replay.latest_log() is None
 

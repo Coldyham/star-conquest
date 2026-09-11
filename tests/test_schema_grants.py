@@ -104,3 +104,32 @@ def test_a_replay_is_never_granted_to_the_public(relation):
     assert "delete" not in public.get(relation, set())
     if relation == "game_logs":
         assert public.get(relation, set()) == set(), "an uploaded replay is not public"
+
+
+def _view_columns(view: str) -> list[str]:
+    """The column list `create or replace view public.<view>` selects, in order,
+    as written (``l.rules_version`` -> ``rules_version``)."""
+    match = re.search(
+        rf"create or replace view public\.{view} as\s*\nselect(?: distinct on \([^)]*\))?\s*\n\s*(.+?)\n",
+        SCHEMA.read_text())
+    assert match is not None, f"{view} not found in {SCHEMA}"
+    return [col.strip().rsplit(".", 1)[-1] for col in match.group(1).split(",")]
+
+
+def test_a_views_new_columns_land_after_its_old_ones():
+    """`create or replace view` only accepts an *existing* view's columns back
+    unchanged in name, order and type; a new one has to be appended at the end or
+    Postgres refuses the whole statement (it reads as renaming/retyping whatever
+    column now sits where the new one was inserted). That already happened once
+    here: `rules_version` was added ahead of `log` in `public_replays`, which
+    would fail silently from a caller's point of view — the *old* view is left in
+    place, and every later query for the new column errors and is swallowed by
+    `game.mjs`'s `.catch(() => [])`, taking down every replay's Watch link, not
+    just a new one's.
+
+    Pinned against the shipped column order rather than history, since that is
+    the one thing a future column addition could get wrong the same way.
+    """
+    assert _view_columns("public_replays") == [
+        "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
+    ]

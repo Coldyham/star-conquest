@@ -151,7 +151,10 @@ def row_for(log: GameLog, game_key: str) -> dict:
     so a replay can be found by the map it was played on without decoding every
     blob to ask. ``finished``/``won``/``hand`` are the same kind of index — a
     caller can pick out completed games, or wins, or games actually played by
-    hand, without opening them. They are claims by the client and the schema says
+    hand, without opening them. ``rules_version`` is one more: the board can
+    decide whether a replay is still watchable exactly (``GameLog.is_current``,
+    same rule the game itself uses to gate ``Watch``/resume) without decoding the
+    blob to find out. All of them are claims by the client and the schema says
     so; the verifier trusts none of them, it replays the log.
     """
     return {
@@ -161,6 +164,7 @@ def row_for(log: GameLog, game_key: str) -> dict:
         "finished": bool(log.finished),
         "won": bool(log.finished and log.winner == _HUMAN_SEAT),
         "hand": log.hand_turns,
+        "rules_version": log.rules_version,
         "log": log.encoded(),
     }
 

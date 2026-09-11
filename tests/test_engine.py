@@ -59,6 +59,31 @@ def test_production_cadence():
     assert s.systems[0].ships == 2        # after 6 turns
 
 
+def test_a_hull_finished_this_turn_defends_its_own_system():
+    """Production resolves before arrivals, so a ship completing on the turn its
+    system is attacked is in the garrison for the fight. Sized against the garrison
+    the attacker can see rather than the one it meets: 4 v 3 takes the system, 4 v 4
+    annihilates to neutral."""
+    with no_jitter():
+        s = make_state([(0, 1, 4, 100), (1, 2, 3, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1        # one turn from its next ship
+        engine.apply_order(s, Order(1, 0, 1, 4))
+        engine.end_turn(s)
+        assert (s.systems[1].owner_id, s.systems[1].ships) == (0, 0)
+
+
+def test_a_system_that_falls_this_turn_accrues_from_the_next_one():
+    """The flip side of the phase order: capture resets the progress bar, and the
+    turn's accrual has already happened, so a captor starts from zero."""
+    with no_jitter():
+        s = make_state([(0, 1, 10, 100), (1, 2, 1, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.end_turn(s)
+        assert s.systems[1].owner_id == 1     # the extra hull wasn't enough
+        assert s.systems[1].prod_progress == 0
+
+
 def test_fleet_arrives_after_exactly_travel_turns():
     # a second player keeps the game alive so the win check doesn't freeze it
     s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
@@ -387,10 +412,11 @@ def test_a_scripted_turn_refights_the_battle_on_the_recorded_dice():
         engine.end_turn(s, script=engine.TurnRecord([Order(1, 0, 1, 10)], dice))
         return s.systems[1].owner_id
 
-    # The draws are dealt in the order the fight asks for them: the side holding
-    # the node first (it is folded in as the incumbent), then the attacker.
-    assert fight([+0.9, -0.9]) == 2, "the dice favoured the defender; it should hold"
-    assert fight([-0.9, +0.9]) == 1, "and favouring the attacker should flip it"
+    # The draws are dealt in the order the fight asks for them: the attacker
+    # first, then the defender — the defender is folded in last, regardless of
+    # relative strength, since it holds the ground rather than queuing by size.
+    assert fight([+0.9, -0.9]) == 1, "the dice favoured the attacker; it should take the system"
+    assert fight([-0.9, +0.9]) == 2, "and favouring the defender should hold it"
 
 
 def test_end_turn_records_the_draws_a_live_fight_made():

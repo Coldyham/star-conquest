@@ -125,6 +125,13 @@ create table if not exists public.game_logs (
   finished     boolean not null default false,
   won          boolean not null default false,
   hand         integer not null default 0 check (hand >= 0),
+  -- The rules this match was played under (`engine.RULES_VERSION` at the time),
+  -- one more claim of the same kind: it lets a caller tell a replay that can
+  -- still be reconstructed exactly from one that can't (`GameLog.is_current`)
+  -- without decoding the blob to find out. Every row before this column existed
+  -- really was played under rules v1 — it is the only version there has ever
+  -- been until now — so the default below is historical fact, not a guess.
+  rules_version integer not null default 1 check (rules_version >= 1),
   log          text not null check (octet_length(log) between 1 and 262144),
   submitted_at timestamptz not null default now()
 );
@@ -135,6 +142,7 @@ create table if not exists public.game_logs (
 alter table public.game_logs add column if not exists finished boolean not null default false;
 alter table public.game_logs add column if not exists won      boolean not null default false;
 alter table public.game_logs add column if not exists hand     integer not null default 0;
+alter table public.game_logs add column if not exists rules_version integer not null default 1;
 
 -- Longest first: that is the row a verifier wants, and the index answers the
 -- lookup by match_id at the same time.
@@ -327,10 +335,22 @@ create table if not exists public.bot_scores (
 --
 -- Longest upload per match, since a game checkpoints as it goes: distinct on
 -- picks it, and the rest are that match's own history.
+--
+-- `rules_version` is listed *last*, after `log` — not for taste, but because
+-- `create or replace view` only accepts an existing view's columns unchanged in
+-- name, order and type, with any new ones appended at the end. `log` was the
+-- last column before this field existed; inserting `rules_version` ahead of it
+-- makes Postgres refuse the whole statement (it reads as trying to rename `log`
+-- to `rules_version`), so a board that already had this view would fail to pick
+-- up the new column at all — silently, from `game.mjs`'s side, since a failed
+-- `create or replace view` leaves the *old* view in place and every later query
+-- for `rules_version` against it errors and is swallowed by `watchableIds`'s
+-- `.catch(() => [])`, which is what takes down every Watch link, not just a new
+-- game's.
 -- ---------------------------------------------------------------------------
 create or replace view public.public_replays as
 select distinct on (l.match_id)
-  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log
+  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
 where exists (select 1 from public.scores s where s.match_id = l.match_id)
 order by l.match_id, l.turns desc, l.id desc;

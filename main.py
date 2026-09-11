@@ -328,6 +328,7 @@ LOG_FRAGMENT = "log="
 WATCH_UNREACHABLE_MSG = "Couldn't fetch that replay from the leaderboard"
 WATCH_MISSING_MSG = "That replay isn't on the leaderboard — is its score still posted?"
 WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
+WATCH_OUTDATED_MSG = "That replay was recorded under older rules and can't be shown exactly anymore"
 
 
 def replay_request() -> str:
@@ -340,8 +341,24 @@ def replay_request() -> str:
     return token[len(LOG_FRAGMENT):] if token.startswith(LOG_FRAGMENT) else ""
 
 
+def _decode_log(blob: str) -> Optional[GameLog]:
+    """``blob`` as a replayable log, or None if it can't be one at all — an
+    unreadable/truncated encoding, or nothing recorded. Shared by ``open_replay``
+    and its caller, which needs the same decode a second time only to tell an
+    unreadable blob apart from an outdated one for the status line.
+    """
+    try:
+        log = replay.GameLog.decode(blob)
+    except ValueError:
+        return None
+    return log if log.turn_count else None
+
+
 def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
-    """Rebuild a downloaded match, ready to review. None if the blob is not one.
+    """Rebuild a downloaded match, ready to review. None if the blob is not one,
+    or if it was recorded under rules this engine has since moved past
+    (``GameLog.is_current``) — reconstructing it would silently show a game other
+    than the one that was actually played, rather than the one asked for.
 
     Goes through ``resume_game``, so a watched replay is the same object a resumed
     save is — which is what makes *rewinding* out of one work for free: fork it at
@@ -349,11 +366,8 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
     (``resume_game`` copies them onto ``settings``), so leaving history lands on
     that setup rather than whatever the menu happened to be showing.
     """
-    try:
-        log = replay.GameLog.decode(blob)
-    except ValueError:
-        return None
-    if not log.turn_count:
+    log = _decode_log(blob)
+    if log is None or not log.is_current:
         return None
     ai.load_models()      # a stored match may name a drop-in strategy for a seat
     state, ui = resume_game(log, settings)
@@ -534,10 +548,12 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     snap = ((state.winner is not None and not was_over)
             or (state.is_defeated(ui.human_id) and not was_defeated))
 
-    # Lingering (see turnfilm.film): a live End Turn is worth watching resolve,
-    # unlike history playback (`_next_history_film`), which must glide straight
-    # through instead.
-    film = turnfilm.film(events, linger=True) if before is not None else None
+    # Lingering (see turnfilm.film): a turn you ended by hand is worth watching
+    # resolve. A *run* of turns is not — play mode and history playback
+    # (`_next_history_film`) are one behaviour from two sources, and both have to
+    # glide straight through rather than stop-start for every fight.
+    film = (turnfilm.film(events, linger=not ui.playing)
+            if before is not None else None)
     # A turn with nothing to watch isn't worth a pause, and neither is one nobody
     # asked to see: both land the snap now, exactly as before there were films.
     if film is None or not film.plays:
@@ -548,7 +564,21 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # ...but a film runs in the frame the player was watching it in: the reveal is
     # the last turn's ending, not its opening (`land_film`).
     ui.deferred_view_snap = snap
-    return turnfilm.Reel(before, film)
+    return _primed(ui, turnfilm.Reel(before, film))
+
+
+def _primed(ui: Ui, reel: turnfilm.Reel) -> turnfilm.Reel:
+    """Apply whatever fires at a film's very first instant — a launch, the first
+    `Advanced` — before anything draws it, and hand the reel back.
+
+    A reel can reach `render.draw` in the same frame it was built: a chained turn
+    (either kind) is created *inside* the per-frame update, past the point where a
+    running film is advanced. Without this a continuing fleet is drawn one frame at
+    last turn's un-advanced ``turns_remaining`` — a visible snap back by a whole
+    turn's worth of progress before the next frame's `run_to` catches it up.
+    """
+    ui.archive_marks(reel.board, reel.run_to(0.0))
+    return reel
 
 
 def land_film(state: GameState, ui: Ui) -> None:
@@ -593,15 +623,7 @@ def _next_history_film(ui: Ui, history_states: list[GameState],
     ui.film_visible = frozenset(history_fog[ui.history_turn][0])
     # a copy, so scrubbing back to this turn still finds the board it really was
     reel = turnfilm.Reel(turnfilm.copy_board(history_states[ui.history_turn]), film)
-    # Apply whatever fires at this exact instant (a launch, and the first
-    # Advanced) before this frame ever draws. A chained reel is built and handed
-    # straight to `render.draw` in the same frame — unlike a live End Turn, which
-    # always gets a `run_to` call first (see `main`'s per-frame update) — so
-    # without this, a continuing fleet would be drawn one frame at *last* turn's
-    # un-advanced `turns_remaining`: a visible snap back by one turn's worth of
-    # progress before the next frame's `run_to` catches it back up.
-    ui.archive_marks(reel.board, reel.run_to(0.0))
-    return reel
+    return _primed(ui, reel)
 
 
 def apply_toggle_play(ui: Ui) -> None:
@@ -768,11 +790,20 @@ async def main() -> None:
                                     WATCH_MISSING_MSG if status == share.MISSING
                                     else WATCH_UNREACHABLE_MSG, False)
                 elif opened is None:
-                    # It answered, and what came back was not a replay — an error
-                    # page, a truncated body, a log with no turns in it.
-                    print(f"replay body was not a readable log ({len(body)} bytes): "
-                          f"{body[:120]!r}")
-                    menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
+                    # It answered, and what came back either isn't a replay at all
+                    # (an error page, a truncated body, a log with no turns in it)
+                    # or is one recorded under rules the engine has since moved
+                    # past — decoded again here only to tell the two apart for the
+                    # status line; `open_replay` already made the same call.
+                    stale = _decode_log(body)
+                    if stale is not None and not stale.is_current:
+                        print(f"replay was recorded under rules v{stale.rules_version}, "
+                              f"this build plays v{engine.RULES_VERSION}")
+                        menu.set_status(menu_state, WATCH_OUTDATED_MSG, False)
+                    else:
+                        print(f"replay body was not a readable log ({len(body)} bytes): "
+                              f"{body[:120]!r}")
+                        menu.set_status(menu_state, WATCH_UNREADABLE_MSG, False)
                 else:
                     state, ui, log = opened
                     current_seed = log.seed
@@ -1037,6 +1068,11 @@ async def main() -> None:
                         # nothing to chain into.
                         reel = _next_history_film(ui, history_states, history_fog,
                                                   history_events)
+                    elif (ui.playing and not ui.history and state.winner is None
+                            and ui.mode != viewstate.ROUTING):
+                        # ...and live play chains the same way, on the same terms
+                        # as the PLAY_MS branch below it would have resolved on.
+                        reel = resolve_turn(state, ui, log, settings)
 
             if (reel is None and ui.history and ui.playing
                     and not confirm_quit and not confirm_rewind):
@@ -1064,6 +1100,10 @@ async def main() -> None:
                         auto_accum = 0
                         resolve_turn(state, ui, log, settings)
                 elif ui.playing:
+                    # Same shape as history's playback above: with turn animation
+                    # on, one animated turn chains into the next as it lands, so
+                    # this pacing is only ever felt on a turn with nothing to
+                    # animate (or with the preference off).
                     play_accum += dt
                     if play_accum >= step_delay(ui, PLAY_MS):
                         play_accum = 0

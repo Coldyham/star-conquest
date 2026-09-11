@@ -110,13 +110,15 @@ export function rateLimited(key, now = Date.now(), store = seen) {
  *
  * Everything is checked rather than trusted: this is an unauthenticated endpoint,
  * and `match_id` in particular is the column the verifier keys scores against, so
- * a value of the wrong shape must never reach it. `finished`, `won` and `hand`
- * are claims by the client and are stored as claims — an index for finding logs,
- * never evidence, since replaying the log settles all three.
+ * a value of the wrong shape must never reach it. `finished`, `won`, `hand` and
+ * `rules_version` are claims by the client and are stored as claims — an index
+ * for finding logs (or, for `rules_version`, telling a replay that can still be
+ * reconstructed exactly from one that can't) without decoding every blob, never
+ * evidence, since replaying the log settles the first three.
  */
 export function validate(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "not an object";
-  const { match_id: matchId, game_key: gameKey, turns, log, hand } = body;
+  const { match_id: matchId, game_key: gameKey, turns, log, hand, rules_version: rulesVersion } = body;
 
   if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return "bad match_id";
   if (typeof gameKey !== "string" || !gameKey || gameKey.length > 64) return "bad game_key";
@@ -128,6 +130,11 @@ export function validate(body) {
   if (hand !== undefined && (!Number.isInteger(hand) || hand < 0 || hand > turns)) {
     return "bad hand";
   }
+  // Absent (an older game build) means "the only version there has ever been
+  // until now" — the same historical default `schema.sql`'s own column carries.
+  if (rulesVersion !== undefined && (!Number.isInteger(rulesVersion) || rulesVersion < 1)) {
+    return "bad rules_version";
+  }
   return {
     match_id: matchId,
     game_key: gameKey,
@@ -135,6 +142,7 @@ export function validate(body) {
     finished: body.finished === true,
     won: body.won === true,
     hand: hand === undefined ? 0 : hand,
+    rules_version: rulesVersion === undefined ? 1 : rulesVersion,
     log,
   };
 }

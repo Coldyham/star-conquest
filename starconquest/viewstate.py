@@ -413,6 +413,12 @@ class Ui:
                     continue
                 color = (config.COLOR_TEXT if event.owner_id == event.was_owner
                          else config.player_color(event.owner_id))
+                # A second fight at the same system supersedes the first. Turns
+                # chain straight into each other, so the previous one's mark can
+                # still be fading here, and two bursts with two costs stacked on
+                # one node read as a garbled number rather than as two fights.
+                self.fading_fights = [f for f in self.fading_fights
+                                      if f.node_id != event.node_id]
                 self.fading_fights.append(FadingFight(
                     age_ms=0.0, node_id=event.node_id, low_id=None, high_id=None,
                     at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
@@ -420,6 +426,10 @@ class Ui:
                 for sid, hulls in event.hulls:
                     if not self.sees(sid):   # a rival's yard is not ours to report
                         continue
+                    # ...and the same for a yard finishing a hull two turns
+                    # running: one `+N`, not a pile of them.
+                    self.fading_hulls = [h for h in self.fading_hulls
+                                         if h.node_id != sid]
                     self.fading_hulls.append(FadingHull(
                         age_ms=0.0, node_id=sid, hulls=hulls,
                         owner_id=board.systems[sid].owner_id))
