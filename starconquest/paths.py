@@ -36,7 +36,7 @@ WEB_BESTS_KEY = "sc_bests"
 WEB_SHARE_GAMES_KEY = "sc_share_games"
 
 # Storage key for the "animate turns" display preference (`webstore.animate_turns`):
-# off unless the player turns it on, and stored beside the other local preferences
+# on unless the player turns it off, and stored beside the other local preferences
 # for the same reason `sc_share_games` is — it belongs to this installation, not to
 # a game setup. On `Settings` it would move `challenge_key()` for every map that has
 # ever existed and travel in every shared link, and nothing about how a turn is

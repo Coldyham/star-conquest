@@ -192,8 +192,8 @@ LANE_PICK_DIST = 10         # px: click within this of a queued order's lane sel
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
-# Turn playback (see `turnfilm.py`): the optional animated end of turn, off unless
-# switched on (`webstore.animate_turns`). Presentation only — none of it can move a
+# Turn playback (see `turnfilm.py`): the optional animated end of turn, on unless
+# switched off (`webstore.animate_turns`). Presentation only — none of it can move a
 # result and none of it is recorded. The events inside a beat are spread across it,
 # so a turn with forty orders compresses rather than running long. Only movement
 # spends time: every other beat is an instant, and its number here is a *lead* —

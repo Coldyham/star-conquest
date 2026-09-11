@@ -459,6 +459,24 @@ this mechanism — see "Combat is the one beat with two speeds" above. Because a
 mark's own visibility never depended on the film either way, lingering costs
 nothing but the pause it is *for*.
 
+**A mark no longer needs a `Film` to exist at all, which is what let the
+preference default on without forcing the glide on with it.** Once the animated
+end of turn became the default rather than an opt-in, the question turned around:
+was the glide itself worth losing for someone who only wants to *read* what a turn
+did? `archive_marks(board, events)` already took a plain event list rather than
+anything shaped like a film — it was written that way so `_primed` could call it
+on a reel's very first instant, before any beat had actually played — and that
+turned out to be the whole answer: with turn animation off, `main.resolve_turn`
+and `main._next_history_film` call it directly on the turn's full, ungrouped event
+list (no `turnfilm.film()` beat-grouping, no `Reel`), so every mark the turn earned
+fires at once instead of in sequence, then fades on the same clock a glide's marks
+would have. The gate that used to be one boolean is now two: `marking` (excludes
+only autoplay and fast-forward — a fight is cheap to report and something is always
+watching a turn that isn't either of those) and `filming` (`marking` narrowed by
+the animate-turns preference, which now governs only the glide). `film_visible` is
+still the fog union the glide path uses, set for the archiving call and dropped
+right after so a render pass that runs with no film up never sees it.
+
 **Fog is both turns', and that is not the same as either one.** The destination
 turn's alone was the first cut, and right about the direction: holding the *earlier*
 fog would have an inbound fleet pop into existence halfway down its lane, which is
