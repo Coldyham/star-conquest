@@ -199,7 +199,7 @@ on outcomes.
 
 ### Animated end of turn (turnfilm.py)
 
-Off by default, and a **local display preference** (`webstore.animate_turns`,
+On by default, and a **local display preference** (`webstore.animate_turns`,
 `paths.WEB_ANIMATE_TURNS_KEY`) rather than a `Settings` field — how a turn is
 *drawn* cannot move a result, and a new `Settings` field would move
 `challenge_key()` for every map that ever existed. Runs after a human End Turn and
@@ -207,6 +207,17 @@ in play mode; never under autoplay or fast-forward (the gate is in
 `main.resolve_turn`, read once a turn — never in `render`, where a store read
 costs a DOM call every frame). History playback animates too; scrubbing stays an
 instant seek.
+
+**Switching the preference off drops only the glide, not the marks.**
+`main.resolve_turn`'s `marking` (autoplay/fast-forward excluded, nothing else) is
+strictly wider than its `filming` (`marking and webstore.animate_turns()`): a fight's
+cost and a finished hull are cheap to report and worth seeing on their own, so they
+are archived (`Ui.archive_marks`) even on a turn with no glide to carry them —
+all at once, in place of the beat-by-beat reveal a running film would have given
+them, then left to dissolve on the same clock (`Ui.age_fading_marks`) either way.
+`main._next_history_film` mirrors this for history playback. Neither path builds a
+`turnfilm.Film` to do it: `archive_marks` reads the raw event list directly, so
+there is no beat grouping to skip.
 
 **It animates the past, not the present.** `end_turn` still resolves the turn
 immediately and atomically, so the live `GameState` is always the fully-resolved

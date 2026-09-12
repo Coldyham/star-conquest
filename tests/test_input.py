@@ -915,6 +915,30 @@ def test_defeat_snaps_the_camera_out_once_not_every_turn(monkeypatch):
         pygame.quit()
 
 
+def test_resolve_turn_archives_marks_even_with_the_animate_preference_off(monkeypatch):
+    """Turning the glide off must not take the "-N"/"+N" marks with it: a fight's
+    cost is cheap to report and worth seeing regardless of whether the rest of the
+    turn glides. `marking` (autoplay/fast-forward aside) gates this, strictly wider
+    than `filming` (which also needs the animate-turns preference on)."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        target = state.systems[home].neighbors[0]
+        state.systems[target].owner_id, state.systems[target].ships = 2, 1
+        state.fleets = [Fleet(owner_id=1, source_id=home, dest_id=target, ships=40,
+                              turns_total=2, turns_remaining=1)]
+
+        reel = main.resolve_turn(state, ui, log=None)
+
+        assert reel is None and ui.film is None       # no glide
+        assert state.systems[target].owner_id == 1    # the fight actually happened
+        assert len(ui.fading_fights) == 1
+        assert ui.fading_fights[0].node_id == target
+    finally:
+        pygame.quit()
+
+
 def test_winning_snaps_the_camera_out_to_the_whole_map(monkeypatch):
     monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
@@ -2197,6 +2221,29 @@ def test_next_history_film_respects_the_animate_preference(monkeypatch):
         history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
         assert main._next_history_film(ui, history_states, history_fog, history_events) is None
         assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_archives_marks_even_with_the_animate_preference_off(monkeypatch):
+    """Mirrors `test_resolve_turn_archives_marks_even_with_the_animate_preference_off`
+    for history playback: no glide, but a fight's cost still gets its mark."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        landed = turnfilm.Landed(
+            node_id=0, fleets=(0,), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                                 defender_ships=6, winner=2, survivors=3),))
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [landed]]
+
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None                        # no glide
+        assert len(ui.fading_fights) == 1 and ui.fading_fights[0].node_id == 0
     finally:
         pygame.quit()
 

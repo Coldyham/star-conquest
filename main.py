@@ -501,20 +501,24 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         if ui.autoplay
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
-    # One gate, here rather than at the three call sites. Never under autoplay —
-    # there is nothing you decided to have explained — and never while
-    # fast-forwarding, the whole point of which is to skip. The preference is read
-    # once a turn, like `share.due`, and never in `render`, where reading the store
-    # would cost a DOM call every frame.
-    filming = not ui.autoplay and not ui.fast_forward and webstore.animate_turns()
+    # Two gates, here rather than at the three call sites. `marking` is the wider
+    # one: a fight's cost or a finished hull is cheap to report and worth seeing
+    # even with the full glide off, so it only excludes autoplay — nothing you
+    # decided to have explained — and fast-forward, the whole point of which is to
+    # skip. `filming` narrows that to the animated glide itself, gated on the
+    # display preference on top. Both are read once a turn, like `share.due`, and
+    # never in `render`, where reading the store would cost a DOM call every frame.
+    marking = not ui.autoplay and not ui.fast_forward
+    filming = marking and webstore.animate_turns()
     before = turnfilm.copy_board(state) if filming else None
     # What the human could see going in. `visible` is not monotone — a system lost
-    # this turn drops out of it — so the film draws the union of both turns rather
-    # than have the fight that took it play out under a grey "?" (`Ui.film_visible`).
-    was_visible = frozenset(ui.visible) if filming else frozenset()
+    # this turn drops out of it — so marks (and the film, when there is one) draw
+    # the union of both turns rather than have the fight that took it play out
+    # under a grey "?" (`Ui.film_visible`).
+    was_visible = frozenset(ui.visible) if marking else frozenset()
     events: list[turnfilm.Event] = []
     record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
-                             on_event=events.append if filming else None)
+                             on_event=events.append if marking else None)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
@@ -557,6 +561,16 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # A turn with nothing to watch isn't worth a pause, and neither is one nobody
     # asked to see: both land the snap now, exactly as before there were films.
     if film is None or not film.plays:
+        if marking:
+            # No glide to spread them over, so every mark this turn earned fires
+            # at once — still worth it: `age_fading_marks`/`_draw_film_flashes`
+            # dissolve it on their own clock regardless of whether a playback
+            # ever ran. `film_visible` is set only for the archiving read (the
+            # same union `filming` would have used) and dropped right after, so
+            # it cannot leak into a render pass that expects no film is up.
+            ui.film_visible = was_visible
+            ui.archive_marks(state, events)
+            ui.film_visible = frozenset()
         if snap:
             ui.reset_view(state)
         return None
@@ -600,9 +614,12 @@ def _next_history_film(ui: Ui, history_states: list[GameState],
     """Build the reel for the history turn after ``ui.history_turn``, if there is
     anything in it worth animating.
 
-    Returns None when the next turn has nothing to show — no recorded events, turn
-    animation off, or a film that turns out to be all instants — in which case the
-    caller falls back to stepping it on its own, paced by `PLAY_MS`.
+    Returns None when the next turn has nothing to show — no recorded events, or a
+    film that turns out to be all instants — in which case the caller falls back to
+    stepping it on its own, paced by `PLAY_MS`. With turn animation off, that is
+    every turn: this still archives that turn's marks directly (mirroring
+    `resolve_turn`'s own no-glide branch) before returning None, so a fight's cost
+    or a finished hull keeps showing up even though nothing here glides.
 
     Shared by the two moments history playback advances: right after a film lands
     (so back-to-back animated turns chain immediately, with no dead gap between
@@ -610,8 +627,15 @@ def _next_history_film(ui: Ui, history_states: list[GameState],
     to be quiet.
     """
     nxt = ui.history_turn + 1
-    if not (nxt <= ui.history_max and nxt < len(history_events)
-            and history_events[nxt] and webstore.animate_turns()):
+    if not (nxt <= ui.history_max and nxt < len(history_events) and history_events[nxt]):
+        return None
+    if not webstore.animate_turns():
+        # Same union as the reel path below (`film_visible`, set then dropped
+        # right after the read) so a fight that cost us the system it happened at
+        # still gets its mark rather than playing out under a grey "?".
+        ui.film_visible = frozenset(history_fog[ui.history_turn][0])
+        ui.archive_marks(history_states[nxt], history_events[nxt])
+        ui.film_visible = frozenset()
         return None
     # Not lingering: a run of animated turns here must glide continuously, never
     # stop-start for a fight to be read (that's what a live End Turn is for).
