@@ -663,10 +663,11 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
 
 
 async def _kick_web_resize() -> None:
-    """Web only: fire a synthetic browser resize shortly after boot.
+    """Web only: fire a synthetic browser resize shortly after being scheduled.
 
-    See the comment at the call site in ``main`` — this is a fire-and-forget
-    background task so it doesn't hold up the first frame.
+    Called twice — once at boot, once off the main loop's first input event (see
+    the comments at both call sites) — always as a fire-and-forget background
+    task so it never holds up a frame.
     """
     await asyncio.sleep(0.3)
     webstore.trigger_resize()
@@ -705,7 +706,13 @@ async def main() -> None:
         # The canvas can land squashed to the wrong aspect ratio on first paint
         # (pygbag's own resize handler is what fits it, and that only runs on a
         # genuine `resize` event, never proactively) — nudge it once, after
-        # yielding a beat for the browser's layout to settle.
+        # yielding a beat for the browser's layout to settle. This alone isn't
+        # enough on a phone: the address bar/toolbar often only collapses (changing
+        # the real viewport height) off the player's first tap/click on the *page
+        # itself* — the one that dismisses pygbag's own "Ready to start!" gate — and
+        # that collapse can lag the gesture by more than this beat. So the main loop
+        # below fires a second, identical nudge off its own first input event, which
+        # is the earliest point simulation code can observe that tap having landed.
         asyncio.ensure_future(_kick_web_resize())
     else:
         # Resizable: pygame grows the surface with the window, so we never re-call
@@ -772,6 +779,10 @@ async def main() -> None:
     play_accum = 0
     fullscreen = False
     windowed_size = (config.SCREEN_W, config.SCREEN_H)  # restored when leaving fullscreen
+    # Web only: re-armed below to fire the second resize kick off the loop's first
+    # real input event; already "spent" (never fires) off the web build, so nothing
+    # here needs its own is_web() check.
+    resize_kicked = not paths.is_web()
     while running:
         dt = clock.tick(config.FPS)
         if pending_replay is not None:
@@ -819,6 +830,15 @@ async def main() -> None:
                 ui.view = build_view(state)
                 ui.reset_view(state)   # re-frame for the new size, not the whole map
         for event in pygame.event.get():
+            # Web only, once: the first tap/click/key this session sees is the
+            # earliest point simulation code can observe that the player has
+            # actually landed on the page (touch arrives as MOUSEBUTTONDOWN — see
+            # the boot-time kick's comment for why this second nudge matters, and
+            # why a fixed delay from boot alone isn't a substitute for it).
+            if not resize_kicked and event.type in (
+                    pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                resize_kicked = True
+                asyncio.ensure_future(_kick_web_resize())
             # Android hardware/gesture Back arrives as K_AC_BACK; normalise it to
             # Esc so every existing "cancel / back out" handler below just works.
             if event.type == pygame.KEYDOWN and event.key == pygame.K_AC_BACK:
