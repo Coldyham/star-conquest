@@ -9,7 +9,9 @@
 -- row means using this SQL editor, which runs as `postgres` and bypasses RLS.
 --
 -- Statement order matters below: the functions must come before the views that
--- call them, and `configs` before the view that joins it.
+-- call them, and `configs`/`config_tags` before the views that join them
+-- (`config_tag_counts` before `game_summary`/`config_summary` in turn, since
+-- those two now read it rather than `configs.tags` directly).
 
 -- ---------------------------------------------------------------------------
 -- users: keyed by name alone. name_key is generated so "Andrew", "andrew " and
@@ -273,6 +275,44 @@ alter table public.configs add  constraint configs_tags_shape check (
 );
 
 -- ---------------------------------------------------------------------------
+-- config_tags: unlike `configs.name`, tags are meant to accumulate rather than
+-- be set once — but only from someone who has actually logged a score, which
+-- `score_id` is what enforces (a request naming no real `scores.id` is refused
+-- by the foreign key, not by any identity check — there is none anywhere on
+-- this board). `user_id` rides along too so `config_tag_counts` below can rank
+-- by *distinct players*, not raw submissions: one person replaying the same
+-- config ten times must not alone make a tag look like consensus.
+--
+-- tag_key mirrors users.name_key above: a generated, stored, lower/trim column,
+-- so normalising "Fun", "fun " and "FUN" to one entry is the database's job
+-- rather than something every caller (this site's JS, or anything else that
+-- ever POSTs here directly) has to get right on its own. Downstream readers see
+-- only tag_key; `tag` exists solely to generate it from.
+--
+-- No FK to `configs`: same reasoning as `games` above — a config can be tagged
+-- before anyone has named it, so config_key is checked for shape alone.
+-- ---------------------------------------------------------------------------
+create table if not exists public.config_tags (
+  id         bigint generated always as identity primary key,
+  config_key text not null check (config_key ~ '^[0-9a-f]{16}$'),
+  score_id   bigint not null references public.scores(id) on delete cascade,
+  user_id    bigint not null references public.users(id),
+  tag        text not null,
+  tag_key    text generated always as (lower(trim(tag))) stored,
+  created_at timestamptz not null default now(),
+  constraint config_tags_unique unique (score_id, tag_key)
+);
+
+-- A drop/add pair, same spirit as configs_tags_shape, so a re-paste can
+-- tighten this later. One tag per row, so no comma in the charset.
+alter table public.config_tags drop constraint if exists config_tags_tag_shape;
+alter table public.config_tags add  constraint config_tags_tag_shape check (
+  tag_key ~ '^[a-z0-9 +-]{1,24}$'
+);
+
+create index if not exists config_tags_config_key_idx on public.config_tags (config_key);
+
+-- ---------------------------------------------------------------------------
 -- bot_scores: how each models/ bot fares in the human's seat on a given map,
 -- computed by tools/bot_replay.py (the scheduled GitHub Actions worker) and
 -- keyed by the pair it answers for. One row per (map, bot): the result is a
@@ -356,6 +396,34 @@ where exists (select 1 from public.scores s where s.match_id = l.match_id)
 order by l.match_id, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
+-- config_tag_counts: per-config tag frequency, counting distinct players
+-- (`config_tags.user_id`) rather than raw submissions. Folds in the legacy
+-- `configs.tags` array too, at weight 1 per tag with no player behind it —
+-- otherwise a board's existing named tags would simply vanish the moment this
+-- ships, before a single new-style submission exists to replace them. Real,
+-- counted submissions naturally outrank that flat legacy weight as they
+-- accumulate; nothing here ever writes `configs.tags` again, but nothing
+-- deletes what is already there either.
+--
+-- security_invoker, like game_summary/config_summary below (which read this
+-- view rather than `configs.tags` directly) — so the caller's own grants are
+-- what's checked at every step, not the view owner's.
+-- ---------------------------------------------------------------------------
+create or replace view public.config_tag_counts
+  with (security_invoker = true) as
+select config_key, tag, sum(uses)::integer as uses
+from (
+  select config_key, tag_key as tag, count(distinct user_id) as uses
+  from public.config_tags
+  group by config_key, tag_key
+  union all
+  select config_key, unnest(tags) as tag, 1 as uses
+  from public.configs
+  where array_length(tags, 1) > 0
+) combined
+group by config_key, tag;
+
+-- ---------------------------------------------------------------------------
 -- game_summary: the homepage in one select — every game with its current best
 -- score and last activity. security_invoker makes it evaluate RLS as the caller
 -- rather than the owner, so a future tightened policy can't be bypassed here.
@@ -383,7 +451,7 @@ select
   public.sc_config_key(g.settings_json)      as config_key,
   public.sc_bots(g.settings_json, g.players) as bots,
   cfg.name                                   as config_name,
-  cfg.tags                                   as config_tags,
+  coalesce(tagc.tags, '{}'::text[])          as config_tags,
   -- The best *winning* bot_scores row for this map (fewest turns, ties broken
   -- by lost — the same ordering `best` above uses for the human leader), so a
   -- list card can tell whether any human score actually beats it without a
@@ -416,7 +484,19 @@ left join lateral (
   limit 1
 ) bot on true
 left join public.configs cfg
-  on cfg.config_key = public.sc_config_key(g.settings_json);
+  on cfg.config_key = public.sc_config_key(g.settings_json)
+left join lateral (
+  -- Top 6 by frequency (distinct players first, legacy weight-1 tags filling
+  -- in behind them), same cap `configs_tags_shape` enforced on the old array.
+  select array_agg(t.tag order by t.uses desc, t.tag asc) as tags
+  from (
+    select tag, uses
+    from public.config_tag_counts
+    where config_key = public.sc_config_key(g.settings_json)
+    order by uses desc, tag asc
+    limit 6
+  ) t
+) tagc on true;
 
 -- ---------------------------------------------------------------------------
 -- config_summary: one row per config_key, for the main list's "by config"
@@ -457,13 +537,23 @@ select
   rep.nodes,
   public.sc_bots(rep.settings_json, rep.players) as bots,
   cfg.name as config_name,
-  cfg.tags as config_tags,
+  coalesce(tagc.tags, '{}'::text[]) as config_tags,
   agg.game_count,
   agg.score_count,
   agg.last_activity
 from agg
 join rep on rep.config_key = agg.config_key
-left join public.configs cfg on cfg.config_key = agg.config_key;
+left join public.configs cfg on cfg.config_key = agg.config_key
+left join lateral (
+  select array_agg(t.tag order by t.uses desc, t.tag asc) as tags
+  from (
+    select tag, uses
+    from public.config_tag_counts
+    where config_key = agg.config_key
+    order by uses desc, tag asc
+    limit 6
+  ) t
+) tagc on true;
 
 -- ---------------------------------------------------------------------------
 -- Policies
@@ -472,6 +562,7 @@ alter table public.users   enable row level security;
 alter table public.games   enable row level security;
 alter table public.scores  enable row level security;
 alter table public.configs enable row level security;
+alter table public.config_tags enable row level security;
 alter table public.bot_scores enable row level security;
 alter table public.game_logs enable row level security;
 alter table public.score_checks enable row level security;
@@ -484,6 +575,8 @@ drop policy if exists "scores public read"   on public.scores;
 drop policy if exists "scores public insert" on public.scores;
 drop policy if exists "configs public read"   on public.configs;
 drop policy if exists "configs public insert" on public.configs;
+drop policy if exists "config_tags public read"   on public.config_tags;
+drop policy if exists "config_tags public insert" on public.config_tags;
 drop policy if exists "bot_scores public read" on public.bot_scores;
 drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
 drop policy if exists "score_checks public read" on public.score_checks;
@@ -496,6 +589,8 @@ create policy "scores public read"   on public.scores for select using (true);
 create policy "scores public insert" on public.scores for insert with check (true);
 create policy "configs public read"   on public.configs for select using (true);
 create policy "configs public insert" on public.configs for insert with check (true);
+create policy "config_tags public read"   on public.config_tags for select using (true);
+create policy "config_tags public insert" on public.config_tags for insert with check (true);
 
 -- Read only, and no insert policy to match: bot_scores is written solely by
 -- tools/bot_replay.py under the service_role key, which bypasses RLS.
@@ -508,7 +603,10 @@ create policy "bot_scores public read" on public.bot_scores for select using (tr
 create policy "score_checks public read" on public.score_checks for select using (true);
 
 -- No update or delete policy anywhere: that is what makes every row append-only
--- — for configs, that's what makes the first name posted for a setup permanent.
+-- — for configs, that's what makes the first name posted for a setup permanent,
+-- and for config_tags it's the whole design: unlike a name, a tag is *meant* to
+-- accumulate indefinitely, which an append-only table naturally supports without
+-- ever needing an UPDATE policy at all.
 -- bot_scores is append-only to the public in the strongest sense (it has no
 -- insert policy either), but not immutable in itself: the worker's service_role
 -- key bypasses RLS, which is how a recompute replaces a row.
@@ -520,15 +618,22 @@ create policy "score_checks public read" on public.score_checks for select using
 -- Explicit rather than relying on the project's default privileges, so this file
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
-  public.game_summary, public.config_summary, public.bot_scores,
-  public.score_checks, public.public_replays to anon, authenticated;
+  public.config_tags, public.game_summary, public.config_summary,
+  public.bot_scores, public.score_checks, public.public_replays
+  to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The
 -- public_replays view above is the one exception, and it lends out only the
 -- replays a posted score already points at.
 -- bot_scores is absent from this list on purpose: no insert grant and no insert
 -- policy is what leaves the replay worker as its only writer.
-grant insert on public.users, public.games, public.scores, public.configs to anon, authenticated;
+-- config_tag_counts needs its own select grant despite nothing querying it
+-- directly today: it is security_invoker, so game_summary/config_summary check
+-- the *caller's* privilege on it as a distinct relation, the same reason
+-- `configs` itself needs one (see the comment above the policies).
+grant select on public.config_tag_counts to anon, authenticated;
+grant insert on public.users, public.games, public.scores, public.configs,
+  public.config_tags to anon, authenticated;
 -- game_logs appears in neither grant: not in select (a replay is not public) and
 -- not in insert (uploads go through this site's function, which can size- and
 -- rate-limit them). It is the one table the public can neither read nor write.

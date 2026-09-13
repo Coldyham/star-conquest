@@ -58,13 +58,39 @@ export function select(query) {
   return request(query);
 }
 
-/** POST one row. `returning` asks for the inserted row back (needed for ids). */
-export function insert(table, row, { returning = false } = {}) {
-  return request(table, {
+/**
+ * POST one row (or an array of rows — PostgREST accepts either as the JSON
+ * body unchanged). `returning` asks for the inserted row(s) back (needed for
+ * ids). `onConflict` + `ignoreDuplicates` compile to `ON CONFLICT ... DO
+ * NOTHING` against that constraint's columns — unlike `resolution=merge-
+ * duplicates` (`DO UPDATE`), `ignore-duplicates` needs no UPDATE policy, so
+ * it's safe to use against a table that (like every append-only one here)
+ * doesn't have one. Useful for a bulk insert where some rows in the batch may
+ * already exist: without it, one duplicate fails the *whole* request.
+ */
+export function insert(table, row, { returning = false, onConflict, ignoreDuplicates = false } = {}) {
+  const path = onConflict ? `${table}?on_conflict=${onConflict}` : table;
+  const prefer = [
+    returning ? "return=representation" : "return=minimal",
+    ignoreDuplicates ? "resolution=ignore-duplicates" : null,
+  ].filter(Boolean).join(",");
+  return request(path, {
     method: "POST",
     body: JSON.stringify(row),
-    headers: { Prefer: returning ? "return=representation" : "return=minimal" },
+    headers: { Prefer: prefer },
   });
+}
+
+/**
+ * Call a granted SQL function via PostgREST's `/rpc/<name>` endpoint — the
+ * only way from here to ask the database to compute something (`sc_config_key`)
+ * rather than recompute it in JS, which for that function is not even possible:
+ * it hashes Postgres's own `jsonb::text` cast, and nothing in JS reproduces
+ * that byte-for-byte. A scalar-returning function's response is the bare JSON
+ * value, not a wrapped row/array, which `request()` already parses as-is.
+ */
+export function rpc(name, args) {
+  return request(`rpc/${name}`, { method: "POST", body: JSON.stringify(args) });
 }
 
 export const eq = (value) => `eq.${encodeURIComponent(value)}`;

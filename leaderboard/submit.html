@@ -32,6 +32,9 @@
     <label for="name">Your name</label>
     <input id="name" name="name" type="text" maxlength="60" required placeholder="Name">
 
+    <label for="tags">Tags (optional)</label>
+    <input id="tags" name="tags" type="text" placeholder="Tags, comma separated">
+
     <p class="hint" id="preview" hidden></p>
 
     <!-- Said here because this is where the decision is made. Posting a score
@@ -41,6 +44,13 @@
     <p class="hint">
       Posting a score also publishes that game's replay, so anyone can watch it
       back on the map's page.
+    </p>
+
+    <!-- Said here rather than assumed: unlike the name above, a tag only ever
+         arrives with a score behind it — this is the one place they're entered. -->
+    <p class="hint">
+      Tags describe the setup you just played (e.g. "grindy", "fast games") and
+      only count while attached to a posted score.
     </p>
 
     <button id="go" type="submit">Enter</button>

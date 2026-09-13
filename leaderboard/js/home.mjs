@@ -91,17 +91,19 @@ function filterBar(filters) {
 }
 
 /**
- * Post a name (and optional tags) for a config nobody has named yet. First
- * post wins — configs.config_key is the primary key and there's no UPDATE
- * policy — so a race here just means someone beat you to it, reported the
- * same way ensureUser() in submit.mjs reports a race on a user's name.
+ * Post a name for a config nobody has named yet. First post wins —
+ * configs.config_key is the primary key and there's no UPDATE policy — so a
+ * race here just means someone beat you to it, reported the same way
+ * ensureUser() in submit.mjs reports a race on a user's name.
+ *
+ * Tags used to travel with this form too; they don't any more. A tag is now
+ * gated on having actually posted a score (`config_tags.score_id`), so it's
+ * entered on submit.html alongside the score itself instead — see
+ * `submitTags` there. This form stays name-only, still ungated, still
+ * first-wins, exactly as before.
  */
-async function nameConfig(configKey, name, tagsRaw) {
-  const tags = [...new Set(
-    tagsRaw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
-  )].slice(0, 6);
+async function nameConfig(configKey, name) {
   const row = { config_key: configKey, name: name.trim() };
-  if (tags.length) row.tags = tags;
   const by = myName();
   if (by) row.by_name = by;
   await insert("configs", row);
@@ -109,10 +111,9 @@ async function nameConfig(configKey, name, tagsRaw) {
 
 function nameForm(configKey) {
   const nameField = el("input", { type: "text", maxlength: "40", "aria-label": "Name this setup", placeholder: "Name this setup" });
-  const tagsField = el("input", { type: "text", "aria-label": "Tags", placeholder: "Tags, comma separated" });
   const status = el("span", { class: "name-status" });
   const button = el("button", { class: "mini", type: "submit", text: "Name it" });
-  const form = el("form", { class: "compare" }, [nameField, tagsField, button, status]);
+  const form = el("form", { class: "compare" }, [nameField, button, status]);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -123,7 +124,7 @@ function nameForm(configKey) {
     button.disabled = true;
     status.textContent = "";
     try {
-      await nameConfig(configKey, nameField.value, tagsField.value);
+      await nameConfig(configKey, nameField.value);
       location.reload();
     } catch (err) {
       button.disabled = false;
@@ -131,7 +132,7 @@ function nameForm(configKey) {
         status.textContent = "Someone just named this setup — reloading…";
         setTimeout(() => location.reload(), 900);
       } else if (err.code === "23514") {
-        status.textContent = "That name or tag list is too long.";
+        status.textContent = "That name is too long.";
       } else {
         status.textContent = err.message;
       }
@@ -174,8 +175,10 @@ async function newSeedLink(game) {
 }
 
 /** The header strip shown once the list is filtered to one config: its title
- * and the way to play it, its tags, and — while it has none — the form to give
- * it a name. */
+ * and the way to play it, its tags (now sourced from `config_tag_counts` via
+ * `game_summary`/`config_summary`'s `config_tags` column — ranked by how many
+ * distinct players entered each one when posting a score, not entered here),
+ * and — while it has no name yet — the form to give it one. */
 async function configHead(game) {
   const title = el("h2", { class: "config-title", text: configTitle(game) });
   const play = await newSeedLink(game);
