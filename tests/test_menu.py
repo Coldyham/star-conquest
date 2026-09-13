@@ -47,25 +47,38 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
-def test_file_row_never_overlaps_on_the_web_layout():
-    """The web File row carries an extra 'Get Link' button, which used to leave the
-    name field narrower than its own default value — so a long name ran out over
-    Save/Load. The field is now sized from what the buttons leave, and its text is
-    clipped to the box."""
+def test_web_file_row_is_get_link_only():
+    """The web build's data dir is an in-memory virtual filesystem that doesn't
+    survive a reload, so a file Save/Load there would silently vanish — the web
+    File row shows only 'Get Link' (the URL-token path that actually persists),
+    with no filename field or Save/Load buttons to click."""
     screen, ms, settings = _setup()
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
+        menu.draw(screen, ms, settings)
+        assert "get_link" in ms.rects
+        for key in ("filename_field", "save_settings", "load_settings"):
+            assert key not in ms.rects
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
+def test_desktop_file_row_has_no_get_link():
+    """Desktop keeps the file-backed Save/Load row; Get Link is web-only."""
+    screen, ms, settings = _setup()
+    try:
         ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted
         menu.draw(screen, ms, settings)
+        assert "get_link" not in ms.rects
         field = ms.rects["filename_field"]
         assert field.width > 0
-        for key in ("get_link", "save_settings", "load_settings"):
+        for key in ("save_settings", "load_settings"):
             assert not field.colliderect(ms.rects[key]), f"name field runs into {key}"
         # ...and the default name has room without needing to be clipped at all
         assert menu._fonts()["normal"].size(menu._DEFAULT_FILENAME)[0] < field.width
     finally:
-        menu.is_web = real_is_web
         pygame.quit()
 
 
