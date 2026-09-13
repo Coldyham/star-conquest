@@ -47,17 +47,20 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
-def test_web_file_row_is_get_link_only():
+def test_web_file_row_is_get_link_and_leaderboard():
     """The web build's data dir is an in-memory virtual filesystem that doesn't
     survive a reload, so a file Save/Load there would silently vanish — the web
-    File row shows only 'Get Link' (the URL-token path that actually persists),
-    with no filename field or Save/Load buttons to click."""
+    File row instead offers 'Get Link' (the URL-token path that actually
+    persists) and 'Leaderboard' (the board's by-config listing), with no filename
+    field or Save/Load buttons to click."""
     screen, ms, settings = _setup()
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
         menu.draw(screen, ms, settings)
         assert "get_link" in ms.rects
+        assert "browse_configs" in ms.rects
+        assert not ms.rects["get_link"].colliderect(ms.rects["browse_configs"])
         for key in ("filename_field", "save_settings", "load_settings"):
             assert key not in ms.rects
     finally:
@@ -65,13 +68,32 @@ def test_web_file_row_is_get_link_only():
         pygame.quit()
 
 
+def test_browse_configs_opens_the_leaderboards_config_listing(monkeypatch):
+    """Clicking 'Leaderboard' opens the board's ?group=config view — the same
+    listing a Save/Load row could never have offered on the web, where a saved
+    file silently vanishes on reload."""
+    opened = []
+    monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
+    screen, ms, settings = _setup()
+    real_is_web = menu.is_web
+    menu.is_web = lambda: True
+    try:
+        assert _click_key(screen, ms, settings, "browse_configs") is None
+        assert opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_CONFIGS_PATH)]
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
 def test_desktop_file_row_has_no_get_link():
-    """Desktop keeps the file-backed Save/Load row; Get Link is web-only."""
+    """Desktop keeps the file-backed Save/Load row; Get Link and Leaderboard are
+    web-only."""
     screen, ms, settings = _setup()
     try:
         ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted
         menu.draw(screen, ms, settings)
         assert "get_link" not in ms.rects
+        assert "browse_configs" not in ms.rects
         field = ms.rects["filename_field"]
         assert field.width > 0
         for key in ("save_settings", "load_settings"):
@@ -355,7 +377,7 @@ def test_tab_content_stays_inside_the_panel():
     screen, ms, settings = _setup()
     panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
     chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
-              "get_link", "seed_field", "seed_random"}
+              "get_link", "browse_configs", "seed_field", "seed_random"}
     try:
         for tab in ("basic", "combat", "advanced", "ai"):
             ms.tab = tab

@@ -43,7 +43,7 @@ import pygame
 
 from . import ai, combat, config, softkeyboard, uifont, webstore
 from .model import AiParams
-from .paths import is_web, saves_dir
+from .paths import LEADERBOARD_CONFIGS_PATH, is_web, saves_dir
 from .settings import Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -978,11 +978,13 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
-    ``_SAVE_DIR``. Web: just '[Get Link]' — the web build's data dir is pygbag's
-    in-memory virtual filesystem, which doesn't survive a reload, so a file saved
-    there would silently vanish; Get Link (a URL token in the address bar plus
-    ``localStorage``) is the persistence path that actually works on the web, and
-    is the only one offered there.
+    ``_SAVE_DIR``. Web: '[Get Link] ... [Leaderboard]' — the web build's data dir
+    is pygbag's in-memory virtual filesystem, which doesn't survive a reload, so a
+    file saved there would silently vanish. Get Link (a URL token in the address
+    bar plus ``localStorage``) is the persistence path that actually works there;
+    Leaderboard opens the board's "by config" listing (``home.mjs``'s
+    ``?group=config``) — where a setup worth returning to already lives, once
+    somebody has posted a score under it.
 
     The field takes whatever width the buttons leave (no "File" label: the name
     field had less room than the default name needs, and Save/Load say plainly
@@ -995,9 +997,12 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
             ms.rects.pop(key, None)
         link = pygame.Rect(lx, y, 110, _CH)
         _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        boards = pygame.Rect(rx - 150, y, 150, _CH)
+        _button(surface, ms, "browse_configs", boards, "Leaderboard", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         return
 
     ms.rects.pop("get_link", None)
+    ms.rects.pop("browse_configs", None)
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
     field = pygame.Rect(lx, y, save.x - 10 - lx, _CH)
@@ -1471,6 +1476,16 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             set_status(ms, "Link updated — copy it from the address bar", True)
         else:
             set_status(ms, "Couldn't create link", False)
+    elif hit == "browse_configs":
+        url = webstore.leaderboard_url(LEADERBOARD_CONFIGS_PATH)
+        if not url:
+            set_status(ms, "No leaderboard is configured", False)
+        elif webstore.open_url(url):
+            set_status(ms, "Leaderboard opened", True)
+        elif webstore.copy_to_clipboard(url):
+            set_status(ms, "Couldn't open a tab — link copied instead", True)
+        else:
+            set_status(ms, "Couldn't open the leaderboard", False)
     return None
 
 
