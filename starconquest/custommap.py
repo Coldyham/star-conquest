@@ -204,6 +204,9 @@ class CustomMap:
         out.extend(_spacing_problems(m))
         out.extend(_lane_problems(m))
         out.extend(_connectivity_problems(m))
+        # Worst first: the Play gate quotes `blockers()[0]`, and a warning at the
+        # top of the list would bury the thing actually stopping the game.
+        out.sort(key=lambda p: 0 if p.blocks else 1)
         return out
 
     def blockers(self) -> list[Problem]:
@@ -390,7 +393,15 @@ def _spacing_problems(m: "CustomMap") -> list[Problem]:
 def _lane_problems(m: "CustomMap") -> list[Problem]:
     """Crossing lanes and lanes running under a third system — the two rules
     ``mapgen`` already enforces when it generates (``_crosses_any`` and
-    ``_grazes_other_node``), applied to a hand-drawn graph."""
+    ``_grazes_other_node``), applied to a hand-drawn graph.
+
+    They differ in severity, deliberately. A lane hidden *under* a system
+    misrepresents the graph — you read the map wrong — so it blocks. Two lanes
+    crossing in open space only looks busier: the engine, the AI and every bot
+    are indifferent to planarity, so it is a **warning**. The creator's Planar
+    toggle is what keeps the common path clean, by refusing to *draw* one; an
+    imported or deliberately-drawn crossing map still plays.
+    """
     pos = [n.pos for n in m.nodes]
     clearance = config.LANE_NODE_CLEARANCE_FRAC * config.WORLD_SIZE
     out: list[Problem] = []
@@ -402,7 +413,7 @@ def _lane_problems(m: "CustomMap") -> list[Problem]:
                 continue    # lanes sharing a system are incident, not crossing
             if segments_intersect(pos[a], pos[b], pos[c], pos[d]):
                 out.append(Problem(
-                    BLOCK, "crossing",
+                    WARN, "crossing",
                     f"Lanes #{a}-#{b} and #{c}-#{d} cross.",
                     nodes=(a, b, c, d), lanes=(li, lj),
                 ))

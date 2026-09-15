@@ -808,6 +808,47 @@ rules would then refuse. It reads `EXTRA_EDGE_FRACTION` and `MAX_EDGE_LENGTH_FRA
 live off `config`, so the button goes through `settings.apply_globals` first —
 `mapmaker` never writes `config` itself.
 
+### Why a crossing warns and a graze blocks
+
+The decision table said "block both", and Phase 1 shipped both as blockers — then
+Phase 2's Planar toggle made the inconsistency obvious. A checkbox that lets you
+draw a map the Play gate then refuses is worse than no checkbox, so one of the two
+had to move, and the plan's own ripple analysis had already settled which: "a hand
+map may carry crossing lanes ... no rule cares about planarity."
+
+So the two rules are now separated by what they actually cost:
+
+- **A lane under a third system** misrepresents the graph — it renders as if
+  hidden behind that system, so you read the map wrong. Blocks, always.
+- **Two lanes crossing in open space** costs nothing but tidiness. The engine, the
+  AI, `fog`, `turnfilm` and every bot read the graph and never the geometry.
+  Warns.
+
+The **Planar** toggle (default on) then does its job at *draw* time, refusing to
+lay a crossing lane, rather than at validation time. Default-on means the common
+path never produces one; turning it off leaves a map that still plays, still
+parses and still shares, which is the only arrangement where the toggle is
+coherent. `problems()` sorts blockers ahead of warnings so the Play gate's
+`blockers()[0]` is never buried under one.
+
+### Two gestures, one commit path
+
+Lane drawing offers a tap-then-tap and a drag, because neither alone is right for
+both input modalities — a drag is natural with a mouse and awkward on a phone at
+zoom, a tap pair is the reverse. They share one armed source (`Editor.lane_src`)
+and one `_add_lane`, so they cannot diverge: a test asserts both gestures produce
+byte-identical lanes.
+
+Systems are picked before lanes, and that ordering is load-bearing rather than
+arbitrary: a lane's endpoint is *inside* its system's tap reach by construction,
+so testing lanes first would make it impossible to start a lane at a system that
+already has one.
+
+Left-drag pans here but not in the Systems tool. That asymmetry is deliberate —
+in Systems a press on empty space always means "place", so there is no free
+gesture to spend, and route mode already records what happens when one press is
+given a second meaning conditional on the target.
+
 ### What the editor opens onto
 
 Never a blank canvas. A blank map fails the Play gate on two counts at once (no

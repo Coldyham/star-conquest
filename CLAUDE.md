@@ -884,10 +884,28 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   bots as `base_turns`, so moving a node in a live state means recomputing all
   three — miss one and the board lies. With positions plus index pairs the lanes
   follow for free and undo is a copy of plain data.
-- **The validator has one implementation with two callers.** `problems()` gates
-  Play, renders live in the sidebar, *and* is what a drag's legality is filtered
-  from — never a second copy of the geometry that could drift from what Play
-  enforces.
+- **The validator has one implementation with three callers.** `problems()` gates
+  Play, renders live in the sidebar, *and* is what a drag's or a new lane's
+  legality is filtered from — never a second copy of the geometry that could
+  drift from what Play enforces.
+- **A crossing lane is a *warning*; a lane under a system is a blocker.** The
+  engine, the AI and every bot are indifferent to planarity, so two lanes crossing
+  in open space only looks busier — but a lane hidden beneath a third system
+  misrepresents the graph. The creator's **Planar** toggle (default on) is what
+  keeps the common path clean, by refusing to *draw* a crossing; it is editor-time
+  only, so turning it off leaves a map that still plays and still shares. Making
+  crossing a blocker instead would mean a map you can draw is a map you cannot
+  play, which is what the toggle exists to avoid.
+- **Lane drawing is two gestures through one `_add_lane`.** A tap arms the source
+  and the next press commits; a drag past `DRAG_THRESHOLD` commits on release. One
+  armed source (`Editor.lane_src`) serves both, so they cannot produce different
+  work. Systems are picked *before* lanes — a lane's endpoint sits inside its
+  system's tap reach, and "start a lane here" has to win there — and a repeat press
+  on overlapping lanes cycles, the same shape `input._pick_lane` uses.
+- **Left-drag pans in the Lanes tool but not the Systems tool.** In Systems a
+  press on empty space always means "place", so there is no free left gesture, and
+  making it conditional on legality would give one press two meanings — the trap
+  route mode's tap documents. Right-drag and the on-map cluster pan in both.
 - **Adding `custom_map` cost a `_LEGACY_KEY_DROPS` entry** and moved the default
   digest to `38c8b7ba470f6f4c`; all three previous digests are recovered in order.
   `tools/bot_replay._OUTCOME_MODULES` gained `custommap` — miss that and a change

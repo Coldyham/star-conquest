@@ -41,14 +41,14 @@ import pygame
 from . import (config, custommap, mapgen, paths, settings as settings_mod,
                softkeyboard, widgets)
 from .custommap import CustomMap, MapNode, Problem
-from .geometry import WorldView, dist
+from .geometry import WorldView, dist, point_segment_dist
 from .settings import Settings
 
 # Tool modes. Phase 1 ships the first; the strip is drawn for all three so the
 # scene's layout — and therefore the camera — never moves as they arrive.
 SYSTEMS, LANES, OWNERS = "systems", "lanes", "owners"
 _TOOLS = ((SYSTEMS, "Systems"), (LANES, "Lanes"), (OWNERS, "Owners"))
-_READY_TOOLS = (SYSTEMS,)
+_READY_TOOLS = (SYSTEMS, LANES)
 
 # The production palette: a weighted roll, then the six explicit values.
 # `config.node_radius` clamps, so 1 and 2 draw the same size and 5 and 6 do too —
@@ -66,6 +66,7 @@ _STATUS_ERROR_MS = 15000
 _PANEL_BG = (22, 25, 36)
 _PANEL_EDGE = (48, 54, 74)
 _WARN = (220, 150, 90)
+_LANE_ARM = (150, 200, 240)   # the armed lane source, and its rubber band
 _BAD = (220, 110, 110)
 
 
@@ -86,6 +87,16 @@ class Editor:
     pick: object = PALETTE_RANDOM        # PALETTE_RANDOM, or an int production
 
     sel_node: Optional[int] = None
+    sel_lane: Optional[int] = None
+    # Lane drawing: one armed source serving both gestures. A tap leaves it armed
+    # so the next press commits; a drag past the threshold commits on release.
+    lane_src: Optional[int] = None
+    lane_drag: bool = False
+    lane_pos: tuple[int, int] = (0, 0)
+    # Refuse to *draw* a crossing lane. Editor-time only, and that is the whole
+    # point: `custommap` reports a crossing as a warning rather than a blocker, so
+    # turning this off leaves a map that still plays and still shares.
+    planar: bool = True
     drag_node: Optional[int] = None
     drag_origin: Optional[tuple[int, int]] = None   # world coords, for the snap-back
     drag_start: tuple[int, int] = (0, 0)            # screen coords the press landed at
@@ -93,6 +104,7 @@ class Editor:
     drag_undone: bool = False                       # is this drag's undo snapshot taken?
     pan_active: bool = False
     pan_last: tuple[int, int] = (0, 0)
+    pan_button: int = 3    # which button armed the pan (Lanes allows the left one)
     drag_slider: Optional[str] = None
 
     # What the live validator is complaining about *right now*, so an illegal
@@ -135,6 +147,11 @@ def open_editor(settings: Settings, seed: Optional[int] = None) -> Editor:
     you can do here works yet" is a poor one; the footer's *New* is one press away
     for anyone who wants to start from nothing.
     """
+    # The lane readouts and lane styling go through `config.travel_turns_at_length`,
+    # so the menu's ship-speed knob has to have reached `config` or the editor
+    # quotes the previous game's travel times. `_generated` does this on the other
+    # branch anyway; doing it here covers both.
+    settings_mod.apply_globals(settings)
     recipe = settings.custom_map.copy() if settings.custom_map is not None else _generated(settings, seed)
     return Editor(recipe=recipe, view=_build_view())
 
@@ -301,6 +318,8 @@ def _draw_map(surface, ed: Editor) -> None:
         width, color = widgets.lane_style(turns)
         if li in ed.bad_lanes:
             width, color = width + config.s(1), _WARN
+        elif li == ed.sel_lane:
+            width, color = width + config.s(2), config.COLOR_SELECT
         pygame.draw.line(surface, color, pos[a], pos[b], width)
 
     font = widgets.fonts()["small"]
@@ -312,11 +331,23 @@ def _draw_map(surface, ed: Editor) -> None:
         widgets.text(surface, font, str(node.ships), config.text_on(color), center=pos[i])
         if i in ed.bad_nodes:
             pygame.draw.circle(surface, _WARN, pos[i], r + config.NODE_RING_PAD, config.s(2))
+        elif i == ed.lane_src:
+            pygame.draw.circle(surface, _LANE_ARM, pos[i], r + config.NODE_RING_PAD, config.s(2))
         elif i == ed.sel_node:
             pygame.draw.circle(surface, config.COLOR_SELECT, pos[i], r + config.NODE_RING_PAD, config.s(2))
         label = f"#{i}"
         widgets.text(surface, font, label, config.COLOR_TEXT_DIM,
                      center=(pos[i][0], pos[i][1] + r + widgets.row_h("small") // 2 + config.s(2)))
+
+    if ed.lane_drag and ed.lane_src is not None and ed.lane_src < len(pos):
+        # Rubber band toward the cursor, with a ring on a system it could land on
+        # — `render._draw_drag` is the model.
+        pygame.draw.line(surface, _LANE_ARM, pos[ed.lane_src], ed.lane_pos, max(2, config.s(3)))
+        pygame.draw.circle(surface, _LANE_ARM, ed.lane_pos, max(3, config.s(5)), config.s(2))
+        target = _pick_node(ed, ed.lane_pos)
+        if target is not None and target != ed.lane_src:
+            r = config.node_radius(ed.recipe.nodes[target].production) + config.s(4)
+            pygame.draw.circle(surface, config.COLOR_SELECT, pos[target], r, max(2, config.s(2)))
 
     surface.set_clip(prev)
 
@@ -328,8 +359,7 @@ def _lane_turns(a: MapNode, b: MapNode) -> int:
     travel_turns`` makes — so the number authored against is the number the built
     map gives, including the menu's ship-speed slider.
     """
-    length_ly = dist(a.pos, b.pos) * config.LY_PER_WORLD_UNIT
-    return config.travel_turns_at_length(round(length_ly, 1), 0)
+    return config.travel_turns_at_length(_lane_length(a, b), 0)
 
 
 def _draw_zoom_controls(surface, ed: Editor) -> None:
@@ -386,13 +416,28 @@ def _draw_top(surface, ed: Editor) -> None:
                      midright=(config.SCREEN_W - config.HUD_PAD, config.EDIT_TOP_H // 2))
 
 
+_TOOL_HINTS = {
+    LANES: ("Drag from one system to another to lay a lane —",
+            "or tap one, then tap the other. Tap a lane to select it."),
+}
+
+
 def _draw_palette(surface, ed: Editor) -> None:
-    """The production swatches: a weighted roll, then 1..6 turns per ship."""
+    """The bottom band: production swatches in the Systems tool, a hint in tools
+    that have no palette. Its *height* never varies (see ``_palette_h``) — only
+    what is drawn in it."""
     band = _palette_rect()
     pygame.draw.rect(surface, _PANEL_BG, band)
     pygame.draw.line(surface, _PANEL_EDGE, (0, band.top), (band.right, band.top))
 
     font = widgets.fonts()["small"]
+    if ed.tool in _TOOL_HINTS:
+        y = band.centery - widgets.row_h("small") // 2
+        for line in _TOOL_HINTS[ed.tool]:
+            widgets.text(surface, font, line, config.COLOR_TEXT_DIM, center=(band.centerx, y))
+            y += widgets.row_h("small")
+        return
+
     entries: list[tuple[object, str, int]] = [(PALETTE_RANDOM, "Random (2-5)", config.HOME_PRODUCTION)]
     entries += [(p, f"{p}/ship", p) for p in _PALETTE_VALUES]
 
@@ -440,8 +485,13 @@ def _draw_side(surface, ed: Editor, settings: Settings) -> None:
     inner_w = panel.w - 2 * pad
     y = panel.y + pad
 
-    y = _draw_selection(surface, ed, f, x, y, inner_w)
-    y = _draw_econ_sliders(surface, ed, settings, f, x, y, inner_w)
+    if ed.tool == LANES:
+        y = _draw_lane_selection(surface, ed, f, x, y, inner_w)
+        y = _draw_lane_controls(surface, ed, settings, f, x, y, inner_w)
+    else:
+        y = _draw_selection(surface, ed, f, x, y, inner_w)
+        y = _draw_sliders(surface, ed, settings, f, x, y, inner_w,
+                          "New system rolls", econ_specs())
     _draw_problems(surface, ed, f, x, y, inner_w, panel.bottom - pad)
 
 
@@ -468,6 +518,71 @@ def _draw_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     delete = pygame.Rect(x + bw + config.BTN_GAP, y, w - bw - config.BTN_GAP, bh)
     ed.rects["reroll"] = _btn_rect(surface, reroll, "Reroll", widgets.BTN_BLUE, f["small"])
     ed.rects["delete"] = _btn_rect(surface, delete, "Delete", widgets.BTN_RED, f["small"])
+    return y + bh + config.ROW_GAP * 2
+
+
+def _draw_lane_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
+    """The selected lane: how far it runs, how long it takes, and Delete."""
+    lane = _selected_lane(ed)
+    if lane is None:
+        widgets.text(surface, f["small"], "Tap a lane to select it",
+                     config.COLOR_TEXT_DIM, topleft=(x, y))
+        return y + widgets.row_h() + config.ROW_GAP
+
+    a, b = lane
+    na, nb = ed.recipe.nodes[a], ed.recipe.nodes[b]
+    length = _lane_length(na, nb)
+    turns = _lane_turns(na, nb)
+
+    widgets.text(surface, f["normal"], f"Lane #{a} - #{b}", config.COLOR_TEXT, topleft=(x, y))
+    y += widgets.row_h("normal")
+    for label, value in (("Length", f"{length:g} ly"),
+                         ("Travel", f"{turns} turn" + ("s" if turns != 1 else ""))):
+        widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM, topleft=(x, y))
+        widgets.text(surface, f["small"], value, config.COLOR_TEXT,
+                     midright=(x + w, y + widgets.row_h("small") // 2))
+        y += widgets.row_h("small")
+    if config.SHIP_SPEED_GROWTH_PCT > 0:
+        # The figure above is turn 0's, which is the one worth authoring against —
+        # but with growth on it is a ceiling, not the whole story.
+        for line in widgets.wrap(f["small"], "Ships speed up each turn, so this is turn 0.", w):
+            widgets.text(surface, f["small"], line, _WARN, topleft=(x, y))
+            y += widgets.row_h("small")
+
+    y += config.ROW_GAP
+    bh = widgets.tap_size(config.FOOTER_BTN_H)
+    ed.rects["delete_lane"] = _btn_rect(
+        surface, pygame.Rect(x, y, w, bh), "Delete lane", widgets.BTN_RED, f["small"])
+    return y + bh + config.ROW_GAP * 2
+
+
+def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int) -> int:
+    """The two lane-generation knobs, the Planar toggle, and the two map-wide
+    lane actions."""
+    y = _draw_sliders(surface, ed, settings, f, x, y, w, "Auto-lanes", lane_specs())
+
+    box = widgets.tap_size(config.STEPPER_SIZE)
+    row = max(box, widgets.row_h())
+    rect = pygame.Rect(x, y, w, row)
+    mark = pygame.Rect(x, y + (row - box) // 2, box, box)
+    accent = widgets.BTN_BLUE[1]
+    pygame.draw.rect(surface, config.COLOR_BG, mark, border_radius=config.s(4))
+    pygame.draw.rect(surface, accent, mark, config.s(1), border_radius=config.s(4))
+    if ed.planar:
+        inner = mark.inflate(-box // 2, -box // 2)
+        pygame.draw.rect(surface, accent, inner, border_radius=config.s(2))
+    widgets.text(surface, f["small"], "Planar (refuse crossings)", config.COLOR_TEXT_DIM,
+                 midleft=(mark.right + config.BTN_GAP, y + row // 2))
+    ed.rects["planar"] = rect
+    y += row + config.ROW_GAP
+
+    bh = widgets.tap_size(config.FOOTER_BTN_H)
+    bw = (w - config.BTN_GAP) // 2
+    ed.rects["auto_lanes"] = _btn_rect(
+        surface, pygame.Rect(x, y, bw, bh), "Auto", widgets.BTN_VIOLET, f["small"])
+    ed.rects["clear_lanes"] = _btn_rect(
+        surface, pygame.Rect(x + bw + config.BTN_GAP, y, w - bw - config.BTN_GAP, bh),
+        "Clear all", widgets.BTN_AMBER, f["small"])
     return y + bh + config.ROW_GAP * 2
 
 
@@ -502,17 +617,19 @@ def _stepper_row(surface, ed: Editor, f, x: int, y: int, w: int,
     return y + row + config.ROW_GAP
 
 
-def _draw_econ_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int) -> int:
-    """The Economy knobs, which govern what the *next* placement rolls.
+def _draw_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int,
+                  heading: str, specs) -> int:
+    """A titled block of ``Settings``-writing sliders.
 
-    They live here rather than on the menu's Advanced tab because on a custom map
-    every garrison is already concrete — the roll happens at placement, so this is
-    the only moment they can still bite.
+    Both groups the creator owns are drawn by this: the Economy knobs, which
+    govern what the *next* placement rolls, and the two lane knobs Auto-lanes
+    reads. Both moved here from the menu's Advanced tab because on a custom map
+    they only bite at the moment the creator uses them.
     """
-    widgets.text(surface, f["small"], "New system rolls", config.COLOR_TEXT_DIM, topleft=(x, y))
+    widgets.text(surface, f["small"], heading, config.COLOR_TEXT_DIM, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
 
-    for key, label, attr, lo, hi, _step, is_int in econ_specs():
+    for key, label, attr, lo, hi, _step, is_int in specs:
         value = getattr(settings, attr)
         shown = f"{int(value)}" if is_int else f"{value:g}"
         widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM, topleft=(x, y))
@@ -525,6 +642,13 @@ def _draw_econ_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: in
         ed.rects[key] = track
         y += track.h + config.ROW_GAP
     return y + config.ROW_GAP
+
+
+def lane_specs():
+    """The two lane-generation knobs, from the menu's own list (see
+    ``econ_specs`` for why it is imported lazily)."""
+    from .menu import lane_sliders
+    return lane_sliders()
 
 
 def econ_specs():
@@ -579,7 +703,6 @@ def _footer_specs(ed: Editor) -> list[tuple[str, str, tuple, tuple, int, str]]:
         ("redo", "Redo", *widgets.BTN_BLUE, 65, "left"),
         ("new", "New", *widgets.BTN_AMBER, 40, "left"),
         ("generate", "Generate", *widgets.BTN_AMBER, 35, "left"),
-        ("auto_lanes", "Auto lanes", *widgets.BTN_VIOLET, 80, "left"),
         ("filename", "", (0, 0, 0), (0, 0, 0), 45, "right"),
         ("open", "Open", *widgets.BTN_BLUE, 50, "right"),
         ("save", "Save", *widgets.BTN_BLUE, 55, "right"),
@@ -659,13 +782,16 @@ _CONFIRMS = {
     "auto_lanes": ("Replace every lane?",
                    "Auto-lanes rebuilds the whole network, so any bottleneck you "
                    "drew by hand goes with it."),
+    "clear_lanes": ("Remove every lane?",
+                    "The systems stay where they are; only the network goes."),
     "new": ("Start from a blank canvas?", "The map you have drawn will be discarded."),
 }
 
 
 def _draw_confirm(surface, ed: Editor) -> None:
     title, detail = _CONFIRMS[ed.confirm or "new"]
-    yes_label, no_label = widgets.confirm_labels("Replace" if ed.confirm == "auto_lanes" else "Discard")
+    yes_label, no_label = widgets.confirm_labels(
+        {"auto_lanes": "Replace", "clear_lanes": "Remove"}.get(ed.confirm or "", "Discard"))
     widgets.draw_modal(surface, title, detail,
                        ((yes_label, *widgets.BTN_DANGER), (no_label, *widgets.BTN_BLUE)))
     yes, no = widgets.modal_buttons(surface, (yes_label, no_label))
@@ -731,12 +857,45 @@ def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
         return None
 
     _stop_editing_filename(ed)
+    if ed.tool == LANES:
+        _press_lane(ed, pos)
+        return None
+
     node = _pick_node(ed, pos)
     if node is not None:
         _arm_move(ed, node, pos)
         return None
     _place(ed, settings, pos)
     return None
+
+
+def _press_lane(ed: Editor, pos) -> None:
+    """A press on the map in the Lanes tool.
+
+    Systems are tested before lanes: a lane's endpoint sits inside its system's
+    tap reach, and "start a lane here" has to win there. One armed source serves
+    both gestures — a tap leaves it armed so the next press commits, a drag
+    commits on release.
+    """
+    node = _pick_node(ed, pos)
+    if node is not None:
+        ed.sel_lane = None
+        if ed.lane_src is None:
+            ed.lane_src, ed.lane_drag, ed.lane_pos = node, False, pos
+            ed.drag_start = pos
+        elif ed.lane_src == node:
+            ed.lane_src = None              # tapping the armed system again disarms
+        else:
+            _add_lane(ed, ed.lane_src, node)
+            ed.lane_src = None
+        return
+
+    ed.lane_src = None
+    ed.sel_lane = _pick_lane(ed, pos)
+    if ed.sel_lane is None:
+        # Nothing under the press at all, so left-drag is free here — unlike the
+        # Systems tool, where it always means "place".
+        ed.pan_active, ed.pan_last, ed.pan_button = True, pos, 1
 
 
 def _hit(ed: Editor, pos) -> Optional[str]:
@@ -775,7 +934,7 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
     if hit.startswith("tool_"):
         ed.tool = hit[5:]
         return None
-    if hit in _ECON_KEYS():
+    if hit in _SLIDER_KEYS():
         ed.drag_slider = hit
         _set_slider(ed, settings, hit, pos[0])
         return None
@@ -800,6 +959,12 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
         _reroll_selected(ed, settings)
     elif hit == "delete":
         _delete_selected(ed)
+    elif hit == "delete_lane":
+        _delete_lane(ed)
+    elif hit == "planar":
+        ed.planar = not ed.planar
+    elif hit == "clear_lanes":
+        ed.confirm = "clear_lanes"
     elif hit == "undo":
         _undo(ed)
     elif hit == "redo":
@@ -843,9 +1008,14 @@ def _handle_motion(event, ed: Editor, settings: Settings) -> None:
     if ed.drag_slider is not None and event.buttons[0]:
         _set_slider(ed, settings, ed.drag_slider, event.pos[0])
         return
-    if ed.pan_active and event.buttons[2]:
+    if ed.pan_active and event.buttons[ed.pan_button - 1]:
         ed.view.pan(event.pos[0] - ed.pan_last[0], event.pos[1] - ed.pan_last[1])
         ed.pan_last = event.pos
+        return
+    if ed.lane_src is not None and event.buttons[0]:
+        if dist(event.pos, ed.drag_start) > config.DRAG_THRESHOLD:
+            ed.lane_drag = True
+        ed.lane_pos = event.pos
         return
     if ed.drag_node is None or not event.buttons[0]:
         return
@@ -872,7 +1042,16 @@ def _handle_release(event, ed: Editor) -> None:
         return
     if event.button != 1:
         return
+    ed.pan_active = False
     ed.drag_slider = None
+    if ed.lane_drag:
+        # A drag that landed on nothing cancels the arming rather than leaving it
+        # set — the gesture said where it meant to end.
+        target = _pick_node(ed, event.pos)
+        if target is not None and ed.lane_src is not None and target != ed.lane_src:
+            _add_lane(ed, ed.lane_src, target)
+        ed.lane_src, ed.lane_drag = None, False
+        return
     node = ed.drag_node
     ed.drag_node = None
     if node is not None and ed.drag_moved and _illegal(ed, node) and ed.drag_origin is not None:
@@ -905,7 +1084,7 @@ def _handle_key(event, ed: Editor, settings: Settings) -> Optional[str]:
         commit(ed, settings)
         return "menu"
     elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
-        _delete_selected(ed)
+        _delete_lane(ed) if ed.tool == LANES else _delete_selected(ed)
     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
         return _play(ed, settings)
     return None
@@ -930,6 +1109,8 @@ def _handle_confirm(event, ed: Editor, settings: Settings) -> None:
         return
     if which == "auto_lanes":
         _auto_lanes(ed, settings)
+    elif which == "clear_lanes":
+        _clear_lanes(ed)
     elif which == "new":
         _push_undo(ed)
         _adopt(ed, CustomMap())
@@ -988,7 +1169,9 @@ def _adopt(ed: Editor, recipe: CustomMap) -> None:
     best meaningless and at worst the wrong system.
     """
     ed.recipe = recipe
-    ed.sel_node = None
+    ed.sel_node = ed.sel_lane = None
+    ed.lane_src = None
+    ed.lane_drag = False
     ed.drag_node = ed.drag_origin = None
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
@@ -1005,7 +1188,7 @@ def _place(ed: Editor, settings: Settings, pos) -> None:
 
     candidate = CustomMap(nodes=ed.recipe.nodes + [node], lanes=list(ed.recipe.lanes))
     index = len(candidate.nodes) - 1
-    if _offenders(candidate, index)[0]:
+    if _offenders(candidate, index, ed.planar)[0]:
         _set_status(ed, "Too close to another system or a lane.", False)
         return
 
@@ -1087,6 +1270,46 @@ def _delete_selected(ed: Editor) -> None:
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
 
+def _add_lane(ed: Editor, a: int, b: int) -> None:
+    """Draw one lane, if the rules allow it there. The single commit path, shared
+    by the tap-tap and drag gestures."""
+    key = (min(a, b), max(a, b))
+    if key in ed.recipe.lanes:
+        _set_status(ed, f"#{key[0]} and #{key[1]} are already linked.", False)
+        return
+
+    candidate = CustomMap(nodes=ed.recipe.nodes, lanes=sorted(ed.recipe.lanes + [key]))
+    index = candidate.lanes.index(key)
+    if _lane_offenders(candidate, index, ed.planar)[1]:
+        _set_status(ed, "That lane would run under a system."
+                    if not ed.planar else
+                    "That lane would run under a system, or cross another.", False)
+        return
+
+    _push_undo(ed)
+    ed.recipe.lanes = candidate.lanes
+    ed.sel_lane = index
+    _set_status(ed, "", True)
+
+
+def _delete_lane(ed: Editor) -> None:
+    lane = _selected_lane(ed)
+    if lane is None:
+        return
+    _push_undo(ed)
+    ed.recipe.lanes = [pair for pair in ed.recipe.lanes if pair != lane]
+    ed.sel_lane = None
+
+
+def _clear_lanes(ed: Editor) -> None:
+    if not ed.recipe.lanes:
+        return
+    _push_undo(ed)
+    ed.recipe.lanes = []
+    ed.sel_lane = None
+    _set_status(ed, "Every lane removed", True)
+
+
 def _auto_lanes(ed: Editor, settings: Settings) -> None:
     """Rebuild the whole lane network with ``mapgen``'s own planar edge builder.
 
@@ -1109,6 +1332,7 @@ def _auto_lanes(ed: Editor, settings: Settings) -> None:
     ed.recipe.lanes = sorted(
         (min(a, b), max(a, b)) for a, b in mapgen._planar_edges(positions)
     )
+    ed.sel_lane = None
     _set_status(ed, f"{len(ed.recipe.lanes)} lanes drawn", True)
 
 
@@ -1117,18 +1341,37 @@ def _auto_lanes(ed: Editor, settings: Settings) -> None:
 # --------------------------------------------------------------------------- #
 # The positional rules, the ones a move or a placement can break. A seat gap or a
 # disconnected graph is equally a blocker, but neither is the drag's fault and
-# neither should snap a system back.
-_PLACEMENT_CODES = frozenset({"too_close", "graze", "crossing"})
+# neither should snap a system back. "crossing" joins them only while the Planar
+# toggle is on — it is a warning in the validator, not a blocker, so with the
+# toggle off a crossing must not refuse anything.
+_PLACEMENT_CODES = frozenset({"too_close", "graze"})
 
 
-def _offenders(recipe: CustomMap, index: int) -> tuple[frozenset[int], frozenset[int]]:
-    """The nodes and lanes a positional rule is complaining about *around*
-    ``index`` — one validator, filtered, rather than a second copy of the geometry
-    that could drift from what the Play gate enforces."""
+def _codes(planar: bool) -> frozenset[str]:
+    return _PLACEMENT_CODES | {"crossing"} if planar else _PLACEMENT_CODES
+
+
+def _offenders(recipe: CustomMap, index: int, planar: bool = True
+               ) -> tuple[frozenset[int], frozenset[int]]:
+    """The nodes and lanes a positional rule is complaining about *around* the
+    system ``index`` — one validator, filtered, rather than a second copy of the
+    geometry that could drift from what the Play gate enforces."""
+    return _filter(recipe, planar, lambda problem: index in problem.nodes)
+
+
+def _lane_offenders(recipe: CustomMap, lane: int, planar: bool
+                    ) -> tuple[frozenset[int], frozenset[int]]:
+    """The same, for a lane rather than a system — what a newly drawn lane is
+    tested against."""
+    return _filter(recipe, planar, lambda problem: lane in problem.lanes)
+
+
+def _filter(recipe: CustomMap, planar: bool, touches) -> tuple[frozenset[int], frozenset[int]]:
+    codes = _codes(planar)
     nodes: set[int] = set()
     lanes: set[int] = set()
     for problem in recipe.problems():
-        if problem.code not in _PLACEMENT_CODES or index not in problem.nodes:
+        if problem.code not in codes or not touches(problem):
             continue
         nodes.update(problem.nodes)
         lanes.update(problem.lanes)
@@ -1136,11 +1379,11 @@ def _offenders(recipe: CustomMap, index: int) -> tuple[frozenset[int], frozenset
 
 
 def _refresh_bad(ed: Editor, index: int) -> None:
-    ed.bad_nodes, ed.bad_lanes = _offenders(ed.recipe, index)
+    ed.bad_nodes, ed.bad_lanes = _offenders(ed.recipe, index, ed.planar)
 
 
 def _illegal(ed: Editor, index: int) -> bool:
-    return bool(_offenders(ed.recipe, index)[0])
+    return bool(_offenders(ed.recipe, index, ed.planar)[0])
 
 
 def _move_node(ed: Editor, index: int, pos) -> None:
@@ -1163,6 +1406,37 @@ def _pick_node(ed: Editor, pos) -> Optional[int]:
 
 def _screen_of(ed: Editor, index: int) -> tuple[int, int]:
     return ed.view.to_screen(ed.recipe.nodes[index].pos)
+
+
+def _selected_lane(ed: Editor) -> Optional[tuple[int, int]]:
+    """The selected lane as its node pair, or None. Returns the *pair* rather than
+    the index, because an index into a list that has since been edited is at best
+    meaningless and at worst the wrong lane."""
+    if ed.sel_lane is None or not 0 <= ed.sel_lane < len(ed.recipe.lanes):
+        return None
+    return ed.recipe.lanes[ed.sel_lane]
+
+
+def _lane_length(a: MapNode, b: MapNode) -> float:
+    return round(dist(a.pos, b.pos) * config.LY_PER_WORLD_UNIT, 1)
+
+
+def _pick_lane(ed: Editor, pos) -> Optional[int]:
+    """The lane under ``pos``, nearest first — with a repeat press cycling through
+    overlapping candidates rather than always grabbing the same one, the same
+    shape ``input._pick_lane`` uses."""
+    hits: list[tuple[float, int]] = []
+    for i, (a, b) in enumerate(ed.recipe.lanes):
+        d = point_segment_dist(pos, ed.view.to_screen(ed.recipe.nodes[a].pos),
+                               ed.view.to_screen(ed.recipe.nodes[b].pos))
+        if d <= config.LANE_PICK_DIST:
+            hits.append((d, i))
+    if not hits:
+        return None
+    order = [i for _d, i in sorted(hits)]
+    if ed.sel_lane in order:
+        return order[(order.index(ed.sel_lane) + 1) % len(order)]
+    return order[0]
 
 
 def _selected(ed: Editor) -> Optional[MapNode]:
@@ -1190,8 +1464,14 @@ def _view_centre() -> tuple[int, int]:
 # --------------------------------------------------------------------------- #
 # Sliders, text entry and the map library
 # --------------------------------------------------------------------------- #
-def _ECON_KEYS() -> frozenset[str]:
-    return frozenset(spec[0] for spec in econ_specs())
+def _slider_specs():
+    """Every slider the creator can draw, whichever tool is up. One lookup, so
+    `_set_slider` cannot go looking in the wrong group."""
+    return tuple(econ_specs()) + tuple(lane_specs())
+
+
+def _SLIDER_KEYS() -> frozenset[str]:
+    return frozenset(spec[0] for spec in _slider_specs())
 
 
 def _set_slider(ed: Editor, settings: Settings, key: str, px: int) -> None:
@@ -1201,7 +1481,7 @@ def _set_slider(ed: Editor, settings: Settings, key: str, px: int) -> None:
     where ``widgets.slider`` puts the knob — re-deriving the inset here is how a
     knob ends up drifting away from the finger at the extremes.
     """
-    spec = next((s for s in econ_specs() if s[0] == key), None)
+    spec = next((s for s in _slider_specs() if s[0] == key), None)
     rect = ed.rects.get(key)
     if spec is None or rect is None:
         return

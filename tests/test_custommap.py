@@ -153,13 +153,40 @@ def test_a_lane_running_under_a_third_system_blocks():
     assert any(p.code == "graze" for p in m.problems())
 
 
-def test_crossing_lanes_block():
-    m = CustomMap(
+def _crossed() -> CustomMap:
+    """Two lanes crossing in open space: the diagonals of a square."""
+    return CustomMap(
         nodes=[MapNode(100, 100, 3, 5, 1), MapNode(900, 900, 3, 5, 2),
                MapNode(900, 100, 3, 5, 0), MapNode(100, 900, 3, 5, 0)],
-        lanes=[(0, 1), (2, 3)],                # the two diagonals of a square
+        lanes=[(0, 1), (2, 3), (0, 2), (1, 3)],
     ).normalised()
-    assert any(p.code == "crossing" for p in m.problems())
+
+
+def test_crossing_lanes_warn_rather_than_block():
+    """Two lanes crossing in open space only looks busier — the engine, the AI
+    and every bot are indifferent to planarity. A lane hidden *under* a system is
+    the one that misrepresents the graph, and that still blocks."""
+    crossing = next(p for p in _crossed().problems() if p.code == "crossing")
+    assert not crossing.blocks
+    assert set(crossing.nodes) == {0, 1, 2, 3}
+
+
+def test_a_crossing_map_is_still_playable_and_still_parses():
+    """Which is what makes the creator's Planar toggle coherent: turning it off
+    has to leave you with a map you can actually play and share."""
+    m = _crossed()
+    assert m.is_playable()
+    assert CustomMap.from_dict(m.to_dict()) == m
+
+
+def test_blockers_are_listed_before_warnings():
+    """The Play gate quotes `blockers()[0]`, so a warning at the top of the list
+    would bury the thing actually stopping the game."""
+    m = _crossed()
+    m.lanes = [(0, 1), (2, 3)]                  # ...and now nothing is connected
+    severities = [p.blocks for p in m.problems()]
+    assert severities == sorted(severities, reverse=True)
+    assert m.problems()[0].blocks
 
 
 def test_lanes_sharing_a_system_are_incident_not_crossing():

@@ -112,6 +112,17 @@ _ADV_ECON = (
 )
 
 
+def lane_sliders():
+    """The two map knobs that govern lane *generation*, for the creator's Lanes
+    sidebar — `mapgen._planar_edges` reads exactly these two live off `config`.
+
+    Selected by name rather than by slicing `_ADV_MAP`, so reordering that tuple
+    cannot silently hand the creator the node-placement knobs instead.
+    """
+    wanted = ("extra_edge_fraction", "max_edge_length_frac")
+    return tuple(spec for spec in _ADV_MAP if spec[2] in wanted)
+
+
 def econ_sliders():
     """The Economy slider specs, for the map creator's sidebar.
 

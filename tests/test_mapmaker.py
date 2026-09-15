@@ -289,6 +289,7 @@ def test_an_econ_slider_writes_settings(scene):
 # --------------------------------------------------------------------------- #
 def test_auto_lanes_reproduces_mapgens_own_edge_builder(scene):
     screen, ed, settings = scene
+    ed.tool = mapmaker.LANES
     ed.recipe.lanes = []
     _click_key(screen, ed, settings, "auto_lanes")
     assert ed.confirm == "auto_lanes"       # destructive, so it asks first
@@ -302,6 +303,7 @@ def test_auto_lanes_reproduces_mapgens_own_edge_builder(scene):
 
 def test_auto_lanes_can_be_declined(scene):
     screen, ed, settings = scene
+    ed.tool = mapmaker.LANES
     ed.recipe.lanes = []
     _click_key(screen, ed, settings, "auto_lanes")
     mapmaker.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0), ed, settings)
@@ -483,8 +485,8 @@ def test_an_unfinished_tool_records_no_rect(scene):
     forgets to check."""
     screen, ed, settings = scene
     mapmaker.draw(screen, ed, settings)
-    assert "tool_systems" in ed.rects
-    assert "tool_lanes" not in ed.rects and "tool_owners" not in ed.rects
+    assert "tool_systems" in ed.rects and "tool_lanes" in ed.rects
+    assert "tool_owners" not in ed.rects          # Owners is still to come
 
 
 def test_a_control_not_drawn_this_frame_cannot_be_clicked(scene):
@@ -545,3 +547,206 @@ def test_a_resize_keeps_the_zoom_and_reflows_the_viewport(scene):
         assert view.right <= config.SCREEN_W and view.bottom <= config.SCREEN_H
     finally:
         config.SCREEN_W, config.SCREEN_H = 1440, 960
+
+
+# --------------------------------------------------------------------------- #
+# The Lanes tool
+# --------------------------------------------------------------------------- #
+def _lanes(scene):
+    screen, ed, settings = scene
+    ed.tool = mapmaker.LANES
+    return screen, ed, settings
+
+
+def _at(ed, index):
+    return ed.view.to_screen(ed.recipe.nodes[index].pos)
+
+
+def test_tapping_two_systems_lays_a_lane(scene):
+    screen, ed, settings = _lanes(scene)
+    ed.recipe.lanes = []
+    _press(screen, ed, settings, _at(ed, 0))
+    assert ed.lane_src == 0 and ed.recipe.lanes == []   # armed, not yet committed
+    _release(ed, settings, _at(ed, 0))
+    _press(screen, ed, settings, _at(ed, 2))
+    assert ed.recipe.lanes == [(0, 2)]
+    assert ed.lane_src is None
+
+
+def test_dragging_between_systems_lays_the_same_lane(scene):
+    """Two gestures, one `_add_lane` — so they must produce byte-identical work."""
+    screen, ed, settings = _lanes(scene)
+    ed.recipe.lanes = []
+    _press(screen, ed, settings, _at(ed, 0))
+    for pos in (_at(ed, 0), _at(ed, 2)):
+        mapmaker.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=pos, buttons=(1, 0, 0), rel=(0, 0)),
+            ed, settings)
+    assert ed.lane_drag
+    _release(ed, settings, _at(ed, 2))
+    assert ed.recipe.lanes == [(0, 2)]
+    assert ed.lane_src is None and not ed.lane_drag
+
+
+def test_a_drag_that_lands_on_nothing_cancels_the_arming(scene):
+    screen, ed, settings = _lanes(scene)
+    ed.recipe.lanes = []
+    _press(screen, ed, settings, _at(ed, 0))
+    for pos in (_at(ed, 0), _empty_spot(ed)):
+        mapmaker.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=pos, buttons=(1, 0, 0), rel=(0, 0)),
+            ed, settings)
+    _release(ed, settings, _empty_spot(ed))
+    assert ed.recipe.lanes == [] and ed.lane_src is None
+
+
+def test_tapping_the_armed_system_again_disarms(scene):
+    screen, ed, settings = _lanes(scene)
+    _press(screen, ed, settings, _at(ed, 0))
+    _release(ed, settings, _at(ed, 0))
+    _press(screen, ed, settings, _at(ed, 0))
+    assert ed.lane_src is None
+
+
+def test_a_duplicate_lane_is_refused(scene):
+    screen, ed, settings = _lanes(scene)
+    before = list(ed.recipe.lanes)
+    _press(screen, ed, settings, _at(ed, 0))
+    _release(ed, settings, _at(ed, 0))
+    _press(screen, ed, settings, _at(ed, 1))          # (0, 1) already exists
+    assert ed.recipe.lanes == before and not ed.status_ok
+
+
+def test_a_lane_that_would_run_under_a_system_is_refused(scene):
+    screen, ed, settings = _lanes(scene)
+    ed.recipe = CustomMap(
+        nodes=[MapNode(100, 500, 3, 5, 1), MapNode(500, 500, 3, 5, 0), MapNode(900, 500, 3, 5, 2)],
+        lanes=[(0, 1), (1, 2)],
+    ).normalised()
+    _press(screen, ed, settings, _at(ed, 0))
+    _release(ed, settings, _at(ed, 0))
+    _press(screen, ed, settings, _at(ed, 2))          # 0-2 would pass through 1
+    assert ed.recipe.lanes == [(0, 1), (1, 2)] and not ed.status_ok
+
+
+def _crossing_setup(ed):
+    """A square with both sides drawn; the two diagonals would cross."""
+    ed.recipe = CustomMap(
+        nodes=[MapNode(200, 200, 3, 5, 1), MapNode(800, 200, 3, 5, 0),
+               MapNode(800, 800, 3, 5, 2), MapNode(200, 800, 3, 5, 0)],
+        lanes=[(0, 1), (1, 2), (2, 3), (0, 3), (0, 2)],
+    ).normalised()
+
+
+def test_planar_on_refuses_a_crossing_lane(scene):
+    screen, ed, settings = _lanes(scene)
+    _crossing_setup(ed)
+    assert ed.planar
+    _press(screen, ed, settings, _at(ed, 1))
+    _release(ed, settings, _at(ed, 1))
+    _press(screen, ed, settings, _at(ed, 3))          # 1-3 crosses 0-2
+    assert (1, 3) not in ed.recipe.lanes and not ed.status_ok
+
+
+def test_planar_off_allows_it_and_the_map_still_plays(scene):
+    """Which is the whole point of the toggle: a crossing is a warning, not a
+    blocker, so turning it off must leave a map you can actually play."""
+    screen, ed, settings = _lanes(scene)
+    _crossing_setup(ed)
+    _click_key(screen, ed, settings, "planar")
+    assert not ed.planar
+
+    _press(screen, ed, settings, _at(ed, 1))
+    _release(ed, settings, _at(ed, 1))
+    _press(screen, ed, settings, _at(ed, 3))
+    assert (1, 3) in ed.recipe.lanes
+    assert ed.can_play()
+    assert any(p.code == "crossing" and not p.blocks for p in ed.problems())
+
+
+def test_a_lane_can_be_picked_and_deleted(scene):
+    screen, ed, settings = _lanes(scene)
+    a, b = _at(ed, 0), _at(ed, 1)
+    midpoint = ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
+    _press(screen, ed, settings, midpoint)
+    assert ed.recipe.lanes[ed.sel_lane] == (0, 1)
+
+    _click_key(screen, ed, settings, "delete_lane")
+    assert (0, 1) not in ed.recipe.lanes and ed.sel_lane is None
+
+
+def test_a_repeat_press_cycles_between_overlapping_lanes(scene):
+    """Two lanes can sit on top of each other, so the nearest one must not be the
+    only one you can ever reach — the shape `input._pick_lane` uses."""
+    screen, ed, settings = _lanes(scene)
+    _crossing_setup(ed)
+    ed.planar = False
+    ed.recipe.lanes = sorted(ed.recipe.lanes + [(1, 3)])
+    centre = ed.view.to_screen((500.0, 500.0))        # where the diagonals cross
+
+    picks = set()
+    for _ in range(4):
+        _press(screen, ed, settings, centre)
+        picks.add(ed.sel_lane)
+    assert len(picks) == 2, picks                     # both diagonals reachable
+
+
+def test_a_system_is_tested_before_a_lane(scene):
+    """A lane's endpoint sits inside its system's tap reach, and "start a lane
+    here" has to win there."""
+    screen, ed, settings = _lanes(scene)
+    _press(screen, ed, settings, _at(ed, 0))
+    assert ed.lane_src == 0 and ed.sel_lane is None
+
+
+def test_clear_lanes_asks_first_and_keeps_the_systems(scene):
+    screen, ed, settings = _lanes(scene)
+    _click_key(screen, ed, settings, "clear_lanes")
+    assert ed.confirm == "clear_lanes" and ed.recipe.lanes
+    mapmaker.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_y, mod=0), ed, settings)
+    assert ed.recipe.lanes == [] and len(ed.recipe.nodes) == 4
+    mapmaker._undo(ed)
+    assert len(ed.recipe.lanes) == 4
+
+
+def test_left_drag_pans_in_the_lanes_tool(scene):
+    """Unlike the Systems tool, where a press on empty space always means
+    "place", so there is no free left gesture."""
+    screen, ed, settings = _lanes(scene)
+    ed.view.zoom_at(_empty_spot(ed), 2.0)
+    off = ed.view.off_x
+    pos = _empty_spot(ed)
+    _press(screen, ed, settings, pos)
+    mapmaker.handle_event(
+        pygame.event.Event(pygame.MOUSEMOTION, pos=(pos[0] - 40, pos[1]),
+                           buttons=(1, 0, 0), rel=(0, 0)), ed, settings)
+    assert ed.view.off_x != off
+
+
+def test_the_lane_sidebar_quotes_the_travel_time_the_board_gives(scene):
+    screen, ed, settings = _lanes(scene)
+    ed.sel_lane = ed.recipe.lanes.index((0, 1))
+    mapmaker.draw(screen, ed, settings)
+    a, b = ed.recipe.nodes[0], ed.recipe.nodes[1]
+    state = mapgen.generate_custom(1, ed.recipe.normalised())
+    assert mapmaker._lane_turns(a, b) == state.travel_turns(0, 1)
+
+
+def test_a_lane_slider_writes_settings(scene):
+    screen, ed, settings = _lanes(scene)
+    mapmaker.draw(screen, ed, settings)
+    rect = ed.rects["adv_extra_edges"]
+    mapmaker.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(rect.x, rect.centery), button=1),
+        ed, settings)
+    assert settings.extra_edge_fraction == 0.0        # the spec's bottom end
+
+
+def test_switching_tools_never_changes_the_map(scene):
+    screen, ed, settings = scene
+    before = ed.recipe.to_dict()
+    for _ in range(5):
+        for tool in (mapmaker.SYSTEMS, mapmaker.LANES):
+            ed.tool = tool
+            mapmaker.draw(screen, ed, settings)
+    assert ed.recipe.to_dict() == before
