@@ -512,7 +512,8 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
 # specially in `_tab_changed`, since it spans two per-seat lists rather than a
 # flat set of Settings attrs.
 _TAB_FIELDS = {
-    "basic": ("players", "nodes", "mode", "seed", "autoplay", "fog_sight", "fog_scout"),
+    "basic": ("players", "nodes", "mode", "seed", "autoplay", "fog_sight", "fog_scout",
+              "custom_map"),
     "combat": tuple(attr for _, _, attr, *_ in _ADV_COMBAT) + ("in_lane_battles",),
     "advanced": tuple(attr for _, _, attr, *_ in _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG) + ("neutral_produces",),
 }
@@ -560,25 +561,39 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     right = panel.right - 34
     y = panel.y + 34
 
+    drawn = settings.custom_map is not None
+
     _row_label(surface, "Players", left, y, _changed(settings, "players"))
-    _stepper(surface, ms, "players", str(settings.players), right, y)
+    if drawn:
+        # Derived from the map, so the number is shown but not offered: the
+        # control simply is not drawn, and `_draw_menu` clears `ms.rects` every
+        # frame, so it is inert by construction rather than by a disabled flag.
+        _derived(surface, f"{settings.players} (from the map)", right, y)
+    else:
+        _stepper(surface, ms, "players", str(settings.players), right, y)
     y += _ROW_H
 
     _row_label(surface, "Systems", left, y, _changed(settings, "nodes"))
-    _stepper(surface, ms, "nodes", str(settings.nodes), right, y)
+    if drawn:
+        _derived(surface, f"{settings.nodes} (from the map)", right, y)
+    else:
+        _stepper(surface, ms, "nodes", str(settings.nodes), right, y)
     y += _ROW_H
 
     _row_label(surface, "Map type", left, y, _changed(settings, "mode"))
-    _segmented(
-        surface,
-        ms,
-        right,
-        y,
-        [
-            ("mode_random", "Random", settings.mode == "random"),
-            ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
-        ],
-    )
+    if drawn:
+        _derived(surface, "hand-drawn", right, y)
+    else:
+        _segmented(
+            surface,
+            ms,
+            right,
+            y,
+            [
+                ("mode_random", "Random", settings.mode == "random"),
+                ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
+            ],
+        )
     y += _ROW_H
 
     _row_label(surface, "Seed", left, y, _changed(settings, "seed"))
@@ -615,9 +630,15 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     lx = panel.x + pad
     rx = lx + col_w + pad
 
+    drawn = settings.custom_map is not None
+
     y = panel.y + 16  # LEFT: Map + Travel
     y = _section(surface, "Map", lx, y)
-    y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
+    if drawn:
+        y = _hidden_note(surface, ("Placement and lanes are hand-drawn.",
+                                   "The two lane knobs live in the creator."), lx, y, col_w)
+    else:
+        y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
@@ -627,7 +648,14 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     y = _section(surface, "Visibility", rx, y)
     y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
-    y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
+    if drawn:
+        # Every production and garrison on a hand map is already concrete — they
+        # are rolled at the moment a system is placed, so these only bite inside
+        # the creator, which is where they now are.
+        y = _hidden_note(surface, ("Every system's production and garrison",
+                                   "is set in the creator."), rx, y, col_w)
+    else:
+        y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
     if _changed(settings, "neutral_produces"):
         _changed_dot(surface, rx - 12, y + _CH // 2)
     _text(surface, _fonts()["small"], "Neutral produces", config.COLOR_TEXT_DIM, midleft=(rx, y + _CH // 2))
@@ -908,6 +936,31 @@ def _sliders(surface, ms, target, specs, x: int, y: int, width: int) -> int:
 # --------------------------------------------------------------------------- #
 # Widgets
 # --------------------------------------------------------------------------- #
+def _visible_adv(settings: Settings):
+    """The Advanced sliders actually on screen for this setup."""
+    if settings.custom_map is None:
+        return _ADV_ALL
+    return _ADV_TRAVEL + _ADV_FOG
+
+
+def _derived(surface, text: str, right: int, y: int) -> None:
+    """A read-only value where a control would otherwise sit — a hand map decides
+    it, so it is reported rather than offered."""
+    _text(surface, _fonts()["normal"], text, _DISABLED_TEXT, midright=(right, y + _CH // 2))
+
+
+def _hidden_note(surface, lines, x: int, y: int, width: int) -> int:
+    """Stand-in prose for a slider group a custom map makes meaningless.
+
+    Hand-broken rather than reflowed, like the rest of this fixed-canvas scene —
+    a runtime wrap would make the panel's height depend on its text.
+    """
+    for line in lines:
+        _text(surface, _fonts()["small"], line, _DISABLED_TEXT, midleft=(x, y + _CH // 2))
+        y += _CH - 6
+    return y + 10
+
+
 def _row_label(surface, text: str, x: int, y: int, changed: bool = False) -> None:
     if changed:
         _changed_dot(surface, x - 12, y + _CH // 2)
@@ -1450,7 +1503,9 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "randomise_ai":
         _randomise_sliders(settings.ai[ms.ai_seat - 1], _ai_specs(ms, settings))
     elif hit == "randomise_adv":
-        _randomise_sliders(settings, _ADV_ALL)
+        # The hidden groups are not the die's to roll: they describe generation,
+        # and a hand map has already been generated by hand.
+        _randomise_sliders(settings, _visible_adv(settings))
     elif hit == "neutral_produces":
         settings.neutral_produces = not settings.neutral_produces
     elif hit == "in_lane_battles":
@@ -1620,10 +1675,23 @@ def set_status(ms: MenuState, text: str, ok: bool) -> None:
 
 
 def _set_players(settings: Settings, n: int) -> None:
+    if settings.custom_map is not None:
+        return _interlocked()
     settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, n))
     if settings.nodes < settings.min_nodes():
         settings.nodes = settings.min_nodes()
 
 
 def _set_nodes(settings: Settings, n: int) -> None:
+    if settings.custom_map is not None:
+        return _interlocked()
     settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, n))
+
+
+def _interlocked() -> None:
+    """Both setters above are inert while a hand map is set: `players` and `nodes`
+    are then derived from the recipe, and a nudge here would desync them from it
+    until the next `from_dict` silently reconciled them back — moving the setup
+    digest in between. The steppers aren't drawn in that state, so this only ever
+    catches a caller that isn't the stepper."""
+    return None

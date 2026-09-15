@@ -48,7 +48,7 @@ from .settings import Settings
 # scene's layout — and therefore the camera — never moves as they arrive.
 SYSTEMS, LANES, OWNERS = "systems", "lanes", "owners"
 _TOOLS = ((SYSTEMS, "Systems"), (LANES, "Lanes"), (OWNERS, "Owners"))
-_READY_TOOLS = (SYSTEMS, LANES)
+_READY_TOOLS = (SYSTEMS, LANES, OWNERS)
 
 # The production palette: a weighted roll, then the six explicit values.
 # `config.node_radius` clamps, so 1 and 2 draw the same size and 5 and 6 do too —
@@ -97,6 +97,16 @@ class Editor:
     # point: `custommap` reports a crossing as a warning rather than a blocker, so
     # turning this off leaves a map that still plays and still shares.
     planar: bool = True
+
+    # Owners tool. `owner_pick` is what a tap paints; the two box flags are route
+    # mode's arming exactly — `box_press` on the press, `box_active` only past the
+    # threshold, so a tap that never moves paints nothing.
+    owner_pick: int = 1
+    box_press: bool = False
+    box_active: bool = False
+    box_from: tuple[int, int] = (0, 0)
+    box_to: tuple[int, int] = (0, 0)
+
     drag_node: Optional[int] = None
     drag_origin: Optional[tuple[int, int]] = None   # world coords, for the snap-back
     drag_start: tuple[int, int] = (0, 0)            # screen coords the press landed at
@@ -339,6 +349,11 @@ def _draw_map(surface, ed: Editor) -> None:
         widgets.text(surface, font, label, config.COLOR_TEXT_DIM,
                      center=(pos[i][0], pos[i][1] + r + widgets.row_h("small") // 2 + config.s(2)))
 
+    if ed.box_active:
+        box = pygame.Rect(_clip_to_view(_box_rect(ed)))
+        if box.w > 0 and box.h > 0:
+            pygame.draw.rect(surface, config.COLOR_SELECT, box, config.s(1))
+
     if ed.lane_drag and ed.lane_src is not None and ed.lane_src < len(pos):
         # Rubber band toward the cursor, with a ring on a system it could land on
         # — `render._draw_drag` is the model.
@@ -431,6 +446,9 @@ def _draw_palette(surface, ed: Editor) -> None:
     pygame.draw.line(surface, _PANEL_EDGE, (0, band.top), (band.right, band.top))
 
     font = widgets.fonts()["small"]
+    if ed.tool == OWNERS:
+        _draw_seat_palette(surface, ed, band, font)
+        return
     if ed.tool in _TOOL_HINTS:
         y = band.centery - widgets.row_h("small") // 2
         for line in _TOOL_HINTS[ed.tool]:
@@ -474,6 +492,53 @@ def _draw_palette(surface, ed: Editor) -> None:
         x = rect.right + config.BTN_GAP
 
 
+def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
+    """Neutral, then the seats — one more than are currently held, floored at two.
+
+    Offering ``n + 1`` is what makes the common path gap-free by construction: you
+    can always reach the next seat and never one past it. It does not *prevent* a
+    gap (paint seat 3, then clear seat 2), which is why that case gets a blocker
+    with a one-press fix rather than a silent renumber — renumbering changes a
+    seat's colour without being asked, and the colour is part of what an author
+    intended.
+    """
+    counts = ed.recipe.owner_counts()
+    held = sum(1 for pid, n in counts.items() if pid > 0 and n > 0)
+    top = max(config.MIN_PLAYERS, min(held + 1, config.MAX_PLAYERS))
+    entries = [0] + list(range(1, top + 1))
+
+    captions = {pid: (f"{config.player_name(pid)} ({counts.get(pid, 0)})" if pid else
+                      f"Neutral ({counts.get(0, 0)})") for pid in entries}
+    swatch = widgets.tap_size(2 * config.NODE_MAX_RADIUS + config.s(8))
+    wanted = max(swatch, max(font.size(c)[0] for c in captions.values()) + config.s(8))
+    gaps = config.BTN_GAP * (len(entries) - 1)
+    room = max(1, (band.w - 2 * config.HUD_PAD - gaps) // len(entries))
+    cell = min(wanted, room)
+    captioned = cell >= wanted
+
+    x = band.x + max(config.HUD_PAD, (band.w - (cell * len(entries) + gaps)) // 2)
+    cy = band.y + config.HUD_PAD + config.NODE_MAX_RADIUS
+    for pid in entries:
+        rect = pygame.Rect(x, band.y + config.HUD_PAD, cell, band.h - 2 * config.HUD_PAD)
+        colour = config.player_color(pid)
+        centre = (rect.centerx, cy)
+        r = config.node_radius(config.HOME_PRODUCTION)
+        pygame.draw.circle(surface, colour, centre, r)
+        pygame.draw.circle(surface, widgets.brighten(colour, 40), centre, r, config.s(2))
+        # Seat 1 is the human (`main.new_ui` passes human_id=1) — worth marking,
+        # since which colour you are is not otherwise visible until the game opens.
+        glyph = "-" if pid == 0 else ("You" if pid == 1 else str(pid))
+        widgets.text(surface, font, glyph, config.text_on(colour), center=centre)
+        if ed.owner_pick == pid:
+            pygame.draw.circle(surface, config.COLOR_SELECT, centre,
+                               r + config.NODE_RING_PAD, config.s(2))
+        if captioned:
+            widgets.text(surface, font, captions[pid], config.COLOR_TEXT_DIM,
+                         center=(rect.centerx, cy + config.NODE_MAX_RADIUS + widgets.row_h("small") // 2))
+        ed.rects[f"seat_{pid}"] = rect
+        x = rect.right + config.BTN_GAP
+
+
 def _draw_side(surface, ed: Editor, settings: Settings) -> None:
     panel = _side_rect()
     pygame.draw.rect(surface, _PANEL_BG, panel)
@@ -488,6 +553,9 @@ def _draw_side(surface, ed: Editor, settings: Settings) -> None:
     if ed.tool == LANES:
         y = _draw_lane_selection(surface, ed, f, x, y, inner_w)
         y = _draw_lane_controls(surface, ed, settings, f, x, y, inner_w)
+    elif ed.tool == OWNERS:
+        y = _draw_selection(surface, ed, f, x, y, inner_w)
+        y = _draw_owner_controls(surface, ed, f, x, y, inner_w)
     else:
         y = _draw_selection(surface, ed, f, x, y, inner_w)
         y = _draw_sliders(surface, ed, settings, f, x, y, inner_w,
@@ -584,6 +652,24 @@ def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: i
         surface, pygame.Rect(x + bw + config.BTN_GAP, y, w - bw - config.BTN_GAP, bh),
         "Clear all", widgets.BTN_AMBER, f["small"])
     return y + bh + config.ROW_GAP * 2
+
+
+def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
+    """Make homeworld, plus the seat-gap fix when there is a gap to fix."""
+    bh = widgets.tap_size(config.FOOTER_BTN_H)
+    if _selected(ed) is not None:
+        # Explicit, never implicit: painting a colour must not silently rewrite
+        # numbers you set, but "give this one a real garrison" shouldn't be a trip
+        # back to the Systems tool either.
+        ed.rects["make_home"] = _btn_rect(
+            surface, pygame.Rect(x, y, w, bh), "Make homeworld", widgets.BTN_BLUE, f["small"])
+        y += bh + config.ROW_GAP
+
+    if any(p.code == "seat_gap" for p in ed.problems()):
+        ed.rects["renumber"] = _btn_rect(
+            surface, pygame.Rect(x, y, w, bh), "Renumber seats", widgets.BTN_AMBER, f["small"])
+        y += bh + config.ROW_GAP
+    return y + config.ROW_GAP
 
 
 def _btn_rect(surface, rect, label, palette, font) -> pygame.Rect:
@@ -860,6 +946,9 @@ def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
     if ed.tool == LANES:
         _press_lane(ed, pos)
         return None
+    if ed.tool == OWNERS:
+        _press_owner(ed, pos)
+        return None
 
     node = _pick_node(ed, pos)
     if node is not None:
@@ -867,6 +956,24 @@ def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
         return None
     _place(ed, settings, pos)
     return None
+
+
+def _press_owner(ed: Editor, pos) -> None:
+    """A press on the map in the Owners tool: paint one system, or arm a box.
+
+    One meaning per tap. A press on a system paints it, and a second press on a
+    system *already* that owner clears it to neutral — never "select here, paint
+    there", and never a second primary meaning conditional on the system, which is
+    the trap route mode's tap documents.
+    """
+    node = _pick_node(ed, pos)
+    if node is not None:
+        ed.sel_node = node
+        _paint(ed, [node])
+        return
+    ed.box_press, ed.box_active = True, False
+    ed.box_from = ed.box_to = pos
+    ed.drag_start = pos
 
 
 def _press_lane(ed: Editor, pos) -> None:
@@ -931,6 +1038,9 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
         ed.pick = PALETTE_RANDOM if value == PALETTE_RANDOM else int(value)
         _retype_selection(ed, settings)
         return None
+    if hit.startswith("seat_"):
+        ed.owner_pick = int(hit[5:])
+        return None
     if hit.startswith("tool_"):
         ed.tool = hit[5:]
         return None
@@ -965,6 +1075,10 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
         ed.planar = not ed.planar
     elif hit == "clear_lanes":
         ed.confirm = "clear_lanes"
+    elif hit == "make_home":
+        _make_homeworld(ed)
+    elif hit == "renumber":
+        _renumber_seats(ed)
     elif hit == "undo":
         _undo(ed)
     elif hit == "redo":
@@ -1012,6 +1126,11 @@ def _handle_motion(event, ed: Editor, settings: Settings) -> None:
         ed.view.pan(event.pos[0] - ed.pan_last[0], event.pos[1] - ed.pan_last[1])
         ed.pan_last = event.pos
         return
+    if ed.box_press and event.buttons[0]:
+        if dist(event.pos, ed.drag_start) > config.DRAG_THRESHOLD:
+            ed.box_active = True
+        ed.box_to = event.pos
+        return
     if ed.lane_src is not None and event.buttons[0]:
         if dist(event.pos, ed.drag_start) > config.DRAG_THRESHOLD:
             ed.lane_drag = True
@@ -1044,6 +1163,13 @@ def _handle_release(event, ed: Editor) -> None:
         return
     ed.pan_active = False
     ed.drag_slider = None
+    if ed.box_press:
+        # Only a box that actually became one paints; a press that never moved was
+        # a tap on empty space, which means nothing here.
+        if ed.box_active:
+            _paint(ed, _nodes_in_box(ed, _box_rect(ed)))
+        ed.box_press = ed.box_active = False
+        return
     if ed.lane_drag:
         # A drag that landed on nothing cancels the arming rather than leaving it
         # set — the gesture said where it meant to end.
@@ -1172,6 +1298,7 @@ def _adopt(ed: Editor, recipe: CustomMap) -> None:
     ed.sel_node = ed.sel_lane = None
     ed.lane_src = None
     ed.lane_drag = False
+    ed.box_press = ed.box_active = False
     ed.drag_node = ed.drag_origin = None
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
@@ -1268,6 +1395,90 @@ def _delete_selected(ed: Editor) -> None:
     ed.sel_node = None
     ed.drag_node = ed.drag_origin = None
     ed.bad_nodes = ed.bad_lanes = frozenset()
+
+
+def _paint(ed: Editor, targets: list[int]) -> None:
+    """Stamp ``owner_pick`` onto ``targets``, or clear them if they already hold it.
+
+    The toggle is decided once, from the whole group, so a box never half-paints
+    and half-clears: if every system in it already belongs to the picked seat, the
+    press clears them all; otherwise it paints them all.
+    """
+    targets = [i for i in targets if 0 <= i < len(ed.recipe.nodes)]
+    if not targets:
+        return
+    clearing = all(ed.recipe.nodes[i].owner == ed.owner_pick for i in targets)
+    owner = 0 if clearing else ed.owner_pick
+    if all(ed.recipe.nodes[i].owner == owner for i in targets):
+        return
+    _push_undo(ed)
+    for i in targets:
+        ed.recipe.nodes[i].owner = owner
+
+
+def _make_homeworld(ed: Editor) -> None:
+    """Stamp the homeworld production and garrison onto the selected system."""
+    node = _selected(ed)
+    if node is None:
+        return
+    if (node.production, node.ships) == (config.HOME_PRODUCTION, config.HOME_START_SHIPS):
+        return
+    _push_undo(ed)
+    node.production = config.HOME_PRODUCTION
+    node.ships = config.HOME_START_SHIPS
+
+
+def _renumber_seats(ed: Editor) -> None:
+    """Compact the seats to ``1..k`` ascending, closing any gap.
+
+    Offered as a one-press fix rather than done silently: it changes a seat's
+    colour without being asked, and the colour is part of what an author intended.
+    """
+    held = sorted({n.owner for n in ed.recipe.nodes if n.owner > 0})
+    remap = {pid: i for i, pid in enumerate(held, start=1)}
+    if all(pid == new for pid, new in remap.items()):
+        return
+    _push_undo(ed)
+    for node in ed.recipe.nodes:
+        if node.owner > 0:
+            node.owner = remap[node.owner]
+    ed.owner_pick = min(ed.owner_pick, len(held)) if ed.owner_pick > 0 else 0
+    _set_status(ed, "Seats renumbered", True)
+
+
+def _box_rect(ed: Editor) -> tuple[int, int, int, int]:
+    (x0, y0), (x1, y1) = ed.box_from, ed.box_to
+    return (min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+
+
+def _clip_to_view(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """Intersect a screen rect with the map viewport — the editor's own
+    ``viewstate._clip_to_play``, against ``_view_rect`` rather than
+    ``config.play_rect``."""
+    rx, ry, rw, rh = rect
+    vx, vy, vw, vh = _view_rect()
+    x0, y0 = max(rx, vx), max(ry, vy)
+    x1, y1 = min(rx + rw, vx + vw), min(ry + rh, vy + vh)
+    return (x0, y0, max(0, x1 - x0), max(0, y1 - y0))
+
+
+def _nodes_in_box(ed: Editor, rect: tuple[int, int, int, int]) -> list[int]:
+    """Every system inside a dragged screen box.
+
+    Clipped to the viewport first, because ``to_screen`` projects *every* system
+    including ones panned out under the sidebar or the palette band — only the
+    drawing is clipped, so an unclipped box dragged to the edge would quietly pick
+    up systems that are not on screen at all.
+    """
+    bx, by, bw, bh = _clip_to_view(rect)
+    if bw <= 0 or bh <= 0:
+        return []
+    out = []
+    for i, node in enumerate(ed.recipe.nodes):
+        sx, sy = ed.view.to_screen(node.pos)
+        if bx <= sx <= bx + bw and by <= sy <= by + bh:
+            out.append(i)
+    return out
 
 
 def _add_lane(ed: Editor, a: int, b: int) -> None:

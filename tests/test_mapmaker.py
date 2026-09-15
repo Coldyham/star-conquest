@@ -444,19 +444,23 @@ def test_a_problem_row_selects_and_frames_its_offender(scene):
 # Layout
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("scale", [1.0, 1.5, 2.0])
-def test_every_control_stays_on_screen_at_any_ui_scale(scene, scale):
+@pytest.mark.parametrize("tool", [mapmaker.SYSTEMS, mapmaker.LANES, mapmaker.OWNERS])
+def test_every_control_stays_on_screen_at_any_ui_scale(scene, scale, tool):
     """The editor's analogue of `test_tab_content_stays_inside_the_panel`, and a
-    check the fixed-canvas menu structurally cannot make."""
+    check the fixed-canvas menu structurally cannot make. Every tool, because each
+    draws its own palette band and its own sidebar."""
     screen, ed, settings = scene
     config.apply_ui_scale(scale)
     widgets._FONTS.clear()
     ed.view = mapmaker._build_view()
-    ed.sel_node = 0
+    ed.tool, ed.sel_node = tool, 0
+    ed.sel_lane = 0
+    ed.recipe.nodes[2].owner = 4        # so the seat-gap fix is drawn too
     mapmaker.draw(screen, ed, settings)
 
     window = pygame.Rect(0, 0, config.SCREEN_W, config.SCREEN_H)
     for key, rect in ed.rects.items():
-        assert window.contains(rect), f"scale {scale}: {key} {tuple(rect)} is off screen"
+        assert window.contains(rect), f"{tool} at {scale}: {key} {tuple(rect)} is off screen"
 
 
 @pytest.mark.parametrize("scale", [1.0, 2.0])
@@ -480,13 +484,18 @@ def test_the_viewport_does_not_move_when_the_tool_does(scene):
         assert mapmaker._view_rect() == before
 
 
-def test_an_unfinished_tool_records_no_rect(scene):
+def test_an_unfinished_tool_records_no_rect(scene, monkeypatch):
     """Inert by construction rather than by a disabled flag some later branch
-    forgets to check."""
+    forgets to check. Every tool is finished now, so the mechanism is pinned by
+    taking one away rather than by waiting for the next unfinished one."""
     screen, ed, settings = scene
     mapmaker.draw(screen, ed, settings)
-    assert "tool_systems" in ed.rects and "tool_lanes" in ed.rects
-    assert "tool_owners" not in ed.rects          # Owners is still to come
+    assert {"tool_systems", "tool_lanes", "tool_owners"} <= set(ed.rects)
+
+    monkeypatch.setattr(mapmaker, "_READY_TOOLS", (mapmaker.SYSTEMS,))
+    mapmaker.draw(screen, ed, settings)
+    assert "tool_systems" in ed.rects
+    assert "tool_lanes" not in ed.rects and "tool_owners" not in ed.rects
 
 
 def test_a_control_not_drawn_this_frame_cannot_be_clicked(scene):
@@ -747,6 +756,168 @@ def test_switching_tools_never_changes_the_map(scene):
     before = ed.recipe.to_dict()
     for _ in range(5):
         for tool in (mapmaker.SYSTEMS, mapmaker.LANES):
+            ed.tool = tool
+            mapmaker.draw(screen, ed, settings)
+    assert ed.recipe.to_dict() == before
+
+
+# --------------------------------------------------------------------------- #
+# The Owners tool
+# --------------------------------------------------------------------------- #
+def _owners(scene):
+    screen, ed, settings = scene
+    ed.tool = mapmaker.OWNERS
+    return screen, ed, settings
+
+
+def test_tapping_a_system_paints_the_picked_seat(scene):
+    screen, ed, settings = _owners(scene)
+    ed.owner_pick = 2
+    _press(screen, ed, settings, _at(ed, 1))
+    assert ed.recipe.nodes[1].owner == 2
+
+
+def test_tapping_a_system_that_already_holds_the_pick_clears_it(scene):
+    """One meaning per tap: never "select here, paint there"."""
+    screen, ed, settings = _owners(scene)
+    ed.owner_pick = 1
+    _press(screen, ed, settings, _at(ed, 0))      # node 0 is already seat 1
+    assert ed.recipe.nodes[0].owner == 0
+
+
+def test_the_seat_palette_offers_one_more_seat_than_is_held(scene):
+    """Which is what makes the common path gap-free by construction: the next
+    seat is always reachable and the one past it never is."""
+    screen, ed, settings = _owners(scene)
+    mapmaker.draw(screen, ed, settings)
+    seats = {int(k[5:]) for k in ed.rects if k.startswith("seat_")}
+    assert seats == {0, 1, 2, 3}                  # neutral, the two held, one more
+
+
+def test_the_seat_palette_always_offers_at_least_two_seats(scene):
+    screen, ed, settings = _owners(scene)
+    for node in ed.recipe.nodes:
+        node.owner = 0
+    mapmaker.draw(screen, ed, settings)
+    seats = {int(k[5:]) for k in ed.rects if k.startswith("seat_")}
+    assert seats == {0, 1, config.MIN_PLAYERS}
+
+
+def test_the_seat_palette_stops_at_max_players(scene):
+    screen, ed, settings = _owners(scene)
+    ed.recipe = CustomMap(
+        nodes=[MapNode(100 + i * 120, 500, 3, 5, i + 1) for i in range(config.MAX_PLAYERS)],
+        lanes=[(i, i + 1) for i in range(config.MAX_PLAYERS - 1)],
+    ).normalised()
+    mapmaker.draw(screen, ed, settings)
+    seats = {int(k[5:]) for k in ed.rects if k.startswith("seat_")}
+    assert max(seats) == config.MAX_PLAYERS
+
+
+def test_a_palette_swatch_picks_that_seat(scene):
+    screen, ed, settings = _owners(scene)
+    _click_key(screen, ed, settings, "seat_2")
+    assert ed.owner_pick == 2
+    _click_key(screen, ed, settings, "seat_0")
+    assert ed.owner_pick == 0
+
+
+def test_a_drag_box_paints_every_system_inside_it(scene):
+    screen, ed, settings = _owners(scene)
+    ed.owner_pick = 2
+    lo = ed.view.to_screen((150.0, 150.0))
+    hi = ed.view.to_screen((850.0, 850.0))
+    _press(screen, ed, settings, lo)
+    for pos in (lo, hi):
+        mapmaker.handle_event(
+            pygame.event.Event(pygame.MOUSEMOTION, pos=pos, buttons=(1, 0, 0), rel=(0, 0)),
+            ed, settings)
+    assert ed.box_active
+    _release(ed, settings, hi)
+    assert [n.owner for n in ed.recipe.nodes] == [2, 2, 2, 2]
+
+
+def test_a_tap_on_empty_space_paints_nothing(scene):
+    """route mode's two-flag arming: `box_press` on the press, `box_active` only
+    past the threshold."""
+    screen, ed, settings = _owners(scene)
+    before = [n.owner for n in ed.recipe.nodes]
+    pos = _empty_spot(ed)
+    _press(screen, ed, settings, pos)
+    assert ed.box_press and not ed.box_active
+    _release(ed, settings, pos)
+    assert [n.owner for n in ed.recipe.nodes] == before
+
+
+def test_a_box_is_clipped_to_the_viewport_before_it_picks_anything(scene):
+    """`to_screen` projects every system, including ones panned out under the
+    sidebar — only the *drawing* is clipped."""
+    screen, ed, settings = _owners(scene)
+    side = mapmaker._side_rect()
+    box = (side.x + 10, side.y + 10, side.w - 20, side.h - 20)
+    assert mapmaker._nodes_in_box(ed, box) == []
+
+
+def test_a_box_paints_as_one_group_rather_than_half_toggling(scene):
+    screen, ed, settings = _owners(scene)
+    ed.owner_pick = 1                             # node 0 already holds seat 1
+    mapmaker._paint(ed, [0, 1, 2, 3])
+    assert [n.owner for n in ed.recipe.nodes] == [1, 1, 1, 1]
+    mapmaker._paint(ed, [0, 1, 2, 3])             # now all of them hold it: clear
+    assert [n.owner for n in ed.recipe.nodes] == [0, 0, 0, 0]
+
+
+def test_make_homeworld_stamps_both_numbers_in_one_press(scene):
+    screen, ed, settings = _owners(scene)
+    ed.sel_node = 1
+    _click_key(screen, ed, settings, "make_home")
+    assert ed.recipe.nodes[1].production == config.HOME_PRODUCTION
+    assert ed.recipe.nodes[1].ships == config.HOME_START_SHIPS
+
+
+def test_painting_a_seat_never_rewrites_the_numbers(scene):
+    """Explicit, never implicit — Make homeworld is the deliberate version."""
+    screen, ed, settings = _owners(scene)
+    ed.owner_pick = 2
+    before = (ed.recipe.nodes[1].production, ed.recipe.nodes[1].ships)
+    _press(screen, ed, settings, _at(ed, 1))
+    assert (ed.recipe.nodes[1].production, ed.recipe.nodes[1].ships) == before
+
+
+def test_a_seat_gap_blocks_and_offers_a_one_press_fix(scene):
+    screen, ed, settings = _owners(scene)
+    ed.recipe.nodes[2].owner = 3                  # seats 1 and 3, no 2
+    assert any(p.code == "seat_gap" and p.blocks for p in ed.problems())
+    assert not ed.can_play()
+
+    _click_key(screen, ed, settings, "renumber")
+    assert [n.owner for n in ed.recipe.nodes] == [1, 0, 2, 0]
+    assert ed.can_play()
+
+
+def test_renumbering_is_undoable(scene):
+    screen, ed, settings = _owners(scene)
+    ed.recipe.nodes[2].owner = 5
+    mapmaker._renumber_seats(ed)
+    assert ed.recipe.nodes[2].owner == 2
+    mapmaker._undo(ed)
+    assert ed.recipe.nodes[2].owner == 5
+
+
+def test_the_renumber_button_only_appears_when_there_is_a_gap(scene):
+    screen, ed, settings = _owners(scene)
+    mapmaker.draw(screen, ed, settings)
+    assert "renumber" not in ed.rects
+    ed.recipe.nodes[2].owner = 4
+    mapmaker.draw(screen, ed, settings)
+    assert "renumber" in ed.rects
+
+
+def test_switching_between_all_three_tools_never_changes_the_map(scene):
+    screen, ed, settings = scene
+    before = ed.recipe.to_dict()
+    for _ in range(4):
+        for tool in (mapmaker.SYSTEMS, mapmaker.LANES, mapmaker.OWNERS):
             ed.tool = tool
             mapmaker.draw(screen, ed, settings)
     assert ed.recipe.to_dict() == before

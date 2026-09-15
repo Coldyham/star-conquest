@@ -849,6 +849,50 @@ in Systems a press on empty space always means "place", so there is no free
 gesture to spend, and route mode already records what happens when one press is
 given a second meaning conditional on the target.
 
+### Seats: gap-free by construction, never by force
+
+The owner palette offers `n + 1` seats — one more than are currently held, floored
+at two — which makes the ordinary path incapable of leaving a gap: the next seat
+is always reachable and the one past it never is. It does not make a gap
+*impossible*, since you can paint seat 3 and then clear seat 2, and that is where
+the interesting decision was.
+
+Silent compaction was considered and rejected. Renumbering changes a seat's colour
+without being asked, and on a map where you have deliberately given red the two
+systems behind the ridge, the colour is part of what you authored. So the gap gets
+a blocker that says exactly what is wrong and a one-press **Renumber seats** that
+fixes it — undoable, like every other edit.
+
+The same instinct governs painting: a seat colour never rewrites the numbers.
+**Make homeworld** is the explicit version, and it lives in the Owners sidebar so
+the common "give this one a real garrison" case is not a round trip back to the
+Systems tool.
+
+### What the menu does with a hand-drawn map
+
+`Settings.players` and `Settings.nodes` stop being inputs once a recipe is set —
+they are derived from it, and `from_dict` reconciles them on the way back in. The
+menu therefore *reports* them instead of offering them, and does it by **not
+drawing the control at all**: `_draw_menu` clears `ms.rects` every frame, so an
+undrawn control is inert by construction rather than by a disabled flag some later
+branch forgets to check.
+
+`_set_players`/`_set_nodes` are interlocked on top of that, which is belt and
+braces on purpose — the steppers are gone, so only a caller that is *not* the
+stepper can reach them, and the cost of one getting through is a setup whose
+digest no longer matches its own map until the next decode quietly reconciles it.
+
+Advanced's Map and Economy groups go the same way, for a reason specific to this
+design: every production and garrison on a hand map is concrete, rolled at the
+moment a system is placed, so those knobs only bite inside the creator — which is
+where they now are. Had garrisons stayed sentinels resolved at build time, the
+sliders would have had to stay live on the menu.
+
+**Seed stays**, and that is worth stating because the original sketch had it as
+redundant. With the layout fully concrete the seed no longer shapes the map — but
+it still drives every combat roll and every star name, so it is as load-bearing as
+it ever was.
+
 ### What the editor opens onto
 
 Never a blank canvas. A blank map fails the Play gate on two counts at once (no

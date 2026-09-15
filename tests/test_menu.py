@@ -792,3 +792,117 @@ def test_animate_turns_toggles_the_stored_preference(monkeypatch, tmp_path):
         assert settings.to_dict() == before.to_dict()
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# What a hand-drawn map hides
+# --------------------------------------------------------------------------- #
+def _drawn_map():
+    from starconquest.custommap import CustomMap, MapNode
+    return CustomMap(
+        nodes=[MapNode(200, 200, 3, 10, 1), MapNode(600, 600, 4, 8, 2)],
+        lanes=[(0, 1)],
+    ).normalised()
+
+
+def _with_map():
+    screen, ms, settings = _setup()
+    settings.custom_map = _drawn_map()
+    settings.players, settings.nodes = 2, 2
+    return screen, ms, settings
+
+
+def test_a_custom_map_hides_the_controls_it_decides():
+    """Inert by construction: `_draw_menu` clears `ms.rects` every frame, so a
+    control that isn't drawn cannot be clicked — no disabled flag to forget."""
+    screen, ms, settings = _with_map()
+    try:
+        ms.tab = "basic"
+        menu.draw(screen, ms, settings)
+        for key in ("players_dec", "players_inc", "nodes_dec", "nodes_inc",
+                    "mode_random", "mode_symmetric"):
+            assert key not in ms.rects, key
+        # ...and the rows that still mean something are untouched.
+        for key in ("seed_field", "autoplay", "fog_of_war", "share_games",
+                    "animate_turns"):
+            assert key in ms.rects, key
+    finally:
+        pygame.quit()
+
+
+def test_a_custom_map_hides_the_advanced_groups_the_creator_owns():
+    screen, ms, settings = _with_map()
+    try:
+        ms.tab = "advanced"
+        menu.draw(screen, ms, settings)
+        hidden = {spec[0] for spec in menu._ADV_MAP + menu._ADV_ECON}
+        assert not (hidden & set(ms.rects))
+        kept = {spec[0] for spec in menu._ADV_TRAVEL + menu._ADV_FOG}
+        assert kept <= set(ms.rects)
+        assert "neutral_produces" in ms.rects
+    finally:
+        pygame.quit()
+
+
+def test_the_generated_map_menu_is_unchanged():
+    """The hiding is conditional, so the ordinary setup must still offer all of it."""
+    screen, ms, settings = _setup()
+    try:
+        ms.tab = "basic"
+        menu.draw(screen, ms, settings)
+        assert {"players_inc", "nodes_inc", "mode_random"} <= set(ms.rects)
+        ms.tab = "advanced"
+        menu.draw(screen, ms, settings)
+        assert {spec[0] for spec in menu._ADV_MAP + menu._ADV_ECON} <= set(ms.rects)
+    finally:
+        pygame.quit()
+
+
+def test_players_and_nodes_are_interlocked_against_the_recipe():
+    """A nudge from any path would desync them from the map until the next
+    `from_dict` reconciled them back — moving the setup digest in between."""
+    screen, ms, settings = _with_map()
+    try:
+        menu._set_players(settings, 5)
+        menu._set_nodes(settings, 30)
+        assert (settings.players, settings.nodes) == (2, 2)
+    finally:
+        pygame.quit()
+
+
+def test_randomise_leaves_the_hidden_groups_alone():
+    screen, ms, settings = _with_map()
+    try:
+        before = {spec[2]: getattr(settings, spec[2])
+                  for spec in menu._ADV_MAP + menu._ADV_ECON}
+        menu._randomise_sliders(settings, menu._visible_adv(settings))
+        assert all(getattr(settings, attr) == value for attr, value in before.items())
+    finally:
+        pygame.quit()
+
+
+def test_the_basic_tab_marks_a_hand_map_as_a_change():
+    screen, ms, settings = _with_map()
+    try:
+        assert menu._tab_changed("basic", settings)
+    finally:
+        pygame.quit()
+
+
+def test_a_hand_map_setup_still_fits_the_panel():
+    """`test_tab_content_stays_inside_the_panel` draws the default setup; this is
+    the other state the same panel has to hold."""
+    screen, ms, settings = _with_map()
+    panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
+    chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
+              "get_link", "seed_field", "seed_random", "create_map", "clear_map"}
+    try:
+        for tab in ("basic", "combat", "advanced", "ai"):
+            ms.tab = tab
+            menu.draw(screen, ms, settings)
+            for key, rect in ms.rects.items():
+                if key.startswith("tab_") or key in chrome:
+                    continue
+                assert panel.contains(rect), f"{tab}: {key} {tuple(rect)} escapes the panel"
+    finally:
+        pygame.quit()

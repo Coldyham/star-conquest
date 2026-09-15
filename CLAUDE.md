@@ -912,6 +912,34 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   to the recipe parser leaves every cached `bot_scores` row falsely fresh.
   `tools/setup_sweep` refuses a hand-authored setup outright: its whole method is
   reseeding, and no seed re-rolls a hand map.
+- **The three tools share one scene and never discard each other's work.**
+  Systems places and edits; Lanes draws and picks; Owners paints seats. The
+  viewport rect must **not** depend on the tool (`_palette_h` is measured but
+  fixed), or switching tools moves the map under the cursor. `ed.rects` is one
+  namespace cleared every frame, so a control that isn't drawn is inert by
+  construction — but two controls sharing a key means the later-drawn one wins,
+  silently.
+- **The seat palette offers `n + 1` seats, floored at 2.** That makes the common
+  path gap-free by construction. It does not *prevent* a gap (paint seat 3, then
+  clear seat 2), so that case gets a blocker and a one-press **Renumber seats**
+  rather than a silent compaction — renumbering changes a seat's colour without
+  being asked, and the colour is part of what an author intended.
+- **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
+  version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
+  common "give this one a real garrison" case isn't a two-tool round trip.
+- **Box-paint copies route mode's two-flag arming** (`box_press` on the press,
+  `box_active` only past the threshold, so a tap that never moves paints nothing)
+  and **clips the box to the viewport first** — `to_screen` projects every system,
+  including ones panned out under the sidebar, and only the drawing is clipped.
+  A box paints as one group: if every system in it already holds the pick it
+  clears them all, otherwise it paints them all, so a box never half-toggles.
+- **The menu hides what a hand map decides, by not drawing it.** Basic's Players,
+  Systems and Map type become read-only derived values; Advanced's Map and Economy
+  groups become a note, since those knobs now live in the creator and only bite
+  there. `menu._set_players`/`_set_nodes` are additionally *interlocked* while a
+  recipe is set — a nudge from any other path would desync them from it until the
+  next `from_dict` reconciled them back, moving the digest in between. Seed stays:
+  it still drives combat dice and star names.
 - **Star names are deliberately absent from a recipe.** `mapgen._name_systems`
   stamps them from `state.rng` last and serializes nothing, so they are recreated
   for free from the seed; the editor shows ids (`#7`).
