@@ -11,6 +11,7 @@ than one scale — a check the menu structurally cannot make.
 from __future__ import annotations
 
 import os
+import random
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -172,9 +173,14 @@ def test_a_random_placement_only_ever_rolls_the_weighted_values(scene):
 # Dragging
 # --------------------------------------------------------------------------- #
 def test_a_legal_drag_moves_the_system(scene):
+    """Checked in pixels, not world units: a drag round-trips through integer
+    screen coordinates, so at the resting zoom the landing world position is only
+    ever accurate to the pixel the cursor was on."""
     screen, ed, settings = scene
     _drag(screen, ed, settings, 1, (700.0, 350.0))
-    assert (ed.recipe.nodes[1].x, ed.recipe.nodes[1].y) == (700, 350)
+    landed = ed.view.to_screen(ed.recipe.nodes[1].pos)
+    target = ed.view.to_screen((700.0, 350.0))
+    assert abs(landed[0] - target[0]) <= 1 and abs(landed[1] - target[1]) <= 1
 
 
 def test_an_illegal_drag_snaps_back_to_where_it_started(scene):
@@ -245,10 +251,43 @@ def test_steppers_edit_the_selected_system(scene):
     ed.sel_node = 1
     _click_key(screen, ed, settings, "prod_plus")
     _click_key(screen, ed, settings, "ships_minus")
-    _click_key(screen, ed, settings, "owner_plus")
     assert ed.recipe.nodes[1].production == 5
     assert ed.recipe.nodes[1].ships == 5
-    assert ed.recipe.nodes[1].owner == 1
+
+
+def test_the_owner_row_sets_a_seat_in_one_press(scene):
+    """A seat is a colour, so it is pointed at rather than stepped to — and any
+    seat in the row is one press away, not four."""
+    screen, ed, settings = scene
+    ed.sel_node = 1
+    _click_key(screen, ed, settings, "own_2")
+    assert ed.recipe.nodes[1].owner == 2
+    mapmaker._undo(ed)
+    assert ed.recipe.nodes[1].owner == 0
+
+
+def test_the_owner_row_offers_exactly_what_the_seat_palette_does(scene):
+    """One list, two readers: a seat the sidebar offers but the Owners palette
+    calls a gap (or the other way about) is a contradiction, not a choice."""
+    screen, ed, settings = scene
+    ed.sel_node = 1
+    mapmaker.draw(screen, ed, settings)
+    sidebar = {int(k[4:]) for k in ed.rects if k.startswith("own_")}
+    ed.tool = mapmaker.OWNERS
+    mapmaker.draw(screen, ed, settings)
+    palette = {int(k[5:]) for k in ed.rects if k.startswith("seat_")}
+    assert sidebar == palette == set(mapmaker._seat_entries(ed.recipe))
+
+
+def test_the_owner_row_does_not_toggle_back_to_neutral(scene):
+    """Neutral has its own swatch here, so pressing the seat a system already
+    holds must not mean something else — that is the map tap's job, where there is
+    nothing else to press."""
+    screen, ed, settings = scene
+    ed.sel_node = 0                      # already seat 1
+    _click_key(screen, ed, settings, "own_1")
+    assert ed.recipe.nodes[0].owner == 1
+    assert not ed.undo_stack             # nothing happened, so nothing to undo
 
 
 def test_steppers_stop_at_their_ceilings(scene):
@@ -390,6 +429,19 @@ def test_leaving_to_the_menu_commits_even_a_half_built_map(scene):
     assert settings.custom_map.lanes == [(0, 1)]
 
 
+def test_an_empty_canvas_commits_as_no_hand_map_at_all(scene):
+    """Not a half-built map: it carries nothing to preserve, and writing it would
+    pin the menu into "Edit map" with a setup that cannot start — which is what
+    opening the creator and leaving straight away would do, now that blank is
+    where it opens."""
+    screen, ed, settings = scene
+    settings.players, settings.nodes = 4, 20
+    mapmaker._adopt(ed, CustomMap())
+    assert _click_key(screen, ed, settings, "back") == "menu"
+    assert settings.custom_map is None
+    assert (settings.players, settings.nodes) == (4, 20)   # the menu's own, untouched
+
+
 def test_commit_keeps_players_and_nodes_in_step_with_the_map(scene):
     screen, ed, settings = scene
     ed.recipe.nodes[3].owner = 3
@@ -519,12 +571,24 @@ def test_a_control_not_drawn_this_frame_cannot_be_clicked(scene):
 # --------------------------------------------------------------------------- #
 # Opening the editor
 # --------------------------------------------------------------------------- #
-def test_opening_without_a_map_starts_from_a_generated_one(scene):
+def test_opening_without_a_map_starts_from_a_blank_canvas(scene):
+    """*Create map* means create. A generated board to pick apart is a different
+    task, and it is one press away on the footer's *Generate*."""
+    screen, ed, settings = scene
+    fresh = mapmaker.open_editor(settings)
+    assert fresh.recipe == CustomMap()
+
+
+def test_generate_rolls_the_map_the_seed_describes(scene):
+    """Same layout as the seed's own board, only translated — `_centred` shifts it
+    into the middle of the creator's wider canvas and changes nothing else."""
     screen, ed, settings = scene
     fresh = mapmaker.open_editor(settings, seed=11)
-    assert fresh.recipe == custommap.from_state(
-        mapgen.generate(11, settings.mode, settings.nodes, settings.players))
-    assert fresh.can_play()          # never a blank canvas you cannot play
+    _click_key(screen, fresh, settings, "generate")
+    expected = mapmaker._centred(custommap.from_state(
+        mapgen.generate(11, settings.mode, settings.nodes, settings.players)))
+    assert fresh.recipe == expected
+    assert fresh.can_play()
 
 
 def test_opening_with_a_map_edits_a_copy_of_it(scene):
@@ -921,3 +985,177 @@ def test_switching_between_all_three_tools_never_changes_the_map(scene):
             ed.tool = tool
             mapmaker.draw(screen, ed, settings)
     assert ed.recipe.to_dict() == before
+
+
+# --------------------------------------------------------------------------- #
+# Auto homeworlds
+# --------------------------------------------------------------------------- #
+def _confirm(ed, settings, yes=True):
+    key = pygame.K_y if yes else pygame.K_ESCAPE
+    mapmaker.handle_event(pygame.event.Event(pygame.KEYDOWN, key=key, mod=0), ed, settings)
+
+
+def test_auto_homeworlds_gives_every_seat_exactly_one_start(scene):
+    screen, ed, settings = _owners(scene)
+    ed.auto_seats = 3
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    owners = [n.owner for n in ed.recipe.nodes]
+    assert sorted(o for o in owners if o) == [1, 2, 3]
+    assert ed.recipe.seats() == 3
+
+
+def test_auto_homeworlds_is_mapgens_own_placement(scene):
+    """The same function the generator uses, not a second copy of the maths — so a
+    hand-drawn board is started from no differently than one rolled from a seed."""
+    screen, ed, settings = _owners(scene)
+    ed.rng = random.Random(7)
+    want = ed.seat_target()
+    expected = mapgen.peripheral_starts(
+        {i: n.pos for i, n in enumerate(ed.recipe.nodes)}, want, random.Random(7))
+
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    placed = [i for i, n in enumerate(ed.recipe.nodes) if n.owner > 0]
+    assert sorted(placed) == sorted(expected)
+    # ...and seat order follows the sweep, not the node order.
+    assert [ed.recipe.nodes[i].owner for i in expected] == list(range(1, want + 1))
+
+
+def test_auto_homeworlds_stamps_the_homeworld_numbers(scene):
+    screen, ed, settings = _owners(scene)
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    for node in ed.recipe.nodes:
+        if node.owner > 0:
+            assert (node.production, node.ships) == (config.HOME_PRODUCTION,
+                                                     config.HOME_START_SHIPS)
+
+
+def test_auto_homeworlds_demotes_the_starts_it_replaces(scene):
+    """A start that loses its seat is rolled back down to an ordinary system —
+    otherwise the map's largest prize is a leftover, sitting where a homeworld
+    used to be."""
+    screen, ed, settings = _owners(scene)
+    for node in ed.recipe.nodes:           # every system a homeworld to begin with
+        node.owner = 0
+        node.production, node.ships = config.HOME_PRODUCTION, config.HOME_START_SHIPS
+    ed.auto_seats = 2
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    for node in ed.recipe.nodes:
+        if node.owner == 0:
+            assert node.ships <= config.garrison_for(node.production, config.GARRISON_JITTER)
+
+
+def test_auto_homeworlds_leaves_hand_set_numbers_alone(scene):
+    """Only an exact homeworld stamp is demoted — the line `_make_homeworld` draws
+    between what an author chose and what the tool put there."""
+    screen, ed, settings = _owners(scene)
+    ed.recipe.nodes[1].production, ed.recipe.nodes[1].ships = 4, 31
+    ed.auto_seats = 2
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    if ed.recipe.nodes[1].owner == 0:
+        assert (ed.recipe.nodes[1].production, ed.recipe.nodes[1].ships) == (4, 31)
+
+
+def test_auto_homeworlds_asks_first(scene):
+    screen, ed, settings = _owners(scene)
+    before = ed.recipe.to_dict()
+    _click_key(screen, ed, settings, "auto_owners")
+    assert ed.confirm == "auto_owners"
+    _confirm(ed, settings, yes=False)
+    assert ed.recipe.to_dict() == before and ed.confirm is None
+
+
+def test_auto_homeworlds_is_one_undo(scene):
+    screen, ed, settings = _owners(scene)
+    before = ed.recipe.to_dict()
+    ed.auto_seats = 3
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    assert ed.recipe.to_dict() != before
+    mapmaker._undo(ed)
+    assert ed.recipe.to_dict() == before
+
+
+def test_auto_homeworlds_refuses_more_seats_than_systems(scene):
+    screen, ed, settings = _owners(scene)
+    ed.recipe = CustomMap(
+        nodes=[MapNode(200, 200, 3, 5, 0), MapNode(800, 800, 3, 5, 0)],
+        lanes=[(0, 1)],
+    ).normalised()
+    ed.auto_seats = 4
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    assert [n.owner for n in ed.recipe.nodes] == [0, 0]
+    assert not ed.status_ok
+
+
+def test_the_seat_count_follows_the_map_until_it_is_set(scene):
+    """`auto_seats` is None until the stepper is touched, so the readout is the
+    truth about the map rather than a number that can go stale behind it."""
+    screen, ed, settings = _owners(scene)
+    assert ed.seat_target() == ed.recipe.seats() == 2
+    ed.recipe.nodes[1].owner = 3
+    assert ed.seat_target() == 3
+    _click_key(screen, ed, settings, "seats_plus")
+    assert (ed.auto_seats, ed.seat_target()) == (4, 4)
+
+
+def test_the_seats_stepper_stops_at_the_player_limits(scene):
+    screen, ed, settings = _owners(scene)
+    for _ in range(config.MAX_PLAYERS + 3):
+        _click_key(screen, ed, settings, "seats_plus")
+    assert ed.seat_target() == config.MAX_PLAYERS
+    for _ in range(config.MAX_PLAYERS + 3):
+        _click_key(screen, ed, settings, "seats_minus")
+    assert ed.seat_target() == config.MIN_PLAYERS
+
+
+def test_a_whole_recipe_swap_hands_the_seat_count_back_to_the_map(scene):
+    """A count belongs to the map it was chosen for — the same argument `_adopt`
+    already makes about a selection index."""
+    screen, ed, settings = _owners(scene)
+    ed.auto_seats = 6
+    mapmaker._adopt(ed, _square())
+    assert ed.auto_seats is None and ed.seat_target() == 2
+
+
+def test_the_map_the_auto_button_draws_is_playable(scene):
+    screen, ed, settings = _owners(scene)
+    for node in ed.recipe.nodes:
+        node.owner = 0
+    assert not ed.can_play()               # too few seats
+    _click_key(screen, ed, settings, "auto_owners")
+    _confirm(ed, settings)
+    assert ed.can_play()
+
+
+# --------------------------------------------------------------------------- #
+# The footer's default action
+# --------------------------------------------------------------------------- #
+def test_the_menu_button_sits_in_the_tool_strip(scene):
+    """Going back to the seats, strategies, fog and seed is the stage after the
+    three tools, not a sibling of Undo — so it rides in the strip, not the
+    footer."""
+    screen, ed, settings = scene
+    mapmaker.draw(screen, ed, settings)
+    assert ed.rects["back"].bottom <= config.EDIT_TOP_H
+    assert "back" not in {spec[0] for spec in mapmaker._footer_specs(ed)}
+
+
+def test_the_footer_reads_left_to_right_in_the_order_it_is_specified(scene):
+    screen, ed, settings = scene
+    mapmaker.draw(screen, ed, settings)
+    order = ["generate", "new", "undo", "redo", "filename", "open", "save", "play"]
+    lefts = [ed.rects[key].x for key in order]
+    assert lefts == sorted(lefts)
+
+
+def test_an_unplayable_map_still_greys_the_play_button(scene):
+    screen, ed, settings = scene
+    ed.recipe.lanes = []                   # disconnected: a blocker
+    palettes = {spec[0]: (spec[2], spec[3]) for spec in mapmaker._footer_specs(ed)}
+    assert palettes["play"] == mapmaker._DEAD_PALETTE

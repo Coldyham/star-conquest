@@ -13,6 +13,13 @@ import math
 # --------------------------------------------------------------------------- #
 WORLD_SIZE = 1000.0            # game is laid out in a WORLD_SIZE x WORLD_SIZE box
 WORLD_MARGIN = 80.0            # keep nodes this far from the world edge
+# Hand-authored maps get a wider box than the square one `mapgen` generates into.
+# Nothing generated moves -- `_play_bounds()` is still square, so every seed lays
+# out the board it always did -- but a recipe stores concrete coordinates and
+# `main.build_view` fits the node bounding box at play time, so a map drawn to
+# these bounds fills a widescreen window instead of being letterboxed. Widening
+# `WORLD_SIZE` itself would re-roll every seed and cost a RULES_VERSION bump.
+CUSTOM_WORLD_W = 1600.0        # hand-drawn maps are laid out in CUSTOM_WORLD_W x WORLD_SIZE
 
 LY_PER_WORLD_UNIT = 0.1        # cosmetic: a lane's length in light-years
 SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn

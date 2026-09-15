@@ -396,18 +396,23 @@ def _make_players(state: GameState, num_players: int) -> None:
         )
 
 
-def _peripheral_starts(state: GameState, count: int) -> list[int]:
-    """Homeworlds evenly spread around the map's rim, one per angular sector.
+def peripheral_starts(positions: dict[int, tuple[float, float]], count: int, rng) -> list[int]:
+    """Homeworlds evenly spread around the rim of ``positions``, one per angular
+    sector. Keyed by id rather than taking a ``GameState``, because the map
+    creator's Owners tool places starts from a recipe that is not a board.
 
     Directions are equally spaced by angle (with a random overall rotation for
     variety), and for each direction we take the node furthest that way from the
     map centre. Every player thus gets a peripheral 'corner' start and nobody is
     boxed into the contested middle, so no seat is systematically disadvantaged.
+
+    Callers guarantee ``0 < count <= len(positions)``; asking for more starts than
+    there are systems has no answer to give.
     """
-    ids = list(state.systems)
-    cx = sum(state.systems[i].pos[0] for i in ids) / len(ids)
-    cy = sum(state.systems[i].pos[1] for i in ids) / len(ids)
-    base = state.rng.uniform(0.0, 2.0 * math.pi)
+    ids = list(positions)
+    cx = sum(positions[i][0] for i in ids) / len(ids)
+    cy = sum(positions[i][1] for i in ids) / len(ids)
+    base = rng.uniform(0.0, 2.0 * math.pi)
 
     chosen: list[int] = []
     used: set[int] = set()
@@ -418,13 +423,21 @@ def _peripheral_starts(state: GameState, count: int) -> list[int]:
         for sid in ids:
             if sid in used:
                 continue
-            px, py = state.systems[sid].pos
+            px, py = positions[sid]
             score = (px - cx) * dx + (py - cy) * dy  # projection onto the target direction
             if score > best_score:
                 best_score, best_id = score, sid
         used.add(best_id)
         chosen.append(best_id)
     return chosen
+
+
+def _peripheral_starts(state: GameState, count: int) -> list[int]:
+    """``peripheral_starts`` over a live board — the same ids in the same order
+    (``state.systems`` is insertion-ordered) and the same single ``rng`` draw, so
+    a seed lays out exactly the board it always did."""
+    return peripheral_starts({sid: s.pos for sid, s in state.systems.items()},
+                             count, state.rng)
 
 
 def _assign_players_and_starts(state: GameState, num_players: int) -> None:

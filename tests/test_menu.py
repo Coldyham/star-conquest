@@ -906,3 +906,108 @@ def test_a_hand_map_setup_still_fits_the_panel():
                 assert panel.contains(rect), f"{tab}: {key} {tuple(rect)} escapes the panel"
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Dropping a hand-drawn map
+# --------------------------------------------------------------------------- #
+def test_clearing_a_drawn_map_asks_first():
+    """A drawn map is the only thing on this screen that cannot be got back from
+    the seed, and the x sits one button away from Edit map."""
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        assert ms.confirm_clear_map and settings.custom_map is not None
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.custom_map is None and not ms.confirm_clear_map
+    finally:
+        pygame.quit()
+
+
+def test_declining_keeps_the_drawn_map():
+    screen, ms, settings = _with_map()
+    drawn = settings.custom_map.to_dict()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_no")
+        assert not ms.confirm_clear_map
+        assert settings.custom_map is not None
+        assert settings.custom_map.to_dict() == drawn
+    finally:
+        pygame.quit()
+
+
+def test_escape_keeps_the_map_and_y_clears_it():
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        _keydown(ms, settings, pygame.K_ESCAPE)     # Esc would otherwise quit
+        assert not ms.confirm_clear_map and settings.custom_map is not None
+        _click_key(screen, ms, settings, "clear_map")
+        _keydown(ms, settings, pygame.K_y)
+        assert settings.custom_map is None
+    finally:
+        pygame.quit()
+
+
+def test_the_clear_map_modal_swallows_every_other_control():
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        assert _click_key(screen, ms, settings, "start") is None
+        assert _click_key(screen, ms, settings, "create_map") is None
+        assert ms.confirm_clear_map and settings.custom_map is not None
+    finally:
+        pygame.quit()
+
+
+def test_clearing_the_map_still_puts_nodes_back_in_generated_range():
+    """`nodes` was reconciled to the recipe and may sit below the generated floor,
+    so a generator that now has to honour it needs it back in range."""
+    screen, ms, settings = _with_map()
+    try:
+        assert settings.nodes < settings.min_nodes()
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.nodes >= settings.min_nodes()
+    finally:
+        pygame.quit()
+
+
+def test_clearing_a_challenges_map_still_raises_the_unchallenge_modal():
+    """The confirm sits inside `_dispatch`, so the edit it lets through is checked
+    against the challenge exactly as any other edit is."""
+    screen, ms, settings = _with_map()
+    try:
+        settings.challenge = Challenge(turns=20, lost=3, hand=20, by="someone",
+                                       key=settings.challenge_keys()[0])
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.custom_map is None and ms.confirm_unchallenge
+    finally:
+        pygame.quit()
+
+
+def test_start_refuses_a_hand_map_the_builder_would_assert_on():
+    """`mapgen.generate_custom` is the strict builder behind the one tolerant
+    gate, so a half-built recipe — which `mapmaker.commit` deliberately lets
+    through, since it must survive a trip back here — has to be stopped at Start
+    rather than reaching the assert."""
+    from starconquest.custommap import CustomMap, MapNode
+    screen, ms, settings = _setup()
+    try:
+        settings.custom_map = CustomMap(nodes=[MapNode(200, 200, 3, 10, 1),
+                                               MapNode(600, 600, 4, 8, 2)])   # no lanes
+        assert _click_key(screen, ms, settings, "start") is None
+        assert ms.status and not ms.status_ok
+        assert _keydown(ms, settings, pygame.K_RETURN) is None
+    finally:
+        pygame.quit()
+
+
+def test_start_is_unaffected_by_a_playable_hand_map():
+    screen, ms, settings = _with_map()
+    try:
+        assert _click_key(screen, ms, settings, "start") == "start"
+    finally:
+        pygame.quit()

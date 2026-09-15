@@ -893,13 +893,53 @@ redundant. With the layout fully concrete the seed no longer shapes the map — 
 it still drives every combat roll and every star name, so it is as load-bearing as
 it ever was.
 
+### Why a hand map gets a wider box than a generated one
+
+`WORLD_SIZE` is square and `mapgen._place_nodes` jitters its grid inside it, so
+every generated board is square — which the creator, fitting that box
+aspect-preserved into a 16:9 window, faithfully rendered as a small square with a
+third of the screen dead either side.
+
+Widening `WORLD_SIZE` itself was the obvious fix and is the expensive one: every
+seed would lay out a different board, which is a `RULES_VERSION` bump and makes
+every stored replay, every posted score and every cached `bot_scores` row
+unverifiable. The thing that makes the cheap version possible is that a recipe
+stores **concrete coordinates** and never goes through `_play_bounds` at all. So
+`CUSTOM_WORLD_W` (1600) is a second box that only hand maps live in:
+`MapNode.clamped` enforces it, `mapmaker._build_view` is the camera over exactly
+it, and nothing generated moves. At play time `main.build_view` fits the node
+bounding box rather than any world box, so a map drawn to these bounds simply
+fills the window.
+
+*Generate* then hands back a square map inside a wider canvas, so `_centred`
+translates it into the middle. A translation and nothing else: scaling it to fill
+the width would stretch every lane and quote travel times the seed never gave.
+
 ### What the editor opens onto
 
-Never a blank canvas. A blank map fails the Play gate on two counts at once (no
-seats, no lanes), and "nothing here works yet" is a poor first impression of a
-tool whose whole point is that it produces something playable. Entry seeds from a
-generated map built with the current settings; *New* is one press away for anyone
-who wants to start from nothing, and *Generate* rolls another.
+A blank canvas — the opposite of what Phase 1 shipped, and worth recording why it
+flipped. The original argument was that a blank map fails the Play gate on two
+counts at once (no seats, no lanes) and that "nothing here works yet" is a poor
+first impression. What that overlooked is that *Create map* is a request to
+create: opening onto a generated board makes the first act picking someone else's
+map apart, which is a different task from the one that was asked for, and the
+validator's problem list already says exactly what a blank map is missing. Both
+other starting points are one press away on the footer — *Generate* rolls a board
+to edit, *Open* loads a saved one.
+
+Two consequences had to be paid for, both because `mapgen.generate_custom` is the
+strict builder and **asserts** on a recipe with blockers:
+
+- `commit` writes `custom_map = None` for an *empty* recipe rather than the empty
+  recipe itself. It is not a half-built map — it carries nothing to preserve and
+  is indistinguishable in intent from having no hand map — and writing it would
+  pin the menu into "Edit map" over a setup that cannot start, which opening the
+  creator and pressing Esc would otherwise now do.
+- `menu._start` refuses a hand map with blockers, saying the first one. A
+  genuinely half-built map (systems but no lanes) must still survive a trip back
+  to the menu to change a setting, so `commit` still writes it; the gate belongs
+  at Start. This hole predated the blank default — deleting every system and
+  leaving would reach the same assert — it just stopped being obscure.
 
 ## Persistence, replay & history (`replay.py`)
 

@@ -98,12 +98,16 @@ class MapNode:
         An owner outside ``1..MAX_PLAYERS`` becomes neutral rather than being
         clamped *up* — clamping would invent a seat out of a typo, and a seat is
         the one field that changes how many players the game has.
+
+        The box is ``CUSTOM_WORLD_W`` wide by ``WORLD_SIZE`` tall, not the square
+        ``mapgen`` generates into: a recipe stores concrete coordinates and never
+        goes through ``_play_bounds``, so a hand map can be drawn to the shape a
+        window actually is without moving a single generated board.
         """
-        size = int(config.WORLD_SIZE)
         owner = self.owner if 0 <= self.owner <= config.MAX_PLAYERS else 0
         return MapNode(
-            x=_clamp(self.x, 0, size),
-            y=_clamp(self.y, 0, size),
+            x=_clamp(self.x, 0, int(config.CUSTOM_WORLD_W)),
+            y=_clamp(self.y, 0, int(config.WORLD_SIZE)),
             production=_clamp(self.production, 0, config.CUSTOM_MAX_PRODUCTION),
             ships=_clamp(self.ships, 0, config.CUSTOM_MAX_SHIPS),
             owner=owner,

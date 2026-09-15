@@ -855,6 +855,27 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   row, and why the Economy sliders move into the creator's sidebar: garrisons are
   rolled *at the moment a system is placed*, so placement is the only point at
   which they still bite. Nothing stored is a sentinel.
+- **A hand map lives in a wider box than a generated one.** `config.WORLD_SIZE`
+  is square and `mapgen._place_nodes` rolls inside it, so every generated board is
+  square; a recipe stores concrete coordinates and never goes through
+  `_play_bounds`, so it doesn't have to be. `config.CUSTOM_WORLD_W` x
+  `WORLD_SIZE` is the hand-map box — `custommap.MapNode.clamped` enforces it and
+  `mapmaker._build_view` is the camera over exactly it, so the canvas *is* the
+  region a system may occupy. Widening `WORLD_SIZE` itself instead would re-roll
+  every seed: a `RULES_VERSION` bump, and every stored replay and posted score
+  unverifiable. `mapmaker._generated` **centres** what it adopts, since a square
+  map in a wider canvas would otherwise open hugging the left; a translation only,
+  because scaling to fill the width would stretch every lane and quote travel
+  times the seed never gave.
+- **The editor opens on a blank canvas, and that costs two guards.**
+  `mapgen.generate_custom` asserts on a recipe with blockers, so a map that cannot
+  build must never reach it. `mapmaker.commit` writes `custom_map = None` for an
+  *empty* recipe (not a half-built map — it carries nothing, and writing it pins
+  the menu into "Edit map" over a setup that cannot start), and `menu._start` — the
+  one funnel all three `"start"` returns go through — refuses a hand map with
+  blockers and says the first one. A genuinely half-built map is still committed:
+  it must survive a trip to the menu to change a setting, so the gate is at Start,
+  not at commit.
 - **One tolerant gate, one strict builder.** `CustomMap.from_dict` is total and
   never raises — it pads short rows, clamps out-of-range numbers and drops junk
   lanes — and returns `None` for anything that cannot describe a playable map.
@@ -924,9 +945,27 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   clear seat 2), so that case gets a blocker and a one-press **Renumber seats**
   rather than a silent compaction — renumbering changes a seat's colour without
   being asked, and the colour is part of what an author intended.
+  `mapmaker._seat_entries` is that list, with two readers: the Owners palette band
+  and the selected system's owner row in the sidebar (a row of swatches, not a
+  stepper — a seat is a colour, so it is pointed at). They must not disagree about
+  which seats exist, or one offers a seat the other calls a gap. The sidebar row
+  has no toggle-to-neutral second meaning, unlike a tap on the map: Neutral is its
+  own swatch there.
 - **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
   version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
   common "give this one a real garrison" case isn't a two-tool round trip.
+- **The Owners tool's *Auto* is `mapgen.peripheral_starts`, not a second copy of
+  it.** That function was lifted out of `mapgen._peripheral_starts` to take a
+  `{id: pos}` map and an rng, so the editor can seat a recipe that is not a board
+  — the wrapper keeps the same ids, the same order and the same single rng draw,
+  so a seed still lays out the board it always did. It replaces rather than
+  merges (one start per angular sector is the whole property) and demotes a
+  system it unseats back to an ordinary roll, but only one carrying the exact
+  homeworld stamp. Its seat count is `Editor.auto_seats`, **not**
+  `settings.players`: with a recipe set, `commit` derives `players` from
+  `recipe.seats()`, so placing the homeworlds *is* how the seat count is chosen —
+  and `None` there means "as many as the map already has", which is what keeps
+  the readout honest and why `_adopt` resets it.
 - **Box-paint copies route mode's two-flag arming** (`box_press` on the press,
   `box_active` only past the threshold, so a tap that never moves paints nothing)
   and **clips the box to the viewport first** — `to_screen` projects every system,
@@ -934,12 +973,16 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   A box paints as one group: if every system in it already holds the pick it
   clears them all, otherwise it paints them all, so a box never half-toggles.
 - **The menu hides what a hand map decides, by not drawing it.** Basic's Players,
-  Systems and Map type become read-only derived values; Advanced's Map and Economy
+  Systems and Map type become read-only derived values (Players is chosen in the
+  creator instead, by *Auto* above or by painting); Advanced's Map and Economy
   groups become a note, since those knobs now live in the creator and only bite
   there. `menu._set_players`/`_set_nodes` are additionally *interlocked* while a
   recipe is set — a nudge from any other path would desync them from it until the
   next `from_dict` reconciled them back, moving the digest in between. Seed stays:
-  it still drives combat dice and star names.
+  it still drives combat dice and star names. Dropping the recipe (the *x* beside
+  *Edit map*) is behind a confirm, answered inside `_dispatch` rather than ahead
+  of it, so the clear still falls through to the un-challenge check every other
+  edit trips.
 - **Star names are deliberately absent from a recipe.** `mapgen._name_systems`
   stamps them from `state.rng` last and serializes nothing, so they are recreated
   for free from the seed; the editor shows ids (`#7`).

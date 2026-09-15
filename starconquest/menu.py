@@ -295,6 +295,10 @@ class MenuState:
     # still matched it, so "keep the challenge" can put the setup back.
     confirm_unchallenge: bool = False
     challenge_snapshot: Optional[dict] = None
+    # Clear-map confirm modal. Answered inside `_dispatch` rather than ahead of it,
+    # so clearing still falls through to the un-challenge check that any other
+    # edit to the setup would trip.
+    confirm_clear_map: bool = False
     # An action the un-challenge modal is standing in front of. Pressing "Create
     # map" asks *before* the editor opens rather than on the way back out —
     # walking someone through a whole authoring session and only then telling them
@@ -412,6 +416,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _text(surface, f["small"], ms.status, _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 852))
     if not config.touch_ui:
         _text(surface, f["small"], "Enter: start game   ·   Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, 886))
+    if ms.confirm_clear_map:
+        _draw_clear_map(surface, ms, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
@@ -473,15 +479,30 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
     f = _fonts()
     change, keep = _unchallenge_labels()
     ch = settings.challenge
-    lines = [
-        ("Change the challenge setup?", f["normal"], config.COLOR_TEXT),
-        ("Your result won't compare to the score on the link", f["small"], _WARN),
-        # `summary` brings its own parenthetical, so don't wrap it in more.
-        (f"Target: {ch.summary()}" if ch is not None else "", f["small"], config.COLOR_TEXT_DIM),
-    ]
+    _draw_menu_modal(
+        surface, ms, w, h,
+        [
+            ("Change the challenge setup?", f["normal"], config.COLOR_TEXT),
+            ("Your result won't compare to the score on the link", f["small"], _WARN),
+            # `summary` brings its own parenthetical, so don't wrap it in more.
+            (f"Target: {ch.summary()}" if ch is not None else "", f["small"], config.COLOR_TEXT_DIM),
+        ],
+        ("unchallenge_change", change, _BTN_FILL, _WARN),
+        ("unchallenge_keep", keep, _HL_FILL, _HL_BORDER),
+    )
 
+
+def _draw_menu_modal(surface, ms: MenuState, w: int, h: int, lines, go, stay) -> None:
+    """A veiled, measured confirm panel over the canvas: prose lines stacked above
+    a go/stay pair.
+
+    Measured and centred rather than positioned, like `widgets.draw_modal` in the
+    game — the labels grow on a phone. The *stay* button carries the highlight, so
+    the safe answer is the one the eye lands on.
+    """
+    f = _fonts()
     pad, gap, row = 28, 14, 34
-    bw = max(f["normal"].size(s)[0] for s in (change, keep)) + 2 * 18
+    bw = max(f["normal"].size(s)[0] for _k, s, _fl, _b in (go, stay)) + 2 * 18
     bh = 40
     text_w = max(font.size(text)[0] for text, font, _ in lines)
     pw = max(text_w, 2 * bw + gap) + 2 * pad
@@ -500,10 +521,41 @@ def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int
         y += row
 
     by = panel.bottom - pad - bh
-    _button(
-        surface, ms, "unchallenge_change", pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh), change, fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT
+    for rect, (key, label, fill, border) in zip(
+        (pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh),
+         pygame.Rect(panel.centerx + gap // 2, by, bw, bh)),
+        (go, stay),
+    ):
+        _button(surface, ms, key, rect, label, fill=fill, border=border, tcol=config.COLOR_TEXT)
+
+
+def _clear_map_labels() -> tuple[str, str]:
+    """(clear-it, keep-it) labels; key hints dropped on a touch build, as
+    `_unchallenge_labels` does."""
+    if config.touch_ui:
+        return ("Clear the map", "Keep it")
+    return ("Clear the map (Y)", "Keep it (Esc)")
+
+
+def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
+    """Modal: dropping a hand-drawn map is not a small press.
+
+    The x sits one button away from *Edit map* and a drawn map is the only thing
+    on this screen that cannot be got back from the seed — every other setting is
+    a stepper away from where it was.
+    """
+    f = _fonts()
+    clear, keep = _clear_map_labels()
+    _draw_menu_modal(
+        surface, ms, w, h,
+        [
+            ("Discard the map you drew?", f["normal"], config.COLOR_TEXT),
+            ("Maps come from the seed again — this one is not saved", f["small"], _WARN),
+            ("Save it from the creator first if you want to keep it", f["small"], config.COLOR_TEXT_DIM),
+        ],
+        ("clear_map_yes", clear, _BTN_FILL, _WARN),
+        ("clear_map_no", keep, _HL_FILL, _HL_BORDER),
     )
-    _button(surface, ms, "unchallenge_keep", pygame.Rect(panel.centerx + gap // 2, by, bw, bh), keep, fill=_HL_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT)
 
 
 # Settings fields shown on each tab, for the tab row's own changed-dot — a tab
@@ -1278,6 +1330,31 @@ def _comparable(settings: Settings) -> bool:
     return settings.challenge is not None and settings.challenge.matches(settings)
 
 
+def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
+    """Answer the clear-map modal. Y/Enter discards the drawn map, N/Esc keeps it."""
+    answer: Optional[bool] = None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for key, value in (("clear_map_yes", True), ("clear_map_no", False)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                answer = value
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+            answer = True
+        elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+            answer = False
+    if answer is None:
+        return None
+    ms.confirm_clear_map = False
+    if answer:
+        settings.custom_map = None
+        # `nodes` was reconciled to the recipe and may sit below the generated
+        # floor, so put it back in range now that a generator has to honour it.
+        settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, settings.nodes))
+        set_status(ms, "Custom map cleared — maps come from the seed again", True)
+    return None
+
+
 def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[str]:
     """Answer the un-challenge modal: keep the edit and drop the score, or put the
     setup back the way the link had it.
@@ -1374,6 +1451,8 @@ def _to_canvas_event(event, ms: MenuState):
 
 
 def _dispatch(event, ms: MenuState, settings: Settings):
+    if ms.confirm_clear_map:  # modal: swallows everything until answered
+        return _handle_clear_map(event, ms, settings)
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -1431,7 +1510,7 @@ def _handle_key(event, ms: MenuState, settings: Settings):
     if ms.editing_seed:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             ms.editing_seed = False
-            return "start"
+            return _start(ms, settings)
         if event.key == pygame.K_ESCAPE:
             ms.editing_seed = False
             return None
@@ -1454,7 +1533,7 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         return None
 
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        return "start"
+        return _start(ms, settings)
     if event.key == pygame.K_ESCAPE:
         return "quit"
     return None
@@ -1470,7 +1549,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.strategy_open = False  # click anywhere else closes the dropdown
 
     if hit == "start":
-        return "start"
+        return _start(ms, settings)
     if hit == "quit":
         return "quit"
     if hit is None:
@@ -1552,11 +1631,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "create_map":
         return _open_creator(ms, settings)
     elif hit == "clear_map":
-        settings.custom_map = None
-        # `nodes` was reconciled to the recipe and may sit below the generated
-        # floor, so put it back in range now that a generator has to honour it.
-        settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, settings.nodes))
-        set_status(ms, "Custom map cleared — maps come from the seed again", True)
+        ms.confirm_clear_map = True
     elif hit == "filename_field":
         ms.editing_filename = True
     elif hit == "save_settings":
@@ -1665,6 +1740,22 @@ def _settings_path(name: str) -> Path:
 # that clears before it can be read is worse than none.
 _STATUS_MS = 4000
 _STATUS_ERROR_MS = 15000
+
+
+def _start(ms: MenuState, settings: Settings):
+    """``"start"``, unless a hand-drawn map would refuse to build.
+
+    ``mapgen.generate_custom`` asserts on a recipe with blockers — it is the strict
+    builder behind the one tolerant gate — so the half-built map ``mapmaker.commit``
+    deliberately lets through has to stop here rather than there. The creator says
+    the same thing on its own *Play now*; this is the same refusal for the route
+    that goes back to the menu first.
+    """
+    blockers = settings.custom_map.blockers() if settings.custom_map is not None else []
+    if blockers:
+        set_status(ms, blockers[0].text, False)
+        return None
+    return "start"
 
 
 def set_status(ms: MenuState, text: str, ok: bool) -> None:

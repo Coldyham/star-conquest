@@ -82,6 +82,10 @@ class Editor:
     # `random` module: the web build boots from a fixed interpreter image, so
     # `random`'s auto-seeding can hand out the same sequence on every page load.
     rng: random.Random = field(default_factory=settings_mod.fresh_rng)
+    # What *Generate* rolls, when it is pinned. `None` — every real caller — means
+    # "resolve one off the Settings the way starting a game would", so the button
+    # hands back a different map each press.
+    seed: Optional[int] = None
 
     tool: str = SYSTEMS
     pick: object = PALETTE_RANDOM        # PALETTE_RANDOM, or an int production
@@ -102,6 +106,11 @@ class Editor:
     # mode's arming exactly — `box_press` on the press, `box_active` only past the
     # threshold, so a tap that never moves paints nothing.
     owner_pick: int = 1
+    # How many homeworlds *Auto* places. `None` means "as many as the map already
+    # has", so the readout is the map's own truth until someone sets a number;
+    # `_adopt` puts it back. Never `settings.players` — `commit` derives that from
+    # the recipe, so a number written there is overwritten on the way out.
+    auto_seats: Optional[int] = None
     box_press: bool = False
     box_active: bool = False
     box_from: tuple[int, int] = (0, 0)
@@ -127,7 +136,7 @@ class Editor:
 
     filename: str = ""
     editing_filename: bool = False
-    confirm: Optional[str] = None        # "auto_lanes" | "new" | None
+    confirm: Optional[str] = None        # an `_CONFIRMS` key, or None
 
     status: str = ""
     status_ok: bool = True
@@ -145,25 +154,30 @@ class Editor:
     def can_play(self) -> bool:
         return self.recipe.is_playable()
 
+    def seat_target(self) -> int:
+        """How many homeworlds *Auto* places, clamped to a playable seat count."""
+        want = self.recipe.seats() if self.auto_seats is None else self.auto_seats
+        return max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, want))
+
 
 # --------------------------------------------------------------------------- #
 # Opening / committing
 # --------------------------------------------------------------------------- #
 def open_editor(settings: Settings, seed: Optional[int] = None) -> Editor:
-    """The editor for ``settings`` — its existing hand map, or a generated one.
+    """The editor for ``settings`` — its existing hand map, or a blank canvas.
 
-    Never a blank canvas on entry. A blank map has no seats and no lanes, so it
-    fails the Play gate on two counts at once, and a first impression of "nothing
-    you can do here works yet" is a poor one; the footer's *New* is one press away
-    for anyone who wants to start from nothing.
+    Blank is the default because *Create map* means create: handing someone a
+    generated board to pick apart is a different task from drawing one, and the
+    footer's *Generate* is one press away for anyone who wants that instead.
+    ``seed`` is therefore only consulted by *Generate*; it is accepted here so a
+    caller can pin the map that button rolls.
     """
     # The lane readouts and lane styling go through `config.travel_turns_at_length`,
     # so the menu's ship-speed knob has to have reached `config` or the editor
-    # quotes the previous game's travel times. `_generated` does this on the other
-    # branch anyway; doing it here covers both.
+    # quotes the previous game's travel times.
     settings_mod.apply_globals(settings)
-    recipe = settings.custom_map.copy() if settings.custom_map is not None else _generated(settings, seed)
-    return Editor(recipe=recipe, view=_build_view())
+    recipe = settings.custom_map.copy() if settings.custom_map is not None else CustomMap()
+    return Editor(recipe=recipe, view=_build_view(), seed=seed)
 
 
 def _generated(settings: Settings, seed: Optional[int] = None) -> CustomMap:
@@ -172,11 +186,29 @@ def _generated(settings: Settings, seed: Optional[int] = None) -> CustomMap:
     Goes through ``settings.apply_globals`` rather than ``mapgen.generate``
     directly, because generation reads the map knobs live off ``config`` and that
     is the single sanctioned writer into it.
+
+    Centred on the way in: generation lays out inside the square ``_play_bounds``
+    and the creator's canvas is wider than that, so an uncentred recipe would open
+    hugging the left edge. A translation is the only edit — scaling it to fill the
+    width would stretch every lane and hand back travel times the seed never gave.
     """
     settings_mod.apply_globals(settings)
     concrete = settings_mod.resolve_seed(settings) if seed is None else seed
     state = mapgen.generate(concrete, settings.mode, settings.nodes, settings.players)
-    return custommap.from_state(state)
+    return _centred(custommap.from_state(state))
+
+
+def _centred(recipe: CustomMap) -> CustomMap:
+    """``recipe`` shifted so its bounding box sits in the middle of the canvas."""
+    if not recipe.nodes:
+        return recipe
+    xs = [n.x for n in recipe.nodes]
+    ys = [n.y for n in recipe.nodes]
+    dx = int(round((config.CUSTOM_WORLD_W - (max(xs) + min(xs))) / 2))
+    dy = int(round((config.WORLD_SIZE - (max(ys) + min(ys))) / 2))
+    for node in recipe.nodes:
+        node.x, node.y = node.x + dx, node.y + dy
+    return recipe.normalised()
 
 
 def commit(ed: Editor, settings: Settings) -> None:
@@ -188,9 +220,19 @@ def commit(ed: Editor, settings: Settings) -> None:
     way back in, so letting them drift here would move the digest in between.
 
     Runs even for a map that fails the Play gate — a half-built map must survive a
-    trip to the menu to change a setting. Only *starting a game* is gated.
+    trip to the menu to change a setting. Only *starting a game* is gated
+    (``menu._start``, since ``mapgen.generate_custom`` asserts).
+
+    An *empty* recipe is the exception, and it is not a half-built map: it carries
+    nothing to preserve and is indistinguishable in intent from having no hand map
+    at all. Writing it would pin the menu into "Edit map" with a setup that cannot
+    start, which is what opening the creator and leaving straight away would
+    otherwise do now that a blank canvas is where it opens.
     """
     recipe = ed.recipe.normalised()
+    if not recipe.nodes:
+        settings.custom_map = None
+        return
     settings.custom_map = recipe
     settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, recipe.seats()))
     settings.nodes = max(1, len(recipe.nodes))
@@ -213,7 +255,7 @@ def reflow(ed: Editor) -> None:
 
 
 def _build_view() -> WorldView:
-    """The camera over the *full* world box, fixed for the editor's lifetime.
+    """The camera over the *full* hand-map box, fixed for the editor's lifetime.
 
     Fixed rather than fitted to the nodes: ``WorldView`` takes its bounds at
     construction and never re-derives them, so a box that grew as systems were
@@ -222,9 +264,13 @@ def _build_view() -> WorldView:
     just inside ``WORLD_MARGIN``: in play, ``main.build_view`` fits to the actual
     node bounding box, so a map drawn to the edges simply fills the viewport more
     tightly.
+
+    The box is ``config.CUSTOM_WORLD_W`` x ``config.WORLD_SIZE`` — wider than the
+    square ``mapgen`` rolls into, and the same bounds ``MapNode.clamped`` enforces,
+    so the canvas is exactly the region a system may occupy.
     """
     return WorldView(
-        (0.0, 0.0, config.WORLD_SIZE, config.WORLD_SIZE),
+        (0.0, 0.0, config.CUSTOM_WORLD_W, config.WORLD_SIZE),
         _view_rect(),
         padding=config.map_fit_padding(),
         pan_padding=config.map_pan_padding(),
@@ -425,10 +471,28 @@ def _draw_top(surface, ed: Editor) -> None:
             ed.rects[f"tool_{key}"] = rect
         x = rect.right + config.BTN_GAP
 
+    # *Menu* rides in the tool strip rather than the footer: drawing a map is a
+    # setup step, and going back to the seats, strategies, fog and seed behind it
+    # is the stage after the three tools, not a sibling of Undo. Green for the same
+    # reason it always was — it is the way on, not the way out.
+    label = widgets.key_hint("Menu", "Esc")
+    back = pygame.Rect(x + config.BTN_GAP, y, widgets.btn_w(font, label), h)
+    widgets.btn(surface, back, label, *widgets.BTN_GREEN, font)
+    ed.rects["back"] = back
+
     if ed.status:
         color = config.COLOR_TEXT if ed.status_ok else _BAD
+        # Clipped to the room the strip has left, so a long message runs off to the
+        # left rather than over the buttons — the same end-anchoring `_text_field`
+        # gives the filename box.
+        room = pygame.Rect(back.right + config.BTN_GAP, 0,
+                           max(0, config.SCREEN_W - config.HUD_PAD - back.right - config.BTN_GAP),
+                           config.EDIT_TOP_H)
+        prev = surface.get_clip()
+        surface.set_clip(room.clip(bar))
         widgets.text(surface, font, ed.status, color,
                      midright=(config.SCREEN_W - config.HUD_PAD, config.EDIT_TOP_H // 2))
+        surface.set_clip(prev)
 
 
 _TOOL_HINTS = {
@@ -492,6 +556,19 @@ def _draw_palette(surface, ed: Editor) -> None:
         x = rect.right + config.BTN_GAP
 
 
+def _seat_entries(recipe: CustomMap) -> list[int]:
+    """Neutral, then the seats — one more than are currently held, floored at two.
+
+    One list with two readers: the Owners tool's palette band and the selected
+    system's owner row in the sidebar. They must agree about which seats exist, or
+    one of them offers a seat the other says is a gap.
+    """
+    counts = recipe.owner_counts()
+    held = sum(1 for pid, n in counts.items() if pid > 0 and n > 0)
+    top = max(config.MIN_PLAYERS, min(held + 1, config.MAX_PLAYERS))
+    return [0] + list(range(1, top + 1))
+
+
 def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
     """Neutral, then the seats — one more than are currently held, floored at two.
 
@@ -503,9 +580,7 @@ def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
     intended.
     """
     counts = ed.recipe.owner_counts()
-    held = sum(1 for pid, n in counts.items() if pid > 0 and n > 0)
-    top = max(config.MIN_PLAYERS, min(held + 1, config.MAX_PLAYERS))
-    entries = [0] + list(range(1, top + 1))
+    entries = _seat_entries(ed.recipe)
 
     captions = {pid: (f"{config.player_name(pid)} ({counts.get(pid, 0)})" if pid else
                       f"Neutral ({counts.get(0, 0)})") for pid in entries}
@@ -577,9 +652,7 @@ def _draw_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     y = _stepper_row(surface, ed, f, x, y, w, "prod", "Production", f"{node.production}/ship")
     y = _stepper_row(surface, ed, f, x, y, w, "ships", "Garrison", str(node.ships))
     y = _garrison_slider_row(surface, ed, f, x, y, w, node)
-    owner = "Neutral" if node.owner == 0 else config.player_name(node.owner)
-    y = _stepper_row(surface, ed, f, x, y, w, "owner", "Owner", owner,
-                     swatch=config.player_color(node.owner))
+    y = _owner_row(surface, ed, f, x, y, w, node)
 
     bh = widgets.tap_size(config.FOOTER_BTN_H)
     bw = (w - config.BTN_GAP) // 2
@@ -656,7 +729,11 @@ def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: i
 
 
 def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
-    """Make homeworld, plus the seat-gap fix when there is a gap to fix."""
+    """Make homeworld and the seat-gap fix, then the map-wide auto-placement block.
+
+    Laid out the way the Lanes sidebar is: what the selection can do first, the
+    knob-plus-Auto block that rewrites the whole map last.
+    """
     bh = widgets.tap_size(config.FOOTER_BTN_H)
     if _selected(ed) is not None:
         # Explicit, never implicit: painting a colour must not silently rewrite
@@ -670,7 +747,16 @@ def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
         ed.rects["renumber"] = _btn_rect(
             surface, pygame.Rect(x, y, w, bh), "Renumber seats", widgets.BTN_AMBER, f["small"])
         y += bh + config.ROW_GAP
-    return y + config.ROW_GAP
+
+    # The seat count lives here rather than staying on the menu's Basic tab: with
+    # a recipe set, `commit` derives `settings.players` from the map, so the
+    # number that decides how many seats play *is* how many homeworlds get placed.
+    widgets.text(surface, f["small"], "Auto homeworlds", config.COLOR_TEXT_DIM, topleft=(x, y))
+    y += widgets.row_h("small") + config.ROW_GAP
+    y = _stepper_row(surface, ed, f, x, y, w, "seats", "Seats", str(ed.seat_target()))
+    ed.rects["auto_owners"] = _btn_rect(
+        surface, pygame.Rect(x, y, w, bh), "Auto", widgets.BTN_VIOLET, f["small"])
+    return y + bh + config.ROW_GAP * 2
 
 
 def _btn_rect(surface, rect, label, palette, font) -> pygame.Rect:
@@ -681,7 +767,7 @@ def _btn_rect(surface, rect, label, palette, font) -> pygame.Rect:
 
 
 def _stepper_row(surface, ed: Editor, f, x: int, y: int, w: int,
-                 key: str, label: str, value: str, swatch=None) -> int:
+                 key: str, label: str, value: str) -> int:
     """One "label  −  value  +" row, recording both step rects."""
     size = widgets.tap_size(config.STEPPER_SIZE)
     row = max(size, widgets.row_h())
@@ -690,18 +776,52 @@ def _stepper_row(surface, ed: Editor, f, x: int, y: int, w: int,
     accent = widgets.BTN_BLUE[1]
 
     widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + row // 2))
-    vx = minus.x - config.BTN_GAP
-    if swatch is not None:
-        dot = config.s(6)
-        pygame.draw.circle(surface, swatch, (vx - dot, y + row // 2), dot)
-        vx -= 2 * dot + config.s(4)
-    widgets.text(surface, f["small"], value, config.COLOR_TEXT, midright=(vx, y + row // 2))
+    widgets.text(surface, f["small"], value, config.COLOR_TEXT,
+                 midright=(minus.x - config.BTN_GAP, y + row // 2))
 
     widgets.step_button(surface, minus, "-", accent)
     widgets.step_button(surface, plus, "+", accent)
     ed.rects[f"{key}_minus"] = minus
     ed.rects[f"{key}_plus"] = plus
     return y + row + config.ROW_GAP
+
+
+def _owner_row(surface, ed: Editor, f, x: int, y: int, w: int, node: MapNode) -> int:
+    """Owner as a row of seat swatches, sized and shaped like the -/+ steppers above.
+
+    A seat *is* a colour, so pointing at one beats stepping through them: the
+    stepper this replaces made picking seat 4 four presses, and never showed what
+    the seats were. The list is ``_seat_entries`` — exactly what the Owners tool's
+    palette band offers — and the current owner is still named on the label row, so
+    nothing is conveyed by colour alone.
+
+    Unlike a tap on the map in the Owners tool, pressing the swatch a system
+    already holds does nothing: Neutral is its own swatch here, so a
+    toggle-to-neutral would be a second meaning on a press that already has one.
+    """
+    entries = _seat_entries(ed.recipe)
+    name = "Neutral" if node.owner == 0 else config.player_name(node.owner)
+    widgets.text(surface, f["small"], "Owner", config.COLOR_TEXT_DIM, topleft=(x, y))
+    widgets.text(surface, f["small"], name, config.COLOR_TEXT,
+                 midright=(x + w, y + widgets.row_h("small") // 2))
+    y += widgets.row_h("small")
+
+    gap = max(1, config.BTN_GAP // 2)
+    # Capped at its share of the row, the same squeeze the palette bands take: the
+    # list grows as seats are painted, and the sidebar's width does not.
+    room = max(1, (w - gap * (len(entries) - 1)) // len(entries))
+    cell = min(widgets.tap_size(config.STEPPER_SIZE), room)
+    radius = config.s(4)
+    for i, pid in enumerate(entries):
+        rect = pygame.Rect(x + i * (cell + gap), y, cell, cell)
+        colour = config.player_color(pid)
+        edge = config.COLOR_SELECT if pid == node.owner else widgets.brighten(colour, 40)
+        pygame.draw.rect(surface, colour, rect, border_radius=radius)
+        pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=radius)
+        widgets.text(surface, f["small"], "-" if pid == 0 else str(pid),
+                     config.text_on(colour), center=rect.center)
+        ed.rects[f"own_{pid}"] = rect
+    return y + cell + config.ROW_GAP
 
 
 def _garrison_slider_row(surface, ed: Editor, f, x: int, y: int, w: int, node: MapNode) -> int:
@@ -799,17 +919,20 @@ _DEAD_PALETTE = ((38, 42, 52), (78, 84, 98))
 # (key, label, fill, edge, squeeze rank, cluster). The filename field carries no
 # label of its own but takes part in the same measure-and-squeeze pass, so a
 # narrow window sheds it in rank order like everything else.
+#
+# Left to right: the two that replace the whole map, then the two that step
+# through its history, then the file cluster and *Play now*. *Menu* is not here —
+# it sits in the tool strip (see `_draw_top`).
 def _footer_specs(ed: Editor) -> list[tuple[str, str, tuple, tuple, int, str]]:
     return [
-        ("back", widgets.key_hint("Menu", "Esc"), *widgets.BTN_BLUE, 90, "left"),
+        ("generate", "Generate", *widgets.BTN_AMBER, 35, "left"),
+        ("new", "New (blank)", *widgets.BTN_AMBER, 40, "left"),
         ("undo", "Undo", *widgets.BTN_BLUE, 70, "left"),
         ("redo", "Redo", *widgets.BTN_BLUE, 65, "left"),
-        ("new", "New", *widgets.BTN_AMBER, 40, "left"),
-        ("generate", "Generate", *widgets.BTN_AMBER, 35, "left"),
         ("filename", "", (0, 0, 0), (0, 0, 0), 45, "right"),
         ("open", "Open", *widgets.BTN_BLUE, 50, "right"),
         ("save", "Save", *widgets.BTN_BLUE, 55, "right"),
-        ("play", "Play", *(widgets.BTN_GREEN if ed.can_play() else _DEAD_PALETTE), 100, "right"),
+        ("play", "Play now", *(widgets.BTN_BLUE if ed.can_play() else _DEAD_PALETTE), 100, "right"),
     ]
 
 
@@ -887,6 +1010,9 @@ _CONFIRMS = {
                    "drew by hand goes with it."),
     "clear_lanes": ("Remove every lane?",
                     "The systems stay where they are; only the network goes."),
+    "auto_owners": ("Replace every homeworld?",
+                    "Auto-placing spreads the starts around the rim, so any seat "
+                    "you painted by hand goes with it."),
     "new": ("Start from a blank canvas?", "The map you have drawn will be discarded."),
 }
 
@@ -894,7 +1020,8 @@ _CONFIRMS = {
 def _draw_confirm(surface, ed: Editor) -> None:
     title, detail = _CONFIRMS[ed.confirm or "new"]
     yes_label, no_label = widgets.confirm_labels(
-        {"auto_lanes": "Replace", "clear_lanes": "Remove"}.get(ed.confirm or "", "Discard"))
+        {"auto_lanes": "Replace", "auto_owners": "Replace",
+         "clear_lanes": "Remove"}.get(ed.confirm or "", "Discard"))
     widgets.draw_modal(surface, title, detail,
                        ((yes_label, *widgets.BTN_DANGER), (no_label, *widgets.BTN_BLUE)))
     yes, no = widgets.modal_buttons(surface, (yes_label, no_label))
@@ -1058,6 +1185,9 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
     if hit.startswith("seat_"):
         ed.owner_pick = int(hit[5:])
         return None
+    if hit.startswith("own_"):
+        _set_owner(ed, int(hit[4:]))
+        return None
     if hit.startswith("tool_"):
         new_tool = hit[5:]
         if ed.tool == LANES and new_tool != LANES:
@@ -1094,8 +1224,8 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
         _step_selected(ed, "production", 1 if hit.endswith("plus") else -1)
     elif hit in ("ships_minus", "ships_plus"):
         _step_selected(ed, "ships", 1 if hit.endswith("plus") else -1)
-    elif hit in ("owner_minus", "owner_plus"):
-        _step_selected(ed, "owner", 1 if hit.endswith("plus") else -1)
+    elif hit in ("seats_minus", "seats_plus"):
+        ed.auto_seats = ed.seat_target() + (1 if hit.endswith("plus") else -1)
     elif hit == "reroll":
         _reroll_selected(ed, settings)
     elif hit == "delete":
@@ -1116,11 +1246,13 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
         _redo(ed)
     elif hit == "auto_lanes":
         ed.confirm = "auto_lanes"
+    elif hit == "auto_owners":
+        ed.confirm = "auto_owners"
     elif hit == "new":
         ed.confirm = "new"
     elif hit == "generate":
         _push_undo(ed)
-        _adopt(ed, _generated(settings))
+        _adopt(ed, _generated(settings, ed.seed))
         _set_status(ed, "Generated a fresh map to edit", True)
     elif hit == "open":
         _open_file(ed)
@@ -1269,6 +1401,8 @@ def _handle_confirm(event, ed: Editor, settings: Settings) -> None:
         return
     if which == "auto_lanes":
         _auto_lanes(ed, settings)
+    elif which == "auto_owners":
+        _auto_owners(ed, settings)
     elif which == "clear_lanes":
         _clear_lanes(ed)
     elif which == "new":
@@ -1330,6 +1464,7 @@ def _adopt(ed: Editor, recipe: CustomMap) -> None:
     """
     ed.recipe = recipe
     ed.sel_node = ed.sel_lane = None
+    ed.auto_seats = None
     ed.lane_src = None
     ed.lane_drag = False
     ed.box_press = ed.box_active = False
@@ -1366,6 +1501,12 @@ def _place(ed: Editor, settings: Settings, pos) -> None:
 def _rolled_production(ed: Editor) -> int:
     if isinstance(ed.pick, int):        # PALETTE_RANDOM is the string, so this splits them
         return ed.pick
+    return _weighted_production(ed)
+
+
+def _weighted_production(ed: Editor) -> int:
+    """The Random swatch's roll, with no palette pick able to override it — what
+    ``mapgen._assign_production_and_garrisons`` gives an ordinary system."""
     values = list(config.PRODUCTION_WEIGHTS)
     weights = [config.PRODUCTION_WEIGHTS[v] for v in values]
     return ed.rng.choices(values, weights=weights, k=1)[0]
@@ -1412,13 +1553,21 @@ def _step_selected(ed: Editor, attr: str, delta: int) -> None:
     if node is None:
         return
     hi = {"production": config.CUSTOM_MAX_PRODUCTION,
-          "ships": config.CUSTOM_MAX_SHIPS,
-          "owner": config.MAX_PLAYERS}[attr]
+          "ships": config.CUSTOM_MAX_SHIPS}[attr]
     value = max(0, min(hi, getattr(node, attr) + delta))
     if value == getattr(node, attr):
         return
     _push_undo(ed)
     setattr(node, attr, value)
+
+
+def _set_owner(ed: Editor, pid: int) -> None:
+    """Stamp a seat onto the selected system, from the sidebar's swatch row."""
+    node = _selected(ed)
+    if node is None or node.owner == pid:
+        return
+    _push_undo(ed)
+    node.owner = pid
 
 
 def _delete_selected(ed: Editor) -> None:
@@ -1460,6 +1609,52 @@ def _make_homeworld(ed: Editor) -> None:
     _push_undo(ed)
     node.production = config.HOME_PRODUCTION
     node.ships = config.HOME_START_SHIPS
+
+
+def _auto_owners(ed: Editor, settings: Settings) -> None:
+    """Spread ``seat_target()`` homeworlds around the rim through
+    ``mapgen.peripheral_starts`` — the generator's own placement, so a hand-drawn
+    board is started from no differently than one rolled from a seed.
+
+    Replaces rather than merges, which is why it is behind a confirm: one start
+    per angular sector is the whole property, and a seat kept somewhere else
+    breaks it.
+
+    A system that loses its start is rolled back down to an ordinary one, as
+    ``mapgen`` rolls every non-home system — otherwise the map's largest prize is
+    a leftover garrison sitting where a homeworld used to be. Only an exact
+    homeworld stamp is demoted; numbers an author set are left alone, the same
+    line ``_make_homeworld`` draws.
+    """
+    want = ed.seat_target()
+    if len(ed.recipe.nodes) < want:
+        _set_status(ed, f"Place at least {want} systems first.", False)
+        return
+    # The Economy sliders govern both stamps below, and they only write `Settings`
+    # — `apply_globals` is the single sanctioned writer into `config`.
+    settings_mod.apply_globals(settings)
+    homes = mapgen.peripheral_starts(
+        {i: n.pos for i, n in enumerate(ed.recipe.nodes)}, want, ed.rng)
+
+    _push_undo(ed)
+    picked = set(homes)
+    stamp = (config.HOME_PRODUCTION, config.HOME_START_SHIPS)
+    for i, node in enumerate(ed.recipe.nodes):
+        if i in picked:
+            continue
+        node.owner = 0
+        if (node.production, node.ships) == stamp:
+            node.production = _weighted_production(ed)
+            node.ships = _rolled_garrison(ed, settings, node)
+    for pid, i in enumerate(homes, start=1):
+        node = ed.recipe.nodes[i]
+        node.owner = pid
+        node.production, node.ships = stamp
+    # The palette only offers seats up to the highest one held, so a pick left
+    # above that would paint a gap straight back in — the blocker `_renumber_seats`
+    # exists to clear.
+    ed.owner_pick = min(ed.owner_pick, want) if ed.owner_pick > 0 else 0
+    _set_status(ed, f"{want} homeworlds placed around the rim", True)
 
 
 def _renumber_seats(ed: Editor) -> None:

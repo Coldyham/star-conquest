@@ -61,6 +61,18 @@ def test_clamping_keeps_every_value_in_range():
     assert node.owner == 0   # an out-of-range seat goes neutral, never clamped *up*
 
 
+def test_a_hand_map_is_wider_than_it_is_tall():
+    """The creator's box is not the square `mapgen` rolls into: a recipe stores
+    concrete coordinates and never goes through `_play_bounds`, so it can be drawn
+    to the shape a window actually is without re-rolling a single seed."""
+    assert config.CUSTOM_WORLD_W > config.WORLD_SIZE
+    far = MapNode(99999, 99999).clamped()
+    assert (far.x, far.y) == (int(config.CUSTOM_WORLD_W), int(config.WORLD_SIZE))
+    # ...and a point the square box would have rejected survives untouched.
+    wide = MapNode(int(config.WORLD_SIZE) + 200, 500).clamped()
+    assert wide.x == int(config.WORLD_SIZE) + 200
+
+
 def test_an_out_of_range_owner_never_invents_a_seat():
     """Clamping a typo'd owner up to MAX_PLAYERS would add a player to the game
     nobody asked for; neutral is the only safe reading."""
