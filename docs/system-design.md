@@ -715,6 +715,107 @@ bare viewport because the bare-viewport comparison used to let a "centred"
 offset push a boundary system back out through the margin at certain zooms
 (regression test: `test_boundary_never_crosses_the_margin_at_any_zoom`).
 
+## Hand-authored maps (`custommap.py`, `mapmaker.py`)
+
+The rules are in CLAUDE.md, keyed by the matching heading. What follows is the
+reasoning and the measurements behind them.
+
+### Why the recipe lives on `Settings`
+
+Everything a shared map has to survive — a save file, a settings link, a challenge
+link, a resume, a replay, the leaderboard's `settings_json`, the offline bot
+column — is already plumbed for `Settings`. Putting the map anywhere else means
+building a second copy of all of it, and building it *worse*, because a replay's
+reproducibility then depends on two artefacts staying in step instead of one.
+The alternative considered and rejected was a map *file* referenced by name: it
+makes a link un-shareable (the recipient has no such file) and a replay
+un-replayable the moment the file is edited, which is the exact failure mode
+format version 1 already taught us about re-running bots.
+
+The cost is one `_LEGACY_KEY_DROPS` entry. Verified by running it rather than by
+reasoning — today's chain was
+
+    ('770ba09210f6127a', 'a61a1888857255e8', '7b989c6085320172')
+
+and with the field added it is
+
+    ('38c8b7ba470f6f4c', '770ba09210f6127a', 'a61a1888857255e8', '7b989c6085320172')
+
+so every digest already in circulation is recovered, in order. A setup that *has*
+a map offers exactly one key, since `custom_map` appears in every entry — correct,
+because no version lacking the field could have described such a map.
+
+### Why the editor's model is a recipe, not a `GameState`
+
+This was the other way round in the first draft, and it is worth recording why it
+flipped. `Lane.length_ly` and `Lane.travel_turns` are **stored** fields, written
+by `mapgen._add_lane`, cached *again* into `GameState.adjacency` by
+`rebuild_topology`, and shipped to external bots as `base_turns`. Dragging a node
+in a live state therefore means recomputing every incident lane's length *and*
+its turns *and* the topology cache, and missing any one of the three leaves a
+board that lies about itself. With positions plus index pairs there is nothing to
+maintain: the lanes follow their nodes, and the one derivation happens once, at
+build time, in `_add_lane_between`.
+
+Two more things fell out of it. `GameState.players` must hold a `Player` per owner
+id, so painting seat 5 onto a 3-player state breaks `_draw_scoreboard`,
+`fog.observe` and `is_defeated` — a recipe just stores the number. And undo
+becomes a copy of plain data rather than a deep copy of a live simulation.
+
+The one cost is that node identity is positional, so deleting node *i* shifts
+every later lane index. That is why `CustomMap.without_node` exists and why
+nothing else is allowed to open-code a deletion.
+
+### The geometric rules, and why they can be hard blocks
+
+Both of the editor's positional rules are `mapgen`'s own — `_crosses_any` and
+`_grazes_other_node` — so a hand map is held to the standard a generated one
+already meets. Measured over 40 seeds x {12,18,24,40} nodes x {random,symmetric} x
+{2,4,6} players:
+
+- **zero lane crossings and zero grazes** in every generated map, so both can be
+  hard blocks without a loaded generated map ever lighting up; and
+- the **tightest node pair mapgen ever produces is 53.6 world units**, which is
+  what fixes `CUSTOM_MIN_NODE_SEP_FRAC` at 0.045 (45 units) — deliberately equal
+  to `LANE_NODE_CLEARANCE_FRAC`, so one clearance figure governs both node-vs-node
+  and node-vs-lane. An earlier draft proposed 70, which would have flagged
+  violations on load. `test_mapgen.py`'s sweep is the regression guard.
+
+A drag shows its refusal rather than preventing it: the node follows the cursor
+the whole way and the offenders ring amber, and an illegal release **snaps back**
+to where the drag started. Not clamped to "the nearest legal point" — with several
+constraints live at once that point is ill-defined, and it silently puts the
+system somewhere nobody asked for.
+
+### `CUSTOM_MAX_NODES` is not `MAX_NODES`
+
+`generate_symmetric` rounds the node count up to a whole number per sector and
+adds the shared centre, returning `players * round((nodes-1)/players) + 1` — **41
+systems at 40 nodes**, which is a board the game generates and plays today.
+Capping the recipe parser at `MAX_NODES` would therefore make a perfectly ordinary
+generated map un-importable into the creator. The two ceilings are different
+things and now say so: `CUSTOM_MAX_NODES` bounds a malformed blob, while
+`MAX_NODES` is the *authoring* ceiling the editor enforces on placement.
+
+### Why Auto-lanes replaces rather than merges
+
+`mapgen._planar_edges` always builds a full MST, so merging its output into a
+hand-drawn set would quietly reconnect a bottleneck the author put there on
+purpose — the one structural decision a hand map exists to express. Replacing is
+honest about what it does, which is why it is behind a confirm. Its output is
+planar and graze-free by construction, so it can never produce a map the manual
+rules would then refuse. It reads `EXTRA_EDGE_FRACTION` and `MAX_EDGE_LENGTH_FRAC`
+live off `config`, so the button goes through `settings.apply_globals` first —
+`mapmaker` never writes `config` itself.
+
+### What the editor opens onto
+
+Never a blank canvas. A blank map fails the Play gate on two counts at once (no
+seats, no lanes), and "nothing here works yet" is a poor first impression of a
+tool whose whole point is that it produces something playable. Entry seeds from a
+generated map built with the current settings; *New* is one press away for anyone
+who wants to start from nothing, and *Generate* rolls another.
+
 ## Persistence, replay & history (`replay.py`)
 
 Format version 1 recorded the *human's* orders alone and rebuilt everything

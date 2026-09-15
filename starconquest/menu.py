@@ -110,6 +110,19 @@ _ADV_ECON = (
     ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
     ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
 )
+
+
+def econ_sliders():
+    """The Economy slider specs, for the map creator's sidebar.
+
+    They are drawn there rather than on the Advanced tab whenever a custom map is
+    set: every garrison on a hand map is concrete, rolled at the moment a system
+    is placed, so placement is the only point at which these still bite. One list,
+    two scenes — a second copy would drift.
+    """
+    return _ADV_ECON
+
+
 # Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
 # still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
 # namespace written to, not the tab drawn on.
@@ -271,6 +284,12 @@ class MenuState:
     # still matched it, so "keep the challenge" can put the setup back.
     confirm_unchallenge: bool = False
     challenge_snapshot: Optional[dict] = None
+    # An action the un-challenge modal is standing in front of. Pressing "Create
+    # map" asks *before* the editor opens rather than on the way back out —
+    # walking someone through a whole authoring session and only then telling them
+    # it invalidated their challenge is the wrong order — so the action waits here
+    # and "Change it anyway" re-issues it.
+    pending_action: Optional[str] = None
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -374,7 +393,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _draw_ai(surface, ms, settings, panel)
 
     _file_control(surface, ms, w, 720)
-    _draw_start(surface, ms, w)
+    _draw_start(surface, ms, settings, w)
     # Two separate lines below the Start row: the transient save/load status, then
     # the keyboard hint (dropped on touch, where there are no keys to press — and
     # where it used to be drawn straight on top of the status).
@@ -1085,13 +1104,27 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
     ms.rects[key] = box
 
 
-def _draw_start(surface, ms: MenuState, w: int) -> None:
+def _draw_start(surface, ms: MenuState, settings: Settings, w: int) -> None:
     rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
     # Touch/web equivalent of Esc's quit — there's no keyboard on a phone, so
     # without this a touch user has no way to leave the app at all.
     quit_rect = pygame.Rect(rect.right + 14, rect.y, 110, rect.height)
     _button(surface, ms, "quit", quit_rect, "Quit", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
+
+    # The map creator, to Start's left so Start itself stays centred. Its little
+    # x drops the drawn map and goes back to generating from the seed; it only
+    # exists when there is one to drop, so there is no inert control to mis-press.
+    drawn = settings.custom_map is not None
+    label = "Edit map" if drawn else "Create map"
+    cw = _fonts()["normal"].size(label)[0] + 36
+    create = pygame.Rect(rect.x - 14 - cw, rect.y, cw, rect.height)
+    _button(surface, ms, "create_map", create, label, fill=_BTN_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+    if drawn:
+        clear = pygame.Rect(create.x - 8 - 34, rect.y + 6, 34, rect.height - 12)
+        _button(surface, ms, "clear_map", clear, "x", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
+    else:
+        ms.rects.pop("clear_map", None)
 
 
 # --------------------------------------------------------------------------- #
@@ -1157,8 +1190,7 @@ def handle_event(event, ms: MenuState, settings: Settings):
     # keyboard as a text field gains/loses focus (a no-op on desktop).
     event = _to_canvas_event(event, ms)
     if ms.confirm_unchallenge:  # modal: swallows everything until answered
-        _handle_unchallenge(event, ms, settings)
-        return None
+        return _handle_unchallenge(event, ms, settings)
     if event.type in _MUTATING_EVENTS and _comparable(settings):
         # Remember the last setup the challenge's score still applied to, before
         # this event gets a chance to change it. A slider drag is covered by the
@@ -1180,9 +1212,14 @@ def _comparable(settings: Settings) -> bool:
     return settings.challenge is not None and settings.challenge.matches(settings)
 
 
-def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> None:
+def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[str]:
     """Answer the un-challenge modal: keep the edit and drop the score, or put the
-    setup back the way the link had it."""
+    setup back the way the link had it.
+
+    Returns whatever action the modal was standing in front of (only ever
+    ``"create_map"`` today), so pressing *Change it anyway* carries straight on
+    into the editor rather than making the player press the button twice.
+    """
     keep_edit: Optional[bool] = None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         for key, answer in (("unchallenge_change", True), ("unchallenge_keep", False)):
@@ -1195,9 +1232,10 @@ def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> None:
         elif event.key in (pygame.K_n, pygame.K_ESCAPE):
             keep_edit = False
     if keep_edit is None:
-        return
+        return None
 
     ms.confirm_unchallenge = False
+    deferred, ms.pending_action = ms.pending_action, None
     if keep_edit:
         settings.challenge = None
         ms.challenge_snapshot = None
@@ -1205,11 +1243,13 @@ def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> None:
         # would resurrect the banner we were just asked to get rid of.
         webstore.sync_settings(settings.to_token())
         set_status(ms, "Challenge cleared — this is your own setup now", True)
-    elif ms.challenge_snapshot is not None:
+        return deferred
+    if ms.challenge_snapshot is not None:
         settings.copy_from(Settings.from_dict(ms.challenge_snapshot))
         # The seed field keeps its own edit buffer, so resync it or the box would
         # still show the rejected number.
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
+    return None    # kept the challenge: whatever was deferred is cancelled with it
 
 
 def pump(ms: MenuState, settings: Settings) -> None:
@@ -1441,6 +1481,14 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_scout = config.FOG_ON_SCOUT
         else:  # on -> off: full visibility
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
+    elif hit == "create_map":
+        return _open_creator(ms, settings)
+    elif hit == "clear_map":
+        settings.custom_map = None
+        # `nodes` was reconciled to the recipe and may sit below the generated
+        # floor, so put it back in range now that a generator has to honour it.
+        settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, settings.nodes))
+        set_status(ms, "Custom map cleared — maps come from the seed again", True)
     elif hit == "filename_field":
         ms.editing_filename = True
     elif hit == "save_settings":
@@ -1513,6 +1561,22 @@ def _randomise_sliders(target, specs) -> None:
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
     settings.seed = int(ms.seed_text) if ms.seed_text else None
+
+
+def _open_creator(ms: MenuState, settings: Settings) -> Optional[str]:
+    """Hand ``main`` the "open the map creator" action — or raise the un-challenge
+    modal first and let *it* re-issue the action.
+
+    Asking here rather than on the way out of the editor is deliberate: authoring
+    a whole map and only then being told it invalidated the score on the link is
+    the wrong order to find out.
+    """
+    if settings.challenge is not None:
+        ms.challenge_snapshot = settings.to_dict()
+        ms.pending_action = "create_map"
+        ms.confirm_unchallenge = True
+        return None
+    return "create_map"
 
 
 def _settings_path(name: str) -> Path:

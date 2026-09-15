@@ -64,16 +64,19 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`. This is what lets
+  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`.
+  This is what lets
   `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
-  to any of these. (`fog` is presentation-only visibility — pure hop-distance queries the
+  to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
+  parses for it). (`custommap` is the hand-authored map recipe and its validator —
+  see Hand-authored maps below. `fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
   presentation-only playback the *engine writes into* and never reads back — see
   Animated end of turn below. `replay` serializes a
   match to JSON and replays it back through the headless engine — see Persistence
   & replay below.)
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  and `main`.
+  `mapmaker`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
@@ -829,4 +832,68 @@ light relaxation + a Euclidean MST for connectivity, which is planar so edges
 don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
 (one base sector rotated N times about a shared contested centre for a perfectly
 fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
-both.
+both. Note `symmetric` rounds the node count up to a whole number per sector and
+adds the shared centre, so it can return **more than `config.MAX_NODES`** systems
+(41 at 40 nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+
+### Hand-authored maps (custommap.py, mapmaker.py)
+
+A board has a **third source**: a recipe drawn by hand. `custommap.CustomMap` is
+the serializable form — systems with concrete positions, production, garrisons and
+owners, plus lanes as index pairs — and it rides on `Settings.custom_map`, which is
+the whole trick: save/load, share and challenge links, resume, replay, the
+leaderboard and the offline bot column all carry it with no new plumbing.
+`mapgen.generate_custom` builds the board; `settings.build_state` branches to it.
+
+- **A hand map is not a `mode`.** `GameState.mode` is stamped `"custom"` (its one
+  non-test reader is `botio.setup`), but `"custom"` must **never** join
+  `settings.MODES`: `leaderboard/schema.sql` is `check (mode in
+  ('random','symmetric'))`, so a token carrying it would be refused by the
+  database on submit. The setup keeps the mode it had; the recipe overrides it.
+- **Every stored value is concrete, so the seed no longer shapes the layout** —
+  it drives combat dice and star names only. That is why the menu keeps its Seed
+  row, and why the Economy sliders move into the creator's sidebar: garrisons are
+  rolled *at the moment a system is placed*, so placement is the only point at
+  which they still bite. Nothing stored is a sentinel.
+- **One tolerant gate, one strict builder.** `CustomMap.from_dict` is total and
+  never raises — it pads short rows, clamps out-of-range numbers and drops junk
+  lanes — and returns `None` for anything that cannot describe a playable map.
+  `generate_custom` asserts. Repair only what is local and bounded: auto-linking a
+  disconnected graph would invent structure the author never drew and present it
+  as theirs, so that is a rejection. A rejection is never silent even though
+  nothing is raised — `challenge_key()` stops matching the sender's stamp, so the
+  menu's existing "this setup has been edited" banner fires with nothing added.
+- **`normalised()` must stay idempotent, and `to_dict` emits it.** `challenge_key`
+  hashes what `to_dict` writes, so a form the reader would normalise differently
+  makes a sender's own link read as edited the moment it is opened — the trap
+  `_ai_from_dict` documents for an int `aux`. Coordinates are **integers** for the
+  same family of reasons: `verify_scores.same_setup` hashes a jsonb side (which
+  drops `100.0` to `100`) against a plain-JSON side, and `_aux_widened` already
+  papers over that for one field. Don't make it two.
+- **Node identity is positional**, so deleting node *i* shifts every later lane
+  index. `CustomMap.without_node` is the single implementation; don't open-code it.
+- **`mapmaker` draws on the real surface, not `menu`'s fixed canvas.**
+  `menu._to_canvas_event` rounds pointer coords through a float scale, and stacking
+  that on `WorldView.to_world` gives two lossy inversions in series — at
+  `config.ZOOM_MAX` a system would not land where you tapped. It shares *primitives*
+  with `render` (`widgets`, `config.node_radius`/`player_color`/`text_on`) rather
+  than drawing functions, which are threaded through fog, film and order state the
+  editor has none of.
+- **Its working model is the recipe, never a live `GameState`.** `Lane.length_ly`
+  and `travel_turns` are stored fields, cached again in `adjacency` and shipped to
+  bots as `base_turns`, so moving a node in a live state means recomputing all
+  three — miss one and the board lies. With positions plus index pairs the lanes
+  follow for free and undo is a copy of plain data.
+- **The validator has one implementation with two callers.** `problems()` gates
+  Play, renders live in the sidebar, *and* is what a drag's legality is filtered
+  from — never a second copy of the geometry that could drift from what Play
+  enforces.
+- **Adding `custom_map` cost a `_LEGACY_KEY_DROPS` entry** and moved the default
+  digest to `38c8b7ba470f6f4c`; all three previous digests are recovered in order.
+  `tools/bot_replay._OUTCOME_MODULES` gained `custommap` — miss that and a change
+  to the recipe parser leaves every cached `bot_scores` row falsely fresh.
+  `tools/setup_sweep` refuses a hand-authored setup outright: its whole method is
+  reseeding, and no seed re-rolls a hand map.
+- **Star names are deliberately absent from a recipe.** `mapgen._name_systems`
+  stamps them from `state.rng` last and serializes nothing, so they are recreated
+  for free from the seed; the editor shows ids (`#7`).

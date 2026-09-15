@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from typing import TYPE_CHECKING
 
 from . import config
 from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
 from .model import GameState, Player, System
 from .starnames import pick as pick_names
+
+if TYPE_CHECKING:  # import-cycle-free: custommap imports config/geometry/model only
+    from .custommap import CustomMap
 
 
 # --------------------------------------------------------------------------- #
@@ -57,6 +61,37 @@ def generate_random(
     state.rebuild_topology()
     _name_systems(state)
     assert is_connected(state), "generated map is not connected"
+    return state
+
+
+def generate_custom(seed: int, design: "CustomMap") -> GameState:
+    """Build the board a hand-authored recipe describes.
+
+    Draws nothing: every position, production, garrison and owner in the recipe is
+    already concrete, so no existing mapgen code is refactored and no generated
+    map's rng stream moves. The seed still matters — it drives combat dice and the
+    star names below — it just no longer shapes the layout.
+
+    Strict by contract: ``custommap.from_dict`` is the one tolerant gate, and past
+    it a recipe is playable or it is ``None``. A blocker here is a caller bug.
+    """
+    assert not design.blockers(), f"custom map is not playable: {design.blockers()}"
+    state = GameState.new(seed, mode="custom")
+    _make_players(state, design.seats())
+    for i, node in enumerate(design.nodes):
+        state.systems[i] = System(
+            id=i,
+            pos=node.pos,
+            owner_id=node.owner,
+            ships=node.ships,
+            production=node.production,
+        )
+    for a, b in design.lanes:
+        _add_lane_between(state, a, b)   # length_ly / travel_turns derived here
+
+    state.rebuild_topology()
+    _name_systems(state)                 # LAST, and the only draw from state.rng
+    assert is_connected(state), "custom map is not connected"
     return state
 
 
@@ -174,7 +209,7 @@ def _base_sector_values(state, per_player) -> tuple[list[int], list[int]]:
     for _ in range(per_player - 1):
         p = state.rng.choices(values, weights=weights, k=1)[0]
         prod.append(p)
-        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p) + state.rng.randint(0, config.GARRISON_JITTER))
+        ships.append(config.garrison_for(p, state.rng.randint(0, config.GARRISON_JITTER)))
     return prod, ships
 
 
@@ -410,7 +445,7 @@ def _assign_production_and_garrisons(state: GameState) -> None:
         if sys.owner_id != 0:
             continue  # homeworlds already configured
         sys.production = state.rng.choices(values, weights=weights, k=1)[0]
-        sys.ships = config.GARRISON_BASE + round(config.GARRISON_K / sys.production) + state.rng.randint(0, config.GARRISON_JITTER)
+        sys.ships = config.garrison_for(sys.production, state.rng.randint(0, config.GARRISON_JITTER))
 
 
 # --------------------------------------------------------------------------- #

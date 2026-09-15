@@ -247,3 +247,18 @@ def test_budget_scale_is_one_in_an_ordinary_game():
     ai.load_models()
     import sys
     assert sys.modules["sc_model_knower"].BUDGET_SCALE == 1.0
+
+
+def test_a_hand_authored_map_plays_a_whole_game():
+    """The cheapest proof the whole custom-map funnel holds: a recipe on a
+    `Settings`, through `build_state`, into a real game that reaches a result with
+    `check_invariants` running every turn."""
+    from starconquest import custommap, mapgen
+
+    cfg = Settings()
+    cfg.custom_map = custommap.from_state(mapgen.generate(4, "random", 16, 3))
+    cfg.players, cfg.nodes = cfg.custom_map.seats(), len(cfg.custom_map.nodes)
+
+    result = sim.play_settings(cfg, seed=4, bot="heuristic", max_turns=600)
+    assert result.turns > 0
+    assert result.won or result.timed_out or result.lost >= 0

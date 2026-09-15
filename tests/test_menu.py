@@ -342,7 +342,7 @@ def test_tab_content_stays_inside_the_panel():
     screen, ms, settings = _setup()
     panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
     chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
-              "get_link", "seed_field", "seed_random"}
+              "get_link", "seed_field", "seed_random", "create_map", "clear_map"}
     try:
         for tab in ("basic", "combat", "advanced", "ai"):
             ms.tab = tab
