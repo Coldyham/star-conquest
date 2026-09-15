@@ -1059,7 +1059,15 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
         ed.owner_pick = int(hit[5:])
         return None
     if hit.startswith("tool_"):
-        ed.tool = hit[5:]
+        new_tool = hit[5:]
+        if ed.tool == LANES and new_tool != LANES:
+            # Lanes-only state: a selected lane or an armed source has no tool
+            # left to click it away in once Lanes isn't the active one, so it
+            # would otherwise keep glowing on the map indefinitely.
+            ed.sel_lane = None
+            ed.lane_src = None
+            ed.lane_drag = False
+        ed.tool = new_tool
         return None
     if hit == "ships_slider":
         if _selected(ed) is not None:
