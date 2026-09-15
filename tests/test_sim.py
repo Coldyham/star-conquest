@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections import Counter
 
@@ -9,6 +10,7 @@ from starconquest import ai, settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
+from tools.bot_replay import REPLAY_AUX
 
 
 def test_invariants_hold_and_most_games_terminate():
@@ -202,13 +204,31 @@ def test_aux_none_is_the_documented_untuned_profile():
 
 
 def test_a_tuned_replay_is_still_reproducible():
-    # The whole premise of caching. knower's search is iteration-bounded, so depth
-    # 12 plans the same way twice; only its SEARCH_BUDGET_S catastrophe guard
-    # could break that, and it is sized not to fire.
+    # The whole premise of caching, so the depth is read from the worker rather
+    # than chosen here: the configuration worth asserting about is the one that
+    # actually gets cached. The search is iteration-bounded and plans the same way
+    # twice at *any* depth — but only with its two wall-clock catastrophe guards
+    # out of the way, which is the state the worker caches from
+    # (`tools/bot_replay.BUDGET_SCALE`). Lifted to inf rather than the worker's
+    # 100x: a guard that *cannot* fire keeps this an assertion about the search,
+    # where one that merely has headroom is an assertion about how busy the
+    # machine is. Headroom at scale 1 is under 2x — a decide measures ~86 ms
+    # against the 150 ms guard — so a loaded runner trips it on one run of the
+    # pair and not the other, which is a flake rather than a finding.
+    #
+    # Played out in full deliberately. `ReplayResult` compares two numbers, and a
+    # capped game fixes one of them: at 20 turns the *squeezed* run below lands on
+    # the same (turns, lost) as the base, so a cap buys seconds by making a
+    # genuinely different plan indistinguishable.
     ai.load_models()
     cfg = _setup()
-    assert sim.play_settings(cfg, 11, "knower", aux=12) == \
-           sim.play_settings(cfg, 11, "knower", aux=12)
+    depth = REPLAY_AUX["knower"]
+    try:
+        ai.set_budget_scale(math.inf)
+        assert sim.play_settings(cfg, 11, "knower", aux=depth) == \
+               sim.play_settings(cfg, 11, "knower", aux=depth)
+    finally:
+        ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
 
 
 def test_budget_scale_is_wired_and_only_matters_when_it_bites():
@@ -218,14 +238,24 @@ def test_budget_scale_is_wired_and_only_matters_when_it_bites():
     # Squeezing the scale must change the answer — that is what proves the knob
     # reaches the guard at all — while raising it must not, since a guard that
     # never fires cannot influence anything.
+    #
+    # Depth 12 is load-bearing here rather than borrowed from the worker: the
+    # squeeze only bites from depth 4 up on this board, since below that the whole
+    # search finishes inside the 3 ms guard and the knob has nothing to cut. That
+    # floor rises with machine speed, so the depth-12 decide's ~69 ms is the margin
+    # keeping the assertion true on a fast runner.
     ai.load_models()
     cfg = _setup()
     try:
+        # Both ends of the comparison are taken with no guard able to fire: at the
+        # 1.0 default one *can* (see the test above), so a `base` measured there
+        # would be the loaded machine's answer rather than the search's.
+        ai.set_budget_scale(math.inf)
         base = sim.play_settings(cfg, 11, "knower", aux=12)
         ai.set_budget_scale(0.02)
         assert sim.play_settings(cfg, 11, "knower", aux=12) != base, \
             "a 3ms guard changed nothing — BUDGET_SCALE is not reaching the search"
-        ai.set_budget_scale(100)
+        ai.set_budget_scale(100)   # the worker's own lift: 15 s and 5 s guards
         assert sim.play_settings(cfg, 11, "knower", aux=12) == base
     finally:
         ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
