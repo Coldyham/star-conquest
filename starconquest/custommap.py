@@ -366,9 +366,10 @@ def _seat_problems(m: "CustomMap") -> list[Problem]:
     if missing:
         gaps = ", ".join(str(p) for p in missing)
         word = "Seat" if len(missing) == 1 else "Seats"
+        verb = "holds" if len(missing) == 1 else "hold"
         return [Problem(
             BLOCK, "seat_gap",
-            f"{word} {gaps} hold no systems. Seats must run 1 to N with no gaps.",
+            f"{word} {gaps} {verb} no systems. Seats must run 1 to N with no gaps.",
         )]
     return []
 
@@ -451,9 +452,11 @@ def _connectivity_problems(m: "CustomMap") -> list[Problem]:
     if len(seen) == len(m.nodes):
         return []
     stranded = tuple(i for i in range(len(m.nodes)) if i not in seen)
+    noun = "system" if len(stranded) == 1 else "systems"
+    pronoun = "it" if len(stranded) == 1 else "them"
     return [Problem(
         BLOCK, "disconnected",
-        f"{len(stranded)} system(s) can't be reached — connect them with lanes.",
+        f"{len(stranded)} {noun} can't be reached — connect {pronoun} with lanes.",
         nodes=stranded,
     )]
 

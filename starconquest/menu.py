@@ -635,8 +635,9 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     y = panel.y + 16  # LEFT: Map + Travel
     y = _section(surface, "Map", lx, y)
     if drawn:
-        y = _hidden_note(surface, ("Placement and lanes are hand-drawn.",
-                                   "The two lane knobs live in the creator."), lx, y, col_w)
+        y = _hidden_note(surface, ("Placement and lanes are",
+                                   "hand-drawn. The two lane",
+                                   "knobs live in the creator."), lx, y, col_w)
     else:
         y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
@@ -652,8 +653,9 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
         # Every production and garrison on a hand map is already concrete — they
         # are rolled at the moment a system is placed, so these only bite inside
         # the creator, which is where they now are.
-        y = _hidden_note(surface, ("Every system's production and garrison",
-                                   "is set in the creator."), rx, y, col_w)
+        y = _hidden_note(surface, ("Every system's production",
+                                   "and garrison is set in",
+                                   "the creator."), rx, y, col_w)
     else:
         y = _sliders(surface, ms, settings, _ADV_ECON, rx, y, col_w)
     if _changed(settings, "neutral_produces"):

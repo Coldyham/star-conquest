@@ -565,17 +565,18 @@ def _draw_side(surface, ed: Editor, settings: Settings) -> None:
 
 def _draw_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     node = _selected(ed)
-    row = widgets.row_h()
     if node is None:
-        widgets.text(surface, f["small"], "Click empty space to place a system",
-                     config.COLOR_TEXT_DIM, topleft=(x, y))
-        return y + row + config.ROW_GAP
+        for line in widgets.wrap(f["small"], "Click empty space to place a system", w):
+            widgets.text(surface, f["small"], line, config.COLOR_TEXT_DIM, topleft=(x, y))
+            y += widgets.row_h("small")
+        return y + config.ROW_GAP
 
     widgets.text(surface, f["normal"], f"System #{ed.sel_node}", config.COLOR_TEXT, topleft=(x, y))
     y += widgets.row_h("normal")
 
     y = _stepper_row(surface, ed, f, x, y, w, "prod", "Production", f"{node.production}/ship")
     y = _stepper_row(surface, ed, f, x, y, w, "ships", "Garrison", str(node.ships))
+    y = _garrison_slider_row(surface, ed, f, x, y, w, node)
     owner = "Neutral" if node.owner == 0 else config.player_name(node.owner)
     y = _stepper_row(surface, ed, f, x, y, w, "owner", "Owner", owner,
                      swatch=config.player_color(node.owner))
@@ -703,6 +704,21 @@ def _stepper_row(surface, ed: Editor, f, x: int, y: int, w: int,
     return y + row + config.ROW_GAP
 
 
+def _garrison_slider_row(surface, ed: Editor, f, x: int, y: int, w: int, node: MapNode) -> int:
+    """A coarse drag for Garrison, under the stepper row it doesn't replace.
+
+    Tops out at `config.CUSTOM_GARRISON_SLIDER_MAX` for a comfortable drag range;
+    the steppers above stay the way to reach a bigger garrison than the slider
+    can, up to `config.CUSTOM_MAX_SHIPS`. A value already past the slider's top
+    just shows the knob pinned at the right end.
+    """
+    track = pygame.Rect(x, y, w, widgets.tap_size(config.SLIDER_KNOB_R * 2))
+    t = min(1.0, node.ships / config.CUSTOM_GARRISON_SLIDER_MAX)
+    widgets.slider(surface, track, t, *widgets.BTN_BLUE)
+    ed.rects["ships_slider"] = track
+    return y + track.h + config.ROW_GAP
+
+
 def _draw_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int,
                   heading: str, specs) -> int:
     """A titled block of ``Settings``-writing sliders.
@@ -756,7 +772,8 @@ def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) 
     selects the offender and centres the camera on it.
     """
     problems = ed.problems()
-    heading = "Ready to play" if not problems else f"{len(problems)} problem(s)"
+    noun = "problem" if len(problems) == 1 else "problems"
+    heading = "Ready to play" if not problems else f"{len(problems)} {noun}"
     widgets.text(surface, f["small"], heading,
                  config.COLOR_TEXT_DIM if not problems else _WARN, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
@@ -1044,6 +1061,12 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
     if hit.startswith("tool_"):
         ed.tool = hit[5:]
         return None
+    if hit == "ships_slider":
+        if _selected(ed) is not None:
+            _push_undo(ed)
+            ed.drag_slider = hit
+            _set_garrison_slider(ed, pos[0])
+        return None
     if hit in _SLIDER_KEYS():
         ed.drag_slider = hit
         _set_slider(ed, settings, hit, pos[0])
@@ -1119,6 +1142,9 @@ def _play(ed: Editor, settings: Settings) -> Optional[str]:
 
 
 def _handle_motion(event, ed: Editor, settings: Settings) -> None:
+    if ed.drag_slider == "ships_slider" and event.buttons[0]:
+        _set_garrison_slider(ed, event.pos[0])
+        return
     if ed.drag_slider is not None and event.buttons[0]:
         _set_slider(ed, settings, ed.drag_slider, event.pos[0])
         return
@@ -1702,6 +1728,22 @@ def _set_slider(ed: Editor, settings: Settings, key: str, px: int) -> None:
     value = round(value / step) * step if step else value
     value = max(lo, min(hi, value))
     setattr(settings, attr, int(round(value)) if is_int else round(value, 4))
+
+
+def _set_garrison_slider(ed: Editor, px: int) -> None:
+    """Write the Garrison slider's value onto the selected node.
+
+    Not a `_slider_specs()` entry: those write a `Settings`/`AiParams` attribute,
+    and this writes the selected node's `ships` directly, capped at
+    `config.CUSTOM_GARRISON_SLIDER_MAX` rather than `CUSTOM_MAX_SHIPS` — the
+    steppers are what reach past that.
+    """
+    node = _selected(ed)
+    rect = ed.rects.get("ships_slider")
+    if node is None or rect is None:
+        return
+    t = widgets.slider_fraction(rect, px)
+    node.ships = round(t * config.CUSTOM_GARRISON_SLIDER_MAX)
 
 
 def _stop_editing_filename(ed: Editor) -> None:

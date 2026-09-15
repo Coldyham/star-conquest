@@ -75,6 +75,10 @@ NEUTRAL_PRODUCES = False    # neutrals are static garrisons by default
 CUSTOM_MAX_PRODUCTION = 12  # turns per ship (0 is legal too -- engine skips it)
 CUSTOM_MAX_SHIPS = 99       # starting garrison
 
+# The creator's Garrison slider tops out here for a comfortable drag range; the
+# stepper +/- beside it stays uncapped up to CUSTOM_MAX_SHIPS for anything bigger.
+CUSTOM_GARRISON_SLIDER_MAX = 50
+
 # The recipe parser's structural ceiling -- what bounds a malformed blob, not a
 # game rule. It must sit above anything the generator itself can produce, and
 # MAX_NODES is *not* that bound: `generate_symmetric` rounds the node count up to
