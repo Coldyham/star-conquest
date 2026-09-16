@@ -252,16 +252,20 @@ def test_on_the_web_the_endpoint_follows_the_page(monkeypatch):
 
 
 # --- the "animate turns" display preference ---------------------------------- #
-def test_animate_turns_is_off_until_it_is_switched_on():
-    """Nobody who has not asked for it should have their turns slowed down, and
-    the ``""``-for-off encoding means anything but a stored "1" reads as off."""
-    assert webstore.animate_turns() is False
-    webstore.set(WEB_ANIMATE_TURNS_KEY, "sure")
-    assert webstore.animate_turns() is False
-
-
-def test_animate_turns_round_trips_and_can_be_switched_back_off():
-    assert webstore.set_animate_turns(True) is True
+def test_animate_turns_is_on_until_it_is_switched_off():
+    """On by default: an absent key, and anything stored but a literal "0", reads
+    as on — only an explicit "0" (what `set_animate_turns(False)` writes) reads
+    off, which is what makes the tri-state encoding necessary for a preference
+    that defaults *on* (unlike `share_games`'s plain ``""``-for-off)."""
     assert webstore.animate_turns() is True
+    webstore.set(WEB_ANIMATE_TURNS_KEY, "sure")
+    assert webstore.animate_turns() is True
+    webstore.set(WEB_ANIMATE_TURNS_KEY, "1")   # a legacy explicit-on value
+    assert webstore.animate_turns() is True
+
+
+def test_animate_turns_round_trips_and_can_be_switched_back_on():
     assert webstore.set_animate_turns(False) is True
     assert webstore.animate_turns() is False
+    assert webstore.set_animate_turns(True) is True
+    assert webstore.animate_turns() is True

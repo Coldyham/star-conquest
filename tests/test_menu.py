@@ -784,11 +784,11 @@ def test_animate_turns_toggles_the_stored_preference(monkeypatch, tmp_path):
     screen, ms, settings = _setup()
     try:
         before = Settings.from_dict(settings.to_dict())
-        assert menu.webstore.animate_turns() is False
-        _click_key(screen, ms, settings, "animate_turns")
         assert menu.webstore.animate_turns() is True
         _click_key(screen, ms, settings, "animate_turns")
         assert menu.webstore.animate_turns() is False
+        _click_key(screen, ms, settings, "animate_turns")
+        assert menu.webstore.animate_turns() is True
         assert settings.to_dict() == before.to_dict()
     finally:
         pygame.quit()

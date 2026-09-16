@@ -104,19 +104,21 @@ def set_share_games(on: bool) -> bool:
 
 
 def animate_turns() -> bool:
-    """Whether the player has switched on the animated end of turn.
+    """Whether the player has the animated end of turn switched on.
 
-    Off unless it has been switched on: an absent key, an unreadable store and a
-    fresh install all read as False. Note the ``""``-for-off encoding only works
-    for a preference that defaults *off* — ``get`` cannot tell absent from off.
+    On unless it has been explicitly switched off: an absent key, an unreadable
+    store and a fresh install all read as True, so the encoding is tri-state here
+    (unlike ``share_games``, which defaults off and can use a plain ``""``-for-off
+    encoding) — only a stored ``"0"`` reads False; a legacy ``"1"`` from before this
+    default flipped, and the ``""`` an absent key reads as, both still read True.
     """
-    return get(WEB_ANIMATE_TURNS_KEY) == "1"
+    return get(WEB_ANIMATE_TURNS_KEY) != "0"
 
 
 def set_animate_turns(on: bool) -> bool:
     """Store the preference. False if the store refused it, which the menu says out
     loud rather than letting a setting quietly forget itself."""
-    return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "")
+    return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
 
 
 def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:
