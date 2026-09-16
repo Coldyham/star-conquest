@@ -169,6 +169,110 @@ def test_a_random_placement_only_ever_rolls_the_weighted_values(scene):
     assert rolled <= set(config.PRODUCTION_WEIGHTS)
 
 
+def test_shift_click_places_and_lanes_to_the_selected_system(scene):
+    screen, ed, settings = scene
+    ed.sel_node = 0
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _press(screen, ed, settings, _empty_spot(ed))
+    finally:
+        pygame.key.set_mods(0)
+    new = len(ed.recipe.nodes) - 1
+    assert new == 4
+    assert (0, new) in ed.recipe.lanes
+    assert ed.sel_node == new                     # the new system is the new anchor
+
+
+def test_an_unshifted_click_places_without_a_lane(scene):
+    screen, ed, settings = scene
+    ed.sel_node = 0
+    before_lanes = list(ed.recipe.lanes)
+    _press(screen, ed, settings, _empty_spot(ed))
+    assert len(ed.recipe.nodes) == 5
+    assert ed.recipe.lanes == before_lanes
+
+
+def test_a_run_of_shift_clicks_builds_a_chain(scene):
+    """Each placement's own anchor is the one before it, so a run chains rather
+    than fanning out from wherever it started."""
+    screen, ed, settings = scene
+    ed.sel_node = 0
+    spots = [ed.view.to_screen((500.0, 500.0)), ed.view.to_screen((500.0, 650.0))]
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        for pos in spots:
+            _press(screen, ed, settings, pos)
+            _release(ed, settings, pos)
+    finally:
+        pygame.key.set_mods(0)
+    assert len(ed.recipe.nodes) == 6
+    assert (0, 4) in ed.recipe.lanes and (4, 5) in ed.recipe.lanes
+    assert ed.sel_node == 5
+
+
+def test_shift_click_on_an_existing_system_links_without_placing(scene):
+    screen, ed, settings = scene
+    ed.sel_node = 1
+    before = len(ed.recipe.nodes)
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _press(screen, ed, settings, _at(ed, 3))
+    finally:
+        pygame.key.set_mods(0)
+    assert len(ed.recipe.nodes) == before          # no new system
+    assert (1, 3) in ed.recipe.lanes
+    assert ed.sel_node == 3                        # re-anchored
+
+
+def test_a_shift_placed_lane_and_system_are_one_undo(scene):
+    screen, ed, settings = scene
+    ed.sel_node = 0
+    before = ed.recipe.to_dict()
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _press(screen, ed, settings, _empty_spot(ed))
+    finally:
+        pygame.key.set_mods(0)
+    mapmaker._undo(ed)
+    assert ed.recipe.to_dict() == before
+
+
+def test_a_refused_chain_lane_still_places_the_system(scene):
+    """The two halves fail independently — a lane a third system blocks is not a
+    reason to refuse the placement it was chained from."""
+    screen, ed, settings = scene
+    ed.recipe = CustomMap(
+        nodes=[MapNode(100, 500, 3, 5, 1), MapNode(500, 500, 3, 5, 0)], lanes=[],
+    ).normalised()
+    ed.sel_node = 0
+    pos = ed.view.to_screen((900.0, 500.0))            # 0's lane to it would graze 1
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _press(screen, ed, settings, pos)
+    finally:
+        pygame.key.set_mods(0)
+    assert len(ed.recipe.nodes) == 3                   # placed regardless
+    assert ed.recipe.lanes == []                       # but not linked
+    assert not ed.status_ok and "system" in ed.status
+
+
+def test_shift_is_ignored_while_auto_relane_is_on(scene):
+    """The generated network would overwrite a chained lane inside the same
+    gesture that just drew it, so shift-chaining stands down while this is on."""
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    ed.sel_node = 0
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _press(screen, ed, settings, _empty_spot(ed))
+    finally:
+        pygame.key.set_mods(0)
+    expected = sorted((min(a, b), max(a, b))
+                      for a, b in mapgen._planar_edges([n.pos for n in ed.recipe.nodes]))
+    assert ed.recipe.lanes == expected                 # auto-relane ran, not the chain
+    assert ed.sel_lane is None
+
+
 # --------------------------------------------------------------------------- #
 # Dragging
 # --------------------------------------------------------------------------- #
@@ -347,6 +451,69 @@ def test_auto_lanes_can_be_declined(scene):
     _click_key(screen, ed, settings, "auto_lanes")
     mapmaker.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0), ed, settings)
     assert ed.recipe.lanes == [] and ed.confirm is None
+
+
+# --------------------------------------------------------------------------- #
+# Auto-relane
+# --------------------------------------------------------------------------- #
+def test_toggling_auto_relane_on_does_not_relane_immediately(scene):
+    """Turning it on is not itself destructive — it takes hold from the next
+    system added or removed, not the press that switched it on."""
+    screen, ed, settings = scene
+    ed.tool = mapmaker.LANES
+    before = list(ed.recipe.lanes)
+    _click_key(screen, ed, settings, "auto_relane")
+    assert ed.auto_relane
+    assert ed.recipe.lanes == before
+    assert ed.status_ok and ed.status
+
+
+def test_auto_relane_rebuilds_the_network_on_placement(scene):
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    ed.recipe.lanes = [(0, 1)]              # a stale, hand-drawn network
+    _press(screen, ed, settings, _empty_spot(ed))
+    expected = sorted((min(a, b), max(a, b))
+                      for a, b in mapgen._planar_edges([n.pos for n in ed.recipe.nodes]))
+    assert ed.recipe.lanes == expected
+
+
+def test_auto_relane_rebuilds_the_network_on_deletion(scene):
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    ed.sel_node = 1
+    _click_key(screen, ed, settings, "delete")
+    expected = sorted((min(a, b), max(a, b))
+                      for a, b in mapgen._planar_edges([n.pos for n in ed.recipe.nodes]))
+    assert ed.recipe.lanes == expected
+
+
+def test_auto_relane_leaves_a_drag_alone(scene):
+    """Only a discrete add or remove re-runs it — a drag is continuous, and
+    relaning mid-drag would fight the rubber band."""
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    before = list(ed.recipe.lanes)
+    _drag(screen, ed, settings, 1, (700.0, 350.0))
+    assert ed.recipe.lanes == before
+
+
+def test_auto_relane_folds_into_the_placements_own_undo(scene):
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    before = ed.recipe.to_dict()
+    _press(screen, ed, settings, _empty_spot(ed))
+    mapmaker._undo(ed)
+    assert ed.recipe.to_dict() == before
+
+
+def test_auto_relane_is_not_reset_by_adopting_a_new_recipe(scene):
+    """A preference, like Planar — `_adopt` swaps out everything that pointed
+    into the old recipe, but this isn't one of those things."""
+    screen, ed, settings = scene
+    ed.auto_relane = True
+    mapmaker._adopt(ed, CustomMap())
+    assert ed.auto_relane
 
 
 def test_undo_and_redo_walk_the_same_path(scene):
@@ -796,6 +963,36 @@ def test_left_drag_pans_in_the_lanes_tool(scene):
     assert ed.view.off_x != off
 
 
+def test_right_drag_still_pans_after_a_left_drag_pan_in_the_lanes_tool(scene):
+    """`pan_button` must be restated on the right-button press too, or one
+    left-drag pan here leaves it pinned at 1 and every later right-drag pan —
+    in any tool, for the rest of the session — goes dead."""
+    screen, ed, settings = _lanes(scene)
+    ed.view.zoom_at(_empty_spot(ed), 2.0)
+    pos = _empty_spot(ed)
+    _press(screen, ed, settings, pos)                  # left-drag pan (button 1)
+    mapmaker.handle_event(
+        pygame.event.Event(pygame.MOUSEMOTION, pos=(pos[0] - 40, pos[1]),
+                           buttons=(1, 0, 0), rel=(0, 0)), ed, settings)
+    _release(ed, settings, (pos[0] - 40, pos[1]))
+
+    off = ed.view.off_x
+    _press(screen, ed, settings, pos, button=3)         # right-drag pan
+    mapmaker.handle_event(
+        pygame.event.Event(pygame.MOUSEMOTION, pos=(pos[0] - 40, pos[1]),
+                           buttons=(0, 0, 1), rel=(0, 0)), ed, settings)
+    assert ed.view.off_x != off
+
+
+def test_an_empty_space_tap_deselects_the_system_in_the_lanes_tool(scene):
+    """The Systems selection has no press anywhere in this tool that could clear
+    it otherwise, so it would sit on the map for the rest of the session."""
+    screen, ed, settings = _lanes(scene)
+    ed.sel_node = 1
+    _press(screen, ed, settings, _empty_spot(ed))
+    assert ed.sel_node is None
+
+
 def test_the_lane_sidebar_quotes_the_travel_time_the_board_gives(scene):
     screen, ed, settings = _lanes(scene)
     ed.sel_lane = ed.recipe.lanes.index((0, 1))
@@ -886,6 +1083,37 @@ def test_a_palette_swatch_picks_that_seat(scene):
     assert ed.owner_pick == 0
 
 
+def test_a_palette_swatch_also_recolours_the_selected_system(scene):
+    """The seat palette works the way `pal_*` already does for production
+    (`_retype_selection`): a swatch pressed while a system is selected that left
+    it alone would look inert."""
+    screen, ed, settings = _owners(scene)
+    ed.sel_node = 1
+    _click_key(screen, ed, settings, "seat_2")
+    assert ed.recipe.nodes[1].owner == 2
+    assert ed.owner_pick == 2
+
+
+def test_the_owner_row_arms_the_paint_pick_too(scene):
+    """Both rows land on `_pick_seat`, so pressing the sidebar's swatch is as
+    good as pressing the band's — they are one control in two places."""
+    screen, ed, settings = _owners(scene)
+    ed.sel_node = 1
+    _click_key(screen, ed, settings, "own_2")
+    assert ed.owner_pick == 2
+
+
+def test_pressing_the_bands_held_seat_arms_the_pick_without_an_edit(scene):
+    """The band half of the sidebar row's own rule: Neutral is its own swatch,
+    so pressing the seat a system already holds must not mean something else."""
+    screen, ed, settings = _owners(scene)
+    ed.sel_node = 0                          # already seat 1
+    _click_key(screen, ed, settings, "seat_1")
+    assert ed.recipe.nodes[0].owner == 1
+    assert ed.owner_pick == 1
+    assert not ed.undo_stack                 # nothing happened, so nothing to undo
+
+
 def test_a_drag_box_paints_every_system_inside_it(scene):
     screen, ed, settings = _owners(scene)
     ed.owner_pick = 2
@@ -911,6 +1139,15 @@ def test_a_tap_on_empty_space_paints_nothing(scene):
     assert ed.box_press and not ed.box_active
     _release(ed, settings, pos)
     assert [n.owner for n in ed.recipe.nodes] == before
+
+
+def test_an_empty_space_tap_deselects_the_system_in_the_owners_tool(scene):
+    """Without this the ring — and the sidebar block that follows it — has
+    nothing anywhere in this tool that can clear it again."""
+    screen, ed, settings = _owners(scene)
+    ed.sel_node = 1
+    _press(screen, ed, settings, _empty_spot(ed))
+    assert ed.sel_node is None
 
 
 def test_a_box_is_clipped_to_the_viewport_before_it_picks_anything(scene):

@@ -934,10 +934,33 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   work. Systems are picked *before* lanes — a lane's endpoint sits inside its
   system's tap reach, and "start a lane here" has to win there — and a repeat press
   on overlapping lanes cycles, the same shape `input._pick_lane` uses.
+- **Shift-click chains, in the Systems tool only.** Held down, a click both places
+  (or links) and keeps building from what it just touched — the anchor is always
+  `Editor.sel_node`, and `_arm_move` already makes whatever was just placed or
+  clicked the new one, so a run of shift-clicks chains and a shift-click off to
+  the side branches from wherever you're pointing. `mapmaker._lane_candidate` is
+  the validation half split out of `_add_lane`, so a placement that also links
+  validates the new lane against the recipe with the new node already in it and
+  takes one undo snapshot for both halves rather than two; a refused link never
+  refuses the placement, it only leaves the status saying which half failed. Off
+  while Auto-lanes' re-run toggle is on (below) — the network it rebuilds would
+  overwrite the very lane a chained click just drew.
 - **Left-drag pans in the Lanes tool but not the Systems tool.** In Systems a
   press on empty space always means "place", so there is no free left gesture, and
   making it conditional on legality would give one press two meanings — the trap
   route mode's tap documents. Right-drag and the on-map cluster pan in both.
+  `pan_button` records *which* button armed the pan (Lanes' left-drag sets it to
+  1), and both branches that can arm one write it — the right-button press
+  restates 3, not just leaves whatever the last pan left behind, or one left-drag
+  pan in Lanes leaves every later right-drag pan, in any tool, dead for the rest
+  of the session.
+- **An empty-space press deselects, in Lanes and Owners.** Neither tool has any
+  other press that can clear `Editor.sel_node` — Owners paints or arms a box on a
+  miss, Lanes disarms `lane_src`/`sel_lane` on one — so without this the ring (and
+  the sidebar block that follows it) would sit on the map for the rest of the
+  session once carried in from Systems. Systems is deliberately exempt: a press on
+  empty space there always means "place", and placing selects the new system, so
+  the ring is never stale there anyway.
 - **Adding `custom_map` cost a `_LEGACY_KEY_DROPS` entry** and moved the default
   digest to `38c8b7ba470f6f4c`; all three previous digests are recovered in order.
   `tools/bot_replay._OUTCOME_MODULES` gained `custommap` — miss that and a change
@@ -951,6 +974,16 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   namespace cleared every frame, so a control that isn't drawn is inert by
   construction — but two controls sharing a key means the later-drawn one wins,
   silently.
+- **Auto-lanes can re-run itself, on a placement or a deletion only.**
+  `Editor.auto_relane` (a preference like `planar` — `_adopt` leaves both alone)
+  re-runs `mapmaker._relane` — `_auto_lanes` without the confirm or its own undo
+  snapshot — folded into that edit's single undo step. A drag is deliberately
+  exempt: it's continuous, and relaning mid-drag would fight the rubber band a
+  system follows while an illegal spot is still being tried. Hand-drawn lanes stay
+  legal while it's on; they simply last until the next system is added or
+  removed, and the Lanes tool is never locked. Turning it on doesn't relane on the
+  spot — that would be a destructive rewrite with no confirm — it only takes hold
+  from the next change.
 - **The seat palette offers `n + 1` seats, floored at 2.** That makes the common
   path gap-free by construction. It does not *prevent* a gap (paint seat 3, then
   clear seat 2), so that case gets a blocker and a one-press **Renumber seats**
@@ -959,9 +992,14 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   `mapmaker._seat_entries` is that list, with two readers: the Owners palette band
   and the selected system's owner row in the sidebar (a row of swatches, not a
   stepper — a seat is a colour, so it is pointed at). They must not disagree about
-  which seats exist, or one offers a seat the other calls a gap. The sidebar row
-  has no toggle-to-neutral second meaning, unlike a tap on the map: Neutral is its
-  own swatch there.
+  which seats exist, or one offers a seat the other calls a gap. Both rows are one
+  control (`mapmaker._pick_seat`): a swatch arms the seat a map tap paints *and*
+  stamps it on the selected system, the same way the production palette's `pal_*`
+  already retypes a selected system rather than looking inert
+  (`_retype_selection`). Neither row has a toggle-to-neutral second meaning:
+  pressing the seat a system already holds arms the pick and stops there — Neutral
+  is its own swatch in both rows, so that stays the map tap's job, where there is
+  nothing else to press.
 - **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
   version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
   common "give this one a real garrison" case isn't a two-tool round trip.

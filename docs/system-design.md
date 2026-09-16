@@ -867,6 +867,55 @@ in Systems a press on empty space always means "place", so there is no free
 gesture to spend, and route mode already records what happens when one press is
 given a second meaning conditional on the target.
 
+### Why Systems still has no deselect gesture
+
+Lanes and Owners both drop `sel_node` on a press that misses every system — added
+once testing turned up that neither tool had *any* other press that could clear a
+selection carried in from Systems, so the ring (and the sidebar block behind it)
+had nowhere to go. Systems was left out on purpose rather than by oversight: a
+press on empty space there always means "place" (see above), so giving it a
+second meaning conditional on where it lands is exactly the trap route mode's tap
+already documents, and it isn't needed anyway — placing a system selects it, so
+the ring there is never inherited stale from another tool the way it can be after
+switching tabs.
+
+### Why the seat rows became one control rather than the tap becoming select-only
+
+Testing turned up the same friction from the opposite end: with a system already
+selected, pressing the Owners palette band appeared to do nothing to it, so the
+only way to recolour it was the sidebar's own row — or painting the *next* system
+the wrong seat and fixing it up. Two designs were on the table. One left the map
+tap alone and made a press on the band merely *select* whatever it's pointed at
+(closer to how a tool palette often behaves elsewhere); the other made both rows
+stamp the selection, matching what the production palette already does one
+column over. The second was already proven code: `pal_*` sets `ed.pick` **and**
+calls `_retype_selection`, precisely because a swatch that leaves a selected
+system looking untouched reads as broken, not indifferent. Doing anything else for
+seats — the one tool where two identical rows sit side by side — would have made
+"press a swatch" mean two different things depending on which one your hand
+reached for. The one-meaning-per-tap rule this book keeps citing (route mode,
+Owners' own map tap) is about a *map* press choosing between two competing
+interpretations at the same coordinate; a press on chrome that already has a
+single, stated job was never in tension with it, so unifying the rows costs
+nothing that rule was protecting. Neutral is still exempt from the toggle on
+either row, for the same reason it always was: the swatch already exists, so a
+second meaning on the seat a system already holds is one meaning too many.
+
+### Why auto-relane skips a drag
+
+`Editor.auto_relane` re-runs the network on a system placed or removed, but
+deliberately not on one dragged into place. A drag is live and continuous —
+`_handle_motion` moves the node every frame the press is held, legal or not, and
+shows the refusal as amber rings rather than blocking the motion (see the
+snap-back rule above) — so rebuilding the whole lane set on every frame of that
+would fight the rubber band the node is already following, and would burn through
+`mapgen._planar_edges` far more than the gesture needs. A placement or a deletion
+is discrete: one edit, one rebuild, folded into that edit's own undo step exactly
+the way `_add_lane` already folds into a chained placement's. The lanes a drag
+leaves behind are not wrong, either — they're the pre-drag network, exactly as
+stale (or as current) as they were before the system moved, and the next add or
+remove catches them up.
+
 ### Seats: gap-free by construction, never by force
 
 The owner palette offers `n + 1` seats — one more than are currently held, floored

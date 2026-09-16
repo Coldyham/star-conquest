@@ -101,6 +101,10 @@ class Editor:
     # point: `custommap` reports a crossing as a warning rather than a blocker, so
     # turning this off leaves a map that still plays and still shares.
     planar: bool = True
+    # Re-run *Auto* after every system added or removed, so the network tracks the
+    # systems while they are laid out. A preference like `planar` rather than
+    # anything the recipe carries, so `_adopt` leaves it alone.
+    auto_relane: bool = False
 
     # Owners tool. `owner_pick` is what a tap paints; the two box flags are route
     # mode's arming exactly — `box_press` on the press, `box_active` only past the
@@ -578,6 +582,11 @@ def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
     with a one-press fix rather than a silent renumber — renumbering changes a
     seat's colour without being asked, and the colour is part of what an author
     intended.
+
+    A press here goes through ``_pick_seat``, the same as the sidebar's owner row
+    (``_owner_row``) below — one control in two places, so a system already
+    selected recolours the moment you press a different swatch here, rather than
+    only from the sidebar.
     """
     counts = ed.recipe.owner_counts()
     entries = _seat_entries(ed.recipe)
@@ -633,6 +642,18 @@ def _draw_side(surface, ed: Editor, settings: Settings) -> None:
         y = _draw_owner_controls(surface, ed, f, x, y, inner_w)
     else:
         y = _draw_selection(surface, ed, f, x, y, inner_w)
+        if ed.sel_node is None and not config.touch_ui:
+            # Only in the room the "Click empty space..." placeholder already
+            # spends nothing past — the selected-system block right above is
+            # already the tight case at high UI scale, and this has no touch
+            # equivalent to be worth the squeeze there anyway (dropped the same
+            # way `render._key_hint` drops the `(Esc)`/`(R)` suffixes).
+            for line in widgets.wrap(f["small"], "Tip: shift-click a system to "
+                                     "lane it from the one you placed last", inner_w):
+                widgets.text(surface, f["small"], line, config.COLOR_TEXT_DIM,
+                            topleft=(x, y))
+                y += widgets.row_h("small")
+            y += config.ROW_GAP
         y = _draw_sliders(surface, ed, settings, f, x, y, inner_w,
                           "New system rolls", econ_specs())
     _draw_problems(surface, ed, f, x, y, inner_w, panel.bottom - pad)
@@ -698,11 +719,11 @@ def _draw_lane_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     return y + bh + config.ROW_GAP * 2
 
 
-def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int) -> int:
-    """The two lane-generation knobs, the Planar toggle, and the two map-wide
-    lane actions."""
-    y = _draw_sliders(surface, ed, settings, f, x, y, w, "Auto-lanes", lane_specs())
-
+def _draw_checkbox(surface, ed: Editor, f, x: int, y: int, w: int,
+                   key: str, checked: bool, label: str) -> int:
+    """A labelled checkbox row, registering ``ed.rects[key]`` over the whole row
+    so the label is as clickable as the box. Shared by Planar and Re-run — the
+    Lanes sidebar's only two toggles."""
     box = widgets.tap_size(config.STEPPER_SIZE)
     row = max(box, widgets.row_h())
     rect = pygame.Rect(x, y, w, row)
@@ -710,13 +731,24 @@ def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: i
     accent = widgets.BTN_BLUE[1]
     pygame.draw.rect(surface, config.COLOR_BG, mark, border_radius=config.s(4))
     pygame.draw.rect(surface, accent, mark, config.s(1), border_radius=config.s(4))
-    if ed.planar:
+    if checked:
         inner = mark.inflate(-box // 2, -box // 2)
         pygame.draw.rect(surface, accent, inner, border_radius=config.s(2))
-    widgets.text(surface, f["small"], "Planar (refuse crossings)", config.COLOR_TEXT_DIM,
+    widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM,
                  midleft=(mark.right + config.BTN_GAP, y + row // 2))
-    ed.rects["planar"] = rect
-    y += row + config.ROW_GAP
+    ed.rects[key] = rect
+    return y + row + config.ROW_GAP
+
+
+def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int) -> int:
+    """The two lane-generation knobs, the Planar and Re-run toggles, and the two
+    map-wide lane actions."""
+    y = _draw_sliders(surface, ed, settings, f, x, y, w, "Auto-lanes", lane_specs())
+
+    y = _draw_checkbox(surface, ed, f, x, y, w, "planar", ed.planar,
+                       "Planar (refuse crossings)")
+    y = _draw_checkbox(surface, ed, f, x, y, w, "auto_relane", ed.auto_relane,
+                       "Re-run after each change")
 
     bh = widgets.tap_size(config.FOOTER_BTN_H)
     bw = (w - config.BTN_GAP) // 2
@@ -795,9 +827,11 @@ def _owner_row(surface, ed: Editor, f, x: int, y: int, w: int, node: MapNode) ->
     palette band offers — and the current owner is still named on the label row, so
     nothing is conveyed by colour alone.
 
-    Unlike a tap on the map in the Owners tool, pressing the swatch a system
-    already holds does nothing: Neutral is its own swatch here, so a
-    toggle-to-neutral would be a second meaning on a press that already has one.
+    A press goes through ``_pick_seat`` — the same as the palette band above,
+    which is what lets either row recolour the selected system. Pressing the
+    swatch a system already holds is still inert: Neutral is its own swatch here,
+    so a toggle-to-neutral would be a second meaning on a press that already has
+    one, and that stays the map tap's job.
     """
     entries = _seat_entries(ed.recipe)
     name = "Neutral" if node.owner == 0 else config.player_name(node.owner)
@@ -1066,8 +1100,12 @@ def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
         # space always means "place", so there is no free left gesture — and
         # making it conditional on legality would give one press two meanings,
         # the trap route mode's tap already documents.
+        #
+        # `pan_button` is restated here, not just in `_press_lane`: that one sets
+        # it to 1, and a pan armed by the right button while `_handle_motion` is
+        # still watching button 1 never moves at all.
         if _over_map(pos):
-            ed.pan_active, ed.pan_last = True, pos
+            ed.pan_active, ed.pan_last, ed.pan_button = True, pos, 3
         return None
     if event.button != 1:
         return None
@@ -1094,11 +1132,18 @@ def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
         _press_owner(ed, pos)
         return None
 
+    # Shift chains: held down, a click both places (or links) *and* keeps
+    # building from what it just touched. Off while Auto-lanes' "re-run after
+    # every change" is on, since the network it rebuilds would overwrite the
+    # very lane a chained click just drew.
+    shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT) and not ed.auto_relane
     node = _pick_node(ed, pos)
     if node is not None:
+        if shift:
+            _chain_lane(ed, node)     # reads sel_node before _arm_move overwrites it
         _arm_move(ed, node, pos)
         return None
-    _place(ed, settings, pos)
+    _place(ed, settings, pos, link=ed.sel_node if shift else None)
     return None
 
 
@@ -1109,12 +1154,17 @@ def _press_owner(ed: Editor, pos) -> None:
     system *already* that owner clears it to neutral — never "select here, paint
     there", and never a second primary meaning conditional on the system, which is
     the trap route mode's tap documents.
+
+    A press that misses every system drops the selection on its way to arming the
+    box. Without it the ring — and the sidebar block that follows it — has nothing
+    anywhere in this tool that can clear it again.
     """
     node = _pick_node(ed, pos)
     if node is not None:
         ed.sel_node = node
         _paint(ed, [node])
         return
+    ed.sel_node = None
     ed.box_press, ed.box_active = True, False
     ed.box_from = ed.box_to = pos
     ed.drag_start = pos
@@ -1127,6 +1177,10 @@ def _press_lane(ed: Editor, pos) -> None:
     tap reach, and "start a lane here" has to win there. One armed source serves
     both gestures — a tap leaves it armed so the next press commits, a drag
     commits on release.
+
+    A press that misses every system also drops ``sel_node``: it is the Systems
+    tool's selection, this tool has no press that sets it, and its ring would
+    otherwise sit on the map for the rest of the session.
     """
     node = _pick_node(ed, pos)
     if node is not None:
@@ -1141,7 +1195,7 @@ def _press_lane(ed: Editor, pos) -> None:
             ed.lane_src = None
         return
 
-    ed.lane_src = None
+    ed.lane_src = ed.sel_node = None
     ed.sel_lane = _pick_lane(ed, pos)
     if ed.sel_lane is None:
         # Nothing under the press at all, so left-drag is free here — unlike the
@@ -1158,6 +1212,21 @@ def _hit(ed: Editor, pos) -> Optional[str]:
     """
     return next((key for key, rect in ed.rects.items()
                  if rect.w > 0 and rect.h > 0 and rect.collidepoint(pos)), None)
+
+
+def _chain_lane(ed: Editor, node: int) -> None:
+    """Shift-click on an already-placed system, from the Systems tool: lane it to
+    the current selection and (via the caller's `_arm_move`) make it the new
+    anchor, so a run of shift-clicks chains and a shift-click off to the side
+    branches from wherever you're pointing.
+
+    Reads `sel_node` before `_handle_press` calls `_arm_move`, which would
+    otherwise overwrite it with `node` first.
+    """
+    if ed.sel_node is None or node == ed.sel_node:
+        return
+    _add_lane(ed, ed.sel_node, node)
+    ed.sel_lane = None
 
 
 def _arm_move(ed: Editor, node: int, pos) -> None:
@@ -1183,10 +1252,10 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
         _retype_selection(ed, settings)
         return None
     if hit.startswith("seat_"):
-        ed.owner_pick = int(hit[5:])
+        _pick_seat(ed, int(hit[5:]))
         return None
     if hit.startswith("own_"):
-        _set_owner(ed, int(hit[4:]))
+        _pick_seat(ed, int(hit[4:]))
         return None
     if hit.startswith("tool_"):
         new_tool = hit[5:]
@@ -1229,11 +1298,18 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
     elif hit == "reroll":
         _reroll_selected(ed, settings)
     elif hit == "delete":
-        _delete_selected(ed)
+        _delete_selected(ed, settings)
     elif hit == "delete_lane":
         _delete_lane(ed)
     elif hit == "planar":
         ed.planar = not ed.planar
+    elif hit == "auto_relane":
+        ed.auto_relane = not ed.auto_relane
+        if ed.auto_relane:
+            # Never relanes on the spot — that would be a destructive rewrite
+            # with no confirm. It takes hold from the next system added or
+            # removed, same as any other preference that only bites forward.
+            _set_status(ed, "Lanes will redraw on the next system added or removed", True)
     elif hit == "clear_lanes":
         ed.confirm = "clear_lanes"
     elif hit == "make_home":
@@ -1376,7 +1452,7 @@ def _handle_key(event, ed: Editor, settings: Settings) -> Optional[str]:
         commit(ed, settings)
         return "menu"
     elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
-        _delete_lane(ed) if ed.tool == LANES else _delete_selected(ed)
+        _delete_lane(ed) if ed.tool == LANES else _delete_selected(ed, settings)
     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
         return _play(ed, settings)
     return None
@@ -1472,8 +1548,14 @@ def _adopt(ed: Editor, recipe: CustomMap) -> None:
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
 
-def _place(ed: Editor, settings: Settings, pos) -> None:
-    """Place a system at ``pos``, if the rules allow it there."""
+def _place(ed: Editor, settings: Settings, pos, link: Optional[int] = None) -> None:
+    """Place a system at ``pos``, if the rules allow it there.
+
+    ``link`` is a system to lane the new one to — shift-click chaining, and its
+    only caller. Validated against the recipe with the new node already in it,
+    since the lane's far end didn't exist a moment ago; a refused link never
+    refuses the placement, it only leaves the status saying which half failed.
+    """
     if len(ed.recipe.nodes) >= config.MAX_NODES:
         _set_status(ed, f"That's the limit — {config.MAX_NODES} systems.", False)
         return
@@ -1487,15 +1569,25 @@ def _place(ed: Editor, settings: Settings, pos) -> None:
     if _offenders(candidate, index, ed.planar)[0]:
         _set_status(ed, "Too close to another system or a lane.", False)
         return
+    lanes = _lane_candidate(ed, candidate, link, index) if link is not None else None
 
     _push_undo(ed)
     ed.recipe.nodes.append(node)
+    if lanes is not None:
+        ed.recipe.lanes = lanes
+        ed.sel_lane = lanes.index((min(link, index), max(link, index)))
+    elif ed.auto_relane and len(ed.recipe.nodes) >= 2:
+        # Off when `link` is given — `_handle_press` never sets both, since a
+        # generated network would overwrite the chained lane inside the same
+        # gesture that just drew it.
+        _relane(ed, settings)
     # Placing also arms the move-drag, so place-then-position is one gesture —
     # and one undo. `drag_undone` is already True, so nudging it into place does
     # not push a second snapshot on top of the placement's.
     _arm_move(ed, index, pos)
     ed.drag_undone = True
-    _set_status(ed, "", True)
+    if link is None or lanes is not None:
+        _set_status(ed, "", True)
 
 
 def _rolled_production(ed: Editor) -> int:
@@ -1562,7 +1654,9 @@ def _step_selected(ed: Editor, attr: str, delta: int) -> None:
 
 
 def _set_owner(ed: Editor, pid: int) -> None:
-    """Stamp a seat onto the selected system, from the sidebar's swatch row."""
+    """Stamp a seat onto the selected system, if there is one and it doesn't
+    already hold it. The stamping half of `_pick_seat` — see there for why a
+    swatch is never a no-op if a system is watching."""
     node = _selected(ed)
     if node is None or node.owner == pid:
         return
@@ -1570,7 +1664,24 @@ def _set_owner(ed: Editor, pid: int) -> None:
     node.owner = pid
 
 
-def _delete_selected(ed: Editor) -> None:
+def _pick_seat(ed: Editor, pid: int) -> None:
+    """Arm the seat a map tap paints, and stamp it on the selected system.
+
+    The palette band and the sidebar's owner row both land here, so they cannot
+    disagree about what pressing a swatch does — the production palette already
+    works this way (`_retype_selection`): a swatch pressed while a system is
+    selected that left the system alone looks like it did nothing at all.
+
+    Never a toggle to neutral: Neutral is its own swatch in both rows, so
+    pressing the seat a system already holds arms the pick and stops there —
+    `_set_owner`'s own guard. That second meaning belongs to a *map* tap
+    (`_press_owner`), where there is nothing else to press.
+    """
+    ed.owner_pick = pid
+    _set_owner(ed, pid)
+
+
+def _delete_selected(ed: Editor, settings: Settings) -> None:
     if ed.sel_node is None:
         return
     _push_undo(ed)
@@ -1578,6 +1689,10 @@ def _delete_selected(ed: Editor) -> None:
     ed.sel_node = None
     ed.drag_node = ed.drag_origin = None
     ed.bad_nodes = ed.bad_lanes = frozenset()
+    # `without_node` already drops every lane the deleted system carried, so
+    # there is always at least the two nodes `_relane` needs once this fires.
+    if ed.auto_relane and len(ed.recipe.nodes) >= 2:
+        _relane(ed, settings)
 
 
 def _paint(ed: Editor, targets: list[int]) -> None:
@@ -1710,25 +1825,37 @@ def _nodes_in_box(ed: Editor, rect: tuple[int, int, int, int]) -> list[int]:
     return out
 
 
-def _add_lane(ed: Editor, a: int, b: int) -> None:
-    """Draw one lane, if the rules allow it there. The single commit path, shared
-    by the tap-tap and drag gestures."""
+def _lane_candidate(ed: Editor, recipe: CustomMap, a: int, b: int
+                    ) -> Optional[list[tuple[int, int]]]:
+    """``recipe.lanes`` with ``a``-``b`` added, or ``None`` with the refusal said
+    out loud. Split out of `_add_lane` so a placement that also links (shift-click
+    chaining) can validate the new lane against a recipe that already holds the
+    new system, before either half is committed — and so both take one undo
+    snapshot rather than two."""
     key = (min(a, b), max(a, b))
-    if key in ed.recipe.lanes:
+    if key in recipe.lanes:
         _set_status(ed, f"#{key[0]} and #{key[1]} are already linked.", False)
-        return
+        return None
 
-    candidate = CustomMap(nodes=ed.recipe.nodes, lanes=sorted(ed.recipe.lanes + [key]))
+    candidate = CustomMap(nodes=recipe.nodes, lanes=sorted(recipe.lanes + [key]))
     index = candidate.lanes.index(key)
     if _lane_offenders(candidate, index, ed.planar)[1]:
         _set_status(ed, "That lane would run under a system."
                     if not ed.planar else
                     "That lane would run under a system, or cross another.", False)
-        return
+        return None
+    return candidate.lanes
 
+
+def _add_lane(ed: Editor, a: int, b: int) -> None:
+    """Draw one lane, if the rules allow it there. The single commit path, shared
+    by the tap-tap and drag gestures."""
+    lanes = _lane_candidate(ed, ed.recipe, a, b)
+    if lanes is None:
+        return
     _push_undo(ed)
-    ed.recipe.lanes = candidate.lanes
-    ed.sel_lane = index
+    ed.recipe.lanes = lanes
+    ed.sel_lane = lanes.index((min(a, b), max(a, b)))
     _set_status(ed, "", True)
 
 
@@ -1750,29 +1877,39 @@ def _clear_lanes(ed: Editor) -> None:
     _set_status(ed, "Every lane removed", True)
 
 
+def _relane(ed: Editor, settings: Settings) -> None:
+    """Rebuild the network in place with ``mapgen``'s own planar edge builder —
+    ``_auto_lanes`` without the confirm or the undo snapshot, so a placement or
+    deletion that re-runs it (``Editor.auto_relane``) folds into that edit's own
+    single undo step rather than pushing a second one.
+
+    ``_planar_edges`` reads ``EXTRA_EDGE_FRACTION``/``MAX_EDGE_LENGTH_FRAC`` live
+    off ``config``, so the knobs go in through ``settings.apply_globals`` — the
+    single sanctioned writer. This module never ``setattr``s ``config`` itself.
+    """
+    settings_mod.apply_globals(settings)
+    positions = [n.pos for n in ed.recipe.nodes]
+    ed.recipe.lanes = sorted(
+        (min(a, b), max(a, b)) for a, b in mapgen._planar_edges(positions)
+    )
+    ed.sel_lane = None
+
+
 def _auto_lanes(ed: Editor, settings: Settings) -> None:
-    """Rebuild the whole lane network with ``mapgen``'s own planar edge builder.
+    """Rebuild the whole lane network — the *Auto* button's confirmed, undoable
+    one-shot version of ``_relane``.
 
     Replaces rather than merges, which is why it is behind a confirm:
     ``_planar_edges`` always builds a full MST, so merging it into a hand-drawn
     set would silently bury a deliberate bottleneck. Its output is planar and
     graze-free by construction, so it can never produce a map the manual rules
     would then refuse.
-
-    ``_planar_edges`` reads ``EXTRA_EDGE_FRACTION``/``MAX_EDGE_LENGTH_FRAC`` live
-    off ``config``, so the knobs go in through ``settings.apply_globals`` — the
-    single sanctioned writer. This module never ``setattr``s ``config`` itself.
     """
     if len(ed.recipe.nodes) < 2:
         _set_status(ed, "Place at least two systems first.", False)
         return
-    settings_mod.apply_globals(settings)
     _push_undo(ed)
-    positions = [n.pos for n in ed.recipe.nodes]
-    ed.recipe.lanes = sorted(
-        (min(a, b), max(a, b)) for a, b in mapgen._planar_edges(positions)
-    )
-    ed.sel_lane = None
+    _relane(ed, settings)
     _set_status(ed, f"{len(ed.recipe.lanes)} lanes drawn", True)
 
 
