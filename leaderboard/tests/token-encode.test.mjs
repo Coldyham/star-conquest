@@ -11,7 +11,7 @@ import test from "node:test";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import { decodeToken } from "../js/token-decode.mjs";
-import { encodeToken, newSeedSetup } from "../js/token-encode.mjs";
+import { botWatchSetup, encodeToken, newSeedSetup } from "../js/token-encode.mjs";
 
 globalThis.crypto ??= webcrypto;
 
@@ -81,5 +81,55 @@ test("a config link is not a score to post", async () => {
   // submit.html's reader must reject it: there is no result on this setup yet,
   // which is rather the point of handing someone a fresh map.
   const token = await encodeToken(newSeedSetup({ mode: "random", players: 3, nodes: 18, seed: 5 }), deflate);
+  await assert.rejects(() => decodeToken(token, inflate), /not a challenge link/);
+});
+
+test("a bot watch link keeps the map and hands the human's seat to the bot", () => {
+  const setup = botWatchSetup(
+    { mode: "random", players: 3, nodes: 18, seed: 7, ai_strategy: ["heuristic", "thinker"], ai: [{ aux: 9 }, { reserve_fraction: 0.5 }] },
+    "knower",
+    12,
+  );
+  assert.deepEqual(setup, {
+    mode: "random",
+    players: 3,
+    nodes: 18,
+    seed: 7, // unlike newSeedSetup, a bot replays the map actually played
+    ai_strategy: ["knower", "thinker", "heuristic"],
+    ai: [{ aux: 12 }, { reserve_fraction: 0.5 }, {}],
+    autoplay: true,
+  });
+});
+
+test("a bot watch link discards whatever seat 1's own strategy and params were", () => {
+  // Mirrors tools/sim.play_settings: that slot belongs to the human, not the bot
+  // being measured, so its prior value (however tuned) is not the bot's identity.
+  const setup = botWatchSetup(
+    { players: 2, ai_strategy: ["thinker"], ai: [{ aux: 9, reserve_fraction: 0.9 }] },
+    "rusherplus",
+    undefined,
+  );
+  assert.deepEqual(setup.ai_strategy, ["rusherplus", "heuristic"]);
+  assert.deepEqual(setup.ai, [{}, {}]);
+});
+
+test("a bot watch link's aux is omitted at the untuned default", () => {
+  const untuned = botWatchSetup({ players: 1 }, "heuristic", 1);
+  assert.deepEqual(untuned.ai, [{}]);
+  const tuned = botWatchSetup({ players: 1 }, "knower", 8);
+  assert.deepEqual(tuned.ai, [{ aux: 8 }]);
+});
+
+test("a bot watch link still encodes with no settings_json or player count at all", async () => {
+  const setup = botWatchSetup(null, "heuristic", 1);
+  assert.deepEqual(setup, { ai_strategy: ["heuristic"], ai: [{}], autoplay: true });
+  await encodeToken(setup, deflate); // must not throw
+});
+
+test("a bot watch link is not a score to post either", async () => {
+  const token = await encodeToken(
+    botWatchSetup({ mode: "random", players: 3, nodes: 18, seed: 5 }, "knower", 12),
+    deflate,
+  );
   await assert.rejects(() => decodeToken(token, inflate), /not a challenge link/);
 });

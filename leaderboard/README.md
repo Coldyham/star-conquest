@@ -188,6 +188,40 @@ lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
 
+### Watching a bot's replay
+
+Every bot row carries a **Watch** link too, next to a human score's (see
+"Watching one back" below) — but it is built rather than fetched. Nothing was
+ever uploaded for it to point at: a bot's game is exactly as reproducible as
+the number on the row, the same fact that lets `tools/bot_replay.py` compute
+it once instead of on every page view. So the link just hands the game the
+same ingredients the worker replayed — the stored setup, the seed, and the
+bot standing in for the human's seat, already in autoplay — and lets the
+game's own engine play it out live from turn one, rather than scrubbing a
+recorded log.
+
+`js/token-encode.mjs`'s `botWatchSetup` builds that setup, mirroring
+`tools/sim.play_settings` (what `bot_replay.py` actually calls) field for
+field: seat 1's own strategy and params are discarded — that slot belongs to
+whoever holds the human seat in the stored setup, not to the bot being
+measured — and replaced with the bot at the `aux` its row was computed at;
+every other seat keeps the strategy and params the setup gave it, since those
+are part of the map's difficulty. `game.mjs`'s `botWatchLink` is the encoding
+step, the same `encodeToken`/`deflate` pair `js/home.mjs`'s "Play a new seed"
+already uses.
+
+Unlike a human's Watch link there is no rules-version check here, and that is
+deliberate rather than an oversight: a stored *log* replays recorded orders
+and dice, which is exactly what an engine-rules change can break, so that link
+is withdrawn rather than shown wrong (`GameLog.is_current`, above). A bot
+replay never applies anything recorded — it re-decides every turn against
+whatever code is live — so there is nothing here that can fail to
+reconstruct; the only way it can drift is the same one `bot_replay.py`'s
+`--stale` already accepts as normal: the engine or the bot has moved on since
+the row was cached, so a live watch shows the bot as it plays *today*, which
+may no longer match the cached `turns`/`lost` exactly. That is "old", not
+"broken" — see `pending()`'s docstring in `tools/bot_replay.py`.
+
 ## Checked scores
 
 A score in a link is a claim. The *replay* behind it is not: a match is fully
@@ -269,6 +303,9 @@ reviewer — `reconstruct`, the fog replay and the scrubber — and its engine i
 Python, so a JS viewer would be a second engine to keep in step with the first.
 The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
 `netlify/functions/replay.mjs` and opens history review on it.
+
+(A bot's row gets a Watch link the same way, but built rather than fetched —
+see "Watching a bot's replay" under "How the bots did" above.)
 
 **Posting a score is what publishes that replay.** `public_replays` (schema.sql)
 is `game_logs` restricted to the matches a posted score points at, so a game that
