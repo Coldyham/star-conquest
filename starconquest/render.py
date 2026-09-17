@@ -1282,7 +1282,8 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
-    _draw_scoreboard(surface, state, ui, w, turn.right + config.HUD_PAD * 2)
+    scoreboard_right = _draw_challenge_target(surface, ui, w)
+    _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
     # bottom bar
     by = h - config.HUD_BOTTOM_H
@@ -1520,6 +1521,26 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
 
 _DEAD_COLOR = (92, 96, 110)
+
+
+def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
+    """The score to beat, pinned in the top bar's right corner for as long as the
+    match runs — not just on the win overlay at the end of it, since the point of
+    a persistent reminder is not having to hold the number in your head (or reopen
+    a finished game to recall it). Teal ties it to the same accent as the
+    "Challenge a friend" button that made this a challenge in the first place.
+
+    Returns the x the scoreboard must stay clear of (``w`` when there is nothing
+    to draw), the same measured-not-hardcoded handoff the turn counter gives it.
+    """
+    if ui.challenge_target is None:
+        return w
+    turns, lost = ui.challenge_target
+    who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+    text = f"Beat {who}{turns}t / {lost} lost"
+    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
+                  midright=(w - config.HUD_PAD, config.HUD_TOP_H // 2))
+    return label.left - config.HUD_PAD
 
 
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
