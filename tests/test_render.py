@@ -257,6 +257,32 @@ def test_scoreboard_full_table_and_eliminated():
         pygame.quit()
 
 
+def test_challenge_target_shown_throughout_play_not_only_on_win():
+    """The score to beat sits in the top bar's right corner for the whole match,
+    not just the win overlay's after-the-fact verdict — so it survives an
+    in-progress frame with no winner set, and makes room for the scoreboard
+    rather than drawing under it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        assert state.winner is None
+
+        w = screen.get_width()
+        assert render._draw_challenge_target(screen, ui, w) == w   # nothing set
+
+        ui.challenge_target = (137, 412)
+        ui.challenge_by = "Ada"
+        right = render._draw_challenge_target(screen, ui, w)
+        assert right < w - config.HUD_PAD   # the scoreboard must stay clear of it
+
+        render.draw(screen, state, ui)   # the whole frame, mid-game, no crash
+    finally:
+        pygame.quit()
+
+
 def test_render_fogged_states_no_crash():
     """Fogged silhouettes, hidden systems, a "?" panel, and a frozen scoreboard row
     all draw without a crash."""
