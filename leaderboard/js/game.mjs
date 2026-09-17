@@ -1,11 +1,13 @@
 import { configured, eq, select } from "./api.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
+import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
   mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
 import { aliasFor } from "./token-decode.mjs";
+import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import { bestBot, botOrder, displayOrder, humanVsBots } from "./standings.mjs";
 
 const heading = document.getElementById("setup");
@@ -93,12 +95,43 @@ function outdatedNote() {
 }
 
 /**
+ * "Watch" on a bot's replay — unlike a human score, nothing was ever uploaded
+ * for it to point at. A bot's game is a pure function of the stored setup, the
+ * seed and the code (the same fact that lets `tools/bot_replay.py` compute it
+ * once and cache it), so this reconstructs it instead of fetching it: the link
+ * opens the game on that exact setup with `row.bot` standing in for the
+ * human's seat, already in autoplay (`botWatchSetup`, token-encode.mjs — the
+ * browser's mirror of `tools/sim.play_settings`).
+ *
+ * Returns null without GAME_URL to link into, or if the setup fails to encode
+ * — same shape as game.mjs's other optional, best-effort links.
+ */
+async function botWatchLink(gameSettings, row) {
+  if (!GAME_URL) return null;
+  let token;
+  try {
+    token = await encodeToken(botWatchSetup(gameSettings, row.bot, row.aux), deflate);
+  } catch {
+    return null;
+  }
+  return el("a", {
+    class: "watch",
+    href: `${GAME_URL}#${token}`,
+    target: "_blank",
+    rel: "noopener",
+    title: "Replay this bot in the browser",
+    text: "Watch",
+  });
+}
+
+/**
  * One bot's row, sharing the .score grid with the human table above so the two
  * read as one board. A win takes its place among the bots that won; a loss shows
  * a dash, because botOrder() deliberately doesn't rank the failures against each
- * other (see standings.mjs).
+ * other (see standings.mjs). `watch` is this row's Watch link (or null), built
+ * ahead of time by renderBots since encoding it is async.
  */
-function botRow(row, rank) {
+function botRow(row, rank, watch) {
   const classes = ["score", "bot"];
   if (row.won && rank <= 3) classes.push(`rank-${rank}`);
   if (!row.won) classes.push("bot-lost");
@@ -114,7 +147,10 @@ function botRow(row, rank) {
       el("a", { class: "nm", href: `index.html?bot=${encodeURIComponent(row.bot)}`, text: botProfile(row) }),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
-    el("span", { class: "result", text: botSummary(row) }),
+    el("span", { class: "result" }, [
+      el("span", { text: botSummary(row) }),
+      ...(watch ? [watch] : []),
+    ]),
     // Disclosed rather than hidden: a replay that blew its per-decision budget
     // forfeited those turns' orders, so its result depended on how fast the
     // runner was and is not reproducible the way every other row is.
@@ -147,7 +183,7 @@ function botVerdict(rows, best) {
  * Hidden rather than "not computed yet": a board whose owner has never set the
  * worker's secrets would otherwise carry a permanent apology on every map.
  */
-function renderBots(rows, best) {
+async function renderBots(rows, best, gameSettings) {
   if (!rows.length) return;
   const ordered = botOrder(rows);
   // Placings are over the winners alone, so they must be looked up per row
@@ -158,8 +194,9 @@ function renderBots(rows, best) {
   botsLede.textContent =
     `Each bot replayed from the player's seat on this exact map — same seed, ` +
     `same opponents. ${botVerdict(rows, best)}`;
+  const watchLinks = await Promise.all(ordered.map((row) => botWatchLink(gameSettings, row)));
   clear(botsTarget).append(
-    el("ol", { class: "scores" }, ordered.map((row) => botRow(row, ranks.get(row.bot)))),
+    el("ol", { class: "scores" }, ordered.map((row, i) => botRow(row, ranks.get(row.bot), watchLinks[i]))),
   );
   botsSection.hidden = false;
 }
@@ -284,7 +321,7 @@ async function load() {
     // After the human table, and off the same fetch: the bots are context for
     // the board above, not a board of their own. `scores[0]` is the turns-leader
     // whatever ranking is on screen, which is the one the verdict compares.
-    renderBots(bots, scores.length ? scores[0] : null);
+    await renderBots(bots, scores.length ? scores[0] : null, game.settings_json);
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);
