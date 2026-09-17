@@ -502,13 +502,13 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
     # Two gates, here rather than at the three call sites. `marking` is the wider
-    # one: a fight's cost or a finished hull is cheap to report and worth seeing
-    # even with the full glide off, so it only excludes autoplay — nothing you
-    # decided to have explained — and fast-forward, the whole point of which is to
-    # skip. `filming` narrows that to the animated glide itself, gated on the
-    # display preference on top. Both are read once a turn, like `share.due`, and
-    # never in `render`, where reading the store would cost a DOM call every frame.
-    marking = not ui.autoplay and not ui.fast_forward
+    # one: a fight's cost or a finished hull is cheap to report and worth seeing,
+    # for a bot-driven turn as much as a human one, so it only excludes
+    # fast-forward, the whole point of which is to skip. `filming` narrows that to
+    # the animated glide itself, gated on the display preference on top. Both are
+    # read once a turn, like `share.due`, and never in `render`, where reading the
+    # store would cost a DOM call every frame.
+    marking = not ui.fast_forward
     filming = marking and webstore.animate_turns()
     before = turnfilm.copy_board(state) if filming else None
     # What the human could see going in. `visible` is not monotone — a system lost
@@ -553,10 +553,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
             or (state.is_defeated(ui.human_id) and not was_defeated))
 
     # Lingering (see turnfilm.film): a turn you ended by hand is worth watching
-    # resolve. A *run* of turns is not — play mode and history playback
-    # (`_next_history_film`) are one behaviour from two sources, and both have to
-    # glide straight through rather than stop-start for every fight.
-    film = (turnfilm.film(events, linger=not ui.playing)
+    # resolve. A *run* of turns is not — play mode, autoplay and history playback
+    # (`_next_history_film`) are one behaviour from three sources, and all of them
+    # have to glide straight through rather than stop-start for every fight.
+    film = (turnfilm.film(events, linger=not (ui.playing or ui.autoplay))
             if before is not None else None)
     # A turn with nothing to watch isn't worth a pause, and neither is one nobody
     # asked to see: both land the snap now, exactly as before there were films.
@@ -1105,6 +1105,7 @@ async def main() -> None:
                     land_film(state, ui)
                     reel = None
                     play_accum = 0
+                    auto_accum = 0
                     if ui.history and ui.playing:
                         # Chain straight into the next turn's film with no gap, so
                         # a run of animated turns glides rather than stuttering —
@@ -1116,6 +1117,12 @@ async def main() -> None:
                             and ui.mode != viewstate.ROUTING):
                         # ...and live play chains the same way, on the same terms
                         # as the PLAY_MS branch below it would have resolved on.
+                        reel = resolve_turn(state, ui, log, settings)
+                    elif (ui.autoplay and not ui.history and state.winner is None
+                            and ui.mode != viewstate.ROUTING):
+                        # ...and so does autoplay, on the same terms as the
+                        # AUTOPLAY_MS branch below it would have resolved on — a bot
+                        # game gets the same continuous glide a human's does.
                         reel = resolve_turn(state, ui, log, settings)
 
             if (reel is None and ui.history and ui.playing
@@ -1139,10 +1146,14 @@ async def main() -> None:
                     and not confirm_quit and not confirm_rewind and not ui.history
                     and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
+                    # Same shape as play mode just below: with turn animation on,
+                    # one animated turn chains into the next as it lands (above),
+                    # so this pacing is only ever felt on a turn with nothing to
+                    # animate (or with the preference off).
                     auto_accum += dt
                     if auto_accum >= step_delay(ui, AUTOPLAY_MS):
                         auto_accum = 0
-                        resolve_turn(state, ui, log, settings)
+                        reel = resolve_turn(state, ui, log, settings)
                 elif ui.playing:
                     # Same shape as history's playback above: with turn animation
                     # on, one animated turn chains into the next as it lands, so

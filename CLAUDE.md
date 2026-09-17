@@ -202,14 +202,16 @@ on outcomes.
 On by default, and a **local display preference** (`webstore.animate_turns`,
 `paths.WEB_ANIMATE_TURNS_KEY`) rather than a `Settings` field — how a turn is
 *drawn* cannot move a result, and a new `Settings` field would move
-`challenge_key()` for every map that ever existed. Runs after a human End Turn and
-in play mode; never under autoplay or fast-forward (the gate is in
-`main.resolve_turn`, read once a turn — never in `render`, where a store read
-costs a DOM call every frame). History playback animates too; scrubbing stays an
-instant seek.
+`challenge_key()` for every map that ever existed. Runs after a human End Turn, in
+play mode, and under autoplay — a bot's turn is exactly as worth watching as a
+human's, which matters for a leaderboard bot score's Watch link, an autoplay
+game start to finish; only fast-forward, whose whole point is to skip, is
+excluded (the gate is in `main.resolve_turn`, read once a turn — never in
+`render`, where a store read costs a DOM call every frame). History playback
+animates too; scrubbing stays an instant seek.
 
 **Switching the preference off drops only the glide, not the marks.**
-`main.resolve_turn`'s `marking` (autoplay/fast-forward excluded, nothing else) is
+`main.resolve_turn`'s `marking` (fast-forward excluded, nothing else) is
 strictly wider than its `filming` (`marking and webstore.animate_turns()`): a fight's
 cost and a finished hull are cheap to report and worth seeing on their own, so they
 are archived (`Ui.archive_marks`) even on a turn with no glide to carry them —
@@ -320,16 +322,18 @@ Rules that hold it together:
   film runs with `Ui.playing` False throughout, so toggling play *on* while it
   plays must leave it alone rather than freezing it on the first frame.
 - **A run of turns chains one animated turn straight into the next, and never
-  lingers.** Live play and history playback are the same behaviour from two
-  sources, and both take the same path: the moment a film lands the loop starts
-  the next turn — `main._next_history_film` in history, `resolve_turn` in live
-  play (on the same terms the `PLAY_MS` branch below it would have resolved on) —
-  before the `PLAY_MS` pacing gets a chance to run. That pacing now only ever
-  fires for a turn with nothing to animate, or with the preference off. A turn
-  ended by hand is the deliberate opposite: watching your own move resolve is
-  worth a pause, which is what `linger` buys (above). Nothing is lost either way
-  — a mark's visibility no longer depends on `film` still being current (above),
-  so lingering only changes how long `film` itself holds the board.
+  lingers.** Live play, autoplay and history playback are the same behaviour from
+  three sources, and all three take the same path: the moment a film lands the
+  loop starts the next turn — `main._next_history_film` in history, `resolve_turn`
+  in live play and in autoplay (each on the same terms its own pacing branch below
+  it would have resolved on: `PLAY_MS` for the former, `AUTOPLAY_MS` for the
+  latter) — before that pacing gets a chance to run. It now only ever fires for a
+  turn with nothing to animate, or with the preference off. `linger` (above) is
+  what tells the two apart: `not (ui.playing or ui.autoplay)`, so a turn ended by
+  hand alone gets the pause, and a run of turns — of either kind — glides through
+  instead. Nothing is lost either way — a mark's visibility no longer depends on
+  `film` still being current (above), so lingering only changes how long `film`
+  itself holds the board.
   **Every reel goes through `main._primed`**, which runs it to `0.0` (archiving
   whatever marks that makes) before it is handed back. A chained reel is built
   *inside* the per-frame update, past the point where a running film is stepped,
