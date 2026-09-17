@@ -46,7 +46,7 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     """Map a click/drag x within the scrubber track to a turn index (0..max).
 
     The travel is the recorded rect inset by the knob's radius at each end, which
-    is where ``render._draw_slider`` puts the knob — invert anything else and the
+    is where ``widgets.slider`` puts the knob — invert anything else and the
     knob drifts away from the pointer toward the extremes."""
     x, _y, w, _h = ui.scrubber_rect
     travel = w - 2 * config.SLIDER_KNOB_R
@@ -537,9 +537,12 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
         return action
-    if _point_in_rect(pos, ui.end_turn_rect):
+    # Guarded on the width like every other rect test: render zeroes both of these
+    # (route mode borrows the End Turn block, a running film takes it away), and a
+    # zeroed rect still contains the point (0, 0).
+    if ui.end_turn_rect[2] and _point_in_rect(pos, ui.end_turn_rect):
         return "end_turn"
-    if _point_in_rect(pos, ui.play_pause_rect):
+    if ui.play_pause_rect[2] and _point_in_rect(pos, ui.play_pause_rect):
         return "toggle_play"
     if ui.autoplay:
         return None

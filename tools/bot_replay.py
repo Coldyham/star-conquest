@@ -63,8 +63,8 @@ from tests import sim  # noqa: E402  — the shared headless harness (see its do
 # outcome-bearing despite being cosmetic — mapgen rolls names off `state.rng`,
 # so changing the name list shifts every draw taken after it.
 _OUTCOME_MODULES = (
-    "ai", "combat", "config", "engine", "geometry", "mapgen", "model",
-    "settings", "starnames",
+    "ai", "combat", "config", "custommap", "engine", "geometry", "mapgen",
+    "model", "settings", "starnames",
 )
 
 # ...and the subset that can move a *recorded* game: `_OUTCOME_MODULES` minus

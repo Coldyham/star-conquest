@@ -37,7 +37,7 @@ const KNOB_LABELS = {
 // "Tuned AI" entry), and autoplay (a play-style preference, excluded from
 // sc_config_key itself, per schema.sql).
 const NOT_A_TWEAK = new Set([
-  "mode", "players", "nodes", "seed", "autoplay", "challenge", "ai", "ai_strategy",
+  "mode", "players", "nodes", "seed", "autoplay", "challenge", "ai", "ai_strategy", "custom_map",
 ]);
 
 function formatValue(key, value) {
@@ -58,6 +58,7 @@ export function tweaks(settingsJson) {
     .filter((key) => !NOT_A_TWEAK.has(key))
     .map((key) => ({ key, label: formatValue(key, settings[key]) }));
   if (Array.isArray(settings.ai) && settings.ai.length) out.push({ key: "ai", label: "Tuned AI" });
+  if (settings.custom_map) out.push({ key: "custom_map", label: "Custom map" });
   return out.sort((a, b) => a.key.localeCompare(b.key));
 }
 

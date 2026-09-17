@@ -99,6 +99,19 @@ carries tuned knobs, `nodes` and `ship_ly_per_turn` together move lane length
 over an order of magnitude (bot-design, "Lane length across the parameter
 space"), and a bot that cannot see which regime it is in cannot price anything.
 
+`setup.mode` has a **third value, `"custom"`**: the board was drawn by hand in the
+map creator rather than generated. Treat it as "assume nothing structural". A
+generated map is planar, gives every seat a peripheral start and exactly one
+system, and spaces its systems evenly; a hand map may do none of that — lanes can
+cross, systems can sit close together, a seat may start with several systems or a
+central one, and production and garrisons follow no distribution. Everything a bot
+actually needs is still in `map` below, measured from the real board. The seed
+also stops meaning what it usually does: every value in a hand map is concrete, so
+the seed drives combat dice and star names only.
+
+`PROTOCOL` does **not** bump for this. It moves when a message's *meaning*
+changes, not when an existing field gains a value.
+
 **`rules`** is the derived arithmetic a Python bot reads live off `config` and
 `combat`, computed once and handed over:
 

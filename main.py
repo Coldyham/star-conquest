@@ -18,9 +18,9 @@ from typing import Optional
 
 import pygame
 
-from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, share, softkeyboard, turnfilm, viewstate,
-                          webstore)
+from starconquest import (ai, config, engine, fog, mapgen, mapmaker, menu, paths,
+                          render, replay, share, softkeyboard, turnfilm,
+                          viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -143,6 +143,15 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
     fog is off (both ranges at max), where `visible` covers the whole map.
     """
     ui.visible = _accumulate_fog(state, ui.human_id, ui.seen, ui.player_intel)
+
+
+def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
+    """Roll the seed and open a fresh match — the single start path, shared by the
+    menu's Start Game and the map creator's Play so the two cannot drift apart."""
+    ai.load_models()   # pick up files added since launch / named by a loaded config
+    seed = resolve_seed(settings)
+    state, ui, log = start_game(settings, seed, settings.autoplay)
+    return state, ui, log, seed
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -758,9 +767,11 @@ async def main() -> None:
     config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
     clock = pygame.time.Clock()
 
-    # Two scenes share the one window: the setup menu and the game board. The
-    # menu builds `state`/`ui` on "start"; pressing M in-game drops back to it.
+    # Three scenes share the one window: the setup menu, the map creator and the
+    # game board. The menu builds `state`/`ui` on "start"; pressing M in-game
+    # drops back to it, and Create/Edit map opens the creator between the two.
     menu_state = MenuState()
+    editor: mapmaker.Editor | None = None      # live only while scene == "maker"
     state: GameState | None = None
     ui: Ui | None = None
     log: GameLog | None = None       # replay log of the live match (None while in menu)
@@ -853,6 +864,8 @@ async def main() -> None:
             if state is not None and ui is not None:
                 ui.view = build_view(state)
                 ui.reset_view(state)   # re-frame for the new size, not the whole map
+            if editor is not None:
+                mapmaker.reflow(editor)
         for event in pygame.event.get():
             # Web only, once: the first tap/click/key this session sees is the
             # earliest point simulation code can observe that the player has
@@ -966,13 +979,24 @@ async def main() -> None:
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
-                    ai.load_models()   # pick up files added since launch / named by a loaded config
-                    current_seed = resolve_seed(settings)
-                    state, ui, log = start_game(settings, current_seed, settings.autoplay)
+                    state, ui, log, current_seed = _begin_game(settings)
                     scene = "game"
                     auto_accum = 0
+                elif action == "create_map":
+                    editor = mapmaker.open_editor(settings)
+                    scene = "maker"
                 elif action == "quit":
                     confirm_quit = True
+                continue
+
+            if scene == "maker":
+                assert editor is not None
+                action = mapmaker.handle_event(event, editor, settings)
+                if action == "play":
+                    state, ui, log, current_seed = _begin_game(settings)
+                    scene, editor = "game", None
+                elif action == "menu":
+                    scene, editor = "menu", None
                 continue
 
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
@@ -1171,6 +1195,11 @@ async def main() -> None:
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
+        elif scene == "maker":
+            assert editor is not None
+            mapmaker.pump(editor)          # same soft-keyboard poll, for its filename field
+            mapmaker.age_status(editor, dt)
+            mapmaker.draw(screen, editor, settings)
         else:
             assert state is not None and ui is not None   # scene == "game"
             if ui.history and history_states:

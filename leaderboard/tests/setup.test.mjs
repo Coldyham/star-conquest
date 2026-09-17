@@ -48,6 +48,13 @@ test("ai_strategy is read separately as bots, not as a tweak", () => {
   assert.equal(configLabel({ ai_strategy: ["heuristic", "marshal"] }), "Default");
 });
 
+test("a hand-authored map shows as one entry, not the raw recipe object", () => {
+  assert.equal(
+    configLabel({ custom_map: { systems: [], lanes: [] } }),
+    "Custom map",
+  );
+});
+
 test("an unrecognised knob still renders, under its own key", () => {
   assert.equal(configLabel({ some_future_knob: 7 }), "some_future_knob 7");
 });

@@ -23,7 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest.settings import Challenge, Settings  # noqa: E402 — needs the path above
+from starconquest import custommap, mapgen  # noqa: E402 — needs the path above
+from starconquest.settings import Challenge, Settings  # noqa: E402
 
 OUT = ROOT / "leaderboard" / "tests" / "fixtures" / "tokens.json"
 
@@ -93,6 +94,20 @@ def main() -> None:
     cases.append({"name": "bad-log-id", "token": forged.to_token(),
                   "expect": {**expect_for(forged), "challenge":
                              {"turns": 12, "lost": 1, "hand": 12, "by": "", "log": ""}}})
+
+    # A hand-authored map riding in the token. The decoder reads only the four
+    # identity fields and the score, and `canonicalize` recurses arrays and
+    # objects generically — so the recipe should ride straight through with no
+    # JavaScript change at all. This case is the only thing that pins that
+    # against a real Python-encoded token rather than against a reading of the
+    # code.
+    drawn = Settings(seed=2024)
+    drawn.custom_map = custommap.from_state(mapgen.generate(31, "random", 14, 3))
+    drawn.players = drawn.custom_map.seats()
+    drawn.nodes = len(drawn.custom_map.nodes)
+    drawn = stamped(drawn, turns=44, lost=18, hand=44, by="Cartographer")
+    cases.append({"name": "custom-map", "token": drawn.to_token(),
+                  "expect": expect_for(drawn)})
 
     # The pre-compression form real early links used; from_token still reads it.
     legacy = stamped(Settings(players=2, nodes=9, seed=7), turns=14, lost=0, hand=14, by="")
