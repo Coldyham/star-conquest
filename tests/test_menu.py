@@ -47,12 +47,12 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
-def test_web_file_row_is_get_link_and_leaderboard():
+def test_web_file_row_is_get_link_and_recently_played():
     """The web build's data dir is an in-memory virtual filesystem that doesn't
     survive a reload, so a file Save/Load there would silently vanish — the web
     File row instead offers 'Get Link' (the URL-token path that actually
-    persists) and 'Leaderboard' (the board's by-config listing), with no filename
-    field or Save/Load buttons to click."""
+    persists) and 'Recently played' (the board's by-config listing), with no
+    filename field or Save/Load buttons to click."""
     screen, ms, settings = _setup()
     real_is_web = menu.is_web
     menu.is_web = lambda: True
@@ -69,7 +69,7 @@ def test_web_file_row_is_get_link_and_leaderboard():
 
 
 def test_browse_configs_opens_the_leaderboards_config_listing(monkeypatch):
-    """Clicking 'Leaderboard' opens the board's ?group=config view — the same
+    """Clicking 'Recently played' opens the board's ?group=config view — the same
     listing a Save/Load row could never have offered on the web, where a saved
     file silently vanishes on reload."""
     opened = []
@@ -86,8 +86,8 @@ def test_browse_configs_opens_the_leaderboards_config_listing(monkeypatch):
 
 
 def test_desktop_file_row_has_no_get_link():
-    """Desktop keeps the file-backed Save/Load row; Get Link and Leaderboard are
-    web-only."""
+    """Desktop keeps the file-backed Save/Load row; Get Link and Recently played
+    are web-only."""
     screen, ms, settings = _setup()
     try:
         ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted

@@ -978,13 +978,13 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
-    ``_SAVE_DIR``. Web: '[Get Link] ... [Leaderboard]' — the web build's data dir
-    is pygbag's in-memory virtual filesystem, which doesn't survive a reload, so a
-    file saved there would silently vanish. Get Link (a URL token in the address
-    bar plus ``localStorage``) is the persistence path that actually works there;
-    Leaderboard opens the board's "by config" listing (``home.mjs``'s
-    ``?group=config``) — where a setup worth returning to already lives, once
-    somebody has posted a score under it.
+    ``_SAVE_DIR``. Web: '[Get Link] ... [Recently played]' — the web build's data
+    dir is pygbag's in-memory virtual filesystem, which doesn't survive a reload,
+    so a file saved there would silently vanish. Get Link (a URL token in the
+    address bar plus ``localStorage``) is the persistence path that actually
+    works there; Recently played opens the board's "by config" listing
+    (``home.mjs``'s ``?group=config``) — where a setup worth returning to already
+    lives, once somebody has posted a score under it.
 
     The field takes whatever width the buttons leave (no "File" label: the name
     field had less room than the default name needs, and Save/Load say plainly
@@ -997,8 +997,8 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
             ms.rects.pop(key, None)
         link = pygame.Rect(lx, y, 110, _CH)
         _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-        boards = pygame.Rect(rx - 150, y, 150, _CH)
-        _button(surface, ms, "browse_configs", boards, "Leaderboard", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        boards = pygame.Rect(rx - 190, y, 190, _CH)
+        _button(surface, ms, "browse_configs", boards, "Recently played", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         return
 
     ms.rects.pop("get_link", None)
@@ -1481,7 +1481,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         if not url:
             set_status(ms, "No leaderboard is configured", False)
         elif webstore.open_url(url):
-            set_status(ms, "Leaderboard opened", True)
+            set_status(ms, "Recently played opened", True)
         elif webstore.copy_to_clipboard(url):
             set_status(ms, "Couldn't open a tab — link copied instead", True)
         else:
