@@ -31,7 +31,10 @@ function nameCell(score) {
     : el("span", { class: "nm", text: credit(score) });
 }
 
-function scoreRow(score, rank, watchable) {
+function scoreRow(score, rank, replays) {
+  const version = replays.get(score.match_id);
+  const watchable = version === CURRENT_RULES_VERSION;
+  const outdated = version !== undefined && !watchable;
   return el("li", { class: rank <= 3 ? `score rank-${rank}` : "score" }, [
     el("span", { class: "rank", text: ordinal(rank) }),
     // The dot leader is its own flexible element rather than trailing dots on the
@@ -40,12 +43,14 @@ function scoreRow(score, rank, watchable) {
       nameCell(score),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
-    // Watch rides *inside* the result cell rather than becoming a fifth column:
-    // .score is a four-track grid and a bot row has four children, so a fifth
-    // track would leave every bot row carrying an empty column and its gap.
+    // Watch (or its outdated-replay note) rides *inside* the result cell rather
+    // than becoming a fifth column: .score is a four-track grid and a bot row
+    // has four children, so a fifth track would leave every bot row carrying an
+    // empty column and its gap.
     el("span", { class: "result" }, [
       el("span", { text: scoreSummary(score) }),
-      ...(watchable.has(score.match_id) ? [watchLink(score.match_id)] : []),
+      ...(watchable ? [watchLink(score.match_id)] : []),
+      ...(outdated ? [outdatedNote()] : []),
     ]),
     el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
   ]);
@@ -70,6 +75,20 @@ function watchLink(matchId) {
     rel: "noopener",
     title: "Replay this game in the browser",
     text: "Watch",
+  });
+}
+
+/**
+ * Stands in for Watch on a score whose replay exists but predates the current
+ * rules — disclosed rather than just dropped, so a historic score reads as
+ * "can't replay this one" instead of looking indistinguishable from a score
+ * that never had a replay at all.
+ */
+function outdatedNote() {
+  return el("span", {
+    class: "outdated",
+    title: "This replay was recorded under an earlier ruleset and can no longer be reconstructed exactly.",
+    text: "Older ruleset",
   });
 }
 
@@ -164,13 +183,15 @@ function sortToggle() {
 }
 
 /**
- * Which of these scores have a replay anyone can watch *and reconstruct
- * exactly* — a `rules_version` behind `CURRENT_RULES_VERSION` means the game's
- * own engine has moved past the rules that replay was recorded under, so
- * reconstructing it would show a different game than the one actually played
- * (`GameLog.is_current`, the same check the game itself uses to gate its own
- * Watch/resume). Rather than link to a replay it can no longer show right, the
- * board simply doesn't offer it.
+ * Every score's replay status, keyed by match_id: the `rules_version` its log
+ * was recorded under if one was ever uploaded, absent otherwise. A version
+ * equal to `CURRENT_RULES_VERSION` can be watched and reconstructed exactly; an
+ * older one can't — the game's own engine has moved past the rules that replay
+ * was recorded under, so reconstructing it would show a different game than the
+ * one actually played (`GameLog.is_current`, the same check the game itself
+ * uses to gate its own Watch/resume). Rather than link to a replay it can no
+ * longer show right, the board marks it outdated instead of offering it (see
+ * `scoreRow`/`outdatedNote`).
  *
  * Asked by id rather than by map: a score's `game_key` and its log's are stamped
  * by different code paths (the token's `Challenge.key` and `GameLog.setup_key`),
@@ -181,15 +202,13 @@ function sortToggle() {
  * "Watch" link is not worth taking the score table down for. Needs GAME_URL too:
  * without somewhere to send a watcher there is nothing to link to.
  */
-async function watchableIds(scores) {
+async function replayVersions(scores) {
   const ids = [...new Set(scores.map((s) => s.match_id).filter(Boolean))];
-  if (!GAME_URL || !ids.length) return new Set();
+  if (!GAME_URL || !ids.length) return new Map();
   const rows = await select(
     `public_replays?select=match_id,rules_version&match_id=in.(${ids.map(encodeURIComponent).join(",")})`,
   ).catch(() => []);
-  return new Set(
-    rows.filter((r) => r.rules_version === CURRENT_RULES_VERSION).map((r) => r.match_id),
-  );
+  return new Map(rows.map((r) => [r.match_id, r.rules_version]));
 }
 
 async function load() {
@@ -256,9 +275,9 @@ async function load() {
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
-    const watchable = await watchableIds(scores);
+    const replays = await replayVersions(scores);
     clear(target).append(
-      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], watchable))),
+      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays))),
       ...(link ? [link] : []),
     );
 
