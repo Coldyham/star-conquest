@@ -85,6 +85,16 @@ _NETLIFY_SUFFIX = ".netlify.app"
 LEADERBOARD_SUBMIT_PATH = "/submit"    # the score-entry form, opened with #<token>
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
+# The board's "by config" listing (`leaderboard/js/home.mjs`'s `?group=config`):
+# every setup somebody has posted a score under, grouped and named. Not specific
+# to the setup on the menu right now — there is no way to name an arbitrary,
+# possibly never-played setup's own config page without either shipping the
+# Supabase project straight into the game or reimplementing `sc_config_key`'s
+# Postgres-specific hashing a second time (schema.sql spells out why that hash
+# is deliberately computed nowhere but there). This is the same link the web
+# menu's file row used to spend on a Save/Load row that never actually
+# persisted anything in the browser (see `menu._file_control`).
+LEADERBOARD_CONFIGS_PATH = "/index.html?group=config"
 
 
 def sibling_host(host: str, tag: str, *, add: bool) -> str:
