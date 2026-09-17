@@ -1,15 +1,17 @@
-import { configured, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, eq, insert, rpc, select, UNIQUE_VIOLATION } from "./api.mjs";
 import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
 // Posting again from the same browser shouldn't mean retyping your name — the
 // whole point of arriving here from the game's win screen is one click. The same
 // remembered name is what puts "My scores" in the marquee.
 import { mountMyScores, myName, rememberName } from "./me.mjs";
+import { normalizeTags } from "./tags.mjs";
 import { decodeToken, fragmentOf, setupIdentity } from "./token-decode.mjs";
 
 const form = document.getElementById("form");
 const linkField = document.getElementById("link");
 const nameField = document.getElementById("name");
+const tagsField = document.getElementById("tags");
 const preview = document.getElementById("preview");
 const status = document.getElementById("status");
 const button = document.getElementById("go");
@@ -104,6 +106,39 @@ async function ensureUser(name) {
   }
 }
 
+/**
+ * The config a setup belongs to, computed by the database rather than here:
+ * `sc_config_key` hashes Postgres's own `jsonb::text` cast of `settings_json`,
+ * which nothing in JS reproduces byte-for-byte (see `api.mjs`'s `rpc` doc).
+ * Called with `decoded.setup` directly — already in hand, no extra `select`
+ * needed to fetch it back off whatever `games` row `ensureGame` resolved to.
+ */
+async function configKeyFor(setup) {
+  return rpc("sc_config_key", { settings: setup });
+}
+
+/**
+ * Attach this submission's tags to the config it was scored on. Entirely
+ * best-effort: caught here rather than left to the caller, so a rejected tag
+ * (or a board whose schema.sql hasn't been re-pasted yet, and so has no
+ * `config_tags` table at all — this JS auto-deploys independently of that
+ * manual SQL step) can never turn a successfully posted score into an error
+ * the player sees. `ignoreDuplicates` against the (score_id, tag_key)
+ * constraint means a retried submission doesn't fail the whole batch over
+ * tags it already added.
+ */
+async function submitTags(setup, scoreId, userId, tagsRaw) {
+  const tags = normalizeTags(tagsRaw);
+  if (!tags.length) return;
+  try {
+    const configKey = await configKeyFor(setup);
+    const rows = tags.map((tag) => ({ config_key: configKey, score_id: scoreId, user_id: userId, tag }));
+    await insert("config_tags", rows, { onConflict: "score_id,tag_key", ignoreDuplicates: true });
+  } catch {
+    // Tags are a nicety on top of a posted score, never load-bearing for it.
+  }
+}
+
 async function decodePasted() {
   return decodeToken(linkField.value, inflate);
 }
@@ -178,7 +213,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const gameKey = await ensureGame(decoded);
     const userId = await ensureUser(nameField.value);
-    await insert("scores", {
+    const [score] = await insert("scores", {
       game_key: gameKey,
       user_id: userId,
       turns: decoded.challenge.turns,
@@ -190,8 +225,10 @@ form.addEventListener("submit", async (event) => {
       // — only the id, and the two can arrive in either order.
       match_id: decoded.challenge.log,
       raw_token: decoded.token,
-    });
+    }, { returning: true });
     rememberName(nameField.value);
+    // Best-effort and never blocking: see submitTags's own doc comment.
+    await submitTags(decoded.setup, score.id, userId, tagsField.value);
     location.href = `game.html?key=${encodeURIComponent(gameKey)}`;
   } catch (err) {
     button.disabled = false;

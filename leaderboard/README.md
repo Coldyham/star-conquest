@@ -128,14 +128,27 @@ posted. There's no in-site remedy for that, only the SQL editor: re-derive the o
 and new keys for the setups that matter and move the `configs` row across, the same
 way `fold-game-key.sql` moves `scores` rows after a `Challenge.key` split.
 
-Naming and tagging a config is **first name wins, permanently** — `configs` is
-append-only like every other table here (no UPDATE policy), so a typo can only be
-fixed from the SQL editor, the same trade `users.name` already makes. Since
-`config_key` is derived rather than stored, there's also no link between it and
-`games`: anyone can post a name for a config key nobody has played yet, or the
-wrong hex string entirely. Harmless — `game_summary`'s join only ever surfaces a
-name that actually matches a stored setup — but it's the same class of trust
-already extended to every other free-text field on this board.
+Naming a config is **first name wins, permanently** — `configs` is append-only
+like every other table here (no UPDATE policy), so a typo can only be fixed from
+the SQL editor, the same trade `users.name` already makes. Since `config_key` is
+derived rather than stored, there's also no link between it and `games`: anyone
+can post a name for a config key nobody has played yet, or the wrong hex string
+entirely. Harmless — `game_summary`'s join only ever surfaces a name that
+actually matches a stored setup — but it's the same class of trust already
+extended to every other free-text field on this board.
+
+**Tags are different: they accumulate, and only from someone who has posted a
+score.** `config_tags` is a second, append-only table — one row per (score, tag)
+— rather than the array `configs.tags` used to be the only way to write; posting
+a score is what [`submit.html`](submit.html) now also offers a tags field for,
+and `score_id` is the gate (a row naming no real score is refused by its foreign
+key). `config_tag_counts` ranks each config's tags by how many *distinct
+players* have entered them, folding in whatever a board already has in
+`configs.tags` at a flat weight of one apiece — so upgrading a board doesn't
+erase its existing tags, real submissions simply outrank that flat weight as
+they accumulate. `game_summary`/`config_summary` read this view rather than
+`configs.tags` directly now, but a config's *name* is unaffected — still
+untied to any score, still first-wins.
 
 ## How the bots did
 
@@ -288,8 +301,9 @@ paths and a folded key would make a `game_key` lookup quietly miss.
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, `configs`, `game_logs`, `score_checks`, the
-   `game_summary`/`config_summary`/`public_replays` views, and the row-level security policies that
+   `users`, `games`, `scores`, `configs`, `config_tags`, `game_logs`,
+   `score_checks`, the `game_summary`/`config_summary`/`config_tag_counts`/
+   `public_replays` views, and the row-level security policies that
    make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
@@ -404,10 +418,13 @@ query string, and answers "unpublished" and "missing" identically.
 best-of-several attempts, who leads a comparison, and the card's own totals — which
 is why that logic sits in a module with no DOM or fetch in it. It also covers the
 map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.mjs`
-covers a config's derived label (`js/setup.mjs`). Neither `schema.sql` nor its
-functions have a test harness — verify a change to `sc_config_key`/`sc_bots` by
-pasting the file into a scratch Postgres or Supabase project and querying
-`game_summary`/`config_summary` directly.
+covers a config's derived label (`js/setup.mjs`), and `tests/tags.test.mjs` covers
+tag normalisation (`js/tags.mjs`'s `normalizeTags` — trim, lowercase, dedupe, the
+6-tag cap) the same way, with no DOM or database needed to exercise it. Neither
+`schema.sql` nor its functions have a test harness — verify a change to
+`sc_config_key`/`sc_bots`/`config_tag_counts` by pasting the file into a scratch
+Postgres or Supabase project and querying `game_summary`/`config_summary`
+directly.
 
 ## Known limitations, accepted on purpose
 
@@ -424,7 +441,10 @@ pasting the file into a scratch Postgres or Supabase project and querying
   played at least one turn by hand, so nothing else can be posted.
 - **A config's name is first-wins and permanent**, and a `config_key` can be
   squatted or posted for a setup nobody has played — see "Same setup, different
-  seed" above.
+  seed" above. Tags don't share that trade — they accumulate — but they do
+  share the trust model: whoever posts a score picks the tags that ride with
+  it, and "most frequent" only means "most distinct players have typed this,"
+  not "true."
 - **Supabase pauses free projects after about a week idle**, which needs a manual
   unpause. A weekly scheduled request against the REST API would prevent it.
 - **A replay recorded under rules the engine has since moved past loses its
