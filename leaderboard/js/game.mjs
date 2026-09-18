@@ -3,7 +3,7 @@ import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
-  mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  embargoNote, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
 import { aliasFor } from "./token-decode.mjs";
@@ -207,6 +207,26 @@ function playLink(token) {
   return el("a", { class: "btn play", href: `${GAME_URL}#${token}`, target: "_blank", rel: "noopener", text: "Play this map" });
 }
 
+/**
+ * "Play this map" for a map with no scores posted yet — registered here as a
+ * bare setup (js/submit.mjs) rather than reached through a win. There is no
+ * `raw_token` to reuse (that rides on a score, per `playLink`'s usual caller),
+ * so this re-encodes `game.settings_json` instead — it already carries the
+ * exact seed the setup was registered under, so whoever opens it plays the
+ * same map, not a fresh roll (contrast home.mjs's newSeedLink, which is for a
+ * *config* and deliberately blanks the seed).
+ */
+async function freshPlayLink(game) {
+  if (!GAME_URL) return null;
+  let token;
+  try {
+    token = await encodeToken(game.settings_json, deflate);
+  } catch {
+    return null;
+  }
+  return playLink(token);
+}
+
 /** Toggle between the board's two rankings, each a plain link so the choice
  * stays shareable. Highlights the active one with the same .btn/.btn.ghost
  * pair the rest of the site uses for "current vs. not". */
@@ -299,16 +319,22 @@ async function load() {
     const game = games[0];
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(configBadge(game), ...botChips(game));
-    subtitle.textContent = scores.length
-      ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
-      : "No scores posted yet.";
+    const embargo = embargoNote(game.embargo_until);
+    subtitle.textContent = [
+      scores.length
+        ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
+        : "No scores posted yet.",
+      embargo,
+    ].filter(Boolean).join(" · ");
     clear(sortTarget).append(sortToggle());
 
     // The server order above (turns then lost then earliest submission) is
     // exactly how the turns-leader is found, regardless of which ranking is
     // on screen — "Play this map" always hands back that target, since the
-    // game itself compares turns first.
-    const link = playLink(scores.length ? scores[0].raw_token : null);
+    // game itself compares turns first. A map with no scores yet (registered
+    // as a bare setup, never played through to a challenge) has no such token
+    // to reuse, so it falls back to the setup itself.
+    const link = scores.length ? playLink(scores[0].raw_token) : await freshPlayLink(game);
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);

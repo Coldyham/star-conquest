@@ -28,14 +28,20 @@ export function clear(node) {
   return node;
 }
 
-/** "Random · 3 players · 18 systems · seed 42" */
+/**
+ * "Random · 3 players · 18 systems · seed 42" — or "seed random" for a plain
+ * settings-share link with no seed pinned (Settings.seed is None). Every row
+ * actually stored in `games` has a concrete seed (the column is not-null), so
+ * this only ever matters in submit.mjs's preview, before such a link is
+ * rejected there for having no single map to register.
+ */
 export function mapSummary(game) {
   const mode = game.mode === "symmetric" ? "Symmetric" : "Random";
   return [
     mode,
     `${game.players} players`,
     `${game.nodes} systems`,
-    `seed ${game.seed}`,
+    `seed ${game.seed ?? "random"}`,
   ].join(" · ");
 }
 
@@ -198,6 +204,32 @@ export function botLeadBadge(game) {
     title: `${game.bot_name} — ${game.bot_turns} turns · ${game.bot_lost} lost. No human score beats it yet.`,
     text: "Bot leads",
   });
+}
+
+/**
+ * "Replays hidden — revealing in 3 days", or null once the embargo has lifted
+ * or none was ever set (`games.embargo_until`, schema.sql). Deliberately says
+ * nothing about how many replays are behind it, or whether any exist at all —
+ * either would leak the one thing the embargo exists to hide. Rounds up, so a
+ * few hours left still reads as "1 day" rather than "0 days".
+ */
+export function embargoNote(until) {
+  if (!until) return null;
+  const ms = new Date(until).getTime() - Date.now();
+  if (!(ms > 0)) return null;
+  const days = Math.max(1, Math.ceil(ms / 86400000));
+  return `Replays hidden — revealing in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/**
+ * The badge a map's card carries while embargoNote() above has something to
+ * say — same shape as botLeadBadge: a stated fact, not a filter, so it is a
+ * span rather than a link.
+ */
+export function embargoBadge(game) {
+  const note = embargoNote(game.embargo_until);
+  if (!note) return null;
+  return el("span", { class: "badge embargo", title: note, text: "Embargoed" });
 }
 
 export function showError(node, message) {

@@ -529,6 +529,24 @@ intact.
       log rather than trusted. Key the log by `GameLog.setup_key()`, never the
       live `Settings`: `main` resolves "roll a fresh seed" at game start and never
       writes it back.
+  - **A map can be registered with no score at all, and can carry a one-time
+    reveal date over its replays.** `js/submit.mjs`'s `ensureGame` accepts any
+    Star Conquest link, not just a challenge one — `token-decode.mjs`'s
+    `decodeToken` returns `challenge: null` for a plain settings-share link (or
+    one carrying `Challenge`'s own `turns <= 0` sentinel) rather than rejecting
+    it, and the site takes that as a setup to add rather than a score to post.
+    That is what lets a setup be shared and played before anyone — its own
+    author included — has a result on it to disclose. `games.embargo_until`
+    rides along on that same insert, optionally, and only there: `games` is
+    append-only like everything else on this board, so an embargo can only
+    ever be decided the one moment a map's row does not yet exist, never
+    retrofitted onto one already on the board. It gates one thing —
+    `public_replays` above filters out a match whose map is still embargoed —
+    never a score: scores and rankings post and rank normally throughout,
+    since there is no account system here to tell a submitter's own later read
+    apart from anyone else's, so the only boundary that can be enforced
+    cleanly is a blackout on the moves themselves, applied identically to
+    every reader, the setter included.
   - **A replay is never shown as if it still reproduced the game once the engine
     has moved past it.** `GameLog.is_current` (`rules_version == engine.
     RULES_VERSION`) is the same check on both sides of the wire, and both were

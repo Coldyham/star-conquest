@@ -77,11 +77,16 @@ test("the fragment is URL-safe base64 with no padding", async () => {
   assert.match(token, /^[A-Za-z0-9_-]+$/);
 });
 
-test("a config link is not a score to post", async () => {
-  // submit.html's reader must reject it: there is no result on this setup yet,
-  // which is rather the point of handing someone a fresh map.
+test("a config link decodes with nothing to post, and no map to register either", async () => {
+  // submit.html's reader takes it as a bare setup (challenge: null) rather than
+  // rejecting outright — but newSeedSetup always surrenders the seed, and
+  // submit.mjs refuses to register a setup with none: there is no single map
+  // to hand a name and an embargo to, which is rather the point of offering
+  // someone a fresh roll instead of the exact map that was played.
   const token = await encodeToken(newSeedSetup({ mode: "random", players: 3, nodes: 18, seed: 5 }), deflate);
-  await assert.rejects(() => decodeToken(token, inflate), /not a challenge link/);
+  const decoded = await decodeToken(token, inflate);
+  assert.equal(decoded.challenge, null);
+  assert.equal(decoded.seed, null);
 });
 
 test("a bot watch link keeps the map and hands the human's seat to the bot", () => {
@@ -131,5 +136,6 @@ test("a bot watch link is not a score to post either", async () => {
     botWatchSetup({ mode: "random", players: 3, nodes: 18, seed: 5 }, "knower", 12),
     deflate,
   );
-  await assert.rejects(() => decodeToken(token, inflate), /not a challenge link/);
+  const decoded = await decodeToken(token, inflate);
+  assert.equal(decoded.challenge, null);
 });

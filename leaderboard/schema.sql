@@ -46,6 +46,34 @@ create table if not exists public.games (
 );
 
 -- ---------------------------------------------------------------------------
+-- games.embargo_until: an optional reveal date, set only when the site itself
+-- inserts a *new* row (js/submit.mjs's ensureGame) — never by an update, since
+-- there is no update policy for it to use. That is what makes it permanent and
+-- unappealable in either direction: nobody, the setter included, can move it
+-- once the row exists, and nobody can attach one to a map already on the board
+-- either (the whole point of "first insert wins" here is that an embargo has to
+-- be decided before anyone has seen what it would hide).
+--
+-- It gates one thing only — a replay's visibility (`public_replays` below) —
+-- never a score. Scores and rankings post and rank normally throughout: a
+-- friend's turn count tells you you're behind, not how they did it. That is a
+-- deliberate, narrower promise than "hide the whole map": with no accounts to
+-- check identity against, a stricter blackout could only be enforced by hiding
+-- every reader equally, which would also hide a submitter's own confirmation
+-- that their score landed — so the boundary is drawn at "the moves", the one
+-- thing a challenge like this is actually trying to keep secret.
+--
+-- The bound below is a sanity cap, not a promise about the *right* embargo
+-- length — same spirit as the loose checks on this table's other columns.
+-- ---------------------------------------------------------------------------
+alter table public.games add column if not exists embargo_until timestamptz;
+
+alter table public.games drop constraint if exists games_embargo_bounds;
+alter table public.games add  constraint games_embargo_bounds check (
+  embargo_until is null or embargo_until <= first_seen_at + interval '90 days'
+);
+
+-- ---------------------------------------------------------------------------
 -- scores: one row per submission, never deduplicated. turns is the score (lower
 -- is better), fewest lost breaks a tie — the same rule the game uses. hand is how
 -- many turns the player actually decided; the rest were autoplayed, disclosed
@@ -387,12 +415,26 @@ create table if not exists public.bot_scores (
 -- for `rules_version` against it errors and is swallowed by `watchableIds`'s
 -- `.catch(() => [])`, which is what takes down every Watch link, not just a new
 -- game's.
+--
+-- The join/where below is the other half of `games.embargo_until`: a replay
+-- whose map is still embargoed is filtered out here, at the one place every
+-- reader of a replay goes through (this function, the game's own Watch link,
+-- and nowhere else — see the comment on that column). Matched through
+-- `scores.game_key` rather than `game_logs.game_key`: a log is stamped with
+-- whatever digest the *game* held at upload time, which is not necessarily the
+-- key this site filed the map under (`findTwin` in submit.mjs can fold it onto
+-- an older one), while a score's `game_key` is guaranteed by its foreign key to
+-- name a row that actually exists in `games`. A `left join` rather than an
+-- inner one so a log with no matching `games` row (nothing has registered that
+-- exact key yet) reads as "no embargo" rather than vanishing.
 -- ---------------------------------------------------------------------------
 create or replace view public.public_replays as
 select distinct on (l.match_id)
   l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
-where exists (select 1 from public.scores s where s.match_id = l.match_id)
+join public.scores s on s.match_id = l.match_id
+left join public.games g on g.game_key = s.game_key
+where g.embargo_until is null or g.embargo_until <= now()
 order by l.match_id, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
@@ -459,7 +501,11 @@ select
   -- matching standings.mjs's bestBot() null case.
   bot.turns as bot_turns,
   bot.lost  as bot_lost,
-  bot.bot   as bot_name
+  bot.bot   as bot_name,
+  -- Read straight off games (this view's own base table), never re-derived:
+  -- see the comment on the column itself for what it gates and why it's here
+  -- rather than on a per-config table.
+  g.embargo_until
 from public.games g
 left join lateral (
   select s.turns, s.lost, s.hand, s.by_name, u.name as user_name

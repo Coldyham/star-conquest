@@ -1,7 +1,9 @@
 # Star Conquest leaderboard
 
 A small public board for challenge links. Win a game, press **Challenge a friend**,
-paste the link here with a name, and the score joins the ranking for that map.
+paste the link here with a name, and the score joins the ranking for that map. A
+plain settings-share link works too, with no score yet: it registers the setup so
+others can play it and post their own — see "Sharing a setup with no score" below.
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
 API. It is a separate Netlify site from the game itself; nothing in the game or
@@ -14,7 +16,7 @@ its `web/` build depends on it.
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
-| [`submit.html`](submit.html) | paste a challenge link to post a score |
+| [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the
@@ -85,6 +87,49 @@ With `findTwin` in place a split can no longer *grow*, so this is tidying rather
 than rescue, and the folded-away key still works as a link: `js/game.mjs` reads
 an unknown key through `aliasFor` and forwards a bookmark to wherever its map
 now lives.
+
+## Sharing a setup with no score
+
+A challenge link is not the only thing `submit.html` takes. `js/token-decode.mjs`
+reads any Star Conquest link, and `challenge` comes back `null` for a plain
+settings-share link (or a challenge link with nothing on it — `Challenge`'s own
+`turns <= 0` sentinel). The form notices and switches shape: no name, no tags
+(a tag needs a posted score to attach to — `config_tags.score_id`), just the
+link and an optional embargo. Submitting registers the `games` row and sends you
+straight to the map's page — there to hand around, played on and posted to by
+whoever you share it with, the same as any other map on the board.
+
+The one thing it refuses is a setup with no seed pinned (`Settings.seed is
+None` — "roll a fresh map at start"): there would be no single map to register,
+so the form says so rather than silently hashing an ambiguous setup. Pin a seed
+in the game's Advanced menu before sharing a link this way.
+
+### Embargoed replays
+
+The same form takes an optional **days to hide replays**. Fill it in and, the
+*first* time that exact map reaches the board (whether that is this submission
+or a later score on it — `games` is append-only, so this can only ever be
+decided once, and is ignored on every insert after), `games.embargo_until` is
+set to that many days out. Until it passes, that map's **Watch** links are gone
+everywhere on the board: `public_replays` (schema.sql) filters out a match
+whose map is still embargoed, which is the one place every replay read goes
+through — the game's own Watch link included.
+
+Scores and rankings are unaffected — they post and rank normally the whole
+time. This is deliberately a narrower promise than hiding the map outright:
+with no accounts here, there is no way to let a submitter see their *own*
+early result without either trusting a client-held secret (which anyone who
+has the link could also hold) or making up an identity system this board has
+never needed. So the boundary is drawn at the one thing an embargo like this
+is actually trying to protect — the moves — and it is drawn for everyone
+alike, the person who set it included. If you want to challenge friends to beat
+a score without anyone (yourself too) being able to watch how it was done
+until a deadline, this is that feature: register the map with an embargo
+before anyone plays it, or set one on your own first submission.
+
+The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
+own `first_seen_at`), not a promise about the *right* length — same spirit as
+the loose checks on every other column of that table.
 
 ## Same setup, different seed
 
@@ -320,12 +365,15 @@ The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
 (A bot's row gets a Watch link the same way, but built rather than fetched —
 see "Watching a bot's replay" under "How the bots did" above.)
 
-**Posting a score is what publishes that replay.** `public_replays` (schema.sql)
-is `game_logs` restricted to the matches a posted score points at, so a game that
-merely uploaded itself because *Share replays* was on stays unreadable. That rule
-lives in the view's `where` clause rather than in the function, which selects
-from the view and has no condition of its own to drift. `submit.html` says so on
-the form, since that is where the decision is actually made.
+**Posting a score is what publishes that replay** — unless the map it belongs to
+is still embargoed, in which case nothing is, whoever posted it. `public_replays`
+(schema.sql) is `game_logs` restricted to the matches a posted score points at
+*and* whose map's `games.embargo_until` has either passed or was never set, so a
+game that merely uploaded itself because *Share replays* was on stays unreadable
+either way. That rule lives in the view's `where` clause rather than in the
+function, which selects from the view and has no condition of its own to drift.
+`submit.html` says so on the form, since that is where the decision is actually
+made — see "Embargoed replays" above for how a map ends up embargoed at all.
 
 The link is only rendered for ids `public_replays` actually returns
 (`watchableIds` in `js/game.mjs`), so it can never lead to a 404 — a score can
@@ -474,8 +522,11 @@ directly.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
-- **Wins only.** The game only offers the challenge link when the human won and
-  played at least one turn by hand, so nothing else can be posted.
+- **A score is wins only.** The game only offers the challenge link when the
+  human won and played at least one turn by hand, so nothing else can be
+  posted as a score. A setup with no result behind it is the exception — see
+  "Sharing a setup with no score" above — but that registers a map, never a
+  score.
 - **A config's name is first-wins and permanent**, and a `config_key` can be
   squatted or posted for a setup nobody has played — see "Same setup, different
   seed" above. Tags don't share that trade — they accumulate — but they do
