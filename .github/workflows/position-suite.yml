@@ -17,16 +17,16 @@
 #
 # Per-position cost is wildly uneven — most resolve in under a second, a few
 # (a long game with a crowded AI roster) take 30-170s each across six bots —
-# so 25 minutes only got through 5 of 15 games on the first real run.
-# Measured throughput put the full run at 45-55 minutes; 60 leaves headroom.
+# so 25 minutes only got through 5 of 15 games on the first real run. That was
+# also before knower replayed at its real search depth (below), which is the
+# roster's own slow one, so the 60-minute budget stays even now the roster is
+# smaller — better idle headroom than a second timeout bump.
 #
-# The default roster drops heuristic and rusherplus: both sit at the bottom of
-# the full-roster ladder in docs/bot-design.md (~5% win share each) and add
-# little beyond "can the weakest bot recover", at the cost of 2 of 6 bots'
-# worth of runtime. knower now also replays at tools.bot_replay.REPLAY_AUX
-# (depth 12, its measured-best profile — see position_suite.py --aux) rather
-# than the untuned depth-1 default, matching what the leaderboard's bot column
-# measures it at.
+# The default roster is just knower and marshal: the two still being tuned,
+# not the full lineup docs/bot-design.md ladders against each other. knower
+# also replays at tools.bot_replay.REPLAY_AUX (depth 12, its measured-best
+# profile — see position_suite.py --aux) rather than the untuned depth-1
+# default, matching what the leaderboard's bot column measures it at.
 name: Position suite
 
 on:
@@ -39,7 +39,7 @@ on:
       bots:
         description: "position_suite.py --bots (space-separated; blank = every registered strategy)"
         required: false
-        default: "knower marshal thinker claudebot"
+        default: "knower marshal"
 
 jobs:
   position-suite:
