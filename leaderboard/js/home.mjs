@@ -2,7 +2,8 @@ import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./ap
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botLeadBadge, clear, configBadge, el, embargoBadge, mapSummary, relativeTime, showError,
+  botChips, botLeadBadge, clear, configBadge, el, embargoBadge, embargoNote, leaderCredit, mapSummary,
+  relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { configTitle } from "./setup.mjs";
@@ -193,18 +194,23 @@ async function configHead(game) {
 }
 
 function row(game) {
-  const name = (game.best_user_name || "").trim() || "anonymous";
-  // A dead heat on turns *and* lost is a shared record, so credit all of it.
-  // best_holders is absent unless the game_summary view is current; treat a
-  // missing count as the one leading name.
-  const others = Math.max(0, Number(game.best_holders || 1) - 1);
-  const holder = others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
-  const detail = [
-    `${game.best_lost} lost`,
-    game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
-    `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`,
-    relativeTime(game.last_activity),
-  ].filter(Boolean).join(" · ");
+  const holder = leaderCredit(game);
+  const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
+  // While embargoed, the card keeps the leader and the turn count next to
+  // them (the headline figure below) — a target to chase — but drops every
+  // other detail this line would otherwise carry: lost/hand say more about
+  // *how* a score was made than the bare turn count does, and last activity
+  // is exactly the kind of "who's trying, and when" signal an embargo is
+  // meant to keep from the rest of the group. See game.mjs's renderEmbargoed
+  // for the same cut on the map's own page.
+  const detail = embargoNote(game.embargo_until)
+    ? scoreCount
+    : [
+        `${game.best_lost} lost`,
+        game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
+        scoreCount,
+        relativeTime(game.last_activity),
+      ].filter(Boolean).join(" · ");
 
   const body = el("a", { class: "card-body", href: `game.html?key=${encodeURIComponent(game.game_key)}` }, [
     el("div", { class: "card-main" }, [

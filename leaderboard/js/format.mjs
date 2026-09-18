@@ -187,6 +187,23 @@ export function botChips(game) {
 }
 
 /**
+ * "Name" or "Name & N others" for a map's current best score — the one thing
+ * `game_summary`'s aggregate says about who is ahead, independent of the full
+ * per-score list. Shared by the list card (home.mjs's row()) and the map's own
+ * page, which falls back to this alone while a map is still embargoed (see
+ * game.mjs's renderEmbargoed) — an embargo hides the rest of the board, but not
+ * the one fact that gives a friend something left to chase.
+ */
+export function leaderCredit(game) {
+  const name = (game.best_user_name || "").trim() || "anonymous";
+  // A dead heat on turns *and* lost is a shared record, so credit all of it.
+  // best_holders is absent unless the game_summary view is current; treat a
+  // missing count as the one leading name.
+  const others = Math.max(0, Number(game.best_holders || 1) - 1);
+  return others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
+}
+
+/**
  * "Bot leads" — the marker a list card carries when nobody has beaten this
  * map's best bot yet. `game.mjs`'s botVerdict spells the same "behind"/"tied"
  * verdict out as a sentence on the map's own page; a list card only has room

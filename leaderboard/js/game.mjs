@@ -3,7 +3,7 @@ import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
-  embargoNote, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
 import { aliasFor } from "./token-decode.mjs";
@@ -268,6 +268,54 @@ async function replayVersions(scores) {
   return new Map(rows.map((r) => [r.match_id, r.rules_version]));
 }
 
+/**
+ * The map page while its embargo is still live (`games.embargo_until`,
+ * schema.sql) — a compromise, not a blackout. The full per-score list is
+ * never even requested here, so a competitor cannot see who else has played,
+ * when, or how: lost, hand and submission time all say more about *how* a
+ * score was made than the bare turn count does, and that "how" is exactly
+ * what an embargo exists to keep back. What does show is `game_summary`'s own
+ * aggregate — who currently holds the best turn count, and how many scores
+ * exist in total — because the embargo is meant to leave something to chase,
+ * not nothing at all: without a target, there is no reason to keep trying
+ * before the reveal.
+ *
+ * The bots table is unaffected and fetched the same as always: a bot's game
+ * is a pure function of the setup and the code (docs/bot-design.md), already
+ * fully public via `bot_scores`, so there is no *person's* strategy in it to
+ * protect. Its verdict is built off the same aggregate rather than a fetched
+ * score row — `{turns, lost}` is all `humanVsBots`/`bestBot` ever read.
+ *
+ * The play link is always the setup alone (`freshPlayLink`), never a score's
+ * `raw_token` — that token is a full challenge link and would smuggle out the
+ * very lost/hand/by fields this view is holding back, sitting right there in
+ * the page's own HTML whether or not they're ever rendered as text.
+ */
+async function renderEmbargoed(game, embargoText, bots) {
+  subtitle.textContent = [
+    game.score_count
+      ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
+      : "No scores posted yet.",
+    embargoText,
+  ].filter(Boolean).join(" · ");
+  clear(sortTarget);
+
+  const lede = game.score_count
+    ? el("p", { class: "lede" }, [
+        "Currently ahead: ",
+        el("strong", { text: leaderCredit(game) }),
+        ` — ${game.best_turns} turns. `,
+        "Every other score, and every replay, stays hidden until the embargo lifts.",
+      ])
+    : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
+
+  const link = await freshPlayLink(game);
+  clear(target).append(lede, ...(link ? [link] : []));
+
+  const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
+  await renderBots(bots, best, game.settings_json);
+}
+
 async function load() {
   mountMyScores();
   if (!configured()) {
@@ -282,12 +330,12 @@ async function load() {
   }
 
   try {
-    const [games, scores, bots] = await Promise.all([
+    // Scores are deliberately not fetched here — only once the map is known
+    // not to be embargoed, below. Fetching the full list up front and simply
+    // not rendering it would still hand every score's detail to the page
+    // (and anyone watching the network tab) before a single row is drawn.
+    const [games, bots] = await Promise.all([
       select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
-      select(
-        `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
-          `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
-      ),
       // The one query allowed to fail quietly. A board running an older
       // schema.sql has no bot_scores table, and PostgREST answers 404 — which
       // inside Promise.all would reject the whole batch and take the human score
@@ -319,13 +367,21 @@ async function load() {
     const game = games[0];
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(configBadge(game), ...botChips(game));
+
     const embargo = embargoNote(game.embargo_until);
-    subtitle.textContent = [
-      scores.length
-        ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
-        : "No scores posted yet.",
-      embargo,
-    ].filter(Boolean).join(" · ");
+    if (embargo) {
+      await renderEmbargoed(game, embargo, bots);
+      return;
+    }
+
+    const scores = await select(
+      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
+        `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
+    );
+
+    subtitle.textContent = scores.length
+      ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
+      : "No scores posted yet.";
     clear(sortTarget).append(sortToggle());
 
     // The server order above (turns then lost then earliest submission) is

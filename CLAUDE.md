@@ -530,7 +530,7 @@ intact.
       live `Settings`: `main` resolves "roll a fresh seed" at game start and never
       writes it back.
   - **A map can be registered with no score at all, and can carry a one-time
-    reveal date over its replays.** `js/submit.mjs`'s `ensureGame` accepts any
+    reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
     Star Conquest link, not just a challenge one — `token-decode.mjs`'s
     `decodeToken` returns `challenge: null` for a plain settings-share link (or
     one carrying `Challenge`'s own `turns <= 0` sentinel) rather than rejecting
@@ -540,13 +540,24 @@ intact.
     rides along on that same insert, optionally, and only there: `games` is
     append-only like everything else on this board, so an embargo can only
     ever be decided the one moment a map's row does not yet exist, never
-    retrofitted onto one already on the board. It gates one thing —
-    `public_replays` above filters out a match whose map is still embargoed —
-    never a score: scores and rankings post and rank normally throughout,
-    since there is no account system here to tell a submitter's own later read
-    apart from anyone else's, so the only boundary that can be enforced
-    cleanly is a blackout on the moves themselves, applied identically to
-    every reader, the setter included.
+    retrofitted onto one already on the board.
+    - **It gates the replay and the detail behind it, never the fact that a
+      lead exists.** `public_replays` filters out a match whose map is still
+      embargoed — the DB-level half, real for every caller, not just the
+      site's own UI — and `game.mjs`'s `renderEmbargoed` is the other half: it
+      never requests the per-score list at all while a map is embargoed, only
+      `game_summary`'s own aggregate (`best_turns`/`best_user_name`/
+      `best_holders`/`score_count`), so there is nothing for the page or its
+      network tab to hand out beyond who is ahead and by how many turns. Lost,
+      hand and submission time stay off the page entirely, along with every
+      other score — a stricter cut would leave nothing to chase, which
+      defeats a deadline built to be raced against. `home.mjs`'s card makes
+      the same cut on the list. Scores and rankings themselves are otherwise
+      unaffected by an embargo — they post and rank normally throughout,
+      since there is no account system here to tell a submitter's own later
+      read apart from anyone else's, so the only boundary that can be
+      enforced for everyone alike, the setter included, is on *how* a score
+      was made rather than on whether one exists.
   - **A replay is never shown as if it still reproduced the game once the engine
     has moved past it.** `GameLog.is_current` (`rules_version == engine.
     RULES_VERSION`) is the same check on both sides of the wire, and both were

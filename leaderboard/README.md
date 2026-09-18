@@ -110,22 +110,35 @@ The same form takes an optional **days to hide replays**. Fill it in and, the
 *first* time that exact map reaches the board (whether that is this submission
 or a later score on it — `games` is append-only, so this can only ever be
 decided once, and is ignored on every insert after), `games.embargo_until` is
-set to that many days out. Until it passes, that map's **Watch** links are gone
-everywhere on the board: `public_replays` (schema.sql) filters out a match
-whose map is still embargoed, which is the one place every replay read goes
-through — the game's own Watch link included.
+set to that many days out.
 
-Scores and rankings are unaffected — they post and rank normally the whole
-time. This is deliberately a narrower promise than hiding the map outright:
-with no accounts here, there is no way to let a submitter see their *own*
-early result without either trusting a client-held secret (which anyone who
-has the link could also hold) or making up an identity system this board has
-never needed. So the boundary is drawn at the one thing an embargo like this
-is actually trying to protect — the moves — and it is drawn for everyone
-alike, the person who set it included. If you want to challenge friends to beat
-a score without anyone (yourself too) being able to watch how it was done
-until a deadline, this is that feature: register the map with an embargo
-before anyone plays it, or set one on your own first submission.
+Until it passes, the map's page (`game.html`) shows a target, not a board: how
+many scores exist, who currently holds the best turn count, and that turn
+count itself — enough to know you're behind and by how much, which is the
+whole point of a deadline like this ("who can beat this before the embargo
+lifts" needs *something* to chase). Everything past that is gone: the full
+per-score list, ships lost, hand count, submission times, and every **Watch**
+link. `game.mjs` never even requests the per-score list while embargoed — only
+`game_summary`'s own aggregate (`best_turns`/`best_user_name`/`best_holders`/
+`score_count`), so there is nothing for the page (or its network tab) to leak
+beyond that one figure. `public_replays` (schema.sql) is the DB-level half of
+the same cut: it filters out a match whose map is still embargoed, which is
+the one place every replay read goes through, the game's own Watch link
+included — so unlike the score list (client-side only, matching how openly
+readable `scores` already is everywhere else on this board), a replay stays
+unreadable at the database, not just unrendered.
+
+This is deliberately narrower than hiding the map outright: with no accounts
+here, there is no way to let a submitter see their *own* early result without
+either trusting a client-held secret (which anyone who has the link could also
+hold) or making up an identity system this board has never needed. So the
+boundary is drawn at *how* a score was made — the moves, and the secondary
+detail (lost, hand, timing) that hints at them — never at the turn count
+itself, and it is drawn for everyone alike, the person who set it included.
+If you want to challenge friends to beat a score without anyone (yourself
+too) being able to see how it was done, while still leaving them a number to
+chase, this is that feature: register the map with an embargo before anyone
+plays it, or set one on your own first submission.
 
 The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
 own `first_seen_at`), not a promise about the *right* length — same spirit as
