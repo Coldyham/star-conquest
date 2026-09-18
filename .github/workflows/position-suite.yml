@@ -1,0 +1,85 @@
+# Measure the roster against positions from real human games rather than
+# bot-vs-bot self-play — tools/position_suite.py --supabase. See "Positions
+# from real games" in docs/bot-design.md for what `faster`/`median gain`/
+# `recovered` mean and why they must not be blurred together.
+#
+# The one of the three that needs the secret key: game_logs (the replays
+# themselves) has no public read policy. `--games` bounds the corpus — the
+# first attempt at this ran unbounded, hit this job's own timeout with
+# nothing printed yet (Python buffers stdout to a non-tty, so a mid-run kill
+# loses everything), and never got a report out. `python -u` plus `tee`
+# instead of a bare `>>` redirect means a kill now still leaves whatever
+# printed so far in both the summary and the raw log.
+#
+# Split out of a single human-score-report.yml alongside config-census.yml
+# and setup-sweep.yml so a slow/large corpus here can't cost those two their
+# turn, and so this can be rerun on its own while tuning --games/--bots.
+#
+# Per-position cost is wildly uneven — most resolve in under a second, a few
+# (a long game with a crowded AI roster) take 30-170s each across six bots —
+# so 25 minutes only got through 5 of 15 games on the first real run. That was
+# also before knower replayed at its real search depth (below), which is the
+# roster's own slow one, so the 60-minute budget stays even now the roster is
+# smaller — better idle headroom than a second timeout bump.
+#
+# The default roster is just knower and marshal: the two still being tuned,
+# not the full lineup docs/bot-design.md ladders against each other. knower
+# also replays at tools.bot_replay.REPLAY_AUX (depth 12, its measured-best
+# profile — see position_suite.py --aux) rather than the untuned depth-1
+# default, matching what the leaderboard's bot column measures it at.
+name: Position suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "position_suite.py --games (0 = every game in the corpus)"
+        required: false
+        default: "15"
+      bots:
+        description: "position_suite.py --bots (space-separated; blank = every registered strategy)"
+        required: false
+        default: "knower marshal"
+
+jobs:
+  position-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the board is configured
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_KEY" ]; }; then
+            echo "No Supabase secrets set — skipping (see bot-replay.yml's header)." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: position_suite.py --supabase
+        if: steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GAMES: ${{ inputs.games }}
+          BOTS: ${{ inputs.bots }}
+        run: |
+          args=(--supabase --games "$GAMES")
+          if [ -n "$BOTS" ]; then
+            args+=(--bots $BOTS)
+          fi
+          echo "## position_suite.py ${args[*]}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -u tools/position_suite.py "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

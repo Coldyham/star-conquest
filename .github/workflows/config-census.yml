@@ -1,0 +1,44 @@
+# Which setups people actually play — tools/config_census.py, off the board's
+# public tables. No secret needed: `games`/`scores` carry a public read policy
+# and config_census reads the publishable key straight out of
+# leaderboard/js/config.mjs. See "Positions from real games" in
+# docs/bot-design.md for why this matters (a margin fitted at config.py's
+# defaults may be fitted for a regime nobody actually plays).
+#
+# Split out of a single human-score-report.yml so this, position-suite.yml
+# and setup-sweep.yml can each be reviewed and rerun on their own — they share
+# no state, so bundling them only meant one slow tool blocking the others.
+name: Config census
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_maps:
+        description: "config_census.py --no-maps (skip lane-timing math)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: config_census.py
+        env:
+          NO_MAPS: ${{ inputs.no_maps }}
+        run: |
+          args=()
+          if [ "$NO_MAPS" = "true" ]; then
+            args+=(--no-maps)
+          fi
+          echo "## config_census.py ${args[*]}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -u tools/config_census.py "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

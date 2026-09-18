@@ -182,15 +182,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="read the shared corpus instead of local games")
     parser.add_argument("--bot-timeout", type=float, default=0.0,
                         help="seconds per decide() before a seat forfeits the turn")
+    parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
+                        help="override a bot's aux for this run, e.g. --aux knower=8 "
+                             "(default: tools.bot_replay.REPLAY_AUX, the same profile "
+                             "the leaderboard's bot column replays each bot at)")
+    parser.add_argument("--budget-scale", type=float, default=None,
+                        help="multiply the bots' own per-decide wall-clock guards by "
+                             "this (default: tools.bot_replay.BUDGET_SCALE). Sized for "
+                             "the browser build; nothing here waits on a frame, and a "
+                             "guard that never trips is what keeps a result "
+                             "reproducible. 1 restores the in-game behaviour")
     parser.add_argument("--csv", type=Path, default=None,
                         help="also write every row here, for analysis elsewhere")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Lazy, and read even off the local path: this is a batch tool with nothing
+    # waiting on a frame, so — same reasoning as tools/bot_replay.py — a bot's own
+    # wall-clock guard is worth lifting out of the way, and a bot with a measured
+    # best profile (today, just knower) is worth measuring there rather than at
+    # its untuned default.
+    from tools.bot_replay import BUDGET_SCALE, replay_aux  # noqa: PLC0415
+
     args = parse_args(argv)
+    try:
+        overrides = dict(item.split("=", 1) for item in args.aux)
+        overrides = {bot: float(value) for bot, value in overrides.items()}
+    except ValueError:
+        print(f"--aux wants BOT=VALUE pairs, got: {' '.join(args.aux)}", file=sys.stderr)
+        return 2
+
     loaded = ai.load_models()
     roster = args.bots or ai.available_strategies()
+    aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
+    profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
+    scale = BUDGET_SCALE if args.budget_scale is None else args.budget_scale
+    widened = ai.set_budget_scale(scale)
 
     logs = supabase_logs(args.games) if args.supabase else local_logs(args.dir)
     if args.games > 0:
@@ -203,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
     plan = [(log, turn) for log in logs
             for turn in sim.positions(log, args.every, args.skip_last)]
     print(f"models {', '.join(loaded) or 'none'}")
+    print(f"replay profile: {profile or 'every bot at its default aux'}"
+          + (f" · wall-clock guards x{scale:g} on {', '.join(widened)}"
+             if widened and scale != 1 else ""))
     print(f"{len(logs)} games · {len(plan)} positions · {len(roster)} bots "
           f"= {len(plan) * len(roster)} runs")
 
@@ -212,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         for bot in roster:
             try:
                 by_bot[bot].append(
-                    sim.play_from(log, turn, bot, max_turns=args.max_turns,
+                    sim.play_from(log, turn, bot, aux=aux_for(bot), max_turns=args.max_turns,
                                   bot_timeout=args.bot_timeout))
             except Exception as err:  # noqa: BLE001 — one bad position, not a dead run
                 print(f"  {log.match_id[:8]}@{turn} {bot}: skipped ({err})")
