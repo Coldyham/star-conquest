@@ -92,6 +92,47 @@ length across the parameter space" above, is very likely one regime of three. A
 gap found here is a hypothesis; confirming it still wants a paired sweep with a
 z-score, the same as everything else in this file.
 
+## The first census and setup sweep off the live board (2026-09)
+
+`tools/config_census.py` and `tools/setup_sweep.py` ran for the first time
+against the shared corpus once it grew past a handful of games (47 games, 87
+scores at the time of this run) — answering "Lane length across the parameter
+space"'s open question of which regime people actually sit in.
+
+**They mostly sit in the regime the roster is fitted for.** Median lane length
+clustered at 2-6 turns across the corpus (`ship_ly_per_turn` mostly 6-7.5,
+`config`'s own default is 6) — the middle third of the three regimes that
+section warns about, not either edge. Balance knobs otherwise sit close to
+default (`combat_jitter` 0.08-0.10, `defender_advantage` 1.0-1.05). Mode is
+overwhelmingly `random`, 3-5 players, 12-33 nodes.
+
+`setup_sweep.py` then ran the most-played real setup found there (random, 3
+players, 13 nodes, the knobs above, vs knower+marshal) through three arms —
+defaults, +map size only, +every knob ("played") — 40 seeds a cell:
+
+    bot          defaults    +map size    played
+    marshal        37.5%       45.0%      40.0%
+    knower         32.5%       30.0%      40.0%
+    thinker        22.5%       10.0%      15.0%
+    claudebot      15.0%        5.0%       0.0%
+    heuristic       7.5%        2.5%       2.5%
+    rusherplus      2.5%        5.0%       0.0%
+
+Only one of the 18 defaults-vs-arm comparisons cleared |z| >= 1.96
+(claudebot, defaults to played, z = -2.55), against ~0.9 expected from chance
+alone across that many comparisons — so per the tool's own warning, this is
+not yet a finding. It is a direction worth re-checking with a dedicated
+paired sweep if it recurs: claudebot lost every one of 40 games on the setup
+actually played, having won 15% at the defaults it was tuned against.
+
+`position_suite.py --supabase` was also run (15 games, every 20 turns, full
+6-bot roster) but real per-position cost turned out far more uneven than
+budgeted — most positions resolve in under a second, a handful (a long game
+with a crowded AI roster) take 30-170s each across the roster — so the first
+attempt only covered 5 of 15 games before its job timeout. No numbers from it
+are recorded here; see `.github/workflows/position-suite.yml` for the rerun
+with a wider budget once it completes.
+
 ## `models/knower.py` and simultaneous resolution
 
 Because turns resolve simultaneously — `_collect_orders` hands every seat the
