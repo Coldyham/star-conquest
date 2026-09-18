@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import signal
 import statistics
 import sys
 import time
@@ -61,6 +62,21 @@ from tests import sim  # noqa: E402 — the shared headless harness
 # formality every bot completes identically.
 DEFAULT_EVERY = 20
 DEFAULT_SKIP_LAST = 20
+
+
+class _Cancelled(BaseException):
+    """Raised from the SIGTERM handler below, never caught as an ordinary error.
+
+    A CI timeout kills the process a fixed, short grace period after asking it to
+    stop (GitHub Actions: SIGINT then SIGTERM, ~7.5s apart before SIGKILL), and a
+    single position can cost over a hundred seconds — so waiting for the current
+    position to finish before checking a flag can miss that whole window. Raising
+    immediately, the same way Python's own SIGINT-to-KeyboardInterrupt already
+    does, is what makes a slow position interruptible rather than merely the gaps
+    between them. Subclassing ``BaseException`` (not ``Exception``) keeps it out
+    of ``except Exception`` — a genuine cancellation must never be logged and
+    swallowed as "one bad position, skipped".
+    """
 
 
 def local_logs(directory: Path | None = None) -> list[replay.GameLog]:
@@ -237,28 +253,44 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(logs)} games · {len(plan)} positions · {len(roster)} bots "
           f"= {len(plan) * len(roster)} runs")
 
+    def _cancel(signum, frame):  # noqa: ARG001
+        raise _Cancelled()
+
+    signal.signal(signal.SIGTERM, _cancel)
+
     by_bot: dict[str, list[sim.PositionResult]] = {bot: [] for bot in roster}
     started = time.time()
-    for index, (log, turn) in enumerate(plan, 1):
-        for bot in roster:
-            try:
-                by_bot[bot].append(
-                    sim.play_from(log, turn, bot, aux=aux_for(bot), max_turns=args.max_turns,
-                                  bot_timeout=args.bot_timeout))
-            except Exception as err:  # noqa: BLE001 — one bad position, not a dead run
-                print(f"  {log.match_id[:8]}@{turn} {bot}: skipped ({err})")
-        print(f"  [{index}/{len(plan)}] {log.match_id[:8]} turn {turn}"
-              f" · {time.time() - started:.0f}s", end="\r", flush=True)
+    index = 0
+    stopped = False
+    try:
+        for index, (log, turn) in enumerate(plan, 1):
+            for bot in roster:
+                try:
+                    by_bot[bot].append(
+                        sim.play_from(log, turn, bot, aux=aux_for(bot), max_turns=args.max_turns,
+                                      bot_timeout=args.bot_timeout))
+                except Exception as err:  # noqa: BLE001 — one bad position, not a dead run
+                    print(f"  {log.match_id[:8]}@{turn} {bot}: skipped ({err})")
+            print(f"  [{index}/{len(plan)}] {log.match_id[:8]} turn {turn}"
+                  f" · {time.time() - started:.0f}s", end="\r", flush=True)
+    except (KeyboardInterrupt, _Cancelled):
+        # A CI timeout, or a person losing patience — either way the roster still
+        # played `index` real positions, and discarding that in favour of nothing
+        # is a worse outcome than a smaller, honestly-labelled sample.
+        stopped = True
     print(" " * 70, end="\r")
+    if stopped:
+        print(f"stopped after {index}/{len(plan)} positions — reporting on what finished")
 
     report(by_bot)
     if args.csv:
         rows = [asdict(r) | {"gain": r.gain} for rows in by_bot.values() for r in rows]
-        with open(args.csv, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"wrote {len(rows)} rows to {args.csv}")
+        if rows:
+            with open(args.csv, "w", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"wrote {len(rows)} rows to {args.csv}")
     return 0
 
 
