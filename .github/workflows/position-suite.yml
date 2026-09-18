@@ -14,6 +14,11 @@
 # Split out of a single human-score-report.yml alongside config-census.yml
 # and setup-sweep.yml so a slow/large corpus here can't cost those two their
 # turn, and so this can be rerun on its own while tuning --games/--bots.
+#
+# Per-position cost is wildly uneven — most resolve in under a second, a few
+# (a long game with a crowded AI roster) take 30-170s each across six bots —
+# so 25 minutes only got through 5 of 15 games on the first real run.
+# Measured throughput put the full run at 45-55 minutes; 60 leaves headroom.
 name: Position suite
 
 on:
@@ -31,7 +36,7 @@ on:
 jobs:
   position-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
