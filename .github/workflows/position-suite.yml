@@ -17,12 +17,13 @@
 #
 # Per-position cost is wildly uneven — most resolve in under a second, a few
 # (a long game with a crowded AI roster, or knower at its real search depth
-# below) take 30-170s each — so this has hit its own timeout twice while the
-# roster and knower's aux were still being worked out. Rather than chase the
-# exact minutes a --games/--bots combination needs, position_suite.py now
+# below) take 30-170s each. The knower+marshal run at 60 minutes reached 101
+# of 113 positions, measured throughput putting the full 15 games at 65-70
+# minutes — 90 leaves real margin for a complete run in one go. Chasing the
+# exact minutes is no longer the fallback either way: position_suite.py
 # catches the timeout's SIGTERM and reports on however many positions it
-# reached instead of losing the run outright (see `_Cancelled` there) — so
-# 60 minutes stays a working budget, not a number to keep raising.
+# reached instead of losing the run outright (see `_Cancelled` there), so a
+# --games/--bots combination that does run long still produces something.
 #
 # The default roster is just knower and marshal: the two still being tuned,
 # not the full lineup docs/bot-design.md ladders against each other. knower
@@ -46,7 +47,7 @@ on:
 jobs:
   position-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
