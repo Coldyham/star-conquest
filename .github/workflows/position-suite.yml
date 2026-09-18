@@ -14,6 +14,19 @@
 # Split out of a single human-score-report.yml alongside config-census.yml
 # and setup-sweep.yml so a slow/large corpus here can't cost those two their
 # turn, and so this can be rerun on its own while tuning --games/--bots.
+#
+# Per-position cost is wildly uneven — most resolve in under a second, a few
+# (a long game with a crowded AI roster) take 30-170s each across six bots —
+# so 25 minutes only got through 5 of 15 games on the first real run. That was
+# also before knower replayed at its real search depth (below), which is the
+# roster's own slow one, so the 60-minute budget stays even now the roster is
+# smaller — better idle headroom than a second timeout bump.
+#
+# The default roster is just knower and marshal: the two still being tuned,
+# not the full lineup docs/bot-design.md ladders against each other. knower
+# also replays at tools.bot_replay.REPLAY_AUX (depth 12, its measured-best
+# profile — see position_suite.py --aux) rather than the untuned depth-1
+# default, matching what the leaderboard's bot column measures it at.
 name: Position suite
 
 on:
@@ -24,14 +37,14 @@ on:
         required: false
         default: "15"
       bots:
-        description: "position_suite.py --bots (blank = every registered strategy)"
+        description: "position_suite.py --bots (space-separated; blank = every registered strategy)"
         required: false
-        default: ""
+        default: "knower marshal"
 
 jobs:
   position-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
