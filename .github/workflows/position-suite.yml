@@ -1,0 +1,72 @@
+# Measure the roster against positions from real human games rather than
+# bot-vs-bot self-play — tools/position_suite.py --supabase. See "Positions
+# from real games" in docs/bot-design.md for what `faster`/`median gain`/
+# `recovered` mean and why they must not be blurred together.
+#
+# The one of the three that needs the secret key: game_logs (the replays
+# themselves) has no public read policy. `--games` bounds the corpus — the
+# first attempt at this ran unbounded, hit this job's own timeout with
+# nothing printed yet (Python buffers stdout to a non-tty, so a mid-run kill
+# loses everything), and never got a report out. `python -u` plus `tee`
+# instead of a bare `>>` redirect means a kill now still leaves whatever
+# printed so far in both the summary and the raw log.
+#
+# Split out of a single human-score-report.yml alongside config-census.yml
+# and setup-sweep.yml so a slow/large corpus here can't cost those two their
+# turn, and so this can be rerun on its own while tuning --games/--bots.
+name: Position suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "position_suite.py --games (0 = every game in the corpus)"
+        required: false
+        default: "15"
+      bots:
+        description: "position_suite.py --bots (blank = every registered strategy)"
+        required: false
+        default: ""
+
+jobs:
+  position-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the board is configured
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_KEY" ]; }; then
+            echo "No Supabase secrets set — skipping (see bot-replay.yml's header)." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: position_suite.py --supabase
+        if: steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GAMES: ${{ inputs.games }}
+          BOTS: ${{ inputs.bots }}
+        run: |
+          args=(--supabase --games "$GAMES")
+          if [ -n "$BOTS" ]; then
+            args+=(--bots $BOTS)
+          fi
+          echo "## position_suite.py ${args[*]}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -u tools/position_suite.py "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

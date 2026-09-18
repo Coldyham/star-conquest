@@ -1,0 +1,41 @@
+# Does the roster's ranking change on the setup people actually play, versus
+# config.py's defaults? — tools/setup_sweep.py. See "Lane length across the
+# parameter space" and "Positions from real games" in docs/bot-design.md.
+#
+# No secret needed: like config_census.py (which it calls to find the
+# most-played setup), it reads only the board's public tables through the
+# publishable key in leaderboard/js/config.mjs.
+#
+# Split out of a single human-score-report.yml alongside config-census.yml
+# and position-suite.yml so this can be rerun on its own — e.g. with more
+# --seeds once the paired z-scores below look worth tightening — without
+# waiting on or blocking the other two.
+name: Setup sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: "setup_sweep.py --seeds (games per bot per arm)"
+        required: false
+        default: "40"
+
+jobs:
+  setup-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: setup_sweep.py
+        env:
+          SEEDS: ${{ inputs.seeds }}
+        run: |
+          echo "## setup_sweep.py --seeds $SEEDS" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -u tools/setup_sweep.py --seeds "$SEEDS" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
