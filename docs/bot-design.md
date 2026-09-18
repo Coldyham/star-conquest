@@ -136,13 +136,31 @@ not yet a finding. It is a direction worth re-checking with a dedicated
 paired sweep if it recurs: claudebot lost every one of 40 games on the setup
 actually played, having won 15% at the defaults it was tuned against.
 
-`position_suite.py --supabase` was also run (15 games, every 20 turns, full
-6-bot roster) but real per-position cost turned out far more uneven than
-budgeted — most positions resolve in under a second, a handful (a long game
-with a crowded AI roster) take 30-170s each across the roster — so the first
-attempt only covered 5 of 15 games before its job timeout. No numbers from it
-are recorded here; see `.github/workflows/position-suite.yml` for the rerun
-with a wider budget once it completes.
+`position_suite.py --supabase` also ran, against 15 games sampled every 20
+turns (113 positions), knower at its measured-best depth 12 and marshal — the
+two the roster is currently being tuned against, not the full lineup above.
+Real per-position cost turned out far more uneven than budgeted (most resolve
+in under a second, a handful — a long game with a crowded AI roster, or
+knower's own search — run 30-170s), which cost two earlier attempts their job
+timeout before `position_suite.py` learned to report on whatever it had
+finished rather than losing the run outright (see `tools/position_suite.py`'s
+`_Cancelled`). The completed run:
+
+    bot          positions    won      faster        median gain    recovered    timeouts
+    knower            113   61.9%   50.0% of 104            -0     75.0% of 8            1
+    marshal           113   42.5%   41.9% of 105           +17     50.0% of 8            0
+
+Read per the rules above: `faster` and `median gain` say knower tracks a
+human's pace roughly evenly from these positions (faster half the time,
+median gain essentially zero) while marshal runs slower than the human more
+often than not (+17 turns median, when both finish). `recovered` is the
+sharper number — of the 8 sampled positions drawn from games the human
+actually *lost*, knower took the board 75% of the time against marshal's 50%.
+Eight positions is a thin sample for a rate on its own (see the caution
+above), but it lines up with knower's oracle prediction being exactly the
+tool no blind heuristic has, which is the mechanism this would be explained
+by rather than a coincidence — worth widening the corpus before leaning on it
+further, not before noting it.
 
 ## `models/knower.py` and simultaneous resolution
 
