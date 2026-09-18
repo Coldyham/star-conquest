@@ -92,6 +92,17 @@ length across the parameter space" above, is very likely one regime of three. A
 gap found here is a hypothesis; confirming it still wants a paired sweep with a
 z-score, the same as everything else in this file.
 
+**Each bot replays at its measured-best profile, not its menu default —
+the same rule `bot_replay.REPLAY_AUX` follows for the leaderboard's bot
+column, reused rather than re-decided here.** The first real run measured
+knower at `aux=1.0` (search depth 1, the untuned default) purely because
+nobody had wired the override through; its win rate and turn counts in any
+run before this fix understate what knower actually does. `--aux BOT=VALUE`
+overrides a single run and `--budget-scale` controls how far the bots' own
+wall-clock guards are lifted (100x default, same reasoning as
+`bot_replay.BUDGET_SCALE`: nothing here waits on a frame, and a guard that
+never trips is what keeps a result reproducible rather than clock-dependent).
+
 ## The first census and setup sweep off the live board (2026-09)
 
 `tools/config_census.py` and `tools/setup_sweep.py` ran for the first time
