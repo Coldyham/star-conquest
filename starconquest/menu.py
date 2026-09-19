@@ -734,7 +734,14 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
 _COMBAT_PROSE = (
     "Battles use Lanchester's square law.",
     "The winner keeps sqrt(W² − L²) ships",
-    "e.g. 12 attacking 10 leaves 6 or 7 survivors",
+    # The exact number the code returns, not a range: `_survivors` rounds
+    # sqrt(44) = 6.63 to 7 and always has (banker's rounding, pinned because it
+    # decides seeded replays). "6 or 7" read as though the result were uncertain,
+    # which the readout directly below — "Jitter off: this result is exact." on
+    # this very fight, the page's own 12-vs-10 default — flatly contradicts.
+    # Same 44 characters as the line it replaced, so the panel's hand-broken
+    # height is unmoved.
+    "e.g. 12 attacking 10 leaves 7 — √44, rounded",
 )
 
 
