@@ -577,6 +577,43 @@ would have left the same trap set for the next caller — which is exactly what
 happened when live play started chaining too, since `resolve_turn`'s own reel is
 built in that branch of the update rather than from the event handler.
 
+**A join also has to carry the previous film's overrun, and cap what a slow frame
+may spend.** Both are about the same thing — the loop's clock is frames, and a
+frame is not a fixed slice of wall clock — and both were only ever visible under
+autoplay, which is why it looked choppier than history playback of the very same
+turns.
+
+*Overrun.* A film lands on the first frame whose `film_ms` reaches `total_ms`,
+which is almost never exactly its end: the step is a whole frame, so on average
+half a frame lands past it. Starting the chained film at `0.0` throws that away,
+so every single join holds the fleets still for the remainder of a frame. One
+frame in sixty is not much; sixty of them, one per turn, is the difference between
+a glide and a shimmer. `main._carry_into` pays the overrun into the new film
+instead (clamped to that film's own length, so a carry larger than a whole
+playback lands it next frame rather than leaving the playhead past its end), which
+is what makes a chained run advance at exactly one film-length per film.
+
+*Frame cap.* Resolving a turn is the loop's one genuinely expensive step — every
+seat's `decide`, plus rewriting the log — and under autoplay or play mode it
+happens in the very frame that lands one film and starts the next. `clock.tick`
+hands that whole stretch to the frame *after*, and with a search bot on the board
+it can run into the hundreds of milliseconds: charged in full to the film that
+just started, the fleets teleport a third of the way down their lanes before the
+glide takes over. `config.MAX_FRAME_MS` caps what one frame may hand on (three
+frames at the target rate), so a long frame makes the animation fall behind the
+wall clock rather than jump — the right trade for a playback that is a
+fixed-length glide synchronised to nothing. History playback resolves nothing and
+so never met either problem, which is exactly why the two looked different.
+
+**The camera controls are the second exemption from the skip rule.** Reset view,
+the on-map zoom `−`/`+` and the `R` key change where you are looking from and
+nothing about the turn being played back, so `input._moves_camera` lets them past
+the blanket "any press skips a film" the same way `_toggles_play` does (the wheel
+was already past it, by not being one of the press types the rule names). Under
+autoplay that is the difference between working and not: films chain back to back
+with no gap, so the press would be spent skipping one, and the next turn's film is
+already up by the time a second press arrives — the whole cluster reads as dead.
+
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
 6-ship system read `−8`, which is almost entirely the defender's garrison — wiped

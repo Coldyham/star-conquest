@@ -234,6 +234,40 @@ A bot that wants the same treatment declares `BUDGET_SCALE = 1.0` and multiplies
 its own budgets by it at call time; see `models/README.md`. Bots without it are
 left alone.
 
+**Why the replayed seat stays flagged as the human's.** A row on that column
+carries a *Watch* link, and a link can only ever hand the game a setup with
+`autoplay` on (`botWatchSetup`, `leaderboard/js/token-encode.mjs`) — there is no
+field in a token that says "seat 1 is a bot", and adding one would move
+`challenge_key` for every map that ever existed. So the app keeps seat 1 human and
+drives it from outside, and the harness has to do the same or the row describes a
+game the link cannot play.
+
+It did not, and the two really were different games. `sim.play_settings` used to
+clear `is_human` on the seat it took over — the shortest way to make
+`engine._collect_orders` decide it — and an oracle opponent reads that flag: a
+human seat is predicted blind and never trusted, while an AI one is resolved
+through `ai.STRATEGIES` and simulated exactly (`knower._model_for`,
+`_rollout_decide`). The cached row was therefore a game whose opponents knew which
+bot was standing in and could simulate it turn by turn, which is information the
+person whose score it is measured against never gave them. On a 3-seat, 18-node
+map with knower opponents that was worth flipping the result outright:
+
+    marshal, seat flagged as a bot   lost,  146 turns, 147 lost
+    marshal, seat left human          won,  210 turns, 232 lost
+
+`sim._hand_over` now sets the strategy and params only, and `sim._step_seat`
+drives the seat the way `main.resolve_turn` does under autoplay — orders computed
+outside `end_turn` and passed in, every other seat decided inside it in seat
+order, so the draws each takes from `state.rng` land in the same places either
+way. `play_from` (the position suite) goes through the same pair, which is what
+keeps the two harnesses measuring one bot one way.
+
+The harness is part of the answer, so `bot_replay.engine_rev` hashes
+`tests/sim.py` alongside the core and `models/` (`_OUTCOME_HARNESS`): change how a
+replay is played and every cached row is marked stale. It stays out of
+`replay_rev`, which covers a stored *log's* replay — that asks no seat to decide
+anything, so no harness can move it.
+
 ## `models/marshal.py` and what the measurements deleted
 
 marshal was commissioned around three ideas: bait an opponent into a system a

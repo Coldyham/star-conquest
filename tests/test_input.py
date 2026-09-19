@@ -1935,6 +1935,97 @@ def test_hovering_or_zooming_leaves_a_film_running():
         pygame.quit()
 
 
+def _a_moving_reel(state):
+    """A reel whose film is one move beat, on a board with a fleet to move."""
+    board = turnfilm.copy_board(state)
+    home = next(s.id for s in board.systems.values() if s.owner_id == 1)
+    board.fleets = [Fleet(owner_id=1, source_id=home,
+                          dest_id=board.systems[home].neighbors[0], ships=3,
+                          turns_total=3, turns_remaining=3)]
+    return turnfilm.Reel(board, turnfilm.film([turnfilm.Advanced(((0, 2),))]))
+
+
+def test_a_chained_film_starts_where_the_last_one_overran():
+    """A frame steps the clock by a whole frame's worth, so the frame that lands
+    a film almost always runs past its end. A run of turns is meant to be one
+    continuous glide, so that overrun is paid into the film that follows rather
+    than dropped — dropping it stalls every fleet for the rest of a frame at
+    every join, which is the stutter that told autoplay apart from history."""
+    state, ui = _setup()
+    try:
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, 20.0)
+        assert ui.film_ms == 20.0
+        # ...and nothing to carry leaves the film at its own opening.
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, 0.0)
+        assert ui.film_ms == 0.0
+    finally:
+        pygame.quit()
+
+
+def test_a_carry_longer_than_the_film_lands_it_rather_than_overrunning():
+    """A frame is capped (`config.MAX_FRAME_MS`) but a film is not bounded below
+    by it, so the debt is clamped too: the next frame lands this film and chains
+    on, instead of a playhead sitting past its own end."""
+    state, ui = _setup()
+    try:
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, reel.film.total_ms * 10)
+        assert ui.film_ms == reel.film.total_ms
+    finally:
+        pygame.quit()
+
+
+def test_the_camera_controls_leave_a_film_running_and_still_work():
+    """Where you are looking changes nothing about the turn being played back, so
+    the cluster is exempt from "any press skips" the way Play/Pause is.
+
+    It is unusable otherwise under autoplay, where films chain back to back: the
+    press would be spent skipping one, and the next turn's would already be up by
+    the time a second arrived."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        ui.reset_view_rect, ui.zoom_minus_rect = (10, 10, 40, 40), (60, 10, 40, 40)
+        ui.zoom_plus_rect = (110, 10, 40, 40)
+        before = ui.view.zoom
+
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(120, 20), button=1),
+            state, ui) is None
+        assert ui.film is not None          # still playing
+        assert ui.view.zoom > before        # ...and the press zoomed
+
+        ui.view.zoom_at((600, 460), 3.0)
+        game_input.handle_event(
+            pygame.event.Event(pygame.KEYDOWN, key=pygame.K_r, mod=0, unicode="r"),
+            state, ui)
+        assert ui.film is not None
+        assert ui.view.zoom < 3.0           # R re-framed without losing the film
+    finally:
+        pygame.quit()
+
+
+def test_a_press_next_to_the_camera_cluster_still_skips():
+    """The exemption is the three rects and the R key, not "anything on the map":
+    a press that misses them is an ordinary press and skips as before."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        ui.reset_view_rect = (10, 10, 40, 40)
+        ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(200, 200), button=1),
+            state, ui) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
 def _won_with_animation(monkeypatch, playing: bool = False):
     """A human win *worth watching*, with turn animation on: the reel plus its Ui.
 

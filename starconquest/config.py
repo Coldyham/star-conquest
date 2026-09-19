@@ -333,6 +333,24 @@ FONT_SIZE_BIG = 30
 
 FPS = 60
 
+# Ceiling on how much time one frame may hand the loop (`main`'s `dt`).
+#
+# A frame is not always a frame's worth of wall clock: resolving a turn is the
+# loop's one genuinely expensive step — every seat's `decide`, plus rewriting the
+# log — and under autoplay or play mode it happens in the very frame that lands
+# one film and starts the next, where it can run to hundreds of ms with a search
+# bot on the board. `clock.tick` hands that whole stretch to the *next* frame,
+# which without a ceiling is charged straight to the fresh film: the fleets
+# teleport a third of the way down their lanes before the glide takes over, which
+# is the stutter a chained run of turns is supposed not to have (history playback
+# has nothing to resolve, so it never sees this). Tab switches and GC pauses do
+# the same thing on a smaller scale.
+#
+# Three frames at the target rate. Capping means a long frame makes the animation
+# fall behind the wall clock rather than jump — the right trade for a playback
+# that is a fixed-length glide synchronised to nothing.
+MAX_FRAME_MS = 50
+
 # --------------------------------------------------------------------------- #
 # UI scaling (DPI / touch)
 # --------------------------------------------------------------------------- #

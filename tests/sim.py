@@ -94,6 +94,38 @@ def _timed_decide(seconds: float, timeouts: list[int]) -> ai.DecideFn:
     return _decide
 
 
+def _hand_over(seat, bot: str, aux: float | None) -> None:
+    """Put ``bot`` in ``seat`` the way the *game* does when it autoplays a human.
+
+    The seat keeps ``is_human``. That looks like a detail and is not: an oracle
+    bot reads the board's seat flags to decide how to model everybody else
+    (`models/knower.py` — a human seat is predicted blind and never trusted,
+    while an AI one is resolved through `ai.STRATEGIES` and simulated exactly).
+    Clearing the flag here would therefore hand every oracle *opponent* a
+    readout of which bot is standing in — information the person whose score
+    this is measured against never gave them — and the run would stop being the
+    one the board offers to replay. Measured at the time: with knower opponents
+    it was worth flipping marshal from a loss to a win on the same map.
+
+    The price is that the engine will no longer decide the seat for us
+    (`engine._collect_orders` skips a human), so every caller has to step the
+    turn the way `main.resolve_turn` does under autoplay — hence the companion
+    `_step_seat` below, and the two are only ever used together.
+    """
+    seat.ai_strategy = bot
+    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+
+
+def _step_seat(state: GameState, seat, decide: ai.DecideFn) -> None:
+    """One turn with ``seat`` driven from outside, exactly as the app autoplays.
+
+    `main.resolve_turn` computes the human seat's orders itself and passes them
+    to `end_turn`; every other seat is decided inside it, in seat order, so the
+    draws each one takes from ``state.rng`` fall in the same places either way.
+    """
+    engine.end_turn(state, human_orders=decide(state, seat.id), decide=decide)
+
+
 @dataclass
 class SimResult:
     seed: int
@@ -332,17 +364,13 @@ def play_settings(
     seat = state.human()
     if seat is None:
         raise ValueError("this setup has no human seat to replay")
-    # Hand the seat to the AI: engine._collect_orders skips the human, so this is
-    # what makes `decide` run for it at all (`play` does the same for every seat).
-    seat.is_human = False
-    seat.ai_strategy = bot
-    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+    _hand_over(seat, bot, aux)
 
     check_invariants(state)
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=decide)
+        _step_seat(state, seat, decide)
         check_invariants(state)
     return ReplayResult(
         bot=bot,
@@ -407,16 +435,14 @@ def play_from(
         return PositionResult(bot, log.match_id, turn, state.winner == seat.id, 0,
                               seat.ships_lost, human_won, human_from, False)
 
-    seat.is_human = False
-    seat.ai_strategy = bot
-    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+    _hand_over(seat, bot, aux)
 
     check_invariants(state)
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     limit = turn + max_turns
     while state.winner is None and state.turn < limit:
-        engine.end_turn(state, decide=decide)
+        _step_seat(state, seat, decide)
         check_invariants(state)
     won = state.winner == seat.id
     return PositionResult(

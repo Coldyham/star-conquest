@@ -72,6 +72,14 @@ _OUTCOME_MODULES = (
 # deals its recorded dice, so no bot is ever consulted (see `replay_rev`).
 _REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
 
+# The harness that actually plays a bot replay is part of the answer too, and is
+# named separately because only `engine_rev` may read it: `sim.play_settings`
+# decides how the seat is handed over and how each turn is stepped, so a change
+# there moves every cached row exactly as a change to `engine` would. It cannot
+# move a *stored log's* replay, which asks no seat to decide anything, so it must
+# stay out of `_REPLAY_MODULES`.
+_OUTCOME_HARNESS = ("tests", "sim.py")
+
 # Where a bot is replayed at something other than its default profile.
 #
 # `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
@@ -155,7 +163,8 @@ def engine_rev() -> str:
     and only when — the simulation or a bot does.
     """
     return _digest([ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
-                   + sorted((ROOT / "models").glob("*.py")))
+                   + sorted((ROOT / "models").glob("*.py"))
+                   + [ROOT.joinpath(*_OUTCOME_HARNESS)])
 
 
 def replay_rev() -> str:

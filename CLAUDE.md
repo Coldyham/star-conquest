@@ -317,9 +317,15 @@ Rules that hold it together:
   and `land_film` is the one place the clock running out and a press skipping both
   pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
   Anything else a playback holds back belongs there too, never at a call site.
-- **Play/Pause freezes a film; every other press still skips it.**
-  `input._toggles_play` exempts that one control (the P key, or its footer
-  button) from the blanket "any press skips" rule, and `main.apply_toggle_play`
+- **Play/Pause freezes a film; the camera controls ignore it; every other press
+  still skips it.** `input._toggles_play` exempts that one control (the P key, or
+  its footer button) from the blanket "any press skips" rule, and
+  `input._moves_camera` exempts the camera cluster (Reset view, the on-map zoom
+  `−`/`+`, the R key) outright — where you are looking changes nothing about the
+  turn being played back, and under autoplay, where films chain with no gap
+  between them, a press that only skips leaves the whole cluster looking dead.
+  The wheel needs no entry: it is not one of the press types the rule names.
+  `main.apply_toggle_play`
   is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
   set only when *pausing an already-running* playthrough (`was_playing` going
   in) rather than whenever a film merely happens to be up — a manually-triggered
@@ -338,6 +344,17 @@ Rules that hold it together:
   instead. Nothing is lost either way — a mark's visibility no longer depends on
   `film` still being current (above), so lingering only changes how long `film`
   itself holds the board.
+  **A join carries the last film's overrun, and one frame's step is capped.** A
+  film lands on the first frame past its end, so the step nearly always overruns
+  it; `main._carry_into` pays that into the chained film (clamped to its own
+  length) instead of dropping it, or every join stalls the fleets for the rest of
+  a frame. And `config.MAX_FRAME_MS` caps what one frame may hand the loop: the
+  frame that lands a film is also the one that resolves the next turn — every
+  seat's `decide` plus the log rewrite, hundreds of ms with a search bot on the
+  board — and `clock.tick` gives that whole stretch to the frame after, which
+  uncapped teleports the fresh glide rather than advancing it. History playback
+  resolves nothing, which is exactly why autoplay looked choppier than a playback
+  of the same turns.
   **Every reel goes through `main._primed`**, which runs it to `0.0` (archiving
   whatever marks that makes) before it is handed back. A chained reel is built
   *inside* the per-frame update, past the point where a running film is stepped,
@@ -477,7 +494,18 @@ intact.
     `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
     `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` at
     search depth 12) and the value in force is stored on the row; opponents keep
-    theirs. It also lifts the bots' own per-decide wall-clock guards 100x
+    theirs. **The seat it takes over stays flagged human** (`sim._hand_over` sets
+    the strategy and params only; `sim._step_seat` then drives it from outside
+    `end_turn`, as `main.resolve_turn` does under autoplay). That is forced by the
+    *Watch* link beside the row: a token cannot say "seat 1 is a bot", only
+    `autoplay: true`, so a row computed with the flag cleared describes a game the
+    link cannot play — and an oracle opponent reads that flag, simulating a seat
+    it takes for a bot exactly where it would only guess at a human's
+    (`knower._model_for`). Measured, that was worth flipping marshal from a loss
+    to a win. `play_from` uses the same pair, and `engine_rev` hashes
+    `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is played marks
+    every cached row stale; `replay_rev` must not, since a stored log's replay
+    consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
     (`ai.set_budget_scale`, opt-in via a model's `BUDGET_SCALE`): those are sized
     so the browser tab never freezes, and tripping one is the only thing that
     makes such a bot's output depend on the clock — so a batch run that can never

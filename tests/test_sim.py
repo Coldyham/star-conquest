@@ -133,9 +133,10 @@ def test_replay_lands_on_the_same_map_the_human_played():
 
 
 def test_the_bot_actually_drives_the_human_seat():
-    # engine._collect_orders skips the human seat, so a replay that forgot to
-    # clear is_human would sit still and lose every time. Seat 1 must be taking
-    # ground, which is only possible if `decide` ran for it.
+    # `engine._collect_orders` skips the human seat, so the harness has to drive
+    # it from outside (`sim._step_seat`); a replay that forgot to would sit still
+    # and lose every time. Seat 1 must be taking ground, which is only possible
+    # if `decide` ran for it.
     cfg = _setup()
     result = sim.play_settings(cfg, 11, "heuristic", max_turns=40)
     assert result.turns > 0
@@ -160,6 +161,86 @@ def test_the_replayed_seat_ignores_the_setup_s_own_ai_params():
     tuned.ai[0] = AiParams(reserve_fraction=0.9, reserve_floor=40, expand_margin=9.0,
                            attack_margin=9.0, reinforce_margin=40, aux=7.0)
     assert sim.play_settings(tuned, 11, "heuristic") == sim.play_settings(_setup(), 11, "heuristic")
+
+
+def _watch_link_run(cfg: Settings, seed: int, bot: str, aux=None):
+    """What the leaderboard's Watch link actually plays, in this process.
+
+    `leaderboard/js/token-encode.mjs`'s `botWatchSetup` writes the bot into seat
+    1's strategy, gives that seat default `AiParams` (bar `aux`) and turns
+    `autoplay` on; the app then drives the human seat from outside, exactly as
+    `main.resolve_turn` does. Nothing in a token can flag a seat as a bot, so
+    this is the *only* shape that link can produce — which is why it, and not
+    the harness, is the fixed point the column has to meet.
+    """
+    from dataclasses import replace as _replace
+
+    from starconquest import engine
+
+    watched = Settings.from_dict(cfg.to_dict())
+    strategies = list(watched.ai_strategy)
+    strategies[0] = bot
+    watched.ai_strategy = strategies
+    params = [_replace(p) for p in watched.ai]
+    params[0] = AiParams() if aux is None else AiParams(aux=aux)
+    watched.ai, watched.autoplay = params, True
+
+    state = settings_mod.build_state(watched, seed)
+    seat = state.human()
+    while state.winner is None and state.turn < 600:
+        engine.end_turn(state, human_orders=ai.decide(state, seat.id), decide=ai.decide)
+    return sim.ReplayResult(bot=bot, won=state.winner == seat.id, turns=state.turn,
+                            lost=seat.ships_lost, timed_out=state.winner is None)
+
+
+def test_the_column_plays_the_game_its_watch_link_replays():
+    """A bot's row and the Watch link beside it must be the same run.
+
+    They diverged, and the cause was a seat flag: the harness used to clear
+    `is_human` on the seat it took over (the shortest way to make the engine
+    decide it), which an oracle opponent reads as "that seat is a bot I can
+    resolve through `ai.STRATEGIES` and simulate exactly" rather than "a person
+    I have to guess at" (`models/knower.py`). So the cached row was a game whose
+    opponents knew which bot was standing in, and the link — which can only ever
+    turn `autoplay` on — played one whose opponents did not. Measured on a map
+    with knower opponents, that was worth flipping marshal from a loss to a win.
+
+    The opponent here is that difference in one line rather than a real oracle,
+    which would cost a minute of search to say the same thing.
+    """
+    def peeker(state, pid):
+        faces_human = any(p.is_human for p in state.players.values()
+                          if p.id != pid and not p.is_neutral)
+        return ai.compute_orders(state, pid) if faces_human else []
+
+    ai.register("_peeker", peeker)
+    try:
+        cfg = _setup()
+        cfg.ai_strategy = ["heuristic", "_peeker", "_peeker"] + ["heuristic"] * 3
+        assert sim.play_settings(cfg, 11, "heuristic") == \
+               _watch_link_run(cfg, 11, "heuristic")
+    finally:
+        ai.STRATEGIES.pop("_peeker", None)
+
+
+def test_the_replayed_seat_is_still_the_human_seat():
+    """The flag itself, pinned: `play_settings` hands a seat over without
+    pretending a person has left the chair. Everything above rests on it, and it
+    is a one-character regression to make."""
+    cfg = _setup()
+    seen: list[bool] = []
+
+    def watcher(state, pid):
+        seen.append(state.players[1].is_human)
+        return []
+
+    ai.register("_watcher", watcher)
+    try:
+        cfg.ai_strategy = ["heuristic", "_watcher", "heuristic"] + ["heuristic"] * 3
+        sim.play_settings(cfg, 11, "heuristic", max_turns=3)
+    finally:
+        ai.STRATEGIES.pop("_watcher", None)
+    assert seen and all(seen)
 
 
 def test_a_bot_that_never_wins_still_reports_a_result():
