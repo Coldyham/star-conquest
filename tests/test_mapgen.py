@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import random
 
 from starconquest import config, mapgen, starnames
@@ -132,3 +133,84 @@ def test_pick_names_numbers_the_surplus_when_asked_for_more_than_exist():
     names = starnames.pick(rng, n)
     assert len(names) == n
     assert len(set(names)) == n
+
+
+# --------------------------------------------------------------------------- #
+# Custom maps — the second source of a board, built from a concrete recipe
+# --------------------------------------------------------------------------- #
+def _recipe(seed: int = 5, mode: str = "random", nodes: int = 18, players: int = 3):
+    from starconquest import custommap
+    return custommap.from_state(mapgen.generate(seed, mode, nodes, players))
+
+
+def test_generate_custom_honours_every_explicit_value():
+    """Nothing in a recipe is a sentinel resolved at build time, which is what
+    lets the seed stop shaping a custom map at all."""
+    design = _recipe()
+    state = mapgen.generate_custom(123, design)
+    for i, node in enumerate(design.nodes):
+        system = state.systems[i]
+        assert system.pos == (float(node.x), float(node.y))
+        assert system.production == node.production
+        assert system.ships == node.ships
+        assert system.owner_id == node.owner
+
+
+def test_generate_custom_stamps_the_custom_mode():
+    """On the *state*, never on `settings.MODES` — the leaderboard's schema
+    constrains that column to random/symmetric, so a token carrying "custom"
+    would be refused on submit."""
+    from starconquest.settings import MODES
+    assert mapgen.generate_custom(1, _recipe()).mode == "custom"
+    assert "custom" not in MODES
+
+
+def test_generate_custom_satisfies_the_same_invariants_as_a_generated_map():
+    state = mapgen.generate_custom(9, _recipe())
+    assert mapgen.is_connected(state)
+    for key, lane in state.lanes.items():
+        assert len(key) == 2                      # canonical, order-independent
+        assert lane.travel_turns >= 1
+        a, b = sorted(key)
+        assert state.adjacency[a][b] == state.adjacency[b][a]
+    names = [s.name for s in state.systems.values()]
+    assert len(set(names)) == len(names)
+    assert set(names) <= set(starnames.NAMES)
+
+
+def test_a_custom_map_is_deterministic_from_its_seed():
+    design = _recipe()
+    a = mapgen.generate_custom(77, design)
+    b = mapgen.generate_custom(77, design)
+    assert [s.name for s in a.systems.values()] == [s.name for s in b.systems.values()]
+
+
+def test_naming_is_the_last_roll_of_a_custom_build(monkeypatch):
+    """Same property `generate_random` has: names are the final draw, so nothing
+    that shapes the board depends on them."""
+    design = _recipe()
+    named = mapgen.generate_custom(7, design)
+    monkeypatch.setattr(mapgen, "_name_systems", lambda state: None)
+    bare = mapgen.generate_custom(7, design)
+    assert [s.pos for s in named.systems.values()] == [s.pos for s in bare.systems.values()]
+    assert [s.ships for s in named.systems.values()] == [s.ships for s in bare.systems.values()]
+    assert set(named.lanes) == set(bare.lanes)
+    assert not any(s.name for s in bare.systems.values())
+
+
+def test_a_generated_map_never_violates_the_hand_placement_rules():
+    """The regression guard on `CUSTOM_MIN_NODE_SEP_FRAC`: raise it past the
+    tightest pair mapgen actually produces (measured at 53.6 world units) and
+    loading a generated map into the creator lights up with violations."""
+    sep = config.CUSTOM_MIN_NODE_SEP_FRAC * config.WORLD_SIZE
+    for seed in range(12):
+        for nodes in (12, 18, 24, 40):
+            for mode in ("random", "symmetric"):
+                for players in (2, 4, 6):
+                    design = _recipe(seed, mode, nodes, players)
+                    assert design.problems() == [], \
+                        f"{mode}/{nodes}n/{players}p seed {seed}: {design.problems()}"
+                    for i, a in enumerate(design.nodes):
+                        for b in design.nodes[i + 1:]:
+                            gap = math.hypot(a.x - b.x, a.y - b.y)
+                            assert gap >= sep, f"{mode}/{nodes}n seed {seed}: gap {gap:.1f}"

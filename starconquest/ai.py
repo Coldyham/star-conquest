@@ -146,6 +146,12 @@ def set_budget_scale(scale: float) -> list[str]:
     call time, and is saying so. Anything that doesn't is left alone. Returns the
     names actually set, so a caller can report what it changed.
 
+    ``math.inf`` is the limit case: the deadline it builds is infinite, so the
+    guard becomes structurally unable to fire rather than merely unlikely to.
+    That is what the suite's reproducibility checks pass, since a test machine
+    under load is exactly the slow runner such a guard was sized against; a real
+    batch caller keeps a finite lift so a wedged bot is still stopped.
+
     Never call this from inside a model, and never mid-game: it is process-wide,
     so it must be set once at startup, before any ``decide`` runs.
     """

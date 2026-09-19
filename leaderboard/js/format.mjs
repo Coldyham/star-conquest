@@ -28,14 +28,20 @@ export function clear(node) {
   return node;
 }
 
-/** "Random · 3 players · 18 systems · seed 42" */
+/**
+ * "Random · 3 players · 18 systems · seed 42" — or "seed random" for a plain
+ * settings-share link with no seed pinned (Settings.seed is None). Every row
+ * actually stored in `games` has a concrete seed (the column is not-null), so
+ * this only ever matters in submit.mjs's preview, before such a link is
+ * rejected there for having no single map to register.
+ */
 export function mapSummary(game) {
   const mode = game.mode === "symmetric" ? "Symmetric" : "Random";
   return [
     mode,
     `${game.players} players`,
     `${game.nodes} systems`,
-    `seed ${game.seed}`,
+    `seed ${game.seed ?? "random"}`,
   ].join(" · ");
 }
 
@@ -181,6 +187,23 @@ export function botChips(game) {
 }
 
 /**
+ * "Name" or "Name & N others" for a map's current best score — the one thing
+ * `game_summary`'s aggregate says about who is ahead, independent of the full
+ * per-score list. Shared by the list card (home.mjs's row()) and the map's own
+ * page, which falls back to this alone while a map is still embargoed (see
+ * game.mjs's renderEmbargoed) — an embargo hides the rest of the board, but not
+ * the one fact that gives a friend something left to chase.
+ */
+export function leaderCredit(game) {
+  const name = (game.best_user_name || "").trim() || "anonymous";
+  // A dead heat on turns *and* lost is a shared record, so credit all of it.
+  // best_holders is absent unless the game_summary view is current; treat a
+  // missing count as the one leading name.
+  const others = Math.max(0, Number(game.best_holders || 1) - 1);
+  return others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
+}
+
+/**
  * "Bot leads" — the marker a list card carries when nobody has beaten this
  * map's best bot yet. `game.mjs`'s botVerdict spells the same "behind"/"tied"
  * verdict out as a sentence on the map's own page; a list card only has room
@@ -198,6 +221,32 @@ export function botLeadBadge(game) {
     title: `${game.bot_name} — ${game.bot_turns} turns · ${game.bot_lost} lost. No human score beats it yet.`,
     text: "Bot leads",
   });
+}
+
+/**
+ * "Replays hidden — revealing in 3 days", or null once the embargo has lifted
+ * or none was ever set (`games.embargo_until`, schema.sql). Deliberately says
+ * nothing about how many replays are behind it, or whether any exist at all —
+ * either would leak the one thing the embargo exists to hide. Rounds up, so a
+ * few hours left still reads as "1 day" rather than "0 days".
+ */
+export function embargoNote(until) {
+  if (!until) return null;
+  const ms = new Date(until).getTime() - Date.now();
+  if (!(ms > 0)) return null;
+  const days = Math.max(1, Math.ceil(ms / 86400000));
+  return `Replays hidden — revealing in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/**
+ * The badge a map's card carries while embargoNote() above has something to
+ * say — same shape as botLeadBadge: a stated fact, not a filter, so it is a
+ * span rather than a link.
+ */
+export function embargoBadge(game) {
+  const note = embargoNote(game.embargo_until);
+  if (!note) return null;
+  return el("span", { class: "badge embargo", title: note, text: "Embargoed" });
 }
 
 export function showError(node, message) {

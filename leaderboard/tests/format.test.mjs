@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botProfile, competitionRanks } from "../js/format.mjs";
+import { botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
+
+const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString();
 
 /** scores([31, 16], …) -> the {turns, lost} shape a score row ranks by. */
 const scores = (...pairs) => pairs.map(([turns, lost]) => ({ turns, lost }));
@@ -45,6 +47,35 @@ test("competitionRanks holds under a lost-first sort too, since a tie is symmetr
     competitionRanks(scores([41, 14], [31, 16], [31, 16], [75, 31])),
     [1, 2, 2, 4],
   );
+});
+
+test("no embargo, or a lifted one, has nothing to say", () => {
+  assert.equal(embargoNote(null), null);
+  assert.equal(embargoNote(""), null);
+  assert.equal(embargoNote(inDays(-1)), null);
+  assert.equal(embargoNote(new Date().toISOString()), null);
+});
+
+test("a live embargo counts the days left, rounding up", () => {
+  assert.equal(embargoNote(inDays(3)), "Replays hidden — revealing in 3 days");
+  // Just under a day still reads as one, not zero.
+  assert.equal(embargoNote(inDays(0.1)), "Replays hidden — revealing in 1 day");
+  assert.equal(embargoNote(inDays(1)), "Replays hidden — revealing in 1 day");
+});
+
+test("leaderCredit names the current best score's holder", () => {
+  assert.equal(leaderCredit({ best_user_name: "Ann", best_holders: 1 }), "Ann");
+  // A missing user_name falls back to "anonymous", not a blank string —
+  // credit() elsewhere makes the same fallback for a hand-written link's by_name.
+  assert.equal(leaderCredit({ best_user_name: "", best_holders: 1 }), "anonymous");
+});
+
+test("leaderCredit credits every holder of a shared record, singular and plural", () => {
+  assert.equal(leaderCredit({ best_user_name: "Ann", best_holders: 2 }), "Ann & 1 other");
+  assert.equal(leaderCredit({ best_user_name: "Ann", best_holders: 3 }), "Ann & 2 others");
+  // best_holders is absent on an older game_summary view; treat that as "just
+  // the one leading name" rather than crashing or reading it as zero others.
+  assert.equal(leaderCredit({ best_user_name: "Ann" }), "Ann");
 });
 
 test("a bot replayed at a tuned profile says so; a default one just gives its name", () => {

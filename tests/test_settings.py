@@ -10,6 +10,7 @@ import contextlib
 import pytest
 
 from starconquest import config
+from starconquest.custommap import CustomMap, MapNode
 from starconquest.model import AiParams
 from starconquest.settings import (_GLOBAL_KNOBS, _LEGACY_KEY_DROPS, Challenge,
                                    Settings, _hash_setup, build_state,
@@ -104,6 +105,15 @@ def test_node_jitter_changes_the_map():
 # --------------------------------------------------------------------------- #
 # save / load
 # --------------------------------------------------------------------------- #
+def _tiny_map() -> CustomMap:
+    """The smallest playable hand map: two seats, one lane, well clear of the
+    separation and graze rules."""
+    return CustomMap(
+        nodes=[MapNode(200, 200, 3, 10, 1), MapNode(600, 600, 4, 8, 2)],
+        lanes=[(0, 1)],
+    ).normalised()
+
+
 def _customised() -> Settings:
     s = Settings(mode="symmetric", players=5, nodes=30, seed=42, autoplay=True,
                  home_start_ships=25, combat_jitter=0.3, ship_ly_per_turn=9.5)
@@ -303,7 +313,7 @@ def test_challenge_key_is_stable():
     entry below it lacked its fields too) and updating the literal here, so links
     already in circulation keep resolving to the setup they describe.
     """
-    assert Settings().challenge_key() == "770ba09210f6127a"
+    assert Settings().challenge_key() == "38c8b7ba470f6f4c"
 
 
 def test_challenge_keys_lead_with_the_canonical_one():
@@ -313,6 +323,18 @@ def test_challenge_keys_lead_with_the_canonical_one():
     assert len(set(keys)) == len(keys) == 1 + len(_LEGACY_KEY_DROPS)
 
 
+def _moved(field: str):
+    """A value for ``field`` that differs from its default.
+
+    Both tests below are written against *whichever* `_LEGACY_KEY_DROPS` entry is
+    newest, so they cannot assume the field is a number — `custom_map` is a
+    dataclass whose default is None, and `default + 0.2` raises on it.
+    """
+    if field == "custom_map":
+        return _tiny_map()
+    return getattr(Settings(), field) + 0.2
+
+
 def test_a_legacy_key_is_dropped_once_its_own_field_is_moved():
     """The dropped field is the one a legacy digest cannot see, so a setup that
     moved it is not one that version could have stamped."""
@@ -320,7 +342,7 @@ def test_a_legacy_key_is_dropped_once_its_own_field_is_moved():
     s = _customised()
     assert len(s.challenge_keys()) == 1 + len(_LEGACY_KEY_DROPS)
 
-    setattr(s, field, getattr(Settings(), field) + 0.2)
+    setattr(s, field, _moved(field))
     assert s.challenge_keys() == (s.challenge_key(),)
 
 
@@ -346,7 +368,7 @@ def test_an_old_link_still_detects_an_edit_to_the_field_it_predates():
     s.challenge = Challenge(turns=10, key=_hash_setup(older))
     assert s.challenge.matches(s)
 
-    setattr(s, field, getattr(Settings(), field) + 0.2)
+    setattr(s, field, _moved(field))
     assert not s.challenge.matches(s)
 
 
@@ -499,3 +521,116 @@ def test_random_seed_ignores_the_global_random_state():
     first = [random_seed() for _ in range(5)]
     _random.seed(1234)
     assert [random_seed() for _ in range(5)] != first
+
+
+# --------------------------------------------------------------------------- #
+# Hand-authored maps riding along in the setup
+# --------------------------------------------------------------------------- #
+def _with_map() -> Settings:
+    s = Settings()
+    s.custom_map = _tiny_map()
+    s.players, s.nodes = s.custom_map.seats(), len(s.custom_map.nodes)
+    return s
+
+
+def test_a_custom_map_survives_to_dict_to_token_and_save(tmp_path):
+    """Three round trips, not one: `to_dict` is no longer a bare `asdict`, and a
+    forgotten override there half-breaks the save file silently while the token
+    keeps working."""
+    s = _with_map()
+    assert Settings.from_dict(s.to_dict()).custom_map == s.custom_map
+    assert Settings.from_token(s.to_token()).custom_map == s.custom_map
+    path = tmp_path / "hand.json"
+    s.save(path)
+    assert Settings.load(path).custom_map == s.custom_map
+
+
+def test_to_dict_writes_the_compact_wire_form_not_the_dataclass():
+    """A bare `asdict` would write a keyed object per node, roughly trebling every
+    shared link and giving the setup digest a second shape nothing else reads."""
+    data = _with_map().to_dict()
+    assert set(data["custom_map"]) == {"v", "n", "l"}
+    assert data["custom_map"]["n"][0] == [200, 200, 3, 10, 1]
+
+
+def test_from_dict_reconciles_nodes_and_players_to_the_recipe():
+    """They must agree with the seats actually placed, or `token_dict`'s seat
+    truncation and `challenge_keys`' seat blanking disagree with the sender's."""
+    data = _with_map().to_dict()
+    data["players"], data["nodes"] = 6, 30      # a token that disagrees with its map
+    out = Settings.from_dict(data)
+    assert out.players == 2 and out.nodes == 2
+
+
+def test_a_hand_map_may_sit_below_the_generated_node_floor():
+    """The reconciliation is deliberately after the clamps and overrides them: a
+    two-system map is a legitimate thing to draw, and `min_nodes()` only governs
+    what the *generator* is asked for."""
+    s = _with_map()
+    assert s.nodes < s.min_nodes()
+    assert Settings.from_dict(s.to_dict()).nodes == 2
+
+
+def test_a_broken_recipe_lands_at_none_and_the_setup_still_builds():
+    """Rejection is never silent even though nothing is raised: `challenge_key()`
+    no longer matches the key a sender stamped, so the menu's existing "this setup
+    has been edited" banner fires with nothing added."""
+    data = _with_map().to_dict()
+    data["custom_map"]["l"] = []               # two systems, no lane: disconnected
+    out = Settings.from_dict(data)
+    assert out.custom_map is None
+    assert build_state(out, 3) is not None
+
+
+def test_a_custom_setup_offers_exactly_one_challenge_key():
+    """`custom_map` appears in every `_LEGACY_KEY_DROPS` entry, so no older
+    version could have described such a map — correctly, since none could."""
+    assert len(_with_map().challenge_keys()) == 1
+
+
+def test_copy_from_deep_copies_the_recipe():
+    s = _with_map()
+    other = Settings()
+    other.copy_from(s)
+    other.custom_map.nodes[0].x = 999
+    assert s.custom_map.nodes[0].x == 200
+
+
+def test_build_state_takes_the_custom_branch():
+    state = build_state(_with_map(), 11)
+    assert state.mode == "custom"
+    assert len(state.systems) == 2
+
+
+def test_a_setup_without_a_map_prunes_the_key_from_its_token():
+    """So a generated map's shared link is byte-identical either side of this
+    change, and the leaderboard needs no KEY_ALIASES entry for it."""
+    assert "custom_map" not in Settings().token_dict()
+
+
+def test_no_core_module_imports_pygame():
+    """The hard split the whole layout rests on — it is what lets `tests/sim` and
+    most of the suite run with no display. There is no violation today, and this
+    change adds both a new core module (`custommap`) and a new shell one
+    (`mapmaker`), so pin it rather than rely on nobody noticing.
+
+    Parsed rather than grepped: every one of these modules says "no pygame" in its
+    own docstring, so a substring search passes nothing and fails everything.
+    """
+    import ast
+    import pathlib
+
+    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
+            "settings", "fog", "replay", "turnfilm", "custommap")
+    pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
+    for name in core:
+        tree = ast.parse((pkg / f"{name}.py").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            assert not any(n.split(".")[0] == "pygame" for n in names), \
+                f"{name}.py is core and must not import pygame"

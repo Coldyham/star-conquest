@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Post a score · Star Conquest Leaderboard</title>
+<title>Post a score or setup · Star Conquest Leaderboard</title>
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
@@ -18,37 +18,55 @@
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1>Enter your score</h1>
+  <h1>Enter a score, or share a setup</h1>
   <p class="lede">
     Win a game, press <strong>Challenge a friend</strong>, and the link on your
-    clipboard carries the map and your result. Paste it here to put it on the board.
+    clipboard carries the map and your result — paste it here to put it on the
+    board. A plain settings-share link works too, with nothing to post yet: it
+    just adds the setup so others can play it and challenge each other.
   </p>
 
   <form id="form" class="form" autocomplete="off">
-    <label for="link">Challenge link</label>
+    <label for="link">Star Conquest link</label>
     <textarea id="link" name="link" rows="3" required
               placeholder="https://…/#eNoljE0OgjAQhe_y1rOw0Crpz…"></textarea>
 
-    <label for="name">Your name</label>
-    <input id="name" name="name" type="text" maxlength="60" required placeholder="Name">
-
-    <label for="tags">Tags (optional)</label>
-    <input id="tags" name="tags" type="text" placeholder="Tags, comma separated">
-
     <p class="hint" id="preview" hidden></p>
 
-    <!-- Said here because this is where the decision is made. Posting a score
-         publishes that game's replay: `public_replays` is exactly the logs a
-         posted score points at, which is what puts a "Watch" link beside it. A
-         game that merely uploaded itself is not published by it. -->
+    <div id="score-fields">
+      <label for="name">Your name</label>
+      <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
+
+      <label for="tags">Tags (optional)</label>
+      <input id="tags" name="tags" type="text" placeholder="Tags, comma separated">
+    </div>
+
+    <label for="embargo">Hide replays for this many days (optional)</label>
+    <input id="embargo" name="embargo" type="number" min="1" max="90" step="1" placeholder="e.g. 7">
+    <!-- Said here because this is where the decision is made, and only once:
+         `games.embargo_until` is set the one time a map's row is first
+         inserted (schema.sql) and never after, so this field only does
+         anything the first time anyone posts this exact map. -->
     <p class="hint">
+      Only takes effect the first time this exact map reaches the board. Scores
+      and rankings still post and rank normally the whole time — this hides
+      replays only, so nobody (you included) can watch one back until the
+      embargo lifts.
+    </p>
+
+    <!-- Said here because this is where the decision is made. Posting a score
+         publishes that game's replay (once any embargo above has lifted):
+         `public_replays` is exactly the logs a posted score points at, which
+         is what puts a "Watch" link beside it. A game that merely uploaded
+         itself is not published by it. -->
+    <p class="hint" id="score-hint">
       Posting a score also publishes that game's replay, so anyone can watch it
       back on the map's page.
     </p>
 
     <!-- Said here rather than assumed: unlike the name above, a tag only ever
          arrives with a score behind it — this is the one place they're entered. -->
-    <p class="hint">
+    <p class="hint" id="tags-hint">
       Tags describe the setup you just played (e.g. "grindy", "fast games") and
       only count while attached to a posted score.
     </p>

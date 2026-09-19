@@ -2,7 +2,8 @@ import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./ap
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botLeadBadge, clear, configBadge, el, mapSummary, relativeTime, showError,
+  botChips, botLeadBadge, clear, configBadge, el, embargoBadge, embargoNote, leaderCredit, mapSummary,
+  relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { configTitle } from "./setup.mjs";
@@ -16,7 +17,7 @@ const COLUMNS = [
   "game_key", "mode", "players", "nodes", "seed", "last_activity", "score_count",
   "best_turns", "best_lost", "best_hand", "best_by_name", "best_user_name", "best_holders",
   "settings_json", "config_key", "bots", "config_name", "config_tags",
-  "bot_turns", "bot_lost", "bot_name",
+  "bot_turns", "bot_lost", "bot_name", "embargo_until",
 ].join(",");
 
 // config_summary's columns are already a curated, fixed set (schema.sql), so
@@ -193,18 +194,23 @@ async function configHead(game) {
 }
 
 function row(game) {
-  const name = (game.best_user_name || "").trim() || "anonymous";
-  // A dead heat on turns *and* lost is a shared record, so credit all of it.
-  // best_holders is absent unless the game_summary view is current; treat a
-  // missing count as the one leading name.
-  const others = Math.max(0, Number(game.best_holders || 1) - 1);
-  const holder = others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
-  const detail = [
-    `${game.best_lost} lost`,
-    game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
-    `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`,
-    relativeTime(game.last_activity),
-  ].filter(Boolean).join(" · ");
+  const holder = leaderCredit(game);
+  const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
+  // While embargoed, the card keeps the leader and the turn count next to
+  // them (the headline figure below) — a target to chase — but drops every
+  // other detail this line would otherwise carry: lost/hand say more about
+  // *how* a score was made than the bare turn count does, and last activity
+  // is exactly the kind of "who's trying, and when" signal an embargo is
+  // meant to keep from the rest of the group. See game.mjs's renderEmbargoed
+  // for the same cut on the map's own page.
+  const detail = embargoNote(game.embargo_until)
+    ? scoreCount
+    : [
+        `${game.best_lost} lost`,
+        game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
+        scoreCount,
+        relativeTime(game.last_activity),
+      ].filter(Boolean).join(" · ");
 
   const body = el("a", { class: "card-body", href: `game.html?key=${encodeURIComponent(game.game_key)}` }, [
     el("div", { class: "card-main" }, [
@@ -221,16 +227,21 @@ function row(game) {
 
   return el("div", { class: "card" }, [
     body,
-    el("div", { class: "card-tags" }, [configBadge(game), botLeadBadge(game), ...botChips(game)]),
+    el("div", { class: "card-tags" }, [configBadge(game), botLeadBadge(game), embargoBadge(game), ...botChips(game)]),
   ]);
 }
 
 /** A config-grouped row: no single score to headline (its games may be
  * different seeds of unequal difficulty), so the card states the setup and
  * how much has been played on it, and drills into the per-game list on click
- * — the same place a config badge already goes. */
+ * — the same place a config badge already goes. System count is a config-wide
+ * fact (every game in the group shares the same node count, since `nodes` is
+ * part of what `sc_config_key` groups by), unlike an embargo, which is set per
+ * map and would be misleading to show at this level — see game.mjs/row()
+ * above for where that belongs instead. */
 function configRow(config) {
   const detail = [
+    `${config.nodes} ${config.nodes === 1 ? "system" : "systems"}`,
     `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}`,
     `${config.score_count} ${config.score_count === 1 ? "score" : "scores"}`,
     relativeTime(config.last_activity),

@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Optional
 
 from . import config, mapgen
+from .custommap import CustomMap
 from .model import AiParams, GameState
 
 MODES = ("random", "symmetric")
@@ -81,8 +82,9 @@ _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 # entry below. Worth knowing before adding a per-bot knob here rather than
 # through `AiParams.aux`, which every seat dict already carries.
 _LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
-    ("in_lane_battles",),
-    ("in_lane_battles", "defender_advantage"),
+    ("custom_map",),
+    ("custom_map", "in_lane_battles"),
+    ("custom_map", "in_lane_battles", "defender_advantage"),
 )
 
 
@@ -176,6 +178,17 @@ class Settings:
     # others come from drop-in files the menu discovers. Same seat-1 indexing.
     ai_strategy: list[str] = field(default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)])
 
+    # -- A hand-authored map, or None to generate one from the seed ---------- #
+    # Embedded here rather than stored beside a Settings, so it travels through
+    # every piece of plumbing a generated map already uses — save/load, share and
+    # challenge links, resume, replay, the leaderboard and the offline bot column
+    # — with nothing downstream needing to know a map was drawn by hand. `mode`,
+    # `players` and `nodes` still describe it: `from_dict` reconciles the latter
+    # two to the recipe, and `mode` stays "random"/"symmetric" because
+    # `leaderboard/schema.sql` constrains the column (the *state* is stamped
+    # "custom", not the setup).
+    custom_map: Optional[CustomMap] = None
+
     # -- A score to beat on this exact setup, or None for an ordinary config --- #
     # Presentation context only: `build_state` ignores it, and it is excluded from
     # `challenge_key` so a config and the same config-plus-a-target agree.
@@ -216,8 +229,17 @@ class Settings:
 
     # -- save / load (see module docstring) ---------------------------------- #
     def to_dict(self) -> dict:
-        """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts)."""
-        return asdict(self)
+        """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts).
+
+        Not a bare ``asdict``: that would write ``custom_map`` as its keyed
+        dataclass form, roughly trebling the length of every shared link and
+        giving the setup digest a second shape nothing else reads. ``CustomMap``
+        owns its own compact, canonical wire form — use it everywhere this dict
+        goes (hashed, tokenised *and* saved).
+        """
+        out = asdict(self)
+        out["custom_map"] = None if self.custom_map is None else self.custom_map.to_dict()
+        return out
 
     @classmethod
     def from_dict(cls, data: dict) -> "Settings":
@@ -260,6 +282,17 @@ class Settings:
             out.ai_strategy.append("heuristic")
 
         out.challenge = _challenge_from_dict(data.get("challenge"))
+
+        # Deliberately after the clamps above, and overriding them. A hand map may
+        # legitimately sit below `min_nodes()`, and `players` must agree with the
+        # seats actually placed or `token_dict`'s seat truncation and
+        # `challenge_keys`' seat blanking would disagree with the sender's.
+        # `CustomMap.from_dict` is total: a recipe it cannot use lands at None and
+        # this setup plays a generated map of the stated size instead.
+        out.custom_map = CustomMap.from_dict(data.get("custom_map"))
+        if out.custom_map is not None:
+            out.players = out.custom_map.seats()
+            out.nodes = len(out.custom_map.nodes)
         return out
 
     def save(self, path) -> None:
@@ -304,6 +337,8 @@ class Settings:
         strategies = _trim_trailing(full["ai_strategy"][:seats], "heuristic")
         if strategies:
             out["ai_strategy"] = strategies
+        if self.custom_map is not None:
+            out["custom_map"] = full["custom_map"]
         if self.challenge is not None:
             out["challenge"] = full["challenge"]
         return out
@@ -413,6 +448,8 @@ class Settings:
                 self.ai_strategy = list(other.ai_strategy)
             elif f.name == "challenge":
                 self.challenge = replace(other.challenge) if other.challenge else None
+            elif f.name == "custom_map":
+                self.custom_map = other.custom_map.copy() if other.custom_map else None
             else:
                 setattr(self, f.name, getattr(other, f.name))
 
@@ -420,7 +457,7 @@ class Settings:
 # Fields `from_dict`'s scalar loop and `token_dict`'s prune loop both skip, each
 # handling them explicitly instead (nested dataclasses, per-seat lists, and `seed`
 # whose Optional[int] defeats `_coerce`'s type-of-default dispatch).
-_STRUCTURED = ("ai", "ai_strategy", "challenge", "seed")
+_STRUCTURED = ("ai", "ai_strategy", "challenge", "custom_map", "seed")
 
 
 def _trim_trailing(items: list, default) -> list:
@@ -525,6 +562,17 @@ def random_seed() -> int:
     return fresh_rng().randrange(config.SEED_MAX)
 
 
+def apply_globals(settings: Settings) -> None:
+    """Public face of ``_apply_globals``, for callers outside generation.
+
+    The map creator's Auto-lanes button runs ``mapgen._planar_edges``, which reads
+    ``config.EXTRA_EDGE_FRACTION``/``MAX_EDGE_LENGTH_FRAC`` live — so those knobs
+    have to reach ``config`` first, and this is the one sanctioned writer. Nothing
+    outside this module may ``setattr(config, ...)`` itself.
+    """
+    _apply_globals(settings)
+
+
 def _apply_globals(settings: Settings) -> None:
     """Push the global balance knobs into the `config` module (the single writer).
 
@@ -543,7 +591,10 @@ def build_state(settings: Settings, seed: int) -> GameState:
     (params a copy, so later menu edits don't reach into a live game).
     """
     _apply_globals(settings)
-    state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
+    if settings.custom_map is not None:
+        state = mapgen.generate_custom(seed, settings.custom_map)
+    else:
+        state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
     for player in state.players.values():
         if not player.is_neutral:
             player.ai_strategy = settings.seat_strategy(player.id)

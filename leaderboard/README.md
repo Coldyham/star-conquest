@@ -1,7 +1,9 @@
 # Star Conquest leaderboard
 
 A small public board for challenge links. Win a game, press **Challenge a friend**,
-paste the link here with a name, and the score joins the ranking for that map.
+paste the link here with a name, and the score joins the ranking for that map. A
+plain settings-share link works too, with no score yet: it registers the setup so
+others can play it and post their own — see "Sharing a setup with no score" below.
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
 API. It is a separate Netlify site from the game itself; nothing in the game or
@@ -14,7 +16,7 @@ its `web/` build depends on it.
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
-| [`submit.html`](submit.html) | paste a challenge link to post a score |
+| [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the
@@ -85,6 +87,62 @@ With `findTwin` in place a split can no longer *grow*, so this is tidying rather
 than rescue, and the folded-away key still works as a link: `js/game.mjs` reads
 an unknown key through `aliasFor` and forwards a bookmark to wherever its map
 now lives.
+
+## Sharing a setup with no score
+
+A challenge link is not the only thing `submit.html` takes. `js/token-decode.mjs`
+reads any Star Conquest link, and `challenge` comes back `null` for a plain
+settings-share link (or a challenge link with nothing on it — `Challenge`'s own
+`turns <= 0` sentinel). The form notices and switches shape: no name, no tags
+(a tag needs a posted score to attach to — `config_tags.score_id`), just the
+link and an optional embargo. Submitting registers the `games` row and sends you
+straight to the map's page — there to hand around, played on and posted to by
+whoever you share it with, the same as any other map on the board.
+
+The one thing it refuses is a setup with no seed pinned (`Settings.seed is
+None` — "roll a fresh map at start"): there would be no single map to register,
+so the form says so rather than silently hashing an ambiguous setup. Pin a seed
+in the game's Advanced menu before sharing a link this way.
+
+### Embargoed replays
+
+The same form takes an optional **days to hide replays**. Fill it in and, the
+*first* time that exact map reaches the board (whether that is this submission
+or a later score on it — `games` is append-only, so this can only ever be
+decided once, and is ignored on every insert after), `games.embargo_until` is
+set to that many days out.
+
+Until it passes, the map's page (`game.html`) shows a target, not a board: how
+many scores exist, who currently holds the best turn count, and that turn
+count itself — enough to know you're behind and by how much, which is the
+whole point of a deadline like this ("who can beat this before the embargo
+lifts" needs *something* to chase). Everything past that is gone: the full
+per-score list, ships lost, hand count, submission times, and every **Watch**
+link. `game.mjs` never even requests the per-score list while embargoed — only
+`game_summary`'s own aggregate (`best_turns`/`best_user_name`/`best_holders`/
+`score_count`), so there is nothing for the page (or its network tab) to leak
+beyond that one figure. `public_replays` (schema.sql) is the DB-level half of
+the same cut: it filters out a match whose map is still embargoed, which is
+the one place every replay read goes through, the game's own Watch link
+included — so unlike the score list (client-side only, matching how openly
+readable `scores` already is everywhere else on this board), a replay stays
+unreadable at the database, not just unrendered.
+
+This is deliberately narrower than hiding the map outright: with no accounts
+here, there is no way to let a submitter see their *own* early result without
+either trusting a client-held secret (which anyone who has the link could also
+hold) or making up an identity system this board has never needed. So the
+boundary is drawn at *how* a score was made — the moves, and the secondary
+detail (lost, hand, timing) that hints at them — never at the turn count
+itself, and it is drawn for everyone alike, the person who set it included.
+If you want to challenge friends to beat a score without anyone (yourself
+too) being able to see how it was done, while still leaving them a number to
+chase, this is that feature: register the map with an embargo before anyone
+plays it, or set one on your own first submission.
+
+The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
+own `first_seen_at`), not a promise about the *right* length — same spirit as
+the loose checks on every other column of that table.
 
 ## Same setup, different seed
 
@@ -201,6 +259,40 @@ lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
 
+### Watching a bot's replay
+
+Every bot row carries a **Watch** link too, next to a human score's (see
+"Watching one back" below) — but it is built rather than fetched. Nothing was
+ever uploaded for it to point at: a bot's game is exactly as reproducible as
+the number on the row, the same fact that lets `tools/bot_replay.py` compute
+it once instead of on every page view. So the link just hands the game the
+same ingredients the worker replayed — the stored setup, the seed, and the
+bot standing in for the human's seat, already in autoplay — and lets the
+game's own engine play it out live from turn one, rather than scrubbing a
+recorded log.
+
+`js/token-encode.mjs`'s `botWatchSetup` builds that setup, mirroring
+`tools/sim.play_settings` (what `bot_replay.py` actually calls) field for
+field: seat 1's own strategy and params are discarded — that slot belongs to
+whoever holds the human seat in the stored setup, not to the bot being
+measured — and replaced with the bot at the `aux` its row was computed at;
+every other seat keeps the strategy and params the setup gave it, since those
+are part of the map's difficulty. `game.mjs`'s `botWatchLink` is the encoding
+step, the same `encodeToken`/`deflate` pair `js/home.mjs`'s "Play a new seed"
+already uses.
+
+Unlike a human's Watch link there is no rules-version check here, and that is
+deliberate rather than an oversight: a stored *log* replays recorded orders
+and dice, which is exactly what an engine-rules change can break, so that link
+is withdrawn rather than shown wrong (`GameLog.is_current`, above). A bot
+replay never applies anything recorded — it re-decides every turn against
+whatever code is live — so there is nothing here that can fail to
+reconstruct; the only way it can drift is the same one `bot_replay.py`'s
+`--stale` already accepts as normal: the engine or the bot has moved on since
+the row was cached, so a live watch shows the bot as it plays *today*, which
+may no longer match the cached `turns`/`lost` exactly. That is "old", not
+"broken" — see `pending()`'s docstring in `tools/bot_replay.py`.
+
 ## Checked scores
 
 A score in a link is a claim. The *replay* behind it is not: a match is fully
@@ -283,12 +375,18 @@ Python, so a JS viewer would be a second engine to keep in step with the first.
 The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
 `netlify/functions/replay.mjs` and opens history review on it.
 
-**Posting a score is what publishes that replay.** `public_replays` (schema.sql)
-is `game_logs` restricted to the matches a posted score points at, so a game that
-merely uploaded itself because *Share replays* was on stays unreadable. That rule
-lives in the view's `where` clause rather than in the function, which selects
-from the view and has no condition of its own to drift. `submit.html` says so on
-the form, since that is where the decision is actually made.
+(A bot's row gets a Watch link the same way, but built rather than fetched —
+see "Watching a bot's replay" under "How the bots did" above.)
+
+**Posting a score is what publishes that replay** — unless the map it belongs to
+is still embargoed, in which case nothing is, whoever posted it. `public_replays`
+(schema.sql) is `game_logs` restricted to the matches a posted score points at
+*and* whose map's `games.embargo_until` has either passed or was never set, so a
+game that merely uploaded itself because *Share replays* was on stays unreadable
+either way. That rule lives in the view's `where` clause rather than in the
+function, which selects from the view and has no condition of its own to drift.
+`submit.html` says so on the form, since that is where the decision is actually
+made — see "Embargoed replays" above for how a map ends up embargoed at all.
 
 The link is only rendered for ids `public_replays` actually returns
 (`watchableIds` in `js/game.mjs`), so it can never lead to a 404 — a score can
@@ -437,8 +535,11 @@ directly.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
-- **Wins only.** The game only offers the challenge link when the human won and
-  played at least one turn by hand, so nothing else can be posted.
+- **A score is wins only.** The game only offers the challenge link when the
+  human won and played at least one turn by hand, so nothing else can be
+  posted as a score. A setup with no result behind it is the exception — see
+  "Sharing a setup with no score" above — but that registers a map, never a
+  score.
 - **A config's name is first-wins and permanent**, and a `config_key` can be
   squatted or posted for a setup nobody has played — see "Same setup, different
   seed" above. Tags don't share that trade — they accumulate — but they do

@@ -12,6 +12,10 @@ const form = document.getElementById("form");
 const linkField = document.getElementById("link");
 const nameField = document.getElementById("name");
 const tagsField = document.getElementById("tags");
+const embargoField = document.getElementById("embargo");
+const scoreFields = document.getElementById("score-fields");
+const scoreHint = document.getElementById("score-hint");
+const tagsHint = document.getElementById("tags-hint");
 const preview = document.getElementById("preview");
 const status = document.getElementById("status");
 const button = document.getElementById("go");
@@ -60,7 +64,8 @@ async function findTwin(decoded) {
 }
 
 /**
- * The key to file this score under: find or create the game row.
+ * The key to file this score (or bare setup) under: find or create the game
+ * row, and say whether an embargo actually took effect.
  *
  * Select-then-insert rather than an upsert: an upsert compiles to ON CONFLICT DO
  * UPDATE, and there is deliberately no UPDATE policy for it to use (schema.sql).
@@ -70,25 +75,48 @@ async function findTwin(decoded) {
  * The stamped key wins whenever the board already holds it — that is the map
  * page every link out of this site points at. Only when it is unknown do we look
  * for the same map under an older key.
+ *
+ * `embargoUntil` (an ISO timestamp, or null for none) only ever takes effect on
+ * the `insert` below — the one moment this map's row does not already exist.
+ * `games` is append-only like everything else here, so an embargo requested
+ * against a map already on the board is silently ignored rather than
+ * retroactively hiding replays someone may already have watched; the returned
+ * `embargoed` flag is how the submit handler tells the difference.
  */
-async function ensureGame(decoded) {
+async function ensureGame(decoded, embargoUntil) {
   const found = await select(`games?select=game_key&game_key=${eq(decoded.gameKey)}&limit=1`);
-  if (found.length) return decoded.gameKey;
+  if (found.length) return { gameKey: decoded.gameKey, embargoed: false };
   const twin = await findTwin(decoded);
-  if (twin) return twin;
+  if (twin) return { gameKey: twin, embargoed: false };
+  const row = {
+    game_key: decoded.gameKey,
+    mode: decoded.mode,
+    players: decoded.players,
+    nodes: decoded.nodes,
+    seed: decoded.seed,
+    settings_json: decoded.setup,
+  };
+  if (embargoUntil) row.embargo_until = embargoUntil;
   try {
-    await insert("games", {
-      game_key: decoded.gameKey,
-      mode: decoded.mode,
-      players: decoded.players,
-      nodes: decoded.nodes,
-      seed: decoded.seed,
-      settings_json: decoded.setup,
-    });
+    await insert("games", row);
   } catch (err) {
     if (err.code !== UNIQUE_VIOLATION) throw err;
+    return { gameKey: decoded.gameKey, embargoed: false };  // someone else just inserted it
   }
-  return decoded.gameKey;
+  return { gameKey: decoded.gameKey, embargoed: Boolean(embargoUntil) };
+}
+
+/**
+ * The embargo field as an ISO timestamp, or null for "no embargo requested" —
+ * the shape `ensureGame` above wants. Clamped to what `games_embargo_bounds`
+ * (schema.sql) actually allows, so a stray value here fails as "no embargo"
+ * rather than as a rejected insert the player has no way to explain.
+ */
+function embargoUntilFrom(daysValue) {
+  const days = Number(daysValue);
+  if (!Number.isFinite(days) || days <= 0) return null;
+  const clamped = Math.min(90, Math.max(1, Math.round(days)));
+  return new Date(Date.now() + clamped * 86400000).toISOString();
 }
 
 /** Find or create the user, keyed by name alone — same race handling as above. */
@@ -143,12 +171,36 @@ async function decodePasted() {
   return decodeToken(linkField.value, inflate);
 }
 
+/**
+ * Switch the form between its two shapes: posting a score (a challenge link)
+ * or sharing a bare setup (a plain settings link, or one that never got played
+ * to a result — decodeToken's `challenge: null`, token-decode.mjs). The name
+ * and tags fields belong to a *score*; a bare setup has neither a poster to
+ * credit nor anything a tag could describe (config_tags.score_id requires one
+ * to exist), so they hide rather than sitting there unused. The embargo field
+ * and its hint stay up in both shapes — see ensureGame's doc comment for why
+ * it's harmless to offer even when it may end up doing nothing.
+ */
+function setSharing(sharing) {
+  scoreFields.hidden = sharing;
+  scoreHint.hidden = sharing;
+  tagsHint.hidden = sharing;
+  nameField.required = !sharing;
+  button.textContent = sharing ? "Share setup" : "Enter";
+}
+
 async function refreshPreview() {
   preview.hidden = true;
-  if (!linkField.value.trim()) return;
+  if (!linkField.value.trim()) {
+    setSharing(false);
+    return;
+  }
   try {
     const decoded = await decodePasted();
-    preview.textContent = `${mapSummary(decoded)} — ${scoreSummary(decoded.challenge)}`;
+    setSharing(!decoded.challenge);
+    preview.textContent = decoded.challenge
+      ? `${mapSummary(decoded)} — ${scoreSummary(decoded.challenge)}`
+      : `${mapSummary(decoded)} — no score on this link, just the setup`;
     preview.hidden = false;
     say("");
   } catch {
@@ -166,7 +218,7 @@ linkField.addEventListener("input", refreshPreview);
  * the game can hand us its existing link shape verbatim. fragmentOf already takes
  * everything after the '#', so a whole pasted URL works here too.
  */
-function prefill() {
+async function prefill() {
   const name = myName();
   if (name) nameField.value = name;
 
@@ -176,9 +228,11 @@ function prefill() {
     return;
   }
   linkField.value = token;
-  refreshPreview();
-  // The link is the part that was tedious; put the cursor on what's left.
-  (name ? document.getElementById("go") : nameField).focus();
+  await refreshPreview();
+  // The link is the part that was tedious; put the cursor on what's left. A
+  // bare setup has no name field to land on even with none remembered — the
+  // button is the only control left either way.
+  (name || scoreFields.hidden ? button : nameField).focus();
 }
 
 mountMyScores();
@@ -190,28 +244,40 @@ form.addEventListener("submit", async (event) => {
     say("This leaderboard isn't connected to its database yet — see leaderboard/README.md.", "error");
     return;
   }
-  if (!nameField.value.trim()) {
-    say("Add a name to post under.", "error");
-    return;
-  }
 
   let decoded;
   try {
     decoded = await decodePasted();
-  } catch (err) {
-    say(
-      err.message.startsWith("not a challenge link")
-        ? "That's a valid Star Conquest link, but it has no score on it — paste the one from Challenge a friend after a win."
-        : "That doesn't look like a Star Conquest challenge link.",
-      "error",
-    );
+  } catch {
+    say("That doesn't look like a Star Conquest link.", "error");
+    return;
+  }
+
+  const sharing = !decoded.challenge;
+  if (!sharing && !nameField.value.trim()) {
+    say("Add a name to post under.", "error");
+    return;
+  }
+  if (decoded.seed === null) {
+    // A plain settings-share link may leave the seed to be rolled fresh at
+    // start (Settings.seed is None) — fine for opening the game, but there is
+    // no single map to register or score without one. Told apart from "that
+    // doesn't look like a link at all" above, since this one decoded fine.
+    say("This link has no fixed map (its seed is set to “random”) — pick a seed in the game's Advanced menu and share that link instead.", "error");
     return;
   }
 
   button.disabled = true;
-  say("Posting…");
+  say(sharing ? "Sharing…" : "Posting…");
   try {
-    const gameKey = await ensureGame(decoded);
+    const embargoUntil = embargoUntilFrom(embargoField.value);
+    const { gameKey, embargoed } = await ensureGame(decoded, embargoUntil);
+
+    if (sharing) {
+      location.href = `game.html?key=${encodeURIComponent(gameKey)}`;
+      return;
+    }
+
     const userId = await ensureUser(nameField.value);
     const [score] = await insert("scores", {
       game_key: gameKey,
@@ -229,6 +295,13 @@ form.addEventListener("submit", async (event) => {
     rememberName(nameField.value);
     // Best-effort and never blocking: see submitTags's own doc comment.
     await submitTags(decoded.setup, score.id, userId, tagsField.value);
+    if (embargoUntil && !embargoed) {
+      // The embargo field was filled in, but this map was already on the
+      // board (from an earlier score, or someone else's bare share) — say so
+      // rather than silently posting as if it had been honoured.
+      say("Posted — but this map was already on the board, so the embargo you set wasn't applied. Redirecting…");
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+    }
     location.href = `game.html?key=${encodeURIComponent(gameKey)}`;
   } catch (err) {
     button.disabled = false;

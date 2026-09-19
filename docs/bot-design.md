@@ -220,6 +220,16 @@ strictly more reproducible. It remains a guard — a wedged bot is stopped long
 before the workflow's own `timeout-minutes` has to — and `BUDGET_SCALE` stays 1.0
 for every ordinary caller, so a real game is untouched.
 
+The suite's own reproducibility checks lift them too, and further — to `inf`
+rather than 100x (`tests/test_sim.py::test_a_tuned_replay_is_still_reproducible`,
+`::test_budget_scale_is_wired_and_only_matters_when_it_bites`). A test machine
+running the rest of the suite beside them *is* the "2x slower runner" above, so
+at the shipped scale the guard fires on one run of a pair and not the other and
+the assertion measures the machine rather than the search. A guard that cannot
+fire is the only version of "sized not to fire" a test can rely on; the one
+assertion left at a finite scale is the 100x the worker actually uses, which is
+there to pin that the worker's own setting is guard-free on this workload.
+
 A bot that wants the same treatment declares `BUDGET_SCALE = 1.0` and multiplies
 its own budgets by it at call time; see `models/README.md`. Bots without it are
 left alone.

@@ -31,6 +31,33 @@ export function newSeedSetup(settingsJson) {
 }
 
 /**
+ * A stored setup with a bot standing in for the human's seat and the whole
+ * match set to autoplay, ready to encode: what a bot score's "Watch" link is
+ * made of.
+ *
+ * Mirrors `tools/sim.play_settings` exactly, which is what actually produced
+ * the row on `bot_scores` this link is offered from: seat 1's own strategy and
+ * params are discarded rather than kept, since that slot belongs to the human
+ * and is unrelated to how the bot ought to play, and `aux` (falsy or `1`, its
+ * untuned default) leaves the seat at `AiParams()`'s own defaults — Python's
+ * tolerant decoder pads any field this omits, so a bare `{aux}` (or `{}`) is
+ * exactly `AiParams(aux=aux)`. Every other seat keeps the strategy and params
+ * the setup gave it, since those are part of the map's difficulty.
+ *
+ * Unlike `newSeedSetup`, the seed travels with it: a bot replay is the same
+ * map the human played, not a fresh one.
+ */
+export function botWatchSetup(settingsJson, bot, aux) {
+  const setup = settingsJson || {};
+  const seats = Math.max(1, Number(setup.players) || 1);
+  const strategies = Array.from({ length: seats }, (_, i) => (setup.ai_strategy || [])[i] || "heuristic");
+  const params = Array.from({ length: seats }, (_, i) => (setup.ai || [])[i] || {});
+  strategies[0] = bot;
+  params[0] = aux && aux !== 1 ? { aux } : {};
+  return { ...setup, ai_strategy: strategies, ai: params, autoplay: true };
+}
+
+/**
  * A setup dict as a link fragment.
  *
  * @param setup    a plain settings dict (see newSeedSetup)

@@ -18,9 +18,9 @@ from typing import Optional
 
 import pygame
 
-from starconquest import (ai, config, engine, fog, mapgen, menu, paths, render,
-                          replay, share, softkeyboard, turnfilm, viewstate,
-                          webstore)
+from starconquest import (ai, config, engine, fog, mapgen, mapmaker, menu, paths,
+                          render, replay, share, softkeyboard, turnfilm,
+                          viewstate, webstore)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -143,6 +143,15 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
     fog is off (both ranges at max), where `visible` covers the whole map.
     """
     ui.visible = _accumulate_fog(state, ui.human_id, ui.seen, ui.player_intel)
+
+
+def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
+    """Roll the seed and open a fresh match — the single start path, shared by the
+    menu's Start Game and the map creator's Play so the two cannot drift apart."""
+    ai.load_models()   # pick up files added since launch / named by a loaded config
+    seed = resolve_seed(settings)
+    state, ui, log = start_game(settings, seed, settings.autoplay)
+    return state, ui, log, seed
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -502,13 +511,13 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         else list(ui.pending) + auto_forward_orders(state, ui)
     )
     # Two gates, here rather than at the three call sites. `marking` is the wider
-    # one: a fight's cost or a finished hull is cheap to report and worth seeing
-    # even with the full glide off, so it only excludes autoplay — nothing you
-    # decided to have explained — and fast-forward, the whole point of which is to
-    # skip. `filming` narrows that to the animated glide itself, gated on the
-    # display preference on top. Both are read once a turn, like `share.due`, and
-    # never in `render`, where reading the store would cost a DOM call every frame.
-    marking = not ui.autoplay and not ui.fast_forward
+    # one: a fight's cost or a finished hull is cheap to report and worth seeing,
+    # for a bot-driven turn as much as a human one, so it only excludes
+    # fast-forward, the whole point of which is to skip. `filming` narrows that to
+    # the animated glide itself, gated on the display preference on top. Both are
+    # read once a turn, like `share.due`, and never in `render`, where reading the
+    # store would cost a DOM call every frame.
+    marking = not ui.fast_forward
     filming = marking and webstore.animate_turns()
     before = turnfilm.copy_board(state) if filming else None
     # What the human could see going in. `visible` is not monotone — a system lost
@@ -553,10 +562,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
             or (state.is_defeated(ui.human_id) and not was_defeated))
 
     # Lingering (see turnfilm.film): a turn you ended by hand is worth watching
-    # resolve. A *run* of turns is not — play mode and history playback
-    # (`_next_history_film`) are one behaviour from two sources, and both have to
-    # glide straight through rather than stop-start for every fight.
-    film = (turnfilm.film(events, linger=not ui.playing)
+    # resolve. A *run* of turns is not — play mode, autoplay and history playback
+    # (`_next_history_film`) are one behaviour from three sources, and all of them
+    # have to glide straight through rather than stop-start for every fight.
+    film = (turnfilm.film(events, linger=not (ui.playing or ui.autoplay))
             if before is not None else None)
     # A turn with nothing to watch isn't worth a pause, and neither is one nobody
     # asked to see: both land the snap now, exactly as before there were films.
@@ -758,9 +767,11 @@ async def main() -> None:
     config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
     clock = pygame.time.Clock()
 
-    # Two scenes share the one window: the setup menu and the game board. The
-    # menu builds `state`/`ui` on "start"; pressing M in-game drops back to it.
+    # Three scenes share the one window: the setup menu, the map creator and the
+    # game board. The menu builds `state`/`ui` on "start"; pressing M in-game
+    # drops back to it, and Create/Edit map opens the creator between the two.
     menu_state = MenuState()
+    editor: mapmaker.Editor | None = None      # live only while scene == "maker"
     state: GameState | None = None
     ui: Ui | None = None
     log: GameLog | None = None       # replay log of the live match (None while in menu)
@@ -853,6 +864,8 @@ async def main() -> None:
             if state is not None and ui is not None:
                 ui.view = build_view(state)
                 ui.reset_view(state)   # re-frame for the new size, not the whole map
+            if editor is not None:
+                mapmaker.reflow(editor)
         for event in pygame.event.get():
             # Web only, once: the first tap/click/key this session sees is the
             # earliest point simulation code can observe that the player has
@@ -966,13 +979,24 @@ async def main() -> None:
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
-                    ai.load_models()   # pick up files added since launch / named by a loaded config
-                    current_seed = resolve_seed(settings)
-                    state, ui, log = start_game(settings, current_seed, settings.autoplay)
+                    state, ui, log, current_seed = _begin_game(settings)
                     scene = "game"
                     auto_accum = 0
+                elif action == "create_map":
+                    editor = mapmaker.open_editor(settings)
+                    scene = "maker"
                 elif action == "quit":
                     confirm_quit = True
+                continue
+
+            if scene == "maker":
+                assert editor is not None
+                action = mapmaker.handle_event(event, editor, settings)
+                if action == "play":
+                    state, ui, log, current_seed = _begin_game(settings)
+                    scene, editor = "game", None
+                elif action == "menu":
+                    scene, editor = "menu", None
                 continue
 
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
@@ -1105,6 +1129,7 @@ async def main() -> None:
                     land_film(state, ui)
                     reel = None
                     play_accum = 0
+                    auto_accum = 0
                     if ui.history and ui.playing:
                         # Chain straight into the next turn's film with no gap, so
                         # a run of animated turns glides rather than stuttering —
@@ -1116,6 +1141,12 @@ async def main() -> None:
                             and ui.mode != viewstate.ROUTING):
                         # ...and live play chains the same way, on the same terms
                         # as the PLAY_MS branch below it would have resolved on.
+                        reel = resolve_turn(state, ui, log, settings)
+                    elif (ui.autoplay and not ui.history and state.winner is None
+                            and ui.mode != viewstate.ROUTING):
+                        # ...and so does autoplay, on the same terms as the
+                        # AUTOPLAY_MS branch below it would have resolved on — a bot
+                        # game gets the same continuous glide a human's does.
                         reel = resolve_turn(state, ui, log, settings)
 
             if (reel is None and ui.history and ui.playing
@@ -1139,10 +1170,14 @@ async def main() -> None:
                     and not confirm_quit and not confirm_rewind and not ui.history
                     and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
+                    # Same shape as play mode just below: with turn animation on,
+                    # one animated turn chains into the next as it lands (above),
+                    # so this pacing is only ever felt on a turn with nothing to
+                    # animate (or with the preference off).
                     auto_accum += dt
                     if auto_accum >= step_delay(ui, AUTOPLAY_MS):
                         auto_accum = 0
-                        resolve_turn(state, ui, log, settings)
+                        reel = resolve_turn(state, ui, log, settings)
                 elif ui.playing:
                     # Same shape as history's playback above: with turn animation
                     # on, one animated turn chains into the next as it lands, so
@@ -1160,6 +1195,11 @@ async def main() -> None:
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
+        elif scene == "maker":
+            assert editor is not None
+            mapmaker.pump(editor)          # same soft-keyboard poll, for its filename field
+            mapmaker.age_status(editor, dt)
+            mapmaker.draw(screen, editor, settings)
         else:
             assert state is not None and ui is not None   # scene == "game"
             if ui.history and history_states:

@@ -13,6 +13,13 @@ import math
 # --------------------------------------------------------------------------- #
 WORLD_SIZE = 1000.0            # game is laid out in a WORLD_SIZE x WORLD_SIZE box
 WORLD_MARGIN = 80.0            # keep nodes this far from the world edge
+# Hand-authored maps get a wider box than the square one `mapgen` generates into.
+# Nothing generated moves -- `_play_bounds()` is still square, so every seed lays
+# out the board it always did -- but a recipe stores concrete coordinates and
+# `main.build_view` fits the node bounding box at play time, so a map drawn to
+# these bounds fills a widescreen window instead of being letterboxed. Widening
+# `WORLD_SIZE` itself would re-roll every seed and cost a RULES_VERSION bump.
+CUSTOM_WORLD_W = 1600.0        # hand-drawn maps are laid out in CUSTOM_WORLD_W x WORLD_SIZE
 
 LY_PER_WORLD_UNIT = 0.1        # cosmetic: a lane's length in light-years
 SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
@@ -47,6 +54,11 @@ EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the
 MAX_EDGE_LENGTH_FRAC = 0.5     # prune non-MST candidate edges longer than this * WORLD_SIZE
 LANE_NODE_CLEARANCE_FRAC = 0.045  # reject an extra edge passing closer than this * WORLD_SIZE
 #   to an unrelated node's centre -> it would render as if running underneath that system
+CUSTOM_MIN_NODE_SEP_FRAC = 0.045  # hand-placed systems must sit this far * WORLD_SIZE apart
+#   deliberately equal to LANE_NODE_CLEARANCE_FRAC: one clearance figure then governs
+#   both node-vs-node and node-vs-lane. Must stay below the tightest pair mapgen
+#   itself produces (measured: 53.6 units), or loading a generated map lights up
+#   with violations -- test_mapgen's separation sweep pins that.
 LLOYD_PASSES = 1              # relaxation passes to even out random node placement
 NODE_JITTER = 0.85           # placement spread within a grid cell (0..1); higher == more length variety
 RELAX_MIN_SEP_FRAC = 0.6     # relaxation only pushes apart nodes closer than this * ideal spacing
@@ -63,6 +75,27 @@ GARRISON_K = 12              # ships += round(GARRISON_K / production)
 GARRISON_JITTER = 3         # ships += rng.randint(0, GARRISON_JITTER)
 
 NEUTRAL_PRODUCES = False    # neutrals are static garrisons by default
+
+# Ceilings on a hand-authored system, for the map creator's steppers and the
+# recipe parser's clamps. Generous rather than balanced: the author is the one
+# deciding, and a value past these is a typo or a hand-edited token.
+CUSTOM_MAX_PRODUCTION = 12  # turns per ship (0 is legal too -- engine skips it)
+CUSTOM_MAX_SHIPS = 99       # starting garrison
+
+# The creator's Garrison slider tops out here for a comfortable drag range; the
+# stepper +/- beside it stays uncapped up to CUSTOM_MAX_SHIPS for anything bigger.
+CUSTOM_GARRISON_SLIDER_MAX = 50
+
+# The recipe parser's structural ceiling -- what bounds a malformed blob, not a
+# game rule. It must sit above anything the generator itself can produce, and
+# MAX_NODES is *not* that bound: `generate_symmetric` rounds the node count up to
+# a whole number per sector and adds the shared centre, so it returns
+# `players * round((nodes-1)/players) + 1` -- 41 systems at 40 nodes, and up to
+# MAX_NODES + MAX_PLAYERS/2 + 1 in general. Capping the parser at MAX_NODES would
+# make a map the game generates and plays today un-importable into the creator.
+# The authoring ceiling is separate and *is* MAX_NODES: the editor refuses the
+# 41st hand-placed system.
+CUSTOM_MAX_NODES = MAX_NODES + MAX_PLAYERS
 
 # --------------------------------------------------------------------------- #
 # Combat  (Lanchester square law + jitter)
@@ -143,6 +176,16 @@ HUD_RIGHT_W = 240            # reserved right column for the system/lane info pa
 # the queued-orders list never draws underneath it).
 END_TURN_H = 96
 FOOTER_BTN_H = 40            # height of the smaller bottom-bar buttons (play/pause, etc.)
+
+# Map creator chrome (mapmaker.py). Its viewport is derived from these rather
+# than from play_rect(), which reserves HUD_RIGHT_W and both bars for a HUD the
+# editor doesn't have.
+EDIT_TOP_H = 44              # tool-mode strip across the top
+EDIT_SIDE_W = 260            # right-hand sidebar: selection editors, sliders, problems
+EDIT_PALETTE_MIN_H = 96      # floor on the bottom palette band (it is measured, not fixed)
+# Deliberately *not* in _SCALABLE below: it is a count of remembered edits, not a
+# pixel size, so the UI scale has nothing to say about it.
+EDIT_UNDO_DEPTH = 64         # how many edits back the creator's Undo reaches
 
 # Shared layout metrics. Text-bearing boxes are sized from the *measured* label
 # plus BTN_PAD_X, and text rows from the font's own line height plus ROW_GAP, so
@@ -271,7 +314,7 @@ SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
 
 # Sliders (the send popup's count slider and history mode's turn scrubber — the
-# same widget, drawn by render._draw_slider). The knob is inset by its radius at
+# same widget, drawn by widgets.slider). The knob is inset by its radius at
 # both ends of the track, so it never overhangs the box it sits in.
 SLIDER_TRACK_H = 6          # px: thickness of the track
 SLIDER_KNOB_R = 7           # px: radius of the knob
@@ -330,6 +373,7 @@ touch_ui = False
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
+    "EDIT_TOP_H", "EDIT_SIDE_W", "EDIT_PALETTE_MIN_H",
     "HUD_PAD", "PANEL_PAD", "BTN_PAD_X", "BTN_GAP", "ROW_GAP", "TOUCH_MIN_TARGET",
     "MAP_FIT_PADDING", "MAP_PAN_PADDING", "NODE_RING_PAD",
     "NODE_LABEL_GAP", "NODE_LABEL_PAD",
@@ -480,6 +524,22 @@ def text_on(bg: tuple[int, int, int]) -> tuple[int, int, int]:
     if _contrast_ratio(COLOR_TEXT_DARK, bg) >= _contrast_ratio(COLOR_TEXT, bg):
         return COLOR_TEXT_DARK
     return COLOR_TEXT
+
+
+def garrison_for(production: int, jitter_roll: int) -> int:
+    """A neutral system's starting garrison: scaled by desirability, plus a roll.
+
+    Takes the *already-drawn* jitter rather than drawing it, so the one caller
+    that must not move an rng stream (`mapgen._assign_production_and_garrisons`)
+    keeps its `state.rng.randint` exactly where it was, and the map creator can
+    pass a roll from its own throwaway generator.
+
+    A production of 0 never yields a ship, so the "richer -> bigger" scaling has
+    nothing to price: it gets the base garrison alone. mapgen never asks for one
+    — only a hand-authored map can.
+    """
+    scaled = round(GARRISON_K / production) if production > 0 else 0
+    return GARRISON_BASE + scaled + jitter_roll
 
 
 def node_radius(production: int) -> int:

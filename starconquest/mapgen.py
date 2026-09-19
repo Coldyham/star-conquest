@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from typing import TYPE_CHECKING
 
 from . import config
 from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
 from .model import GameState, Player, System
 from .starnames import pick as pick_names
+
+if TYPE_CHECKING:  # import-cycle-free: custommap imports config/geometry/model only
+    from .custommap import CustomMap
 
 
 # --------------------------------------------------------------------------- #
@@ -57,6 +61,37 @@ def generate_random(
     state.rebuild_topology()
     _name_systems(state)
     assert is_connected(state), "generated map is not connected"
+    return state
+
+
+def generate_custom(seed: int, design: "CustomMap") -> GameState:
+    """Build the board a hand-authored recipe describes.
+
+    Draws nothing: every position, production, garrison and owner in the recipe is
+    already concrete, so no existing mapgen code is refactored and no generated
+    map's rng stream moves. The seed still matters — it drives combat dice and the
+    star names below — it just no longer shapes the layout.
+
+    Strict by contract: ``custommap.from_dict`` is the one tolerant gate, and past
+    it a recipe is playable or it is ``None``. A blocker here is a caller bug.
+    """
+    assert not design.blockers(), f"custom map is not playable: {design.blockers()}"
+    state = GameState.new(seed, mode="custom")
+    _make_players(state, design.seats())
+    for i, node in enumerate(design.nodes):
+        state.systems[i] = System(
+            id=i,
+            pos=node.pos,
+            owner_id=node.owner,
+            ships=node.ships,
+            production=node.production,
+        )
+    for a, b in design.lanes:
+        _add_lane_between(state, a, b)   # length_ly / travel_turns derived here
+
+    state.rebuild_topology()
+    _name_systems(state)                 # LAST, and the only draw from state.rng
+    assert is_connected(state), "custom map is not connected"
     return state
 
 
@@ -174,7 +209,7 @@ def _base_sector_values(state, per_player) -> tuple[list[int], list[int]]:
     for _ in range(per_player - 1):
         p = state.rng.choices(values, weights=weights, k=1)[0]
         prod.append(p)
-        ships.append(config.GARRISON_BASE + round(config.GARRISON_K / p) + state.rng.randint(0, config.GARRISON_JITTER))
+        ships.append(config.garrison_for(p, state.rng.randint(0, config.GARRISON_JITTER)))
     return prod, ships
 
 
@@ -361,18 +396,23 @@ def _make_players(state: GameState, num_players: int) -> None:
         )
 
 
-def _peripheral_starts(state: GameState, count: int) -> list[int]:
-    """Homeworlds evenly spread around the map's rim, one per angular sector.
+def peripheral_starts(positions: dict[int, tuple[float, float]], count: int, rng) -> list[int]:
+    """Homeworlds evenly spread around the rim of ``positions``, one per angular
+    sector. Keyed by id rather than taking a ``GameState``, because the map
+    creator's Owners tool places starts from a recipe that is not a board.
 
     Directions are equally spaced by angle (with a random overall rotation for
     variety), and for each direction we take the node furthest that way from the
     map centre. Every player thus gets a peripheral 'corner' start and nobody is
     boxed into the contested middle, so no seat is systematically disadvantaged.
+
+    Callers guarantee ``0 < count <= len(positions)``; asking for more starts than
+    there are systems has no answer to give.
     """
-    ids = list(state.systems)
-    cx = sum(state.systems[i].pos[0] for i in ids) / len(ids)
-    cy = sum(state.systems[i].pos[1] for i in ids) / len(ids)
-    base = state.rng.uniform(0.0, 2.0 * math.pi)
+    ids = list(positions)
+    cx = sum(positions[i][0] for i in ids) / len(ids)
+    cy = sum(positions[i][1] for i in ids) / len(ids)
+    base = rng.uniform(0.0, 2.0 * math.pi)
 
     chosen: list[int] = []
     used: set[int] = set()
@@ -383,13 +423,21 @@ def _peripheral_starts(state: GameState, count: int) -> list[int]:
         for sid in ids:
             if sid in used:
                 continue
-            px, py = state.systems[sid].pos
+            px, py = positions[sid]
             score = (px - cx) * dx + (py - cy) * dy  # projection onto the target direction
             if score > best_score:
                 best_score, best_id = score, sid
         used.add(best_id)
         chosen.append(best_id)
     return chosen
+
+
+def _peripheral_starts(state: GameState, count: int) -> list[int]:
+    """``peripheral_starts`` over a live board — the same ids in the same order
+    (``state.systems`` is insertion-ordered) and the same single ``rng`` draw, so
+    a seed lays out exactly the board it always did."""
+    return peripheral_starts({sid: s.pos for sid, s in state.systems.items()},
+                             count, state.rng)
 
 
 def _assign_players_and_starts(state: GameState, num_players: int) -> None:
@@ -410,7 +458,7 @@ def _assign_production_and_garrisons(state: GameState) -> None:
         if sys.owner_id != 0:
             continue  # homeworlds already configured
         sys.production = state.rng.choices(values, weights=weights, k=1)[0]
-        sys.ships = config.GARRISON_BASE + round(config.GARRISON_K / sys.production) + state.rng.randint(0, config.GARRISON_JITTER)
+        sys.ships = config.garrison_for(sys.production, state.rng.randint(0, config.GARRISON_JITTER))
 
 
 # --------------------------------------------------------------------------- #

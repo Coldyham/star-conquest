@@ -1,4 +1,4 @@
-// Reads a Star Conquest challenge link.
+// Reads a Star Conquest link — a plain settings-share link or a challenge one.
 //
 // The game encodes a whole Settings object as
 // `JSON -> zlib.compress(9) -> base64url, '=' stripped` (starconquest/settings.py,
@@ -6,9 +6,12 @@
 // can take a pasted link without any Python.
 //
 // It reads only what the leaderboard needs — the four identity fields the game
-// never prunes, plus the score — rather than porting Settings.from_dict. The
-// decompressor is injected so this module stays platform-free: the browser passes
-// inflate-browser.mjs, the tests pass Node's zlib.
+// never prunes, plus the score when there is one — rather than porting
+// Settings.from_dict. `challenge` is null for a plain settings-share link (or one
+// carrying Challenge's own turns<=0 "no challenge" sentinel): the leaderboard
+// takes that as a setup to register rather than a score to post (js/submit.mjs).
+// The decompressor is injected so this module stays platform-free: the browser
+// passes inflate-browser.mjs, the tests pass Node's zlib.
 //
 // tests/fixtures/tokens.json holds real tokens from the Python encoder;
 // regenerate with `uv run python tools/dump_challenge_fixtures.py`.
@@ -71,12 +74,13 @@ export function fragmentOf(input) {
 }
 
 /**
- * Decode a challenge link (or bare token).
+ * Decode a Star Conquest link — a plain settings-share link, or a challenge one
+ * carrying a score on top of the same setup.
  *
  * @param input    the pasted URL or token
  * @param inflate  (Uint8Array) => Uint8Array | Promise<Uint8Array>, zlib-wrapped
- * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by, log}, gameKey, token}
- * @throws Error  'malformed token' or 'not a challenge link'
+ * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by, log} | null, gameKey, setup, token}
+ * @throws Error  'malformed token'
  */
 export async function decodeToken(input, inflate) {
   const token = fragmentOf(input);
@@ -97,36 +101,45 @@ export async function decodeToken(input, inflate) {
   }
 
   // turns <= 0 is Challenge's own "no challenge" sentinel, so a plain
-  // settings-share link lands here too — there is no score in it to post.
-  const challenge = dict.challenge;
-  if (!challenge || typeof challenge !== "object" || !(positiveInt(challenge.turns))) {
-    throw new Error("not a challenge link");
-  }
+  // settings-share link (no score, just a setup) reads the same way as one
+  // stamped with that sentinel — both are "nothing to post", not an error.
+  // submit.mjs branches on `challenge` being null to offer registering the
+  // bare setup instead of posting a score.
+  const raw = dict.challenge;
+  const hasChallenge = raw && typeof raw === "object" && positiveInt(raw.turns);
 
   return {
     // from_dict clamps an unknown mode to "random"; match it rather than reject.
     mode: MODES.includes(dict.mode) ? dict.mode : "random",
     players: requirePositiveInt(dict.players, "players"),
     nodes: requirePositiveInt(dict.nodes, "nodes"),
-    // A challenge link always pins the seed actually played (main.challenge_settings),
-    // so a missing one would silently describe a different map.
-    seed: requireInt(dict.seed, "seed"),
-    challenge: {
-      turns: challenge.turns,
-      lost: requireCount(challenge.lost, "lost"),
-      hand: requireCount(challenge.hand, "hand"),
-      by: typeof challenge.by === "string" ? challenge.by : "",
+    // A challenge link always pins the seed actually played
+    // (main.challenge_settings), so a missing one there would silently describe
+    // a different map. A plain settings-share link can genuinely carry `null`
+    // ("roll a fresh map at start", Settings.seed is None) — allowed through
+    // here and rejected with a clearer message where it matters (submit.mjs),
+    // since there is no single map to register without one.
+    seed: requireSeed(dict.seed),
+    challenge: hasChallenge ? {
+      turns: raw.turns,
+      lost: requireCount(raw.lost, "lost"),
+      hand: requireCount(raw.hand, "hand"),
+      by: typeof raw.by === "string" ? raw.by : "",
       // Challenge.log: the id of the replay this score was made in, uploaded by
       // the game when the player pressed "Post to leaderboard". Absent from a
       // hand-written link and from every token minted before the field existed,
       // so a blank is ordinary — it means unverified, not invalid. Shape-checked
       // rather than trusted: it is written to a column the verifier keys on.
-      log: MATCH_ID.test(challenge.log) ? challenge.log : "",
-    },
+      log: MATCH_ID.test(raw.log) ? raw.log : "",
+    } : null,
     gameKey: await gameKeyFor(dict),
     setup: setupOf(dict),
     token,
   };
+}
+
+function requireSeed(value) {
+  return value === null ? null : requireInt(value, "seed");
 }
 
 /**

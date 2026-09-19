@@ -23,7 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest.settings import Challenge, Settings  # noqa: E402 — needs the path above
+from starconquest import custommap, mapgen  # noqa: E402 — needs the path above
+from starconquest.settings import Challenge, Settings  # noqa: E402
 
 OUT = ROOT / "leaderboard" / "tests" / "fixtures" / "tokens.json"
 
@@ -45,6 +46,23 @@ def expect_for(settings: Settings) -> dict:
             "log": challenge.log,
         },
         "gameKey": challenge.key,
+    }
+
+
+def expect_for_setup(settings: Settings) -> dict:
+    """What the JS decoder must return for a token with nothing to post — a
+    plain settings-share link, or one carrying Challenge's own turns<=0
+    sentinel. Never a ``gameKey`` here: with no ``Challenge.key`` to reuse the
+    JS side falls back to hashing the setup itself (SHA-256, prefixed ``j:``),
+    which nothing in Python reproduces byte-for-byte — see the ``blank-key``
+    case below for the same reason. ``expectGameKeyPrefix`` covers it instead.
+    """
+    return {
+        "mode": settings.mode,
+        "players": settings.players,
+        "nodes": settings.nodes,
+        "seed": settings.seed,
+        "challenge": None,
     }
 
 
@@ -94,6 +112,20 @@ def main() -> None:
                   "expect": {**expect_for(forged), "challenge":
                              {"turns": 12, "lost": 1, "hand": 12, "by": "", "log": ""}}})
 
+    # A hand-authored map riding in the token. The decoder reads only the four
+    # identity fields and the score, and `canonicalize` recurses arrays and
+    # objects generically — so the recipe should ride straight through with no
+    # JavaScript change at all. This case is the only thing that pins that
+    # against a real Python-encoded token rather than against a reading of the
+    # code.
+    drawn = Settings(seed=2024)
+    drawn.custom_map = custommap.from_state(mapgen.generate(31, "random", 14, 3))
+    drawn.players = drawn.custom_map.seats()
+    drawn.nodes = len(drawn.custom_map.nodes)
+    drawn = stamped(drawn, turns=44, lost=18, hand=44, by="Cartographer")
+    cases.append({"name": "custom-map", "token": drawn.to_token(),
+                  "expect": expect_for(drawn)})
+
     # The pre-compression form real early links used; from_token still reads it.
     legacy = stamped(Settings(players=2, nodes=9, seed=7), turns=14, lost=0, hand=14, by="")
     cases.append({"name": "legacy-uncompressed", "token": uncompressed_token(legacy),
@@ -109,14 +141,26 @@ def main() -> None:
                   "expect": {k: v for k, v in expect_for(keyless).items() if k != "gameKey"},
                   "expectGameKeyPrefix": "j:"})
 
-    # Rejections: a settings-share link carries no score to post, and turns == 0
-    # is Challenge's own "no challenge" sentinel.
+    # A settings-share link carries no score to post — decodes with
+    # `challenge: null` rather than rejecting, so the leaderboard can offer it
+    # as a setup to register instead.
     cases.append({"name": "no-challenge", "token": Settings(seed=42).to_token(),
-                  "reject": "not a challenge link"})
+                  "expect": expect_for_setup(Settings(seed=42)),
+                  "expectGameKeyPrefix": "j:"})
+    # turns == 0 is Challenge's own "no challenge" sentinel: the same outcome
+    # as carrying no challenge object at all.
     zeroed = Settings(seed=42)
     zeroed.challenge = Challenge(turns=0, lost=0, hand=0, by="")
     cases.append({"name": "zero-turns", "token": zeroed.to_token(),
-                  "reject": "not a challenge link"})
+                  "expect": expect_for_setup(zeroed),
+                  "expectGameKeyPrefix": "j:"})
+    # A plain settings-share link may genuinely carry no seed at all
+    # (Settings.seed is None -> "roll a fresh map at start"): the one identity
+    # field a setup-only link is allowed to leave unpinned.
+    seedless = Settings()
+    cases.append({"name": "no-seed", "token": seedless.to_token(),
+                  "expect": expect_for_setup(seedless),
+                  "expectGameKeyPrefix": "j:"})
     cases.append({"name": "garbage", "token": "not a token!!", "reject": "malformed"})
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

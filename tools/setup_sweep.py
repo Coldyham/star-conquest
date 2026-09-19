@@ -239,6 +239,17 @@ def main(argv: list[str] | None = None) -> int:
     chosen = entry["row"]
     played = chosen["config"]
     opponents = args.opponents if args.opponents is not None else list(chosen["bots"])
+    if played.custom_map is not None:
+        # The whole method here is reseeding — does the ranking hold across
+        # boards? A hand-authored map is one board: every value in it is
+        # concrete, so the seed drives combat dice and star names only and every
+        # "seed" would replay the same layout. Worse, `arms` builds a fresh
+        # Settings with no recipe, so the map/played arms would silently measure
+        # a generated board nobody played.
+        print(f"Setup {chosen['game_key']} carries a hand-authored map, which no "
+              "seed re-rolls — there is nothing for this sweep to vary.",
+              file=sys.stderr)
+        return 1
 
     bots = args.bots or ai.available_strategies()
     seeds = list(range(args.start, args.start + args.seeds))

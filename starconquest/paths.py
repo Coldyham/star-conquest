@@ -162,3 +162,13 @@ def saves_dir() -> Path:
     Named here rather than in ``menu`` now that two modules write into it.
     """
     return data_dir() / "saves"
+
+
+def maps_dir() -> Path:
+    """Where hand-authored maps live (gitignored), mirroring ``saves_dir``.
+
+    On the web build this is emscripten MEMFS and does not survive a reload —
+    exactly as ``saves/`` already behaves. Matching that is the consistent
+    choice; routing both through ``webstore`` is a separate improvement.
+    """
+    return data_dir() / "maps"

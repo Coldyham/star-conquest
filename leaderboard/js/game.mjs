@@ -1,11 +1,13 @@
 import { configured, eq, select } from "./api.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
+import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
-  mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
 import { aliasFor } from "./token-decode.mjs";
+import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import { bestBot, botOrder, displayOrder, humanVsBots } from "./standings.mjs";
 
 const heading = document.getElementById("setup");
@@ -93,12 +95,43 @@ function outdatedNote() {
 }
 
 /**
+ * "Watch" on a bot's replay — unlike a human score, nothing was ever uploaded
+ * for it to point at. A bot's game is a pure function of the stored setup, the
+ * seed and the code (the same fact that lets `tools/bot_replay.py` compute it
+ * once and cache it), so this reconstructs it instead of fetching it: the link
+ * opens the game on that exact setup with `row.bot` standing in for the
+ * human's seat, already in autoplay (`botWatchSetup`, token-encode.mjs — the
+ * browser's mirror of `tools/sim.play_settings`).
+ *
+ * Returns null without GAME_URL to link into, or if the setup fails to encode
+ * — same shape as game.mjs's other optional, best-effort links.
+ */
+async function botWatchLink(gameSettings, row) {
+  if (!GAME_URL) return null;
+  let token;
+  try {
+    token = await encodeToken(botWatchSetup(gameSettings, row.bot, row.aux), deflate);
+  } catch {
+    return null;
+  }
+  return el("a", {
+    class: "watch",
+    href: `${GAME_URL}#${token}`,
+    target: "_blank",
+    rel: "noopener",
+    title: "Replay this bot in the browser",
+    text: "Watch",
+  });
+}
+
+/**
  * One bot's row, sharing the .score grid with the human table above so the two
  * read as one board. A win takes its place among the bots that won; a loss shows
  * a dash, because botOrder() deliberately doesn't rank the failures against each
- * other (see standings.mjs).
+ * other (see standings.mjs). `watch` is this row's Watch link (or null), built
+ * ahead of time by renderBots since encoding it is async.
  */
-function botRow(row, rank) {
+function botRow(row, rank, watch) {
   const classes = ["score", "bot"];
   if (row.won && rank <= 3) classes.push(`rank-${rank}`);
   if (!row.won) classes.push("bot-lost");
@@ -114,7 +147,10 @@ function botRow(row, rank) {
       el("a", { class: "nm", href: `index.html?bot=${encodeURIComponent(row.bot)}`, text: botProfile(row) }),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
-    el("span", { class: "result", text: botSummary(row) }),
+    el("span", { class: "result" }, [
+      el("span", { text: botSummary(row) }),
+      ...(watch ? [watch] : []),
+    ]),
     // Disclosed rather than hidden: a replay that blew its per-decision budget
     // forfeited those turns' orders, so its result depended on how fast the
     // runner was and is not reproducible the way every other row is.
@@ -147,7 +183,7 @@ function botVerdict(rows, best) {
  * Hidden rather than "not computed yet": a board whose owner has never set the
  * worker's secrets would otherwise carry a permanent apology on every map.
  */
-function renderBots(rows, best) {
+async function renderBots(rows, best, gameSettings) {
   if (!rows.length) return;
   const ordered = botOrder(rows);
   // Placings are over the winners alone, so they must be looked up per row
@@ -158,8 +194,9 @@ function renderBots(rows, best) {
   botsLede.textContent =
     `Each bot replayed from the player's seat on this exact map — same seed, ` +
     `same opponents. ${botVerdict(rows, best)}`;
+  const watchLinks = await Promise.all(ordered.map((row) => botWatchLink(gameSettings, row)));
   clear(botsTarget).append(
-    el("ol", { class: "scores" }, ordered.map((row) => botRow(row, ranks.get(row.bot)))),
+    el("ol", { class: "scores" }, ordered.map((row, i) => botRow(row, ranks.get(row.bot), watchLinks[i]))),
   );
   botsSection.hidden = false;
 }
@@ -168,6 +205,26 @@ function renderBots(rows, best) {
 function playLink(token) {
   if (!GAME_URL || !token) return null;
   return el("a", { class: "btn play", href: `${GAME_URL}#${token}`, target: "_blank", rel: "noopener", text: "Play this map" });
+}
+
+/**
+ * "Play this map" for a map with no scores posted yet — registered here as a
+ * bare setup (js/submit.mjs) rather than reached through a win. There is no
+ * `raw_token` to reuse (that rides on a score, per `playLink`'s usual caller),
+ * so this re-encodes `game.settings_json` instead — it already carries the
+ * exact seed the setup was registered under, so whoever opens it plays the
+ * same map, not a fresh roll (contrast home.mjs's newSeedLink, which is for a
+ * *config* and deliberately blanks the seed).
+ */
+async function freshPlayLink(game) {
+  if (!GAME_URL) return null;
+  let token;
+  try {
+    token = await encodeToken(game.settings_json, deflate);
+  } catch {
+    return null;
+  }
+  return playLink(token);
 }
 
 /** Toggle between the board's two rankings, each a plain link so the choice
@@ -211,6 +268,54 @@ async function replayVersions(scores) {
   return new Map(rows.map((r) => [r.match_id, r.rules_version]));
 }
 
+/**
+ * The map page while its embargo is still live (`games.embargo_until`,
+ * schema.sql) — a compromise, not a blackout. The full per-score list is
+ * never even requested here, so a competitor cannot see who else has played,
+ * when, or how: lost, hand and submission time all say more about *how* a
+ * score was made than the bare turn count does, and that "how" is exactly
+ * what an embargo exists to keep back. What does show is `game_summary`'s own
+ * aggregate — who currently holds the best turn count, and how many scores
+ * exist in total — because the embargo is meant to leave something to chase,
+ * not nothing at all: without a target, there is no reason to keep trying
+ * before the reveal.
+ *
+ * The bots table is unaffected and fetched the same as always: a bot's game
+ * is a pure function of the setup and the code (docs/bot-design.md), already
+ * fully public via `bot_scores`, so there is no *person's* strategy in it to
+ * protect. Its verdict is built off the same aggregate rather than a fetched
+ * score row — `{turns, lost}` is all `humanVsBots`/`bestBot` ever read.
+ *
+ * The play link is always the setup alone (`freshPlayLink`), never a score's
+ * `raw_token` — that token is a full challenge link and would smuggle out the
+ * very lost/hand/by fields this view is holding back, sitting right there in
+ * the page's own HTML whether or not they're ever rendered as text.
+ */
+async function renderEmbargoed(game, embargoText, bots) {
+  subtitle.textContent = [
+    game.score_count
+      ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
+      : "No scores posted yet.",
+    embargoText,
+  ].filter(Boolean).join(" · ");
+  clear(sortTarget);
+
+  const lede = game.score_count
+    ? el("p", { class: "lede" }, [
+        "Currently ahead: ",
+        el("strong", { text: leaderCredit(game) }),
+        ` — ${game.best_turns} turns. `,
+        "Every other score, and every replay, stays hidden until the embargo lifts.",
+      ])
+    : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
+
+  const link = await freshPlayLink(game);
+  clear(target).append(lede, ...(link ? [link] : []));
+
+  const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
+  await renderBots(bots, best, game.settings_json);
+}
+
 async function load() {
   mountMyScores();
   if (!configured()) {
@@ -225,12 +330,12 @@ async function load() {
   }
 
   try {
-    const [games, scores, bots] = await Promise.all([
+    // Scores are deliberately not fetched here — only once the map is known
+    // not to be embargoed, below. Fetching the full list up front and simply
+    // not rendering it would still hand every score's detail to the page
+    // (and anyone watching the network tab) before a single row is drawn.
+    const [games, bots] = await Promise.all([
       select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
-      select(
-        `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
-          `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
-      ),
       // The one query allowed to fail quietly. A board running an older
       // schema.sql has no bot_scores table, and PostgREST answers 404 — which
       // inside Promise.all would reject the whole batch and take the human score
@@ -262,6 +367,18 @@ async function load() {
     const game = games[0];
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(configBadge(game), ...botChips(game));
+
+    const embargo = embargoNote(game.embargo_until);
+    if (embargo) {
+      await renderEmbargoed(game, embargo, bots);
+      return;
+    }
+
+    const scores = await select(
+      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
+        `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
+    );
+
     subtitle.textContent = scores.length
       ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
       : "No scores posted yet.";
@@ -270,8 +387,10 @@ async function load() {
     // The server order above (turns then lost then earliest submission) is
     // exactly how the turns-leader is found, regardless of which ranking is
     // on screen — "Play this map" always hands back that target, since the
-    // game itself compares turns first.
-    const link = playLink(scores.length ? scores[0].raw_token : null);
+    // game itself compares turns first. A map with no scores yet (registered
+    // as a bare setup, never played through to a challenge) has no such token
+    // to reuse, so it falls back to the setup itself.
+    const link = scores.length ? playLink(scores[0].raw_token) : await freshPlayLink(game);
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
@@ -284,7 +403,7 @@ async function load() {
     // After the human table, and off the same fetch: the bots are context for
     // the board above, not a board of their own. `scores[0]` is the turns-leader
     // whatever ranking is on screen, which is the one the verdict compares.
-    renderBots(bots, scores.length ? scores[0] : null);
+    await renderBots(bots, scores.length ? scores[0] : null, game.settings_json);
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);
