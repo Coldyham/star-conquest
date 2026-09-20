@@ -6,7 +6,7 @@ import math
 import time
 from collections import Counter
 
-from starconquest import ai, settings as settings_mod
+from starconquest import ai, replay, settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
@@ -241,6 +241,43 @@ def test_the_replayed_seat_is_still_the_human_seat():
     finally:
         ai.STRATEGIES.pop("_watcher", None)
     assert seen and all(seen)
+
+
+def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
+    """The property the leaderboard's stored bot replays rest on: a `log` filled
+    in alongside `play_settings` is not a second opinion that can drift from the
+    cached row (the way re-simulating one always could — see
+    `test_the_column_plays_the_game_its_watch_link_replays` above) — it is a
+    recording, so `replay.reconstruct` must land on the exact board the run
+    actually reached, orders and dice both applied verbatim."""
+    ai.load_models()
+    cfg = _setup()
+    log = replay.new_log(cfg, 11)
+    result = sim.play_settings(cfg, 11, "marshal", max_turns=600, log=log)
+    assert result.won and not result.timed_out    # this map's seed 11 is a real win
+
+    assert log.finished and log.winner == 1        # seat 1 is always the replayed seat
+    assert log.hand_turns == 0                     # AI-driven the whole match
+    assert log.turn_count == result.turns
+
+    state, _ = replay.reconstruct(log)
+    seat = state.human()
+    assert (state.winner == seat.id) == result.won
+    assert state.turn == result.turns
+    assert seat.ships_lost == result.lost
+
+
+def test_an_unresolved_log_is_left_unfinished():
+    """A run that hits max_turns without a winner (a draw counts as a winner —
+    `state.winner == 0` — so this is genuinely unresolved) must not be recorded
+    as finished with no winner, the same guard `main.resolve_turn` applies."""
+    cfg = _setup()
+    log = replay.new_log(cfg, 11)
+    result = sim.play_settings(cfg, 11, "heuristic", max_turns=2, log=log)
+    assert result.timed_out
+    assert log.turn_count == 2
+    assert not log.finished
+    assert log.winner is None
 
 
 def test_a_bot_that_never_wins_still_reports_a_result():

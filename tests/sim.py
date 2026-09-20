@@ -116,14 +116,17 @@ def _hand_over(seat, bot: str, aux: float | None) -> None:
     seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
 
 
-def _step_seat(state: GameState, seat, decide: ai.DecideFn) -> None:
+def _step_seat(state: GameState, seat, decide: ai.DecideFn) -> engine.TurnRecord:
     """One turn with ``seat`` driven from outside, exactly as the app autoplays.
 
     `main.resolve_turn` computes the human seat's orders itself and passes them
     to `end_turn`; every other seat is decided inside it, in seat order, so the
     draws each one takes from ``state.rng`` fall in the same places either way.
+    Returns the `TurnRecord` `end_turn` always produces, so a caller building a
+    `replay.GameLog` alongside the run (`play_settings`'s `log` parameter) has
+    exactly what `GameLog.record_turn` wants, with nothing re-derived.
     """
-    engine.end_turn(state, human_orders=decide(state, seat.id), decide=decide)
+    return engine.end_turn(state, human_orders=decide(state, seat.id), decide=decide)
 
 
 @dataclass
@@ -325,6 +328,7 @@ def play_settings(
     aux: float | None = None,
     max_turns: int = 600,
     bot_timeout: float = 0.0,
+    log: replay.GameLog | None = None,
 ) -> ReplayResult:
     """Replay a stored setup with ``bot`` holding the human's seat.
 
@@ -359,6 +363,22 @@ def play_settings(
     A bot that never takes the board still returns a result: ``won`` is False and
     ``turns``/``lost`` report how long it lasted and what it spent. Never rank a
     lost game against a won one on turns alone.
+
+    ``log``, given, is filled in turn by turn exactly as ``main.resolve_turn``
+    fills in a live match's — every seat's orders and combat draws, via
+    ``log.record_turn`` off the same ``TurnRecord`` ``_step_seat`` returns — so
+    replaying it back through ``replay.reconstruct`` reproduces this exact run,
+    with nothing re-decided. That is what makes it safe to *store*: unlike this
+    function's own return value, which drifts the moment the engine or the bot
+    changes underneath it, a filled-in log is a recording, not a rerun, and
+    stays exact regardless. It is always accumulated — the caller cannot know in
+    advance whether the game is worth keeping — and every turn is marked
+    ``human_ai=True``, since the seat is AI-driven for the whole match; a caller
+    keeping the log only for a win (``tools/bot_replay.py``) simply discards it
+    otherwise. ``log.mark_finished`` is called only on an actual win or loss
+    (``state.winner is not None``), the same guard ``main.resolve_turn`` uses —
+    a log that hit ``max_turns`` unresolved is left correctly unfinished rather
+    than marked finished with no winner.
     """
     state = settings.build_state(cfg, seed)
     seat = state.human()
@@ -370,8 +390,12 @@ def play_settings(
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        _step_seat(state, seat, decide)
+        record = _step_seat(state, seat, decide)
+        if log is not None:
+            log.record_turn(record, human_ai=True)
         check_invariants(state)
+    if log is not None and state.winner is not None:
+        log.mark_finished(state.winner)
     return ReplayResult(
         bot=bot,
         won=state.winner == seat.id,

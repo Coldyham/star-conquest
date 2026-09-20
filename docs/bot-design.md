@@ -268,6 +268,39 @@ replay is played and every cached row is marked stale. It stays out of
 `replay_rev`, which covers a stored *log's* replay — that asks no seat to decide
 anything, so no harness can move it.
 
+**Fixing the flag fixed the number; it did not fix the link.** The bug above
+was in what `sim.play_settings` *computed* — a wrong number, corrected once the
+seat stayed flagged human. But the Watch link beside a row was never reading that
+number at all: `botWatchSetup` hands the browser the same ingredients (setup,
+seed, bot) and lets it re-decide the whole match from turn one, live. That
+re-decision runs on whatever commit is actually deployed to the game's site, at
+whatever moment someone clicks Watch — not the commit the worker used, and not
+guaranteed to be the same one. Two computations of "the same" game, kept in sync
+only by *hoping* neither has moved, is the same shape of risk the is_human bug
+was, one level up: fixing the flag made both sides compute the same answer today,
+but nothing stopped them drifting apart again tomorrow, from either side, with no
+error to notice it by — a stale deploy, a future engine change, a second bug in
+either harness. The fix for *that* class of problem is to stop asking a Watch
+link to compute anything at all.
+
+`sim.play_settings` grew a `log` parameter: filled in turn by turn, off the same
+`TurnRecord` `_step_seat` already produces, so a `replay.GameLog` comes out of a
+replay for free, in the same shape `main.resolve_turn` builds one from live play.
+`tools/bot_replay.py` keeps it, encoded, on a win (`bot_scores.match_id`/
+`rules_version`/`log` — a loss stores nothing, the same rule a human's own posted
+score follows), and the Watch link becomes `#log=<match_id>`: a human score's own
+mechanism, unmodified. `replay.reconstruct` applies recorded orders and dice
+verbatim and asks no seat to decide anything, so there is no second computation
+left to disagree with the first — watching the replay *is* rewatching the exact
+game the row reports on, structurally, not by two things happening to agree.
+`leaderboard/schema.sql`'s `public_watchable_replays` (a `union all` of
+`public_replays` with a winning bot's own log, since `bot_scores` needs no
+further consent gate to be public) is the one relation
+`netlify/functions/replay.mjs` reads either kind through, so the function keeps
+its single, unconditional query. `standings.botWatchKind` is what decides which
+of "current" / "outdated" / "legacy" (no stored log — the old method, kept as a
+transitional fallback) / "none" (a loss) a row gets.
+
 ## `models/marshal.py` and what the measurements deleted
 
 marshal was commissioned around three ideas: bait an opponent into a system a

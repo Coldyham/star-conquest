@@ -521,6 +521,32 @@ intact.
     `turns`, says whether a bot took the board, and a loss is listed but never
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's secret key is its only writer.
+  - **A winning replay is stored on the row, and the Watch link plays that back
+    rather than re-deciding the match live.** `_hand_over` staying human (above)
+    keeps the *computed* `won`/`turns`/`lost` matching what a real autoplayed
+    game would produce, but only a recorded log makes the *Watch link itself*
+    incapable of disagreeing with them — a token can hand the browser the same
+    setup and ask it to re-decide from turn one, but that re-decision depends on
+    exactly which commit is deployed where and, unfixed, is exactly the class of
+    bug `_hand_over` closed one instance of. `sim.play_settings`'s `log`
+    parameter fills in a `replay.GameLog` turn by turn as the run happens (via
+    `_step_seat`'s own `TurnRecord`, the same shape `main.resolve_turn` records
+    from); `tools/bot_replay.py` builds one for every replay and keeps its
+    encoded form only on a win (`bot_scores.match_id`/`rules_version`/`log`),
+    the same rule a human's own posted score follows. `replay.reconstruct`ing it
+    back applies recorded orders and dice verbatim, so it cannot drift from the
+    row it backs the way a re-decision could. `standings.botWatchKind(row)`
+    picks the link: `#log=<match_id>` (exactly a human score's own mechanism)
+    for a current replay, an outdated-replay disclosure for one stamped under
+    rules this build has moved past, or the old reconstruct-it-live method
+    (`token-encode.botWatchSetup`) as a fallback for a row with no stored replay
+    at all — a loss, or one computed before this existed. `game_logs`'s human
+    consent boundary (a posted score) is untouched; a bot's own log needs none
+    of it, since `bot_scores` is already fully public, so it lives directly on
+    that row rather than in `game_logs` — `public_watchable_replays`
+    (`leaderboard/schema.sql`) is the `union all` of `public_replays` with a
+    winning bot's own log that `netlify/functions/replay.mjs` actually reads,
+    keeping that function's one-query, no-branching shape for either kind.
   - **The game uploads replays, and the worker checks scores against them.**
     `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`
     sends the log itself, and `tools/verify_scores.py` (the same scheduled worker

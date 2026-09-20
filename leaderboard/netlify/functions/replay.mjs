@@ -4,16 +4,22 @@
  * The read half of the pair with `log.mjs`, and the same shape: the game holds no
  * database key, this function does, and the browser only ever talks to this site.
  *
- * What may be served is decided in SQL, not here. `public_replays` (see
- * `schema.sql`) is `game_logs` restricted to the matches a posted score points
- * at — so posting a score publishes that replay, and a game that merely uploaded
- * itself because "Share replays" was on stays unreadable. This function selects
- * from the view and nothing else; it has no `if` that could drift from that rule.
+ * What may be served is decided in SQL, not here: `public_watchable_replays`
+ * (see `schema.sql`) unions the two pools this id can name, each gated by its
+ * own, unrelated rule — `public_replays` is `game_logs` restricted to the
+ * matches a posted score points at (so posting a score publishes that replay,
+ * and a game that merely uploaded itself because "Share replays" was on stays
+ * unreadable), and a winning bot's own stored replay (`bot_scores.log`), which
+ * needs no further gate here since `bot_scores` itself is already fully public.
+ * This function selects from the union and nothing else; it has no `if` that
+ * could drift from either rule.
  *
  * Environment: `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or the legacy
- * `SUPABASE_SERVICE_KEY`), exactly as `log.mjs` needs them. The view is granted
- * to the publishable key as well, so a page can list what is watchable without a
- * secret; the game comes through here because it should not carry either.
+ * `SUPABASE_SERVICE_KEY`), exactly as `log.mjs` needs them. Unlike
+ * `public_replays`, the union view is granted to the service key alone — a
+ * bot's `match_id`/`rules_version` already ride on its own public `bot_scores`
+ * row, so nothing on the site needs a second, wider door onto this view just to
+ * list what is watchable.
  *
  * The response is the encoded log itself — `replay.GameLog.encoded` output, which
  * is base64url text — as `text/plain`, because that is precisely what
@@ -58,11 +64,11 @@ export default async function handler(request) {
   if (!MATCH_ID.test(id)) return reply(400, "bad id");
 
   const response = await fetch(
-    `${url.replace(/\/$/, "")}/rest/v1/public_replays?select=log&match_id=eq.${id}`,
+    `${url.replace(/\/$/, "")}/rest/v1/public_watchable_replays?select=log&match_id=eq.${id}`,
     { headers: { apikey: key, Authorization: `Bearer ${key}` } },
   );
   if (!response.ok) {
-    console.error("public_replays read failed", response.status, await response.text());
+    console.error("public_watchable_replays read failed", response.status, await response.text());
     return reply(502, "lookup failed");
   }
   const rows = await response.json();

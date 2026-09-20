@@ -383,8 +383,38 @@ create table if not exists public.bot_scores (
   -- has one row per bot and the board never shows two answers to one question.
   engine_rev   text not null default '',
   computed_at  timestamptz not null default now(),
+  -- match_id/log/rules_version: the exact replay behind a *winning* row, so its
+  -- Watch link can play back the recorded game rather than asking the browser
+  -- to re-decide the whole match live (which could disagree with this row —
+  -- see tools/bot_replay.py's module doc for why that actually happened).
+  -- Blank together on a loss, the same rule a human's own posted score follows
+  -- (only a win is worth a Watch link) — never NULL, so an ordinary equality
+  -- filter (`match_id <> ''`) is enough everywhere this is read, in SQL and in
+  -- JS alike, with no null-handling anywhere.
+  match_id      text not null default '' check (match_id = '' or match_id ~ '^[0-9a-f]{16}$'),
+  -- The rules a stored log was played under (`engine.RULES_VERSION` at the
+  -- time), read the same way `game_logs.rules_version` already is: 0 (rather
+  -- than game_logs's historical 1) means "no log here at all", since bot_scores
+  -- predates this column entirely and every row before it genuinely has no
+  -- replay to disclaim.
+  rules_version integer not null default 0 check (rules_version >= 0),
+  log           text not null default '' check (octet_length(log) <= 262144),
   primary key (game_key, bot)
 );
+
+-- For a board created before a win started storing its own replay. Same
+-- drop/add spirit as game_logs's retrofitted columns above: re-pasting this
+-- file upgrades an existing table, which `create table if not exists` alone
+-- would silently skip.
+alter table public.bot_scores add column if not exists match_id text not null default '';
+alter table public.bot_scores add column if not exists rules_version integer not null default 0;
+alter table public.bot_scores add column if not exists log text not null default '';
+
+-- Matches game_logs's own match_id index in shape and purpose: this is the
+-- lookup netlify/functions/replay.mjs's fallback does, via
+-- public_watchable_replays below.
+create index if not exists bot_scores_match_idx
+  on public.bot_scores (match_id) where match_id <> '';
 
 -- ---------------------------------------------------------------------------
 -- public_replays: the replays anyone may watch — and the *only* rows of
@@ -436,6 +466,38 @@ join public.scores s on s.match_id = l.match_id
 left join public.games g on g.game_key = s.game_key
 where g.embargo_until is null or g.embargo_until <= now()
 order by l.match_id, l.turns desc, l.id desc;
+
+-- ---------------------------------------------------------------------------
+-- public_watchable_replays: the worker-side counterpart to public_replays —
+-- everything netlify/functions/replay.mjs may hand back for a given id,
+-- whichever pool it came from. That function reads exactly one relation on
+-- purpose ("what may be served is decided in SQL, not here... it has no `if`
+-- that could drift from that rule" — its own doc), so a second, differently
+-- gated source is unioned in here rather than added as a branch there.
+--
+-- The two halves are gated by two different, unrelated rules, which is why
+-- this is a plain `union all` rather than one already-existing view widened:
+-- a human replay is public only because a posted score points at it
+-- (public_replays' own consent boundary, untouched); a bot's replay is
+-- public because bot_scores itself already is — read by anyone, keyed by no
+-- person, computed by a worker rather than disclosed by one — so a win's
+-- stored log needs no *further* gate here at all. Filtering to `match_id <>
+-- ''` is what keeps a loss (which stores none) out.
+--
+-- Not itself granted to anon/authenticated: nothing here that the public
+-- couldn't already read some other way (public_replays directly, or a bot's
+-- own row) needs a second, wider door — this view exists purely so
+-- replay.mjs's one lookup covers both pools.
+-- ---------------------------------------------------------------------------
+create or replace view public.public_watchable_replays as
+select
+  match_id, game_key, turns, finished, won, hand, log, rules_version
+from public.public_replays
+union all
+select
+  match_id, game_key, turns, true as finished, won, 0 as hand, log, rules_version
+from public.bot_scores
+where match_id <> '';
 
 -- ---------------------------------------------------------------------------
 -- config_tag_counts: per-config tag frequency, counting distinct players
@@ -718,11 +780,16 @@ grant select, insert, update on public.score_checks to service_role;
 -- select + delete for the worker (read a replay, prune one a longer upload has
 -- superseded); insert for netlify/functions/log.mjs, which holds the same key.
 grant select, insert, delete on public.game_logs to service_role;
--- ...and the view netlify/functions/replay.mjs serves a replay out of. It is not
--- security_invoker, so it reads game_logs with owner rights whoever asks — but
--- the caller still needs SELECT on the view itself, which grants nothing beyond
--- the rows its own where clause already allows anyone to read.
-grant select on public.public_replays to service_role;
+-- ...and the view netlify/functions/replay.mjs actually serves a replay out of:
+-- public_watchable_replays, the union of public_replays with a winning bot's own
+-- stored log (see that view's own comment). Like public_replays before it, it is
+-- not security_invoker, so it reads game_logs and bot_scores with owner rights
+-- whoever asks — the caller still needs SELECT on the view itself, which grants
+-- nothing beyond the rows its own definition already allows anyone to read some
+-- other way (public_replays directly, or a bot's own public row). public_replays
+-- needs no grant of its own here any more: nothing under this key reads it
+-- directly since replay.mjs switched to the union.
+grant select on public.public_watchable_replays to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.

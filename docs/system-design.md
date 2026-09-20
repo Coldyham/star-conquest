@@ -1535,6 +1535,34 @@ how many they beat. On a board of high scores the interesting question is whethe
 anyone outplayed the best machine answer to that map, not whether they placed
 mid-table among six of them.
 
+### A win stores its own replay
+
+The Watch link beside a winning row used to hand the browser the same
+ingredients the worker replayed (setup, seed, bot) and let it re-decide the whole
+match live from turn one — which could disagree with the row it sat beside,
+since a fresh re-decision depends on exactly which commit is deployed where and
+on how an oracle opponent is willing to treat the seat it faces. See
+[`bot-design.md`](bot-design.md), "Fixing the flag fixed the number; it did not
+fix the link", for the incident and the reasoning.
+
+`sim.play_settings` now takes a `log: replay.GameLog | None` parameter, filled
+in turn by turn off the same `TurnRecord` its own per-turn stepping already
+produces — exactly the shape `main.resolve_turn` builds one from in a live game.
+`tools/bot_replay.py` builds one for every replay and keeps its encoded form
+only on a win (`bot_scores.match_id`/`rules_version`/`log`; a loss stores
+nothing, the rule a human's own posted score follows), and the Watch link
+becomes `#log=<match_id>` — a human score's own mechanism, unchanged.
+`replay.reconstruct` applies recorded orders and dice verbatim and asks no seat
+to decide anything, so there is no second computation left that could disagree
+with the first. `leaderboard/schema.sql`'s `public_watchable_replays` (a
+`union all` of `public_replays` with a winning bot's own log, needing no further
+consent gate since `bot_scores` is already fully public) is the one relation
+`netlify/functions/replay.mjs` reads either kind through, keeping that
+function's single, unconditional query. `standings.botWatchKind(row)` picks
+between a current replay, an outdated one (stamped under rules this build has
+moved past), the old reconstruct-it-live method as a fallback for a row with no
+stored log yet, or nothing for a loss.
+
 ### `engine_rev` hashes the simulation, not the commit
 
 Each row records a digest of what produced it, so `--stale` can find rows the
