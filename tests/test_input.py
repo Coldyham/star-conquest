@@ -2026,6 +2026,35 @@ def test_a_press_next_to_the_camera_cluster_still_skips():
         pygame.quit()
 
 
+def test_take_control_stops_an_autoplaying_film_in_one_press():
+    """Play/Pause is hidden under autoplay (it would be a no-op — the turn
+    advance isn't gated on `ui.playing` there), which makes Autoplay / Take
+    control the *only* way to stop the automatic advance — and films chain with
+    no gap under autoplay, so it has to fire on the very press that lands on a
+    running one, or the next turn's film is up before a second press arrives.
+
+    Unlike Play/Pause it doesn't need to freeze anything: the film keeps
+    playing (nothing is lost), and control is simply back the instant it lands,
+    since `main`'s chaining re-reads `ui.autoplay` fresh at that point."""
+    state, ui = _setup()
+    try:
+        ui.autoplay = True
+        ui.autoplay_button_rect = (10, 10, 80, 30)
+        ui.film = _a_film()
+
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a, mod=0, unicode="a")
+        assert game_input.handle_event(ev, state, ui) == "toggle_autoplay"
+        assert ui.film is not None          # kept playing, not discarded
+
+        ui.autoplay, ui.film = True, _a_film()   # click does the same
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(20, 20), button=1),
+            state, ui) == "toggle_autoplay"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
 def _won_with_animation(monkeypatch, playing: bool = False):
     """A human win *worth watching*, with turn animation on: the reel plus its Ui.
 

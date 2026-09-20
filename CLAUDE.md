@@ -317,14 +317,22 @@ Rules that hold it together:
   and `land_film` is the one place the clock running out and a press skipping both
   pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
   Anything else a playback holds back belongs there too, never at a call site.
-- **Play/Pause freezes a film; the camera controls ignore it; every other press
-  still skips it.** `input._toggles_play` exempts that one control (the P key, or
-  its footer button) from the blanket "any press skips" rule, and
-  `input._moves_camera` exempts the camera cluster (Reset view, the on-map zoom
-  `−`/`+`, the R key) outright — where you are looking changes nothing about the
-  turn being played back, and under autoplay, where films chain with no gap
-  between them, a press that only skips leaves the whole cluster looking dead.
-  The wheel needs no entry: it is not one of the press types the rule names.
+- **Play/Pause freezes a film; the camera controls ignore it; Autoplay / Take
+  control fires straight through it; every other press still skips it.**
+  `input._toggles_play` exempts that one control (the P key, or its footer
+  button) from the blanket "any press skips" rule, `input._moves_camera` exempts
+  the camera cluster (Reset view, the on-map zoom `−`/`+`, the R key) outright —
+  where you are looking changes nothing about the turn being played back — and
+  `input._toggles_autoplay` exempts the Autoplay / Take control button (the A
+  key) for a sharper reason: under autoplay Play/Pause is hidden (the turn
+  advance isn't gated on `ui.playing` there — see the footer's own comment), so
+  Take control is the *only* way to stop it, and films chain with no gap between
+  them, so it has to work on the very press that lands on a running one. Nothing
+  needs freezing for it: the showing film plays out unchanged, and control is
+  back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh
+  at that point. Under any of the three, a press that only skips leaves the
+  cluster looking dead. The wheel needs no entry: it is not one of the press
+  types the rule names.
   `main.apply_toggle_play`
   is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
   set only when *pausing an already-running* playthrough (`was_playing` going

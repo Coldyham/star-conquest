@@ -614,6 +614,19 @@ autoplay that is the difference between working and not: films chain back to bac
 with no gap, so the press would be spent skipping one, and the next turn's film is
 already up by the time a second press arrives — the whole cluster reads as dead.
 
+**Autoplay / Take control is the third, and the sharpest case of it.** Play/Pause
+is hidden under autoplay — the footer's own comment says why: turns advance on
+`AUTOPLAY_MS` regardless of `ui.playing` there, so pausing would be a no-op — which
+makes Take control the *only* way to stop the automatic advance at all. Without
+`input._toggles_autoplay` exempting it (the A key, or its footer button), the same
+chaining that broke the camera cluster broke this control outright: a press during
+a running film was spent skipping it, and by the time a second one landed the next
+turn's film was already up, so there was no way to ever actually take control back
+while autoplay was running. Nothing here needs freezing the way Play/Pause does —
+the film already showing plays out exactly as it would have, and control is simply
+back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh at
+that point rather than caching the value from when the film started.
+
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
 6-ship system read `−8`, which is almost entirely the defender's garrison — wiped
