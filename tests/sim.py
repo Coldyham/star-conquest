@@ -95,38 +95,34 @@ def _timed_decide(seconds: float, timeouts: list[int]) -> ai.DecideFn:
 
 
 def _hand_over(seat, bot: str, aux: float | None) -> None:
-    """Put ``bot`` in ``seat`` the way the *game* does when it autoplays a human.
+    """Put ``bot`` in ``seat`` outright: strategy, params, and ``is_human``
+    cleared.
 
-    The seat keeps ``is_human``. That looks like a detail and is not: an oracle
-    bot reads the board's seat flags to decide how to model everybody else
-    (`models/knower.py` — a human seat is predicted blind and never trusted,
-    while an AI one is resolved through `ai.STRATEGIES` and simulated exactly).
-    Clearing the flag here would therefore hand every oracle *opponent* a
-    readout of which bot is standing in — information the person whose score
-    this is measured against never gave them — and the run would stop being the
-    one the board offers to replay. Measured at the time: with knower opponents
-    it was worth flipping marshal from a loss to a win on the same map.
+    Clearing the flag is what lets an oracle opponent read this seat the way it
+    reads every other bot seat on the board — resolved through `ai.STRATEGIES`
+    and simulated exactly (`models/knower.py`'s `_model_for`) — rather than
+    guessing blind at it as it would a real, unpredictable person. That is the
+    same full-information footing every other bot-vs-bot measurement in this
+    codebase already stands on (`sim.play`'s ladder and swap tournaments clear
+    `is_human` on every seat, including whichever one starts there), so a bot
+    replayed through this function faces the same scrutiny it would anywhere
+    else it is measured — never an artificial edge from opponents forced to
+    treat it as a black box.
 
-    The price is that the engine will no longer decide the seat for us
-    (`engine._collect_orders` skips a human), so every caller has to step the
-    turn the way `main.resolve_turn` does under autoplay — hence the companion
-    `_step_seat` below, and the two are only ever used together.
+    A version of this that left the seat flagged human existed briefly, on the
+    reasoning that a leaderboard row had to compute the same thing a *live*
+    Watch link would if reconstructed via autoplay — and a token can only ever
+    say `autoplay: true`, never "seat 1 is a bot". That reasoning no longer
+    applies: `tools/bot_replay.py` now stores the finished run as a
+    `replay.GameLog` and a Watch link plays that back (`replay.reconstruct`,
+    which applies recorded orders and dice verbatim and asks no seat to decide
+    anything). Nothing about a stored replay's exactness depends on what this
+    seat was flagged during the run that produced it, so there is no reason
+    left to hobble the measurement to match a mechanism that no longer exists.
     """
+    seat.is_human = False
     seat.ai_strategy = bot
     seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
-
-
-def _step_seat(state: GameState, seat, decide: ai.DecideFn) -> engine.TurnRecord:
-    """One turn with ``seat`` driven from outside, exactly as the app autoplays.
-
-    `main.resolve_turn` computes the human seat's orders itself and passes them
-    to `end_turn`; every other seat is decided inside it, in seat order, so the
-    draws each one takes from ``state.rng`` fall in the same places either way.
-    Returns the `TurnRecord` `end_turn` always produces, so a caller building a
-    `replay.GameLog` alongside the run (`play_settings`'s `log` parameter) has
-    exactly what `GameLog.record_turn` wants, with nothing re-derived.
-    """
-    return engine.end_turn(state, human_orders=decide(state, seat.id), decide=decide)
 
 
 @dataclass
@@ -365,20 +361,22 @@ def play_settings(
     lost game against a won one on turns alone.
 
     ``log``, given, is filled in turn by turn exactly as ``main.resolve_turn``
-    fills in a live match's — every seat's orders and combat draws, via
-    ``log.record_turn`` off the same ``TurnRecord`` ``_step_seat`` returns — so
-    replaying it back through ``replay.reconstruct`` reproduces this exact run,
-    with nothing re-decided. That is what makes it safe to *store*: unlike this
-    function's own return value, which drifts the moment the engine or the bot
-    changes underneath it, a filled-in log is a recording, not a rerun, and
-    stays exact regardless. It is always accumulated — the caller cannot know in
-    advance whether the game is worth keeping — and every turn is marked
-    ``human_ai=True``, since the seat is AI-driven for the whole match; a caller
-    keeping the log only for a win (``tools/bot_replay.py``) simply discards it
-    otherwise. ``log.mark_finished`` is called only on an actual win or loss
-    (``state.winner is not None``), the same guard ``main.resolve_turn`` uses —
-    a log that hit ``max_turns`` unresolved is left correctly unfinished rather
-    than marked finished with no winner.
+    fills in a live match's — every seat's orders and combat draws, off the same
+    ``TurnRecord`` every ``end_turn`` call already returns — so replaying it back
+    through ``replay.reconstruct`` reproduces this exact run, with nothing
+    re-decided. That is what makes it safe to *store*: unlike this function's own
+    return value, which drifts the moment the engine or the bot changes
+    underneath it, a filled-in log is a recording, not a rerun, and stays exact
+    regardless — of the engine, of the bot, and (see ``_hand_over``) of whatever
+    this seat was flagged during the run that produced it. It is always
+    accumulated — the caller cannot know in advance whether the game is worth
+    keeping — and every turn is marked ``human_ai=True``: there is no human seat
+    in this match at all, and that is the closest available flag to saying so; a
+    caller keeping the log only for a win (``tools/bot_replay.py``) simply
+    discards it otherwise. ``log.mark_finished`` is called only on an actual win
+    or loss (``state.winner is not None``), the same guard ``main.resolve_turn``
+    uses — a log that hit ``max_turns`` unresolved is left correctly unfinished
+    rather than marked finished with no winner.
     """
     state = settings.build_state(cfg, seed)
     seat = state.human()
@@ -390,7 +388,7 @@ def play_settings(
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        record = _step_seat(state, seat, decide)
+        record = engine.end_turn(state, decide=decide)
         if log is not None:
             log.record_turn(record, human_ai=True)
         check_invariants(state)
@@ -466,7 +464,7 @@ def play_from(
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     limit = turn + max_turns
     while state.winner is None and state.turn < limit:
-        _step_seat(state, seat, decide)
+        engine.end_turn(state, decide=decide)
         check_invariants(state)
     won = state.winner == seat.id
     return PositionResult(

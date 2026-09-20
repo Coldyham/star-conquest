@@ -502,18 +502,24 @@ intact.
     `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
     `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` at
     search depth 12) and the value in force is stored on the row; opponents keep
-    theirs. **The seat it takes over stays flagged human** (`sim._hand_over` sets
-    the strategy and params only; `sim._step_seat` then drives it from outside
-    `end_turn`, as `main.resolve_turn` does under autoplay). That is forced by the
-    *Watch* link beside the row: a token cannot say "seat 1 is a bot", only
-    `autoplay: true`, so a row computed with the flag cleared describes a game the
-    link cannot play — and an oracle opponent reads that flag, simulating a seat
-    it takes for a bot exactly where it would only guess at a human's
-    (`knower._model_for`). Measured, that was worth flipping marshal from a loss
-    to a win. `play_from` uses the same pair, and `engine_rev` hashes
-    `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is played marks
-    every cached row stale; `replay_rev` must not, since a stored log's replay
-    consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
+    theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
+    `is_human`, sets the strategy and params; plain `engine.end_turn(state,
+    decide=decide)` then drives every seat, the replayed one included, just as
+    `sim.play`'s own ladder/swap tournaments do). That is the same
+    full-information footing every other bot-vs-bot measurement in this codebase
+    already stands on: an oracle opponent resolves it through `ai.STRATEGIES`
+    and simulates it exactly (`knower._model_for`), the way it would any other
+    fielded bot, rather than guessing blind at a seat that was never actually a
+    person. Leaving the flag set once looked necessary — a token can only ever
+    say "seat 1 is a bot" as `autoplay: true`, never as an actual flag, so a
+    live, token-driven Watch link could only ever reconstruct the *handicapped*
+    version, and a row computed the other way described a game that link
+    couldn't play. Measured with knower opponents, that handicap was worth
+    flipping marshal's result from a loss to a win on one map — a real, if
+    inconsistent, edge. `play_from` uses the same handover, and `engine_rev`
+    hashes `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is
+    played marks every cached row stale; `replay_rev` must not, since a stored
+    log's replay consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
     (`ai.set_budget_scale`, opt-in via a model's `BUDGET_SCALE`): those are sized
     so the browser tab never freezes, and tripping one is the only thing that
     makes such a bot's output depend on the clock — so a batch run that can never
@@ -522,30 +528,30 @@ intact.
     ranked (`standings.botOrder`). `bot_scores` is the one table with no public
     insert path: the worker's secret key is its only writer.
   - **A winning replay is stored on the row, and the Watch link plays that back
-    rather than re-deciding the match live.** `_hand_over` staying human (above)
-    keeps the *computed* `won`/`turns`/`lost` matching what a real autoplayed
-    game would produce, but only a recorded log makes the *Watch link itself*
-    incapable of disagreeing with them — a token can hand the browser the same
-    setup and ask it to re-decide from turn one, but that re-decision depends on
-    exactly which commit is deployed where and, unfixed, is exactly the class of
-    bug `_hand_over` closed one instance of. `sim.play_settings`'s `log`
-    parameter fills in a `replay.GameLog` turn by turn as the run happens (via
-    `_step_seat`'s own `TurnRecord`, the same shape `main.resolve_turn` records
-    from); `tools/bot_replay.py` builds one for every replay and keeps its
-    encoded form only on a win (`bot_scores.match_id`/`rules_version`/`log`),
-    the same rule a human's own posted score follows. `replay.reconstruct`ing it
-    back applies recorded orders and dice verbatim, so it cannot drift from the
-    row it backs the way a re-decision could. `standings.botWatchKind(row)`
-    picks the link: `#log=<match_id>` (exactly a human score's own mechanism)
-    for a current replay, an outdated-replay disclosure for one stamped under
-    rules this build has moved past, or the old reconstruct-it-live method
-    (`token-encode.botWatchSetup`) as a fallback for a row with no stored replay
-    at all — a loss, or one computed before this existed. `game_logs`'s human
-    consent boundary (a posted score) is untouched; a bot's own log needs none
-    of it, since `bot_scores` is already fully public, so it lives directly on
-    that row rather than in `game_logs` — `public_watchable_replays`
-    (`leaderboard/schema.sql`) is the `union all` of `public_replays` with a
-    winning bot's own log that `netlify/functions/replay.mjs` actually reads,
+    rather than re-deciding the match live.** That is what let the handover above
+    go back to full information without reopening the original mismatch: a token
+    can hand the browser a setup and ask it to re-decide from turn one, and that
+    re-decision depends on exactly which commit is deployed where — the same
+    class of risk regardless of which way the seat is flagged. `sim.play_settings`'s
+    `log` parameter fills in a `replay.GameLog` turn by turn as the run happens
+    (off the `TurnRecord` every `end_turn` call returns, the same shape
+    `main.resolve_turn` records from); `tools/bot_replay.py` builds one for
+    every replay and keeps its encoded form only on a win
+    (`bot_scores.match_id`/`rules_version`/`log`), the same rule a human's own
+    posted score follows. `replay.reconstruct` applies recorded orders and dice
+    verbatim and asks no seat to decide anything, so it cannot drift from the
+    row it backs — and, load-bearing for the handover above, is completely
+    unaffected by what any seat was flagged during the run that produced it.
+    `standings.botWatchKind(row)` picks the link: `#log=<match_id>` (exactly a
+    human score's own mechanism) for a current replay, an outdated-replay
+    disclosure for one stamped under rules this build has moved past, or the
+    old reconstruct-it-live method (`token-encode.botWatchSetup`) as a fallback
+    for a row with no stored replay at all — a loss, or one computed before
+    this existed. `game_logs`'s human consent boundary (a posted score) is
+    untouched; a bot's own log needs none of it, since `bot_scores` is already
+    fully public, so it lives directly on that row rather than in `game_logs` —
+    `public_watchable_replays` (`leaderboard/schema.sql`) is the `union all` of
+    `public_replays` with a winning bot's own log that `netlify/functions/replay.mjs` actually reads,
     keeping that function's one-query, no-branching shape for either kind.
   - **The game uploads replays, and the worker checks scores against them.**
     `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`

@@ -39,16 +39,16 @@ the same row (``bot_scores.log``/``match_id``/``rules_version``). That is what
 the board's Watch link on a winning bot plays back — ``#log=<match_id>``, the
 same mechanism a human's posted score uses — rather than handing the browser the
 setup and asking it to re-decide the whole match live. The two used to be able
-to disagree: re-deciding depends on exactly which commit is deployed where and
-on every oracle's own rules for reading a seat it is facing (an autoplayed
-"human" seat is never one it may simulate exactly, whatever is actually driving
-it — see ``models/knower.py``), so the *same* setup replayed twice, once here
-and once in a browser, was never guaranteed to reach the same board. A stored
-log cannot disagree with itself: ``replay.reconstruct`` applies its recorded
-orders and dice verbatim, asking no seat to decide anything, so watching it
-*is* rewatching the exact game this row reports on. A loss stores nothing —
-only a win is worth a Watch link, the same rule a human's own posted score
-follows.
+to disagree: re-deciding depends on exactly which commit is deployed where, and
+on treating the replayed seat as an oracle opponent could see any other bot
+(``sim._hand_over`` clears ``is_human`` for exactly this reason), which a token
+can never express — it can only ever say ``autoplay: true``, never "seat 1 is a
+bot". A stored log needs none of that agreement: ``replay.reconstruct`` applies
+its recorded orders and dice verbatim, asking no seat to decide anything, so
+watching it *is* rewatching the exact game this row reports on, regardless of
+what any seat was flagged during the run that produced it. A loss stores
+nothing — only a win is worth a Watch link, the same rule a human's own posted
+score follows.
 """
 
 from __future__ import annotations

@@ -269,17 +269,29 @@ live from the setup and seed.
 
 That used to be the only option, and the two could disagree. Re-deciding a
 match depends on exactly which commit is deployed where, and on how every
-*oracle* bot in the field is willing to treat the seat it is facing: an
-autoplayed "human" seat is never one such a bot may simulate exactly, whatever
-is actually driving it (`models/knower.py`'s `_model_for` — a human-flagged
-seat is always guessed at, never trusted, since a real person could reclaim
-manual control on any turn). `tools/bot_replay.py`'s own worker used to get
-this wrong in the opposite direction — briefly treating the seat it replayed
-as a known, exactly-predictable bot — which is exactly the asymmetry that let
-a row say "lost" while the very link beside it, opened in a browser, played
-out a win. A stored *log* cannot disagree with itself: `replay.reconstruct`
-applies its recorded orders and dice verbatim, asking no seat to decide
-anything, so watching it *is* rewatching the exact game the row reports on.
+*oracle* bot in the field is willing to treat the seat it is facing: a
+human-flagged seat is guessed at, never trusted (`models/knower.py`'s
+`_model_for`), while an AI one is resolved through `ai.STRATEGIES` and
+simulated exactly — a real advantage or disadvantage depending which side of
+it a bot lands on. `tools/bot_replay.py`'s worker used to clear that flag on
+the seat it replayed (the shortest way to make the engine decide it), so its
+opponents could simulate the bot exactly — while a live, token-driven Watch
+link could only ever turn `autoplay` on and leave the flag set, since nothing
+in a token can say "seat 1 is a bot". Two different games, one row: that
+asymmetry let a row say "lost" while the very link beside it, opened in a
+browser, played out a win.
+
+The fix was not to make the harness match the handicapped, flag-set version —
+that would have measured every bot under an artificial disadvantage this
+board's other yardstick, the roster's own ladder and swap tournaments, never
+imposes (there, every seat sees every other clearly). It was to stop asking a
+Watch link to compute anything at all. A stored *log* cannot disagree with
+itself: `replay.reconstruct` applies its recorded orders and dice verbatim,
+asking no seat to decide anything, so watching it *is* rewatching the exact
+game the row reports on — regardless of what any seat was flagged during the
+run that produced it. That is what let the harness go back to clearing the
+flag and measuring every bot on the same full-information footing as the rest
+of the roster, without reopening the original mismatch.
 
 `tools/bot_replay.py` builds this the same way `main.resolve_turn` builds a
 live match's own log — turn by turn, via `sim.play_settings`'s `log`

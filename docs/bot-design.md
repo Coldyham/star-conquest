@@ -234,66 +234,79 @@ A bot that wants the same treatment declares `BUDGET_SCALE = 1.0` and multiplies
 its own budgets by it at call time; see `models/README.md`. Bots without it are
 left alone.
 
-**Why the replayed seat stays flagged as the human's.** A row on that column
-carries a *Watch* link, and a link can only ever hand the game a setup with
-`autoplay` on (`botWatchSetup`, `leaderboard/js/token-encode.mjs`) — there is no
-field in a token that says "seat 1 is a bot", and adding one would move
-`challenge_key` for every map that ever existed. So the app keeps seat 1 human and
-drives it from outside, and the harness has to do the same or the row describes a
-game the link cannot play.
-
-It did not, and the two really were different games. `sim.play_settings` used to
-clear `is_human` on the seat it took over — the shortest way to make
-`engine._collect_orders` decide it — and an oracle opponent reads that flag: a
-human seat is predicted blind and never trusted, while an AI one is resolved
-through `ai.STRATEGIES` and simulated exactly (`knower._model_for`,
-`_rollout_decide`). The cached row was therefore a game whose opponents knew which
-bot was standing in and could simulate it turn by turn, which is information the
-person whose score it is measured against never gave them. On a 3-seat, 18-node
-map with knower opponents that was worth flipping the result outright:
+**A seat flag broke the column once, then nearly broke it a second, subtler
+way.** A row on that column carries a *Watch* link. Originally that link could
+only ever hand the game a setup with `autoplay` on (`botWatchSetup`,
+`leaderboard/js/token-encode.mjs`) and let it re-decide the whole match live —
+there is no field in a token that says "seat 1 is a bot", so the app kept seat 1
+flagged human and drove it from outside no matter what was actually choosing its
+orders. `sim.play_settings` used to clear `is_human` on the seat it took over —
+the shortest way to make `engine._collect_orders` decide it — and an oracle
+opponent reads that flag: a human seat is predicted blind and never trusted,
+while an AI one is resolved through `ai.STRATEGIES` and simulated exactly
+(`knower._model_for`, `_rollout_decide`). So the cached row was a game whose
+opponents knew which bot was standing in, while the live Watch link — which
+could only ever turn `autoplay` on, never clear the flag — played one whose
+opponents did not. Two different games, one row. On a 3-seat, 18-node map with
+knower opponents that was worth flipping the result outright:
 
     marshal, seat flagged as a bot   lost,  146 turns, 147 lost
     marshal, seat left human          won,  210 turns, 232 lost
 
-`sim._hand_over` now sets the strategy and params only, and `sim._step_seat`
-drives the seat the way `main.resolve_turn` does under autoplay — orders computed
-outside `end_turn` and passed in, every other seat decided inside it in seat
-order, so the draws each takes from `state.rng` land in the same places either
-way. `play_from` (the position suite) goes through the same pair, which is what
-keeps the two harnesses measuring one bot one way.
+The first fix matched the two by leaving the flag set: `sim._hand_over` set only
+the strategy and params, and a companion `_step_seat` drove the seat the way
+`main.resolve_turn` does under autoplay, so the harness computed the same
+handicapped game the live link would if reconstructed. That closed the gap, at a
+real cost measured nowhere on the board itself: it made a bot's replayed
+performance depend on an artificial edge no other measurement in this codebase
+grants it. `sim.play`'s own ladder and swap tournaments — the roster's other
+yardstick — clear `is_human` on *every* seat, including whichever one starts
+there, so oracle opponents there see a fielded bot exactly as they see each
+other. Only the bot column singled one seat out as unpredictable, which is not a
+fairer test of the bot, just a different and inconsistent one — an oracle
+opponent that would have countered a bot cleanly in the ladder was, on this one
+measurement, stuck guessing blind at it instead.
 
-The harness is part of the answer, so `bot_replay.engine_rev` hashes
-`tests/sim.py` alongside the core and `models/` (`_OUTCOME_HARNESS`): change how a
-replay is played and every cached row is marked stale. It stays out of
-`replay_rev`, which covers a stored *log's* replay — that asks no seat to decide
-anything, so no harness can move it.
+**Storing the replay removed the reason for the handicap, not just the
+mismatch.** The bug the flag-matching fix closed was really one instance of a
+bigger problem: a Watch link that *re-decides* the match is a second computation
+of "the same" game, kept in sync with the cached row only by construction — by
+matching harness to link today, with nothing stopping either from drifting
+tomorrow (a stale deploy, a future engine change, a second bug in either
+harness). The fix for that class of problem is to stop asking a Watch link to
+compute anything at all, which is what storing the log actually does (see
+below) — and once it does, the flag-matching fix has nothing left to protect.
+`replay.reconstruct` applies a stored log's recorded orders and dice verbatim
+and never asks any seat to decide anything, so what a seat was flagged during
+the run that *produced* the log cannot affect how it plays back, regardless of
+which way the flag was set.
 
-**Fixing the flag fixed the number; it did not fix the link.** The bug above
-was in what `sim.play_settings` *computed* — a wrong number, corrected once the
-seat stayed flagged human. But the Watch link beside a row was never reading that
-number at all: `botWatchSetup` hands the browser the same ingredients (setup,
-seed, bot) and lets it re-decide the whole match from turn one, live. That
-re-decision runs on whatever commit is actually deployed to the game's site, at
-whatever moment someone clicks Watch — not the commit the worker used, and not
-guaranteed to be the same one. Two computations of "the same" game, kept in sync
-only by *hoping* neither has moved, is the same shape of risk the is_human bug
-was, one level up: fixing the flag made both sides compute the same answer today,
-but nothing stopped them drifting apart again tomorrow, from either side, with no
-error to notice it by — a stale deploy, a future engine change, a second bug in
-either harness. The fix for *that* class of problem is to stop asking a Watch
-link to compute anything at all.
+`sim._hand_over` clears `is_human` again, restoring the roster-wide,
+full-information footing: an oracle opponent reads the replayed seat exactly as
+it would in the ladder. `_step_seat` is gone with it — with the flag cleared,
+plain `engine.end_turn(state, decide=decide)` drives every seat, the replayed
+one included, the same as `sim.play`'s own loop. `play_from` (the position
+suite) goes through `_hand_over` too, for the same consistency reason it always
+did: the two harnesses measure one bot one way.
 
-`sim.play_settings` grew a `log` parameter: filled in turn by turn, off the same
-`TurnRecord` `_step_seat` already produces, so a `replay.GameLog` comes out of a
-replay for free, in the same shape `main.resolve_turn` builds one from live play.
-`tools/bot_replay.py` keeps it, encoded, on a win (`bot_scores.match_id`/
-`rules_version`/`log` — a loss stores nothing, the same rule a human's own posted
-score follows), and the Watch link becomes `#log=<match_id>`: a human score's own
-mechanism, unmodified. `replay.reconstruct` applies recorded orders and dice
-verbatim and asks no seat to decide anything, so there is no second computation
-left to disagree with the first — watching the replay *is* rewatching the exact
-game the row reports on, structurally, not by two things happening to agree.
-`leaderboard/schema.sql`'s `public_watchable_replays` (a `union all` of
+The harness is still part of the answer, so `bot_replay.engine_rev` still hashes
+`tests/sim.py` alongside the core and `models/` (`_OUTCOME_HARNESS`) — a change
+to how a replay is played (this one included) marks every cached row stale. It
+stays out of `replay_rev`, which covers a stored *log's* replay: that asks no
+seat to decide anything, so no harness change can move it — exactly the property
+that makes the flag safe to clear in the first place.
+
+**What actually fixed the link.** `sim.play_settings` grew a `log` parameter:
+filled in turn by turn off the `TurnRecord` every `end_turn` call already
+returns, so a `replay.GameLog` comes out of a replay for free, in the same shape
+`main.resolve_turn` builds one from live play. `tools/bot_replay.py` keeps it,
+encoded, on a win (`bot_scores.match_id`/`rules_version`/`log` — a loss stores
+nothing, the same rule a human's own posted score follows), and the Watch link
+becomes `#log=<match_id>`: a human score's own mechanism, unmodified. There is
+no second computation left to disagree with the first — watching the replay *is*
+rewatching the exact game the row reports on, structurally, not by two things
+happening to agree, and not by hobbling what the row measures to make them agree
+either. `leaderboard/schema.sql`'s `public_watchable_replays` (a `union all` of
 `public_replays` with a winning bot's own log, since `bot_scores` needs no
 further consent gate to be public) is the one relation
 `netlify/functions/replay.mjs` reads either kind through, so the function keeps
