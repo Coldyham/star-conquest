@@ -1235,8 +1235,8 @@ _FOOTER_RECTS = (
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     """The bottom bar's button strip, left of the sidebar / End Turn column: touch
-    equivalents of the P / A / H / R / M / X keys plus Quit/Esc, so every live-play
-    action is reachable without a keyboard.
+    equivalents of the P / A / H / N / G / F / M / X keys plus Quit/Esc, so every
+    live-play action is reachable without a keyboard.
 
     Each button is sized to its own measured label. The strip is two independently
     anchored clusters rather than one row: the buttons that leave this game (Quit,
@@ -1298,7 +1298,8 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
     specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
-    # matching the R key exactly.
+    # matching the N key exactly. (R is reset-view, and has no button here: the
+    # on-map zoom cluster carries it.)
     specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
     if state.turn > 0:
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
@@ -1500,12 +1501,16 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
         ui.clear_dangerous_rect = (0, 0, 0, 0)
         _panel_route(surface, state, ui, x, y, content_bottom)
         return
-    # persistent "clear all forwarding" button, shown whenever any rule exists
-    if ui.auto_forward:
+    # persistent "clear all forwarding" button, shown whenever any rule exists.
+    # Not while reviewing history: `input._handle_history_event` is modal and never
+    # hit-tests them, so drawing them there offers a destructive press that does
+    # nothing — the same reason route mode zeroes them just above, arrived at from
+    # the other side (there they must not fire, here they cannot).
+    if ui.auto_forward and not ui.history:
         y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
     # below it, a narrower button for just the rules currently tinted dangerous
     # (pointed at a system we don't hold) — shown only while at least one exists
-    dangerous = [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
+    dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
     if dangerous:
         y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     # A highlighted rule wins the panel's focus over a plain hover; while the popup
@@ -1516,7 +1521,7 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
     if focus is None or focus not in state.systems:
-        _panel_legend(surface, x, y, content_bottom)
+        _panel_legend(surface, x, y, content_bottom, history=ui.history)
         return
 
     y = _panel_system(surface, state, ui, x, y, state.systems[focus])
@@ -1810,41 +1815,66 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
 # as prose that `_wrap` reflows to the panel's width. The touch build gets the same
 # rules in tap language and none of the keyboard shortcuts — there is no keyboard to
 # use them from, and every one of them has a button in the bottom bar.
+#
+# Kept short on purpose, and measured rather than guessed. `_panel_legend` cuts
+# this off at `content_bottom` rather than spilling, with no ellipsis and no
+# scroll, so every line past the panel's floor is prose nobody ever reads the end
+# of. An empty panel holds 23 rows on the touch build and 28-35 on a desktop or
+# browser one; the queued list takes up to half of that back, leaving 11-16. The
+# touch text is the binding case, which is the wrong way round — it is the build
+# with no keyboard shortcuts to fall back on, and it was the one losing whole
+# paragraphs. So only what has to be taught lives here (the goal, the send, the
+# standing rule), ordered with the most droppable line last, and anything a
+# control already explains at the point of use stays there instead: route mode's
+# two sub-modes are described by `_panel_route` once it is open, and the actions
+# with a footer button (History, Autoplay, Fast forward, Menu, New map) name
+# their own key on the button itself via `_key_hint`.
+# `test_help_text_fits_the_empty_panel_whole` is what holds the length.
 _LEGEND_TOUCH = """Take every system to win.
 
-Tap a system to inspect it.
+Tap one of your systems, then a neighbour, to send its garrison down that lane
+— or drag between the two.
 
-Tap one of yours, then a neighbour, to send its garrison down that lane — or drag
-between the two.
+The popup retunes the count; its Forward tab turns the send into a standing
+rule instead.
 
-Then: the slider, −/+, Half or All retune the count. The Forward tab makes it a standing rule
-instead — everything past 'keep' flows on, every turn.
-
-Tap a queued arrow, or its row below, to change it.
-
-Route sets up many rules at once. Chain: pick a group of your systems (drag a
-box), choose a destination, and every system along the way forwards toward it.
-Rally: pick the systems to gather at, and everything else you hold forwards to
-the nearest one.
+Route plans a whole front's worth of rules at once.
 
 Drag to pan, −/+ to zoom."""
 
 _LEGEND_KEYS = """Take every system to win.
 
-Click a system to inspect it.
+Click one of your systems, then a neighbour, to send its garrison down that
+lane — or drag between the two.
 
-Click one of yours, then a neighbour, to send its garrison down that lane — or
-drag between the two.
+The popup retunes the count; its Forward tab turns the send into a standing
+rule instead, and Shift+click arms one without opening it.
 
-Then: the slider, −/+, Half or All. The Forward tab makes a standing rule
-instead — everything past 'keep' flows on, every turn. Shift+click arms one
-directly.
+Route (G) plans a whole front's worth of rules at once.
 
-Click a queued arrow, or its row below, to change it; X clears it.
+Drag to pan, wheel to zoom."""
 
-G opens Route mode, which sets up many rules at once
+# History review is a different scene with different controls, so it gets its own
+# pair rather than the live-play text above: none of the live legend's verbs work
+# while scrubbing (there is no turn to end and no order to give — `_draw_side_panel`
+# hides the queued list, and `input._handle_history_event` is modal and answers
+# nothing else), and none of the controls that *do* work here are named there.
+_LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
-Drag to pan, wheel to zoom, R resets the view. Enter/space ends the turn, P plays on."""
+Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
+
+Rewind to here restarts play from the turn on screen. Exit returns to the live
+board."""
+
+_LEGEND_HISTORY_KEYS = """Reviewing turns already played — nothing here changes the game.
+
+Drag the scrubber or press ←/→ to step a turn; Home/End jump to either end. P
+plays it back.
+
+Point at a system to see it as it was then.
+
+Rewind to here restarts play from the turn on screen. Esc returns to the live
+board."""
 
 
 def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
@@ -1901,14 +1931,28 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     return y
 
 
-def _panel_legend(surface, x, y, bottom: int) -> int:
+def _legend_text(history: bool) -> str:
+    """The legend for the scene and the input modality — the one place the four
+    variants are chosen between, so the test that measures whether a legend fits
+    the panel measures the same string the panel draws."""
+    if history:
+        return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
+    return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
+
+
+def _panel_legend(surface, x, y, bottom: int, history: bool = False) -> int:
     """How to play, shown whenever no system is in focus. Reflowed to the panel's
     width and cut off at ``bottom`` rather than spilling under the End Turn button
-    — at a big UI scale the panel simply hasn't room for every line."""
-    y = _head(surface, x, y, "Star Conquest", config.COLOR_TEXT)
+    — at a big UI scale the panel simply hasn't room for every line.
+
+    ``history`` swaps in the review scene's own controls. It is a parameter rather
+    than a `Ui` read because this is the one panel drawer that needs nothing else
+    off the state, and the test that measures the reflow has no `Ui` to hand.
+    """
+    y = _head(surface, x, y, "History" if history else "Star Conquest", config.COLOR_TEXT)
     font = _fonts()["small"]
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-    for line in _wrap(font, _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS, width):
+    for line in _wrap(font, _legend_text(history), width):
         if y + _row_h() > bottom:  # a whole row, so the returned y clears it too
             break
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)

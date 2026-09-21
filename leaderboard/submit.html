@@ -19,11 +19,23 @@
 <main>
   <a class="back" href="index.html">← All maps</a>
   <h1>Enter a score, or share a setup</h1>
+  <!-- Two routes in, and the game's own button is the shorter one, so it leads:
+       the win overlay's "Enter on leaderboard" opens this page with the token
+       already in the fragment (main.post_to_leaderboard), leaving only a name to
+       fill in. "Challenge a friend" puts the same token on the clipboard instead.
+       A bare setup deliberately does not claim it will appear on the board:
+       home.mjs lists game_summary with score_count=gt.0, and config_summary
+       filters the same way, so until someone posts a score the only way to it is
+       the link. -->
   <p class="lede">
-    Win a game, press <strong>Challenge a friend</strong>, and the link on your
-    clipboard carries the map and your result — paste it here to put it on the
-    board. A plain settings-share link works too, with nothing to post yet: it
-    just adds the setup so others can play it and challenge each other.
+    Win a game and press <strong>Enter on leaderboard</strong> — this page opens
+    with your result already filled in, and you just add a name. Or press
+    <strong>Challenge a friend</strong> and paste the link it copies here.
+  </p>
+  <p class="lede">
+    A plain settings-share link works too, with nothing to post yet: it registers
+    the setup and gives you a page to link people to. It stays off the board
+    itself until someone posts a score on it.
   </p>
 
   <form id="form" class="form" autocomplete="off">

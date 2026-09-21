@@ -568,6 +568,17 @@ def _desktop_scale():
     render._FONTS.clear()
 
 
+def _web_desktop_scale():
+    """The third shipping geometry, between the two above: the browser framebuffer
+    with no touch boost — a desktop browser, which `main`'s probe leaves as a
+    keyboard build. Its 1.5x fonts buy proportionally less panel than the touch
+    build's 2.1x, so the three together bracket what a row of panel text costs."""
+    config.SCREEN_W, config.SCREEN_H = config.WEB_FB_W, config.WEB_FB_H
+    config.apply_ui_scale(min(config.WEB_FB_W / config.BASE_SCREEN_W,
+                              config.WEB_FB_H / config.BASE_SCREEN_H))
+    render._FONTS.clear()
+
+
 def _hud_rects(ui):
     """The bottom bar's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
     names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
@@ -688,6 +699,10 @@ def test_touch_build_drops_keyboard_only_text():
         assert render._key_hint("Quit", "Esc") == "Quit"
         assert render.confirm_labels("Quit") == ("Quit", "Cancel")
         assert "Shift" not in render._LEGEND_TOUCH and "Enter" not in render._LEGEND_TOUCH
+        # ...and the review scene's own legend, which names the scrubber's
+        # buttons rather than the arrow/Home/End/Esc keys behind them
+        for key in ("←", "Home/End", "Esc", " P "):
+            assert key not in render._LEGEND_HISTORY_TOUCH
     finally:
         _desktop_scale()
         pygame.quit()
@@ -703,11 +718,91 @@ def test_wrapped_help_text_fits_the_panel():
             scale()
             font = render._fonts()["small"]
             width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-            for text in (render._LEGEND_TOUCH, render._LEGEND_KEYS):
+            for text in (render._LEGEND_TOUCH, render._LEGEND_KEYS,
+                         render._LEGEND_HISTORY_TOUCH, render._LEGEND_HISTORY_KEYS):
                 for line in render._wrap(font, text, width):
                     assert font.size(line)[0] <= width, f"{line!r} overruns the panel"
             bottom = config.HUD_TOP_H + 200
             assert render._panel_legend(screen, 0, config.HUD_TOP_H, bottom) <= bottom
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_help_text_fits_the_empty_panel_whole():
+    """Not merely cut off cleanly (above) but short enough to be read in full.
+
+    The cut is silent — there is no ellipsis and no scroll — so a legend longer
+    than the panel is prose nobody ever sees the end of, and the end is where the
+    trailing lines that matter least were deliberately put. An empty panel is the
+    floor this has to clear: the queued list only eats into it once the player is
+    already giving orders, which is the point they have stopped reading.
+    """
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            # what `_draw_side_panel` passes when nothing is queued
+            ph = config.SCREEN_H - config.HUD_TOP_H - config.END_TURN_H
+            bottom = config.HUD_TOP_H + ph - config.s(8)
+            y = config.HUD_TOP_H + config.PANEL_PAD
+            font = render._fonts()["small"]
+            width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+            for history in (False, True):
+                text = render._legend_text(history)
+                drawn = render._panel_legend(screen, 0, y, bottom, history=history)
+                lines = render._wrap(font, text, width)
+                room = (bottom - y - render._row_h("normal")) // render._row_h()
+                assert room >= len(lines), (
+                    f"{'history' if history else 'live'} legend needs {len(lines)} "
+                    f"rows, panel holds {room}"
+                )
+                assert drawn <= bottom
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
+    """Review mode is a different scene, so the panel must not teach live play in it.
+
+    `input._handle_history_event` is modal: it answers the scrubber, rewind and
+    exit and nothing else. So the live legend's verbs are all dead here, and the
+    two "Clear ... forwarding" buttons are a destructive-looking press that no
+    handler would ever receive — they must not be drawn at all.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+
+        render.draw(screen, state, ui)
+        assert ui.clear_forward_rect != (0, 0, 0, 0)   # offered during live play
+
+        ui.history = True
+        ui.history_max = 3
+        ui.history_turn = 1
+        drawn = []
+        real_text = render._text
+        render._text = lambda surf, font, text, col, **kw: (
+            drawn.append(text), real_text(surf, font, text, col, **kw))[1]
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        assert ui.clear_forward_rect == (0, 0, 0, 0)
+        assert ui.clear_dangerous_rect == (0, 0, 0, 0)
+        assert "History" in drawn
+        blob = " ".join(drawn)
+        assert "Rewind to here" in blob
+        for live_only in ("Take every system", "standing", "Route"):
+            assert live_only not in blob, f"live-play help leaked into review: {live_only}"
     finally:
         _desktop_scale()
         pygame.quit()
