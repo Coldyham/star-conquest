@@ -74,6 +74,37 @@ What it changes, in descending order of measured value:
     common and the freed surplus has somewhere real to go (220 vs 179 in one
     4-player cell).
 
+  * **Phase 4 does not flow surplus into a system Phase 2 is giving up this
+    same turn.** ``live_frontier``/``_flow_to_front`` used to seed and route
+    through the full ``doomed - saved`` set built at Phase 1/2, so a rear
+    system's surplus and a doomed garrison's retreat routinely crossed in
+    flight and the surplus landed on the enemy a turn or two later — 38
+    ships/player/game at 24 nodes / 6 ly-per-turn. ``giving_up`` is now
+    subtracted from both ``live_frontier`` and the ``owned`` set the BFS
+    routes through. Worth 60.6% pooled (z = 14.01, REPRODUCED) in combination
+    with the next two fixes — see "A non-oracle successor to marshal" below.
+
+  * **A visible strike is priced against the relief that could reach the
+    garrison.** ``_required`` priced a target against its own garrison, its
+    owner's in-flight reinforcements and its production over the flight, but
+    never against a calm neighbour the owner could still move in during the
+    turns the strike is visible — 81-84% of marshal's lost full-price strikes
+    met a garrison grown since launch. ``_relief_capacity`` sums the garrisons
+    of the target owner's systems that could reach it inside the strike's
+    visibility window (``dist - 1`` turns; a 1-turn strike is never visible at
+    all), weighted by ``RELIEF_AWARE`` against a rival target only. Board
+    facts only — never a rival's decision rule — so the bot still commits to
+    a strict non-oracle contract.
+
+  * **A guard across a 1-turn lane is a sunk cost, not a deterrent.**
+    ``_max_adjacent_enemy`` sized the frontier guard off the largest adjacent
+    rival garrison regardless of lane length, but a 1-turn strike lands the
+    turn it launches — the garrison it is sized against never sees it coming,
+    so the guard it funds cannot change the outcome. 73% of garrisons that
+    died to a 1-turn strike were at or under their own guard. A rival reachable
+    in exactly one turn is now weighted by ``FAST_GUARD_WEIGHT``; bit-identical
+    to the unweighted figure wherever no adjacent lane is 1 turn.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -89,7 +120,12 @@ deleted, the known hole in its own guard, why — under "Two doomed neighbours" 
 the retreat rule leads on distance and the doomed are offered to each other
 before anyone else, and — under "Racing a third player for the same system" —
 why the third-party reprice stops at rival-held targets and is deliberately not
-applied to neutral ones. Don't re-add one of those, or
+applied to neutral ones. **"A non-oracle successor to marshal"** covers the three
+most recent additions — the abandoned-flow fix, relief-aware pricing and the
+fast-guard weight — including the leave-one-out measurement confirming each
+contributes to the combination rather than one carrying the other two, and the
+cross-opponent checks against knower and thinker that ruled out relief-aware
+pricing making the bot too cautious. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -139,6 +175,15 @@ RESERVE_PINCER = True           # hold a stagger's nearer wave for its own targe
 CONSOLIDATE = True              # Phase 2: the doomed relieve each other
 AVOID_ABANDONED = True          # ...and never retreat into one that is still doomed
 RETREAT_NEAREST = True          # ...and retreat by travel time, not garrison size
+
+# --- see "A non-oracle successor to marshal" in docs/bot-design.md ---------- #
+FLOW_AVOIDS_ABANDONED = True    # Phase 4: don't flow surplus into a system
+                                 # Phase 2 is giving up this same turn
+RELIEF_AWARE = 0.5              # _required: price a rival target against a
+                                 # calm neighbour's garrison too, weighted by this
+FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
+                                 # rival by this — a strike across it is never
+                                 # visible, so 0.0 ignores it entirely
 
 
 # --------------------------------------------------------------------------- #
@@ -296,13 +341,22 @@ def _production_by(s, turns: int) -> int:
     return (s.prod_progress + turns) // s.production
 
 
-def _max_adjacent_enemy(state, pid, sysobj) -> int:
-    """Largest garrison next door belonging to a real rival. Neutrals never attack."""
-    best = 0
+def _max_adjacent_enemy(state, pid, sysobj) -> float:
+    """Largest garrison next door belonging to a real rival. Neutrals never attack.
+
+    A rival reachable in exactly one turn is weighted by ``FAST_GUARD_WEIGHT``:
+    a strike across a 1-turn lane lands the turn it launches, so the garrison
+    it is sized against never sees it coming and the guard it funds cannot
+    change the outcome. At weight 1.0 this is the unweighted figure.
+    """
+    best = 0.0
     for n in sysobj.neighbors:
         o = state.systems[n]
         if o.owner_id != pid and o.owner_id != 0:
-            best = max(best, o.ships)
+            weight = 1.0
+            if FAST_GUARD_WEIGHT != 1.0 and (state.travel_turns(sysobj.id, n) or 99) == 1:
+                weight = FAST_GUARD_WEIGHT
+            best = max(best, o.ships * weight)
     return best
 
 
@@ -377,6 +431,28 @@ def _attacker_pileup(forces: list[int]) -> int:
     return cur
 
 
+def _relief_capacity(state, target, warning: int) -> int:
+    """Ships the target's owner could still move in from a calm neighbour
+    before we land, given ``warning`` turns of visibility.
+
+    Board facts only — whose systems are calm and how far they are from the
+    target — never a rival's decision rule. A neighbour counts in full
+    regardless of whether it is itself threatened elsewhere: reading that
+    would mean re-deriving a rival's own defensive arithmetic, which the
+    non-oracle rule excludes. See ``RELIEF_AWARE`` and "A non-oracle successor
+    to marshal" in `docs/bot-design.md`.
+    """
+    if warning <= 0:
+        return 0
+    owner = target.owner_id
+    total = 0
+    for n in target.neighbors:
+        o = state.systems[n]
+        if o.owner_id == owner and (state.travel_turns(target.id, n) or 99) <= warning:
+            total += o.ships
+    return total
+
+
 def _required(state, pid, target, dist: int) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
 
@@ -415,12 +491,23 @@ def _required(state, pid, target, dist: int) -> int:
     "Racing a third player for the same system" in `docs/bot-design.md`, which
     also records why a pessimistic remnant estimate hides the converse
     opportunity entirely.
+
+    A rival-held target at ``dist >= 2`` is priced against relief, too: a
+    strike is visible for ``dist - 1`` turns before it lands, which is exactly
+    the window a calm neighbour has to move in, and 81-84% of marshal's lost
+    full-price strikes met a garrison grown since launch. ``_relief_capacity``
+    reads only board facts (whose neighbouring systems are calm, how far they
+    are), never a rival's decision rule, so this stays inside the same
+    non-oracle contract as everything else here. Weighted by ``RELIEF_AWARE``;
+    see "A non-oracle successor to marshal" in `docs/bot-design.md`.
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
         return max(ships + 1, math.ceil(ships * _neutral_margin()))
     defence = (ships + _inbound(state, target.id, target.owner_id, dist)
                + _production_by(target, dist))
+    if RELIEF_AWARE > 0:
+        defence += math.ceil(RELIEF_AWARE * _relief_capacity(state, target, dist - 1))
     for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
         defence = _after_clash(defence, incoming)
     return max(defence + 1, math.ceil(defence * _enemy_margin()))
@@ -694,8 +781,11 @@ def decide(state, pid):
     # to retreat into.
     saved, donated = _consolidate(state, pid, doomed, deficits,
                                   threatened_set, budget, sends)
-    abandoned = (frozenset(sid for sid in doomed if sid not in saved)
-                 if AVOID_ABANDONED else frozenset())
+    # Independent of AVOID_ABANDONED (which only governs where _evacuate will
+    # retreat to): this is every system this turn's Phase 2 is giving up,
+    # regardless, for Phase 4's FLOW_AVOIDS_ABANDONED below to see.
+    giving_up = frozenset(sid for sid in doomed if sid not in saved)
+    abandoned = giving_up if AVOID_ABANDONED else frozenset()
     for sid in doomed:
         if sid not in saved and sid not in donated:
             order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned,
@@ -810,7 +900,16 @@ def decide(state, pid):
     live_frontier = {sid for sid in frontier
                      if any(sysmap[n].owner_id != pid and n not in settled
                             for n in sysmap[sid].neighbors)}
-    parent = _flow_to_front(state, set(owned), live_frontier, pid, max_prod)
+    flow_owned = set(owned)
+    if FLOW_AVOIDS_ABANDONED and giving_up:
+        # A system we are giving up this turn is not a front to feed and not
+        # a waypoint to route through — its own garrison is leaving it, or
+        # about to be overrun, on this exact turn. Left in, a rear system's
+        # surplus and the doomed garrison's retreat routinely cross in
+        # flight and the surplus lands on the enemy a turn or two later.
+        live_frontier -= giving_up
+        flow_owned -= giving_up
+    parent = _flow_to_front(state, flow_owned, live_frontier, pid, max_prod)
     for sid in sorted(owned):
         if sid in live_frontier:
             continue  # the front's leftover stays home as the standing reserve

@@ -26,3 +26,6 @@ games/
 
 # Claude generated feature spec/session notes
 /notes
+
+# Bot-tuning sweep ledger (tools/sweep.py)
+results/

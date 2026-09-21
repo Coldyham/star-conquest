@@ -1526,6 +1526,165 @@ re-tune of a margin, so no `RISK_PARITY`-style constant to float against
 `DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
 exactly the case that has no jitter cushion to lose.
 
+## A non-oracle successor to marshal
+
+Three more fixes, built and measured on a byte-for-byte fork (`models/test.py`,
+forked at `c227288`, deleted once folded back in — everything below is folded
+into `models/marshal.py` directly, constants after its `RETREAT_NEAREST` line)
+using a new paired A/B harness, `tools/sweep.py` (mirrored duels against a fixed
+baseline, so a config identical to the baseline reads exactly 50.0% before
+anything else is trusted; see the tool's own docstring for the full protocol).
+Strict non-oracle throughout: every new term reads board facts only — whose
+systems are calm, how far they are — never a rival's decision rule or strategy
+name.
+
+**Stage 0 — regime map of marshal's own existing constants**
+(`results/stage0.txt`, 18,200 games, 7 cells spanning 12-40 nodes and 3/6/12
+ly/turn): swept `FRONTIER_GUARD`, `BEYOND_DECAY`, `OVERWHELM`, `RISK_PARITY`,
+`NEUTRAL_MARGIN`, `DEFEND_PAD`. No board-size or speed-regime gate needed for
+any of them — every arm read NOT SIGNIFICANT in every cell except `nocommit`
+(the sanity anchor, confirms `COMMIT_SURPLUS` still matters a lot: 29.4%) and a
+small reproduced negative on `NEUTRAL_MARGIN=1.2` (47.1% — confirms the current
+1.3 is fine). The one regime effect that *is* real is the per-lane one the third
+mechanism below targets.
+
+**Where marshal's ships actually die** (per player per game, 24 nodes / 6
+ly-per-turn, ~195 lost): 38 in Phase 4 flow sent into a system the same turn's
+Phase 2 is abandoning; 29 in full-price strikes that met a garrison grown since
+launch (81-84% of lost strikes); 22 in relief/flow landing on a system captured
+in flight (honest, unfixable blind — the strike and the capture are decided
+against the same shared, unmutated start-of-turn state); 16 in forward-steps that
+met reinforcement; 10 in cornered sorties. At 12 ly/turn add 14/game of guards
+dying in place to 1-turn strikes (73% of them at or under their own guard).
+
+### A. `FLOW_AVOIDS_ABANDONED` — Phase 4 must not feed a system Phase 2 is giving up
+
+`live_frontier` was every frontier system with an unsettled non-owned neighbour,
+and `_flow_to_front` seeded from all of them with nothing removing the
+`doomed - saved` set Phase 1/2 had just built. A rear system routinely flowed its
+surplus toward a doomed front whose garrison was retreating — often to that very
+rear system — and the two crossed in flight, landing the surplus on the enemy.
+Fix: `giving_up = frozenset(sid for sid in doomed if sid not in saved)`, built
+independently of `AVOID_ABANDONED` (which only governs where `_evacuate` itself
+retreats to), subtracted from both `live_frontier` and the `owned` set the BFS
+routes through.
+
+### B. `RELIEF_AWARE` — a visible strike is priced against the relief that could reach the garrison
+
+`_required` priced a rival target against its own garrison, the owner's
+in-flight reinforcements and production over the flight — never against a calm
+neighbour the owner could still move in during the turns the strike stays
+visible. A `dist`-turn strike is visible for `dist - 1` turns before it lands (a
+1-turn strike is never visible at all), which is exactly the window a calm
+neighbour has to help. `_relief_capacity(state, target, warning)` sums the
+garrisons of the target owner's systems reachable within that window and prices
+in `ceil(RELIEF_AWARE * capacity)`, board facts only.
+
+**The user's prior going in:** a similar-shaped feature had previously made
+marshal too cautious (the 46% guard result under "The 2026-09 tuning sweep"
+above), and the payoff was expected to depend on the opponent — knower, marshal
+and a human reinforce a threatened system, claudebot and rusherplus do not, so
+against the second group the term is pure over-pricing. Checked directly rather
+than assumed: swept against **thinker** (reinforces, `results/stage1b_thinker.txt`)
+and **claudebot** (never reinforces, `results/stage1b_claudebot.txt`), 19,200
+games total. Against thinker, stock marshal already wins 92.9%; `RELIEF_AWARE`
+pushes it to 94.7-95.8%, a further, significant improvement — correctly
+anticipating real relief pays off. Against claudebot, stock marshal already wins
+98.5%; every weight (0.25/0.5/1.0) reads statistically indistinguishable from
+stock marshal (98.6-98.7%, all NOT SIGNIFICANT) — no measurable harm, because the
+margin over claudebot is already so large a slightly bigger ask costs nothing.
+Weights showed no significant difference from each other in three independent
+tables; 0.5 was the pre-registered choice and reads numerically highest in all
+three, so it shipped.
+
+### C. `FAST_GUARD_WEIGHT` — a guard across a 1-turn lane is a sunk cost, not a deterrent
+
+`_max_adjacent_enemy` sized the frontier guard off the largest adjacent rival
+garrison regardless of lane length. Across a ≥2-turn lane the guard sees the
+strike coming and Phase 1/2 can reinforce or evacuate; across a 1-turn lane the
+strike is invisible — it lands the turn it launches — so a guard sized against
+it is pure sunk cost. 73% of garrisons that died to a 1-turn strike were at or
+under their own guard (14 ships/player/game at 24 nodes / 12 ly-per-turn). Fix:
+weight a rival garrison reachable in exactly one turn by `FAST_GUARD_WEIGHT`
+(0.0 ships it entirely). This *is* the regime gate Stage 0 was checking for,
+keyed per lane on `state.travel_turns` rather than on board size or a global
+speed setting, so it tracks the speed slider and mid-game lane-length growth on
+its own. Bit-identical to the unweighted figure wherever no adjacent lane is 1
+turn, and therefore INERT (not measurable) at 6 ly/turn on 18-40 nodes, where no
+lane is that short — it only bites once `ship_ly_per_turn` or node density
+pushes a lane down to 1 turn.
+
+### Measurement: the combination, ablations, and cross-opponent checks
+
+Six cells throughout: `random:18:6`, `random:24:6`, `random:40:6`, `random:24:12`
+(keeps C out of the INERT gate), `random:18:3` (gives A and B the most flight
+time), `random:24:6,defender_advantage=1.25` (the historical killer cell for
+past marshal ideas).
+
+**Batch 1a** (`results/stage1a.txt`, 33,600 games, 400 seeds): every mechanism
+solo beats marshal, and the combination (`full`: A+B+C together) is the
+strongest row — **60.6% pooled [59.1, 62.0], REPRODUCED, better than baseline in
+all 6 cells**, including the advantage-1.25 cell (64.9%). `only_fast` pools to a
+NOT-SIGNIFICANT ~51% because 5 of 6 cells have no 1-turn lanes at all
+(structurally inert there — see C above), but at the one cell that does have
+them (`random:24:6,ship_ly_per_turn=12.0`), `only_fast` (weight 0.0) reads
+**57.4%, z=4.07, REPRODUCED-strength**, judged per-cell rather than pooled for
+exactly the reason C is INERT elsewhere.
+
+**Batch 1c — leave-one-out** (sweep key `b1b9fa9af40b66fa`, 4 arms × 6 cells ×
+400 seeds = 19,200 games): confirms each of A/B/C actually contributes to
+`full`'s 60.6% rather than one mechanism carrying the other two. Each `drop_X`
+arm sat below `full`, so nothing was simplified out.
+
+**Stage 2 — acceptance** (`results/stage2.txt`, 4800 games, 400 seeds): `final`
+(the combination, now the shipped defaults) vs stock marshal — **60.6% pooled
+[59.1, 62.0], z=14.01, REPRODUCED** (half A 60.8%, half B 60.3%), every cell
+"better than baseline", no cell timeout-dominated (worst: 15% at the
+advantage-1.25 cell, confirmed by direct check to be a true ~17% rate, not the
+smoke harness's small-sample artefact — see the harness-quirk note below).
+
+**Stage 3 — cross-opponent and roster regression.** Against **knower**
+(`results/stage3_knower.txt`, oracle, 2400 games): `final` 61.9% vs stock
+marshal 54.0% pooled — pairwise "separated", `final` does not sit below marshal.
+Against **thinker** (`results/stage3_thinker.txt`, reinforcing, 4800 games):
+`final` 97.4% vs stock marshal 92.9% pooled — separated in every cell. 5-bot
+ladder (`--ladder --trials 30 --nodes 24`): `final` ranked 1st (33% wins) ahead
+of stock marshal 2nd (30%), head-to-head 63%-37%. `tools/position_suite.py
+--bots marshal test` (directional, 26 positions from real games): `final` won
+69.2% of positions vs marshal's 65.4%, faster more often (8.7% vs 4.3% of
+shared-finish positions), same recovery rate. No veto condition was hit
+anywhere, so nothing was dropped and nothing needed re-tuning.
+
+**Decision: A-C already clear the acceptance bar on their own, so a fourth
+candidate mechanism (`DENY_SWAP`, capping a source's commitment against a rival
+by what the rival's own garrison would need to step into it — piloted at
+81-91% for the stepper but never built) was left out of scope.** Building an
+unvalidated, unpiloted mechanism when the goal is already measurably met would
+be exactly the unmeasured complexity this file's own convention argues against.
+If pushing the win rate higher later becomes the goal rather than clearing the
+bar, the "empty interior" weakness under "Racing a third player for the same
+system" — properly scoped by travel time, which the one prior attempt at it
+lacked — looks better-motivated than `DENY_SWAP`.
+
+**Folded into `models/marshal.py` directly** rather than shipped as a second
+bot (`models/test.py` deleted, `tests/test_test.py` deleted, its mechanism
+tests ported into `tests/test_marshal.py`): the improvement was not a different
+playstyle worth keeping side by side, only a strictly better version of the same
+one, so a second roster entry would just be two names for the same strategy at
+different vintages.
+
+**A harness quirk worth knowing before running more `tools/sweep.py` sweeps.**
+When a sweep has many cells (5-8), the smoke gate's automatic seed count is only
+`ceil(20 / (cells * 2))` — as few as 2-4 seeds per cell — and `SMOKE_SEED_BASE`
+is fixed, so a single genuinely-rare stalemate seed landing in a cell's tiny
+smoke sample **deterministically** fails that cell's smoke check on every re-run,
+even though the cell's true timeout rate is well under the 50% threshold. Hit on
+the advantage-1.25 cell here: the smoke's 4-game sample read 100% timed out,
+while a direct 30-seed check read 17%. Diagnose with a direct 20-40-seed check
+before dropping a cell, and if reordering the cell list to land it on both smoke
+seeds instead of being starved to a handful after a bad one fixes it (as it did
+here), that is a legitimate workaround, not a fudge.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
