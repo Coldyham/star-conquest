@@ -147,10 +147,11 @@ test("one caller hitting the limit does not block another", () => {
 // --- the read half ---------------------------------------------------------
 //
 // `replay.mjs` is thinner than `log.mjs` on purpose: what may be served is
-// decided by the `public_replays` view, not by a condition here. So what is
-// worth pinning is the id check (it comes off a URL fragment and goes into a
-// query string) and that a missing replay and an unpublished one are the same
-// answer — telling them apart would disclose that some unposted game exists.
+// decided by the `public_watchable_replays` view, not by a condition here. So
+// what is worth pinning is the id check (it comes off a URL fragment and goes
+// into a query string) and that a missing replay and an unpublished one are
+// the same answer — telling them apart would disclose that some unposted game
+// exists.
 
 import replayHandler from "../netlify/functions/replay.mjs";
 
@@ -184,9 +185,10 @@ test("a published replay comes back as the encoded log itself", async () => {
   // in JSON would only make the game unwrap it again.
   assert.match(response.headers.get("content-type"), /text\/plain/);
   assert.equal(body, "eNrtVNtu");
-  // Read through the view, never the table: that is where "a posted score
-  // published this" is decided.
-  assert.match(seen[0], /public_replays\?select=log&match_id=eq\./);
+  // Read through the union view, never a table directly: that is where each
+  // half's own consent rule is decided (a posted score for a human replay, or
+  // bot_scores' own public row for a bot's).
+  assert.match(seen[0], /public_watchable_replays\?select=log&match_id=eq\./);
 });
 
 test("an id of the wrong shape never reaches the query string", async () => {

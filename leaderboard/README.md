@@ -261,37 +261,67 @@ score) carry what the badge needs without a second per-game query;
 
 ### Watching a bot's replay
 
-Every bot row carries a **Watch** link too, next to a human score's (see
-"Watching one back" below) — but it is built rather than fetched. Nothing was
-ever uploaded for it to point at: a bot's game is exactly as reproducible as
-the number on the row, the same fact that lets `tools/bot_replay.py` compute
-it once instead of on every page view. So the link just hands the game the
-same ingredients the worker replayed — the stored setup, the seed, and the
-bot standing in for the human's seat, already in autoplay — and lets the
-game's own engine play it out live from turn one, rather than scrubbing a
-recorded log.
+A winning bot row carries a **Watch** link, and since the underlying change
+that added this section, it plays back a *recorded* replay — `#log=<match
+id>`, the exact link mechanism a human's posted score uses (see "Watching one
+back" below) — rather than asking the browser to re-decide the whole match
+live from the setup and seed.
 
-`js/token-encode.mjs`'s `botWatchSetup` builds that setup, mirroring
-`tools/sim.play_settings` (what `bot_replay.py` actually calls) field for
-field: seat 1's own strategy and params are discarded — that slot belongs to
-whoever holds the human seat in the stored setup, not to the bot being
-measured — and replaced with the bot at the `aux` its row was computed at;
-every other seat keeps the strategy and params the setup gave it, since those
-are part of the map's difficulty. `game.mjs`'s `botWatchLink` is the encoding
-step, the same `encodeToken`/`deflate` pair `js/home.mjs`'s "Play a new seed"
-already uses.
+That used to be the only option, and the two could disagree. Re-deciding a
+match depends on exactly which commit is deployed where, and on how every
+*oracle* bot in the field is willing to treat the seat it is facing: a
+human-flagged seat is guessed at, never trusted (`models/knower.py`'s
+`_model_for`), while an AI one is resolved through `ai.STRATEGIES` and
+simulated exactly — a real advantage or disadvantage depending which side of
+it a bot lands on. `tools/bot_replay.py`'s worker used to clear that flag on
+the seat it replayed (the shortest way to make the engine decide it), so its
+opponents could simulate the bot exactly — while a live, token-driven Watch
+link could only ever turn `autoplay` on and leave the flag set, since nothing
+in a token can say "seat 1 is a bot". Two different games, one row: that
+asymmetry let a row say "lost" while the very link beside it, opened in a
+browser, played out a win.
 
-Unlike a human's Watch link there is no rules-version check here, and that is
-deliberate rather than an oversight: a stored *log* replays recorded orders
-and dice, which is exactly what an engine-rules change can break, so that link
-is withdrawn rather than shown wrong (`GameLog.is_current`, above). A bot
-replay never applies anything recorded — it re-decides every turn against
-whatever code is live — so there is nothing here that can fail to
-reconstruct; the only way it can drift is the same one `bot_replay.py`'s
-`--stale` already accepts as normal: the engine or the bot has moved on since
-the row was cached, so a live watch shows the bot as it plays *today*, which
-may no longer match the cached `turns`/`lost` exactly. That is "old", not
-"broken" — see `pending()`'s docstring in `tools/bot_replay.py`.
+The fix was not to make the harness match the handicapped, flag-set version —
+that would have measured every bot under an artificial disadvantage this
+board's other yardstick, the roster's own ladder and swap tournaments, never
+imposes (there, every seat sees every other clearly). It was to stop asking a
+Watch link to compute anything at all. A stored *log* cannot disagree with
+itself: `replay.reconstruct` applies its recorded orders and dice verbatim,
+asking no seat to decide anything, so watching it *is* rewatching the exact
+game the row reports on — regardless of what any seat was flagged during the
+run that produced it. That is what let the harness go back to clearing the
+flag and measuring every bot on the same full-information footing as the rest
+of the roster, without reopening the original mismatch.
+
+`tools/bot_replay.py` builds this the same way `main.resolve_turn` builds a
+live match's own log — turn by turn, via `sim.play_settings`'s `log`
+parameter — and stores its encoded form directly on the `bot_scores` row
+(`match_id`/`rules_version`/`log`) the moment a replay wins. Only a win: a
+loss stores nothing, the same rule a human's own posted score follows (there
+is nothing to Watch for a game that went nowhere). `bot_scores` is already
+fully public — no consent to gate, no person's data in it — so this needs no
+new `scores`-style publishing step; storing it on the row *is* publishing it.
+`game.mjs`'s `botRow` reads `standings.mjs`'s `botWatchKind(row)` to decide
+which of three things to show: **current** (`#log=` on the stored match id),
+**outdated** (a replay was stored, but under rules this build no longer plays
+by — the same disclosure a human's outdated replay gets, rather than an
+offer that can no longer reconstruct), or **legacy** (a win computed before a
+row carried a replay at all — `js/token-encode.mjs`'s `botWatchSetup` is kept
+purely as that one fallback, reconstructing the match live the way every
+bot's Watch link used to). A loss offers nothing, at any kind.
+
+The lookup on the game's side goes through one more view,
+`public_watchable_replays` — the union `netlify/functions/replay.mjs` reads,
+of `public_replays` (a human's, gated as always on a posted score) with a
+winning bot's own stored log (gated on nothing further, since `bot_scores`
+already is public). Two different, unrelated consent rules meeting in one
+`union all` rather than a branch in the function itself, which is what keeps
+"what may be served is decided in SQL, not here" true of both halves.
+
+Existing rows computed before this shipped have no stored replay yet — they
+show as "legacy" until the worker replays their map again (an ordinary run
+only refills what's missing or stale, so a one-off `--recompute` is what
+backfills the rest at once).
 
 ## Checked scores
 
@@ -375,8 +405,10 @@ Python, so a JS viewer would be a second engine to keep in step with the first.
 The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
 `netlify/functions/replay.mjs` and opens history review on it.
 
-(A bot's row gets a Watch link the same way, but built rather than fetched —
-see "Watching a bot's replay" under "How the bots did" above.)
+(A winning bot's row gets a Watch link the same way now — `#log=` on its own
+`match_id` — with the ingredients-and-reconstruct method kept only as a
+fallback for a row with no stored replay yet; see "Watching a bot's replay"
+under "How the bots did" above.)
 
 **Posting a score is what publishes that replay** — unless the map it belongs to
 is still embargoed, in which case nothing is, whoever posted it. `public_replays`

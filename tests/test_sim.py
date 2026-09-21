@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import time
 from collections import Counter
+from dataclasses import replace
 
-from starconquest import ai, settings as settings_mod
+from starconquest import ai, engine, replay, settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
@@ -133,9 +134,10 @@ def test_replay_lands_on_the_same_map_the_human_played():
 
 
 def test_the_bot_actually_drives_the_human_seat():
-    # engine._collect_orders skips the human seat, so a replay that forgot to
-    # clear is_human would sit still and lose every time. Seat 1 must be taking
-    # ground, which is only possible if `decide` ran for it.
+    # `_hand_over` clears `is_human`, so `engine._collect_orders` decides seat 1
+    # the ordinary way; a replay that forgot to clear it would sit still (the
+    # engine skips a human seat with no orders queued) and lose every time.
+    # Seat 1 must be taking ground, which is only possible if `decide` ran for it.
     cfg = _setup()
     result = sim.play_settings(cfg, 11, "heuristic", max_turns=40)
     assert result.turns > 0
@@ -160,6 +162,146 @@ def test_the_replayed_seat_ignores_the_setup_s_own_ai_params():
     tuned.ai[0] = AiParams(reserve_fraction=0.9, reserve_floor=40, expand_margin=9.0,
                            attack_margin=9.0, reinforce_margin=40, aux=7.0)
     assert sim.play_settings(tuned, 11, "heuristic") == sim.play_settings(_setup(), 11, "heuristic")
+
+
+def test_the_replayed_seat_is_handed_over_outright():
+    """`play_settings` clears `is_human` on the seat it takes over, so an oracle
+    opponent resolves it through `ai.STRATEGIES` and simulates it exactly — the
+    same full-information footing every other bot-vs-bot measurement in this
+    codebase already stands on (`sim.play`'s ladder/swap tournaments clear the
+    flag on every seat), rather than a hobbled one where opponents must guess
+    blind at a seat that was never actually a person.
+
+    A version of this that left the flag set existed briefly, reasoning that a
+    leaderboard row had to match what a live, token-driven Watch link would
+    compute — and a token can only ever say `autoplay: true`, never "seat 1 is
+    a bot", so the harness had to pretend too. That reasoning is gone along
+    with the mechanism it was protecting: the Watch link for a win now plays
+    back a stored `replay.GameLog` (see the reconstruct-exactness tests below),
+    which asks no seat to decide anything and so cannot be affected by this flag
+    either way. Nothing is left forcing the harness away from the same
+    full-information footing the rest of the roster is measured on."""
+    cfg = _setup()
+    seen: list[bool] = []
+
+    def watcher(state, pid):
+        seen.append(state.players[1].is_human)
+        return []
+
+    ai.register("_watcher", watcher)
+    try:
+        cfg.ai_strategy = ["heuristic", "_watcher", "heuristic"] + ["heuristic"] * 3
+        sim.play_settings(cfg, 11, "heuristic", max_turns=3)
+    finally:
+        ai.STRATEGIES.pop("_watcher", None)
+    assert seen and not any(seen)
+
+
+def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
+    """The whole point of an all-bot game having no preferred seat.
+
+    Watching a setup autoplay in the app and computing the same setup offline
+    (`tools/bot_replay.py`, via this function) have to be the same game, or a
+    leaderboard row describes a match its own Watch link never plays. They used
+    not to be: `_hand_over` cleared `is_human` here, while the app left seat 1
+    flagged, so every oracle opponent (`models/knower.py`) guessed blind at the
+    one seat being measured and simulated all the others exactly. Measured on
+    this setup, that handicap was worth 77 turns.
+
+    A `knower` opponent is what gives this teeth — it is the only fielded
+    strategy whose output depends on what a seat is flagged at all.
+    """
+    ai.load_models()
+    cfg = _setup(seed=7)
+    cfg.ai_strategy = ["marshal", "knower", "heuristic"]
+
+    # The app's own autoplay path: no human seat at all, every seat decided by
+    # the engine's own loop (`main.resolve_turn` passes no `human_orders`).
+    state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
+    assert state.human() is None
+    turns = 0
+    while state.winner is None and turns < 600:
+        engine.end_turn(state, decide=ai.decide)
+        turns += 1
+
+    result = sim.play_settings(cfg, 7, "marshal", max_turns=600)
+    assert (state.winner == 1) == result.won
+    assert state.turn == result.turns
+
+
+def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
+    """The property the leaderboard's stored bot replays rest on: a `log` filled
+    in alongside `play_settings` is not a second opinion that can drift from the
+    cached row the way re-simulating one always could (see
+    `test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything` below for
+    exactly what that buys) — it is a recording, so `replay.reconstruct` must
+    land on the exact board the run actually reached, orders and dice both
+    applied verbatim."""
+    ai.load_models()
+    cfg = _setup(seed=12)
+    log = replay.new_log(cfg, 12)
+    result = sim.play_settings(cfg, 12, "marshal", max_turns=600, log=log)
+    assert result.won and not result.timed_out    # this map's seed 12 is a real win
+
+    assert log.finished and log.winner == 1        # seat 1 is always the replayed seat
+    assert log.hand_turns == 0                     # AI-driven the whole match
+    assert log.turn_count == result.turns
+
+    state, _ = replay.reconstruct(log)
+    seat = state.human()
+    assert (state.winner == seat.id) == result.won
+    assert state.turn == result.turns
+    assert seat.ships_lost == result.lost
+
+
+def test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything():
+    """The reason `_hand_over` is free to clear `is_human` (above): a stored log
+    is replayed by `engine.end_turn(state, script=...)`, which applies the
+    recorded orders and deals the recorded dice verbatim and never calls
+    `decide` for any seat at all — so nothing an oracle would have read off a
+    seat's flags during the *original* run can possibly matter to how the log
+    plays back. `replay.build_state` stamps `is_human` fresh on every
+    reconstruction (seat 1, always, regardless of what the run that produced
+    the log had it set to), and that has no bearing here either: the seat the
+    engine is deciding for during replay is none of them, ever.
+
+    Proven rather than asserted from the mechanism: an oracle that peeks at
+    `is_human` and changes its actual output based on it would, if consulted
+    during reconstruction, diverge from the recorded game — and it does not,
+    because it is never called."""
+    def peeker(state, pid):
+        # A blatant tripwire: if this ever runs during reconstruction, the
+        # board it produces is nothing like the one that was actually played.
+        return [] if state.players[1].is_human else list(ai.compute_orders(state, pid))
+
+    ai.load_models()
+    ai.register("_peeker", peeker)
+    try:
+        cfg = _setup()
+        cfg.ai_strategy = ["heuristic", "_peeker", "_peeker"] + ["heuristic"] * 3
+        log = replay.new_log(cfg, 11)
+        result = sim.play_settings(cfg, 11, "marshal", max_turns=600, log=log)
+
+        state, _ = replay.reconstruct(log)
+        seat = state.human()
+        assert (state.winner == seat.id) == result.won
+        assert state.turn == result.turns
+        assert seat.ships_lost == result.lost
+    finally:
+        ai.STRATEGIES.pop("_peeker", None)
+
+
+def test_an_unresolved_log_is_left_unfinished():
+    """A run that hits max_turns without a winner (a draw counts as a winner —
+    `state.winner == 0` — so this is genuinely unresolved) must not be recorded
+    as finished with no winner, the same guard `main.resolve_turn` applies."""
+    cfg = _setup()
+    log = replay.new_log(cfg, 11)
+    result = sim.play_settings(cfg, 11, "heuristic", max_turns=2, log=log)
+    assert result.timed_out
+    assert log.turn_count == 2
+    assert not log.finished
+    assert log.winner is None
 
 
 def test_a_bot_that_never_wins_still_reports_a_result():

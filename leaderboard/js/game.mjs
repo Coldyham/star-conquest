@@ -8,7 +8,7 @@ import {
 import { mountMyScores } from "./me.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
-import { bestBot, botOrder, displayOrder, humanVsBots } from "./standings.mjs";
+import { bestBot, botOrder, botWatchKind, displayOrder, humanVsBots } from "./standings.mjs";
 
 const heading = document.getElementById("setup");
 const tagsTarget = document.getElementById("setup-tags");
@@ -95,43 +95,56 @@ function outdatedNote() {
 }
 
 /**
- * "Watch" on a bot's replay — unlike a human score, nothing was ever uploaded
- * for it to point at. A bot's game is a pure function of the stored setup, the
- * seed and the code (the same fact that lets `tools/bot_replay.py` compute it
- * once and cache it), so this reconstructs it instead of fetching it: the link
- * opens the game on that exact setup with `row.bot` standing in for the
- * human's seat, already in autoplay (`botWatchSetup`, token-encode.mjs — the
- * browser's mirror of `tools/sim.play_settings`).
+ * The Watch cell for one bot row — 0 or 1 elements to splice into `.result`,
+ * decided by `botWatchKind` (standings.mjs, so the decision itself is covered
+ * by that module's own tests rather than needing a DOM harness here).
  *
- * Returns null without GAME_URL to link into, or if the setup fails to encode
- * — same shape as game.mjs's other optional, best-effort links.
+ * A "current" row reuses `watchLink` verbatim: `bot_scores.match_id` names a
+ * replay exactly the way `scores.match_id` does (both minted by the same
+ * `replay._new_match_id`), and the game's `#log=` path — fetch, decode,
+ * `open_history` — doesn't care which table the id came from. "outdated"
+ * mirrors the human table's own disclosure (`outdatedNote`) rather than
+ * silently falling back to something that may equally have moved on. "legacy"
+ * is the one surviving use of the old method: a win computed before its
+ * replay was stored at all reconstructs the match live instead, the way every
+ * bot's Watch link used to (`botWatchSetup`, token-encode.mjs — mirrors
+ * `tools/sim.play_settings` field for field). "none" (a loss) offers nothing.
  */
-async function botWatchLink(gameSettings, row) {
-  if (!GAME_URL) return null;
+async function botWatchCell(gameSettings, row) {
+  if (!GAME_URL) return [];
+  const kind = botWatchKind(row);
+  if (kind === "current") return [watchLink(row.match_id)];
+  if (kind === "outdated") return [outdatedNote()];
+  if (kind === "none") return [];
+  // "legacy": nothing was ever uploaded for this one, so reconstruct it — the
+  // stored setup, the seed, and `row.bot` standing in for the human's seat,
+  // already in autoplay — and let the game's own engine play it out live from
+  // turn one, rather than scrubbing a recorded log it doesn't have.
   let token;
   try {
     token = await encodeToken(botWatchSetup(gameSettings, row.bot, row.aux), deflate);
   } catch {
-    return null;
+    return [];
   }
-  return el("a", {
+  return [el("a", {
     class: "watch",
     href: `${GAME_URL}#${token}`,
     target: "_blank",
     rel: "noopener",
     title: "Replay this bot in the browser",
     text: "Watch",
-  });
+  })];
 }
 
 /**
  * One bot's row, sharing the .score grid with the human table above so the two
  * read as one board. A win takes its place among the bots that won; a loss shows
  * a dash, because botOrder() deliberately doesn't rank the failures against each
- * other (see standings.mjs). `watch` is this row's Watch link (or null), built
- * ahead of time by renderBots since encoding it is async.
+ * other (see standings.mjs). `watchCell` is this row's Watch cell (0 or 1
+ * elements — see `botWatchCell`), built ahead of time by renderBots since
+ * encoding a legacy link is async.
  */
-function botRow(row, rank, watch) {
+function botRow(row, rank, watchCell) {
   const classes = ["score", "bot"];
   if (row.won && rank <= 3) classes.push(`rank-${rank}`);
   if (!row.won) classes.push("bot-lost");
@@ -149,7 +162,7 @@ function botRow(row, rank, watch) {
     ]),
     el("span", { class: "result" }, [
       el("span", { text: botSummary(row) }),
-      ...(watch ? [watch] : []),
+      ...watchCell,
     ]),
     // Disclosed rather than hidden: a replay that blew its per-decision budget
     // forfeited those turns' orders, so its result depended on how fast the
@@ -194,9 +207,9 @@ async function renderBots(rows, best, gameSettings) {
   botsLede.textContent =
     `Each bot replayed from the player's seat on this exact map — same seed, ` +
     `same opponents. ${botVerdict(rows, best)}`;
-  const watchLinks = await Promise.all(ordered.map((row) => botWatchLink(gameSettings, row)));
+  const watchCells = await Promise.all(ordered.map((row) => botWatchCell(gameSettings, row)));
   clear(botsTarget).append(
-    el("ol", { class: "scores" }, ordered.map((row, i) => botRow(row, ranks.get(row.bot), watchLinks[i]))),
+    el("ol", { class: "scores" }, ordered.map((row, i) => botRow(row, ranks.get(row.bot), watchCells[i]))),
   );
   botsSection.hidden = false;
 }
@@ -341,7 +354,8 @@ async function load() {
       // inside Promise.all would reject the whole batch and take the human score
       // table down with it. The bot section is an extra; the board is not.
       select(
-        `bot_scores?select=bot,won,turns,lost,bot_timeouts,aux,aux_label,computed_at` +
+        `bot_scores?select=bot,won,turns,lost,bot_timeouts,aux,aux_label,computed_at,` +
+          `match_id,rules_version` +
           `&game_key=${eq(gameKey)}`,
       ).catch(() => []),
     ]);

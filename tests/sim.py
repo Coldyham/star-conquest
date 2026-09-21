@@ -94,6 +94,42 @@ def _timed_decide(seconds: float, timeouts: list[int]) -> ai.DecideFn:
     return _decide
 
 
+def _hand_over(seat, bot: str, aux: float | None) -> None:
+    """Put ``bot`` in ``seat`` outright: strategy, params, and ``is_human``
+    cleared.
+
+    Clearing the flag is what lets an oracle opponent read this seat the way it
+    reads every other bot seat on the board — resolved through `ai.STRATEGIES`
+    and simulated exactly (`models/knower.py`'s `_model_for`) — rather than
+    guessing blind at it as it would a real, unpredictable person. That is the
+    same full-information footing every other bot-vs-bot measurement in this
+    codebase already stands on (`sim.play`'s ladder and swap tournaments clear
+    `is_human` on every seat, including whichever one starts there), so a bot
+    replayed through this function faces the same scrutiny it would anywhere
+    else it is measured — never an artificial edge from opponents forced to
+    treat it as a black box.
+
+    The app now agrees by construction rather than by coincidence: a match that
+    starts in autoplay has no human seat at all (`settings.build_state`), so an
+    all-bot game there is measured on the same footing as one here. This call is
+    still what does it in the harness, because a *posted human setup* carries
+    `autoplay: False` — the person who set it was going to play it — so there is
+    nothing in the settings for that stamp to fire on. The seat is taken over
+    explicitly instead.
+
+    A version of this that left the seat flagged human existed briefly, on the
+    reasoning that a leaderboard row had to compute the same thing a *live*
+    Watch link would if reconstructed via autoplay. That reasoning no longer
+    applies from either end: `tools/bot_replay.py` stores the finished run as a
+    `replay.GameLog` and a Watch link plays that back (`replay.reconstruct`,
+    which applies recorded orders and dice verbatim and asks no seat to decide
+    anything), and a token-driven reconstruction would now clear the flag too.
+    """
+    seat.is_human = False
+    seat.ai_strategy = bot
+    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+
+
 @dataclass
 class SimResult:
     seed: int
@@ -293,6 +329,7 @@ def play_settings(
     aux: float | None = None,
     max_turns: int = 600,
     bot_timeout: float = 0.0,
+    log: replay.GameLog | None = None,
 ) -> ReplayResult:
     """Replay a stored setup with ``bot`` holding the human's seat.
 
@@ -327,23 +364,41 @@ def play_settings(
     A bot that never takes the board still returns a result: ``won`` is False and
     ``turns``/``lost`` report how long it lasted and what it spent. Never rank a
     lost game against a won one on turns alone.
+
+    ``log``, given, is filled in turn by turn exactly as ``main.resolve_turn``
+    fills in a live match's — every seat's orders and combat draws, off the same
+    ``TurnRecord`` every ``end_turn`` call already returns — so replaying it back
+    through ``replay.reconstruct`` reproduces this exact run, with nothing
+    re-decided. That is what makes it safe to *store*: unlike this function's own
+    return value, which drifts the moment the engine or the bot changes
+    underneath it, a filled-in log is a recording, not a rerun, and stays exact
+    regardless — of the engine, of the bot, and (see ``_hand_over``) of whatever
+    this seat was flagged during the run that produced it. It is always
+    accumulated — the caller cannot know in advance whether the game is worth
+    keeping — and every turn is marked ``human_ai=True``: there is no human seat
+    in this match at all, and that is the closest available flag to saying so; a
+    caller keeping the log only for a win (``tools/bot_replay.py``) simply
+    discards it otherwise. ``log.mark_finished`` is called only on an actual win
+    or loss (``state.winner is not None``), the same guard ``main.resolve_turn``
+    uses — a log that hit ``max_turns`` unresolved is left correctly unfinished
+    rather than marked finished with no winner.
     """
     state = settings.build_state(cfg, seed)
     seat = state.human()
     if seat is None:
         raise ValueError("this setup has no human seat to replay")
-    # Hand the seat to the AI: engine._collect_orders skips the human, so this is
-    # what makes `decide` run for it at all (`play` does the same for every seat).
-    seat.is_human = False
-    seat.ai_strategy = bot
-    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+    _hand_over(seat, bot, aux)
 
     check_invariants(state)
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
-        engine.end_turn(state, decide=decide)
+        record = engine.end_turn(state, decide=decide)
+        if log is not None:
+            log.record_turn(record, human_ai=True)
         check_invariants(state)
+    if log is not None and state.winner is not None:
+        log.mark_finished(state.winner)
     return ReplayResult(
         bot=bot,
         won=state.winner == seat.id,
@@ -407,9 +462,7 @@ def play_from(
         return PositionResult(bot, log.match_id, turn, state.winner == seat.id, 0,
                               seat.ships_lost, human_won, human_from, False)
 
-    seat.is_human = False
-    seat.ai_strategy = bot
-    seat.ai_params = AiParams() if aux is None else AiParams(aux=aux)
+    _hand_over(seat, bot, aux)
 
     check_invariants(state)
     timeouts = [0]

@@ -31,6 +31,24 @@ keys tab and still work — see ``credentials``.)
 Nothing here imports pygame (or anything off PyPI): the simulation core is pure,
 which is what lets a plain ``python tools/bot_replay.py`` on a bare runner do the
 whole job.
+
+**A winning replay is stored, not just scored.** Alongside the ordinary
+``won``/``turns``/``lost`` row, a win also fills in a ``replay.GameLog`` turn by
+turn (``sim.play_settings``'s ``log`` parameter) and stores its encoded form on
+the same row (``bot_scores.log``/``match_id``/``rules_version``). That is what
+the board's Watch link on a winning bot plays back — ``#log=<match_id>``, the
+same mechanism a human's posted score uses — rather than handing the browser the
+setup and asking it to re-decide the whole match live. The two used to be able
+to disagree: re-deciding depends on exactly which commit is deployed where, and
+on treating the replayed seat as an oracle opponent could see any other bot
+(``sim._hand_over`` clears ``is_human`` for exactly this reason), which a token
+can never express — it can only ever say ``autoplay: true``, never "seat 1 is a
+bot". A stored log needs none of that agreement: ``replay.reconstruct`` applies
+its recorded orders and dice verbatim, asking no seat to decide anything, so
+watching it *is* rewatching the exact game this row reports on, regardless of
+what any seat was flagged during the run that produced it. A loss stores
+nothing — only a win is worth a Watch link, the same rule a human's own posted
+score follows.
 """
 
 from __future__ import annotations
@@ -52,7 +70,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai  # noqa: E402
+from starconquest import ai, replay  # noqa: E402
 from starconquest.settings import Settings  # noqa: E402
 from tests import sim  # noqa: E402  — the shared headless harness (see its docstring)
 
@@ -71,6 +89,14 @@ _OUTCOME_MODULES = (
 # `ai`, and none of `models/`. Replaying a log applies its recorded orders and
 # deals its recorded dice, so no bot is ever consulted (see `replay_rev`).
 _REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
+
+# The harness that actually plays a bot replay is part of the answer too, and is
+# named separately because only `engine_rev` may read it: `sim.play_settings`
+# decides how the seat is handed over and how each turn is stepped, so a change
+# there moves every cached row exactly as a change to `engine` would. It cannot
+# move a *stored log's* replay, which asks no seat to decide anything, so it must
+# stay out of `_REPLAY_MODULES`.
+_OUTCOME_HARNESS = ("tests", "sim.py")
 
 # Where a bot is replayed at something other than its default profile.
 #
@@ -155,7 +181,8 @@ def engine_rev() -> str:
     and only when — the simulation or a bot does.
     """
     return _digest([ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
-                   + sorted((ROOT / "models").glob("*.py")))
+                   + sorted((ROOT / "models").glob("*.py"))
+                   + [ROOT.joinpath(*_OUTCOME_HARNESS)])
 
 
 def replay_rev() -> str:
@@ -316,6 +343,50 @@ def _settings_for(row: dict) -> tuple[Settings, int] | None:
     return cfg, seed
 
 
+def _row_for(job: Job, result: sim.ReplayResult, log: replay.GameLog, rev: str) -> dict:
+    """The ``bot_scores`` upsert row for one finished replay.
+
+    ``log`` is always the run's full recording — ``play_settings`` fills it in
+    turn by turn regardless of the outcome, since nobody knows in advance
+    whether a run is worth keeping — but only a win's is stored: a log is what
+    backs a Watch link, and only a win gets one, the same rule a human's own
+    posted score follows (``Ui.can_post``). A loss therefore writes a blank
+    ``match_id``/``log``/``rules_version`` rather than omitting the keys — an
+    upsert only SETs the columns it is given, so an old winning row replayed
+    into a fresh loss (a bot retuned for the worse, say) must actively clear
+    what it no longer earns, not leave a stale replay pointing at a result the
+    row no longer reports.
+    """
+    row = {
+        "game_key": job.game_key,
+        "bot": job.bot,
+        "won": result.won,
+        "turns": result.turns,
+        "lost": result.lost,
+        "bot_timeouts": result.bot_timeouts,
+        # The profile this answer belongs to. Recorded, not implied: a board
+        # showing knower at search depth 12 beside a menu default of 1 owes
+        # the reader that much, and `pending` reads it back to notice when
+        # the policy has moved.
+        "aux": job.aux,
+        "aux_label": aux_note(job.bot, job.aux),
+        "engine_rev": rev,
+        # Sent rather than left to the column default: on an upsert PostgREST
+        # only SETs the columns present in the payload, so an omitted
+        # computed_at would keep the *original* row's timestamp on a redo.
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if result.won:
+        row["match_id"] = log.match_id
+        row["rules_version"] = log.rules_version
+        row["log"] = log.encoded()
+    else:
+        row["match_id"] = ""
+        row["rules_version"] = 0
+        row["log"] = ""
+    return row
+
+
 def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[str],
             rev: str, aux_for: Callable[[str], float], *,
             recompute: bool = False, stale: bool = False) -> list[Job]:
@@ -457,32 +528,19 @@ def main(argv: list[str] | None = None) -> int:
         if time.monotonic() > deadline:
             print(f"Deadline reached after {index - 1} replays; the next run resumes.")
             break
+        # Always built, on the same "nobody knows in advance" grounds as
+        # play_settings's own docstring — cheap beside the replay itself, and
+        # `_row_for` is what decides whether a loss's is worth keeping.
+        log = replay.new_log(job.cfg, job.seed)
         result = sim.play_settings(job.cfg, job.seed, job.bot, aux=job.aux,
                                    max_turns=args.max_turns,
-                                   bot_timeout=args.bot_timeout)
+                                   bot_timeout=args.bot_timeout,
+                                   log=log)
         outcome = f"won in {result.turns}" if result.won else f"lost after {result.turns}"
         tuned = f"@{job.aux:g}" if job.aux != 1.0 else ""
         print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot + tuned:<14} "
               f"{outcome} turns, {result.lost} ships lost")
-        batch.append({
-            "game_key": job.game_key,
-            "bot": job.bot,
-            "won": result.won,
-            "turns": result.turns,
-            "lost": result.lost,
-            "bot_timeouts": result.bot_timeouts,
-            # The profile this answer belongs to. Recorded, not implied: a board
-            # showing knower at search depth 12 beside a menu default of 1 owes
-            # the reader that much, and `pending` reads it back to notice when
-            # the policy has moved.
-            "aux": job.aux,
-            "aux_label": aux_note(job.bot, job.aux),
-            "engine_rev": rev,
-            # Sent rather than left to the column default: on an upsert PostgREST
-            # only SETs the columns present in the payload, so an omitted
-            # computed_at would keep the *original* row's timestamp on a redo.
-            "computed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        batch.append(_row_for(job, result, log, rev))
         # Flush as we go so a run that is cut short still banks its work.
         if len(batch) >= 50:
             if not args.dry_run:

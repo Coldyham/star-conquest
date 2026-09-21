@@ -88,22 +88,26 @@ def test_the_scrape_actually_found_the_callers():
     uses = _python_uses() | _function_uses()
     assert ("game_logs", "select") in uses          # verify_scores / position_suite
     assert ("game_logs", "insert") in uses          # netlify/functions/log.mjs
-    assert ("public_replays", "select") in uses     # netlify/functions/replay.mjs
+    assert ("public_watchable_replays", "select") in uses  # netlify/functions/replay.mjs
     assert ("bot_scores", "insert") in uses         # bot_replay's upsert
     assert len(uses) >= 8
 
 
-@pytest.mark.parametrize("relation", ["game_logs", "public_replays"])
+@pytest.mark.parametrize("relation",
+                         ["game_logs", "public_replays", "public_watchable_replays"])
 def test_a_replay_is_never_granted_to_the_public(relation):
     """The other half of the rule, and the one that matters more: `game_logs` is
-    readable by nobody but the worker, and `public_replays` lends out only the
-    replays a posted score already points at."""
+    readable by nobody but the worker, `public_replays` lends out only the
+    replays a posted score already points at, and `public_watchable_replays`
+    (the union `replay.mjs` actually reads) has no grant to the public at all —
+    everything it can serve is already reachable some other way (`public_replays`
+    directly, or a bot's own `bot_scores` row), so it needs no door of its own."""
     public = _granted("anon")
     assert "insert" not in public.get(relation, set())
     assert "update" not in public.get(relation, set())
     assert "delete" not in public.get(relation, set())
-    if relation == "game_logs":
-        assert public.get(relation, set()) == set(), "an uploaded replay is not public"
+    if relation in ("game_logs", "public_watchable_replays"):
+        assert public.get(relation, set()) == set(), f"{relation} is not directly public"
 
 
 def _view_columns(view: str) -> list[str]:
@@ -131,5 +135,10 @@ def test_a_views_new_columns_land_after_its_old_ones():
     the one thing a future column addition could get wrong the same way.
     """
     assert _view_columns("public_replays") == [
+        "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
+    ]
+    # public_watchable_replays unions this view with bot_scores, so its own
+    # column list is the same trap waiting for the same reason.
+    assert _view_columns("public_watchable_replays") == [
         "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
     ]

@@ -140,11 +140,66 @@ def _toggles_play(ui: Ui, event) -> bool:
     return False
 
 
+def _moves_camera(ui: Ui, event) -> bool:
+    """Is ``event`` a camera-only control (the R key, or the on-map Reset / -/+)?
+
+    The other exemption from the blanket "any press skips a film", and for a
+    plainer reason than Play/Pause's: where the camera is pointed changes nothing
+    about the turn being played back, so a look around has no business discarding
+    it. The wheel is already exempt by falling outside the press types the rule
+    names at all, and this brings the buttons and the key that do the same job
+    into line with it.
+
+    It matters most under autoplay, where films chain back to back with no gap
+    between them (see `main`'s chaining): every one of these presses would land on
+    a running film, be spent skipping it, and leave the whole cluster looking
+    dead — the next turn's film starts immediately, so the second press meets one
+    too. Each rect test is guarded on its width, so the cluster is simply absent
+    (history mode zeroes all three) rather than matching a stale hit-box.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_r
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return False
+    return any(rect[2] and _point_in_rect(event.pos, rect)
+               for rect in (ui.reset_view_rect, ui.zoom_minus_rect, ui.zoom_plus_rect))
+
+
+def _toggles_autoplay(ui: Ui, event) -> bool:
+    """Is ``event`` the Autoplay / Take control control (the A key, or a click
+    on its button)?
+
+    A third exemption from the blanket "any press skips a film", and the one
+    that most needs it: under autoplay, films chain with no gap between them
+    (see `main`'s chaining), so a press that only skips would spend itself on
+    whichever turn happens to be playing and never reach `main`'s
+    ``"toggle_autoplay"`` handler at all — the next turn's film is already up
+    by the time a second press arrives. Play/Pause is hidden under autoplay
+    (it would be a no-op — see the footer's own comment), which makes this the
+    *only* way to stop the automatic advance, and it has to work in one press
+    or there is none.
+
+    Nothing here needs freezing the way Play/Pause does: turning autoplay off
+    doesn't need the running film to stop, only the *next* one not to start —
+    `main`'s chaining re-reads `ui.autoplay` fresh at the moment each film
+    lands, so the turn already showing plays out to the end exactly as it
+    would have, and control is back the instant it does.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_a
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        return bool(ui.autoplay_button_rect[2]) and _point_in_rect(event.pos, ui.autoplay_button_rect)
+    return False
+
+
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
     # A turn playback is running: any press skips it — except Play/Pause, which
     # must freeze it in place rather than lose it (`main` does the freezing; this
-    # is only about not discarding the film here). Checked before everything else,
-    # and the two scenes differ on purpose for every other press.
+    # is only about not discarding the film here), the camera controls, which
+    # only decide where you are looking from (`_moves_camera`), and Autoplay /
+    # Take control, the one way to stop autoplay's automatic advance at all
+    # (`_toggles_autoplay`). Checked before everything else, and the two scenes
+    # differ on purpose for every other press.
     #
     # In live play the press is *consumed*. The footer strip is still drawn during
     # a film (the film board's winner stays None until the turn closes), so a
@@ -153,7 +208,8 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
     # a transition between turns and the controls are a scrubber: swallowing it
     # would mean a drag never started.
     if (ui.film is not None and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)
-            and not _toggles_play(ui, event)):
+            and not _toggles_play(ui, event) and not _moves_camera(ui, event)
+            and not _toggles_autoplay(ui, event)):
         ui.stop_film()
         if not ui.history:
             return None

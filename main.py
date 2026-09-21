@@ -176,7 +176,15 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
         log, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
-    ui = new_ui(state, loaded.autoplay, loaded)   # sets ui.visible from the final board
+    # Resume *paused*, whatever the match was doing when it was recorded. You
+    # rewind to a turn in order to look at it: spotting a bot's mistake one turn
+    # too late and going back to it, only for the board to start moving again
+    # before you can read it, is the exact thing history is for. Nothing is
+    # decided by waiting — autoplay is now purely "is anything advancing", since
+    # the seat is claimed by *ending* a turn by hand (`engine._claim_seat`) and
+    # not by the absence of autoplay — so the choice of who plays on from here is
+    # handed back to the player, either way, with the clock stopped.
+    ui = new_ui(state, False, loaded)   # sets ui.visible from the final board
     ui.seen |= seen                        # ...plus memory of the whole game
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
@@ -505,11 +513,23 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     """
     was_over = state.winner is not None
     was_defeated = state.is_defeated(ui.human_id)
-    human_orders = (
-        ai.decide(state, ui.human_id)
-        if ui.autoplay
-        else list(ui.pending) + auto_forward_orders(state, ui)
-    )
+    # A match begun in autoplay has no human seat at all (`settings.build_state`),
+    # and ending a turn under manual control is what claims it — not the press of
+    # Take control, which leaves it unclaimed so that it doubles as a pause on a
+    # demo nobody means to play.
+    unclaimed = state.human() is None
+    claim = ui.human_id if unclaimed and not ui.autoplay else None
+    if unclaimed and ui.autoplay:
+        # Nothing to attribute orders to, so pass none and let
+        # `engine._collect_orders` decide this seat in its own loop, exactly as it
+        # does every other. Computing them here *as well* would run the seat's
+        # strategy twice, and the spare draws from `state.rng` would desync every
+        # oracle's bit-exact stream tracking.
+        human_orders = None
+    elif ui.autoplay:
+        human_orders = ai.decide(state, ui.human_id)
+    else:
+        human_orders = list(ui.pending) + auto_forward_orders(state, ui)
     # Two gates, here rather than at the three call sites. `marking` is the wider
     # one: a fight's cost or a finished hull is cheap to report and worth seeing,
     # for a bot-driven turn as much as a human one, so it only excludes
@@ -527,7 +547,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     was_visible = frozenset(ui.visible) if marking else frozenset()
     events: list[turnfilm.Event] = []
     record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
-                             on_event=events.append if marking else None)
+                             on_event=events.append if marking else None,
+                             claim_seat=claim)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
@@ -602,6 +623,29 @@ def _primed(ui: Ui, reel: turnfilm.Reel) -> turnfilm.Reel:
     """
     ui.archive_marks(reel.board, reel.run_to(0.0))
     return reel
+
+
+def _carry_into(ui: Ui, reel: turnfilm.Reel, carry: float) -> None:
+    """Start a chained playback ``carry`` ms in rather than at zero.
+
+    A frame steps the clock by a whole frame's worth, so the frame that lands a
+    film nearly always overruns its end — and the next turn's glide is meant to
+    continue that one without a seam (see the chaining in the loop, and
+    `turnfilm`'s "a run of turns chains one animated turn straight into the
+    next"). Dropping the overrun instead stalls every fleet for the remainder of
+    that frame at every single join, which is a stutter the film's own length is
+    never responsible for and which no amount of tuning `FILM_MOVE_MS` can
+    remove. Paying it forward keeps the glide at one speed across the join.
+
+    Sized in the same currency `config.MAX_FRAME_MS` caps, so the debt a slow
+    frame can hand on is bounded by exactly what that frame was allowed to spend.
+    Clamped to the new film's own length as well, so a frame longer than a whole
+    turn's playback lands it on the next frame rather than running past its end.
+    """
+    if carry <= 0:
+        return
+    ui.film_ms = min(carry, reel.film.total_ms)
+    ui.archive_marks(reel.board, reel.run_to(ui.film_ms))
 
 
 def land_film(state: GameState, ui: Ui) -> None:
@@ -819,7 +863,10 @@ async def main() -> None:
     # here needs its own is_web() check.
     resize_kicked = not paths.is_web()
     while running:
-        dt = clock.tick(config.FPS)
+        # Capped, not raw: the frame that resolves a turn can run far longer than
+        # a frame, and handing that whole stretch to the film it just started
+        # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
+        dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:
@@ -1119,6 +1166,11 @@ async def main() -> None:
                     ui.film_ms += dt
                     ui.archive_marks(reel.board, reel.run_to(ui.film_ms))
                 if ui.film_ms >= ui.film.total_ms:
+                    # By how much this frame's step overran the film. A run of
+                    # turns is one continuous glide (see the chaining below), so
+                    # it belongs to the turn that follows rather than on the
+                    # floor — `_carry_into` pays it there.
+                    carry = ui.film_ms - ui.film.total_ms
                     if ui.history:
                         # The scrubber moves at the film's *end*, so it and the top
                         # bar's turn counter (which reads the board being drawn)
@@ -1148,6 +1200,8 @@ async def main() -> None:
                         # AUTOPLAY_MS branch below it would have resolved on — a bot
                         # game gets the same continuous glide a human's does.
                         reel = resolve_turn(state, ui, log, settings)
+                    if reel is not None:
+                        _carry_into(ui, reel, carry)
 
             if (reel is None and ui.history and ui.playing
                     and not confirm_quit and not confirm_rewind):

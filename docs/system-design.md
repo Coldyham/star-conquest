@@ -577,6 +577,56 @@ would have left the same trap set for the next caller — which is exactly what
 happened when live play started chaining too, since `resolve_turn`'s own reel is
 built in that branch of the update rather than from the event handler.
 
+**A join also has to carry the previous film's overrun, and cap what a slow frame
+may spend.** Both are about the same thing — the loop's clock is frames, and a
+frame is not a fixed slice of wall clock — and both were only ever visible under
+autoplay, which is why it looked choppier than history playback of the very same
+turns.
+
+*Overrun.* A film lands on the first frame whose `film_ms` reaches `total_ms`,
+which is almost never exactly its end: the step is a whole frame, so on average
+half a frame lands past it. Starting the chained film at `0.0` throws that away,
+so every single join holds the fleets still for the remainder of a frame. One
+frame in sixty is not much; sixty of them, one per turn, is the difference between
+a glide and a shimmer. `main._carry_into` pays the overrun into the new film
+instead (clamped to that film's own length, so a carry larger than a whole
+playback lands it next frame rather than leaving the playhead past its end), which
+is what makes a chained run advance at exactly one film-length per film.
+
+*Frame cap.* Resolving a turn is the loop's one genuinely expensive step — every
+seat's `decide`, plus rewriting the log — and under autoplay or play mode it
+happens in the very frame that lands one film and starts the next. `clock.tick`
+hands that whole stretch to the frame *after*, and with a search bot on the board
+it can run into the hundreds of milliseconds: charged in full to the film that
+just started, the fleets teleport a third of the way down their lanes before the
+glide takes over. `config.MAX_FRAME_MS` caps what one frame may hand on (three
+frames at the target rate), so a long frame makes the animation fall behind the
+wall clock rather than jump — the right trade for a playback that is a
+fixed-length glide synchronised to nothing. History playback resolves nothing and
+so never met either problem, which is exactly why the two looked different.
+
+**The camera controls are the second exemption from the skip rule.** Reset view,
+the on-map zoom `−`/`+` and the `R` key change where you are looking from and
+nothing about the turn being played back, so `input._moves_camera` lets them past
+the blanket "any press skips a film" the same way `_toggles_play` does (the wheel
+was already past it, by not being one of the press types the rule names). Under
+autoplay that is the difference between working and not: films chain back to back
+with no gap, so the press would be spent skipping one, and the next turn's film is
+already up by the time a second press arrives — the whole cluster reads as dead.
+
+**Autoplay / Take control is the third, and the sharpest case of it.** Play/Pause
+is hidden under autoplay — the footer's own comment says why: turns advance on
+`AUTOPLAY_MS` regardless of `ui.playing` there, so pausing would be a no-op — which
+makes Take control the *only* way to stop the automatic advance at all. Without
+`input._toggles_autoplay` exempting it (the A key, or its footer button), the same
+chaining that broke the camera cluster broke this control outright: a press during
+a running film was spent skipping it, and by the time a second one landed the next
+turn's film was already up, so there was no way to ever actually take control back
+while autoplay was running. Nothing here needs freezing the way Play/Pause does —
+the film already showing plays out exactly as it would have, and control is simply
+back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh at
+that point rather than caching the value from when the film started.
+
 **The loss label is the victor's own, in the victor's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
 6-ship system read `−8`, which is almost entirely the defender's garrison — wiped
@@ -1053,6 +1103,30 @@ meant to hand back the position as it was, and on a big map the standing routes
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
 was lost on that turn doesn't come back to life.
 
+The per-turn `"ai"` flag carries a second job now. It is still disclosure first
+(`GameLog.hand_turns`), but it is also the record of *when a person took the
+seat over*: a match begun in autoplay has no human seat at all, and the first
+turn flagged as hand-played is what claims it (see CLAUDE.md's "An all-bot game
+has no human seat"). `reconstruct` re-applies that claim at the same turn, since
+a scripted turn asks no seat to decide and nothing else would ever flip the flag
+back — a match somebody demonstrably took over would otherwise come back exposed
+to oracle prediction on every turn after the resume point. Deriving it from a
+flag the log already carried, rather than storing a claim of its own, is also
+what makes rewinding land right without a line of extra code: `truncate` drops
+the flags along with the turns, so rewinding past every hand-played turn returns
+the match to the all-bot game it was, and rewinding to any turn after one keeps
+the seat claimed.
+
+**A resume always lands paused**, whatever the match was doing when it was
+recorded — a resume from the menu, a mid-game rewind, a fork out of a finished
+game and a watched replay alike (`resume_game` builds its `Ui` with autoplay
+off). You go back to a turn in order to look at it, and spotting a bot's blunder
+one turn too late, rewinding to it and having the board start moving again
+before it can be read is precisely what history exists to prevent. It costs
+nothing to stop there because the claim is no longer tangled up with it: autoplay
+is now purely "is anything advancing", so waiting decides nothing and who plays
+on from here is a choice handed back with the clock stopped.
+
 ### `match_id`: the log's own identity
 
 A log also carries a `match_id`, which is *not* part of what makes a replay
@@ -1484,6 +1558,40 @@ The verdict line measures a person against the *best* bot rather than counting
 how many they beat. On a board of high scores the interesting question is whether
 anyone outplayed the best machine answer to that map, not whether they placed
 mid-table among six of them.
+
+### A win stores its own replay
+
+The Watch link beside a winning row used to hand the browser the same
+ingredients the worker replayed (setup, seed, bot) and let it re-decide the whole
+match live from turn one — which could disagree with the row it sat beside,
+since a fresh re-decision depends on exactly which commit is deployed where.
+Matching the two by hand (the harness treating the replayed seat exactly as the
+token-driven link would) papered over that once at a real cost: it forced the
+harness to measure a bot under an artificial handicap no other measurement here
+grants it, since the roster's own ladder and swap tournaments let every seat see
+every other clearly. See [`bot-design.md`](bot-design.md), "Storing the replay
+removed the reason for the handicap, not just the mismatch", for the incident
+and why storing the log let that handicap be lifted again rather than merely
+tolerated.
+
+`sim.play_settings` now takes a `log: replay.GameLog | None` parameter, filled
+in turn by turn off the `TurnRecord` every `end_turn` call already returns —
+exactly the shape `main.resolve_turn` builds one from in a live game.
+`tools/bot_replay.py` builds one for every replay and keeps its encoded form
+only on a win (`bot_scores.match_id`/`rules_version`/`log`; a loss stores
+nothing, the rule a human's own posted score follows), and the Watch link
+becomes `#log=<match_id>` — a human score's own mechanism, unchanged.
+`replay.reconstruct` applies recorded orders and dice verbatim and asks no seat
+to decide anything, so there is no second computation left that could disagree
+with the first, whatever any seat was flagged during the run that produced the
+log. `leaderboard/schema.sql`'s `public_watchable_replays` (a `union all` of
+`public_replays` with a winning bot's own log, needing no further consent gate
+since `bot_scores` is already fully public) is the one relation
+`netlify/functions/replay.mjs` reads either kind through, keeping that
+function's single, unconditional query. `standings.botWatchKind(row)` picks
+between a current replay, an outdated one (stamped under rules this build has
+moved past), the old reconstruct-it-live method as a fallback for a row with no
+stored log yet, or nothing for a loss.
 
 ### `engine_rev` hashes the simulation, not the commit
 

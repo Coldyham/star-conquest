@@ -32,8 +32,13 @@ export function newSeedSetup(settingsJson) {
 
 /**
  * A stored setup with a bot standing in for the human's seat and the whole
- * match set to autoplay, ready to encode: what a bot score's "Watch" link is
- * made of.
+ * match set to autoplay, ready to encode: the *legacy* form of a bot score's
+ * "Watch" link, kept as a fallback for a row with no stored replay of its own
+ * (`standings.mjs`'s `botWatchKind` returning "legacy" — a win computed
+ * before `tools/bot_replay.py` started storing one). A row that carries a
+ * `match_id` uses `#log=` instead, the same exact-replay link a human score's
+ * Watch button is; this reconstructs the match live, which is exactly the
+ * mismatch storing a replay was for — see that worker's module doc.
  *
  * Mirrors `tools/sim.play_settings` exactly, which is what actually produced
  * the row on `bot_scores` this link is offered from: seat 1's own strategy and
