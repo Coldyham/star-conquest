@@ -1832,6 +1832,26 @@ def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
         pygame.quit()
 
 
+def test_resuming_a_match_always_lands_paused(tmp_path, monkeypatch):
+    """You go back to a turn in order to *look* at it.
+
+    Spotting a bot's blunder one turn too late, rewinding to it, and having the
+    board start moving again before it can be read is the exact thing history is
+    for. Waiting decides nothing now: autoplay is purely "is anything advancing",
+    since the seat is claimed by ending a turn under manual control
+    (`engine._claim_seat`) rather than by autoplay being off — so whether the bot
+    plays on or the player takes over is a choice handed back with the clock
+    stopped, from a resume, a rewind or a watched replay alike.
+    """
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        settings = Settings(seed=1, nodes=18, players=3, autoplay=True)
+        assert main.resume_game(log, settings)[1].autoplay is False
+        assert main.apply_rewind(log, settings, 3)[1].autoplay is False
+    finally:
+        pygame.quit()
+
+
 def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
     """A 404 body, a truncated download or an empty match all have to land as
     "no replay" rather than as an exception on the first frame."""

@@ -407,6 +407,12 @@ def latest_log() -> Optional[GameLog]:
     return None
 
 
+# Which seat a person holds. `mapgen._make_players` stamps pid 1, and nothing in
+# the setup can move it, so a match rebuilt with the flag cleared knows where to
+# put it back (`share.py` reads it the same way, for the same reason).
+HUMAN_SEAT = 1
+
+
 def reconstruct(
     log: GameLog,
     on_turn: Optional[Callable[[GameState], object]] = None,
@@ -430,15 +436,30 @@ def reconstruct(
     ``on_event`` is handed straight to the engine, so a caller that also passes
     ``on_turn`` gets each turn's playback events cut at that turn's boundary
     (`main.build_history`). Neither costs anything when not asked for.
+
+    A match recorded from autoplay is rebuilt with *no* human seat (that is what
+    ``settings.autoplay`` stamps in ``build_state``), so the seat has to be
+    claimed back here too, at the same turn it was claimed in the live match. The
+    per-turn ``"ai"`` flag is already the record of that: the first turn it is
+    False is the first turn a person decided for themselves. Deriving it rather
+    than storing a second flag is what keeps an *old* log replaying correctly —
+    and a scripted turn asks no seat to decide, so nothing else here would ever
+    have flipped it back.
     """
     settings = Settings.from_dict(log.settings)
     state = build_state(settings, log.seed)
+    claimed = state.human() is not None
     if on_turn is not None:
         on_turn(state)
     for i in range(log.turn_count):
         if state.winner is not None:
             break
-        engine.end_turn(state, script=log.script_for(i), on_event=on_event)
+        claim = None
+        if not claimed and not log.turn_is_ai(i):
+            claim = HUMAN_SEAT
+            claimed = True
+        engine.end_turn(state, script=log.script_for(i), on_event=on_event,
+                        claim_seat=claim)
         if on_turn is not None:
             on_turn(state)
     return state, settings

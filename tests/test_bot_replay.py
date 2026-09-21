@@ -16,8 +16,8 @@ from tools import bot_replay
 
 
 def _job(**kw) -> bot_replay.Job:
-    cfg = Settings(mode="random", players=3, nodes=16, seed=11)
-    fields = {"game_key": "abc123", "cfg": cfg, "seed": 11, "bot": "marshal", "aux": 1.0, **kw}
+    cfg = Settings(mode="random", players=3, nodes=16, seed=12)
+    fields = {"game_key": "abc123", "cfg": cfg, "seed": 12, "bot": "marshal", "aux": 1.0, **kw}
     return bot_replay.Job(**fields)
 
 
@@ -31,7 +31,7 @@ def _play(job: bot_replay.Job, bot: str | None = None):
 def test_a_win_stores_the_exact_replay_a_watch_link_would_play():
     job = _job()
     result, log = _play(job)
-    assert result.won   # this map's seed 11 is a real marshal win (see test_sim.py)
+    assert result.won   # this map's seed 12 is a real marshal win (see test_sim.py)
 
     row = bot_replay._row_for(job, result, log, rev="rev1")
     assert row["match_id"] == log.match_id

@@ -176,7 +176,15 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
         log, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
-    ui = new_ui(state, loaded.autoplay, loaded)   # sets ui.visible from the final board
+    # Resume *paused*, whatever the match was doing when it was recorded. You
+    # rewind to a turn in order to look at it: spotting a bot's mistake one turn
+    # too late and going back to it, only for the board to start moving again
+    # before you can read it, is the exact thing history is for. Nothing is
+    # decided by waiting — autoplay is now purely "is anything advancing", since
+    # the seat is claimed by *ending* a turn by hand (`engine._claim_seat`) and
+    # not by the absence of autoplay — so the choice of who plays on from here is
+    # handed back to the player, either way, with the clock stopped.
+    ui = new_ui(state, False, loaded)   # sets ui.visible from the final board
     ui.seen |= seen                        # ...plus memory of the whole game
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
@@ -505,11 +513,23 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     """
     was_over = state.winner is not None
     was_defeated = state.is_defeated(ui.human_id)
-    human_orders = (
-        ai.decide(state, ui.human_id)
-        if ui.autoplay
-        else list(ui.pending) + auto_forward_orders(state, ui)
-    )
+    # A match begun in autoplay has no human seat at all (`settings.build_state`),
+    # and ending a turn under manual control is what claims it — not the press of
+    # Take control, which leaves it unclaimed so that it doubles as a pause on a
+    # demo nobody means to play.
+    unclaimed = state.human() is None
+    claim = ui.human_id if unclaimed and not ui.autoplay else None
+    if unclaimed and ui.autoplay:
+        # Nothing to attribute orders to, so pass none and let
+        # `engine._collect_orders` decide this seat in its own loop, exactly as it
+        # does every other. Computing them here *as well* would run the seat's
+        # strategy twice, and the spare draws from `state.rng` would desync every
+        # oracle's bit-exact stream tracking.
+        human_orders = None
+    elif ui.autoplay:
+        human_orders = ai.decide(state, ui.human_id)
+    else:
+        human_orders = list(ui.pending) + auto_forward_orders(state, ui)
     # Two gates, here rather than at the three call sites. `marking` is the wider
     # one: a fight's cost or a finished hull is cheap to report and worth seeing,
     # for a bot-driven turn as much as a human one, so it only excludes
@@ -527,7 +547,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     was_visible = frozenset(ui.visible) if marking else frozenset()
     events: list[turnfilm.Event] = []
     record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
-                             on_event=events.append if marking else None)
+                             on_event=events.append if marking else None,
+                             claim_seat=claim)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:

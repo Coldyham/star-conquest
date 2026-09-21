@@ -510,13 +510,20 @@ intact.
     already stands on: an oracle opponent resolves it through `ai.STRATEGIES`
     and simulates it exactly (`knower._model_for`), the way it would any other
     fielded bot, rather than guessing blind at a seat that was never actually a
-    person. Leaving the flag set once looked necessary — a token can only ever
-    say "seat 1 is a bot" as `autoplay: true`, never as an actual flag, so a
-    live, token-driven Watch link could only ever reconstruct the *handicapped*
-    version, and a row computed the other way described a game that link
-    couldn't play. Measured with knower opponents, that handicap was worth
-    flipping marshal's result from a loss to a win on one map — a real, if
-    inconsistent, edge. `play_from` uses the same handover, and `engine_rev`
+    person. **The app agrees by construction, not by coincidence**: a match that
+    *starts* in autoplay has no human seat at all (`settings.build_state` clears
+    the flag `mapgen` stamps on pid 1), so an all-bot game has no preferred seat
+    in either place and the in-app demo plays the identical game the column
+    computes — pinned by
+    `test_an_autoplay_demo_plays_the_same_game_the_bot_column_does`, which reads
+    77 turns apart on its setup without it. `_hand_over` is still what does it
+    in the harness, because a posted *human* setup carries `autoplay: False` and
+    so has nothing for that stamp to fire on. Leaving the flag set once looked
+    necessary — a token can only ever say "seat 1 is a bot" as `autoplay: true`,
+    never as an actual flag, so a live, token-driven Watch link could only ever
+    reconstruct the *handicapped* version. That is fixed from both ends now: the
+    row is backed by a stored replay, and a token-driven reconstruction clears
+    the flag too. `play_from` uses the same handover, and `engine_rev`
     hashes `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is
     played marks every cached row stale; `replay_rev` must not, since a stored
     log's replay consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
@@ -769,6 +776,35 @@ intact.
     every seat's orders (including the human's, under autoplay) through
     `engine._own_orders`. Without it any drop-in bot could launch a rival's
     fleet, or the human's.
+  - **An all-bot game has no human seat, and the seat is claimed by *playing*,
+    not by pressing a button.** `settings.build_state` clears the `is_human`
+    `mapgen` stamps on pid 1 whenever `Settings.autoplay` is set, so a match
+    begun as a demo has no preferred seat — otherwise seat 1 is the one seat
+    every oracle guesses blind at while simulating all the others exactly, which
+    is both a handicap no other bot carries and why the app and the offline bot
+    column used to play the same setup differently. `engine.end_turn`'s
+    `claim_seat` is the way back: `main.resolve_turn` passes it on the first turn
+    *ended under manual control*, never on the Take control press itself, so Take
+    control doubles as a pause on a demo nobody means to play. It is a turn phase
+    rather than a shell-side edit because it has to replay — a scripted turn asks
+    no seat to decide, so `replay.reconstruct` re-applies it from the per-turn
+    `"ai"` flag already in the log, at the same turn, and runs it *first* so that
+    turn's own predictions already see the corrected flag. Deriving it from those
+    flags rather than storing a claim of its own is what makes a rewind land
+    right for free: `truncate` drops the flags with the turns, so rewinding past
+    every hand-played turn returns the match to an all-bot game, while rewinding
+    to any turn after one keeps the seat claimed.
+    - **`resolve_turn` must not compute `human_orders` for an unclaimed seat.**
+      `_collect_orders` skips a seat only when `is_human`, so passing orders in
+      *and* leaving the seat unflagged runs its strategy twice — spare draws from
+      `state.rng` that desync every oracle's stream tracking. Pass `None` and let
+      the engine's own loop decide it, exactly as `sim.play`'s tournaments do.
+    - **Resuming, rewinding or watching always lands paused** (`main.resume_game`
+      builds its `Ui` with autoplay off regardless of what the log was doing).
+      You go back to a turn to *look* at it, and a board that starts moving again
+      before it can be read is the thing history exists to prevent. It costs
+      nothing now that the claim is separate: waiting decides nothing, so who
+      plays on is handed back with the clock stopped.
 - **All randomness flows through `state.rng`** (a seeded `random.Random`). A
   seed fully reproduces a map *and* every battle. Never call the global `random`
   module in core code, and keep new map-gen / combat code deterministic given

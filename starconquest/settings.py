@@ -589,6 +589,15 @@ def build_state(settings: Settings, seed: int) -> GameState:
     The single funnel from menu/CLI to a GameState: apply the global knobs, build
     the map, then stamp each non-neutral seat with its own strategy and AI params
     (params a copy, so later menu edits don't reach into a live game).
+
+    A match that *starts* in autoplay has no human seat at all: ``mapgen`` flags
+    pid 1, and this un-flags it. An all-bot game must have no preferred seat, or
+    the seat a bot is measured through is the one seat every oracle opponent has
+    to guess blind at — which is a handicap no other bot on the board carries,
+    and which makes the same setup play differently in the app than it does in
+    the offline harness. The seat is claimed back by the first turn a person
+    actually decides (``engine.claim_seat``), not by the press of Take control,
+    so Take control doubles as a pause on a demo nobody means to play.
     """
     _apply_globals(settings)
     if settings.custom_map is not None:
@@ -599,4 +608,6 @@ def build_state(settings: Settings, seed: int) -> GameState:
         if not player.is_neutral:
             player.ai_strategy = settings.seat_strategy(player.id)
             player.ai_params = replace(settings.seat_params(player.id))
+        if settings.autoplay:
+            player.is_human = False
     return state

@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import time
 from collections import Counter
+from dataclasses import replace
 
-from starconquest import ai, replay, settings as settings_mod
+from starconquest import ai, engine, replay, settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
@@ -196,6 +197,38 @@ def test_the_replayed_seat_is_handed_over_outright():
     assert seen and not any(seen)
 
 
+def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
+    """The whole point of an all-bot game having no preferred seat.
+
+    Watching a setup autoplay in the app and computing the same setup offline
+    (`tools/bot_replay.py`, via this function) have to be the same game, or a
+    leaderboard row describes a match its own Watch link never plays. They used
+    not to be: `_hand_over` cleared `is_human` here, while the app left seat 1
+    flagged, so every oracle opponent (`models/knower.py`) guessed blind at the
+    one seat being measured and simulated all the others exactly. Measured on
+    this setup, that handicap was worth 77 turns.
+
+    A `knower` opponent is what gives this teeth — it is the only fielded
+    strategy whose output depends on what a seat is flagged at all.
+    """
+    ai.load_models()
+    cfg = _setup(seed=7)
+    cfg.ai_strategy = ["marshal", "knower", "heuristic"]
+
+    # The app's own autoplay path: no human seat at all, every seat decided by
+    # the engine's own loop (`main.resolve_turn` passes no `human_orders`).
+    state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
+    assert state.human() is None
+    turns = 0
+    while state.winner is None and turns < 600:
+        engine.end_turn(state, decide=ai.decide)
+        turns += 1
+
+    result = sim.play_settings(cfg, 7, "marshal", max_turns=600)
+    assert (state.winner == 1) == result.won
+    assert state.turn == result.turns
+
+
 def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
     """The property the leaderboard's stored bot replays rest on: a `log` filled
     in alongside `play_settings` is not a second opinion that can drift from the
@@ -205,10 +238,10 @@ def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
     land on the exact board the run actually reached, orders and dice both
     applied verbatim."""
     ai.load_models()
-    cfg = _setup()
-    log = replay.new_log(cfg, 11)
-    result = sim.play_settings(cfg, 11, "marshal", max_turns=600, log=log)
-    assert result.won and not result.timed_out    # this map's seed 11 is a real win
+    cfg = _setup(seed=12)
+    log = replay.new_log(cfg, 12)
+    result = sim.play_settings(cfg, 12, "marshal", max_turns=600, log=log)
+    assert result.won and not result.timed_out    # this map's seed 12 is a real win
 
     assert log.finished and log.winner == 1        # seat 1 is always the replayed seat
     assert log.hand_turns == 0                     # AI-driven the whole match

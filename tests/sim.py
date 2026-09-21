@@ -109,16 +109,21 @@ def _hand_over(seat, bot: str, aux: float | None) -> None:
     else it is measured — never an artificial edge from opponents forced to
     treat it as a black box.
 
+    The app now agrees by construction rather than by coincidence: a match that
+    starts in autoplay has no human seat at all (`settings.build_state`), so an
+    all-bot game there is measured on the same footing as one here. This call is
+    still what does it in the harness, because a *posted human setup* carries
+    `autoplay: False` — the person who set it was going to play it — so there is
+    nothing in the settings for that stamp to fire on. The seat is taken over
+    explicitly instead.
+
     A version of this that left the seat flagged human existed briefly, on the
     reasoning that a leaderboard row had to compute the same thing a *live*
-    Watch link would if reconstructed via autoplay — and a token can only ever
-    say `autoplay: true`, never "seat 1 is a bot". That reasoning no longer
-    applies: `tools/bot_replay.py` now stores the finished run as a
+    Watch link would if reconstructed via autoplay. That reasoning no longer
+    applies from either end: `tools/bot_replay.py` stores the finished run as a
     `replay.GameLog` and a Watch link plays that back (`replay.reconstruct`,
     which applies recorded orders and dice verbatim and asks no seat to decide
-    anything). Nothing about a stored replay's exactness depends on what this
-    seat was flagged during the run that produced it, so there is no reason
-    left to hobble the measurement to match a mechanism that no longer exists.
+    anything), and a token-driven reconstruction would now clear the flag too.
     """
     seat.is_human = False
     seat.ai_strategy = bot

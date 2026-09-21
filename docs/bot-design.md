@@ -296,6 +296,34 @@ stays out of `replay_rev`, which covers a stored *log's* replay: that asks no
 seat to decide anything, so no harness change can move it — exactly the property
 that makes the flag safe to clear in the first place.
 
+**Then the app was fixed to agree, rather than the column bent to match it.**
+Everything above left one half standing: the *game* still flagged seat 1 human
+in an all-bot match, so watching a setup autoplay in the app was a different
+game from the one the column computed for it — the stored replay meant a Watch
+link no longer showed the discrepancy, but the discrepancy was still there, and
+it was the app that had it backwards. An all-bot game has no person in it and
+therefore no seat that deserves to be unpredictable. `settings.build_state` now
+clears the flag whenever a match *starts* in autoplay, which puts the app on the
+same full-information footing as the ladder, the swap tournament, the position
+suite and the column. On a 3-seat, 16-node map with a knower opponent the two
+sides had drifted 77 turns apart (178 in-app against 101 offline); they are now
+turn-for-turn identical, pinned by
+`test_an_autoplay_demo_plays_the_same_game_the_bot_column_does`.
+
+The seat comes back the moment a person actually plays it. What claims it is
+**ending a turn under manual control**, not pressing Take control — which is
+what lets Take control serve as the pause it is usually reached for, on a demo
+somebody wants to stop and read rather than take over. `engine.end_turn`'s
+`claim_seat` applies it as the turn's first phase, so that turn's own
+predictions already treat the seat as a person's; `replay.reconstruct` re-applies
+it from the per-turn `"ai"` flag the log already carried, so a claim survives a
+resume and a rewind lands correctly at either side of it without storing
+anything new. The residual is small and bounded: someone who ticks Autoplay on
+an ordinary game and lets a knower opponent watch their opening is readable
+until the first turn they play themselves — and `carry_autoplay` already frames
+that checkbox as "out of a pure demo" rather than as a way to have the AI open
+for you.
+
 **What actually fixed the link.** `sim.play_settings` grew a `log` parameter:
 filled in turn by turn off the `TurnRecord` every `end_turn` call already
 returns, so a `replay.GameLog` comes out of a replay for free, in the same shape

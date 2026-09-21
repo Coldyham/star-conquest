@@ -59,7 +59,7 @@ def _manual_order(state, hid):
 
 
 def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
-          policy="pass", strategies=None):
+          policy="pass", strategies=None, opens_in_autoplay=None):
     """Play a full game while recording, returning (final_state, log).
 
     ``policy`` chooses how the human seat acts each turn:
@@ -67,14 +67,20 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
       "manual"  – issues one hand order every other turn (draws no rng)
       "autoplay"– AI-driven every turn (draws rng, flagged human_ai=True)
       "mixed"   – flips autoplay on/off every few turns
+
+    ``opens_in_autoplay`` overrides ``Settings.autoplay``, which is what decides
+    whether the match *starts* with a human seat at all (`settings.build_state`).
+    A "mixed" game opened that way is a demo somebody then takes over — the case
+    where the seat is claimed partway through.
     """
+    opens = (policy == "autoplay") if opens_in_autoplay is None else opens_in_autoplay
     settings = Settings(mode=mode, players=players, nodes=nodes, seed=seed,
-                        autoplay=(policy == "autoplay"))
+                        autoplay=opens)
     if strategies is not None:
         settings.ai_strategy[:len(strategies)] = strategies
     state = build_state(settings, seed)
     log = replay.new_log(settings, seed)
-    hid = state.human().id
+    hid = replay.HUMAN_SEAT
     turns = 0
     while state.winner is None and turns < max_turns:
         if policy == "autoplay":
@@ -86,7 +92,15 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
             autoplay, orders = False, (_manual_order(state, hid) if turns % 2 == 0 else [])
         else:  # pass
             autoplay, orders = False, []
-        record = engine.end_turn(state, human_orders=orders, decide=ai.decide)
+        # Mirrors `main.resolve_turn`: a match begun in autoplay has no human seat
+        # until somebody plays a turn by hand, and that turn is what claims it. The
+        # seat then decides for itself, so its orders must not also be passed in —
+        # that would run its strategy twice. See `engine._claim_seat`.
+        claim = hid if not autoplay and state.human() is None else None
+        if state.human() is None and claim is None:
+            orders = None
+        record = engine.end_turn(state, human_orders=orders, decide=ai.decide,
+                                 claim_seat=claim)
         log.record_turn(record, human_ai=autoplay)
         turns += 1
     log.mark_finished(state.winner)
@@ -559,3 +573,80 @@ def test_hand_turns_counts_the_turns_the_human_drove():
     for autoplayed in (False, False, True, False, True):
         log.record_turn(_record([]), human_ai=autoplayed)
     assert log.hand_turns == 3 and log.turn_count == 5
+
+
+# --------------------------------------------------------------------------- #
+# The seat claim: an all-bot game has no human seat until somebody plays a turn
+# --------------------------------------------------------------------------- #
+def test_a_match_begun_in_autoplay_has_no_human_seat():
+    """An all-bot game must have no preferred seat.
+
+    Left flagged, seat 1 is the one seat every oracle opponent has to guess blind
+    at (`models/knower.py`'s `_model_for`) while simulating all the others exactly
+    — a handicap no other bot on the board carries, and the reason the in-app
+    autoplay demo and the offline bot column used to play the same setup
+    differently."""
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=True), 5)
+    assert state.human() is None
+    assert not any(p.is_human for p in state.players.values())
+
+
+def test_a_match_begun_by_hand_still_has_one():
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=False), 5)
+    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+
+
+def test_the_first_hand_played_turn_claims_the_seat():
+    """Take control alone does not claim it — ending a turn under manual control
+    does. That is what lets Take control double as a pause on a demo nobody means
+    to play: pausing, looking, and resuming autoplay leaves the seat as it was."""
+    settings = Settings(players=3, nodes=14, seed=5, autoplay=True)
+    state = build_state(settings, 5)
+    engine.end_turn(state, decide=ai.decide)               # still autoplayed
+    assert state.human() is None
+    engine.end_turn(state, human_orders=[], decide=ai.decide,
+                    claim_seat=replay.HUMAN_SEAT)          # ...ended by hand
+    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+
+
+def test_claiming_a_seat_is_idempotent_and_skips_neutral():
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=True), 5)
+    engine._claim_seat(state, replay.HUMAN_SEAT)
+    engine._claim_seat(state, replay.HUMAN_SEAT)
+    assert state.human().id == replay.HUMAN_SEAT
+    engine._claim_seat(state, 0)                # neutral is a real player (id 0)
+    assert not state.players[0].is_human
+
+
+def test_reconstruct_reclaims_the_seat_at_the_turn_it_was_claimed():
+    """The claim has to be replayable. A scripted turn asks no seat to decide, so
+    nothing in a reconstruction would otherwise flip the flag back — and a match
+    somebody demonstrably took over would come back exposed to prediction on every
+    turn after the resume point."""
+    state, log = _play(4242, policy="mixed", max_turns=24, opens_in_autoplay=True)
+    assert log.turn_is_ai(0)                                           # opened as a demo
+    assert any(not log.turn_is_ai(i) for i in range(log.turn_count))   # ...then taken over
+    rebuilt, _ = replay.reconstruct(log)
+    assert rebuilt.human() is not None and rebuilt.human().id == replay.HUMAN_SEAT
+    # ...and on the very board the live run reached, claim included.
+    assert rebuilt.turn == state.turn and rebuilt.winner == state.winner
+    assert all(rebuilt.systems[i].owner_id == state.systems[i].owner_id
+               and rebuilt.systems[i].ships == state.systems[i].ships
+               for i in state.systems)
+
+
+def test_rewinding_past_every_hand_played_turn_un_claims_the_seat():
+    """Derived from the per-turn "ai" flag rather than stored as a flag of its
+    own, so `truncate` drops the claim along with the turns that made it — rewind
+    to before anybody took over and the match is an all-bot game again, exactly as
+    it was the first time through."""
+    _, log = _play(4242, policy="mixed", max_turns=24, opens_in_autoplay=True)
+    first_hand = next(i for i in range(log.turn_count) if not log.turn_is_ai(i))
+
+    kept = replay.GameLog.from_dict(log.to_dict())
+    kept.truncate(first_hand + 1)              # one hand-played turn survives
+    assert replay.reconstruct(kept)[0].human() is not None
+
+    dropped = replay.GameLog.from_dict(log.to_dict())
+    dropped.truncate(first_hand)               # ...and now none do
+    assert replay.reconstruct(dropped)[0].human() is None

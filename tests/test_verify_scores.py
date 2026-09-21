@@ -31,14 +31,22 @@ def _won_match(max_turns: int = 400):
         with _preserve_config():
             state = build_state(settings, seed)
             log = replay.new_log(settings, seed)
-            hid = state.human().id
+            hid = replay.HUMAN_SEAT
             turns = 0
             while state.winner is None and turns < max_turns:
+                # `autoplay=True` above means there is no human seat to begin with
+                # (`settings.build_state`), and the first turn recorded as
+                # hand-played is what claims it — so the flags below are not free
+                # labelling: they have to be applied to the run as it happens, the
+                # way `main.resolve_turn` does, or the log describes a different
+                # game from the one being played.
+                by_hand = turns < 2
+                claim = hid if by_hand and state.human() is None else None
                 record = engine.end_turn(state, human_orders=ai.decide(state, hid),
-                                         decide=ai.decide)
+                                         decide=ai.decide, claim_seat=claim)
                 # Claim a couple of turns as hand-played: `hand` is disclosure, and
                 # the verifier recomputes it, so it has to be a real number here.
-                log.record_turn(record, human_ai=turns >= 2)
+                log.record_turn(record, human_ai=not by_hand)
                 turns += 1
         if state.winner == hid:
             log.mark_finished(state.winner)

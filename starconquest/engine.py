@@ -136,6 +136,7 @@ def end_turn(
     decide: Optional[DecideFn] = None,
     script: Optional[TurnRecord] = None,
     on_event: Optional[turnfilm.EventFn] = None,
+    claim_seat: Optional[int] = None,
 ) -> TurnRecord:
     """Resolve one turn with simultaneous decision-making.
 
@@ -147,9 +148,16 @@ def end_turn(
     ``script`` replays a turn that was already fought: its orders are applied
     verbatim (no seat is asked to decide) and its dice are dealt back to combat.
     Either way the turn's ``TurnRecord`` is returned, which is what a caller logs.
+
+    ``claim_seat`` marks a seat as a person's before anything else happens (see
+    ``_claim_seat``), so the very first turn somebody decides for themselves is
+    already played against opponents who treat that seat as unpredictable.
     """
     if state.winner is not None:
         return TurnRecord()
+
+    if claim_seat is not None:
+        _claim_seat(state, claim_seat)
 
     watch = turnfilm.watcher(on_event)
     watch.open(state)
@@ -171,6 +179,30 @@ def end_turn(
     state.turn += 1
     watch.ended(state)
     return TurnRecord(orders, dice.drawn)
+
+
+def _claim_seat(state: GameState, pid: int) -> None:
+    """Hand ``pid`` to a person: the seat stops being decided for, permanently.
+
+    A match started in autoplay has no human seat at all (``settings.build_state``),
+    which is what lets an all-bot game be measured with no preferred seat. This is
+    the one way back: the first turn somebody actually decides for themselves
+    claims the seat, so ``_collect_orders`` stops asking ``decide`` for it and a
+    predicting opponent starts guessing at it rather than simulating it exactly.
+
+    It is a phase of the turn rather than a shell-side edit because it has to be
+    *replayable*. A scripted turn never calls ``decide``, so a claim that only
+    happened as a side effect of live order collection would vanish on resume, and
+    a match a person demonstrably took over would come back exposed. ``replay.
+    reconstruct`` re-applies it from the log's own per-turn ``"ai"`` flag at the
+    same point in the sequence, which is why this runs first — before any seat
+    decides, so this turn's predictions already see the corrected flag.
+
+    Idempotent, and never claims the neutral seat.
+    """
+    player = state.players.get(pid)
+    if player is not None and not player.is_neutral:
+        player.is_human = True
 
 
 def _collect_orders(state: GameState, human_orders: Optional[list[Order]], decide: Optional[DecideFn]) -> list[Order]:

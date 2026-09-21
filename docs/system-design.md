@@ -1103,6 +1103,30 @@ meant to hand back the position as it was, and on a big map the standing routes
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
 was lost on that turn doesn't come back to life.
 
+The per-turn `"ai"` flag carries a second job now. It is still disclosure first
+(`GameLog.hand_turns`), but it is also the record of *when a person took the
+seat over*: a match begun in autoplay has no human seat at all, and the first
+turn flagged as hand-played is what claims it (see CLAUDE.md's "An all-bot game
+has no human seat"). `reconstruct` re-applies that claim at the same turn, since
+a scripted turn asks no seat to decide and nothing else would ever flip the flag
+back — a match somebody demonstrably took over would otherwise come back exposed
+to oracle prediction on every turn after the resume point. Deriving it from a
+flag the log already carried, rather than storing a claim of its own, is also
+what makes rewinding land right without a line of extra code: `truncate` drops
+the flags along with the turns, so rewinding past every hand-played turn returns
+the match to the all-bot game it was, and rewinding to any turn after one keeps
+the seat claimed.
+
+**A resume always lands paused**, whatever the match was doing when it was
+recorded — a resume from the menu, a mid-game rewind, a fork out of a finished
+game and a watched replay alike (`resume_game` builds its `Ui` with autoplay
+off). You go back to a turn in order to look at it, and spotting a bot's blunder
+one turn too late, rewinding to it and having the board start moving again
+before it can be read is precisely what history exists to prevent. It costs
+nothing to stop there because the claim is no longer tangled up with it: autoplay
+is now purely "is anything advancing", so waiting decides nothing and who plays
+on from here is a choice handed back with the clock stopped.
+
 ### `match_id`: the log's own identity
 
 A log also carries a `match_id`, which is *not* part of what makes a replay
