@@ -73,8 +73,6 @@ function watchLink(matchId) {
   return el("a", {
     class: "watch",
     href: `${GAME_URL}#log=${matchId}`,
-    target: "_blank",
-    rel: "noopener",
     title: "Replay this game in the browser",
     text: "Watch",
   });
@@ -217,7 +215,7 @@ async function renderBots(rows, best, gameSettings) {
 /** A link back into the game, carrying the leader's score as the target to beat. */
 function playLink(token) {
   if (!GAME_URL || !token) return null;
-  return el("a", { class: "btn play", href: `${GAME_URL}#${token}`, target: "_blank", rel: "noopener", text: "Play this map" });
+  return el("a", { class: "btn play", href: `${GAME_URL}#${token}`, text: "Play this map" });
 }
 
 /**

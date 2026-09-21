@@ -168,8 +168,6 @@ async function newSeedLink(game) {
   return el("a", {
     class: "btn play",
     href: `${GAME_URL}#${token}`,
-    target: "_blank",
-    rel: "noopener",
     title: "Open the game on this setup, with a freshly rolled map",
     text: "Play a new seed",
   });

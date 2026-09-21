@@ -241,13 +241,14 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def open_url(url: str) -> bool:
-    """Open ``url`` in a browser tab, best-effort.
+    """Navigate to ``url``, best-effort.
 
-    On the web that is ``window.open`` in a new tab, so the finished game stays
-    where it is; elsewhere it is the platform's default browser, because a desktop
+    On the web that is a same-tab navigation (``window.location``), so bouncing
+    between the game and the board — routine on a leaderboard visit, not just a
+    one-off score post — doesn't pile up tabs; the back button is what returns to
+    the game. Elsewhere it is the platform's default browser, because a desktop
     player has just as much reason to post a score. True means the call was
-    accepted, not that a tab definitely appeared — a popup blocker can still
-    refuse it, the same contract as ``copy_to_clipboard``.
+    accepted, not that navigation definitely happened.
     """
     if not url:
         return False
@@ -255,10 +256,8 @@ def open_url(url: str) -> bool:
         import platform as _platform
 
         try:
-            # A blocked popup is reported as a null window rather than an error,
-            # and pygame's click reaches us too late to always count as a user
-            # gesture — so test the result instead of assuming it worked.
-            return _platform.window.open(url, "_blank") is not None
+            _platform.window.location = url
+            return True
         except Exception:
             return False
     try:
