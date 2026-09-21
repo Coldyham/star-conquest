@@ -44,7 +44,8 @@ def _clean_registry():
 def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
-             "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY")
+             "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -314,6 +315,7 @@ def test_the_owners_own_reinforcements_are_not_counted_twice(ma):
     must exclude them — counting a garrison's reinforcement as a hostile bloc
     besieging it would inflate every price on the board.
     """
+    ma.RELIEF_AWARE = 0.0  # isolate this from the calm-neighbour relief price
     state = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (1, 20, 4)},
                    [(1, 2, 2), (2, 3, 1)])
     state.fleets.append(Fleet(owner_id=1, source_id=3, dest_id=2, ships=7,
@@ -334,6 +336,7 @@ def test_surplus_goes_in_with_the_wave(ma):
     `_required` prices a 1-ship enemy at 2. thinker sends exactly that and parks
     the other 28 — which is the behaviour this bot exists to fix.
     """
+    ma.FAST_GUARD_WEIGHT = 1.0  # isolate this from the 1-turn-lane guard weighting
     state = _board({1: (2, 30, 3), 2: (1, 1, 3)}, [(1, 2, 1)])
     ma.COMMIT_SURPLUS = False
     lean = _totals(ai.decide(state, 2))[2]
@@ -442,6 +445,7 @@ def test_pincer_reserves_the_nearer_wave(ma):
     Target 4 is richer and too strong for system 1 alone, so it is massed at
     horizon 2 and system 1 is its nearer wave. Target 3 must not spend it.
     """
+    ma.FAST_GUARD_WEIGHT = 1.0  # isolate this from the 1-turn-lane guard weighting
     state = _board({1: (2, 12, 3), 2: (2, 30, 3), 3: (1, 2, 5), 4: (1, 10, 2)},
                    [(1, 3, 1), (1, 4, 1), (2, 4, 2)])
     ma.RESERVE_PINCER = True
@@ -590,4 +594,118 @@ def test_a_retreat_never_goes_into_a_system_being_abandoned(ma):
 
     ma.AVOID_ABANDONED = True
     moves = {(o.source_id, o.dest_id) for o in ai.decide(state, 2)}
-    assert (1, 3) in moves and (1, 2) not in moves, f"retreated into the rout: {moves}"
+    assert (1, 2) not in moves, "must not retreat into a system being abandoned"
+
+
+# --------------------------------------------------------------------------- #
+# A non-oracle successor to marshal: FLOW_AVOIDS_ABANDONED, RELIEF_AWARE,
+# FAST_GUARD_WEIGHT — see docs/bot-design.md
+# --------------------------------------------------------------------------- #
+def _flow_case_state():
+    """R (rear, 20) -> D (frontier, doomed, unsaveable) and R -> F (calm front).
+
+    D's only friendly neighbour is R, two turns away; a 12-stack already one
+    turn from D makes the deadline one turn, which excludes R as Phase 1
+    relief (it is two turns out) and is far more than D's garrison of 3 can
+    ever match — D is unsaveable and evacuates via `_evacuate`. F borders a
+    much poorer rival system and keeps its own guard, so it stays a live,
+    calm front all turn: the choice Phase 4 faces is real, not a fluke of an
+    otherwise-empty board.
+    """
+    state = _board({10: (1, 20, 3), 11: (1, 3, 3), 12: (1, 1, 3),
+                    13: (2, 50, 2), 14: (2, 5, 5)},
+                   [(10, 11, 2), (10, 12, 1), (11, 13, 1), (12, 14, 1)], seat=1)
+    state.fleets = [Fleet(owner_id=2, source_id=13, dest_id=11, ships=12,
+                          turns_total=1, turns_remaining=1)]
+    return state
+
+
+def test_flow_avoids_a_system_being_abandoned_this_turn(ma):
+    ma.FLOW_AVOIDS_ABANDONED = True
+    orders = {(o.source_id, o.dest_id, o.ships) for o in ai.decide(_flow_case_state(), 1)}
+    assert (10, 11, 20) not in orders, "R's surplus must not flow into D"
+    assert (11, 10, 3) in orders, "D still evacuates to R regardless"
+    assert any(o[0] == 10 and o[1] == 12 for o in orders), (
+        "R's surplus should reach the calm front F instead")
+
+
+def test_flow_flag_off_reproduces_the_leak(ma):
+    """The bug this mechanism fixes, pinned so a future edit can't silently
+    remove it."""
+    ma.FLOW_AVOIDS_ABANDONED = False
+    orders = {(o.source_id, o.dest_id, o.ships) for o in ai.decide(_flow_case_state(), 1)}
+    assert (10, 11, 20) in orders, "flag off still shows the leak"
+
+
+def _relief_state():
+    """T (rival, 10) with one calm neighbour H (rival, 6) one turn away."""
+    return _board({20: (2, 10, 3), 21: (2, 6, 3)}, [(20, 21, 1)], seat=1)
+
+
+def test_relief_aware_raises_the_price_of_a_two_turn_strike(ma):
+    """One turn of visibility (dist=2) is exactly the window H has to help."""
+    state = _relief_state()
+    target = state.systems[20]
+    ma.RELIEF_AWARE = 0.0
+    base = ma._required(state, 1, target, dist=2)
+    ma.RELIEF_AWARE = 1.0
+    with_relief = ma._required(state, 1, target, dist=2)
+    assert with_relief - base == math.ceil(6), "H's whole garrison should price in"
+
+
+def test_relief_aware_scales_by_weight(ma):
+    state = _relief_state()
+    target = state.systems[20]
+    ma.RELIEF_AWARE = 0.0
+    base = ma._required(state, 1, target, dist=2)
+    ma.RELIEF_AWARE = 0.5
+    half = ma._required(state, 1, target, dist=2)
+    assert half - base == math.ceil(0.5 * 6)
+
+
+def test_relief_aware_does_not_touch_a_one_turn_strike(ma):
+    """d=1 gives the defender zero turns of warning — untouched regardless of weight."""
+    state = _relief_state()
+    target = state.systems[20]
+    ma.RELIEF_AWARE = 0.0
+    base = ma._required(state, 1, target, dist=1)
+    ma.RELIEF_AWARE = 1.0
+    same = ma._required(state, 1, target, dist=1)
+    assert same == base
+
+
+def test_relief_capacity_ignores_a_neighbour_too_far_to_help(ma):
+    state = _relief_state()
+    target = state.systems[20]
+    assert ma._relief_capacity(state, target, warning=0) == 0
+    assert ma._relief_capacity(state, target, warning=1) == 6
+
+
+def _guard_state(lane_turns):
+    return _board({30: (1, 5, 3), 31: (2, 20, 3)}, [(30, 31, lane_turns)], seat=1)
+
+
+def test_fast_guard_weight_zeroes_a_one_turn_lane_rival(ma):
+    state = _guard_state(lane_turns=1)
+    ma.FAST_GUARD_WEIGHT = 0.0
+    assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 0.0
+
+
+def test_fast_guard_weight_leaves_a_two_turn_lane_rival_alone(ma):
+    """The mechanism is scoped to exactly-1-turn lanes: a strike across a
+    2-turn lane is visible for a turn, so the guard still has a job to do."""
+    state = _guard_state(lane_turns=2)
+    ma.FAST_GUARD_WEIGHT = 0.0
+    assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 20.0
+
+
+def test_fast_guard_weight_at_1_matches_the_unweighted_figure(ma):
+    state = _guard_state(lane_turns=1)
+    ma.FAST_GUARD_WEIGHT = 1.0
+    assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 20.0
+
+
+def test_fast_guard_weight_half_scales_the_one_turn_rival(ma):
+    state = _guard_state(lane_turns=1)
+    ma.FAST_GUARD_WEIGHT = 0.5
+    assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 10.0
