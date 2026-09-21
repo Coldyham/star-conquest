@@ -659,11 +659,11 @@ input[type="text"], input[type="number"] {
   letter-spacing: 0.08em;
 }
 input[type="text"] { text-transform: uppercase; }
-/* The embargo field's div wrapper (submit.html's #score-fields) isn't a flex
- * child of .form, so it gets none of that layout's `gap` — this restores the
- * same rhythm without it, the same way label's own margin-top already does
- * for every field. */
-#score-fields { display: flex; flex-direction: column; gap: 0.3rem; }
+/* submit.html's field-group divs aren't flex children of .form, so their
+ * contents get none of that layout's `gap` — this restores the same rhythm
+ * within them, the same way label's own margin-top already does for every
+ * field. */
+#score-fields, #embargo-fields { display: flex; flex-direction: column; gap: 0.3rem; }
 textarea:focus, input:focus, select:focus {
   outline: none;
   border-color: var(--cyan);

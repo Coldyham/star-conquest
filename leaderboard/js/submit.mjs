@@ -13,9 +13,10 @@ const linkField = document.getElementById("link");
 const nameField = document.getElementById("name");
 const tagsField = document.getElementById("tags");
 const embargoField = document.getElementById("embargo");
+const embargoFields = document.getElementById("embargo-fields");
+const embargoHint = document.getElementById("embargo-hint");
 const scoreFields = document.getElementById("score-fields");
 const scoreHint = document.getElementById("score-hint");
-const tagsHint = document.getElementById("tags-hint");
 const preview = document.getElementById("preview");
 const status = document.getElementById("status");
 const button = document.getElementById("go");
@@ -64,6 +65,24 @@ async function findTwin(decoded) {
 }
 
 /**
+ * The key this map is already on the board under, or null if it is new here.
+ *
+ * The stamped key wins whenever the board already holds it — that is the map
+ * page every link out of this site points at. Only when it is unknown do we look
+ * for the same map under an older key.
+ *
+ * Split out of `ensureGame` because the preview needs the same answer *before*
+ * anything is written: whether to offer an embargo at all. One implementation,
+ * so the field can never be offered for a map the submit path will then refuse
+ * to embargo.
+ */
+async function lookupGame(decoded) {
+  const found = await select(`games?select=game_key&game_key=${eq(decoded.gameKey)}&limit=1`);
+  if (found.length) return decoded.gameKey;
+  return findTwin(decoded);
+}
+
+/**
  * The key to file this score (or bare setup) under: find or create the game
  * row, and say whether an embargo actually took effect.
  *
@@ -71,10 +90,6 @@ async function findTwin(decoded) {
  * UPDATE, and there is deliberately no UPDATE policy for it to use (schema.sql).
  * A unique violation here just means someone else inserted it a moment ago, which
  * is the outcome we wanted anyway.
- *
- * The stamped key wins whenever the board already holds it — that is the map
- * page every link out of this site points at. Only when it is unknown do we look
- * for the same map under an older key.
  *
  * `embargoUntil` (an ISO timestamp, or null for none) only ever takes effect on
  * the `insert` below — the one moment this map's row does not already exist.
@@ -84,10 +99,8 @@ async function findTwin(decoded) {
  * `embargoed` flag is how the submit handler tells the difference.
  */
 async function ensureGame(decoded, embargoUntil) {
-  const found = await select(`games?select=game_key&game_key=${eq(decoded.gameKey)}&limit=1`);
-  if (found.length) return { gameKey: decoded.gameKey, embargoed: false };
-  const twin = await findTwin(decoded);
-  if (twin) return { gameKey: twin, embargoed: false };
+  const known = await lookupGame(decoded);
+  if (known) return { gameKey: known, embargoed: false };
   const row = {
     game_key: decoded.gameKey,
     mode: decoded.mode,
@@ -178,31 +191,94 @@ async function decodePasted() {
  * and tags fields belong to a *score*; a bare setup has neither a poster to
  * credit nor anything a tag could describe (config_tags.score_id requires one
  * to exist), so they hide rather than sitting there unused. The embargo field
- * and its hint stay up in both shapes — see ensureGame's doc comment for why
- * it's harmless to offer even when it may end up doing nothing.
+ * is orthogonal to both shapes — a bare share is one of the two ways a map
+ * first reaches the board — so `setEmbargoOffered` drives it separately, off
+ * whether this map is new rather than off what is being posted.
  */
 function setSharing(sharing) {
   scoreFields.hidden = sharing;
   scoreHint.hidden = sharing;
-  tagsHint.hidden = sharing;
   nameField.required = !sharing;
   button.textContent = sharing ? "Share setup" : "Enter";
 }
 
+/**
+ * Offer the embargo only for a map the board has never seen. On one it already
+ * holds — which is every arrival from the game's own *Enter on leaderboard* on
+ * a map someone has already posted — the field can do nothing but be ignored,
+ * so it and its explanation come off the page entirely rather than describing a
+ * setting that won't apply.
+ *
+ * Clearing the field on the way out matters: the submit path still reads it,
+ * and a number typed before the lookup landed would otherwise ride along
+ * invisibly into `embargoUntilFrom` and raise the "wasn't applied" notice on an
+ * embargo nobody could still see they had asked for.
+ */
+function setEmbargoOffered(offered) {
+  embargoFields.hidden = !offered;
+  if (!offered) {
+    embargoField.value = "";
+    syncEmbargoHint();
+  }
+}
+
+/** The embargo's explanation follows the box: nothing typed, nothing to explain. */
+function syncEmbargoHint() {
+  embargoHint.hidden = !embargoField.value.trim();
+}
+
+embargoField.addEventListener("input", syncEmbargoHint);
+
+/**
+ * Is this map already on the board? Decides whether the embargo field is worth
+ * offering at all (see setEmbargoOffered).
+ *
+ * Fails *open*: an unreachable or unconfigured board answers "new", leaving the
+ * field up. Being offered an embargo that then turns out not to apply is the
+ * mild failure — the submit path already says so — while hiding it on a blip
+ * would quietly cost a genuine setter their one chance to use it, on the single
+ * submission where it was ever possible.
+ */
+async function alreadyOnBoard(decoded) {
+  if (!configured() || decoded.seed === null) return false;
+  try {
+    return Boolean(await lookupGame(decoded));
+  } catch {
+    return false;
+  }
+}
+
+// Each keystroke starts a fresh pass and both halves of one are async, so a slow
+// reply for a half-pasted link could otherwise land after the finished link's and
+// leave the form describing the wrong one.
+let previewPass = 0;
+
 async function refreshPreview() {
+  const pass = ++previewPass;
   preview.hidden = true;
   if (!linkField.value.trim()) {
     setSharing(false);
+    setEmbargoOffered(true);
     return;
   }
   try {
     const decoded = await decodePasted();
+    if (pass !== previewPass) return;
     setSharing(!decoded.challenge);
     preview.textContent = decoded.challenge
       ? `${mapSummary(decoded)} — ${scoreSummary(decoded.challenge)}`
       : `${mapSummary(decoded)} — no score on this link, just the setup`;
     preview.hidden = false;
     say("");
+    // Deliberately not awaited: this is the one part of the pass that goes to
+    // the network, and `prefill` waits on this function to decide where to put
+    // the cursor. Landing ready to type is worth more than the embargo field
+    // resolving a moment sooner, and it only ever resolves *away*.
+    void (async () => {
+      const known = await alreadyOnBoard(decoded);
+      if (pass !== previewPass) return;
+      setEmbargoOffered(!known);
+    })();
   } catch {
     // Stay quiet while they are still pasting; submitting is what reports.
   }

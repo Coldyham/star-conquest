@@ -49,22 +49,28 @@
       <label for="name">Your name</label>
       <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
 
-      <label for="tags">Tags (optional)</label>
+      <label for="tags">Tags (optional) — describing the settings, not the specific seed</label>
       <input id="tags" name="tags" type="text" placeholder="Tags, comma separated">
     </div>
 
-    <label for="embargo">Hide replays for this many days (optional)</label>
-    <input id="embargo" name="embargo" type="number" min="1" max="90" step="1" placeholder="e.g. 7">
-    <!-- Said here because this is where the decision is made, and only once:
-         `games.embargo_until` is set the one time a map's row is first
-         inserted (schema.sql) and never after, so this field only does
-         anything the first time anyone posts this exact map. -->
-    <p class="hint">
-      Only takes effect the first time this exact map reaches the board. Scores
-      and rankings still post and rank normally the whole time — this hides
-      replays only, so nobody (you included) can watch one back until the
-      embargo lifts.
-    </p>
+    <!-- Hidden outright once the pasted link resolves to a map already on the
+         board: `games.embargo_until` is set the one time a map's row is first
+         inserted (schema.sql) and never after, so on a known map this field
+         can only ever be ignored. submit.mjs's setEmbargoOffered does that,
+         and fails open — an unreachable board leaves it up rather than
+         silently dropping a real setter's one chance to use it. -->
+    <div id="embargo-fields">
+      <label for="embargo">Hide replays for this many days (optional)</label>
+      <input id="embargo" name="embargo" type="number" min="1" max="90" step="1" placeholder="e.g. 7">
+      <!-- Only shown once a number is actually in the box: until then there is
+           no embargo to explain, and this page's problem is too many boxes at
+           once rather than too few. -->
+      <p class="hint" id="embargo-hint" hidden>
+        Scores and rankings still post and rank normally — this hides replays
+        only, so nobody (you included) can watch one back until the embargo
+        lifts.
+      </p>
+    </div>
 
     <!-- Said here because this is where the decision is made. Posting a score
          publishes that game's replay (once any embargo above has lifted):
@@ -74,13 +80,6 @@
     <p class="hint" id="score-hint">
       Posting a score also publishes that game's replay, so anyone can watch it
       back on the map's page.
-    </p>
-
-    <!-- Said here rather than assumed: unlike the name above, a tag only ever
-         arrives with a score behind it — this is the one place they're entered. -->
-    <p class="hint" id="tags-hint">
-      Tags describe the setup you just played (e.g. "grindy", "fast games") and
-      only count while attached to a posted score.
     </p>
 
     <button id="go" type="submit">Enter</button>
