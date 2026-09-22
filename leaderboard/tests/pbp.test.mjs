@@ -12,8 +12,8 @@ import test from "node:test";
 
 import {
   allowedOrigin, deadlinePassed, hashToken, lapsedAction, mintToken, outstanding,
-  rateLimited, sameToken, validateMatch, validateOrders, validateSeats,
-  visibleOrders,
+  rateLimited, sameToken, seatForToken, validateMatch, validateOrders,
+  validateSeats, visibleOrders,
 } from "../netlify/functions/pbp.mjs";
 
 const MATCH = "00112233445566ff";
@@ -58,6 +58,24 @@ test("token comparison rejects a mismatch, whatever its shape", () => {
   assert.ok(!sameToken(hash, "a".repeat(63)), "a length difference is a mismatch");
   assert.ok(!sameToken(hash, null));
   assert.ok(!sameToken(undefined, hash));
+});
+
+test("a token names the one seat it was minted for", async () => {
+  const one = mintToken(), two = mintToken();
+  const stored = { seats: { seats: [1, 2], tokens: {
+    1: await hashToken(one), 2: await hashToken(two) } } };
+  assert.equal(seatForToken(stored, await hashToken(one)), 1);
+  assert.equal(seatForToken(stored, await hashToken(two)), 2);
+});
+
+test("a token nobody was given holds no seat at all", async () => {
+  const stored = { seats: { seats: [1], tokens: { 1: await hashToken(mintToken()) } } };
+  assert.equal(seatForToken(stored, await hashToken(mintToken())), null);
+  assert.equal(seatForToken(stored, "not a hash"), null);
+  // A match stored without a token map must refuse every token rather than
+  // throwing — an unseated match is a broken row, not a way in.
+  assert.equal(seatForToken({}, await hashToken(mintToken())), null);
+  assert.equal(seatForToken(null, "x"), null);
 });
 
 // --------------------------------------------------------------------------

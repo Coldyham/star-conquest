@@ -13,9 +13,11 @@
  * seat to decide. So this stores the inputs, and each client rebuilds the
  * position. What arrives here is orders; what leaves is orders.
  *
- * Three actions, chosen by `?action=`:
+ * Four actions, chosen by `?action=`:
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
+ *   seat    (POST) which seat a token holds — the one thing a client opening a
+ *                  link cannot work out for itself.
  *   submit  (POST) one seat's orders for the live turn, authorised by its token.
  *   resolve (POST) turn the submissions into a resolved turn, once they are all
  *                  in. Sent by whichever client notices first; idempotent, so
@@ -222,6 +224,22 @@ export function validateMatch(body) {
 }
 
 /**
+ * Which seat an offered token hash belongs to, or null.
+ *
+ * Every stored hash is compared rather than the walk stopping at the first
+ * match, so a wrong token cannot be told apart from one for another seat by how
+ * long the answer takes. One implementation for all three actions that check a
+ * token: a second copy is a second chance to get that constant-ish walk wrong.
+ */
+export function seatForToken(match, offered) {
+  let seat = null;
+  for (const [candidate, stored] of Object.entries(match?.seats?.tokens || {})) {
+    if (sameToken(offered, stored)) seat = Number(candidate);
+  }
+  return seat;
+}
+
+/**
  * Which seats still owe orders for `turn`.
  *
  * The whole gate, and it is deliberately a set difference rather than a count:
@@ -339,6 +357,7 @@ export default async function handler(request) {
     return reply(400, { error: "bad json" }, origin);
   }
   if (action === "create") return await handleCreate(call, body, origin);
+  if (action === "seat") return await handleSeat(call, body, origin);
   if (action === "submit") return await handleSubmit(call, body, origin);
   if (action === "resolve") return await handleResolve(call, body, origin);
   return reply(400, { error: "unknown action" }, origin);
@@ -427,6 +446,37 @@ async function handleCreate(call, body, origin) {
   return reply(201, { match_id: row.match_id, tokens }, origin);
 }
 
+/**
+ * Which seat a token holds, and what turn the match is on.
+ *
+ * The seat is deliberately not in the link a player opens (`pbp.link_fragment`):
+ * this endpoint already knows which seat a token belongs to, and a link that
+ * said so as well would be a second claim to keep in step with the first. So a
+ * client asks once, on the launch that hands it a link, and remembers the answer
+ * locally from then on.
+ *
+ * A POST rather than a parameter on `state`, for the reason no other read here
+ * needs a token at all: a token is a write credential, and a query string is
+ * precisely where one gets written down — in request logs, in a proxy's history,
+ * in the browser's own. `state` stays open and tokenless; this is the one read
+ * that authorises, so it is the one read shaped like a write.
+ */
+async function handleSeat(call, body, origin) {
+  if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
+  const { match_id: matchId, token } = body;
+  if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
+  if (typeof token !== "string" || !TOKEN.test(token)) return reply(403, { error: "bad token" }, origin);
+
+  const rows = await call(`/pbp_matches?select=match_id,seats,turn,finished&match_id=eq.${matchId}`);
+  if (rows === null) return reply(502, { error: "store refused" }, origin);
+  if (!rows.length) return reply(404, { error: "no such match" }, origin);
+
+  const seat = seatForToken(rows[0], await hashToken(token));
+  if (seat === null) return reply(403, { error: "bad token" }, origin);
+  return reply(200, { match_id: matchId, seat, turn: rows[0].turn,
+                      finished: rows[0].finished }, origin);
+}
+
 /** One seat's orders for the live turn, authorised by that seat's token. */
 async function handleSubmit(call, body, origin) {
   if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
@@ -448,13 +498,7 @@ async function handleSubmit(call, body, origin) {
   const match = rows[0];
   if (match.finished) return reply(409, { error: "match is over" }, origin);
 
-  // Which seat is this token's? Every hash is compared so a wrong token cannot
-  // be told apart from one for another seat by how fast the answer comes back.
-  const offered = await hashToken(token);
-  let seat = null;
-  for (const [candidate, stored] of Object.entries(match.seats.tokens || {})) {
-    if (sameToken(offered, stored)) seat = Number(candidate);
-  }
+  const seat = seatForToken(match, await hashToken(token));
   if (seat === null) return reply(403, { error: "bad token" }, origin);
 
   // A submission names the turn it is for, so a client that has fallen behind
@@ -524,11 +568,7 @@ async function handleResolve(call, body, origin) {
 
   // Resolving is a seat's right, not the public's: it writes the log every other
   // player will read. Any seat in the match may do it — whoever is looking.
-  const offered = await hashToken(token);
-  let seat = null;
-  for (const [candidate, stored] of Object.entries(match.seats.tokens || {})) {
-    if (sameToken(offered, stored)) seat = Number(candidate);
-  }
+  const seat = seatForToken(match, await hashToken(token));
   if (seat === null) return reply(403, { error: "bad token" }, origin);
 
   if (match.finished) return reply(409, { error: "match is over" }, origin);

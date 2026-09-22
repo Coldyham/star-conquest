@@ -1323,10 +1323,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause.
-    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
-    if not ui.autoplay:
-        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
+    # shown either way, unlike play/pause. Neither is offered in a shared match:
+    # a play-by-post turn advances when the last seat submits, so there is no
+    # clock here for either control to run, and a client that ran one anyway
+    # would resolve a turn the others had not agreed to. Taken away rather than
+    # guarded, the same treatment End Turn gets while we are waiting — and
+    # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
+    if not ui.in_pbp:
+        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
+        if not ui.autoplay:
+            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means

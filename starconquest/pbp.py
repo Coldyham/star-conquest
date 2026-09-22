@@ -267,7 +267,55 @@ def match_from_dict(data: dict) -> Optional[Match]:
 # --------------------------------------------------------------------------- #
 # Rebuilding the board
 # --------------------------------------------------------------------------- #
-def rebuild(match: Match) -> tuple[GameState, replay.GameLog]:
+def seat_people(state: GameState, seats: list[int]) -> None:
+    """Mark exactly ``seats`` as held by people, and every other seat as not.
+
+    A match's roster is who is *playing it by post*; any other live seat is a bot
+    and is decided for. The distinction has to be made identically on every
+    client — it decides which seats ``engine._collect_orders`` asks ``decide``
+    about, and which ones an oracle opponent guesses at rather than simulates —
+    so it is derived here from the roster the server stores, never from who
+    happens to be looking.
+
+    Set outright rather than claimed one seat at a time (``engine._claim_seat``,
+    which only ever adds), because in a shared match the roster is the whole
+    truth about who the people are: ``mapgen`` stamps seat 1 regardless, and a
+    match seated at 2 and 3 would otherwise carry a phantom person at 1 who held
+    every turn forever. It is the same reason ``build_state`` clears that stamp
+    for an all-bot game.
+    """
+    roster = set(seats)
+    for pid, player in state.players.items():
+        if not player.is_neutral:
+            player.is_human = pid in roster
+
+
+def seat_board(match: Match) -> GameState:
+    """The opening position of ``match``, with its roster seated."""
+    state = build_state(match.settings, match.seed)
+    seat_people(state, match.seats)
+    return state
+
+
+def advance(state: GameState, log: replay.GameLog, orders: dict[int, list[Order]],
+            decide=None, on_event=None) -> engine.TurnRecord:
+    """Play one settled turn onto a live board, recording it into ``log``.
+
+    The single step every path through this module takes — rebuilding the match
+    from its opening, resolving the live turn, and (in the shell) advancing the
+    board a player is already looking at. One implementation because the sequence
+    of orders *is* the determinism: a second copy that collected them differently
+    would fight different battles on the same inputs.
+    """
+    record = engine.end_turn(state, seat_orders=orders, decide=decide,
+                             on_event=on_event)
+    log.record_turn(record)
+    if state.winner is not None:
+        log.mark_finished(state.winner)
+    return record
+
+
+def rebuild(match: Match, decide=None) -> tuple[GameState, replay.GameLog]:
     """The live board, and a log of the match so far.
 
     Every resolved turn is replayed through the engine from the stored orders,
@@ -277,32 +325,41 @@ def rebuild(match: Match) -> tuple[GameState, replay.GameLog]:
     so the same orders in the same sequence draw the same numbers on every
     client. That is the determinism the whole design rests on, and
     ``replay.digest_hex`` is what checks it held.
+
+    ``decide`` is how a seat *not* in the roster gets played: a match may seat two
+    people against two bots, and a bot still has to take its turn. It is injected
+    rather than imported for the reason the engine's own is (``engine.end_turn``)
+    — this module is pure core and must not depend on ``ai``. Left out, every
+    such seat simply holds; pass ``ai.decide`` on any client that can rebuild a
+    match with bots in it, and pass it on *all* of them, because whether a bot
+    moved is part of the position.
     """
-    state = build_state(match.settings, match.seed)
+    state = seat_board(match)
     log = replay.GameLog(seed=match.seed, settings=match.settings.to_dict(),
                          match_id=match.match_id)
     for turn in range(match.turn):
         if state.winner is not None:
             break
-        record = engine.end_turn(state, seat_orders=match.orders_for_turn(turn))
-        log.record_turn(record)
+        advance(state, log, match.orders_for_turn(turn), decide)
     if state.winner is not None:
         log.mark_finished(state.winner)
     return state, log
 
 
-def resolve(match: Match) -> tuple[GameState, replay.GameLog, str]:
+def resolve(match: Match, decide=None,
+            on_event=None) -> tuple[GameState, replay.GameLog, str]:
     """Play the live turn out, returning the new board, log and board digest.
 
     Only meaningful once ``match.ready``; the caller checks that. The digest is
     what goes back to the server beside the log, so a second client resolving the
     same turn can be told it agreed.
+
+    ``on_event`` reports only the live turn, never the rebuild that precedes it:
+    what a player watches is the turn that just happened, not the history they
+    already saw.
     """
-    state, log = rebuild(match)
-    record = engine.end_turn(state, seat_orders=match.orders_for_turn(match.turn))
-    log.record_turn(record)
-    if state.winner is not None:
-        log.mark_finished(state.winner)
+    state, log = rebuild(match, decide)
+    advance(state, log, match.orders_for_turn(match.turn), decide, on_event)
     return state, log, replay.digest_hex(state)
 
 
@@ -312,7 +369,15 @@ def resolve(match: Match) -> tuple[GameState, replay.GameLog, str]:
 # The states a poll can answer with, mirroring ``share``: the plumbing worked and
 # there is a body, the plumbing worked and there is nothing there, or it did not
 # work. Kept as separate values because they send the player somewhere different.
-PENDING, OK, ERROR, MISSING = "pending", "ok", "error", "missing"
+#
+# ``REFUSED`` is this module's own addition to that set, and it earns its place:
+# a 403 is the endpoint saying "not with that token", which is the one failure
+# here a player can actually do something about — check the link they were sent.
+# Off the web the body would say so too, but a browser ``fetch`` that rejects
+# hands the handler a status and nothing else, so the distinction has to survive
+# in the state or it does not survive at all.
+PENDING, OK, ERROR, MISSING, REFUSED = (
+    "pending", "ok", "error", "missing", "refused")
 
 # Long enough for a slow phone, short enough that a daemon thread is gone well
 # before anyone quits. Same figure ``share`` uses, for the same reason.
@@ -354,7 +419,7 @@ class Request:
             body = webstore.get(WEB_PBP_BODY_KEY)
             _clear_web_slot()
             return OK, body
-        if state in (ERROR, MISSING):
+        if state in (ERROR, MISSING, REFUSED):
             _clear_web_slot()
             return state, ""
         return PENDING, ""
@@ -400,7 +465,8 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
             "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"
             f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"
             f".catch(function(e){{console.warn('pbp call failed',e);"
-            f"localStorage.setItem({state},e===404?'{MISSING}':'{ERROR}')}})"
+            f"localStorage.setItem({state},e===404?'{MISSING}'"
+            f":e===403?'{REFUSED}':'{ERROR}')}})"
         )
         return Request(web=True)
     except Exception:  # noqa: BLE001
@@ -424,16 +490,21 @@ def _call_desktop(url: str, body: Optional[str]) -> Optional[Request]:
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as response:
                 request._result.append((OK, response.read().decode("utf-8")))
         except urllib.error.HTTPError as err:
-            # The endpoint answering "no such match" is a different thing to tell
-            # the player than "no answer at all". Everything else — including a
-            # refused submission — comes back as a body worth reading.
+            # "No such match" and "not with that token" are different things to
+            # tell the player than "no answer at all", and only they get their own
+            # state. Everything else — a refused submission, a stale turn, a turn
+            # somebody else resolved first — comes back as a body worth reading.
+            body_text = ""
+            try:
+                body_text = err.read().decode("utf-8")
+            except Exception:  # noqa: BLE001
+                pass
             if err.code == 404:
-                request._result.append((MISSING, ""))
+                request._result.append((MISSING, body_text))
+            elif err.code == 403:
+                request._result.append((REFUSED, body_text))
             else:
-                try:
-                    request._result.append((ERROR, err.read().decode("utf-8")))
-                except Exception:  # noqa: BLE001
-                    request._result.append((ERROR, ""))
+                request._result.append((ERROR, body_text))
         except Exception:  # noqa: BLE001
             request._result.append((ERROR, ""))
 
@@ -442,6 +513,82 @@ def _call_desktop(url: str, body: Optional[str]) -> Optional[Request]:
         return request
     except RuntimeError:
         return None
+
+
+def parse_body(text: str) -> Optional[dict]:
+    """A reply's JSON object, or None. Never raises.
+
+    Every answer from the endpoint arrives as an untrusted string — a body that
+    is not JSON at all is an error page, a proxy's interstitial or a truncated
+    read, none of which should reach a caller as an exception on a frame.
+    """
+    try:
+        body = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def create(match_id: str, settings: Settings, seed: int, seats: list[int],
+           deadline_hours: Optional[int] = None) -> Optional[Request]:
+    """Open a match, seating a person at each of ``seats``.
+
+    The reply is the one and only time the seat tokens exist in the clear —
+    nothing stores them, here or there, so whoever opened the match is who hands
+    them out. ``rules_version`` rides along so a client on a later engine can say
+    the match predates it rather than silently playing a different game.
+    """
+    if not replay._MATCH_ID_RE.match(match_id) or not seats:
+        return None
+    return call("create", {
+        "match_id": match_id,
+        "settings_json": settings.to_dict(),
+        "seed": seed,
+        "seats": sorted(set(seats)),
+        "rules_version": engine.RULES_VERSION,
+        "deadline_hours": deadline_hours,
+    })
+
+
+def tokens_from(body: dict, match_id: str) -> dict[int, str]:
+    """``{seat: token}`` out of a ``?action=create`` reply, checked.
+
+    A token we could not use is worse than none: it would be handed to a player
+    as a link that cannot submit. So each one is validated exactly as a link's
+    own is, and a seat whose token fails is simply absent.
+    """
+    if body.get("match_id") != match_id:
+        return {}
+    out: dict[int, str] = {}
+    for seat, token in (body.get("tokens") or {}).items():
+        try:
+            pid = int(seat)
+        except (TypeError, ValueError):
+            continue
+        if Seat(match_id, pid, str(token)).valid():
+            out[pid] = str(token)
+    return out
+
+
+def identify(match_id: str, token: str) -> Optional[Request]:
+    """Ask the endpoint which seat ``token`` holds.
+
+    The seat is not in the link (see ``link_fragment``), so a client opening one
+    has to be told once. It is asked once and then remembered (``remember``): a
+    seat does not move, so every later launch reads it locally.
+    """
+    if not replay._MATCH_ID_RE.match(match_id) or not valid_token(token):
+        return None
+    return call("seat", {"match_id": match_id, "token": token})
+
+
+def seat_from(body: dict, match_id: str, token: str) -> Optional[Seat]:
+    """The seat a ``?action=seat`` reply names, or None if it named none."""
+    try:
+        seat = Seat(match_id, int(body.get("seat", 0) or 0), token)
+    except (TypeError, ValueError):
+        return None
+    return seat if seat.valid() else None
 
 
 def fetch_state(match_id: str) -> Optional[Request]:

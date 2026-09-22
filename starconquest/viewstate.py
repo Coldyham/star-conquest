@@ -516,11 +516,19 @@ class Ui:
         """Is this result the player's own to publish — as a challenge link or as
         a leaderboard entry?
 
-        Three things must hold: the human's seat won it, at least one turn was
-        decided by hand (a pure autoplay demo is a bot's win, not a score), and the
-        match was played here rather than downloaded to watch. Render gates both
-        overlay buttons on this and main gates both actions on it, so a keyboard
-        shortcut can never reach a result the overlay declines to offer.
+        Four things must hold: the human's seat won it, at least one turn was
+        decided by hand (a pure autoplay demo is a bot's win, not a score), the
+        match was played here rather than downloaded to watch, and it was a game
+        of our own rather than a shared one. Render gates both overlay buttons on
+        this and main gates both actions on it, so a keyboard shortcut can never
+        reach a result the overlay declines to offer.
+
+        The fourth is what keeps play-by-post off the board, and it is a matter
+        of meaning rather than of trust: a leaderboard score is turns-to-win
+        against a fixed setup, which measures a person against a map. Beating two
+        friends to the same map in nine turns says nothing about that setup, and
+        posting it as though it did would quietly corrupt every honest score
+        beside it.
 
         The third condition is not airtight and is not meant to be: rewinding a
         watched replay to a turn from its end and playing that turn out forks a
@@ -531,7 +539,7 @@ class Ui:
         from any replay on the board.
         """
         return (state.winner == self.human_id and self.hand_turns > 0
-                and not self.watched)
+                and not self.watched and not self.in_pbp)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
