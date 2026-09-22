@@ -137,6 +137,7 @@ def end_turn(
     script: Optional[TurnRecord] = None,
     on_event: Optional[turnfilm.EventFn] = None,
     claim_seat: Optional[int] = None,
+    seat_orders: Optional[dict[int, list[Order]]] = None,
 ) -> TurnRecord:
     """Resolve one turn with simultaneous decision-making.
 
@@ -152,6 +153,10 @@ def end_turn(
     ``claim_seat`` marks a seat as a person's before anything else happens (see
     ``_claim_seat``), so the very first turn somebody decides for themselves is
     already played against opponents who treat that seat as unpredictable.
+
+    ``seat_orders`` (``{pid: orders}``) is how a game with more than one person in
+    it submits — play-by-post, hotseat. It overrides ``human_orders`` for the
+    seats it names; a seat held by a person and named by neither holds.
     """
     if state.winner is not None:
         return TurnRecord()
@@ -163,7 +168,7 @@ def end_turn(
     watch.open(state)
 
     orders = (list(script.orders) if script is not None
-              else _collect_orders(state, human_orders, decide))
+              else _collect_orders(state, human_orders, decide, seat_orders))
     for order in orders:  # order-independent: each system has a single owner
         watch.launched(state, apply_order(state, order))
 
@@ -205,14 +210,54 @@ def _claim_seat(state: GameState, pid: int) -> None:
         player.is_human = True
 
 
-def _collect_orders(state: GameState, human_orders: Optional[list[Order]], decide: Optional[DecideFn]) -> list[Order]:
-    human = state.human()
-    orders: list[Order] = _own_orders(human_orders, human.id if human else None)
-    if decide is not None:
-        for pid in sorted(state.players):
-            player = state.players[pid]
-            if player.is_neutral or player.is_human or not player.alive:
-                continue
+def _collect_orders(state: GameState, human_orders: Optional[list[Order]],
+                    decide: Optional[DecideFn],
+                    seat_orders: Optional[dict[int, list[Order]]] = None) -> list[Order]:
+    """Every seat's orders for this turn, in the sequence they will be applied.
+
+    Seats are walked in **ascending id**, people and bots alike: a seat a person
+    holds contributes what they submitted, any other live seat is asked to
+    ``decide``. That single rule replaces the older "the human first, then the
+    bots" one and emits the identical sequence for every game that rule could
+    describe — the human is always pid 1 (``mapgen._make_players``), so it was
+    already ascending. It matters that this is an order and not a set: fleets are
+    appended as they launch, ``_resolve_arrivals`` walks them in that order, and
+    the combat dice are consumed along that walk. Two clients that collected the
+    same orders in a different sequence would fight different battles, which is
+    what makes this the load-bearing line for play-by-post.
+
+    ``seat_orders`` is how more than one person submits: ``{pid: orders}``,
+    overriding ``human_orders`` for any seat it names. ``human_orders`` alone is
+    kept for the single-seat callers (``main.resolve_turn``, the tests) and is
+    attributed to ``state.human()`` exactly as it always was.
+    """
+    submitted: dict[int, list[Order]] = {}
+    if human_orders is not None:
+        human = state.human()
+        if human is not None:
+            submitted[human.id] = human_orders
+        elif not seat_orders:
+            # No seat to attribute them to: a headless caller passing orders
+            # explicitly. `_own_orders` takes them as given (seat=None), which is
+            # the escape hatch its own docstring describes.
+            return _own_orders(human_orders, None)
+    if seat_orders:
+        submitted.update(seat_orders)
+
+    orders: list[Order] = []
+    for pid in sorted(state.players):
+        player = state.players[pid]
+        if player.is_neutral:
+            continue
+        if pid in submitted:
+            orders.extend(_own_orders(submitted[pid], pid))
+        elif player.is_human or not player.alive or decide is None:
+            # A person's seat that submitted nothing holds — which is a real turn
+            # (production still ticks, garrisons still defend), and the first-miss
+            # default a play-by-post deadline leans on. A dead seat has nothing to
+            # order either way.
+            continue
+        else:
             orders.extend(_own_orders(decide(state, pid), pid))  # same pre-apply state
     return orders
 
