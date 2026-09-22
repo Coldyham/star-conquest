@@ -53,6 +53,19 @@ WEB_ANIMATE_TURNS_KEY = "sc_animate_turns"
 WEB_REPLAY_STATE_KEY = "sc_replay_state"
 WEB_REPLAY_BODY_KEY = "sc_replay_body"
 
+# The same mailbox pattern for a play-by-post request (`pbp.Request`). A separate
+# pair rather than a shared one because a client can have a replay download and a
+# match poll in flight at once, and one landing must not collect the other's body.
+WEB_PBP_STATE_KEY = "sc_pbp_state"
+WEB_PBP_BODY_KEY = "sc_pbp_body"
+
+# Where a seat's token is remembered, so reopening the game returns you to your
+# match without the link. Keyed by match id: `{"<match id>": {"seat": 2,
+# "token": "…"}}`. A token is the only thing that can move a seat's ships, so it
+# is stored where the game already keeps its own preferences and nowhere else —
+# never in `Settings`, which travels in every shared link.
+WEB_PBP_SEATS_KEY = "sc_pbp_seats"
+
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.
 #
@@ -85,6 +98,7 @@ _NETLIFY_SUFFIX = ".netlify.app"
 LEADERBOARD_SUBMIT_PATH = "/submit"    # the score-entry form, opened with #<token>
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
+LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
 # The board's "by config" listing (`leaderboard/js/home.mjs`'s `?group=config`):
 # every setup somebody has posted a score under, grouped and named. Not specific
 # to the setup on the menu right now — there is no way to name an arbitrary,

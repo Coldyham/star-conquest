@@ -209,18 +209,10 @@ def check_invariants(state: GameState) -> None:
         assert f.owner_id in state.players
 
 
-def board_digest(state: GameState):
-    """Everything a frame can show, for comparing a film's board against the real
-    one. Lanes and adjacency are left out: nothing ever mutates them."""
-    return (
-        tuple((sid, s.owner_id, s.ships, s.production, s.prod_progress)
-              for sid, s in sorted(state.systems.items())),
-        tuple((f.owner_id, f.source_id, f.dest_id, f.ships, f.turns_total,
-               f.turns_remaining, f.lane_slot) for f in state.fleets),
-        state.turn,
-        state.winner,
-        tuple((pid, p.alive, p.ships_lost) for pid, p in sorted(state.players.items())),
-    )
+# The film oracle's board comparison, which play-by-post also needs to check two
+# clients resolved a turn the same way — so it lives in the core now and this is
+# the same function under its old name.
+board_digest = replay.board_digest
 
 
 def check_film(before: GameState, events: list, after: GameState) -> None:

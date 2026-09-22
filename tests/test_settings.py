@@ -702,7 +702,7 @@ def test_no_core_module_imports_pygame():
     import pathlib
 
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
-            "settings", "fog", "replay", "turnfilm", "custommap")
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp")
     pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
     for name in core:
         tree = ast.parse((pkg / f"{name}.py").read_text())

@@ -906,7 +906,12 @@ alter table public.pbp_orders enable row level security;
 -- outright, and only for the worker. `update` on pbp_matches is what no other
 -- table here has -- it is the one thing that genuinely advances.
 grant select, insert, update on public.pbp_matches to service_role;
-grant select, insert on public.pbp_orders to service_role;
+-- `update` on pbp_orders is narrower than it sounds: the only column ever
+-- written after the fact is `board_digest`, stamped on the resolving seat's own
+-- row once the turn it describes has been played. The orders themselves are
+-- never rewritten — that is what the unique constraint per (match, turn, seat)
+-- is for.
+grant select, insert, update on public.pbp_orders to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.

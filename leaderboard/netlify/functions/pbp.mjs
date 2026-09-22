@@ -325,6 +325,7 @@ export default async function handler(request) {
   }
   if (action === "create") return await handleCreate(call, body, origin);
   if (action === "submit") return await handleSubmit(call, body, origin);
+  if (action === "resolve") return await handleResolve(call, body, origin);
   return reply(400, { error: "unknown action" }, origin);
 }
 
@@ -462,6 +463,94 @@ async function handleSubmit(call, body, origin) {
   const waiting = outstanding(roster, live.map((r) => r.seat));
 
   return reply(201, { seat, turn, waiting }, origin);
+}
+
+
+/**
+ * Advance the match: the live turn is complete, here is what it resolved to.
+ *
+ * The server cannot compute this — it has no engine and no dice — so the client
+ * that noticed does the work and reports the result. That sounds like trusting
+ * the client, and it is worth being precise about what it actually trusts: the
+ * orders were already stored, by their own seats, under their own tokens, and
+ * are not re-sent here. What arrives is the *log* those orders produce, which
+ * every other client recomputes for itself from the same stored inputs. A log
+ * that disagreed would be caught by the next client to look, not believed.
+ *
+ * Idempotent by construction: the update is conditional on the turn still being
+ * the one being resolved, so two clients noticing together is not a race. The
+ * second is told the turn already moved and re-reads it, which is the same path
+ * a client that was simply behind takes.
+ */
+async function handleResolve(call, body, origin) {
+  if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
+  const { match_id: matchId, token, turn, log, board_digest: digest } = body;
+  if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
+  if (typeof token !== "string" || !TOKEN.test(token)) return reply(403, { error: "bad token" }, origin);
+  if (!Number.isInteger(turn) || turn < 0) return reply(400, { error: "bad turn" }, origin);
+  if (typeof log !== "string" || !log || log.length > MAX_LOG_BYTES) return reply(400, { error: "bad log" }, origin);
+  if (!BASE64URL.test(log)) return reply(400, { error: "bad log encoding" }, origin);
+  if (digest !== undefined && (typeof digest !== "string" || digest.length > 64)) {
+    return reply(400, { error: "bad board_digest" }, origin);
+  }
+
+  const rows = await call(`/pbp_matches?select=*&match_id=eq.${matchId}`);
+  if (rows === null) return reply(502, { error: "store refused" }, origin);
+  if (!rows.length) return reply(404, { error: "no such match" }, origin);
+  const match = rows[0];
+
+  // Resolving is a seat's right, not the public's: it writes the log every other
+  // player will read. Any seat in the match may do it — whoever is looking.
+  const offered = await hashToken(token);
+  let seat = null;
+  for (const [candidate, stored] of Object.entries(match.seats.tokens || {})) {
+    if (sameToken(offered, stored)) seat = Number(candidate);
+  }
+  if (seat === null) return reply(403, { error: "bad token" }, origin);
+
+  if (match.finished) return reply(409, { error: "match is over" }, origin);
+  if (turn !== match.turn) return reply(409, { error: "stale turn", turn: match.turn }, origin);
+
+  // Every seat must really be in. Checked here rather than taken from the
+  // caller: this is the one gate that decides a turn happened.
+  const live = await call(`/pbp_orders?select=seat&match_id=eq.${matchId}&turn=eq.${turn}`);
+  if (live === null) return reply(502, { error: "store refused" }, origin);
+  const roster = match.seats.seats ?? match.seats;
+  const waiting = outstanding(roster, live.map((r) => r.seat));
+  if (waiting.length) return reply(409, { error: "turn is not ready", waiting }, origin);
+
+  // Conditional on the turn not having moved, which is what makes two clients
+  // resolving together safe: PostgREST turns the filter into the UPDATE's WHERE,
+  // so the loser matches no row and is told to re-read.
+  const updated = await call(
+    `/pbp_matches?match_id=eq.${matchId}&turn=eq.${turn}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        turn: turn + 1,
+        log,
+        finished: body.finished === true,
+        turn_opened_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  if (updated === null) return reply(502, { error: "store refused" }, origin);
+  if (!updated.length) {
+    // Somebody else got there first. Not an error: they computed the same turn
+    // from the same orders, which is the point of the whole design.
+    return reply(409, { error: "already resolved" }, origin);
+  }
+
+  // The digest rides on the resolving seat's own order row, which is where the
+  // coherence check lives — first one wins, the rest are compared against it.
+  if (typeof digest === "string" && digest) {
+    await call(`/pbp_orders?match_id=eq.${matchId}&turn=eq.${turn}&seat=eq.${seat}`,
+               { method: "PATCH",
+                 headers: { Prefer: "return=minimal" },
+                 body: JSON.stringify({ board_digest: digest }) });
+  }
+  return reply(200, { turn: turn + 1, resolved_by: seat }, origin);
 }
 
 export const config = { path: "/api/pbp" };
