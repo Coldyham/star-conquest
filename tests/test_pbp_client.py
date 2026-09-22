@@ -300,3 +300,222 @@ def test_a_resolved_turn_hands_the_board_straight_back():
     app.pbp_opened(ui)
     assert not ui.awaiting_others(state)
     assert ui.pbp_waiting == () and ui.pbp_msg == ""
+
+
+# --------------------------------------------------------------------------- #
+# Opening a match from the menu
+# --------------------------------------------------------------------------- #
+def test_a_new_match_seats_every_player(monkeypatch):
+    """Every player is a person — the simplest rule that fits in a button, and
+    the one someone is already holding in their head when they set the count."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    match_id, _ = app.pbp_open(Settings(players=4), seed=11)
+    assert sent["seats"] == [1, 2, 3, 4]
+    assert sent["match_id"] == match_id and sent["seed"] == 11
+    assert sent["rules_version"] == engine.RULES_VERSION
+
+
+def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
+    """Sent rather than handed back, so a retry after a lost reply opens a second
+    match instead of quietly rewriting the first."""
+    monkeypatch.setattr(pbp, "call", lambda *a, **k: object())
+    first, _ = app.pbp_open(Settings(), seed=1)
+    second, _ = app.pbp_open(Settings(), seed=1)
+    assert first != second
+    assert replay._MATCH_ID_RE.match(first)
+
+
+def test_the_seed_is_pinned_before_the_match_is_opened(monkeypatch):
+    """"Roll a fresh seed" has to mean one seed for the whole table, not one
+    each, so it is resolved and *sent* rather than left in the setup."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(seed=None), seed=4242)
+    assert sent["seed"] == 4242
+
+
+def test_every_seat_gets_a_link_including_our_own(monkeypatch):
+    """A match is only a match once the others are in it, so the thing to hand
+    over is the whole set — and the one that seats us is how we get back in
+    after closing the tab."""
+    monkeypatch.setattr(webstore, "link_url", lambda token: f"https://game/#{token}")
+    lines = app.pbp_links(MATCH, {1: TOKEN, 2: "b" * 32})
+    assert len(lines) == 2
+    assert f"https://game/#pbp={MATCH}:{TOKEN}" in lines[0]
+    assert config.player_name(2) in lines[1]
+
+
+def test_off_the_web_a_link_is_the_bare_fragment():
+    """There is no page to point at, so what goes out is what `--match` takes and
+    what a player can paste onto the web build's address."""
+    lines = app.pbp_links(MATCH, {1: TOKEN})
+    assert lines[0].endswith(f"pbp={MATCH}:{TOKEN}")
+
+
+def test_a_token_that_could_not_seat_anyone_is_never_handed_out():
+    """A link that cannot submit is worse than no link: it would be sent to a
+    player as though it worked."""
+    body = {"match_id": MATCH, "tokens": {"1": TOKEN, "2": "nope", "x": TOKEN}}
+    assert pbp.tokens_from(body, MATCH) == {1: TOKEN}
+    assert pbp.tokens_from(body, "f" * 16) == {}, "...nor one for another match"
+
+
+def test_the_links_are_saved_where_they_can_be_got_at(tmp_path, monkeypatch):
+    """Clipboard first (the only channel an installed PWA has), then a file (the
+    only one a desktop build has). Never the address bar: a seat link left there
+    is read back at the next launch and would seat you in a match you had left.
+    """
+    monkeypatch.setattr(app.paths, "saves_dir", lambda: tmp_path / "saves")
+    monkeypatch.setattr(webstore, "set_url_fragment",
+                        lambda token: pytest.fail("a seat link must not reach the URL"))
+    line = app.pbp_handed_out(MATCH, {1: TOKEN, 2: "b" * 32})
+    saved = (tmp_path / "saves" / f"match_{MATCH}.txt").read_text()
+    assert TOKEN in saved and "b" * 32 in saved
+    assert "match_" in line
+
+
+# --------------------------------------------------------------------------- #
+# Two clients, a whole match, and a server that holds no board
+# --------------------------------------------------------------------------- #
+class _Endpoint:
+    """`pbp.mjs` in miniature: the decisions it makes, none of its plumbing.
+
+    Worth having as well as the JS tests because those check the rules in
+    isolation, and what actually broke in a live match was the *interaction* —
+    `?action=state` withholding the live turn's orders from the very client about
+    to resolve it, so the turn played as though nobody had moved and two clients
+    agreed with each other because both were equally wrong. Only running two of
+    them against one store for a run of turns shows that.
+    """
+
+    def __init__(self, settings: Settings, seed: int, seats: list[int]):
+        self.settings, self.seed, self.seats = settings, seed, sorted(seats)
+        self.turn, self.finished = 0, False
+        self.rows: list[dict] = []
+        self.digests: dict[int, str] = {}      # first digest per turn wins
+
+    # -- reads -------------------------------------------------------------- #
+    def waiting(self) -> list[int]:
+        live = {r["seat"] for r in self.rows if r["turn"] == self.turn}
+        return [s for s in self.seats if s not in live]
+
+    def state(self) -> dict:
+        # Complete-or-nothing on the live turn, exactly as `visibleOrders` is.
+        settled = [r for r in self.rows if r["turn"] < self.turn]
+        return {
+            "match_id": MATCH, "settings_json": self.settings.to_dict(),
+            "seed": self.seed, "seats": list(self.seats), "turn": self.turn,
+            "submitted": [r["seat"] for r in self.rows if r["turn"] == self.turn],
+            "turns": settled if self.waiting() else list(self.rows),
+            "log": "", "finished": self.finished,
+            "rules_version": engine.RULES_VERSION,
+            "deadline_hours": None, "turn_opened_at": "",
+        }
+
+    # -- writes ------------------------------------------------------------- #
+    def submit(self, seat: int, turn: int, orders: list[dict]) -> None:
+        assert turn == self.turn, "a stale submission is refused, never applied"
+        assert seat not in [r["seat"] for r in self.rows if r["turn"] == turn], \
+            "the unique constraint answers a double submission"
+        self.rows.append({"turn": turn, "seat": seat, "orders_json": orders})
+
+    def resolve(self, turn: int, digest: str, finished: bool) -> bool:
+        if turn != self.turn:
+            return False                  # somebody else got there first
+        assert not self.waiting(), "a turn is resolved only once every seat is in"
+        # The coherence tripwire: the first digest for a turn is kept, and every
+        # later one is compared against it.
+        assert self.digests.setdefault(turn, digest) == digest, \
+            f"two clients resolved turn {turn} to different boards"
+        self.turn, self.finished = turn + 1, finished
+        return True
+
+
+def _orders_for(state, seat: int) -> list[dict]:
+    """What a person at ``seat`` does this turn.
+
+    Deterministic, and drawing nothing from `state.rng` — which is also true of a
+    real person's orders, and is why a bot cannot stand in here: `ai.decide` draws,
+    so each client would leave its own rng in a different place and the dice would
+    diverge for reasons that have nothing to do with what was played.
+    """
+    out = []
+    for sid, system in sorted(state.systems.items()):
+        if system.owner_id != seat or system.ships < 4 or not system.neighbors:
+            continue
+        lanes = sorted(system.neighbors)
+        out.append({"src": sid, "dst": lanes[(sid + state.turn) % len(lanes)],
+                    "ships": system.ships // 2})
+    return out
+
+
+def _client(server: _Endpoint, seat: int):
+    state, ui, log = app.open_match(
+        pbp.match_from_dict(server.state()), _seat(seat), Settings())
+    return [state, ui, log, _seat(seat)]
+
+
+def _tick(server: _Endpoint, client) -> None:
+    """One client's frame: read the match, then do whatever the read asks for."""
+    state, ui, log, seat = client
+    match = pbp.match_from_dict(server.state())
+    app.pbp_adopt(match, seat, ui)
+    verdict = app.pbp_verdict(match, state)
+    if verdict == app.PBP_WAIT:
+        if not ui.pbp_submitted and not match.finished:
+            server.submit(seat.seat, state.turn, _orders_for(state, seat.seat))
+    elif verdict == app.PBP_REBUILD:
+        client[0], client[1], client[2] = app.open_match(match, seat, Settings())
+    else:
+        turn = state.turn
+        app.resolve_turn(state, ui, log, Settings(),
+                         seat_orders=match.orders_for_turn(turn))
+        app.pbp_opened(ui)
+        if verdict == app.PBP_RESOLVE:
+            server.resolve(turn, replay.digest_hex(state), state.winner is not None)
+
+
+def test_two_clients_play_a_match_out_and_never_disagree():
+    """The whole design, end to end. Each client rebuilds the position from
+    inputs the server merely keeps, and the server's own digest check is what
+    would catch them drifting apart."""
+    settings = Settings(mode="random", players=2, nodes=14, seed=7)
+    server = _Endpoint(settings, 7, [1, 2])
+    one, two = _client(server, 1), _client(server, 2)
+
+    for _ in range(400):
+        _tick(server, one)
+        _tick(server, two)
+        if server.finished:
+            break
+
+    assert server.turn >= 6, "the match has to actually get somewhere"
+    assert one[0].turn == two[0].turn == server.turn
+    assert replay.digest_hex(one[0]) == replay.digest_hex(two[0])
+    # ...and each client's log is an ordinary one that rebuilds its own board.
+    for state, _, log, _ in (one, two):
+        assert replay.digest_hex(replay.reconstruct(log)[0]) == replay.digest_hex(state)
+
+
+def test_a_client_that_looks_away_for_several_turns_catches_up():
+    """The rebuild arm. There is no single turn to animate, so the position is
+    rebuilt — and must land exactly where the client that never left is."""
+    settings = Settings(mode="random", players=2, nodes=14, seed=3)
+    server = _Endpoint(settings, 3, [1, 2])
+    one, two = _client(server, 1), _client(server, 2)
+
+    for _ in range(60):
+        _tick(server, one)
+        if server.turn >= 4:
+            break
+        # Seat two is not looking: its orders go in, but it never reads back.
+        if server.waiting() == [2]:
+            server.submit(2, server.turn, _orders_for(two[0], 2))
+
+    assert two[0].turn == 0, "...it really was left behind"
+    _tick(server, two)
+    assert two[0].turn == one[0].turn
+    assert replay.digest_hex(two[0]) == replay.digest_hex(one[0])

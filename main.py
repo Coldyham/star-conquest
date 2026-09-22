@@ -422,6 +422,8 @@ PBP_REFUSED_MSG = "That seat link isn't valid for this match"
 PBP_UNREADABLE_MSG = "The match answered with something unreadable"
 PBP_OUTDATED_MSG = "That match was started under rules this build has moved past"
 PBP_SENDING_MSG = "Sending your orders..."
+PBP_OPENING_MSG = "Opening the match..."
+PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
 
 
 def pbp_request() -> Optional[tuple[str, str]]:
@@ -530,6 +532,66 @@ def pbp_opened(ui: Ui) -> None:
     already in.
     """
     ui.pbp_submitted, ui.pbp_waiting, ui.pbp_msg = False, (), ""
+
+
+def pbp_open(settings: Settings, seed: int) -> tuple[str, Optional[pbp.Request]]:
+    """Ask the endpoint to open a shared match on this setup.
+
+    **Every player is a person.** A match is opened for the seats the setup
+    already has rather than for a roster chosen separately — the simplest rule
+    that fits in a button, and the one a player is already holding in their head
+    when they set the player count. Seating people against bots is a thing the
+    schema, the endpoint and ``pbp.rebuild`` all support; what is missing is a
+    way to *say* it that does not cost the Basic tab a ninth row it has no space
+    for, so it waits for the lobby the design already leaves room for.
+
+    The id is minted here and sent rather than handed back, so the call is
+    idempotent in the only sense that matters: a retry after a lost reply opens
+    a second match rather than silently rewriting the first.
+    """
+    match_id = replay._new_match_id()
+    seats = [pid for pid in range(1, settings.players + 1)]
+    return match_id, pbp.create(match_id, settings, seed, seats)
+
+
+def pbp_links(match_id: str, tokens: dict[int, str]) -> list[str]:
+    """One line per seat: whose it is, and the link that seats them.
+
+    A full URL on the web, where there is a page for a link to point at. Off it
+    there is none — so the fragment goes out bare, which is both what ``--match``
+    takes and what a player pastes onto the address of the web build.
+    """
+    return [f"{config.player_name(seat)}: "
+            f"{webstore.link_url(pbp.link_fragment(match_id, token)) or pbp.link_fragment(match_id, token)}"
+            for seat, token in sorted(tokens.items())]
+
+
+def pbp_handed_out(match_id: str, tokens: dict[int, str]) -> str:
+    """Put every seat's link somewhere the player can get at it. A status line.
+
+    All of them at once, including our own: a match is only a match once the
+    other people are in it, so the thing to hand over is the whole set, and the
+    one that seats us is how we get back in after closing the tab. The same
+    three channels ``share_challenge`` uses and in the same order — clipboard
+    first because it is the only one an installed PWA has, then a file, which is
+    the only one a desktop build has.
+
+    Deliberately not the address bar, for the reason a challenge token is kept
+    out of it: a seat link left there is read back at the next launch, and this
+    one would seat you in a match you had already left.
+    """
+    lines = pbp_links(match_id, tokens)
+    if webstore.copy_to_clipboard("\n".join(lines)):
+        return f"{len(lines)} seat links copied — send one to each player"
+    path = paths.saves_dir() / f"match_{match_id}.txt"
+    try:
+        paths.saves_dir().mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n")
+    except OSError:
+        print("Seat links:\n" + "\n".join(lines))
+        return "Couldn't save the seat links — printed to the console"
+    print(f"Seat links ({path}):\n" + "\n".join(lines))
+    return f"Seat links saved to {path.name} — send one to each player"
 
 
 # What a read of a shared match asks the loop to do next. Decided by the turn
@@ -1037,6 +1099,11 @@ async def main() -> None:
     pbp_ident: pbp.Request | None = None
     pbp_poll: pbp.Request | None = None
     pbp_write: pbp.Request | None = None
+    # ?action=create, and the id it was asked to open under. Minted here and sent
+    # rather than handed back, so a retry after a lost reply opens a second match
+    # instead of quietly rewriting the first.
+    pbp_make: pbp.Request | None = None
+    pbp_making = ""
     pbp_accum = 0
     invite = (pbp.parse_link(pbp.PBP_FRAGMENT + args.match.strip())
               if args.match.strip() else pbp_request())
@@ -1130,6 +1197,32 @@ async def main() -> None:
         # film runs: `Request.poll` empties its own mailbox, so an answer
         # collected mid-playback is an answer thrown away — and, more to the
         # point, a turn must never resolve out from under one being drawn.
+        if pbp_make is not None:
+            status, body = pbp_make.poll()
+            if status != pbp.PENDING:
+                pbp_make = None
+                tokens = (pbp.tokens_from(pbp.parse_body(body) or {}, pbp_making)
+                          if status == pbp.OK else {})
+                if not tokens:
+                    print(f"opening match {pbp_making!r} ended in state {status!r}")
+                    menu.set_status(menu_state, pbp_trouble(status, body), False)
+                elif 1 not in tokens:
+                    # We asked for seat 1 and did not get it. Rather than guess
+                    # which seat is ours out of a roster we no longer recognise,
+                    # hand the links over and let a link seat us like anyone else.
+                    menu.set_status(menu_state,
+                                    pbp_handed_out(pbp_making, tokens), True)
+                else:
+                    # Our own seat is kept; the rest are handed out. Then the
+                    # ordinary opening path takes over, exactly as it would for
+                    # somebody following the link we just sent them.
+                    pbp_seat = pbp.Seat(pbp_making, 1, tokens[1])
+                    pbp.remember(pbp_seat)
+                    invite = (pbp_seat.match_id, pbp_seat.token)
+                    pbp_poll = pbp.fetch_state(pbp_seat.match_id)
+                    resume_prompt = None
+                    menu.set_status(menu_state,
+                                    pbp_handed_out(pbp_making, tokens), True)
         if pbp_ident is not None and invite is not None:
             status, body = pbp_ident.poll()
             if status != pbp.PENDING:
@@ -1184,7 +1277,6 @@ async def main() -> None:
                 elif opening:
                     state, ui, log = open_match(match, pbp_seat, settings)
                     current_seed = match.seed
-                    menu.set_status(menu_state, "", True)
                     scene = "game"
                     auto_accum = 0
                 else:
@@ -1361,6 +1453,17 @@ async def main() -> None:
                     state, ui, log, current_seed = _begin_game(settings)
                     scene = "game"
                     auto_accum = 0
+                elif action == "play_by_post":
+                    # The same setup, opened as a shared match. The seed is
+                    # resolved now and sent with it: "roll a fresh seed" has to
+                    # mean one seed for the whole table, not one each.
+                    if pbp_make is None:
+                        current_seed = resolve_seed(settings)
+                        pbp_making, pbp_make = pbp_open(settings, current_seed)
+                        if pbp_make is None:
+                            menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
+                        else:
+                            menu.set_status(menu_state, PBP_OPENING_MSG, True)
                 elif action == "create_map":
                     editor = mapmaker.open_editor(settings)
                     scene = "maker"

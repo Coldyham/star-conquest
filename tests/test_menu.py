@@ -179,6 +179,44 @@ def test_start_via_click_and_enter():
         pygame.quit()
 
 
+def test_play_by_post_opens_the_same_setup_as_a_shared_match():
+    """A sibling of Start, not a setting: it plays this setup, and everything on
+    the page describes it exactly as it would a game of your own."""
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "play_by_post") == "play_by_post"
+        assert not ms.rects["play_by_post"].colliderect(ms.rects["start"])
+        assert not ms.rects["play_by_post"].colliderect(ms.rects["quit"])
+    finally:
+        pygame.quit()
+
+
+def test_play_by_post_is_not_offered_without_a_board(monkeypatch):
+    """Blanking the leaderboard origin switches every networked feature off, and
+    a shared match is one. A button that could not work must not be drawn — and
+    Quit closes the gap it leaves rather than sitting out in space."""
+    monkeypatch.setattr(menu.webstore, "leaderboard_origin", lambda: "")
+    screen, ms, settings = _setup()
+    try:
+        menu.draw(screen, ms, settings)
+        assert "play_by_post" not in ms.rects
+        assert ms.rects["quit"].x == ms.rects["start"].right + 14
+    finally:
+        pygame.quit()
+
+
+def test_a_hand_map_that_cannot_build_is_refused_by_post_too(monkeypatch):
+    """The same gate Start goes through. Finding out a map won't build *after*
+    the match was opened and the links sent would be the worst possible order."""
+    screen, ms, settings = _setup()
+    monkeypatch.setattr(menu, "_start",
+                        lambda m, st, action="start": None)   # what a blocker does
+    try:
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+    finally:
+        pygame.quit()
+
+
 def test_quit_button_click_returns_quit():
     """Touch/web equivalent of Esc: there's no keyboard on a phone, so without
     this a touch user has no way to leave the setup menu at all."""
@@ -370,15 +408,21 @@ def test_combat_knobs_are_gone_from_advanced():
         pygame.quit()
 
 
+# Everything drawn *outside* the tab panel: the title row's seed control and the
+# footer's own rows. Named once, because both panel-fit tests below have to agree
+# about what counts as chrome or one of them starts policing the other's buttons.
+_CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
+           "filename_field", "get_link", "browse_configs", "seed_field",
+           "seed_random", "create_map", "clear_map"}
+
+
 def test_tab_content_stays_inside_the_panel():
     """Every tab's widgets must fit the fixed 560x496 panel — the menu has no
     scrolling, and the Advanced tab silently overflowed it before the Combat page
     took the combat knobs off it."""
     screen, ms, settings = _setup()
     panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
-    chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
-              "get_link", "browse_configs", "seed_field", "seed_random",
-              "create_map", "clear_map"}
+    chrome = _CHROME
     try:
         for tab in ("basic", "combat", "advanced", "ai"):
             ms.tab = tab
@@ -953,9 +997,7 @@ def test_a_hand_map_setup_still_fits_the_panel():
     the other state the same panel has to hold."""
     screen, ms, settings = _with_map()
     panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
-    chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
-              "get_link", "browse_configs", "seed_field", "seed_random",
-              "create_map", "clear_map"}
+    chrome = _CHROME
     try:
         for tab in ("basic", "combat", "advanced", "ai"):
             ms.tab = tab

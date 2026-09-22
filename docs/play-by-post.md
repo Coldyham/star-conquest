@@ -152,7 +152,7 @@ load-bearing:
 
 # Handover
 
-## State: phases 1-3 done, phase 4 part-done
+## State: phases 1-4 done; deadlines remain
 
 | Phase | What | Commit |
 |---|---|---|
@@ -162,8 +162,10 @@ load-bearing:
 | 4a | Client rebuild/resolve | `d1960da` |
 | 4b | Live-orders visibility fix | `f5b01a9` |
 | 4c | Wire + waiting overlay | `ae302e5` |
+| 4d | The loop: open, poll, submit, step | `957e03d` |
+| 4e | Opening a match from the menu | *(this branch)* |
 
-**Tests: 1102 passing, 1 skipped** (baseline on `main` was 1040), plus 9 JS
+**Tests: 1133 passing, 1 skipped** (baseline on `main` was 1040), plus 9 JS
 files. Run `uv run pytest` and `node --test leaderboard/tests/*.test.mjs`.
 
 ## The one idea everything follows from
@@ -213,31 +215,58 @@ behaviour.
 
 ## Where it stops
 
-**Nothing is wired into `main.py` yet.** Every piece exists and is tested, but
-the loop does not yet open a match, poll it, or submit from it. Remaining:
+**Deadlines, and nothing else.** A match can be opened from the menu, its links
+handed out, and played end to end by everyone who has one. What is missing is
+what happens when somebody stops answering.
 
-1. **`main.py` launch path** — read `#pbp=<match>:<token>` (`pbp.parse_link`)
-   beside the existing `#log=`, fetch the match, `pbp.rebuild` it, seat the `Ui`
-   at the token's seat, and remember the seat (`pbp.remember`).
-2. **Poll on an accumulator** — the idiom is at `main.py`'s `play_accum`. Only
-   while a turn is outstanding; every few seconds is generous for play-by-post.
-3. **Submit on End Turn** — instead of resolving locally: send `ui.pending` +
-   `auto_forward_orders` through `pbp.submit`, set `ui.pbp_submitted`.
-4. **Resolve when ready** — on a poll where `match.ready`, call `pbp.resolve`
-   and `pbp.send_resolved`. Serialize against films: never mid-playback.
-5. **Deadlines** — `deadlinePassed`/`lapsedAction` exist and are tested but have
-   no caller. Policy (settled, see plan): 48h default, first miss **holds**,
-   second consecutive miss falls to the seat's bot. The next client to connect
-   resolves a lapsed turn; no cron, no server-side Python.
-6. **Creating a match from the menu** — nothing calls `?action=create` yet except
-   curl. Needs a menu affordance and somewhere to show the seat links.
+`deadlinePassed`/`lapsedAction` exist in `pbp.mjs` and are tested, and the policy
+is settled: 48h default, the first miss **holds** (already a legal turn —
+production ticks, garrisons defend), a second consecutive miss falls to the
+seat's bot. What has no home yet is *who writes the missing orders down*. They
+have to reach `pbp_orders` like any others, or the next client's rebuild fights a
+different turn: the server cannot compute them (no engine), and a client filling
+them in locally would fork the match. So the shape is a fifth action — the client
+that notices a lapse submits the absent seats' orders on their behalf, marked in
+the `source` column that already exists for it ("hold"/"bot" beside "human") —
+and `handleSubmit`'s "authorised by that seat's own token" rule needs a
+deliberate, narrow exception for it, gated on the deadline having really passed.
+That exception is the whole of the remaining design work; everything either side
+of it is written.
+
+Two smaller things left open on purpose:
+
+* **A shared match seats every player.** One button cannot ask for a roster, and
+  the Basic tab has no ninth row to spare (`test_tab_content_stays_inside_the_panel`
+  guards its 560x496 box). Seating people against bots is supported all the way
+  down — `pbp_matches.seats` is a roster, `pbp.rebuild` takes a `decide` — so
+  this is a missing *way to say it*, not a missing capability, and it belongs
+  with the lobby the design already leaves room for.
+* **Seat links go out via the clipboard**, all of them at once, one line per
+  seat, exactly as `share_challenge` hands over a challenge token (and never via
+  the address bar, for the same reason: a seat link left there is read back at
+  the next launch and would seat you in a match you had already left). A modal
+  listing the seats with a Copy button each would be nicer and is a contained
+  piece of UI work.
 
 ## Traps for whoever picks this up
 
-* **`main.py` must not resolve a play-by-post turn locally on End Turn.** That is
-  the whole difference from a single-player game: the turn advances when the last
-  seat submits, not when anyone presses a key. `input.handle_event` already
-  returns `None` for End Turn while `ui.awaiting_others(state)`.
+* **Nothing may resolve a play-by-post turn on a clock of its own.** That is the
+  whole difference from a single-player game: the turn advances when the last
+  seat submits. End Turn *submits* (`main.pbp_send`) and `input.handle_event`
+  returns `None` for a second press while `ui.awaiting_others(state)`; play and
+  autoplay are taken away outright, key and footer button alike, because both
+  exist to run turns on a timer.
+* **The roster is the truth about who the people are, not the `is_human` flags a
+  rebuild leaves behind.** `mapgen` stamps seat 1 regardless and
+  `replay.reconstruct` restores that stamp from the log's single-seat `"ai"`
+  flag, so `pbp.seat_people` sets the whole thing outright — a match seated at 2
+  and 3 would otherwise carry a phantom person at seat 1 holding every turn
+  forever. `main.open_match` re-stamps after `resume_game` for exactly this.
+* **A settled turn goes through `main.resolve_turn`, not beside it.** Everything
+  after the engine returns — the film, the marks, the fog, the log, the camera
+  snap — is the same work whoever collected the orders. `tests/test_pbp_client.py`
+  pins the join: the board the shell steps to and the board another client
+  rebuilds from the opening must be the same board.
 * **Desktop resolves the leaderboard origin to *production*.** There is no page
   host to derive a sibling from off the web (`paths.sibling_host`), so testing a
   preview from a desktop build means overriding `webstore.leaderboard_origin`.
