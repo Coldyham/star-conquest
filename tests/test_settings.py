@@ -13,8 +13,9 @@ from starconquest import config
 from starconquest.custommap import CustomMap, MapNode
 from starconquest.model import AiParams
 from starconquest.settings import (_GLOBAL_KNOBS, _LEGACY_KEY_DROPS, Challenge,
-                                   Settings, _hash_setup, build_state,
-                                   random_seed, resolve_seed)
+                                   RANDOM_STRATEGY, Settings, _hash_setup,
+                                   build_state, random_seed, resolve_seed,
+                                   resolve_strategy)
 
 
 @contextlib.contextmanager
@@ -502,6 +503,86 @@ def test_build_state_stamps_per_seat_strategy():
         state = build_state(s, 5)
         assert state.players[2].ai_strategy == "rusher"
         assert state.players[3].ai_strategy == "heuristic"
+
+
+@contextlib.contextmanager
+def _roster(*names):
+    """Register throwaway strategies, so a pool test doesn't ride on models/."""
+    from starconquest import ai
+    saved = dict(ai.STRATEGIES)
+    try:
+        ai.STRATEGIES.clear()
+        for name in names:
+            ai.register(name, lambda state, pid: [])
+        yield
+    finally:
+        ai.STRATEGIES.clear()
+        ai.STRATEGIES.update(saved)
+
+
+def test_a_random_seat_resolves_to_a_real_bot():
+    """The whole point: the placeholder never reaches a live game, so every
+    oracle, `botio`'s seat reveal and the bot column see the bot that is really
+    deciding rather than a dispatcher they cannot see through."""
+    with _preserve_config(), _roster("alpha", "beta"):
+        s = Settings(players=3, nodes=18)
+        s.ai_strategy[1] = RANDOM_STRATEGY
+        state = build_state(s, 5)
+        assert state.players[2].ai_strategy in ("alpha", "beta")
+        assert s.ai_strategy[1] == RANDOM_STRATEGY, "the setup keeps the placeholder"
+
+
+def test_a_random_seat_is_the_same_bot_every_time_that_seed_is_played():
+    """A seed reproduces the opponents as surely as it reproduces the map — which
+    is what lets a challenge link be raced fairly, and a match be resumed."""
+    with _roster("alpha", "beta", "gamma", "delta"):
+        picks = [resolve_strategy(RANDOM_STRATEGY, 7, 2) for _ in range(20)]
+        assert len(set(picks)) == 1
+
+
+def test_random_seats_are_drawn_independently_of_each_other():
+    with _roster("alpha", "beta", "gamma", "delta"):
+        # Over enough seeds, two seats must disagree at least sometimes; a shared
+        # draw would make them identical on every one.
+        pairs = [(resolve_strategy(RANDOM_STRATEGY, n, 2),
+                  resolve_strategy(RANDOM_STRATEGY, n, 3)) for n in range(40)]
+        assert any(a != b for a, b in pairs)
+
+
+def test_resolving_a_random_seat_never_touches_the_engine_dice():
+    """Derived, never drawn (`botio.decide_seed`'s rule). Leaving a seat to chance
+    must not shift `state.rng`, or the same seed would fight the same map
+    differently depending on how many seats were left to it."""
+    with _preserve_config(), _roster("alpha", "beta", "gamma"):
+        fixed = Settings(players=3, nodes=18)
+        fixed.ai_strategy[1] = "alpha"
+        chance = Settings(players=3, nodes=18)
+        chance.ai_strategy[1] = RANDOM_STRATEGY
+        rolls = []
+        for cfg in (fixed, chance):
+            state = build_state(cfg, 11)
+            rolls.append([state.rng.random() for _ in range(8)])
+        assert rolls[0] == rolls[1]
+
+
+def test_a_named_strategy_passes_through_resolution_untouched():
+    with _roster("alpha", "beta"):
+        assert resolve_strategy("beta", 3, 2) == "beta"
+        assert resolve_strategy("not_registered", 3, 2) == "not_registered"
+
+
+def test_a_random_seat_falls_back_when_nothing_is_registered():
+    """Same degradation `ai.decide` already applies to an unrecognised name,
+    rather than an exception out of the one funnel to a GameState."""
+    with _roster():
+        assert resolve_strategy(RANDOM_STRATEGY, 3, 2) == "heuristic"
+
+
+def test_the_pool_never_offers_the_placeholder_itself():
+    """`random` names no decision function, so picking it would loop."""
+    with _roster("alpha", RANDOM_STRATEGY):
+        assert all(resolve_strategy(RANDOM_STRATEGY, n, 2) == "alpha"
+                   for n in range(20))
 
 
 def test_random_seed_is_in_range_and_not_a_fixed_sequence():

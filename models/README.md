@@ -241,6 +241,14 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 commits its surplus instead of parking it), `knower.py` (the oracle — it runs every
 rival's own `decide` before the engine asks for it).
 
+The dropdown carries one entry that is **not** a bot and cannot be one: `random`
+leaves the seat's bot to the match seed, and `settings.build_state` resolves it to
+one of the above before the game starts. It is deliberately not a model file that
+forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
+seat whose bot it does not yet know (see *Predicting the other seats*), and every
+answer it could give is wrong for some pick. A drop-in of yours joins the pool the
+moment it registers; don't name one `random.py`.
+
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating
 the configuration without them. That is the bar here — measure before you keep.

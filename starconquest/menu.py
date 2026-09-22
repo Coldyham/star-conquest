@@ -16,9 +16,10 @@ Tabs: **Basic** (players/systems/mode/seed/autoplay), **Combat** (the square law
 explained, with a live demo fight and the two combat knobs beside it),
 **Advanced** (curated global balance knobs, bound to ``Settings`` fields), and
 **AI** (per-seat AI tuning with copy/reset-all shortcuts, plus a **Strategy**
-dropdown listing the built-in heuristic and any drop-in ``models/`` files, via
-``ai.load_models``; the bot-defined ``aux`` knob is labelled by the selected
-strategy, or absent if it declares no meaning for it — see ``ai.aux_spec``).
+dropdown listing the built-in heuristic, any drop-in ``models/`` files (via
+``ai.load_models``) and ``random``, which leaves the choice to the seed; the
+bot-defined ``aux`` knob is labelled by the selected strategy, or absent if it
+declares no meaning for it — see ``ai.aux_spec``).
 The Advanced and AI tabs each carry a die button that rolls their sliders to
 random in-bounds values, for fun — the same roll-the-dice metaphor as the seed
 control. Sliders are driven by the spec tables below so drawing and hit-routing
@@ -44,7 +45,7 @@ import pygame
 from . import ai, combat, config, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, is_web, saves_dir
-from .settings import Settings, fresh_rng, random_seed
+from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -288,7 +289,7 @@ class MenuState:
     status_until: int = 0  # ms tick after which status hides
     strategy_open: bool = False  # is the AI-seat strategy dropdown open
     strategies: list[str] = field(  # dropdown options, refreshed on open
-        default_factory=lambda: ["heuristic"]
+        default_factory=lambda: _strategy_options()
     )
     # Un-challenge confirm modal: raised when an edit has just made the loaded
     # challenge's score incomparable. `challenge_snapshot` is the last config that
@@ -310,6 +311,18 @@ class MenuState:
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
     canvas_scale: float = 1.0
     canvas_offset: tuple[int, int] = (0, 0)
+
+
+def _strategy_options() -> list[str]:
+    """Dropdown options: every registered strategy, then ``random``.
+
+    ``random`` is last because it is not one of them — it names no decision
+    function and is resolved to one of the others by ``settings.build_state``
+    from the match seed, so a seat set to it faces a bot the player has not been
+    told. Appending rather than inserting also leaves the measured ladder order
+    above it undisturbed.
+    """
+    return ai.available_strategies() + [RANDOM_STRATEGY]
 
 
 def _ai_specs(ms: MenuState, settings: Settings) -> tuple:
@@ -1581,7 +1594,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "strategy":  # toggle the dropdown, rescanning models/
         if not ms.strategy_open:
             ai.load_models()
-            ms.strategies = ai.available_strategies()
+            ms.strategies = _strategy_options()
         ms.strategy_open = not ms.strategy_open
     elif hit.startswith("strategy_opt_"):
         idx = int(hit[len("strategy_opt_") :])

@@ -701,6 +701,29 @@ intact.
   `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
   list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
   `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
+  - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`,
+    the last entry in the menu's Strategy dropdown) is not a key into
+    `ai.STRATEGIES` at all — `settings.resolve_strategy` replaces it with a real
+    bot inside `build_state`, so nothing downstream ever sees the placeholder.
+    That is why it is resolved here rather than by a `models/` dispatcher bot:
+    `knower._model_for` asks a module `is_oracle_seat(player)` and a dispatcher
+    could not answer, having no seed on a `Player` — resolving one layer earlier
+    keeps every oracle, `botio`'s seat reveal and the leaderboard's bot column
+    looking at the bot that is really deciding, and so keeps the whole roster
+    eligible. The pick is **derived, never drawn** (`random.Random(f"{seed}:
+    strategy:{pid}")`, the rule `botio.decide_seed` follows): leaving a seat to
+    chance must not shift `state.rng`, or the same seed would fight the same map
+    differently depending on how many seats were left to it. A seed therefore
+    reproduces the opponents as surely as it reproduces the map, which is what
+    lets a challenge link on one be raced fairly. The pool is
+    `ai.available_strategies()` read at build time, so a drop-in model joins it;
+    that cannot move a stored game, since `replay.reconstruct` applies recorded
+    orders and dice and asks no seat to decide. `Settings` keeps `"random"`, so
+    a shared link stays a mystery to its recipient and the leaderboard's
+    opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
+    the bot that played — the setup's rule, not its outcome. Disclosing the
+    resolved names would go on `Challenge` (excluded from `challenge_key`), not
+    on `Settings`, which would move every digest ever shared.
   - Those fields are readable for *every* seat — see `models/knower.py` for
     what that makes possible. Any such bot must keep three rules: never call
     `ai.load_models()` from inside a model (it re-`exec_module`s every file,

@@ -16,7 +16,7 @@ import pygame  # noqa: E402
 
 from starconquest import ai, combat, config, menu  # noqa: E402
 from starconquest.menu import MenuState  # noqa: E402
-from starconquest.settings import Challenge, Settings  # noqa: E402
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings  # noqa: E402
 
 
 def _setup():
@@ -518,6 +518,29 @@ def test_ai_tab_strategy_dropdown_select():
         assert not ms.strategy_open
     finally:
         ai.STRATEGIES.pop("dropdown_test", None)
+        pygame.quit()
+
+
+def test_random_is_offered_last_and_declares_no_aux_knob():
+    """A seat can be left to the seed. It sits after the measured ladder order
+    because it is not one of the strategies — `settings.build_state` turns it
+    into one — and it labels no `aux` knob, since which bot will read that knob
+    is exactly what has not been decided yet."""
+    screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
+    ms.tab = "ai"
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        _click_key(screen, ms, settings, "strategy")
+        assert ms.strategies[-1] == RANDOM_STRATEGY
+        assert ms.strategies.count(RANDOM_STRATEGY) == 1, "not a registered strategy too"
+        i = ms.strategies.index(RANDOM_STRATEGY)
+        _click_key(screen, ms, settings, f"strategy_opt_{i}")
+        assert settings.ai_strategy[1] == RANDOM_STRATEGY
+
+        menu.draw(screen, ms, settings)
+        assert "ai_aux" not in ms.rects
+        assert menu._ai_specs(ms, settings) == menu._AI_PARAMS
+    finally:
         pygame.quit()
 
 
