@@ -723,7 +723,12 @@ intact.
     opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
     the bot that played — the setup's rule, not its outcome. Disclosing the
     resolved names would go on `Challenge` (excluded from `challenge_key`), not
-    on `Settings`, which would move every digest ever shared.
+    on `Settings`, which would move every digest ever shared. The win overlay
+    *does* reveal it (`render._winner_label`, "Verdant (Knower) wins!") — the
+    payoff, and free, since there is no turn left to play with the knowledge. It
+    reads `Player.ai_strategy` directly, so it needs no `ai` import and names the
+    resolved bot rather than the placeholder; neutral and any human seat (a
+    claimed one included) are excluded, since nothing decided for them.
   - Those fields are readable for *every* seat — see `models/knower.py` for
     what that makes possible. Any such bot must keep three rules: never call
     `ai.load_models()` from inside a model (it re-`exec_module`s every file,

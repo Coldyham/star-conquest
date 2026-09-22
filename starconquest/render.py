@@ -2032,7 +2032,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     if state.winner == 0:
         msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
     else:
-        msg = f"{config.player_name(state.winner)} wins!"
+        msg = f"{_winner_label(state)} wins!"
         color = config.player_color(state.winner)
 
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
@@ -2107,6 +2107,36 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         ui.leaderboard_button_rect = (0, 0, 0, 0)
 
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
+
+
+def _winner_label(state: GameState) -> str:
+    """"Verdant (Knower)" — the winning seat, and the bot that was driving it.
+
+    Named only for a seat no person was playing: a human seat says who won and
+    stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
+    human seat by then, so a game somebody took over is credited to them rather
+    than to the strategy it opened under. The whole board is a bot's under
+    autoplay, which is exactly when this is worth reading.
+
+    Neutral is excluded explicitly. It is a real player (``id == 0``) carrying the
+    default ``ai_strategy`` like any other, but nothing ever asks it to decide —
+    and it reaches here on the one path that can name it, a mutual annihilation,
+    where "Neutral (Heuristic)" would credit a bot that never played.
+
+    Read straight off ``Player.ai_strategy``; ``render`` imports no ``ai`` and
+    needs none here. That field holds the *resolved* strategy, so a seat set to
+    ``settings.RANDOM_STRATEGY`` is revealed here — which is the point, and costs
+    nothing, since there is no turn left to play with the knowledge.
+
+    Capitalised rather than title-cased, so a drop-in keeps whatever shape its
+    author gave its filename (``claudeBot`` stays ``ClaudeBot``, not ``Claudebot``).
+    """
+    name = config.player_name(state.winner)
+    player = state.players.get(state.winner)
+    if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
+        return name
+    bot = player.ai_strategy
+    return f"{name} ({bot[:1].upper()}{bot[1:]})"
 
 
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:

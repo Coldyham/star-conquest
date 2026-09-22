@@ -82,6 +82,16 @@ bot cannot move a stored game") is untouched. A caller that never ran
 `ai.load_models()` sees only the built-in heuristic, which is the same
 degradation `ai.decide` already applies to an unrecognised strategy name.
 
+**The win overlay reveals it.** `render._winner_label` reads `Player.ai_strategy`
+— the resolved name — so a mystery match ends on "Verdant (Knower) wins!" rather
+than leaving the one interesting fact about it unreadable. Disclosing it at game
+over costs nothing, since there is no turn left in which to use it, and it is the
+whole payoff of having played blind. It excludes a human seat (so a game claimed
+part-way through, `engine.claim_seat`, is credited to the person rather than to
+the strategy it opened under) and neutral, which carries a default `ai_strategy`
+like every other player but never decides anything — it reaches the overlay only
+on a mutual annihilation, where naming a bot would credit one that never played.
+
 **`Settings` keeps the placeholder, so the mystery survives the link.** Only
 `Player` is resolved; `Settings.ai_strategy` still reads `random`, so a saved
 config, a shared setup and a challenge link all preserve it for their recipient,
