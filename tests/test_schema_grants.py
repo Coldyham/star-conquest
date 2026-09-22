@@ -62,13 +62,32 @@ def _python_uses() -> set[tuple[str, str]]:
 
 
 def _function_uses() -> set[tuple[str, str]]:
-    """...and the pairs the Netlify functions need, read off their REST paths."""
+    """...and the pairs the Netlify functions need, read off their REST paths.
+
+    Two shapes, because the functions write queries two ways. `log.mjs` and
+    `replay.mjs` fetch a whole `/rest/v1/<table>` URL inline; `pbp.mjs` builds
+    `/rest/v1` once in a helper and passes `"/<table>?…"` to it, which the first
+    pattern cannot see at all. Missing the second would make this test *pass
+    vacuously* for that function — the precise failure it exists to prevent, so
+    it is worth the second regex rather than a convention nobody can enforce.
+
+    The privilege is inferred from the method in the same window. PATCH is read
+    as an update: PostgREST spells one that way, and `pbp_matches` is the only
+    relation on this board that is ever updated at all.
+    """
     uses = set()
     for path in sorted(FUNCTIONS.glob("*.mjs")):
         text = path.read_text()
-        for match in re.finditer(r"/rest/v1/(\w+)", text):
-            window = text[match.start(): match.start() + 400]
-            uses.add((match.group(1), "insert" if '"POST"' in window else "select"))
+        for pattern in (r"/rest/v1/(\w+)", r"""call\(\s*[`"']/(\w+)"""):
+            for match in re.finditer(pattern, text):
+                window = text[match.start(): match.start() + 400]
+                if '"PATCH"' in window:
+                    privilege = "update"
+                elif '"POST"' in window:
+                    privilege = "insert"
+                else:
+                    privilege = "select"
+                uses.add((match.group(1), privilege))
     return uses
 
 
@@ -90,23 +109,32 @@ def test_the_scrape_actually_found_the_callers():
     assert ("game_logs", "insert") in uses          # netlify/functions/log.mjs
     assert ("public_watchable_replays", "select") in uses  # netlify/functions/replay.mjs
     assert ("bot_scores", "insert") in uses         # bot_replay's upsert
+    assert ("pbp_matches", "select") in uses        # netlify/functions/pbp.mjs
+    assert ("pbp_matches", "insert") in uses        # ...which opens a match
+    assert ("pbp_orders", "insert") in uses         # ...and takes a submission
     assert len(uses) >= 8
 
 
 @pytest.mark.parametrize("relation",
-                         ["game_logs", "public_replays", "public_watchable_replays"])
+                         ["game_logs", "public_replays", "public_watchable_replays",
+                          "pbp_matches", "pbp_orders"])
 def test_a_replay_is_never_granted_to_the_public(relation):
     """The other half of the rule, and the one that matters more: `game_logs` is
     readable by nobody but the worker, `public_replays` lends out only the
     replays a posted score already points at, and `public_watchable_replays`
     (the union `replay.mjs` actually reads) has no grant to the public at all —
     everything it can serve is already reachable some other way (`public_replays`
-    directly, or a bot's own `bot_scores` row), so it needs no door of its own."""
+    directly, or a bot's own `bot_scores` row), so it needs no door of its own.
+
+    The two `pbp_*` tables are here for a different reason: they are the only
+    mutable rows on this board, and a seat token is the only thing that decides
+    who may move a seat's ships. An anon grant on either would hand that away, so
+    like `game_logs` they are reachable through one function and nowhere else."""
     public = _granted("anon")
     assert "insert" not in public.get(relation, set())
     assert "update" not in public.get(relation, set())
     assert "delete" not in public.get(relation, set())
-    if relation in ("game_logs", "public_watchable_replays"):
+    if relation in ("game_logs", "public_watchable_replays", "pbp_matches", "pbp_orders"):
         assert public.get(relation, set()) == set(), f"{relation} is not directly public"
 
 
