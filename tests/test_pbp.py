@@ -283,3 +283,106 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
         pbp.match_from_dict(_state_payload(turn=1, turns=rows)))
     assert replay.digest_hex(rebuilt) == digest
     assert replay.digest_hex(replay.reconstruct(log)[0]) == digest
+
+
+# --------------------------------------------------------------------------- #
+# The wire (both backends intercepted; nothing here touches a network)
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def on_a_board(monkeypatch):
+    """An origin to talk to, without one being configured for real."""
+    monkeypatch.setattr(pbp.webstore, "leaderboard_origin", lambda: "https://board")
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Capture what the desktop backend would put on the wire."""
+    calls = []
+
+    def fake(url, body):
+        calls.append((url, body))
+        return pbp.Request(web=False)
+
+    monkeypatch.setattr(pbp, "_call_desktop", fake)
+    monkeypatch.setattr(pbp, "is_web", lambda: False)
+    return calls
+
+
+def test_a_submission_names_its_match_seat_and_turn(on_a_board, sent):
+    seat = pbp.Seat(MATCH, 2, TOKEN)
+    pbp.submit(seat, 3, [Order(2, 5, 6, 4)])
+    url, body = sent[0]
+    assert "action=submit" in url
+    payload = __import__("json").loads(body)
+    assert payload["match_id"] == MATCH
+    assert payload["token"] == TOKEN
+    assert payload["turn"] == 3
+
+
+def test_a_submitted_order_carries_no_owner(on_a_board, sent):
+    """The endpoint stamps the seat from the token, so an owner on the wire would
+    be a second claim to keep in step — and the thing that makes a foreign order
+    inexpressible rather than merely filtered."""
+    pbp.submit(pbp.Seat(MATCH, 2, TOKEN), 0, [Order(2, 5, 6, 4)])
+    payload = __import__("json").loads(sent[0][1])
+    assert payload["orders"] == [{"src": 5, "dst": 6, "ships": 4}]
+    assert "owner" not in payload["orders"][0]
+
+
+def test_nothing_is_sent_for_a_seat_we_do_not_really_hold(on_a_board, sent):
+    assert pbp.submit(pbp.Seat(MATCH, 2, "not-a-token"), 0, []) is None
+    assert pbp.send_resolved(pbp.Seat("bad", 1, TOKEN), 0,
+                             replay.GameLog(seed=1, settings={}), "d", False) is None
+    assert sent == []
+
+
+def test_a_fetch_for_a_malformed_match_id_is_never_attempted(on_a_board, sent):
+    assert pbp.fetch_state("not-an-id") is None
+    assert sent == []
+
+
+def test_nothing_is_attempted_with_no_endpoint(monkeypatch, sent):
+    monkeypatch.setattr(pbp.webstore, "leaderboard_origin", lambda: "")
+    assert pbp.fetch_state(MATCH) is None
+    assert pbp.submit(pbp.Seat(MATCH, 1, TOKEN), 0, []) is None
+    assert sent == []
+
+
+def test_a_poll_answers_pending_until_the_thread_lands():
+    request = pbp.Request(web=False)
+    assert request.poll() == (pbp.PENDING, "")
+    request._result.append((pbp.OK, "{}"))
+    assert request.poll() == (pbp.OK, "{}")
+
+
+def test_the_web_mailbox_is_cleared_once_collected(monkeypatch):
+    """A stale `ok` from an earlier session would otherwise read as an instant
+    success carrying somebody else's answer (the trap `share` documents)."""
+    monkeypatch.setattr(pbp.webstore, "get",
+                        lambda key: pbp.OK if key == pbp.WEB_PBP_STATE_KEY else "body")
+    cleared = []
+    monkeypatch.setattr(pbp.webstore, "set",
+                        lambda key, value: cleared.append((key, value)) or True)
+    assert pbp.Request(web=True).poll() == (pbp.OK, "body")
+    assert (pbp.WEB_PBP_STATE_KEY, "") in cleared
+    assert (pbp.WEB_PBP_BODY_KEY, "") in cleared
+
+
+def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, monkeypatch):
+    """Inspected as the JS source string it really is — `test_share` does the
+    same. A promise with no `.catch` surfaces in the console as a crash."""
+    source = []
+
+    class FakeWindow:
+        @staticmethod
+        def eval(js):
+            source.append(js)
+
+    fake = type("P", (), {"window": FakeWindow})
+    monkeypatch.setattr(pbp, "is_web", lambda: True)
+    monkeypatch.setitem(__import__("sys").modules, "platform", fake)
+    pbp.submit(pbp.Seat(MATCH, 1, TOKEN), 0, [Order(1, 2, 3, 4)])
+    js = source[0]
+    assert ".catch(" in js, "an unhandled rejection reads as a crash"
+    assert "'POST'" in js and "application/json" in js
+    assert TOKEN in js

@@ -309,6 +309,16 @@ class Ui:
     # somebody else's, so none of the sharing below is offered for it: watching a
     # replay must not be one press away from posting its score as your own.
     watched: bool = False
+    # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
+    # the match id, `pbp_waiting` the seats still to move for the live turn, and
+    # `pbp_submitted` whether we have sent ours — which is what puts the waiting
+    # overlay up. Held here rather than on `GameState` for the reason every other
+    # human-only concern is: the simulation neither knows nor cares that the seat
+    # beside it is a person somewhere else.
+    pbp_match: str = ""
+    pbp_submitted: bool = False
+    pbp_waiting: tuple[int, ...] = ()
+    pbp_msg: str = ""            # what the last call said, drawn on the overlay
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -486,6 +496,21 @@ class Ui:
         disagree about when fast forward means anything.
         """
         return state.winner is None and state.is_defeated(self.human_id)
+
+    @property
+    def in_pbp(self) -> bool:
+        """Whether this is a shared match rather than a game of our own."""
+        return bool(self.pbp_match)
+
+    def awaiting_others(self, state: GameState) -> bool:
+        """Whether to hold the board and say we are waiting.
+
+        Only once *we* have submitted: before that the turn is ours to play, and
+        the fact that somebody else is already in is not something to interrupt
+        anyone with. A decided match is nobody's turn, so it never waits.
+        """
+        return (self.in_pbp and self.pbp_submitted
+                and state.winner is None)
 
     def can_post(self, state: GameState) -> bool:
         """Is this result the player's own to publish — as a challenge link or as

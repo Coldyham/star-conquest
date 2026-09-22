@@ -390,7 +390,11 @@ def _clear_selected(ui: Ui) -> None:
 
 def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        return "end_turn"
+        # A play-by-post turn we have already submitted is not ours to end again:
+        # the turn advances when the last seat is in, not when anyone presses a
+        # key. Suppressed rather than swallowed further up so every other control
+        # — panning, looking, opening history — keeps working while you wait.
+        return None if ui.awaiting_others(state) else "end_turn"
     if event.key == pygame.K_p:
         return "toggle_play"
     if event.key == pygame.K_a:
@@ -597,7 +601,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     # (route mode borrows the End Turn block, a running film takes it away), and a
     # zeroed rect still contains the point (0, 0).
     if ui.end_turn_rect[2] and _point_in_rect(pos, ui.end_turn_rect):
-        return "end_turn"
+        return None if ui.awaiting_others(state) else "end_turn"
     if ui.play_pause_rect[2] and _point_in_rect(pos, ui.play_pause_rect):
         return "toggle_play"
     if ui.autoplay:

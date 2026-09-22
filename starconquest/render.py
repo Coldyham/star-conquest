@@ -110,6 +110,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_scrubber(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
+    elif ui.awaiting_others(state):
+        _draw_waiting_overlay(surface, state, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -1193,8 +1195,17 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # A film is a playback of a turn already resolved, so the button that would
     # resolve the next one goes away for its duration — the same take-it-away
-    # rather than guard-it treatment route mode gets just above.
-    ui.end_turn_rect = (0, 0, 0, 0) if ui.film is not None else (br.x, br.y, br.w, br.h)
+    # rather than guard-it treatment route mode gets just above. A play-by-post
+    # turn we have already submitted is the same case for a different reason: the
+    # turn advances when the last seat is in, and nothing anyone presses here
+    # brings that forward.
+    _gone = ui.film is not None or ui.awaiting_others(state)
+    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
+    if _gone and ui.awaiting_others(state):
+        _text(surface, _fonts()["normal"], "Orders sent", config.COLOR_TEXT_DIM,
+              center=br.center)
+        _draw_footer_buttons(surface, state, ui, by)
+        return
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
     pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:
@@ -2016,6 +2027,66 @@ def draw_confirm_quit(surface) -> None:
             (cancel, *_BTN_GREEN),
         ),
     )
+
+
+def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
+    """Play-by-post: our orders are in, and the turn is waiting on somebody else.
+
+    A veil rather than a modal — the board stays readable underneath, because the
+    position is exactly what you want to look at while you wait, and there is
+    nothing here to answer. The whole stack is measured and then centred, in the
+    same shape ``_draw_win_overlay`` uses, so a line that is not drawn tightens it
+    up rather than leaving a hole.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    # Lighter than the win overlay's: that one ends a game, this one is a pause in
+    # the middle of it and the board underneath still has to be legible.
+    veil.fill((5, 6, 12, 140))
+    surface.blit(veil, (0, 0))
+
+    # Centred on the *map*, not the window, and wrapped to it. The side panel is
+    # still being drawn and still has to be readable, and at a large UI scale a
+    # centred line long enough to say two players' names runs straight across it.
+    px, py, pw, ph = config.play_rect()
+    cx = px + pw // 2
+    width = pw - config.s(48)
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
+    if not names:
+        headline, detail = "Resolving the turn...", ""
+    elif len(names) == 1:
+        headline, detail = "Waiting for " + names[0], "Your orders are in."
+    else:
+        headline = f"Waiting for {len(names)} players"
+        detail = ", ".join(names)
+
+    # Measured, then centred — a line that is not drawn tightens the stack up
+    # rather than leaving a hole, and one too long for the map wraps rather than
+    # spilling out of it.
+    note = "Fog here is a convenience, not a guarantee."
+    stack: list[tuple[pygame.font.Font, str, tuple[int, int, int]]] = []
+    for font, line, color in ((big, headline, config.COLOR_TEXT),
+                              (normal, detail, config.COLOR_TEXT_DIM),
+                              (small, ui.pbp_msg, config.COLOR_TEXT_DIM),
+                              (small, note, config.COLOR_TEXT_DIM)):
+        if not line:
+            continue
+        stack.extend((font, part, color) for part in _wrap(font, line, width))
+
+    total = sum(font.get_height() + config.s(6) for font, _, _ in stack)
+    y = py + ph // 2 - total // 2
+    for font, line, color in stack:
+        _text(surface, font, line, color, center=(cx, y + font.get_height() // 2))
+        y += font.get_height() + config.s(6)
+
+
+def _seat_name(state: GameState, seat: int) -> str:
+    """What to call a seat we are waiting on. Its player name, which is already
+    how every other readout names a side."""
+    player = state.players.get(seat)
+    return player.name if player is not None else f"Seat {seat}"
 
 
 def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:

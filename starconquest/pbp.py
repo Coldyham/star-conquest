@@ -49,7 +49,8 @@ from typing import Optional
 
 from . import engine, replay, webstore
 from .model import GameState, Order
-from .paths import LEADERBOARD_PBP_PATH, WEB_PBP_SEATS_KEY
+from .paths import (LEADERBOARD_PBP_PATH, WEB_PBP_BODY_KEY, WEB_PBP_SEATS_KEY,
+                    WEB_PBP_STATE_KEY, is_web)
 from .settings import Settings, build_state
 
 # A seat token as the endpoint mints one: 128 bits as hex.
@@ -303,3 +304,182 @@ def resolve(match: Match) -> tuple[GameState, replay.GameLog, str]:
     if state.winner is not None:
         log.mark_finished(state.winner)
     return state, log, replay.digest_hex(state)
+
+
+# --------------------------------------------------------------------------- #
+# Talking to the endpoint, without ever making the frame wait
+# --------------------------------------------------------------------------- #
+# The states a poll can answer with, mirroring ``share``: the plumbing worked and
+# there is a body, the plumbing worked and there is nothing there, or it did not
+# work. Kept as separate values because they send the player somewhere different.
+PENDING, OK, ERROR, MISSING = "pending", "ok", "error", "missing"
+
+# Long enough for a slow phone, short enough that a daemon thread is gone well
+# before anyone quits. Same figure ``share`` uses, for the same reason.
+_TIMEOUT = 20
+
+
+class Request:
+    """One in-flight call to the endpoint, polled once a frame.
+
+    ``share.Download``'s shape, generalised to carry a POST body and to hand back
+    the response either way — a submission's answer says who else is still to
+    move, so unlike a replay upload this is a request whose *result* is the
+    point. Deliberately not a promise, a coroutine or a callback: the game loop
+    is a frame loop and the one thing it must never do is wait.
+
+    ``poll`` answers ``(state, body)``.
+    """
+
+    def __init__(self, web: bool) -> None:
+        self._web = web
+        self._result: list[tuple[str, str]] = []   # a one-slot mailbox
+
+    def poll(self) -> tuple[str, str]:
+        if self._web:
+            return self._poll_web()
+        return self._result[0] if self._result else (PENDING, "")
+
+    def _poll_web(self) -> tuple[str, str]:
+        """Collect whatever the fetch parked in localStorage.
+
+        Read through ``webstore.get`` rather than by evaluating JS, because that
+        is the read path the rest of the game proves works every launch. Handing
+        JavaScript a string to *store* and reading it back through the accessor
+        we already trust avoids depending on ``window.eval`` returning a value,
+        which nothing else here needs (``share`` documents the same reasoning).
+        """
+        state = webstore.get(WEB_PBP_STATE_KEY)
+        if state == OK:
+            body = webstore.get(WEB_PBP_BODY_KEY)
+            _clear_web_slot()
+            return OK, body
+        if state in (ERROR, MISSING):
+            _clear_web_slot()
+            return state, ""
+        return PENDING, ""
+
+
+def _clear_web_slot() -> None:
+    """Empty the mailbox, so a stale answer is never read as a fresh one."""
+    webstore.set(WEB_PBP_STATE_KEY, "")
+    webstore.set(WEB_PBP_BODY_KEY, "")
+
+
+def call(action: str, payload: Optional[dict] = None, **params) -> Optional[Request]:
+    """Start a call to ``action``. None if it cannot be attempted at all.
+
+    ``payload`` makes it a POST. Nothing is awaited and nothing blocks; the
+    caller polls the returned ``Request`` once a frame.
+    """
+    url = endpoint(action)
+    if not url:
+        return None
+    for key, value in params.items():
+        url += f"&{key}={value}"
+    body = json.dumps(payload) if payload is not None else None
+    return _call_web(url, body) if is_web() else _call_desktop(url, body)
+
+
+def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
+    """A ``fetch`` that parks its own result where the poll can collect it.
+
+    The handlers leave the slot in exactly one of the three states whatever
+    happens: a non-2xx is as much an answer as a dead connection, and a promise
+    with no rejection handler surfaces in the console as a crash.
+    """
+    import platform as _platform
+
+    state, slot = json.dumps(WEB_PBP_STATE_KEY), json.dumps(WEB_PBP_BODY_KEY)
+    init = ("{method:'POST',headers:{'Content-Type':'application/json'},body:"
+            f"{json.dumps(body)}}}") if body is not None else "{}"
+    try:
+        _platform.window.eval(
+            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
+            f"fetch({json.dumps(url)},{init}).then(function(r)"
+            "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"
+            f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"
+            f".catch(function(e){{console.warn('pbp call failed',e);"
+            f"localStorage.setItem({state},e===404?'{MISSING}':'{ERROR}')}})"
+        )
+        return Request(web=True)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _call_desktop(url: str, body: Optional[str]) -> Optional[Request]:
+    """The same call on a daemon thread, posting into the mailbox when done."""
+    import threading
+    import urllib.error
+    import urllib.request
+
+    request = Request(web=False)
+
+    def _go() -> None:
+        try:
+            req = urllib.request.Request(
+                url, data=body.encode() if body is not None else None,
+                headers={"Content-Type": "application/json"},
+                method="POST" if body is not None else "GET")
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as response:
+                request._result.append((OK, response.read().decode("utf-8")))
+        except urllib.error.HTTPError as err:
+            # The endpoint answering "no such match" is a different thing to tell
+            # the player than "no answer at all". Everything else — including a
+            # refused submission — comes back as a body worth reading.
+            if err.code == 404:
+                request._result.append((MISSING, ""))
+            else:
+                try:
+                    request._result.append((ERROR, err.read().decode("utf-8")))
+                except Exception:  # noqa: BLE001
+                    request._result.append((ERROR, ""))
+        except Exception:  # noqa: BLE001
+            request._result.append((ERROR, ""))
+
+    try:
+        threading.Thread(target=_go, daemon=True, name="pbp-call").start()
+        return request
+    except RuntimeError:
+        return None
+
+
+def fetch_state(match_id: str) -> Optional[Request]:
+    """Ask for a match's current state."""
+    if not replay._MATCH_ID_RE.match(match_id):
+        return None
+    return call("state", match=match_id)
+
+
+def submit(seat: Seat, turn: int, orders: list[Order],
+           digest: str = "") -> Optional[Request]:
+    """Send ``seat``'s orders for ``turn``.
+
+    The owner is left off every order: the endpoint stamps the seat from the
+    token, so a foreign order is not something this can express.
+    """
+    if not seat.valid():
+        return None
+    return call("submit", {
+        "match_id": seat.match_id,
+        "token": seat.token,
+        "turn": turn,
+        "orders": [{"src": o.source_id, "dst": o.dest_id, "ships": o.ships}
+                   for o in orders],
+        "board_digest": digest,
+    })
+
+
+def send_resolved(seat: Seat, turn: int, log: replay.GameLog, digest: str,
+                  finished: bool) -> Optional[Request]:
+    """Hand back the turn this client just played out."""
+    if not seat.valid():
+        return None
+    return call("resolve", {
+        "match_id": seat.match_id,
+        "token": seat.token,
+        "turn": turn,
+        "log": log.encoded(),
+        "board_digest": digest,
+        "finished": finished,
+    })
