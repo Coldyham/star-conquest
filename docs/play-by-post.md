@@ -221,16 +221,36 @@ handed out, played end to end by everyone who has one, and it keeps moving when
 somebody stops answering. What is left is a deployment, and two things left open
 on purpose.
 
-**Nothing here has been run against the live preview since the wiring landed.**
-The two-client harness in `tests/test_pbp_client.py` stands in for it — a whole
-178-turn match with the digest check asserting on every turn, plus a run where
-one seat goes quiet — but a stand-in is not a deploy. The SQL is already applied
-and `source` already carries `('human','hold','bot')`, so nothing about the
-schema has changed; what wants re-checking on a preview is the two new actions
-(`seat`, `lapse`) against a real Supabase, and a deadline actually elapsing in
-wall-clock time rather than being asserted past.
+**The deploy itself is still unverified, and this environment cannot reach it.**
+The egress policy for the session that wrote this denies `*.netlify.app`, so
+`deploy-preview-60` was never actually called. Two things stand in for it, and
+between them they cover everything but the network hop:
 
-Left open deliberately:
+* `leaderboard/tests/pbp-handler.test.mjs` runs the **real handlers** over a stub
+  PostgREST — so the query strings, the token hashing and the conditional update
+  that makes two clients resolving together a non-race are all exercised, in CI,
+  with no deploy. The stub is strict on purpose: an unknown column throws, which
+  is how a query that has drifted from `schema.sql` is caught. Both guarantees
+  were checked by breaking them — a mistyped column and an unconditional update
+  each fail it.
+* `tools/check_pbp.py` is the real-deploy version: it plays a throwaway match out
+  against an origin you give it and asserts the same properties end to end. Run
+  it against a preview before trusting one:
+
+  ```sh
+  uv run python tools/check_pbp.py --origin https://deploy-preview-60--star-conquest-leaderboard.netlify.app
+  ```
+
+  It was developed against the real handlers behind a local stub, so its own
+  logic is exercised; what it has never done is cross a network.
+
+What remains genuinely unknown is therefore narrow: whether the deployed
+function has its `SUPABASE_*` environment set, whether real PostgREST agrees
+with the stub about the unique-violation status code and the conditional
+`PATCH`'s empty result, and whether a deadline elapsing in wall-clock time
+behaves as the backdated clock does. Everything either side of that is pinned.
+
+Left open deliberately:Left open deliberately:
 
 * **A shared match seats every player.** One button cannot ask for a roster, and
   the Basic tab has no ninth row to spare (`test_tab_content_stays_inside_the_panel`
