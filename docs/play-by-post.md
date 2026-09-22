@@ -152,7 +152,7 @@ load-bearing:
 
 # Handover
 
-## State: phases 1-4 done; deadlines remain
+## State: built and playable end to end
 
 | Phase | What | Commit |
 |---|---|---|
@@ -163,9 +163,10 @@ load-bearing:
 | 4b | Live-orders visibility fix | `f5b01a9` |
 | 4c | Wire + waiting overlay | `ae302e5` |
 | 4d | The loop: open, poll, submit, step | `957e03d` |
-| 4e | Opening a match from the menu | *(this branch)* |
+| 4e | Opening a match from the menu | `80b61e2` |
+| 5  | Deadlines | *(this branch)* |
 
-**Tests: 1133 passing, 1 skipped** (baseline on `main` was 1040), plus 9 JS
+**Tests: 1144 passing, 1 skipped** (baseline on `main` was 1040), plus 9 JS
 files. Run `uv run pytest` and `node --test leaderboard/tests/*.test.mjs`.
 
 ## The one idea everything follows from
@@ -215,25 +216,21 @@ behaviour.
 
 ## Where it stops
 
-**Deadlines, and nothing else.** A match can be opened from the menu, its links
-handed out, and played end to end by everyone who has one. What is missing is
-what happens when somebody stops answering.
+Everything in the plan is built. A match is opened from the menu, its links
+handed out, played end to end by everyone who has one, and it keeps moving when
+somebody stops answering. What is left is a deployment, and two things left open
+on purpose.
 
-`deadlinePassed`/`lapsedAction` exist in `pbp.mjs` and are tested, and the policy
-is settled: 48h default, the first miss **holds** (already a legal turn —
-production ticks, garrisons defend), a second consecutive miss falls to the
-seat's bot. What has no home yet is *who writes the missing orders down*. They
-have to reach `pbp_orders` like any others, or the next client's rebuild fights a
-different turn: the server cannot compute them (no engine), and a client filling
-them in locally would fork the match. So the shape is a fifth action — the client
-that notices a lapse submits the absent seats' orders on their behalf, marked in
-the `source` column that already exists for it ("hold"/"bot" beside "human") —
-and `handleSubmit`'s "authorised by that seat's own token" rule needs a
-deliberate, narrow exception for it, gated on the deadline having really passed.
-That exception is the whole of the remaining design work; everything either side
-of it is written.
+**Nothing here has been run against the live preview since the wiring landed.**
+The two-client harness in `tests/test_pbp_client.py` stands in for it — a whole
+178-turn match with the digest check asserting on every turn, plus a run where
+one seat goes quiet — but a stand-in is not a deploy. The SQL is already applied
+and `source` already carries `('human','hold','bot')`, so nothing about the
+schema has changed; what wants re-checking on a preview is the two new actions
+(`seat`, `lapse`) against a real Supabase, and a deadline actually elapsing in
+wall-clock time rather than being asserted past.
 
-Two smaller things left open on purpose:
+Left open deliberately:
 
 * **A shared match seats every player.** One button cannot ask for a roster, and
   the Basic tab has no ninth row to spare (`test_tab_content_stays_inside_the_panel`
@@ -247,6 +244,46 @@ Two smaller things left open on purpose:
   the next launch and would seat you in a match you had already left). A modal
   listing the seats with a Copy button each would be nicer and is a contained
   piece of UI work.
+* **The deadline is 48h and is not on the menu** (`pbp.DEADLINE_HOURS`). The
+  endpoint takes any figure from 1 to 336 hours and stores it per match; nothing
+  offers a choice, for the same reason nothing offers a roster.
+
+## How a deadline works
+
+The policy is Diplomacy's and it is about people rather than rules: the first
+miss **holds**, which is already a legal turn — production ticks, garrisons
+defend, nothing is thrown away — so somebody who is simply a day late loses a
+tempo and not their position. Only a second consecutive miss hands the seat to
+its bot, by which point the alternative is a match that has stopped.
+
+Four things make it work without a cron or a server-side engine:
+
+- **The endpoint owns the judgement; a client owns the orders.** Whose turn has
+  lapsed and what it costs them is decided in `lapsedSeats`, from the stored
+  clock, and published on `?action=state` so a client knows what to send. It is
+  recomputed in `handleLapse` rather than believed. What the client supplies is
+  the one thing the endpoint cannot: a bot's actual orders, which need an engine.
+  A **hold** is forced empty there whatever arrives.
+- **Misses are read off the `source` column**, which is already the record of
+  them: a row filed under a seat's own token is `human` and anything else was
+  filed on its behalf. Nothing to keep in step, and a turn a seat genuinely
+  played resets the run by being there.
+- **A lapsed bot's orders are computed on a copy of the board.** Every bot draws
+  from `state.rng`, and where the live rng stands is part of what makes every
+  client fight the same battles — a client that ran one on its own board would
+  take a draw nobody else took and every roll after it would differ. So the
+  copy is thrown away, only the orders travel, and every other client applies
+  what was stored. `test_filing_a_bots_turn_leaves_the_live_dice_exactly_where_
+  they_were` asserts on the rng directly, because a turn with no fight in it
+  draws nothing and a board digest would agree for the wrong reason.
+- **A client never files its own lapse** (`lapse_orders(skip=…)`). Somebody who
+  opens the game two days late is *here*, and filing their hold the moment they
+  arrive would take the turn away from the one person about to take it. Any
+  other client still may, which is the whole point.
+
+Filing resolves nothing. It makes the turn complete, and the next read takes the
+ordinary resolve path — so a lapsed turn goes through the very same gate every
+other turn does.
 
 ## Traps for whoever picks this up
 

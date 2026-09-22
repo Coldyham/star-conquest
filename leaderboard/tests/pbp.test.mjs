@@ -11,9 +11,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  allowedOrigin, deadlinePassed, hashToken, lapsedAction, mintToken, outstanding,
-  rateLimited, sameToken, seatForToken, validateMatch, validateOrders,
-  validateSeats, visibleOrders,
+  allowedOrigin, consecutiveMisses, deadlinePassed, hashToken, lapsedAction,
+  lapsedSeats, mintToken, outstanding, rateLimited, sameToken, seatForToken,
+  validateMatch, validateOrders, validateSeats, visibleOrders,
 } from "../netlify/functions/pbp.mjs";
 
 const MATCH = "00112233445566ff";
@@ -182,6 +182,63 @@ test("the first miss holds, the second falls to the bot", () => {
 // --------------------------------------------------------------------------
 // Shared with log.mjs
 // --------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// Whose turn has lapsed, and what it costs them
+// --------------------------------------------------------------------------
+const LONG_AGO = "2020-01-01T00:00:00Z";
+
+function opened(over = {}) {
+  return { turn: 3, turn_opened_at: LONG_AGO, deadline_hours: 48, ...over };
+}
+
+test("a seat that played last turn has missed nothing", () => {
+  const rows = [{ turn: 2, seat: 1, source: "human" }];
+  assert.equal(consecutiveMisses(rows, 1, 3), 0);
+});
+
+test("misses are counted back from the live turn and stop at a turn played", () => {
+  const rows = [
+    { turn: 0, seat: 1, source: "hold" },
+    { turn: 1, seat: 1, source: "human" },
+    { turn: 2, seat: 1, source: "hold" },
+  ];
+  assert.equal(consecutiveMisses(rows, 1, 3), 1, "turn 1 resets the run");
+  assert.equal(consecutiveMisses(rows, 1, 1), 1, "...and turn 0 is its own run");
+});
+
+test("a turn nobody filed at all breaks the run", () => {
+  // The opening turn, or a gap: there is no row, so there is nothing to call a
+  // miss, and counting past it would invent absences that never happened.
+  assert.equal(consecutiveMisses([{ turn: 0, seat: 1, source: "hold" }], 1, 3), 0);
+});
+
+test("misses are counted per seat", () => {
+  const rows = [{ turn: 2, seat: 2, source: "bot" }];
+  assert.equal(consecutiveMisses(rows, 1, 3), 0);
+  assert.equal(consecutiveMisses(rows, 2, 3), 1);
+});
+
+test("nothing has lapsed while the clock is still running", () => {
+  const fresh = opened({ turn_opened_at: new Date().toISOString() });
+  assert.deepEqual(lapsedSeats(fresh, [], [1, 2]), {});
+});
+
+test("a match with no deadline never lapses, however long it sits", () => {
+  assert.deepEqual(lapsedSeats(opened({ deadline_hours: null }), [], [1, 2]), {});
+});
+
+test("the first miss holds and the second falls to the bot", () => {
+  const rows = [{ turn: 2, seat: 2, source: "hold" }];
+  assert.deepEqual(lapsedSeats(opened(), rows, [1, 2]),
+                   { 1: "hold", 2: "bot" });
+});
+
+test("a seat that has already submitted is never lapsed", () => {
+  // Only the outstanding ones are offered, so being on time is the whole
+  // defence — there is no separate check to forget.
+  assert.deepEqual(lapsedSeats(opened(), [], [2]), { 2: "hold" });
+});
+
 test("CORS admits the game's own deploys and nothing else", () => {
   assert.ok(allowedOrigin("https://star-conquest.netlify.app"));
   assert.ok(allowedOrigin("https://deploy-preview-42--star-conquest.netlify.app"));

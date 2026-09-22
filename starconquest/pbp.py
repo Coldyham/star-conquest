@@ -43,6 +43,7 @@ Pure core: no pygame, and the network is somebody else's (``share``-style
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from typing import Optional
@@ -55,6 +56,13 @@ from .settings import Settings, build_state
 
 # A seat token as the endpoint mints one: 128 bits as hex.
 TOKEN_CHARS = 32
+
+# How long a seat has to take its turn before the clock runs out on it. Two days
+# is what the format is for: play-by-post exists so that nobody keeps an
+# appointment, and a deadline short enough to be missed by an ordinary weekend
+# would put one back. The first miss only holds (see ``lapse_orders``), so what
+# this really sets is how long a match waits before it is allowed to keep moving.
+DEADLINE_HOURS = 48
 
 
 def endpoint(action: str) -> str:
@@ -184,6 +192,11 @@ class Match:
     turn: int
     submitted: list[int]
     turns: list[dict] = field(default_factory=list)
+    # ``{seat: "hold" | "bot"}`` for the seats the clock has now run out on, and
+    # empty until it has. The endpoint decides it — whose turn has lapsed and
+    # what it costs them is policy, and policy lives in one place — and publishes
+    # it because only a client can act on it: a bot's orders need an engine.
+    lapsed: dict[int, str] = field(default_factory=dict)
     log: str = ""
     finished: bool = False
     rules_version: int = 1
@@ -225,6 +238,27 @@ class Match:
         return out
 
 
+def _lapsed_from(raw) -> dict[int, str]:
+    """``{seat: action}`` out of the wire, keeping only actions we can carry out.
+
+    Tolerant like every other decoder here, and deliberately closed rather than
+    open: an action this build does not know is one it cannot file orders for, so
+    it is dropped and the seat simply keeps waiting — which is the safe way for a
+    client and an endpoint on different deploys to disagree.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[int, str] = {}
+    for seat, action in raw.items():
+        try:
+            pid = int(seat)
+        except (TypeError, ValueError):
+            continue
+        if action in ("hold", "bot"):
+            out[pid] = action
+    return out
+
+
 def match_from_dict(data: dict) -> Optional[Match]:
     """Parse ``?action=state``. None if it cannot describe a match at all.
 
@@ -256,6 +290,7 @@ def match_from_dict(data: dict) -> Optional[Match]:
         turn=int(data.get("turn", 0) or 0),
         submitted=sorted(int(s) for s in data.get("submitted") or []),
         turns=[row for row in (data.get("turns") or []) if isinstance(row, dict)],
+        lapsed=_lapsed_from(data.get("lapsed")),
         log=str(data.get("log", "") or ""),
         finished=bool(data.get("finished", False)),
         rules_version=int(data.get("rules_version", 1) or 1),
@@ -344,6 +379,44 @@ def rebuild(match: Match, decide=None) -> tuple[GameState, replay.GameLog]:
     if state.winner is not None:
         log.mark_finished(state.winner)
     return state, log
+
+
+def lapse_orders(state: GameState, match: Match, decide=None,
+                 skip: int = 0) -> dict[int, list[dict]]:
+    """The orders to file for whoever has let the clock run out.
+
+    A **hold** is no orders at all, and the endpoint forces it empty whatever is
+    sent — so what this really produces is the **bot** case, which has to come
+    from a client because the endpoint has no engine and never will.
+
+    ``skip`` is the seat at this keyboard, and leaving it out is the difference
+    between a deadline that keeps a match moving and one that plays it for you:
+    somebody who opens the game two days late is *here*, and filing their hold
+    the moment they arrive would take the turn away from the one person who was
+    about to take it. Any other client may still file it on their behalf, which
+    is the whole point — but not this one, and not while they are looking at it.
+
+    Computed on a **copy of the board**, and that is the load-bearing line. Every
+    bot draws from ``state.rng``, and where the live rng stands is part of what
+    makes every client fight the same battles; a client that ran a bot on its own
+    board would take a draw nobody else took, and every roll after it would
+    differ. The copy is thrown away and only the orders travel, so a lapsed
+    seat's bot decides exactly once, on one client, and everybody else applies
+    what it decided — which is what the stored order rows are for.
+    """
+    filing: dict[int, list[dict]] = {}
+    for seat, action in sorted(match.lapsed.items()):
+        if seat == skip:
+            continue
+        if action != "bot" or decide is None:
+            filing[seat] = []
+            continue
+        # A copy per seat rather than one for them all: `decide` is not promised
+        # to leave a board alone, and a lapse is rare enough to pay for the doubt.
+        orders = decide(copy.deepcopy(state), seat)
+        filing[seat] = [{"src": o.source_id, "dst": o.dest_id, "ships": o.ships}
+                        for o in orders]
+    return filing
 
 
 def resolve(match: Match, decide=None,
@@ -530,7 +603,7 @@ def parse_body(text: str) -> Optional[dict]:
 
 
 def create(match_id: str, settings: Settings, seed: int, seats: list[int],
-           deadline_hours: Optional[int] = None) -> Optional[Request]:
+           deadline_hours: Optional[int] = DEADLINE_HOURS) -> Optional[Request]:
     """Open a match, seating a person at each of ``seats``.
 
     The reply is the one and only time the seat tokens exist in the clear —
@@ -614,6 +687,26 @@ def submit(seat: Seat, turn: int, orders: list[Order],
         "orders": [{"src": o.source_id, "dst": o.dest_id, "ships": o.ships}
                    for o in orders],
         "board_digest": digest,
+    })
+
+
+def send_lapse(seat: Seat, turn: int,
+               filing: dict[int, list[dict]]) -> Optional[Request]:
+    """File ``filing`` for the seats the clock has run out on.
+
+    The one call that writes orders under somebody else's seat, which is why the
+    endpoint recomputes the whole judgement rather than believing any of this:
+    whether the deadline really passed, whether each named seat really is
+    outstanding, and whether it holds or falls to its bot. What it takes from
+    here is only the part it cannot work out — the orders themselves.
+    """
+    if not seat.valid() or not filing:
+        return None
+    return call("lapse", {
+        "match_id": seat.match_id,
+        "token": seat.token,
+        "turn": turn,
+        "seats": {str(pid): orders for pid, orders in sorted(filing.items())},
     })
 
 

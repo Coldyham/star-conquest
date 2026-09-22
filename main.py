@@ -423,6 +423,7 @@ PBP_UNREADABLE_MSG = "The match answered with something unreadable"
 PBP_OUTDATED_MSG = "That match was started under rules this build has moved past"
 PBP_SENDING_MSG = "Sending your orders..."
 PBP_OPENING_MSG = "Opening the match..."
+PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
 
 
@@ -592,6 +593,30 @@ def pbp_handed_out(match_id: str, tokens: dict[int, str]) -> str:
         return "Couldn't save the seat links — printed to the console"
     print(f"Seat links ({path}):\n" + "\n".join(lines))
     return f"Seat links saved to {path.name} — send one to each player"
+
+
+def pbp_lapse(state: GameState, ui: Ui, match: pbp.Match,
+              seat: pbp.Seat) -> Optional[pbp.Request]:
+    """File the absent seats' turns, so a match nobody has abandoned can go on.
+
+    Sent by whichever client notices, exactly as a resolution is, and for the
+    same reason: there is no cron here and no server-side engine, so the work
+    happens wherever somebody is looking. Two clients noticing together is the
+    same non-event — the second is told the rows are already filed.
+
+    Never for our own seat (``skip``): somebody who opens the game two days late
+    is *here*, and filing their hold the moment they arrive would take the turn
+    away from the one person about to take it.
+
+    Nothing is resolved by it. Filing the last outstanding seat merely makes the
+    turn complete, and the next read takes the ordinary resolve path, so a lapsed
+    turn goes through the very same gate every other turn does.
+    """
+    filing = pbp.lapse_orders(state, match, ai.decide, skip=seat.seat)
+    request = pbp.send_lapse(seat, match.turn, filing)
+    if request is not None:
+        ui.pbp_msg = PBP_LAPSED_MSG
+    return request
 
 
 # What a read of a shared match asks the loop to do next. Decided by the turn
@@ -1283,7 +1308,13 @@ async def main() -> None:
                     assert state is not None and ui is not None and log is not None
                     pbp_adopt(match, pbp_seat, ui)
                     verdict = pbp_verdict(match, state)
-                    if verdict == PBP_REBUILD:
+                    if verdict == PBP_WAIT and match.lapsed and pbp_write is None:
+                        # The clock has run out on somebody. Filing their turn is
+                        # what keeps a match from stopping dead because one person
+                        # stopped answering; it does not resolve anything, so the
+                        # next read still finds an ordinary complete turn.
+                        pbp_write = pbp_lapse(state, ui, match, pbp_seat)
+                    elif verdict == PBP_REBUILD:
                         # More than a turn behind: there is no single turn to
                         # animate, so the position is rebuilt from the opening.
                         # The standing rules come across by hand because they are

@@ -13,12 +13,16 @@
  * seat to decide. So this stores the inputs, and each client rebuilds the
  * position. What arrives here is orders; what leaves is orders.
  *
- * Four actions, chosen by `?action=`:
+ * Five actions, chosen by `?action=`:
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
  *   seat    (POST) which seat a token holds — the one thing a client opening a
  *                  link cannot work out for itself.
  *   submit  (POST) one seat's orders for the live turn, authorised by its token.
+ *   lapse   (POST) file orders for a seat that has let the clock run out, on
+ *                  its behalf. Any seat in the match may, but only once the
+ *                  deadline really has passed — which is decided here, from the
+ *                  stored clock, never from what the caller claims.
  *   resolve (POST) turn the submissions into a resolved turn, once they are all
  *                  in. Sent by whichever client notices first; idempotent, so
  *                  two clients noticing together is not a race.
@@ -278,6 +282,43 @@ export function lapsedAction(misses) {
   return misses >= 1 ? "bot" : "hold";
 }
 
+/**
+ * How many turns in a row, ending at `turn - 1`, this seat did not play itself.
+ *
+ * Read off the `source` column rather than counted separately, because that
+ * column is already the record of it: a row filed by the seat's own token is
+ * "human" and anything else was filed on its behalf. Nothing to keep in step,
+ * and a turn a seat genuinely played resets it by simply being there.
+ */
+export function consecutiveMisses(rows, seat, turn) {
+  let misses = 0;
+  for (let t = turn - 1; t >= 0; t -= 1) {
+    const row = rows.find((r) => r.seat === seat && r.turn === t);
+    if (!row || row.source === "human") break;
+    misses += 1;
+  }
+  return misses;
+}
+
+/**
+ * What a lapse would do to each seat still outstanding — `{}` until the clock
+ * has actually run out.
+ *
+ * The whole policy in one place, and on this side of the wire on purpose: a
+ * client supplies the bot's *orders* (it has the engine; this does not), but
+ * never the judgement about whose turn has lapsed or what that costs them.
+ * `handleState` publishes it so a client knows what to send, and `handleLapse`
+ * recomputes it rather than believing what comes back.
+ */
+export function lapsedSeats(match, rows, waiting, now = Date.now()) {
+  if (!deadlinePassed(match.turn_opened_at, match.deadline_hours, now)) return {};
+  const out = {};
+  for (const seat of waiting) {
+    out[seat] = lapsedAction(consecutiveMisses(rows, seat, match.turn));
+  }
+  return out;
+}
+
 export function deadlinePassed(openedAt, hours, now = Date.now()) {
   if (hours === null || hours === undefined) return false;
   const opened = Date.parse(openedAt);
@@ -359,6 +400,7 @@ export default async function handler(request) {
   if (action === "create") return await handleCreate(call, body, origin);
   if (action === "seat") return await handleSeat(call, body, origin);
   if (action === "submit") return await handleSubmit(call, body, origin);
+  if (action === "lapse") return await handleLapse(call, body, origin);
   if (action === "resolve") return await handleResolve(call, body, origin);
   return reply(400, { error: "unknown action" }, origin);
 }
@@ -402,6 +444,12 @@ async function handleState(call, query, origin) {
     // Who is still to submit for the live turn. The waiting overlay is built
     // from exactly this.
     submitted: live.map((row) => row.seat),
+    // ...and what a lapse would now do to each of them: `{}` until the clock has
+    // run out, then `{seat: "hold" | "bot"}`. Published because the client has to
+    // know which it is before it can send anything — a held turn is no orders at
+    // all, a bot's turn is orders only an engine can produce — but decided here,
+    // and recomputed on the way back in.
+    lapsed: lapsedSeats(match, orders, waiting),
     // Every *settled* turn's orders: the resolved ones, plus the live turn only
     // once every seat is in. That second clause is load-bearing in both
     // directions. Without it a client resolving the turn applies an empty order
@@ -530,6 +578,89 @@ async function handleSubmit(call, body, origin) {
   const waiting = outstanding(roster, live.map((r) => r.seat));
 
   return reply(201, { seat, turn, waiting }, origin);
+}
+
+
+/**
+ * File orders for a seat that has let the clock run out, on its behalf.
+ *
+ * The one place a seat's orders arrive under somebody else's token, and the
+ * exception is drawn as narrowly as it can be: the deadline is recomputed here
+ * from the stored clock, the seat must really still be outstanding, and what may
+ * be filed is exactly what `lapsedSeats` says — a **hold** takes no orders at all
+ * and a **bot** takes only the orders the caller computed, because this function
+ * has no engine to compute them with and never will.
+ *
+ * Two stages rather than one, which is Diplomacy's answer and is about people
+ * rather than rules: the first miss holds, which is already a legal turn —
+ * production ticks, garrisons defend, nothing is thrown away — so somebody who
+ * is simply a day late loses a tempo and not their position. Only a second
+ * consecutive miss hands the seat to its bot, by which point the alternative is
+ * a match that has stopped.
+ *
+ * Nothing here resolves anything. Filing the last outstanding seat merely makes
+ * the turn complete, and the ordinary `resolve` path takes it from there — so a
+ * lapse goes through exactly the gate every other turn does.
+ */
+async function handleLapse(call, body, origin) {
+  if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
+  const { match_id: matchId, token, turn } = body;
+  if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
+  if (typeof token !== "string" || !TOKEN.test(token)) return reply(403, { error: "bad token" }, origin);
+  if (!Number.isInteger(turn) || turn < 0) return reply(400, { error: "bad turn" }, origin);
+  const filing = body.seats;
+  if (!filing || typeof filing !== "object" || Array.isArray(filing)) {
+    return reply(400, { error: "bad seats" }, origin);
+  }
+
+  const rows = await call(`/pbp_matches?select=*&match_id=eq.${matchId}`);
+  if (rows === null) return reply(502, { error: "store refused" }, origin);
+  if (!rows.length) return reply(404, { error: "no such match" }, origin);
+  const match = rows[0];
+
+  // Any seat in the match may file a lapse — whoever is looking — but only a
+  // seat. This writes orders other people will be held to.
+  if (seatForToken(match, await hashToken(token)) === null) {
+    return reply(403, { error: "bad token" }, origin);
+  }
+  if (match.finished) return reply(409, { error: "match is over" }, origin);
+  if (turn !== match.turn) return reply(409, { error: "stale turn", turn: match.turn }, origin);
+
+  const all = await call(
+    `/pbp_orders?select=turn,seat,source&match_id=eq.${matchId}&order=turn.asc`);
+  if (all === null) return reply(502, { error: "store refused" }, origin);
+  const roster = match.seats.seats ?? match.seats;
+  const waiting = outstanding(roster, all.filter((r) => r.turn === turn).map((r) => r.seat));
+  const lapsed = lapsedSeats(match, all, waiting);
+  if (!Object.keys(lapsed).length) {
+    // Either the clock has not run out or nobody is outstanding. Both are the
+    // caller being ahead of the match rather than wrong about it.
+    return reply(409, { error: "nothing has lapsed", waiting }, origin);
+  }
+
+  const filed = [];
+  for (const [key, orders] of Object.entries(filing)) {
+    const seat = Number(key);
+    const action = lapsed[seat];
+    if (action === undefined) return reply(409, { error: "that seat has not lapsed" }, origin);
+    // A held turn is no orders at all, whatever the caller sent — the one thing
+    // about a lapse this function can decide entirely by itself, so it does.
+    const checked = action === "bot" ? validateOrders(orders) : [];
+    if (typeof checked === "string") return reply(400, { error: checked }, origin);
+    filed.push({ match_id: matchId, turn, seat, orders_json: checked,
+                 source: action, board_digest: "" });
+  }
+  if (!filed.length) return reply(400, { error: "no seats named" }, origin);
+
+  const stored = await call("/pbp_orders", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(filed),
+  });
+  // The unique constraint again: somebody else filed the same lapse first, which
+  // is the same non-event two clients resolving together is.
+  if (stored === null) return reply(409, { error: "already filed" }, origin);
+  return reply(201, { turn, filed: filed.map((row) => row.seat) }, origin);
 }
 
 

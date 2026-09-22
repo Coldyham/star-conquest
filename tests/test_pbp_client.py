@@ -22,7 +22,7 @@ import pygame
 import pytest
 
 import main as app
-from starconquest import config, engine, pbp, replay, webstore
+from starconquest import ai, config, engine, pbp, replay, webstore
 from starconquest.model import Order
 from starconquest.settings import Settings
 
@@ -391,16 +391,38 @@ class _Endpoint:
     them against one store for a run of turns shows that.
     """
 
-    def __init__(self, settings: Settings, seed: int, seats: list[int]):
+    def __init__(self, settings: Settings, seed: int, seats: list[int],
+                 lapse_now: bool = False):
         self.settings, self.seed, self.seats = settings, seed, sorted(seats)
         self.turn, self.finished = 0, False
         self.rows: list[dict] = []
         self.digests: dict[int, str] = {}      # first digest per turn wins
+        # `lapse_now` stands in for a clock that has already run out, since these
+        # tests have no two days to wait: it is the one thing `deadlinePassed`
+        # decides, and what it decides is a yes or a no.
+        self.lapse_now = lapse_now
 
     # -- reads -------------------------------------------------------------- #
     def waiting(self) -> list[int]:
         live = {r["seat"] for r in self.rows if r["turn"] == self.turn}
         return [s for s in self.seats if s not in live]
+
+    def misses(self, seat: int) -> int:
+        """`consecutiveMisses`: how many turns running this seat did not play."""
+        count = 0
+        for turn in range(self.turn - 1, -1, -1):
+            row = next((r for r in self.rows
+                        if r["seat"] == seat and r["turn"] == turn), None)
+            if row is None or row["source"] == "human":
+                break
+            count += 1
+        return count
+
+    def lapsed(self) -> dict[int, str]:
+        if not self.lapse_now:
+            return {}
+        return {seat: ("bot" if self.misses(seat) >= 1 else "hold")
+                for seat in self.waiting()}
 
     def state(self) -> dict:
         # Complete-or-nothing on the live turn, exactly as `visibleOrders` is.
@@ -411,8 +433,8 @@ class _Endpoint:
             "submitted": [r["seat"] for r in self.rows if r["turn"] == self.turn],
             "turns": settled if self.waiting() else list(self.rows),
             "log": "", "finished": self.finished,
-            "rules_version": engine.RULES_VERSION,
-            "deadline_hours": None, "turn_opened_at": "",
+            "rules_version": engine.RULES_VERSION, "lapsed": self.lapsed(),
+            "deadline_hours": 48, "turn_opened_at": "2020-01-01T00:00:00Z",
         }
 
     # -- writes ------------------------------------------------------------- #
@@ -420,7 +442,18 @@ class _Endpoint:
         assert turn == self.turn, "a stale submission is refused, never applied"
         assert seat not in [r["seat"] for r in self.rows if r["turn"] == turn], \
             "the unique constraint answers a double submission"
-        self.rows.append({"turn": turn, "seat": seat, "orders_json": orders})
+        self.rows.append({"turn": turn, "seat": seat, "orders_json": orders,
+                          "source": "human"})
+
+    def lapse(self, turn: int, filing: dict[int, list[dict]]) -> None:
+        assert turn == self.turn, "a stale lapse is refused, never applied"
+        allowed = self.lapsed()
+        for seat, orders in filing.items():
+            assert seat in allowed, "only a seat the clock has run out on"
+            # A held turn is no orders at all, whatever the caller sent.
+            self.rows.append({
+                "turn": turn, "seat": seat, "source": allowed[seat],
+                "orders_json": orders if allowed[seat] == "bot" else []})
 
     def resolve(self, turn: int, digest: str, finished: bool) -> bool:
         if turn != self.turn:
@@ -465,7 +498,14 @@ def _tick(server: _Endpoint, client) -> None:
     app.pbp_adopt(match, seat, ui)
     verdict = app.pbp_verdict(match, state)
     if verdict == app.PBP_WAIT:
-        if not ui.pbp_submitted and not match.finished:
+        # Somebody else's lapse first, then our own turn. Not either/or: a lapse
+        # naming only *our* seat files nothing (`skip`), and a client that took
+        # that as its whole turn would sit there refusing to play.
+        filing = (pbp.lapse_orders(state, match, ai.decide, skip=seat.seat)
+                  if match.lapsed else {})
+        if filing:
+            server.lapse(match.turn, filing)
+        elif not ui.pbp_submitted and not match.finished:
             server.submit(seat.seat, state.turn, _orders_for(state, seat.seat))
     elif verdict == app.PBP_REBUILD:
         client[0], client[1], client[2] = app.open_match(match, seat, Settings())
@@ -519,3 +559,116 @@ def test_a_client_that_looks_away_for_several_turns_catches_up():
     _tick(server, two)
     assert two[0].turn == one[0].turn
     assert replay.digest_hex(two[0]) == replay.digest_hex(one[0])
+
+
+# --------------------------------------------------------------------------- #
+# When somebody stops answering
+# --------------------------------------------------------------------------- #
+def test_a_first_miss_files_no_orders_at_all():
+    """A held turn is already a legal one — production ticks, garrisons defend —
+    so somebody a day late loses a tempo rather than their position."""
+    match, state, _, _ = _opened()
+    match.lapsed = {2: "hold"}
+    assert pbp.lapse_orders(state, match, ai.decide) == {2: []}
+
+
+def test_a_second_miss_hands_the_seat_to_its_bot():
+    """...which a client has to compute, because the endpoint has no engine."""
+    match, state, _, _ = _opened()
+    state.systems[next(sid for sid, s in state.systems.items()
+                       if s.owner_id == 2)].ships = 40   # enough to want to move
+    match.lapsed = {2: "bot"}
+    filed = pbp.lapse_orders(state, match, ai.decide)[2]
+    assert filed, "a bot with ships to spend should have filed something"
+    assert all(state.systems[o["src"]].owner_id == 2 for o in filed)
+
+
+def test_filing_a_bots_turn_leaves_the_live_dice_exactly_where_they_were():
+    """The load-bearing line. Every bot draws from `state.rng`, and where the
+    live rng stands is part of what makes every client fight the same battles —
+    so a client that ran one on its own board would take a draw nobody else took
+    and every roll after it would differ.
+
+    Asserted on the rng directly rather than on a board downstream of it: a turn
+    with no fight in it draws nothing, so a digest would agree for reasons that
+    have nothing to do with the property. `test_a_match_carries_on_when_one_
+    player_stops_answering` is what shows the consequence over a run of turns.
+    """
+    match, state, _, _ = _opened()
+    state.systems[next(sid for sid, s in state.systems.items()
+                       if s.owner_id == 2)].ships = 40
+    match.lapsed = {2: "bot"}
+
+    before = state.rng.getstate()
+    filed = pbp.lapse_orders(state, match, ai.decide)[2]
+    assert filed, "the bot must really have been asked, or this proves nothing"
+    assert state.rng.getstate() == before
+
+
+def test_an_action_this_build_cannot_carry_out_is_dropped():
+    """A client and an endpoint on different deploys disagreeing must leave the
+    seat waiting, not file something neither of them means."""
+    match = pbp.match_from_dict(_payload(lapsed={"2": "resign", "3": "hold"}))
+    assert match.lapsed == {3: "hold"}
+
+
+def test_nothing_is_filed_for_a_match_whose_clock_is_still_running():
+    match, state, _, _ = _opened()
+    assert match.lapsed == {}
+    assert pbp.send_lapse(_seat(), 0, pbp.lapse_orders(state, match, ai.decide)) is None
+
+
+def test_a_lapse_names_the_turn_it_is_for(monkeypatch):
+    """...so a client that has fallen behind cannot have yesterday's absences
+    filed against today's board."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    pbp.send_lapse(_seat(), 4, {2: [], 3: [{"src": 1, "dst": 2, "ships": 3}]})
+    assert sent["turn"] == 4 and sent["match_id"] == MATCH
+    assert sorted(sent["seats"]) == ["2", "3"]
+
+
+def test_a_new_match_is_opened_with_a_clock_on_it(monkeypatch):
+    """A match with no deadline never lapses, so one opened without a clock is a
+    match that stops the first time anybody stops answering."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(), seed=1)
+    assert sent["deadline_hours"] == pbp.DEADLINE_HOURS
+
+
+def test_a_match_carries_on_when_one_player_stops_answering():
+    """End to end: seat two goes quiet, and the match keeps moving without it —
+    holding first, then falling to its bot — with both clients still agreeing on
+    every board."""
+    settings = Settings(mode="random", players=2, nodes=14, seed=11)
+    server = _Endpoint(settings, 11, [1, 2], lapse_now=True)
+    one = _client(server, 1)
+
+    for _ in range(40):
+        _tick(server, one)
+        if server.turn >= 5:
+            break
+
+    assert server.turn >= 5, "a quiet seat must not stop the match"
+    filed = [r["source"] for r in server.rows if r["seat"] == 2]
+    assert filed[0] == "hold", "the first miss holds"
+    assert "bot" in filed[1:], "...and a second consecutive miss falls to the bot"
+    # ...and a client that was never there rebuilds the same board from the rows.
+    late = _client(server, 2)
+    assert replay.digest_hex(late[0]) == replay.digest_hex(one[0])
+
+
+def test_our_own_lapse_is_never_filed_by_us():
+    """Somebody who opens the game two days late is *here*. Filing their hold the
+    moment they arrive would take the turn away from the one person about to take
+    it — so another client may file it on their behalf, but never this one."""
+    match, state, _, _ = _opened()
+    match.lapsed = {1: "hold", 2: "hold"}
+    assert pbp.lapse_orders(state, match, ai.decide, skip=1) == {2: []}
+    # ...and with nobody else outstanding there is nothing to send at all.
+    match.lapsed = {1: "bot"}
+    assert pbp.lapse_orders(state, match, ai.decide, skip=1) == {}
+    assert pbp.send_lapse(_seat(1), 0, {}) is None
