@@ -64,12 +64,17 @@ and a **thin pygame presentation shell**, so the entire game is testable
 headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`.
+  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
+  `pbp`.
   This is what lets
   `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
   to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it). (`custommap` is the hand-authored map recipe and its validator —
-  see Hand-authored maps below. `fog` is presentation-only visibility — pure hop-distance queries the
+  see Hand-authored maps below. `pbp` is play-by-post: one seat of a shared match,
+  held by a person at their own pace. It is **work in progress on a branch** and
+  is the one feature here whose working record is not yet in these docs — see
+  [`docs/play-by-post.md`](docs/play-by-post.md), which is temporary and goes away
+  when the branch lands. `fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
   presentation-only playback the *engine writes into* and never reads back — see
   Animated end of turn below. `replay` serializes a
@@ -167,6 +172,9 @@ lacks `decide` is skipped. `main.py` calls it at startup and on game start;
 `ai.available_strategies()` feeds the menu's per-seat Strategy dropdown. `menu.py`
 is the one shell module that imports `ai` (for discovery) — fine, since `ai` is
 pure core (no pygame); the render/input prohibition on importing `ai` still holds.
+(It reaches into core once more for the same reason: `pbp.configured()`, which
+decides whether there is a board to open a shared match on. Also pure core, and
+also not something `render` or `input` may copy.)
 `models/` is committed (not gitignored) precisely so `tools/build_web.sh` can
 stage it alongside `starconquest/` and ship the same bots to the browser/PWA
 build — new bots go in via commit/PR, not local drop-in only.

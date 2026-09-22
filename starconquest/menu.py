@@ -4,7 +4,8 @@ A sibling of the game board rather than part of it, so ``render.py`` /
 ``input.py`` (which are about playing) stay untouched. Like the game, it keeps a
 strict split *within* this module: ``draw`` only reads (never mutates
 ``Settings``), ``handle_event`` only mutates ``MenuState``/``Settings`` and
-returns a high-level action string (``"start"``, ``"quit"``) or ``None``.
+returns a high-level action string (``"start"``, ``"play_by_post"``,
+``"quit"``) or ``None``.
 
 Widgets are immediate-mode: each draws itself and records its screen rect(s) in
 ``MenuState.rects`` under a string key; ``handle_event`` hit-tests the click
@@ -42,7 +43,7 @@ from typing import Optional
 
 import pygame
 
-from . import ai, combat, config, softkeyboard, uifont, webstore
+from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, is_web, saves_dir
 from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
@@ -1255,9 +1256,21 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 def _draw_start(surface, ms: MenuState, settings: Settings, w: int) -> None:
     rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+
+    # The same setup, opened as a shared match instead: one seat per player, one
+    # link each. Drawn only where there is a board to open it on — blanking
+    # `paths.LEADERBOARD_ORIGIN` switches every networked feature off, and this is
+    # one, so a build with none must not offer a button that cannot work.
+    right = rect.right + 14
+    if pbp.configured():
+        post = pygame.Rect(right, rect.y, 160, rect.height)
+        _button(surface, ms, "play_by_post", post, "Play by post", fill=_BTN_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+        right = post.right + 14
+    else:
+        ms.rects.pop("play_by_post", None)
     # Touch/web equivalent of Esc's quit — there's no keyboard on a phone, so
     # without this a touch user has no way to leave the app at all.
-    quit_rect = pygame.Rect(rect.right + 14, rect.y, 110, rect.height)
+    quit_rect = pygame.Rect(right, rect.y, 110, rect.height)
     _button(surface, ms, "quit", quit_rect, "Quit", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
 
     # The map creator, to Start's left so Start itself stays centred. Its little
@@ -1580,6 +1593,11 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
 
     if hit == "start":
         return _start(ms, settings)
+    if hit == "play_by_post":
+        # The same gate Start goes through, for the same reason: a hand map that
+        # cannot build cannot be played by post either, and finding that out
+        # after the match had been opened and the links sent would be worse.
+        return _start(ms, settings, "play_by_post")
     if hit == "quit":
         return "quit"
     if hit is None:
@@ -1782,8 +1800,8 @@ _STATUS_MS = 4000
 _STATUS_ERROR_MS = 15000
 
 
-def _start(ms: MenuState, settings: Settings):
-    """``"start"``, unless a hand-drawn map would refuse to build.
+def _start(ms: MenuState, settings: Settings, action: str = "start"):
+    """``action``, unless a hand-drawn map would refuse to build.
 
     ``mapgen.generate_custom`` asserts on a recipe with blockers — it is the strict
     builder behind the one tolerant gate — so the half-built map ``mapmaker.commit``
@@ -1795,7 +1813,7 @@ def _start(ms: MenuState, settings: Settings):
     if blockers:
         set_status(ms, blockers[0].text, False)
         return None
-    return "start"
+    return action
 
 
 def set_status(ms: MenuState, text: str, ok: bool) -> None:

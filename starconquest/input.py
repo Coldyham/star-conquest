@@ -395,10 +395,14 @@ def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
         # key. Suppressed rather than swallowed further up so every other control
         # — panning, looking, opening history — keeps working while you wait.
         return None if ui.awaiting_others(state) else "end_turn"
-    if event.key == pygame.K_p:
-        return "toggle_play"
-    if event.key == pygame.K_a:
-        return "toggle_autoplay"
+    if event.key in (pygame.K_p, pygame.K_a):
+        # Play and autoplay both resolve turns on a clock of their own, which a
+        # shared match has no room for: its turns advance when the last seat
+        # submits. Dead here exactly as their footer buttons are (`render`), so
+        # the key and the button cannot disagree about it.
+        if ui.in_pbp:
+            return None
+        return "toggle_play" if event.key == pygame.K_p else "toggle_autoplay"
     if event.key == pygame.K_f:
         # main gates this on the human actually being knocked out (see
         # Ui.can_fast_forward); from here it is just another action string.
