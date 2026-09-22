@@ -410,6 +410,15 @@ def latest_log() -> Optional[GameLog]:
 # Which seat a person holds. `mapgen._make_players` stamps pid 1, and nothing in
 # the setup can move it, so a match rebuilt with the flag cleared knows where to
 # put it back (`share.py` reads it the same way, for the same reason).
+#
+# Deliberately still a constant now that a match may seat people elsewhere: the
+# one place it is read reclaims a seat for a match that *began in autoplay* and
+# was taken over mid-game, which only the single-player shell can produce (the
+# demo, plus Take control). A game seating people from the start arrives here
+# with `is_human` already stamped, so `claimed` is true before the loop and this
+# never fires. If an all-bot match ever becomes claimable by more than one
+# person, this has to become a question the log answers per turn rather than one
+# seat named up front.
 HUMAN_SEAT = 1
 
 

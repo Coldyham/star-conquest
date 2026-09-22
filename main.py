@@ -92,8 +92,16 @@ def _apply_shared_link(settings: Settings) -> None:
     webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.without_challenge().to_token())
 
 
-def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None) -> Ui:
-    ui = Ui(view=build_view(state), human_id=1, autoplay=autoplay)
+def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None,
+           seat: int = 1) -> Ui:
+    """A fresh view state for ``seat``.
+
+    ``seat`` is 1 for every single-player match — ``mapgen._make_players`` stamps
+    ``is_human`` there and nothing in the setup moves it. It is a parameter for
+    the games where a person sits somewhere else: a play-by-post client holds one
+    seat, and which one is decided by the link they opened.
+    """
+    ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay)
     challenge = settings.challenge if settings is not None else None
     if challenge is not None and challenge.matches(settings):
         # Carry the target onto the Ui as plain numbers so the win overlay can say
@@ -160,7 +168,7 @@ def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState
     return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed)
 
 
-def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
+def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameState, Ui]:
     """Rebuild a saved in-progress match and adopt its settings for the menu.
 
     ``log`` is then reused as the live log, so continued play appends to the very
@@ -173,7 +181,7 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}
     replay_view = replay.reconstruct(
-        log, on_turn=lambda s: _accumulate_fog(s, 1, seen, intel))
+        log, on_turn=lambda s: _accumulate_fog(s, seat, seen, intel))
     state, loaded = replay_view
     settings.copy_from(loaded)
     # Resume *paused*, whatever the match was doing when it was recorded. You
@@ -184,7 +192,7 @@ def resume_game(log: GameLog, settings: Settings) -> tuple[GameState, Ui]:
     # the seat is claimed by *ending* a turn by hand (`engine._claim_seat`) and
     # not by the absence of autoplay — so the choice of who plays on from here is
     # handed back to the player, either way, with the clock stopped.
-    ui = new_ui(state, False, loaded)   # sets ui.visible from the final board
+    ui = new_ui(state, False, loaded, seat)   # sets ui.visible from the final board
     ui.seen |= seen                        # ...plus memory of the whole game
     intel.update(ui.player_intel)          # final-turn intel wins for live rivals
     ui.player_intel = intel
