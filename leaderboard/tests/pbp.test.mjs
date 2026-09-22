@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   allowedOrigin, deadlinePassed, hashToken, lapsedAction, mintToken, outstanding,
   rateLimited, sameToken, validateMatch, validateOrders, validateSeats,
+  visibleOrders,
 } from "../netlify/functions/pbp.mjs";
 
 const MATCH = "00112233445566ff";
@@ -182,4 +183,31 @@ test("the rate limit allows a polling client and stops a flood", () => {
   assert.ok(rateLimited("ip", now + 240, store), "...but the next is refused");
   // A different caller is unaffected.
   assert.ok(!rateLimited("other", now + 240, store));
+});
+
+// --------------------------------------------------------------------------
+// Which orders a client may see (regression)
+// --------------------------------------------------------------------------
+const ROWS = [
+  { turn: 0, seat: 1, orders_json: [] },
+  { turn: 0, seat: 2, orders_json: [] },
+  { turn: 1, seat: 1, orders_json: [] },
+];
+
+test("the live turn's orders are withheld while anyone is still to submit", () => {
+  // Otherwise a player composing their own orders could read everyone else's,
+  // and a simultaneous turn stops being simultaneous.
+  const out = visibleOrders(ROWS, 1, [2]);
+  assert.deepEqual(out.map((r) => r.turn), [0, 0]);
+});
+
+test("...and released the moment the turn is complete", () => {
+  // The other half, and the one a live match caught: a client resolving a turn
+  // it cannot see the orders for plays it as though nobody moved.
+  const out = visibleOrders(ROWS, 1, []);
+  assert.deepEqual(out.map((r) => r.turn), [0, 0, 1]);
+});
+
+test("a resolved turn's orders are always visible", () => {
+  assert.equal(visibleOrders(ROWS, 2, [1, 2]).length, 3);
 });

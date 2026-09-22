@@ -239,3 +239,47 @@ def test_every_endpoint_switches_itself_off_without_an_origin(monkeypatch):
 def test_an_endpoint_names_its_action(monkeypatch):
     monkeypatch.setattr(pbp.webstore, "leaderboard_origin", lambda: "https://board")
     assert pbp.endpoint("submit").endswith("/api/pbp?action=submit")
+
+
+# --------------------------------------------------------------------------- #
+# The live turn's orders (regression)
+# --------------------------------------------------------------------------- #
+def test_resolving_applies_the_live_turns_orders():
+    """Found in a live match, and the reason the coherence digest exists.
+
+    `?action=state` used to send only *resolved* turns, so a client resolving the
+    live one applied an empty order set and played the turn as though nobody had
+    moved. Two clients agreed with each other perfectly — both being equally
+    wrong — and only comparing a rebuild against the *stored log* showed it.
+    """
+    base = pbp.match_from_dict(_state_payload())
+    state, _ = pbp.rebuild(base)
+    src = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+    dest = next(iter(state.systems[src].neighbors))
+
+    match = pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=[
+        {"turn": 0, "seat": 1, "orders_json": [{"src": src, "dst": dest, "ships": 3}]},
+    ]))
+    resolved, log, _ = pbp.resolve(match)
+    assert any(f.owner_id == 1 and f.source_id == src for f in resolved.fleets), \
+        "the live turn's order must actually launch"
+    assert len(log.orders_for(0)) == 1, "...and be recorded in the log it uploads"
+
+
+def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
+    """The two paths to a position must agree: replaying the uploaded log, and
+    rebuilding from the stored order rows. They diverging is exactly the bug
+    above, and is what a real match caught."""
+    base = pbp.match_from_dict(_state_payload())
+    state, _ = pbp.rebuild(base)
+    src = next(sid for sid, s in state.systems.items() if s.owner_id == 2)
+    dest = next(iter(state.systems[src].neighbors))
+    rows = [{"turn": 0, "seat": 2, "orders_json": [{"src": src, "dst": dest, "ships": 2}]}]
+
+    resolved, log, digest = pbp.resolve(
+        pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
+    # ...and the next client, seeing turn 1 with that turn now settled.
+    rebuilt, _ = pbp.rebuild(
+        pbp.match_from_dict(_state_payload(turn=1, turns=rows)))
+    assert replay.digest_hex(rebuilt) == digest
+    assert replay.digest_hex(replay.reconstruct(log)[0]) == digest

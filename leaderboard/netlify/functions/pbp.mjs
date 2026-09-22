@@ -234,6 +234,21 @@ export function outstanding(seats, submitted) {
 }
 
 /**
+ * Which order rows `?action=state` may hand out, given who is still to submit.
+ *
+ * Complete-or-nothing on the live turn, and it has to be exactly that. Send them
+ * too early and a player still composing orders can read everyone else's, so
+ * simultaneous turns stop being simultaneous. Withhold them once the turn *is*
+ * complete and the client resolving it applies an empty order set and plays the
+ * turn as though nobody moved — which is what really happened, and two clients
+ * then agreed with each other because both were equally wrong.
+ */
+export function visibleOrders(orders, turn, waiting) {
+  const settled = orders.filter((row) => row.turn < turn);
+  return waiting.length ? settled : orders;
+}
+
+/**
  * Whether `turn` has run out of time, and what that means for a seat.
  *
  * Two stages, Diplomacy's: the first miss **holds** (the seat submits nothing,
@@ -352,12 +367,14 @@ async function handleState(call, query, origin) {
   if (orders === null) return reply(502, { error: "store refused" }, origin);
 
   const live = orders.filter((row) => row.turn === match.turn);
+  const roster = match.seats.seats ?? match.seats;
+  const waiting = outstanding(roster, live.map((row) => row.seat));
   return reply(200, {
     match_id: match.match_id,
     settings_json: match.settings_json,
     seed: match.seed,
     rules_version: match.rules_version,
-    seats: match.seats.seats ?? match.seats,
+    seats: roster,
     turn: match.turn,
     log: match.log,
     finished: match.finished,
@@ -366,9 +383,15 @@ async function handleState(call, query, origin) {
     // Who is still to submit for the live turn. The waiting overlay is built
     // from exactly this.
     submitted: live.map((row) => row.seat),
-    // Every resolved turn's orders, so a client that has never seen this match
-    // can rebuild it from the opening position.
-    turns: orders.filter((row) => row.turn < match.turn),
+    // Every *settled* turn's orders: the resolved ones, plus the live turn only
+    // once every seat is in. That second clause is load-bearing in both
+    // directions. Without it a client resolving the turn applies an empty order
+    // set and plays it as though nobody moved — two clients then agree with each
+    // other precisely because both are equally wrong, which is how this was
+    // found. With it sent any earlier, a player still composing their own orders
+    // could read everyone else's, and simultaneous turns would stop being
+    // simultaneous. Complete-or-nothing is what makes both true at once.
+    turns: visibleOrders(orders, match.turn, waiting),
   }, origin);
 }
 
