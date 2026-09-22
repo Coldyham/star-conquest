@@ -17,6 +17,7 @@ import pygame  # noqa: E402
 import pytest  # noqa: E402
 
 from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
+from starconquest import settings as settings_mod  # noqa: E402
 from starconquest.geometry import WorldView  # noqa: E402
 from starconquest.model import Fleet, Order  # noqa: E402
 from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
@@ -201,6 +202,50 @@ def test_win_overlay_draws_every_challenge_verdict():
         render.draw(screen, state, ui)
     finally:
         pygame.quit()
+
+
+def test_the_win_message_names_the_bot_that_won():
+    """"Verdant (Knower) wins!" — which bot took the board is the one thing the
+    overlay could say and didn't, and it is unreadable from the map."""
+    state = mapgen.generate_random(1, num_nodes=18, num_players=4)
+    state.players[3].is_human = False
+    state.players[3].ai_strategy = "knower"
+    state.winner = 3
+    assert render._winner_label(state) == "Verdant (Knower)"
+
+    # A drop-in keeps its own capitalisation rather than being title-cased.
+    state.players[3].ai_strategy = "claudeBot"
+    assert render._winner_label(state) == "Verdant (ClaudeBot)"
+
+    # A human seat is credited to the person, not to whatever it was set to —
+    # including one claimed part-way through (`engine.claim_seat`).
+    state.players[3].is_human = True
+    assert render._winner_label(state) == "Verdant"
+
+    state.winner = 0                      # the draw branch names nobody
+    assert render._winner_label(state) == "Neutral"
+
+
+def test_a_seat_left_to_the_seed_is_revealed_by_the_win_message():
+    """`settings.RANDOM_STRATEGY` resolves on `Player`, never on `Settings`, so
+    the overlay reads the bot that actually played rather than the placeholder.
+    Revealing it at game over is the payoff, and costs nothing: there is no turn
+    left to play with the knowledge."""
+    from starconquest.settings import RANDOM_STRATEGY, Settings, build_state
+
+    saved = {const: getattr(config, const) for _, const in settings_mod._GLOBAL_KNOBS}
+    try:
+        cfg = Settings(players=3, nodes=18)
+        cfg.ai_strategy[1] = RANDOM_STRATEGY          # seat 2
+        state = build_state(cfg, 5)
+        state.winner = 2
+        label = render._winner_label(state)
+        assert label.startswith("Crimson (")
+        assert RANDOM_STRATEGY not in label.lower()
+        assert state.players[2].ai_strategy in ai.available_strategies()
+    finally:
+        for const, val in saved.items():
+            setattr(config, const, val)
 
 
 def test_result_lines_verdict_is_three_way():

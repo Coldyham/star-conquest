@@ -36,6 +36,77 @@ pruning otherwise makes a token depend on the *reader's* defaults, and those
 four are the identity of the match. `from_token` sniffs `raw[:1] != b"{"` to
 keep pre-compression links working.
 
+## A seat left to the seed (`settings.RANDOM_STRATEGY`)
+
+The Strategy dropdown's last entry, `random`, is the one option that names no
+decision function. `settings.resolve_strategy` turns it into a real bot inside
+`build_state`, drawing from `ai.available_strategies()`. The point is to play
+without knowing who you are playing: a large part of this game's skill is
+knowing how a given bot answers a given opening, and that is knowledge a fixed
+opponent hands you before the first turn.
+
+**Why it is resolved in `build_state` and not by a `models/` dispatcher bot.**
+The obvious implementation is a model file whose `decide` looks up a choice and
+forwards to it — it needs no core change and appears in the dropdown for free.
+It breaks on the oracle contract. `models/knower.py` resolves each opponent seat
+through `ai.STRATEGIES` and then asks the owning module `is_oracle_seat(player)`
+to decide whether it may call that seat's real code or must model it blind. A
+dispatcher cannot answer that question: the probe receives a `Player`, which
+carries no seed, so the dispatcher has no way to know which bot this seat is
+about to be. Every answer it could give is wrong somewhere — `True` makes knower
+model a plain heuristic seat blind and untrusted, `False` lets knower call a
+dispatcher that forwards to knower, which is the recursion the `fn is decide`
+check exists to prevent. Resolving one layer earlier deletes the problem rather
+than managing it: by the time anything looks at the seat, `Player.ai_strategy`
+names the bot that is really deciding, and the whole roster stays eligible —
+including the oracles, which are the opponents most worth not recognising.
+
+**The pick is derived, never drawn.** `random.Random(f"{seed}:strategy:{pid}")`,
+the same construction `botio.decide_seed` uses and for the same reason: taking
+the pick from `state.rng` would shift every subsequent battle roll, so the same
+seed would lay out the same map and then fight it differently depending on how
+many seats happened to be left to chance. Derived instead, a seed reproduces the
+opponents exactly as it reproduces the map — which is what makes a challenge
+link on a mystery setup raceable, and a mystery match resumable. Each seat draws
+from its own stream, so three random seats are three independent picks rather
+than three copies of one.
+
+**The pool is read at build time, and that costs nothing a replay depends on.**
+`ai.available_strategies()` is whatever is registered now, so a drop-in model
+joins the pool without being named anywhere. A roster that gains or loses a file
+therefore *can* change which bot a brand-new match faces — but it cannot move a
+single stored one, because `replay.reconstruct` applies the recorded orders and
+deals the recorded dice and asks no seat to decide anything. The property
+`bot_replay.replay_rev` rests on ("retuning, rewriting or deleting a `models/`
+bot cannot move a stored game") is untouched. A caller that never ran
+`ai.load_models()` sees only the built-in heuristic, which is the same
+degradation `ai.decide` already applies to an unrecognised strategy name.
+
+**The win overlay reveals it.** `render._winner_label` reads `Player.ai_strategy`
+— the resolved name — so a mystery match ends on "Verdant (Knower) wins!" rather
+than leaving the one interesting fact about it unreadable. Disclosing it at game
+over costs nothing, since there is no turn left in which to use it, and it is the
+whole payoff of having played blind. It excludes a human seat (so a game claimed
+part-way through, `engine.claim_seat`, is credited to the person rather than to
+the strategy it opened under) and neutral, which carries a default `ai_strategy`
+like every other player but never decides anything — it reaches the overlay only
+on a mutual annihilation, where naming a bot would credit one that never played.
+
+**`Settings` keeps the placeholder, so the mystery survives the link.** Only
+`Player` is resolved; `Settings.ai_strategy` still reads `random`, so a saved
+config, a shared setup and a challenge link all preserve it for their recipient,
+and reopening the menu shows what was chosen rather than what it became. It also
+decides what the leaderboard shows: `sc_bots` reads `settings_json`, so the
+opponent chip on a mystery map reads `random` — the setup's rule rather than its
+outcome. Two consequences worth naming. The chip's bucket is heterogeneous: a
+`random` filter mixes games whose real opponents were knower and rusherplus, and
+those are not the same difficulty. And the board cannot resolve it itself even
+if it wanted to, since the pick comes out of Python's string seeding (SHA-512)
+and JS cannot recompute it — the same wall `KEY_ALIASES` already hits with the
+setup digest. If the resolved names should ever be disclosed, they go on
+`Challenge`, which `challenge_key()` drops before hashing, never on `Settings`,
+where a new field would move the digest of every setup ever shared.
+
 ## Challenge links (`settings.Challenge`)
 
 Score is turns-to-win, ties broken on fewest ships lost. `hand` (how many

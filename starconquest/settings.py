@@ -22,11 +22,23 @@ import zlib
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Optional
 
-from . import config, mapgen
+from . import ai, config, mapgen
 from .custommap import CustomMap
 from .model import AiParams, GameState
 
 MODES = ("random", "symmetric")
+
+# A seat's strategy name meaning "surprise me": `build_state` replaces it with a
+# concrete bot drawn from the seed, so the setup records the *choice to not
+# choose* while the live game holds a real strategy name. Deliberately resolved
+# here rather than by a `models/` dispatcher bot: everything downstream that
+# reasons about who it is playing — `models/knower.py`'s oracle, which asks a
+# module `is_oracle_seat(player)` and gets no seed with which to answer for a
+# dispatcher, `botio`'s seat reveal, the leaderboard's bot column — then sees the
+# bot that is really deciding. It is a key into `ai.STRATEGIES` only by absence:
+# a model file must never be named this, and the pool below is drawn from the
+# registry, so one that was would simply be picked as itself.
+RANDOM_STRATEGY = "random"
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
 _roll_count = itertools.count()
@@ -583,12 +595,45 @@ def _apply_globals(settings: Settings) -> None:
         setattr(config, const, getattr(settings, attr))
 
 
+def resolve_strategy(name: str, seed: int, pid: int) -> str:
+    """A seat's concrete strategy name: ``name`` itself, unless it is
+    ``RANDOM_STRATEGY``, in which case one is drawn for it from the match seed.
+
+    Derived, never drawn — the same rule ``botio.decide_seed`` follows, and for
+    the same reason. Taking a pick from ``state.rng`` would shift every seat's
+    battle dice, so the same seed would lay out the same map and then fight it
+    differently depending on how many seats were left to chance. Seeding a
+    throwaway ``Random`` off the match seed and the seat instead leaves the
+    engine's stream untouched, gives each seat an independent pick, and still
+    reproduces exactly: the same setup and seed always face the same opponents.
+
+    The pool is ``ai.available_strategies()``, i.e. whatever is registered *now*
+    — so it includes drop-in models and holds no bot back, oracles included. It
+    is read at build time rather than baked in because that is the only honest
+    answer to "which bots exist", and the cost is bounded: a recorded match
+    replays its stored orders and dice and asks no seat to decide (see
+    ``replay.reconstruct``), so a roster that gains or loses a file cannot move a
+    single stored game — it can only change whose name is stamped on a *new* one.
+    A caller that never ran ``ai.load_models()`` sees only the built-in
+    heuristic, which is the same degradation ``ai.decide`` already applies to an
+    unrecognised strategy name.
+    """
+    if name != RANDOM_STRATEGY:
+        return name
+    pool = [n for n in ai.available_strategies() if n != RANDOM_STRATEGY]
+    if not pool:
+        return "heuristic"
+    return pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+
+
 def build_state(settings: Settings, seed: int) -> GameState:
     """Generate a game from a settings object and a concrete seed.
 
     The single funnel from menu/CLI to a GameState: apply the global knobs, build
     the map, then stamp each non-neutral seat with its own strategy and AI params
-    (params a copy, so later menu edits don't reach into a live game).
+    (params a copy, so later menu edits don't reach into a live game). A seat set
+    to ``RANDOM_STRATEGY`` is resolved to a real bot here (``resolve_strategy``),
+    so the rest of the game never sees the placeholder.
 
     A match that *starts* in autoplay has no human seat at all: ``mapgen`` flags
     pid 1, and this un-flags it. An all-bot game must have no preferred seat, or
@@ -606,7 +651,7 @@ def build_state(settings: Settings, seed: int) -> GameState:
         state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
     for player in state.players.values():
         if not player.is_neutral:
-            player.ai_strategy = settings.seat_strategy(player.id)
+            player.ai_strategy = resolve_strategy(settings.seat_strategy(player.id), seed, player.id)
             player.ai_params = replace(settings.seat_params(player.id))
         if settings.autoplay:
             player.is_human = False
