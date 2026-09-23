@@ -535,36 +535,45 @@ def pbp_opened(ui: Ui) -> None:
     ui.pbp_submitted, ui.pbp_waiting, ui.pbp_msg = False, (), ""
 
 
-def pbp_open(settings: Settings, seed: int) -> tuple[str, Optional[pbp.Request]]:
+def pbp_open(settings: Settings, seed: int,
+            seats: Optional[list[int]] = None) -> tuple[str, Optional[pbp.Request]]:
     """Ask the endpoint to open a shared match on this setup.
 
-    **Every player is a person.** A match is opened for the seats the setup
-    already has rather than for a roster chosen separately — the simplest rule
+    ``seats`` is the roster to seat a person at — any seat left out plays its
+    already-configured strategy instead, exactly as ``pbp.rebuild`` decides for
+    a bot seat. Left out (``None``), every seat is a person: the simplest rule
     that fits in a button, and the one a player is already holding in their head
-    when they set the player count. Seating people against bots is a thing the
-    schema, the endpoint and ``pbp.rebuild`` all support; what is missing is a
-    way to *say* it that does not cost the Basic tab a ninth row it has no space
-    for, so it waits for the lobby the design already leaves room for.
+    when they set the player count, kept as the default for anything that opens
+    a match without going through the menu's own roster prompt (``menu.MenuState
+    .pbp_roster``, which always includes seat 1 — the creator ends up seated
+    there — and lets 2+ be turned off one at a time).
 
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
     """
     match_id = replay._new_match_id()
-    seats = [pid for pid in range(1, settings.players + 1)]
+    if seats is None:
+        seats = [pid for pid in range(1, settings.players + 1)]
     return match_id, pbp.create(match_id, settings, seed, seats)
 
 
-def pbp_links(match_id: str, tokens: dict[int, str]) -> list[str]:
-    """One line per seat: whose it is, and the link that seats them.
+def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
+    """``(seat, link)`` pairs, sorted by seat — one per person seated.
 
     A full URL on the web, where there is a page for a link to point at. Off it
     there is none — so the fragment goes out bare, which is both what ``--match``
     takes and what a player pastes onto the address of the web build.
     """
-    return [f"{config.player_name(seat)}: "
-            f"{webstore.link_url(pbp.link_fragment(match_id, token)) or pbp.link_fragment(match_id, token)}"
+    return [(seat, webstore.link_url(pbp.link_fragment(match_id, token))
+                    or pbp.link_fragment(match_id, token))
             for seat, token in sorted(tokens.items())]
+
+
+def pbp_links(match_id: str, tokens: dict[int, str]) -> list[str]:
+    """One line per seat: whose it is, and the link that seats them."""
+    return [f"{config.player_name(seat)}: {link}"
+            for seat, link in pbp_seat_links(match_id, tokens)]
 
 
 def pbp_handed_out(match_id: str, tokens: dict[int, str]) -> str:
@@ -1130,6 +1139,11 @@ async def main() -> None:
     pbp_make: pbp.Request | None = None
     pbp_making = ""
     pbp_accum = 0
+    # Every other seat's link, from a match *we* just created — handed to `Ui`
+    # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
+    # opens on the very first frame of the match rather than a status line that
+    # beat it there.
+    pending_invite_links: list[tuple[int, str]] = []
     invite = (pbp.parse_link(pbp.PBP_FRAGMENT + args.match.strip())
               if args.match.strip() else pbp_request())
     if invite is not None and pending_replay is None:
@@ -1238,16 +1252,23 @@ async def main() -> None:
                     menu.set_status(menu_state,
                                     pbp_handed_out(pbp_making, tokens), True)
                 else:
-                    # Our own seat is kept; the rest are handed out. Then the
-                    # ordinary opening path takes over, exactly as it would for
-                    # somebody following the link we just sent them.
+                    # Our own seat is kept; the rest go on the invite overlay,
+                    # the moment there is a `Ui` to hang it off (see `opening`
+                    # below) rather than a status line and a clipboard blob.
+                    # Then the ordinary opening path takes over, exactly as it
+                    # would for somebody following the link we just sent them.
                     pbp_seat = pbp.Seat(pbp_making, 1, tokens[1])
                     pbp.remember(pbp_seat)
                     invite = (pbp_seat.match_id, pbp_seat.token)
                     pbp_poll = pbp.fetch_state(pbp_seat.match_id)
                     resume_prompt = None
-                    menu.set_status(menu_state,
-                                    pbp_handed_out(pbp_making, tokens), True)
+                    others = {seat: token for seat, token in tokens.items() if seat != 1}
+                    pending_invite_links = pbp_seat_links(pbp_making, others)
+                    menu.set_status(
+                        menu_state,
+                        "Match created — copy each seat's link from the game"
+                        if pending_invite_links else "Match created",
+                        True)
         if pbp_ident is not None and invite is not None:
             status, body = pbp_ident.poll()
             if status != pbp.PENDING:
@@ -1302,6 +1323,9 @@ async def main() -> None:
                 elif opening:
                     state, ui, log = open_match(match, pbp_seat, settings)
                     current_seed = match.seed
+                    if pending_invite_links:
+                        ui.pbp_invite = tuple(pending_invite_links)
+                        pending_invite_links = []
                     scene = "game"
                     auto_accum = 0
                 else:
@@ -1485,12 +1509,16 @@ async def main() -> None:
                     scene = "game"
                     auto_accum = 0
                 elif action == "play_by_post":
-                    # The same setup, opened as a shared match. The seed is
-                    # resolved now and sent with it: "roll a fresh seed" has to
-                    # mean one seed for the whole table, not one each.
+                    # The same setup, opened as a shared match — for the roster
+                    # the menu's own prompt just confirmed (seat 1 is always in
+                    # it; a seat left off plays whatever strategy it already
+                    # carries). The seed is resolved now and sent with it:
+                    # "roll a fresh seed" has to mean one seed for the whole
+                    # table, not one each.
                     if pbp_make is None:
                         current_seed = resolve_seed(settings)
-                        pbp_making, pbp_make = pbp_open(settings, current_seed)
+                        pbp_making, pbp_make = pbp_open(
+                            settings, current_seed, sorted(menu_state.pbp_roster) or None)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:
@@ -1520,6 +1548,14 @@ async def main() -> None:
             elif action == "menu":
                 scene = "menu"
                 state, ui, log = None, None, None
+            elif action == "pbp_copy_seat":
+                # The invite overlay named the seat (`input` never touches the
+                # clipboard); the link is whichever row it was drawn from.
+                link = next((link for seat, link in ui.pbp_invite
+                            if seat == ui.pbp_copy_seat), "")
+                if link and webstore.copy_to_clipboard(link):
+                    ui.pbp_invite_copied = ui.pbp_copy_seat
+                ui.pbp_copy_seat = 0
             elif action == "share":
                 # Game-over only (input only returns this there), and only for a
                 # result that is ours to publish — render gates the button on the
@@ -1600,7 +1636,11 @@ async def main() -> None:
                     history_states, history_fog, history_events, entered = open_history(state, ui, log)
                     if entered is not None:
                         live_fog = entered
-            elif action == "rewind":
+            elif action == "rewind" and not ui.in_pbp:
+                # Never reachable from a shared match — render withholds the button
+                # (see `_draw_scrubber`) — but the check is repeated here rather
+                # than trusted, since rewinding forks the view away from a match
+                # the server and every other seat still think is at a later turn.
                 if ui.history_reveal:
                     # finished game — fork a new save so the completed record stays
                     # intact, then resume live play in the new file.

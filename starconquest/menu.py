@@ -307,6 +307,13 @@ class MenuState:
     # it invalidated their challenge is the wrong order — so the action waits here
     # and "Change it anyway" re-issues it.
     pending_action: Optional[str] = None
+    # Play-by-post roster prompt: which seats will be played by a person, opened
+    # by "Play by post" and confirmed into the match ``pbp_open`` creates. Seat 1
+    # is always in it — the creator ends up seated there — so only seats 2+ are
+    # ever toggled; a seat left out keeps whatever strategy the AI tab already
+    # has it playing. Reset to every seat each time the prompt opens.
+    pbp_prompt: bool = False
+    pbp_roster: set[int] = field(default_factory=set)
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -432,6 +439,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _text(surface, f["small"], "Enter: start game   ·   Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, 886))
     if ms.confirm_clear_map:
         _draw_clear_map(surface, ms, w, surface.get_height())
+    if ms.pbp_prompt:
+        _draw_pbp_prompt(surface, ms, settings, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
@@ -570,6 +579,71 @@ def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
         ("clear_map_yes", clear, _BTN_FILL, _WARN),
         ("clear_map_no", keep, _HL_FILL, _HL_BORDER),
     )
+
+
+def _pbp_prompt_labels() -> tuple[str, str]:
+    """(confirm, cancel) labels; key hints dropped on a touch build, as every
+    other modal here does."""
+    if config.touch_ui:
+        return ("Create match", "Cancel")
+    return ("Create match (Enter)", "Cancel (Esc)")
+
+
+def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
+    """Modal: who at the table is a person, before the match is even opened.
+
+    Seat 1 is fixed — the creator ends up seated there regardless of what is
+    checked, so its row carries no checkbox at all — and every seat starts
+    checked (``ms.pbp_roster``, reset by ``_handle_click`` on the way in), so
+    the common case ("every player is a person") is a single press away, the
+    same as it always was; unchecking a seat leaves it to whatever strategy the
+    AI tab already has it playing.
+    """
+    f = _fonts()
+    row_h, gap, pad = 40, 10, 28
+    sw_size = 14
+    confirm, cancel = _pbp_prompt_labels()
+    bw = max(f["normal"].size(s)[0] for s in (confirm, cancel)) + 2 * 18
+    bh = 40
+    title = "Who's playing?"
+    name_w = max(f["normal"].size(config.player_name(seat))[0]
+                 for seat in range(1, settings.players + 1))
+    pw = max(name_w + sw_size + _CH + 4 * pad, f["normal"].size(title)[0] + 2 * pad,
+             2 * bw + gap + 2 * pad)
+    ph = pad + f["normal"].get_height() + gap + settings.players * (row_h + gap) + bh + pad
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
+    pygame.draw.rect(surface, _HL_BORDER, panel, 2, border_radius=10)
+
+    y = panel.y + pad
+    _text(surface, f["normal"], title, config.COLOR_TEXT,
+          center=(panel.centerx, y + f["normal"].get_height() // 2))
+    y += f["normal"].get_height() + gap
+
+    for seat in range(1, settings.players + 1):
+        color = config.player_color(seat)
+        swatch = pygame.Rect(panel.x + pad, y + (row_h - sw_size) // 2, sw_size, sw_size)
+        pygame.draw.rect(surface, color, swatch, border_radius=3)
+        _text(surface, f["normal"], config.player_name(seat), color,
+              midleft=(swatch.right + 10, y + row_h // 2))
+        if seat == 1:
+            _text(surface, f["small"], "(you)", config.COLOR_TEXT_DIM,
+                  midright=(panel.right - pad, y + row_h // 2))
+            ms.rects.pop(f"pbp_seat_{seat}", None)
+        else:
+            _checkbox(surface, ms, f"pbp_seat_{seat}", seat in ms.pbp_roster,
+                      panel.right - pad, y + (row_h - _CH) // 2)
+        y += row_h + gap
+
+    by = panel.bottom - pad - bh
+    go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
+    stay = pygame.Rect(panel.centerx + gap // 2, by, bw, bh)
+    _button(surface, ms, "pbp_confirm", go, confirm, fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "pbp_cancel", stay, cancel, fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM)
 
 
 # Settings fields shown on each tab, for the tab row's own changed-dot — a tab
@@ -1398,6 +1472,36 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
     return None
 
 
+def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str]:
+    """Answer the play-by-post roster prompt: toggle a seat, confirm (opens the
+    match with whichever seats are still checked), or cancel outright.
+
+    Seat 1's row is never a hit target (`_draw_pbp_prompt` draws it but records
+    no rect for it) — the creator ends up seated there regardless, so there is
+    nothing for a click on it to toggle.
+    """
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for seat in range(2, settings.players + 1):
+            rect = ms.rects.get(f"pbp_seat_{seat}")
+            if rect is not None and rect.collidepoint(event.pos):
+                ms.pbp_roster.symmetric_difference_update({seat})
+                return None
+        if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
+            ms.pbp_prompt = False
+            return "play_by_post"
+        if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
+            ms.pbp_prompt = False
+            return None
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            ms.pbp_prompt = False
+            return "play_by_post"
+        if event.key == pygame.K_ESCAPE:
+            ms.pbp_prompt = False
+            return None
+    return None
+
+
 def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[str]:
     """Answer the un-challenge modal: keep the edit and drop the score, or put the
     setup back the way the link had it.
@@ -1496,6 +1600,8 @@ def _to_canvas_event(event, ms: MenuState):
 def _dispatch(event, ms: MenuState, settings: Settings):
     if ms.confirm_clear_map:  # modal: swallows everything until answered
         return _handle_clear_map(event, ms, settings)
+    if ms.pbp_prompt:  # modal: swallows everything until confirmed or cancelled
+        return _handle_pbp_prompt(event, ms, settings)
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -1597,7 +1703,14 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         # The same gate Start goes through, for the same reason: a hand map that
         # cannot build cannot be played by post either, and finding that out
         # after the match had been opened and the links sent would be worse.
-        return _start(ms, settings, "play_by_post")
+        # Opens the roster prompt rather than the match itself — "every player
+        # is a person" is still the default it starts from, but now a choice
+        # rather than the only option.
+        if _start(ms, settings, "play_by_post") is None:
+            return None
+        ms.pbp_prompt = True
+        ms.pbp_roster = set(range(1, settings.players + 1))
+        return None
     if hit == "quit":
         return "quit"
     if hit is None:

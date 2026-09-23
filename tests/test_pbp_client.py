@@ -317,6 +317,18 @@ def test_a_new_match_seats_every_player(monkeypatch):
     assert sent["rules_version"] == engine.RULES_VERSION
 
 
+def test_a_new_match_can_seat_a_roster_smaller_than_the_table(monkeypatch):
+    """The menu's roster prompt can leave a seat to its own strategy — seat 1 is
+    always in it (the creator ends up seated there), but any other seat can be
+    left off, and only the seats actually passed are asked for."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    match_id, _ = app.pbp_open(Settings(players=4), seed=11, seats=[1, 3])
+    assert sent["seats"] == [1, 3]
+    assert sent["match_id"] == match_id
+
+
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
     """Sent rather than handed back, so a retry after a lost reply opens a second
     match instead of quietly rewriting the first."""
@@ -353,6 +365,17 @@ def test_off_the_web_a_link_is_the_bare_fragment():
     what a player can paste onto the web build's address."""
     lines = app.pbp_links(MATCH, {1: TOKEN})
     assert lines[0].endswith(f"pbp={MATCH}:{TOKEN}")
+
+
+def test_seat_links_are_the_raw_pairs_the_invite_overlay_copies(monkeypatch):
+    """`pbp_links` and the invite overlay want different shapes off the same
+    tokens — text lines for the desktop fallback, `(seat, link)` pairs for a
+    row's own Copy button — so one is built from the other rather than the two
+    drifting apart on what a link actually is."""
+    monkeypatch.setattr(webstore, "link_url", lambda token: f"https://game/#{token}")
+    pairs = app.pbp_seat_links(MATCH, {1: TOKEN, 2: "b" * 32})
+    assert pairs == [(1, f"https://game/#pbp={MATCH}:{TOKEN}"),
+                     (2, f"https://game/#pbp={MATCH}:{'b' * 32}")]
 
 
 def test_a_token_that_could_not_seat_anyone_is_never_handed_out():

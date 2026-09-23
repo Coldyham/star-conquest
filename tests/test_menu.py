@@ -179,14 +179,47 @@ def test_start_via_click_and_enter():
         pygame.quit()
 
 
-def test_play_by_post_opens_the_same_setup_as_a_shared_match():
+def test_play_by_post_opens_the_roster_prompt_then_the_match():
     """A sibling of Start, not a setting: it plays this setup, and everything on
-    the page describes it exactly as it would a game of your own."""
+    the page describes it exactly as it would a game of your own — but it opens
+    a roster prompt first ('every player is a person' is the default it starts
+    from, not the only option), and only confirming that returns the action."""
     screen, ms, settings = _setup()
     try:
-        assert _click_key(screen, ms, settings, "play_by_post") == "play_by_post"
+        assert _click_key(screen, ms, settings, "play_by_post") is None
         assert not ms.rects["play_by_post"].colliderect(ms.rects["start"])
         assert not ms.rects["play_by_post"].colliderect(ms.rects["quit"])
+        assert ms.pbp_prompt
+        assert ms.pbp_roster == set(range(1, settings.players + 1))
+
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+        assert not ms.pbp_prompt
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
+    """Unchecking any other seat is fine; seat 1 has no checkbox to press at
+    all, since the creator ends up seated there regardless."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert "pbp_seat_1" not in ms.rects
+        menu.draw(screen, ms, settings)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                pos=ms.rects["pbp_seat_2"].center, button=1)
+        menu.handle_event(ev, ms, settings)
+        assert ms.pbp_roster == {1, 3}
+    finally:
+        pygame.quit()
+
+
+def test_cancelling_the_roster_prompt_opens_no_match():
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert _click_key(screen, ms, settings, "pbp_cancel") is None
+        assert not ms.pbp_prompt
     finally:
         pygame.quit()
 

@@ -3,7 +3,7 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share') or None.
+'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat') or None.
 """
 
 from __future__ import annotations
@@ -192,7 +192,37 @@ def _toggles_autoplay(ui: Ui, event) -> bool:
     return False
 
 
+def _handle_invite_event(event, ui: Ui) -> Optional[str]:
+    """Answer the play-by-post invite overlay: copy one seat's link, or dismiss
+    it for good.
+
+    The clipboard write is main's job — this module never reaches `webstore` —
+    so a Copy row only names the seat (`ui.pbp_copy_seat`) and returns the
+    action that asks for it. Continue needs nothing from main at all: clearing
+    `ui.pbp_invite` is a plain `Ui` mutation, so it happens right here.
+    """
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return None
+    if ui.pbp_invite_close_rect[2] and _point_in_rect(event.pos, ui.pbp_invite_close_rect):
+        ui.pbp_invite = ()
+        ui.pbp_invite_rects = {}
+        ui.pbp_invite_close_rect = (0, 0, 0, 0)
+        ui.pbp_invite_copied = 0
+        return None
+    for seat, rect in ui.pbp_invite_rects.items():
+        if rect[2] and _point_in_rect(event.pos, rect):
+            ui.pbp_copy_seat = seat
+            return "pbp_copy_seat"
+    return None
+
+
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    # Play-by-post's invite overlay is modal too, and ahead of everything below:
+    # a match this fresh (right after we created it) can be running no film and
+    # holds no history or win to check first.
+    if ui.pbp_invite:
+        return _handle_invite_event(event, ui)
+
     # A turn playback is running: any press skips it — except Play/Pause, which
     # must freeze it in place rather than lose it (`main` does the freezing; this
     # is only about not discarding the film here), the camera controls, which

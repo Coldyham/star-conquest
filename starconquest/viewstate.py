@@ -319,6 +319,17 @@ class Ui:
     pbp_submitted: bool = False
     pbp_waiting: tuple[int, ...] = ()
     pbp_msg: str = ""            # what the last call said, drawn on the overlay
+    # Every other seat's link, shown once right after *we* create the match —
+    # "a modal listing the seats with a Copy button each" rather than a status
+    # line over a clipboard blob nobody thought to check (`main.pbp_seat_links`
+    # fills it in, only on the creation path — following someone else's link
+    # never sets it). `(seat, link)` pairs; empty means there is nothing to show,
+    # which is what render/input gate the overlay's presence on.
+    pbp_invite: tuple[tuple[int, str], ...] = ()
+    pbp_invite_rects: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
+    pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    pbp_invite_copied: int = 0   # seat whose row last showed "Copied" feedback
+    pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)

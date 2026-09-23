@@ -250,23 +250,31 @@ with the stub about the unique-violation status code and the conditional
 `PATCH`'s empty result, and whether a deadline elapsing in wall-clock time
 behaves as the backdated clock does. Everything either side of that is pinned.
 
-Left open deliberately:Left open deliberately:
+Done since, off the same "missing way to say it, not a missing capability" list:
 
-* **A shared match seats every player.** One button cannot ask for a roster, and
-  the Basic tab has no ninth row to spare (`test_tab_content_stays_inside_the_panel`
-  guards its 560x496 box). Seating people against bots is supported all the way
-  down — `pbp_matches.seats` is a roster, `pbp.rebuild` takes a `decide` — so
-  this is a missing *way to say it*, not a missing capability, and it belongs
-  with the lobby the design already leaves room for.
-* **Seat links go out via the clipboard**, all of them at once, one line per
-  seat, exactly as `share_challenge` hands over a challenge token (and never via
-  the address bar, for the same reason: a seat link left there is read back at
-  the next launch and would seat you in a match you had already left). A modal
-  listing the seats with a Copy button each would be nicer and is a contained
-  piece of UI work.
+* **A shared match can seat a roster smaller than the table.** `menu`'s "Play by
+  post" button opens a roster prompt (`MenuState.pbp_prompt`/`pbp_roster`) rather
+  than the match itself — every seat starts checked ("every player is a person"
+  is still the default), seat 1 has no checkbox at all (the creator ends up
+  seated there regardless), and unchecking any other seat leaves it to play
+  whatever strategy the AI tab already has it set to. Confirming calls
+  `main.pbp_open(settings, seed, seats=sorted(ms.pbp_roster))`; nothing on the
+  endpoint or in `pbp.rebuild` had to change; they always supported this.
+* **Seat links are copied individually, not as one clipboard blob.** The moment
+  the match we created opens, `Ui.pbp_invite` carries `(seat, link)` for every
+  *other* seat and `render._draw_invite_overlay` shows one row per seat with its
+  own Copy button — the modal the note above called for. `input._handle_invite_
+  event` never touches `webstore` itself (it only names the seat on `ui.pbp_copy_
+  seat` and returns `"pbp_copy_seat"`); `main.py` is where the clipboard write
+  actually happens, same as every other share path. Continue clears the overlay
+  for good; it never reappears once dismissed, and following someone else's
+  invite link never sets it in the first place.
+
+Left open deliberately:
+
 * **The deadline is 48h and is not on the menu** (`pbp.DEADLINE_HOURS`). The
   endpoint takes any figure from 1 to 336 hours and stores it per match; nothing
-  offers a choice, for the same reason nothing offers a roster.
+  offers a choice.
 
 ## How a deadline works
 
