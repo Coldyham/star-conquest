@@ -492,19 +492,39 @@ Weakest in the middle rather than at either end, and never below 68%.
 nodes, default settings — 900 games, 64 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
 docstring, the next time marshal or the roster's pricing changes. Re-run with
-`DENY_SWAP` shipped ("Denying the swap" below):
+`DENY_SWAP` and `RIVAL_REFLOOD_MIN_TURNS` shipped ("Denying the swap" and
+"Phase 3b re-flooding" below). The gate is inert here, since no lane on this
+cell is 5 turns, and the table moved by one game (258/249 and 57% with
+`DENY_SWAP` alone):
 
-    marshal 258 (31%), knower 249 (30%), thinker 160 (19%),
+    marshal 257 (31%), knower 250 (30%), thinker 160 (19%),
     claudebot 91 (11%), heuristic 50 (6%), rusherplus 28 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  marsha  thinke  claude  heuris  rusher
-      knower         —     43%     93%     96%    100%    100%
-      marshal      57%       —     94%    100%    100%     98%
+      knower         —     44%     93%     96%    100%    100%
+      marshal      56%       —     94%    100%    100%     98%
       thinker       7%      6%       —     94%     96%    100%
       claudebot     4%      0%      6%       —     78%     85%
       heuristic     0%      0%      4%     22%       —     68%
       rusherplus    0%      2%      0%     15%     32%       —
+
+The same ladder in two other cells, since this one cannot see anything keyed on
+long lanes. Both 30 seeds and 900 games; the second at `--max-turns 1500`:
+
+    symmetric, 18 nodes, 6 ly/turn     189 timeouts
+    marshal 221 (31%), knower 211 (30%), thinker 119 (17%),
+    claudebot 99 (14%), heuristic 41 (6%), rusherplus 20 (3%)
+    marshal vs knower 75%
+
+    random, 24 nodes, 3 ly/turn        96 timeouts
+    marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
+    claudebot 84 (10%), heuristic 64 (8%), rusherplus 5 (1%)
+    marshal vs knower 76%
+
+Same order in all three, but marshal leads knower by a much wider margin in
+both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
+Head to head it is 60 games a pair less timeouts, so read it as a direction.
 
 The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the
 head-to-head at 51% and 58 timeouts. The same caveat as the paragraph below
@@ -1595,6 +1615,14 @@ long lanes:
     24n, 3 ly/turn, adv 1.25            222-206     428    51.9%  +0.77
     24n, 3 ly/turn, adv 1.5             148-145     293    50.5%  +0.18
     melee 3p + knower, 24n, 3 ly/turn   233-228    (knower 111 of 600)   null
+
+**Symmetric maps cannot measure it.** Gate on against gate off, 300 symmetric
+seeds a cell: 85-94% of slow-lane games time out even at 1500 turns (51-91
+decided games per cell, 51.0-55.3%, all null), and the default-speed cell reads
+exactly 50% (inert). Against knower instead, on the same 150 seeds, the two
+arms read 90% / 88%, 80% / 77% and 88% / 85% of only 17-57 decided games.
+A perfectly fair start on long lanes is a stalemate between these bots, so
+there is nothing to read in either direction.
 
 **It and `DENY_SWAP` overlap but are not the same fix.** Each alone, against
 neither, and against each other, on the same seeds (2001-2300), pooled over
