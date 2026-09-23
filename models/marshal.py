@@ -105,6 +105,16 @@ What it changes, in descending order of measured value:
     in exactly one turn is now weighted by ``FAST_GUARD_WEIGHT``; bit-identical
     to the unweighted figure wherever no adjacent lane is 1 turn.
 
+  * **The surplus leaves the door shut behind it, on a long lane.** In about a
+    fifth of marshal's strikes on a rival, the target's owner launches out of
+    that target into our source on the same turn — neither sees the other's
+    orders — and both systems change hands. Phase 3b now pours surplus only
+    down to what the source needs to hold against the target's whole garrison
+    stepping in (``DENY_SWAP``), and only across a lane of at least
+    ``DENY_SWAP_MIN_TURNS``: 57% at 3 ly/turn, an honest null at the default
+    speed, bit-identical at 12. Capping Phase 3's priced strike as well reads
+    33% — see "Denying the swap" in `docs/bot-design.md`.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -184,11 +194,12 @@ RELIEF_AWARE = 0.5              # _required: price a rival target against a
 FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
                                  # rival by this — a strike across it is never
                                  # visible, so 0.0 ignores it entirely
-DENY_SWAP = 0.0                 # Phase 3/3b: a strike on a rival leaves its
+DENY_SWAP = 1.0                 # Phase 3b: a strike on a rival leaves its
                                  # source able to hold this fraction of the
                                  # target's garrison stepping back into it
-DENY_SWAP_SURPLUS_ONLY = False  # ...capping only Phase 3b's surplus pour
-DENY_SWAP_MIN_TURNS = 0         # ...and only across a lane at least this long
+DENY_SWAP_SURPLUS_ONLY = True   # ...capping only the surplus pour, never
+                                 # Phase 3's priced strike (that reads 33%)
+DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
 
 
 # --------------------------------------------------------------------------- #

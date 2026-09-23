@@ -45,7 +45,8 @@ def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
-             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT")
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
+             "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -347,6 +348,47 @@ def test_surplus_goes_in_with_the_wave(ma):
     assert lean == ma._required(state, 2, state.systems[2], 1), "baseline sent the price"
     assert committed == 30 - guard, "everything above the guard should go"
     assert committed > lean
+
+
+def _swap_board(turns):
+    """Our 30-stack one ``turns``-turn lane from a rival 6 — a strike whose
+    source the target's own garrison could step straight back into."""
+    return _board({1: (2, 30, 3), 2: (1, 6, 3)}, [(1, 2, turns)])
+
+
+def test_deny_swap_keeps_enough_home_to_stop_the_step_in(ma):
+    """Across a long lane, the surplus rides in only down to what the source
+    needs to hold against the target's whole garrison coming the other way."""
+    state = _swap_board(4)
+    ma.DENY_SWAP = 0.0
+    open_door = _totals(ai.decide(state, 2))[2]
+    ma.DENY_SWAP = 1.0
+    denied = _totals(ai.decide(state, 2))[2]
+
+    hold = (math.ceil(6 * ma._defend_margin())
+            - ma._production_by(state.systems[1], 4))
+    assert denied >= ma._required(state, 2, state.systems[2], 4), "the strike still goes"
+    assert 30 - denied >= hold, "the source can hold against the step-in"
+    assert denied < open_door
+
+
+def test_deny_swap_never_caps_the_priced_strike(ma):
+    """Surplus-only: Phase 3's strike at its price is untouched even where the
+    hold would eat into it — capping *that* measured 33% against stock."""
+    state = _board({1: (2, 12, 3), 2: (1, 6, 3)}, [(1, 2, 4)])
+    ma.DENY_SWAP = 1.0
+    price = ma._required(state, 2, state.systems[2], 4)
+    assert _totals(ai.decide(state, 2)).get(2, 0) >= price
+
+
+def test_deny_swap_is_off_below_its_lane_length(ma):
+    """A lane shorter than ``DENY_SWAP_MIN_TURNS`` plays exactly as with the
+    knob off, which is what keeps the default-speed game untouched."""
+    state = _swap_board(ma.DENY_SWAP_MIN_TURNS - 1)
+    ma.DENY_SWAP = 0.0
+    off = ai.decide(state, 2)
+    ma.DENY_SWAP = 1.0
+    assert ai.decide(state, 2) == off
 
 
 def test_commitment_only_ever_adds(ma):

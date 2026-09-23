@@ -489,21 +489,27 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 900 games, 58 timed out and are excluded from the
+nodes, default settings — 900 games, 64 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
-docstring, the next time marshal or the roster's pricing changes:
+docstring, the next time marshal or the roster's pricing changes. Re-run with
+`DENY_SWAP` shipped ("Denying the swap" below):
 
-    marshal 251 (30%), knower 248 (29%), thinker 167 (20%),
-    claudebot 92 (11%), heuristic 46 (5%), rusherplus 38 (5%)
+    marshal 258 (31%), knower 249 (30%), thinker 160 (19%),
+    claudebot 91 (11%), heuristic 50 (6%), rusherplus 28 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  marsha  thinke  claude  heuris  rusher
-      knower         —     49%     84%     95%    100%    100%
-      marshal      51%       —     89%     98%    100%    100%
-      thinker      16%     11%       —     88%     98%     97%
-      claudebot     5%      2%     12%       —     81%     73%
-      heuristic     0%      0%      2%     19%       —     64%
-      rusherplus    0%      0%      3%     27%     36%       —
+      knower         —     43%     93%     96%    100%    100%
+      marshal      57%       —     94%    100%    100%     98%
+      thinker       7%      6%       —     94%     96%    100%
+      claudebot     4%      0%      6%       —     78%     85%
+      heuristic     0%      0%      4%     22%       —     68%
+      rusherplus    0%      2%      0%     15%     32%       —
+
+The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the
+head-to-head at 51% and 58 timeouts. The same caveat as the paragraph below
+applies: 60 games a pair cannot resolve a few points, so this says nothing
+regressed, not that the knower cell moved.
 
 Re-run after the retreat fixes below and it did not move: 251/248 against
 251/249, the knower head-to-head 51% against 50%, one more timeout. That is not
@@ -1696,7 +1702,8 @@ be exactly the unmeasured complexity this file's own convention argues against.
 If pushing the win rate higher later becomes the goal rather than clearing the
 bar, this paragraph used to point at the "empty interior" weakness as the
 better-motivated target. It has since been measured and is not one (next
-section), which leaves `DENY_SWAP` as the remaining unbuilt candidate.
+section), which left `DENY_SWAP` — since built, and shipped in a narrower form
+than the pilot described; see "Denying the swap" below.
 
 **Folded into `models/marshal.py` directly** rather than shipped as a second
 bot (`models/test.py` deleted, `tests/test_test.py` deleted, its mechanism
@@ -1818,6 +1825,77 @@ an undefended interior is the retreat rule leaving systems empty on purpose, the
 residue is either a 1-turn strike no guard can see or a swap nobody could
 relieve, and the strongest probe built against it is a worse bot than the one it
 probes.
+
+### Denying the swap: shipped for long lanes, and only on the surplus
+
+**The swap is common.** Every seat decides against the same start-of-turn board,
+so a strike from S on a rival's T and that rival's own launch from T into S go out
+on the same turn, neither side seeing the other's order, and both systems change
+hands. Instrumented over 20 duel seeds at 24 nodes and 6 ly/turn: **1440 of 6942**
+of marshal's strikes on a rival (21%) met a same-turn launch out of the target into
+the source against itself, 1878 of 8154 (23%) against knower, 475 of 3128 (15%)
+against thinker.
+
+**`DENY_SWAP`** caps a source's commitment so what stays behind can hold against
+the target's entire garrison stepping in: `ceil(DENY_SWAP * T.ships *
+_defend_margin())`, less what S will build over the lane back. Rival targets only
+— a neutral does not move.
+
+**Applied to Phase 3's priced strike it is a disaster**, and monotonically so.
+`tools/sweep.py` against stock marshal, six cells (18/24/40 nodes at 6 ly/turn,
+24 at 12 and at 3, and advantage 1.25), 200 seeds, every row REPRODUCED:
+
+    DENY_SWAP        W-L        n    rate       z
+       0.5        993-1085    2078   47.8%   -2.02
+       1.0        588-1175    1763   33.4%  -13.98
+       1.5        278-1253    1531   18.2%  -24.92
+
+with timeouts climbing 322 -> 637 -> 869 — the stalemate signature. Tracing it:
+the cap mostly *declines strikes* rather than protecting sources (strikes on a
+rival fell from ~10,000 to ~5,500 over the same games, and the per-launch
+step-in rate barely moved, 12.8% to 12.0%). A strike the cap prices out is a
+target the rival keeps.
+
+**Surplus-only is the version that works** (`DENY_SWAP_SURPLUS_ONLY`): Phase 3
+strikes at its price exactly as before, and the cap applies to Phase 3b's pour
+alone. Pooled over the same six cells it is a null — 50.3% at 0.5 and 51.4% at
+1.0 — but one cell stood out: **56.8% at 3 ly/turn** (z = +2.39). One cell of
+twelve readings is what a false positive looks like, so it was re-run alone on
+400 fresh seeds at 18 and 24 nodes: **56.8% again (706-537, z = +4.79),
+REPRODUCED**, and a win *share* of all games of 44.1% against 33.6%, so not a
+timeout artefact. At 12 ly/turn it read 48.5% — not significant, but the wrong
+side.
+
+**So it is a long-lane mechanism, gated per lane** (`DENY_SWAP_MIN_TURNS`), the
+same shape as `FAST_GUARD_WEIGHT`: keyed on `state.travel_turns` rather than on
+a global speed setting. Lane lengths by cell: 3 ly/turn is almost all 4-8 turns,
+6 ly/turn 2-4 (a third to a half at 4), 12 ly/turn 1-2. A third, fresh seed
+batch, 300 seeds:
+
+    gate          default speed + 12 ly/turn    3 ly/turn + adv 1.25
+    K = 4         50.8% (1129-1095)  null       55.1% (772-628)  z = +3.85
+    K = 5         50.2%              null       54.1%            z = +3.09
+    K = 6         bit-identical (inert)         53.5%            z = +2.60
+
+K = 4 keeps the whole slow-lane gain (57.0% and 57.7% in its two 3-ly cells), is
+an honest null at the default speed, reads **exactly** 50.0% at 12 ly/turn
+(structurally inert — no lane there is 4 turns) and 50.6% at advantage 1.25. It
+shipped at `DENY_SWAP = 1.0`, surplus-only, `K = 4`.
+
+**Against the rest of the roster** (200 fresh seeds, 24 and 18 nodes at 3 ly/turn
+plus 24 at 6, stock marshal and the shipped version each against the same
+opponent): against **knower** 72.5% -> 74.9% (78.2 -> 80.9 and 75.7 -> 79.4 in the
+two slow cells, level at 6 ly/turn) — not separated pairwise, but the same
+direction as self-play and nowhere below stock. Against **thinker** 97.3% ->
+96.9%, a ceiling carrying no information. The full `--ladder --trials 30` at 18
+nodes is a regression check at that sample, not a measurement: marshal 258
+(31%), knower 249, knower head-to-head 57%, 64 timeouts (from 251/248/51%/58).
+
+Why only on long lanes is not established. The arithmetic of the hold points the
+other way — the source builds for longer before a slow step-in lands, so the hold
+is *smaller* on a long lane — so the likelier reading is how long a source sits
+exposed: on a long lane the emptied system is open for many turns to anything
+nearby, and the surplus kept home is what keeps it.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
