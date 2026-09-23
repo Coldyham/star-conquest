@@ -187,6 +187,7 @@ FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
 DENY_SWAP = 0.0                 # Phase 3/3b: a strike on a rival leaves its
                                  # source able to hold this fraction of the
                                  # target's garrison stepping back into it
+DENY_SWAP_SURPLUS_ONLY = False  # ...capping only Phase 3b's surplus pour
 
 
 # --------------------------------------------------------------------------- #
@@ -803,11 +804,13 @@ def decide(state, pid):
                 if sysmap[n].owner_id != pid}]
     targets.sort(key=lambda t: (-_richness(state, pid, t, max_prod), t.ships, t.id))
 
-    def spendable(sid, target) -> int:
+    def spendable(sid, target, surplus: bool = False) -> int:
         """``budget[sid]``, less what ``sid`` must keep to hold against
         ``target``'s own garrison stepping into it — see ``DENY_SWAP``."""
         b = budget[sid]
         if DENY_SWAP <= 0 or target.owner_id == 0 or target.ships <= 0:
+            return b
+        if DENY_SWAP_SURPLUS_ONLY and not surplus:
             return b
         back = state.travel_turns(target.id, sid) or 1
         hold = (math.ceil(DENY_SWAP * target.ships * _defend_margin())
@@ -903,8 +906,8 @@ def decide(state, pid):
                      if target.id in sysmap[sid].neighbors
                      and budget.get(sid, 0) > 0 and sid not in pincer_held
                      and (state.travel_turns(sid, target.id) or 99) == chosen_h),
-                    key=lambda s: (-spendable(s, target), s)):
-                send = spendable(sid, target)
+                    key=lambda s: (-spendable(s, target, True), s)):
+                send = spendable(sid, target, True)
                 sends[(sid, target.id)] += send
                 budget[sid] -= send
 
