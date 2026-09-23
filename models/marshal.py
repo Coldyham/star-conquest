@@ -194,12 +194,16 @@ RELIEF_AWARE = 0.5              # _required: price a rival target against a
 FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
                                  # rival by this — a strike across it is never
                                  # visible, so 0.0 ignores it entirely
-DENY_SWAP = 1.0                 # Phase 3b: a strike on a rival leaves its
+DENY_SWAP = 1.0                # Phase 3b: a strike on a rival leaves its
                                  # source able to hold this fraction of the
                                  # target's garrison stepping back into it
 DENY_SWAP_SURPLUS_ONLY = True   # ...capping only the surplus pour, never
                                  # Phase 3's priced strike (that reads 33%)
 DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
+RIVAL_REFLOOD_MIN_TURNS = 0     # Phase 3: stop re-flooding a covered *rival*
+                                 # siege too, when its horizon is at least this
+                                 # many turns; 0 = never (neutrals only). See
+                                 # "Phase 3b re-flooding" in docs/bot-design.md
 
 
 # --------------------------------------------------------------------------- #
@@ -701,6 +705,20 @@ def _flow_to_front(state, owned, frontier, pid, max_prod) -> dict[int, int]:
 # --------------------------------------------------------------------------- #
 # The planner
 # --------------------------------------------------------------------------- #
+def _gates_reflood(target, horizon: int) -> bool:
+    """Whether a target already covered by inbound stops being fed in Phase 3b.
+
+    Always for a neutral. For a rival-held siege only once
+    `RIVAL_REFLOOD_MIN_TURNS` is set and the strike's horizon reaches it — off by
+    default, since gating every rival siege measured 45.1% at
+    `DEFENDER_ADVANTAGE 1.5` (the re-flood is the jitter cushion `_enemy_margin`
+    leaves out).
+    """
+    if target.owner_id == 0:
+        return True
+    return 0 < RIVAL_REFLOOD_MIN_TURNS <= horizon
+
+
 def decide(state, pid):
     sysmap = state.systems
     owned = [sid for sid, s in sysmap.items() if s.owner_id == pid]
@@ -878,7 +896,7 @@ def decide(state, pid):
             budget[sid] -= send
             need -= send
 
-        if shortfall > 0 or target.owner_id != 0:
+        if shortfall > 0 or not _gates_reflood(target, chosen_h):
             # A neutral already fully covered by a wave dispatched an earlier
             # turn has nothing left for any of our systems to contribute, near
             # or far, and must not be mistaken by Phase 3b below for an active
@@ -893,6 +911,8 @@ def decide(state, pid):
             # stands and fights anyway — a lot more of them at high
             # DEFENDER_ADVANTAGE. Continuing to feed an already-"covered" siege
             # is exactly where that missing cushion was coming from by accident.
+            # `RIVAL_REFLOOD_MIN_TURNS` is the measured-and-declined exception
+            # for a long-horizon siege; see `_gates_reflood`.
             struck[target.id] = chosen_h
             if RESERVE_PINCER:
                 # Those nearer sources are promised to next turn's converging
