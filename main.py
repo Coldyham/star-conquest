@@ -1258,9 +1258,13 @@ async def main() -> None:
                     menu.set_status(menu_state,
                                     pbp_handed_out(pbp_making, tokens), True)
                 else:
-                    # Our own seat is kept; the rest go on the invite overlay,
-                    # the moment there is a `Ui` to hang it off (see `opening`
-                    # below) rather than a status line and a clipboard blob.
+                    # Every seat's link, including our own, goes on the invite
+                    # overlay the moment there is a `Ui` to hang it off (see
+                    # `opening` below) rather than a status line and a clipboard
+                    # blob. Ours is there too and not just remembered locally —
+                    # `pbp.remember`'s token lives in this browser's storage
+                    # alone, so a reload, a cleared profile or opening on
+                    # another device has nothing else to recover the seat from.
                     # Then the ordinary opening path takes over, exactly as it
                     # would for somebody following the link we just sent them.
                     pbp_seat = pbp.Seat(pbp_making, 1, tokens[1])
@@ -1268,13 +1272,8 @@ async def main() -> None:
                     invite = (pbp_seat.match_id, pbp_seat.token)
                     pbp_poll = pbp.fetch_state(pbp_seat.match_id)
                     resume_prompt = None
-                    others = {seat: token for seat, token in tokens.items() if seat != 1}
-                    pending_invite_links = pbp_seat_links(pbp_making, others)
-                    menu.set_status(
-                        menu_state,
-                        "Match created — copy each seat's link from the game"
-                        if pending_invite_links else "Match created",
-                        True)
+                    pending_invite_links = pbp_seat_links(pbp_making, tokens)
+                    menu.set_status(menu_state, "Match created — copy each seat's link", True)
         if pbp_ident is not None and invite is not None:
             status, body = pbp_ident.poll()
             if status != pbp.PENDING:
