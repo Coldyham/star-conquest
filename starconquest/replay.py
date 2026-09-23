@@ -47,6 +47,7 @@ after each turn so the file on disk always reflects the live match.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import zlib
@@ -77,6 +78,43 @@ _MATCH_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def board_digest(state: GameState) -> tuple:
+    """Everything about a board that a frame could show.
+
+    Lanes and adjacency are left out: nothing ever mutates them. ``lane_slot`` is
+    *in*, cosmetic though it is — a film that invented its own tracks would pop
+    every fleet sideways, so it is part of what two boards agreeing has to mean.
+
+    Two uses, both about catching a disagreement that should be impossible. The
+    film oracles compare a playback's board against the real one
+    (``tests/sim.check_film``), and play-by-post compares what each client
+    resolved a turn to: the board is a pure function of the settings, the seed
+    and every turn's orders and dice, so honest clients agree by construction and
+    a mismatch means a stale build or a genuine bug — never a player.
+    """
+    return (
+        tuple((sid, s.owner_id, s.ships, s.production, s.prod_progress)
+              for sid, s in sorted(state.systems.items())),
+        tuple((f.owner_id, f.source_id, f.dest_id, f.ships, f.turns_total,
+               f.turns_remaining, f.lane_slot) for f in state.fleets),
+        state.turn,
+        state.winner,
+        tuple((pid, p.alive, p.ships_lost) for pid, p in sorted(state.players.items())),
+    )
+
+
+def digest_hex(state: GameState) -> str:
+    """``board_digest`` as 32 hex characters, for putting on a wire.
+
+    ``repr`` of the tuple rather than JSON: it is only ever compared against
+    another digest produced by this same function, on the same build, so what
+    matters is that it is stable within a version — and ``blake2s`` of it is
+    small enough to sit on every submission without anyone noticing.
+    """
+    raw = repr(board_digest(state)).encode()
+    return hashlib.blake2s(raw, digest_size=16).hexdigest()
 
 
 def _new_match_id() -> str:
@@ -410,6 +448,15 @@ def latest_log() -> Optional[GameLog]:
 # Which seat a person holds. `mapgen._make_players` stamps pid 1, and nothing in
 # the setup can move it, so a match rebuilt with the flag cleared knows where to
 # put it back (`share.py` reads it the same way, for the same reason).
+#
+# Deliberately still a constant now that a match may seat people elsewhere: the
+# one place it is read reclaims a seat for a match that *began in autoplay* and
+# was taken over mid-game, which only the single-player shell can produce (the
+# demo, plus Take control). A game seating people from the start arrives here
+# with `is_human` already stamped, so `claimed` is true before the loop and this
+# never fires. If an all-bot match ever becomes claimable by more than one
+# person, this has to become a question the log answers per turn rather than one
+# seat named up front.
 HUMAN_SEAT = 1
 
 

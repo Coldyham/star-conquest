@@ -572,3 +572,105 @@ def test_a_track_is_only_shared_with_a_different_lane():
     engine.apply_order(s, Order(1, 0, 1, 4))
     engine.apply_order(s, Order(1, 0, 2, 4))
     assert _slots(s) == [0, 0]
+
+
+# --------------------------------------------------------------------------- #
+# More than one seat held by a person (play-by-post, hotseat)
+# --------------------------------------------------------------------------- #
+def _two_humans():
+    """Three seats facing a shared neutral; 1 and 3 are people, 2 is a bot."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100), (2, 3, 20, 100), (3, 0, 1, 100)],
+                   [(0, 3, 5), (1, 3, 5), (2, 3, 5)], human=1)
+    s.players[3].is_human = True
+    return s
+
+
+def test_both_human_seats_have_their_orders_applied():
+    """The bug this generalisation fixes: with two people at the table, the older
+    rule attributed every submitted order to `state.human()` — the first seat it
+    happened to find — so the second player's orders were silently dropped."""
+    s = _two_humans()
+    engine.end_turn(s, seat_orders={1: [Order(1, 0, 3, 5)], 3: [Order(3, 2, 3, 7)]},
+                    decide=lambda st, pid: [])
+    sent = {(f.owner_id, f.ships) for f in s.fleets}
+    assert sent == {(1, 5), (3, 7)}, "neither seat may be dropped"
+    assert s.systems[0].ships == 15 and s.systems[2].ships == 13
+
+
+def test_a_human_seat_is_never_asked_to_decide():
+    """A seat a person holds is theirs even when they submit nothing: the engine
+    must not quietly play it for them."""
+    s = _two_humans()
+    asked = []
+
+    def decide(st, pid):
+        asked.append(pid)
+        return []
+
+    engine.end_turn(s, seat_orders={1: [Order(1, 0, 3, 5)]}, decide=decide)
+    assert asked == [2], "only the bot seat decides; seat 3 holds rather than being played"
+
+
+def test_a_seat_that_submits_nothing_holds():
+    """The first-miss default a play-by-post deadline leans on: an unattended seat
+    launches nothing, but the turn is otherwise entirely normal."""
+    s = _two_humans()
+    turn = s.turn
+    engine.end_turn(s, seat_orders={1: []}, decide=lambda st, pid: [])
+    assert s.fleets == [], "nothing launched"
+    assert s.turn == turn + 1, "...but the turn still resolved"
+    assert s.systems[0].owner_id == 1, "and the seat still holds its ground"
+
+
+def test_a_seat_cannot_order_another_seats_ships():
+    """`_own_orders` is the boundary, and it has to hold per seat now that more
+    than one seat submits: seat 3 naming seat 1's system commands nothing."""
+    s = _two_humans()
+    engine.end_turn(s, seat_orders={3: [Order(1, 0, 3, 5), Order(3, 2, 3, 4)]},
+                    decide=lambda st, pid: [])
+    assert {(f.owner_id, f.ships) for f in s.fleets} == {(3, 4)}
+    assert s.systems[0].ships == 20, "seat 1's garrison is untouched"
+
+
+def test_seat_orders_are_applied_in_ascending_seat_order():
+    """Load-bearing for play-by-post: fleets are appended as they launch and the
+    combat dice are consumed along that walk, so two clients collecting the same
+    orders in different sequences would fight different battles. The sequence is
+    the seat order, never submission order."""
+    s = _two_humans()
+    # Submitted 3-then-1; the applied sequence must still be 1-then-3.
+    engine.end_turn(s, seat_orders={3: [Order(3, 2, 3, 7)], 1: [Order(1, 0, 3, 5)]},
+                    decide=lambda st, pid: [])
+    assert [f.owner_id for f in s.fleets] == [1, 3]
+
+
+def test_seat_orders_override_human_orders_for_the_seat_they_name():
+    s = _two_humans()
+    engine.end_turn(s, human_orders=[Order(1, 0, 3, 9)],
+                    seat_orders={1: [Order(1, 0, 3, 2)]}, decide=lambda st, pid: [])
+    assert [(f.owner_id, f.ships) for f in s.fleets] == [(1, 2)]
+
+
+def test_a_single_human_game_collects_exactly_as_it_always_did():
+    """The compatibility this whole change rests on: one person, one seat, the
+    sequence unchanged — which is why `RULES_VERSION` does not move."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100), (2, 3, 20, 100), (3, 0, 1, 100)],
+                   [(0, 3, 5), (1, 3, 5), (2, 3, 5)], human=1)
+    orders = engine._collect_orders(
+        s, [Order(1, 0, 3, 5)], lambda st, pid: [Order(pid, {2: 1, 3: 2}[pid], 3, 1)])
+    assert [o.owner_id for o in orders] == [1, 2, 3]
+
+
+def test_a_dead_seat_orders_nothing_and_is_not_asked():
+    s = _two_humans()
+    s.players[2].alive = False
+    asked = []
+    orders = engine._collect_orders(s, None, lambda st, pid: asked.append(pid) or [])
+    assert asked == [], "no live bot seat here, and a dead one is never consulted"
+    assert orders == []
+
+
+def test_humans_lists_every_seat_a_person_holds():
+    s = _two_humans()
+    assert [p.id for p in s.humans()] == [1, 3]
+    assert s.human().id == 1, "the single-seat question still answers, unchanged"

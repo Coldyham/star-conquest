@@ -4,7 +4,8 @@ A sibling of the game board rather than part of it, so ``render.py`` /
 ``input.py`` (which are about playing) stay untouched. Like the game, it keeps a
 strict split *within* this module: ``draw`` only reads (never mutates
 ``Settings``), ``handle_event`` only mutates ``MenuState``/``Settings`` and
-returns a high-level action string (``"start"``, ``"quit"``) or ``None``.
+returns a high-level action string (``"start"``, ``"play_by_post"``,
+``"quit"``) or ``None``.
 
 Widgets are immediate-mode: each draws itself and records its screen rect(s) in
 ``MenuState.rects`` under a string key; ``handle_event`` hit-tests the click
@@ -42,7 +43,7 @@ from typing import Optional
 
 import pygame
 
-from . import ai, combat, config, softkeyboard, uifont, webstore
+from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, is_web, saves_dir
 from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
@@ -306,6 +307,22 @@ class MenuState:
     # it invalidated their challenge is the wrong order — so the action waits here
     # and "Change it anyway" re-issues it.
     pending_action: Optional[str] = None
+    # Play-by-post roster prompt: which seats will be played by a person, opened
+    # by "Play by post" and confirmed into the match ``pbp_open`` creates. Seat 1
+    # is always in it — the creator ends up seated there — so only seats 2+ are
+    # ever toggled; a seat left out keeps whatever strategy the AI tab already
+    # has it playing. Reset to every seat each time the prompt opens.
+    pbp_prompt: bool = False
+    pbp_roster: set[int] = field(default_factory=set)
+    # ...and alongside it, how long a seat's clock runs before it lapses — the
+    # same prompt, since both are per-match choices made once, at creation, and
+    # neither belongs on `Settings` (a deadline isn't part of the setup a
+    # challenge link hashes any more than the roster is). Whole days only: the
+    # endpoint accepts 1-336 hours, but the format's own unit is days ("two days
+    # is what play-by-post exists for" — `pbp.DEADLINE_HOURS`), so the stepper
+    # moves in them rather than exposing raw hour arithmetic. Reset to the
+    # default each time the prompt opens.
+    pbp_deadline_hours: int = pbp.DEADLINE_HOURS
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -431,6 +448,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _text(surface, f["small"], "Enter: start game   ·   Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, 886))
     if ms.confirm_clear_map:
         _draw_clear_map(surface, ms, w, surface.get_height())
+    if ms.pbp_prompt:
+        _draw_pbp_prompt(surface, ms, settings, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
@@ -569,6 +588,102 @@ def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
         ("clear_map_yes", clear, _BTN_FILL, _WARN),
         ("clear_map_no", keep, _HL_FILL, _HL_BORDER),
     )
+
+
+def _pbp_prompt_labels() -> tuple[str, str]:
+    """(confirm, cancel) labels; key hints dropped on a touch build, as every
+    other modal here does."""
+    if config.touch_ui:
+        return ("Create match", "Cancel")
+    return ("Create match (Enter)", "Cancel (Esc)")
+
+
+# `pbp.DEADLINE_HOURS` is the format's own unit ("two days is what play-by-post
+# exists for"), so the stepper below moves in whole days rather than exposing
+# raw hour arithmetic — a day (24h) at a time, from one day up to the endpoint's
+# own ceiling of 336h (14 days).
+_PBP_DEADLINE_STEP_H = 24
+_PBP_DEADLINE_MIN_H = 24
+_PBP_DEADLINE_MAX_H = 336
+
+
+def _deadline_label(hours: int) -> str:
+    days = max(1, hours // 24)
+    return "1 day" if days == 1 else f"{days} days"
+
+
+def _step_deadline(ms: MenuState, by: int) -> None:
+    ms.pbp_deadline_hours = max(_PBP_DEADLINE_MIN_H, min(
+        _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
+
+
+def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
+    """Modal: who at the table is a person, and how long their clock runs,
+    before the match is even opened.
+
+    Seat 1 is fixed — the creator ends up seated there regardless of what is
+    checked, so its row carries no checkbox at all — and every seat starts
+    checked (``ms.pbp_roster``, reset by ``_handle_click`` on the way in), so
+    the common case ("every player is a person") is a single press away, the
+    same as it always was; unchecking a seat leaves it to whatever strategy the
+    AI tab already has it playing. The deadline row below the roster is the
+    same idea for ``pbp.DEADLINE_HOURS``: a per-match choice made once, here,
+    rather than a fixed 48h nobody could change.
+    """
+    f = _fonts()
+    row_h, gap, pad = 40, 10, 28
+    sw_size = 14
+    confirm, cancel = _pbp_prompt_labels()
+    bw = max(f["normal"].size(s)[0] for s in (confirm, cancel)) + 2 * 18
+    bh = 40
+    title = "Who's playing?"
+    name_w = max(f["normal"].size(config.player_name(seat))[0]
+                 for seat in range(1, settings.players + 1))
+    stepper_w = 34 + 64 + 34  # `_stepper`'s own fixed −/box/+ widths
+    deadline_w = f["normal"].size("Deadline")[0] + 10 + stepper_w
+    pw = max(name_w + sw_size + _CH + 4 * pad, f["normal"].size(title)[0] + 2 * pad,
+             deadline_w + 2 * pad, 2 * bw + gap + 2 * pad)
+    rows = settings.players + 1   # every seat, plus the deadline
+    ph = pad + f["normal"].get_height() + gap + rows * (row_h + gap) + bh + pad
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
+    pygame.draw.rect(surface, _HL_BORDER, panel, 2, border_radius=10)
+
+    y = panel.y + pad
+    _text(surface, f["normal"], title, config.COLOR_TEXT,
+          center=(panel.centerx, y + f["normal"].get_height() // 2))
+    y += f["normal"].get_height() + gap
+
+    for seat in range(1, settings.players + 1):
+        color = config.player_color(seat)
+        swatch = pygame.Rect(panel.x + pad, y + (row_h - sw_size) // 2, sw_size, sw_size)
+        pygame.draw.rect(surface, color, swatch, border_radius=3)
+        _text(surface, f["normal"], config.player_name(seat), color,
+              midleft=(swatch.right + 10, y + row_h // 2))
+        if seat == 1:
+            _text(surface, f["small"], "(you)", config.COLOR_TEXT_DIM,
+                  midright=(panel.right - pad, y + row_h // 2))
+            ms.rects.pop(f"pbp_seat_{seat}", None)
+        else:
+            _checkbox(surface, ms, f"pbp_seat_{seat}", seat in ms.pbp_roster,
+                      panel.right - pad, y + (row_h - _CH) // 2)
+        y += row_h + gap
+
+    _text(surface, f["normal"], "Deadline", config.COLOR_TEXT,
+          midleft=(panel.x + pad, y + row_h // 2))
+    _stepper(surface, ms, "pbp_deadline", _deadline_label(ms.pbp_deadline_hours),
+             panel.right - pad, y + (row_h - _CH) // 2)
+    y += row_h + gap
+
+    by = panel.bottom - pad - bh
+    go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
+    stay = pygame.Rect(panel.centerx + gap // 2, by, bw, bh)
+    _button(surface, ms, "pbp_confirm", go, confirm, fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
+    _button(surface, ms, "pbp_cancel", stay, cancel, fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM)
 
 
 # Settings fields shown on each tab, for the tab row's own changed-dot — a tab
@@ -1255,9 +1370,21 @@ def _checkbox(surface, ms, key, on: bool, right: int, y: int) -> None:
 def _draw_start(surface, ms: MenuState, settings: Settings, w: int) -> None:
     rect = pygame.Rect(w // 2 - 110, 780, 220, 46)
     _button(surface, ms, "start", rect, "Start Game", fill=_START_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+
+    # The same setup, opened as a shared match instead: one seat per player, one
+    # link each. Drawn only where there is a board to open it on — blanking
+    # `paths.LEADERBOARD_ORIGIN` switches every networked feature off, and this is
+    # one, so a build with none must not offer a button that cannot work.
+    right = rect.right + 14
+    if pbp.configured():
+        post = pygame.Rect(right, rect.y, 160, rect.height)
+        _button(surface, ms, "play_by_post", post, "Play by post", fill=_BTN_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT, font=_fonts()["normal"])
+        right = post.right + 14
+    else:
+        ms.rects.pop("play_by_post", None)
     # Touch/web equivalent of Esc's quit — there's no keyboard on a phone, so
     # without this a touch user has no way to leave the app at all.
-    quit_rect = pygame.Rect(rect.right + 14, rect.y, 110, rect.height)
+    quit_rect = pygame.Rect(right, rect.y, 110, rect.height)
     _button(surface, ms, "quit", quit_rect, "Quit", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM, font=_fonts()["normal"])
 
     # The map creator, to Start's left so Start itself stays centred. Its little
@@ -1385,6 +1512,42 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
     return None
 
 
+def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str]:
+    """Answer the play-by-post roster prompt: toggle a seat, nudge the deadline,
+    confirm (opens the match with whichever seats are still checked, on the
+    deadline shown), or cancel outright.
+
+    Seat 1's row is never a hit target (`_draw_pbp_prompt` draws it but records
+    no rect for it) — the creator ends up seated there regardless, so there is
+    nothing for a click on it to toggle.
+    """
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for seat in range(2, settings.players + 1):
+            rect = ms.rects.get(f"pbp_seat_{seat}")
+            if rect is not None and rect.collidepoint(event.pos):
+                ms.pbp_roster.symmetric_difference_update({seat})
+                return None
+        for key, by in (("pbp_deadline_dec", -1), ("pbp_deadline_inc", 1)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                _step_deadline(ms, by)
+                return None
+        if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
+            ms.pbp_prompt = False
+            return "play_by_post"
+        if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
+            ms.pbp_prompt = False
+            return None
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            ms.pbp_prompt = False
+            return "play_by_post"
+        if event.key == pygame.K_ESCAPE:
+            ms.pbp_prompt = False
+            return None
+    return None
+
+
 def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[str]:
     """Answer the un-challenge modal: keep the edit and drop the score, or put the
     setup back the way the link had it.
@@ -1483,6 +1646,8 @@ def _to_canvas_event(event, ms: MenuState):
 def _dispatch(event, ms: MenuState, settings: Settings):
     if ms.confirm_clear_map:  # modal: swallows everything until answered
         return _handle_clear_map(event, ms, settings)
+    if ms.pbp_prompt:  # modal: swallows everything until confirmed or cancelled
+        return _handle_pbp_prompt(event, ms, settings)
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -1580,6 +1745,19 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
 
     if hit == "start":
         return _start(ms, settings)
+    if hit == "play_by_post":
+        # The same gate Start goes through, for the same reason: a hand map that
+        # cannot build cannot be played by post either, and finding that out
+        # after the match had been opened and the links sent would be worse.
+        # Opens the roster prompt rather than the match itself — "every player
+        # is a person" is still the default it starts from, but now a choice
+        # rather than the only option.
+        if _start(ms, settings, "play_by_post") is None:
+            return None
+        ms.pbp_prompt = True
+        ms.pbp_roster = set(range(1, settings.players + 1))
+        ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
+        return None
     if hit == "quit":
         return "quit"
     if hit is None:
@@ -1782,8 +1960,8 @@ _STATUS_MS = 4000
 _STATUS_ERROR_MS = 15000
 
 
-def _start(ms: MenuState, settings: Settings):
-    """``"start"``, unless a hand-drawn map would refuse to build.
+def _start(ms: MenuState, settings: Settings, action: str = "start"):
+    """``action``, unless a hand-drawn map would refuse to build.
 
     ``mapgen.generate_custom`` asserts on a recipe with blockers — it is the strict
     builder behind the one tolerant gate — so the half-built map ``mapmaker.commit``
@@ -1795,7 +1973,7 @@ def _start(ms: MenuState, settings: Settings):
     if blockers:
         set_status(ms, blockers[0].text, False)
         return None
-    return "start"
+    return action
 
 
 def set_status(ms: MenuState, text: str, ok: bool) -> None:

@@ -309,6 +309,27 @@ class Ui:
     # somebody else's, so none of the sharing below is offered for it: watching a
     # replay must not be one press away from posting its score as your own.
     watched: bool = False
+    # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
+    # the match id, `pbp_waiting` the seats still to move for the live turn, and
+    # `pbp_submitted` whether we have sent ours — which is what puts the waiting
+    # overlay up. Held here rather than on `GameState` for the reason every other
+    # human-only concern is: the simulation neither knows nor cares that the seat
+    # beside it is a person somewhere else.
+    pbp_match: str = ""
+    pbp_submitted: bool = False
+    pbp_waiting: tuple[int, ...] = ()
+    pbp_msg: str = ""            # what the last call said, drawn on the overlay
+    # Every other seat's link, shown once right after *we* create the match —
+    # "a modal listing the seats with a Copy button each" rather than a status
+    # line over a clipboard blob nobody thought to check (`main.pbp_seat_links`
+    # fills it in, only on the creation path — following someone else's link
+    # never sets it). `(seat, link)` pairs; empty means there is nothing to show,
+    # which is what render/input gate the overlay's presence on.
+    pbp_invite: tuple[tuple[int, str], ...] = ()
+    pbp_invite_rects: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
+    pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    pbp_invite_copied: int = 0   # seat whose row last showed "Copied" feedback
+    pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: Optional[tuple[int, int]] = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -487,15 +508,38 @@ class Ui:
         """
         return state.winner is None and state.is_defeated(self.human_id)
 
+    @property
+    def in_pbp(self) -> bool:
+        """Whether this is a shared match rather than a game of our own."""
+        return bool(self.pbp_match)
+
+    def awaiting_others(self, state: GameState) -> bool:
+        """Whether to hold the board and say we are waiting.
+
+        Only once *we* have submitted: before that the turn is ours to play, and
+        the fact that somebody else is already in is not something to interrupt
+        anyone with. A decided match is nobody's turn, so it never waits.
+        """
+        return (self.in_pbp and self.pbp_submitted
+                and state.winner is None)
+
     def can_post(self, state: GameState) -> bool:
         """Is this result the player's own to publish — as a challenge link or as
         a leaderboard entry?
 
-        Three things must hold: the human's seat won it, at least one turn was
-        decided by hand (a pure autoplay demo is a bot's win, not a score), and the
-        match was played here rather than downloaded to watch. Render gates both
-        overlay buttons on this and main gates both actions on it, so a keyboard
-        shortcut can never reach a result the overlay declines to offer.
+        Four things must hold: the human's seat won it, at least one turn was
+        decided by hand (a pure autoplay demo is a bot's win, not a score), the
+        match was played here rather than downloaded to watch, and it was a game
+        of our own rather than a shared one. Render gates both overlay buttons on
+        this and main gates both actions on it, so a keyboard shortcut can never
+        reach a result the overlay declines to offer.
+
+        The fourth is what keeps play-by-post off the board, and it is a matter
+        of meaning rather than of trust: a leaderboard score is turns-to-win
+        against a fixed setup, which measures a person against a map. Beating two
+        friends to the same map in nine turns says nothing about that setup, and
+        posting it as though it did would quietly corrupt every honest score
+        beside it.
 
         The third condition is not airtight and is not meant to be: rewinding a
         watched replay to a turn from its end and playing that turn out forks a
@@ -506,7 +550,7 @@ class Ui:
         from any replay on the board.
         """
         return (state.winner == self.human_id and self.hand_turns > 0
-                and not self.watched)
+                and not self.watched and not self.in_pbp)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

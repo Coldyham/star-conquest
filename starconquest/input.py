@@ -3,7 +3,7 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share') or None.
+'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat') or None.
 """
 
 from __future__ import annotations
@@ -192,7 +192,37 @@ def _toggles_autoplay(ui: Ui, event) -> bool:
     return False
 
 
+def _handle_invite_event(event, ui: Ui) -> Optional[str]:
+    """Answer the play-by-post invite overlay: copy one seat's link, or dismiss
+    it for good.
+
+    The clipboard write is main's job — this module never reaches `webstore` —
+    so a Copy row only names the seat (`ui.pbp_copy_seat`) and returns the
+    action that asks for it. Continue needs nothing from main at all: clearing
+    `ui.pbp_invite` is a plain `Ui` mutation, so it happens right here.
+    """
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return None
+    if ui.pbp_invite_close_rect[2] and _point_in_rect(event.pos, ui.pbp_invite_close_rect):
+        ui.pbp_invite = ()
+        ui.pbp_invite_rects = {}
+        ui.pbp_invite_close_rect = (0, 0, 0, 0)
+        ui.pbp_invite_copied = 0
+        return None
+    for seat, rect in ui.pbp_invite_rects.items():
+        if rect[2] and _point_in_rect(event.pos, rect):
+            ui.pbp_copy_seat = seat
+            return "pbp_copy_seat"
+    return None
+
+
 def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+    # Play-by-post's invite overlay is modal too, and ahead of everything below:
+    # a match this fresh (right after we created it) can be running no film and
+    # holds no history or win to check first.
+    if ui.pbp_invite:
+        return _handle_invite_event(event, ui)
+
     # A turn playback is running: any press skips it — except Play/Pause, which
     # must freeze it in place rather than lose it (`main` does the freezing; this
     # is only about not discarding the film here), the camera controls, which
@@ -390,11 +420,19 @@ def _clear_selected(ui: Ui) -> None:
 
 def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        return "end_turn"
-    if event.key == pygame.K_p:
-        return "toggle_play"
-    if event.key == pygame.K_a:
-        return "toggle_autoplay"
+        # A play-by-post turn we have already submitted is not ours to end again:
+        # the turn advances when the last seat is in, not when anyone presses a
+        # key. Suppressed rather than swallowed further up so every other control
+        # — panning, looking, opening history — keeps working while you wait.
+        return None if ui.awaiting_others(state) else "end_turn"
+    if event.key in (pygame.K_p, pygame.K_a):
+        # Play and autoplay both resolve turns on a clock of their own, which a
+        # shared match has no room for: its turns advance when the last seat
+        # submits. Dead here exactly as their footer buttons are (`render`), so
+        # the key and the button cannot disagree about it.
+        if ui.in_pbp:
+            return None
+        return "toggle_play" if event.key == pygame.K_p else "toggle_autoplay"
     if event.key == pygame.K_f:
         # main gates this on the human actually being knocked out (see
         # Ui.can_fast_forward); from here it is just another action string.
@@ -597,7 +635,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     # (route mode borrows the End Turn block, a running film takes it away), and a
     # zeroed rect still contains the point (0, 0).
     if ui.end_turn_rect[2] and _point_in_rect(pos, ui.end_turn_rect):
-        return "end_turn"
+        return None if ui.awaiting_others(state) else "end_turn"
     if ui.play_pause_rect[2] and _point_in_rect(pos, ui.play_pause_rect):
         return "toggle_play"
     if ui.autoplay:

@@ -89,6 +89,11 @@ CHECKPOINT_TURNS = 25
 # The seat the player holds. `mapgen._make_players` stamps `is_human` on pid 1, so
 # a log's `winner` names a human win by being this — reconstructing the whole
 # match just to ask `state.human()` would be an absurd price for one boolean.
+#
+# Scoped to the leaderboard, which is the only thing that reads it: a posted
+# score is a single-player result on a fixed setup, and a match seating several
+# people is never posted at all. So this stays "did the player win" for the one
+# kind of match that can carry a score, rather than becoming a per-seat question.
 _HUMAN_SEAT = 1
 
 # Long enough for a slow phone on a bad connection, short enough that the daemon

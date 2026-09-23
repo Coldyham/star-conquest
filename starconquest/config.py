@@ -159,7 +159,7 @@ PLAYER_COLORS = [
 ]
 
 PLAYER_NAMES = [
-    "Neutral", "Human", "Crimson", "Verdant", "Amber", "Violet", "Gold",
+    "Neutral", "Azure", "Crimson", "Verdant", "Amber", "Violet", "Gold",
 ]
 
 # --------------------------------------------------------------------------- #

@@ -110,6 +110,10 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_scrubber(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
+    elif ui.pbp_invite:
+        _draw_invite_overlay(surface, ui)
+    elif ui.awaiting_others(state):
+        _draw_waiting_overlay(surface, state, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -1193,8 +1197,17 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # A film is a playback of a turn already resolved, so the button that would
     # resolve the next one goes away for its duration — the same take-it-away
-    # rather than guard-it treatment route mode gets just above.
-    ui.end_turn_rect = (0, 0, 0, 0) if ui.film is not None else (br.x, br.y, br.w, br.h)
+    # rather than guard-it treatment route mode gets just above. A play-by-post
+    # turn we have already submitted is the same case for a different reason: the
+    # turn advances when the last seat is in, and nothing anyone presses here
+    # brings that forward.
+    _gone = ui.film is not None or ui.awaiting_others(state)
+    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
+    if _gone and ui.awaiting_others(state):
+        _text(surface, _fonts()["normal"], "Orders sent", config.COLOR_TEXT_DIM,
+              center=br.center)
+        _draw_footer_buttons(surface, state, ui, by)
+        return
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
     pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:
@@ -1312,10 +1325,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause.
-    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
-    if not ui.autoplay:
-        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
+    # shown either way, unlike play/pause. Neither is offered in a shared match:
+    # a play-by-post turn advances when the last seat submits, so there is no
+    # clock here for either control to run, and a client that ran one anyway
+    # would resolve a turn the others had not agreed to. Taken away rather than
+    # guarded, the same treatment End Turn gets while we are waiting — and
+    # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
+    if not ui.in_pbp:
+        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
+        if not ui.autoplay:
+            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means
@@ -1433,12 +1452,16 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
 
     def label(pid: int, v: str, with_name: bool) -> str:
         p = state.players[pid]
+        # A shared match can seat a person at any colour, so the scoreboard is the
+        # one place that says outright which swatch is yours — a solo game has no
+        # such ambiguity (it is always the seat you are looking at), hence `in_pbp`.
+        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
         if v == "out":
-            return f"{p.name} out" if with_name else "out"
+            return f"{p.name} out{you}" if with_name else f"out{you}"
         systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
         name = f"{p.name} " if with_name else ""
         mark = "" if v == "live" else " ?"  # stale, last-known intel
-        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}"
+        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}{you}"
 
     def row_width(with_name: bool) -> int:
         return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
@@ -1496,6 +1519,8 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
         content_bottom = _draw_order_list(surface, state, ui)
 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
+    if ui.in_pbp:
+        y = _panel_you_are(surface, ui, x, y)
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
         ui.clear_dangerous_rect = (0, 0, 0, 0)
@@ -1722,6 +1747,15 @@ def _head(surface, x, y, text, color) -> int:
     """A panel section heading, in the larger font; returns the y below it."""
     _text(surface, _fonts()["normal"], text, color, topleft=(x, y))
     return y + _row_h("normal")
+
+
+def _panel_you_are(surface, ui: Ui, x, y) -> int:
+    """'You are {seat}', in that seat's own colour — the one line that says
+    outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
+    shared match can seat a person at any colour, but a solo game has no such
+    ambiguity, since it is always the one seat you are looking at."""
+    return _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+                config.player_color(ui.human_id))
 
 
 def _panel_w() -> int:
@@ -2018,6 +2052,155 @@ def draw_confirm_quit(surface) -> None:
     )
 
 
+def _draw_invite_overlay(surface, ui: Ui) -> None:
+    """Play-by-post: the match we just created, one row per seat — including our
+    own — and its own Copy button: 'a modal listing the seats with a Copy button
+    each', replacing a status line over a clipboard blob nobody thought to check.
+
+    Our own row is in it too, not just remembered in this browser's local
+    storage: a reload, a cleared profile or opening on another device has
+    nothing else to recover the seat from, so it needs to be copyable exactly
+    like everyone else's.
+
+    Shown exactly once (`ui.pbp_invite`, set only by the creation path); the
+    clipboard write itself is main's job (`ui.pbp_copy_seat` names the row,
+    `input` sets it and this only reads `pbp_invite_copied` back for the
+    row's own feedback). Continue is the only way to dismiss it, and it never
+    reappears once dismissed.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 190))
+    surface.blit(veil, (0, 0))
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    title = "Match created — copy each seat's link"
+    # The one and only time these links are ever shown: `main.pbp_open` mints
+    # the tokens and hands them over right here, and nothing stores them again
+    # (`pbp.create`'s own docstring — "the reply is the one and only time the
+    # seat tokens exist in the clear"). A missed one has no second chance.
+    subtitle = "Save these somewhere — they won't be shown again"
+    copy_w = _btn_w(small, "Copy", config.s(64))
+    copy_h = max(config.s(28), small.get_height() + config.s(10))
+    sw = config.s(14)   # colour swatch side
+    row_gap = config.s(8)
+    row_h = max(normal.get_height(), copy_h) + config.s(4)
+
+    def seat_label(seat: int) -> str:
+        return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+
+    name_w = max((normal.size(seat_label(seat))[0] for seat, _ in ui.pbp_invite), default=0)
+
+    pad = config.s(24)
+    inner_w = sw + config.s(10) + name_w + config.s(28) + copy_w
+    # The title can run longer than any row — measured and wrapped in the same
+    # font it is drawn in (a mismatch here is exactly what let it overflow the
+    # panel before), and capped so the panel never claims more width than the
+    # window actually has to give it.
+    cap = min(max(inner_w, config.s(280)), w - 2 * pad - config.s(48))
+    title_lines = _wrap(big, title, cap)
+    subtitle_lines = _wrap(small, subtitle, cap)
+    title_w = max((big.size(line)[0] for line in title_lines), default=0)
+    subtitle_w = max((small.size(line)[0] for line in subtitle_lines), default=0)
+    pw = max(inner_w, title_w, subtitle_w) + 2 * pad
+    done_w = _btn_w(normal, "Continue", config.s(140))
+    done_h = copy_h + config.s(6)
+    title_h = len(title_lines) * _row_h("big")
+    subtitle_h = len(subtitle_lines) * _row_h("small")
+    ph = (pad + title_h + config.s(6) + subtitle_h + config.s(18)
+          + len(ui.pbp_invite) * (row_h + row_gap)
+          + config.s(10) + done_h + pad)
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+    pygame.draw.rect(surface, (18, 20, 30), panel, border_radius=config.s(10))
+    pygame.draw.rect(surface, (60, 66, 90), panel, config.s(2), border_radius=config.s(10))
+
+    y = panel.y + pad
+    for line in title_lines:
+        _text(surface, big, line, config.COLOR_TEXT, center=(panel.centerx, y + big.get_height() // 2))
+        y += _row_h("big")
+    y += config.s(6)
+    for line in subtitle_lines:
+        _text(surface, small, line, _VERDICT_MISS, center=(panel.centerx, y + small.get_height() // 2))
+        y += _row_h("small")
+    y += config.s(18)
+
+    ui.pbp_invite_rects = {}
+    for seat, link in ui.pbp_invite:
+        color = config.player_color(seat)
+        swatch = pygame.Rect(panel.x + pad, y + (row_h - sw) // 2, sw, sw)
+        pygame.draw.rect(surface, color, swatch, border_radius=config.s(3))
+        _text(surface, normal, seat_label(seat), color,
+              midleft=(swatch.right + config.s(10), y + row_h // 2))
+        r = pygame.Rect(panel.right - pad - copy_w, y + (row_h - copy_h) // 2, copy_w, copy_h)
+        copied = ui.pbp_invite_copied == seat
+        fill, edge = _BTN_ACTIVE if copied else _BTN_BLUE
+        ui.pbp_invite_rects[seat] = _btn(surface, r, "Copied" if copied else "Copy",
+                                         fill, edge, small)
+        y += row_h + row_gap
+
+    y += config.s(10)
+    done = pygame.Rect(panel.centerx - done_w // 2, y, done_w, done_h)
+    ui.pbp_invite_close_rect = _btn(surface, done, "Continue", *_BTN_GREEN, normal)
+
+
+def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
+    """Play-by-post: our orders are in, and the turn is waiting on somebody else.
+
+    A veil rather than a modal — the board stays readable underneath, because the
+    position is exactly what you want to look at while you wait, and there is
+    nothing here to answer. The whole stack is measured and then centred, in the
+    same shape ``_draw_win_overlay`` uses, so a line that is not drawn tightens it
+    up rather than leaving a hole.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    # Lighter than the win overlay's: that one ends a game, this one is a pause in
+    # the middle of it and the board underneath still has to be legible.
+    veil.fill((5, 6, 12, 140))
+    surface.blit(veil, (0, 0))
+
+    # Centred on the *map*, not the window, and wrapped to it. The side panel is
+    # still being drawn and still has to be readable, and at a large UI scale a
+    # centred line long enough to say two players' names runs straight across it.
+    px, py, pw, ph = config.play_rect()
+    cx = px + pw // 2
+    width = pw - config.s(48)
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
+    if not names:
+        headline, detail = "Resolving the turn...", ""
+    elif len(names) == 1:
+        headline, detail = "Waiting for " + names[0], "Your orders are in."
+    else:
+        headline = f"Waiting for {len(names)} players"
+        detail = ", ".join(names)
+
+    # Measured, then centred — a line that is not drawn tightens the stack up
+    # rather than leaving a hole, and one too long for the map wraps rather than
+    # spilling out of it.
+    stack: list[tuple[pygame.font.Font, str, tuple[int, int, int]]] = []
+    for font, line, color in ((big, headline, config.COLOR_TEXT),
+                              (normal, detail, config.COLOR_TEXT_DIM),
+                              (small, ui.pbp_msg, config.COLOR_TEXT_DIM)):
+        if not line:
+            continue
+        stack.extend((font, part, color) for part in _wrap(font, line, width))
+
+    total = sum(font.get_height() + config.s(6) for font, _, _ in stack)
+    y = py + ph // 2 - total // 2
+    for font, line, color in stack:
+        _text(surface, font, line, color, center=(cx, y + font.get_height() // 2))
+        y += font.get_height() + config.s(6)
+
+
+def _seat_name(state: GameState, seat: int) -> str:
+    """What to call a seat we are waiting on. Its player name, which is already
+    how every other readout names a side."""
+    player = state.players.get(seat)
+    return player.name if player is not None else f"Seat {seat}"
+
+
 def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     """The game-over veil: who won, the score, and the four (or five) things you
     can do next. The whole stack is measured and then centred, so a hidden hint or
@@ -2223,7 +2406,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     rww = _btn_w(font, rewind_label)
     rw = pygame.Rect(w - rww - config.HUD_PAD, y, rww, bh)
     right_limit = rw.x - config.HUD_PAD
-    if ui.history_turn >= ui.history_max:
+    # Never offered in a shared match: rewinding rebuilds a fresh, un-networked
+    # `Ui` (`resume_game`), which would quietly fork the local view away from a
+    # match the server and every other seat still think is at a later turn.
+    if ui.history_turn >= ui.history_max or ui.in_pbp:
         ui.rewind_button_rect = (0, 0, 0, 0)
     else:
         ui.rewind_button_rect = _btn(surface, rw, rewind_label, *_BTN_AMBER, font)

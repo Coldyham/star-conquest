@@ -354,5 +354,15 @@ class GameState:
                 return p
         return None
 
+    def humans(self) -> list[Player]:
+        """Every seat a person holds, lowest id first.
+
+        ``human()`` answers the single-seat question the shell has always asked
+        and stays correct for it; this is the one to ask when more than one seat
+        can be a person's (play-by-post, hotseat), where "the" human seat is not
+        a well-formed question.
+        """
+        return [p for _, p in sorted(self.players.items()) if p.is_human]
+
     def fleets_incoming(self, dest_id: int) -> list[Fleet]:
         return [f for f in self.fleets if f.dest_id == dest_id]

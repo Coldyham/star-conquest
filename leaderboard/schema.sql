@@ -791,6 +791,128 @@ grant select, insert, delete on public.game_logs to service_role;
 -- directly since replay.mjs switched to the union.
 grant select on public.public_watchable_replays to service_role;
 
+-- ---------------------------------------------------------------------------
+-- Play-by-post: pbp_matches, pbp_orders
+--
+-- A different kind of thing to everything above, and deliberately kept apart
+-- from it. The board's tables are append-only, carry no identity, and describe
+-- finished single-player results. A play-by-post match is none of those: it is
+-- *live*, it advances, and a seat has to be something only one person can
+-- submit for. Rather than weaken the guarantees the rest of this file makes --
+-- there are no UPDATE policies anywhere above, and that absence is the
+-- mechanism -- multiplayer gets its own two tables with their own rules, and
+-- nothing about a posted score changes.
+--
+-- The server holds no board and runs no engine. It cannot: the board is a pure
+-- function of the settings, the seed and every turn's orders and dice, which is
+-- what `replay.reconstruct` already rebuilds without asking any seat to decide.
+-- So this stores the *inputs* and lets each client rebuild the position, exactly
+-- as a replay does -- which is also why a finished play-by-post match is an
+-- ordinary log that resumes, reviews and verifies like any other.
+--
+-- Seat tokens are the one identity-shaped thing here, and they are deliberately
+-- the weakest kind: random per match per seat, stored only as a hash, meaningful
+-- in one match and dead when it ends. They authorise "this seat, this match" and
+-- nothing else. They are not accounts, they do not group a person's games, and
+-- there is still no client id anywhere on this board.
+--
+-- Like game_logs, both tables are function-only: no policies, no anon grants.
+-- Writes go through netlify/functions/pbp.mjs under the secret key, which is
+-- what makes a size limit, a rate limit and a token check enforceable at all.
+-- ---------------------------------------------------------------------------
+create table if not exists public.pbp_matches (
+  match_id      text primary key check (match_id ~ '^[0-9a-f]{16}$'),
+  -- The setup every client rebuilds from, and the seed that fixes the map and
+  -- every fight. Both immutable for the life of the match: changing either would
+  -- silently re-map a game in progress.
+  settings_json jsonb not null,
+  seed          integer not null,
+  rules_version integer not null default 1 check (rules_version >= 1),
+  -- Which seats are people, and which of those have been claimed. `seats` is the
+  -- full roster (a bot seat is simply absent), so an unclaimed seat is already a
+  -- representable thing -- that is what an open-seat lobby would list, without
+  -- this table changing shape.
+  seats         jsonb not null,
+  -- The live turn: what every seat is currently submitting orders for. Bumped
+  -- only when the last outstanding seat submits.
+  turn          integer not null default 0 check (turn >= 0),
+  -- The match so far, in `replay.GameLog.encoded` form -- the same deflate +
+  -- base64url blob game_logs stores, so a finished match needs no conversion to
+  -- be watched, resumed or verified. Rewritten each time a turn resolves, which
+  -- is the one genuine UPDATE on this board and the reason these tables are
+  -- separate from the append-only ones above.
+  log           text not null default '' check (octet_length(log) <= 262144),
+  -- When the live turn opened, for the deadline. Wall-clock time is otherwise
+  -- absent from this game: `GameLog` stamps `created_at`/`updated_at` but never
+  -- reads them back for logic, so a deadline has to live here rather than in the
+  -- log. Null means the match has no deadline at all, which is a real choice for
+  -- two people who know each other.
+  turn_opened_at timestamptz not null default now(),
+  deadline_hours integer check (deadline_hours is null or deadline_hours between 1 and 336),
+  finished      boolean not null default false,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- pbp_orders: one seat's submission for one turn.
+--
+-- Append-only in spirit and unique per (match, turn, seat), so a resubmission is
+-- a conflict the function has to decide about rather than something that happens
+-- by accident. Orders are stored as submitted; whether a source is held or a
+-- destination adjacent is `engine.apply_order`'s to decide, for every seat
+-- alike, exactly as it is for a bot on the wire (`botio.orders_from`).
+--
+-- `board_digest` is the coherence tripwire: every client that resolves a turn
+-- reports what board it landed on. The board is a pure function of the stored
+-- inputs, so honest clients agree by construction -- this is what catches a
+-- stale build or a genuine nondeterminism bug, and it is emphatically not an
+-- anti-cheat measure (a client that would lie about this would lie about its
+-- orders too).
+-- ---------------------------------------------------------------------------
+create table if not exists public.pbp_orders (
+  id           bigint generated always as identity primary key,
+  match_id     text not null references public.pbp_matches(match_id) on delete cascade,
+  turn         integer not null check (turn >= 0),
+  seat         integer not null check (seat between 1 and 6),
+  -- `[{"src": 3, "dst": 7, "ships": 12}, ...]`. No owner on the wire: the seat is
+  -- stamped from the token, so a foreign order is not something the protocol can
+  -- express rather than something it filters.
+  orders_json  jsonb not null,
+  -- How this submission came about: a person, a seat that let its deadline pass
+  -- (`hold`), or one played by its bot after a second miss (`bot`). Disclosed,
+  -- never hidden -- the same posture `hand` takes on a posted score.
+  source       text not null default 'human' check (source in ('human', 'hold', 'bot')),
+  board_digest text not null default '' check (char_length(board_digest) <= 64),
+  submitted_at timestamptz not null default now(),
+  constraint pbp_orders_one_per_seat_per_turn unique (match_id, turn, seat)
+);
+
+create index if not exists pbp_orders_turn_idx
+  on public.pbp_orders (match_id, turn);
+
+-- RLS on, and deliberately no policies at all: with row-level security enabled,
+-- a command with no policy is refused outright, so these two tables are closed
+-- to the publishable key exactly as game_logs is. That is the mechanism, not an
+-- omission -- see the note at the top of this file. Every read and write goes
+-- through netlify/functions/pbp.mjs under the secret key, which is the only
+-- place a seat token can actually be checked.
+alter table public.pbp_matches enable row level security;
+alter table public.pbp_orders enable row level security;
+
+-- ...and the grants the function needs under that key. A secret key bypasses RLS
+-- but *not* the GRANT system underneath (the trap this file's own note above
+-- describes, which has caught it three times): without these the queries fail
+-- outright, and only for the worker. `update` on pbp_matches is what no other
+-- table here has -- it is the one thing that genuinely advances.
+grant select, insert, update on public.pbp_matches to service_role;
+-- `update` on pbp_orders is narrower than it sounds: the only column ever
+-- written after the fact is `board_digest`, stamped on the resolving seat's own
+-- row once the turn it describes has been played. The orders themselves are
+-- never rewritten — that is what the unique constraint per (match, turn, seat)
+-- is for.
+grant select, insert, update on public.pbp_orders to service_role;
+
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.
 notify pgrst, 'reload schema';
