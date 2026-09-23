@@ -408,10 +408,21 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
 # Play-by-post
 # --------------------------------------------------------------------------- #
 # How often a client asks the endpoint what a shared match is doing. A turn here
-# takes hours, so five seconds is generous by a wide margin — and it is the
-# cadence the endpoint's own rate limit is sized for (240 calls an hour, which
-# leaves room for several matches at once).
+# takes hours, so five seconds is generous by a wide margin. That is 720 reads
+# an hour per open tab, which is what the endpoint's separate read budget
+# (`MAX_READS_PER_WINDOW` in `pbp.mjs`) is sized around; writes have their own.
 PBP_POLL_MS = 5000
+
+# How long to leave the endpoint alone once it has said "slow down". Its window
+# is an hour, so polling on at the usual cadence would only keep the address
+# throttled; a minute is long enough to stop adding to it and short enough that
+# a board which has recovered is back promptly.
+PBP_THROTTLED_MS = 60_000
+
+
+def pbp_throttled(body: str) -> bool:
+    """Whether a call was turned away by the endpoint's rate limit."""
+    return bool(body) and (pbp.parse_body(body) or {}).get("error") == "slow down"
 
 # The same taxonomy the replay fetch above uses, for the same reason: these send
 # the player somewhere different. A refused *token* is the one worth telling
@@ -425,6 +436,22 @@ PBP_SENDING_MSG = "Sending your orders..."
 PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
+
+# What the endpoint's own refusals mean from this side of the wire. Keyed by the
+# exact `error` string `pbp.mjs` sends; anything not here is relayed with a
+# prefix saying it was a refusal, so it still reads as an answer rather than as
+# a connection problem.
+PBP_ENDPOINT_MSGS = {
+    "stale turn": "The match has moved past this turn — catching up",
+    "already submitted": "Your orders for this turn are already in",
+    "match is over": "This match is already over",
+    "turn is not ready": "Not every seat is in yet",
+    "already resolved": "Another player resolved this turn first — catching up",
+    "already filed": "Those missing turns are already filed",
+    "slow down": "Too many requests — waiting a moment",
+    "store refused": "The match server had a problem — trying again",
+}
+PBP_REFUSAL_MSG = "The match refused that: {}"
 
 
 def pbp_request() -> Optional[tuple[str, str]]:
@@ -461,13 +488,20 @@ def open_match(match: pbp.Match, seat: pbp.Seat,
     the same board by construction; that is the property the whole design rests
     on, so doing both is a check rather than a cost.
 
+    The one thing taken from the first pass rather than the second is
+    ``state.rng``. ``reconstruct`` deals every fight its recorded dice and asks
+    no bot to decide, so its rng never moves; the rebuild drew them, so its rng
+    stands where every other client's does. The next turn is drawn, not dealt,
+    and a board carrying the reconstructed rng fights it with different dice.
+
     The roster is re-stamped afterwards because ``replay.reconstruct`` restores
     the single-seat claim a solo game records, which knows nothing of a match
     seated at two and three.
     """
     ai.load_models()      # a shared setup may name a drop-in strategy for a bot seat
-    _, log = pbp.rebuild(match, ai.decide)
+    rebuilt, log = pbp.rebuild(match, ai.decide)
     state, ui = resume_game(log, settings, seat.seat)
+    state.rng = rebuilt.rng
     pbp.seat_people(state, match.seats)
     pbp_adopt(match, seat, ui)
     return state, ui, log
@@ -494,18 +528,20 @@ def pbp_trouble(status: str, body: str) -> str:
     """A line for a call that did not come back with what was asked for.
 
     Two of the four states name something the player can act on and get their own
-    words. For the rest the endpoint's own are better than ours — "stale turn",
-    "already submitted", "turn is not ready" each name a real state of the match,
-    and the read that follows is about to show it — so they are relayed rather
-    than translated, and only a call that came back with nothing at all falls
-    through to a line about the connection.
+    words. The endpoint's known refusals — "stale turn", "already submitted",
+    "turn is not ready" — each name a real state of the match and are put in the
+    player's terms (``PBP_ENDPOINT_MSGS``); an unknown one is relayed as a
+    refusal, and only a call that came back with nothing at all falls through to
+    a line about the connection.
     """
     if status == pbp.MISSING:
         return PBP_MISSING_MSG
     if status == pbp.REFUSED:
         return PBP_REFUSED_MSG
     error = (pbp.parse_body(body) or {}).get("error") if body else None
-    return error if isinstance(error, str) and error else PBP_UNREACHABLE_MSG
+    if not isinstance(error, str) or not error:
+        return PBP_UNREACHABLE_MSG
+    return PBP_ENDPOINT_MSGS.get(error) or PBP_REFUSAL_MSG.format(error)
 
 
 def pbp_heard(ui: Ui, status: str, body: str) -> None:
@@ -1296,12 +1332,14 @@ async def main() -> None:
                     pbp_heard(ui, status, body)
                 # Whatever it said, the match has moved or it has not, and only a
                 # read can tell us which. Ask on the next frame rather than in
-                # five seconds' time.
-                pbp_accum = PBP_POLL_MS
+                # five seconds' time — unless we were told to slow down.
+                pbp_accum = (PBP_POLL_MS - PBP_THROTTLED_MS if pbp_throttled(body)
+                             else PBP_POLL_MS)
         if pbp_poll is not None and reel is None and pbp_seat is not None:
             status, body = pbp_poll.poll()
             if status != pbp.PENDING:
-                pbp_poll, pbp_accum = None, 0
+                pbp_poll = None
+                pbp_accum = -PBP_THROTTLED_MS if pbp_throttled(body) else 0
                 match = (pbp.match_from_dict(pbp.parse_body(body) or {})
                          if status == pbp.OK else None)
                 opening = state is None or ui is None or not ui.in_pbp

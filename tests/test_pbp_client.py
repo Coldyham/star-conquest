@@ -129,6 +129,24 @@ def test_a_match_opens_on_the_turn_the_endpoint_says_it_is_on():
     assert log.turn_count == 1
 
 
+def test_a_match_opened_mid_game_draws_its_next_turn_where_everyone_else_does():
+    """The board looks right either way; the rng is what forks.
+
+    `open_match` lands its board through `replay.reconstruct`, which deals each
+    fight its recorded dice and so never moves `state.rng`. The next turn is
+    drawn, not dealt, so a client that opened the match mid-game has to carry the
+    rng the rebuild drew — or it fights that turn with different dice from a
+    client that has been stepping all along. A bot seat keeps the fights coming.
+    """
+    ai.load_models()
+    match = pbp.match_from_dict(_payload(seats=(1,), turn=40))
+    rebuilt, _ = pbp.rebuild(match, ai.decide)
+    assert any(t.get("dice") for t in pbp.rebuild(match, ai.decide)[1].turns), \
+        "no fight in the history, so nothing here moved the rng"
+    _, state, _, _ = _opened(seats=(1,), turn=40)
+    assert state.rng.getstate() == rebuilt.rng.getstate()
+
+
 # --------------------------------------------------------------------------- #
 # The join: the shell's turn and another client's must be the same turn
 # --------------------------------------------------------------------------- #
@@ -265,13 +283,39 @@ def test_a_submission_that_landed_says_nothing():
     assert ui.pbp_submitted and ui.pbp_msg == ""
 
 
-def test_the_endpoints_own_words_are_relayed_rather_than_translated():
-    """"stale turn", "already submitted", "turn is not ready" each name a real
-    state of the match, and the read that follows is about to show it."""
-    assert app.pbp_trouble(pbp.ERROR, '{"error": "stale turn", "turn": 4}') == "stale turn"
+def test_the_endpoints_refusals_read_as_refusals_not_as_a_lost_connection():
+    """A known refusal is put in the player's terms, an unknown one is relayed as
+    a refusal, and only a call with no answer at all is blamed on the network."""
+    assert (app.pbp_trouble(pbp.ERROR, '{"error": "stale turn", "turn": 4}')
+            == app.PBP_ENDPOINT_MSGS["stale turn"])
+    assert (app.pbp_trouble(pbp.ERROR, '{"error": "bad turn"}')
+            == app.PBP_REFUSAL_MSG.format("bad turn"))
     assert app.pbp_trouble(pbp.MISSING, "") == app.PBP_MISSING_MSG
     assert app.pbp_trouble(pbp.ERROR, "<!doctype html>") == app.PBP_UNREACHABLE_MSG
     assert app.pbp_trouble(pbp.ERROR, "") == app.PBP_UNREACHABLE_MSG
+
+
+def test_only_the_rate_limit_counts_as_being_told_to_slow_down():
+    assert app.pbp_throttled('{"error": "slow down"}')
+    assert not app.pbp_throttled('{"error": "stale turn"}')
+    assert not app.pbp_throttled("")
+    assert not app.pbp_throttled("<!doctype html>")
+
+
+def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
+    """The refusal hands the board back, which drops the waiting overlay in the
+    same frame. Its reason has to be drawn somewhere else, or the press reads as
+    having done nothing."""
+    from starconquest import render
+    _, state, ui, _ = _opened()
+    ui.pbp_submitted = True
+    app.pbp_heard(ui, pbp.ERROR, '{"error": "stale turn"}')
+    drawn = []
+    monkeypatch.setattr(render, "_label_pill",
+                        lambda surface, font, text, *a: drawn.append(text))
+    render.draw(pygame.display.get_surface(), state, ui)
+    assert not ui.awaiting_others(state)
+    assert app.PBP_ENDPOINT_MSGS["stale turn"] in drawn
 
 
 # --------------------------------------------------------------------------- #
