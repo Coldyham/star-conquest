@@ -269,12 +269,14 @@ Done since, off the same "missing way to say it, not a missing capability" list:
   actually happens, same as every other share path. Continue clears the overlay
   for good; it never reappears once dismissed, and following someone else's
   invite link never sets it in the first place.
-
-Left open deliberately:
-
-* **The deadline is 48h and is not on the menu** (`pbp.DEADLINE_HOURS`). The
-  endpoint takes any figure from 1 to 336 hours and stores it per match; nothing
-  offers a choice.
+* **The deadline is on the same prompt, not fixed at 48h.** A stepper below the
+  roster (`MenuState.pbp_deadline_hours`, reset to `pbp.DEADLINE_HOURS` whenever
+  the prompt opens) moves a day at a time between the endpoint's own 1h/336h
+  bounds — clamped in the UI to 24h/336h, since the format's own unit is days
+  ("two days is what play-by-post exists for") rather than raw hours. Confirming
+  threads it straight through: `main.pbp_open(..., deadline_hours=ms.pbp_
+  deadline_hours)` -> `pbp.create` -> the endpoint's existing `deadline_hours`
+  column, unchanged.
 
 ## How a deadline works
 

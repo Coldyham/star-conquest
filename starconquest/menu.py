@@ -314,6 +314,15 @@ class MenuState:
     # has it playing. Reset to every seat each time the prompt opens.
     pbp_prompt: bool = False
     pbp_roster: set[int] = field(default_factory=set)
+    # ...and alongside it, how long a seat's clock runs before it lapses — the
+    # same prompt, since both are per-match choices made once, at creation, and
+    # neither belongs on `Settings` (a deadline isn't part of the setup a
+    # challenge link hashes any more than the roster is). Whole days only: the
+    # endpoint accepts 1-336 hours, but the format's own unit is days ("two days
+    # is what play-by-post exists for" — `pbp.DEADLINE_HOURS`), so the stepper
+    # moves in them rather than exposing raw hour arithmetic. Reset to the
+    # default each time the prompt opens.
+    pbp_deadline_hours: int = pbp.DEADLINE_HOURS
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -589,15 +598,37 @@ def _pbp_prompt_labels() -> tuple[str, str]:
     return ("Create match (Enter)", "Cancel (Esc)")
 
 
+# `pbp.DEADLINE_HOURS` is the format's own unit ("two days is what play-by-post
+# exists for"), so the stepper below moves in whole days rather than exposing
+# raw hour arithmetic — a day (24h) at a time, from one day up to the endpoint's
+# own ceiling of 336h (14 days).
+_PBP_DEADLINE_STEP_H = 24
+_PBP_DEADLINE_MIN_H = 24
+_PBP_DEADLINE_MAX_H = 336
+
+
+def _deadline_label(hours: int) -> str:
+    days = max(1, hours // 24)
+    return "1 day" if days == 1 else f"{days} days"
+
+
+def _step_deadline(ms: MenuState, by: int) -> None:
+    ms.pbp_deadline_hours = max(_PBP_DEADLINE_MIN_H, min(
+        _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
+
+
 def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
-    """Modal: who at the table is a person, before the match is even opened.
+    """Modal: who at the table is a person, and how long their clock runs,
+    before the match is even opened.
 
     Seat 1 is fixed — the creator ends up seated there regardless of what is
     checked, so its row carries no checkbox at all — and every seat starts
     checked (``ms.pbp_roster``, reset by ``_handle_click`` on the way in), so
     the common case ("every player is a person") is a single press away, the
     same as it always was; unchecking a seat leaves it to whatever strategy the
-    AI tab already has it playing.
+    AI tab already has it playing. The deadline row below the roster is the
+    same idea for ``pbp.DEADLINE_HOURS``: a per-match choice made once, here,
+    rather than a fixed 48h nobody could change.
     """
     f = _fonts()
     row_h, gap, pad = 40, 10, 28
@@ -608,9 +639,12 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     title = "Who's playing?"
     name_w = max(f["normal"].size(config.player_name(seat))[0]
                  for seat in range(1, settings.players + 1))
+    stepper_w = 34 + 64 + 34  # `_stepper`'s own fixed −/box/+ widths
+    deadline_w = f["normal"].size("Deadline")[0] + 10 + stepper_w
     pw = max(name_w + sw_size + _CH + 4 * pad, f["normal"].size(title)[0] + 2 * pad,
-             2 * bw + gap + 2 * pad)
-    ph = pad + f["normal"].get_height() + gap + settings.players * (row_h + gap) + bh + pad
+             deadline_w + 2 * pad, 2 * bw + gap + 2 * pad)
+    rows = settings.players + 1   # every seat, plus the deadline
+    ph = pad + f["normal"].get_height() + gap + rows * (row_h + gap) + bh + pad
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -638,6 +672,12 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
             _checkbox(surface, ms, f"pbp_seat_{seat}", seat in ms.pbp_roster,
                       panel.right - pad, y + (row_h - _CH) // 2)
         y += row_h + gap
+
+    _text(surface, f["normal"], "Deadline", config.COLOR_TEXT,
+          midleft=(panel.x + pad, y + row_h // 2))
+    _stepper(surface, ms, "pbp_deadline", _deadline_label(ms.pbp_deadline_hours),
+             panel.right - pad, y + (row_h - _CH) // 2)
+    y += row_h + gap
 
     by = panel.bottom - pad - bh
     go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
@@ -1473,8 +1513,9 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
 
 
 def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str]:
-    """Answer the play-by-post roster prompt: toggle a seat, confirm (opens the
-    match with whichever seats are still checked), or cancel outright.
+    """Answer the play-by-post roster prompt: toggle a seat, nudge the deadline,
+    confirm (opens the match with whichever seats are still checked, on the
+    deadline shown), or cancel outright.
 
     Seat 1's row is never a hit target (`_draw_pbp_prompt` draws it but records
     no rect for it) — the creator ends up seated there regardless, so there is
@@ -1485,6 +1526,11 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str
             rect = ms.rects.get(f"pbp_seat_{seat}")
             if rect is not None and rect.collidepoint(event.pos):
                 ms.pbp_roster.symmetric_difference_update({seat})
+                return None
+        for key, by in (("pbp_deadline_dec", -1), ("pbp_deadline_inc", 1)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                _step_deadline(ms, by)
                 return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
             ms.pbp_prompt = False
@@ -1710,6 +1756,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             return None
         ms.pbp_prompt = True
         ms.pbp_roster = set(range(1, settings.players + 1))
+        ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
         return None
     if hit == "quit":
         return "quit"

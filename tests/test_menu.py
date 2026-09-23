@@ -214,6 +214,40 @@ def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
         pygame.quit()
 
 
+def test_the_roster_prompt_deadline_stepper_moves_in_whole_days(monkeypatch):
+    """Starts at `pbp.DEADLINE_HOURS`, moves a day (24h) per press, and is
+    clamped to the endpoint's own bounds — a day at the low end, its 336h
+    ceiling at the high end."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_deadline_hours == menu.pbp.DEADLINE_HOURS
+
+        menu.draw(screen, ms, settings)
+        dec = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                 pos=ms.rects["pbp_deadline_dec"].center, button=1)
+        menu.handle_event(dec, ms, settings)
+        assert ms.pbp_deadline_hours == menu.pbp.DEADLINE_HOURS - 24
+
+        for _ in range(20):   # walk past the ceiling from the other side
+            menu.draw(screen, ms, settings)
+            inc = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                     pos=ms.rects["pbp_deadline_inc"].center, button=1)
+            menu.handle_event(inc, ms, settings)
+        assert ms.pbp_deadline_hours == 336
+
+        ms.pbp_deadline_hours = 24
+        menu.draw(screen, ms, settings)
+        dec = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                 pos=ms.rects["pbp_deadline_dec"].center, button=1)
+        menu.handle_event(dec, ms, settings)
+        assert ms.pbp_deadline_hours == 24   # floored, not 0 or negative
+
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+    finally:
+        pygame.quit()
+
+
 def test_cancelling_the_roster_prompt_opens_no_match():
     screen, ms, settings = _setup()
     try:
