@@ -90,17 +90,20 @@ const MAX_ORDERS = 256;
  * adversary. What actually bounds the damage is that every write needs a seat
  * token, and a token is only good for one seat of one match.
  *
- * The cadence to allow is a client polling a match it is waiting on. Play-by-post
- * turns take hours, so a poll every few seconds is already generous and 240 an
- * hour leaves room for several matches at once.
+ * Reads and writes are counted apart. A client polls the match it has open
+ * every five seconds, 720 reads an hour per tab, and several tabs (or players
+ * behind one router) share an address; a read touches no table but the ones it
+ * selects from, so its budget is sized for that. Writes are what a flood would
+ * cost, and each person makes a handful per turn.
  */
 const WINDOW_MS = 60 * 60 * 1000;
 const MAX_PER_WINDOW = 240;
+export const MAX_READS_PER_WINDOW = 4000;
 const seen = new Map();
 
-export function rateLimited(key, now = Date.now(), store = seen) {
+export function rateLimited(key, now = Date.now(), store = seen, max = MAX_PER_WINDOW) {
   const fresh = (store.get(key) || []).filter((at) => now - at < WINDOW_MS);
-  if (fresh.length >= MAX_PER_WINDOW) {
+  if (fresh.length >= max) {
     store.set(key, fresh);
     return true;
   }
@@ -380,15 +383,16 @@ export default async function handler(request) {
   const ip = request.headers.get("x-nf-client-connection-ip")
     || (request.headers.get("x-forwarded-for") || "").split(",")[0].trim()
     || "unknown";
-  if (rateLimited(ip)) return reply(429, { error: "slow down" }, origin);
-
   const query = new URL(request.url).searchParams;
   const action = query.get("action") || "state";
-  const call = db(url, key);
+  const reading = action === "state" && request.method === "GET";
+  const limited = reading
+    ? rateLimited(`read:${ip}`, Date.now(), seen, MAX_READS_PER_WINDOW)
+    : rateLimited(ip);
+  if (limited) return reply(429, { error: "slow down" }, origin);
 
-  if (action === "state" && request.method === "GET") {
-    return await handleState(call, query, origin);
-  }
+  const call = db(url, key);
+  if (reading) return await handleState(call, query, origin);
   if (request.method !== "POST") return reply(405, { error: "POST only" }, origin);
 
   let body;

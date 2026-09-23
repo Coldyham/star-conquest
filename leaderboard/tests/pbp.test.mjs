@@ -12,7 +12,7 @@ import test from "node:test";
 
 import {
   allowedOrigin, consecutiveMisses, deadlinePassed, hashToken, lapsedAction,
-  lapsedSeats, mintToken, outstanding, rateLimited, sameToken, seatForToken,
+  lapsedSeats, MAX_READS_PER_WINDOW, mintToken, outstanding, rateLimited, sameToken, seatForToken,
   validateMatch, validateOrders, validateSeats, visibleOrders,
 } from "../netlify/functions/pbp.mjs";
 
@@ -258,6 +258,17 @@ test("the rate limit allows a polling client and stops a flood", () => {
   assert.ok(rateLimited("ip", now + 240, store), "...but the next is refused");
   // A different caller is unaffected.
   assert.ok(!rateLimited("other", now + 240, store));
+});
+
+test("reads have their own, larger budget: two tabs polling for an hour pass", () => {
+  const store = new Map();
+  const now = Date.now();
+  // Two tabs on one address, a poll each every five seconds.
+  for (let i = 0; i < 2 * 720; i += 1) {
+    assert.ok(!rateLimited("read:ip", now + i, store, MAX_READS_PER_WINDOW), `read ${i}`);
+  }
+  // ...and none of that spent the write budget.
+  assert.ok(!rateLimited("ip", now, store));
 });
 
 // --------------------------------------------------------------------------

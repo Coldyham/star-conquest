@@ -505,13 +505,10 @@ class Request:
         """
         state_key, body_key = _web_keys(self._slot)
         state = webstore.get(state_key)
-        if state == OK:
-            body = webstore.get(body_key)
+        if state in (OK, ERROR, MISSING, REFUSED):
+            body = webstore.get(body_key) or ""
             _clear_web_slot(self._slot)
-            return OK, body
-        if state in (ERROR, MISSING, REFUSED):
-            _clear_web_slot(self._slot)
-            return state, ""
+            return state, body
         return PENDING, ""
 
 
@@ -541,7 +538,9 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
 
     The handlers leave the slot in exactly one of the three states whatever
     happens: a non-2xx is as much an answer as a dead connection, and a promise
-    with no rejection handler surfaces in the console as a crash.
+    with no rejection handler surfaces in the console as a crash. A non-2xx keeps
+    its body, as the desktop path does: "stale turn" is the endpoint answering,
+    and dropping it would tell the player the match could not be reached.
     """
     import platform as _platform
 
@@ -555,11 +554,12 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
         _platform.window.eval(
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
             f"fetch({json.dumps(url)},{init}).then(function(r)"
-            "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"
-            f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"
+            "{return r.text().then(function(t){"
+            f"localStorage.setItem({slot},t);"
+            f"localStorage.setItem({state},r.ok?'{OK}':r.status===404?'{MISSING}'"
+            f":r.status===403?'{REFUSED}':'{ERROR}')}})}})"
             f".catch(function(e){{console.warn('pbp call failed',e);"
-            f"localStorage.setItem({state},e===404?'{MISSING}'"
-            f":e===403?'{REFUSED}':'{ERROR}')}})"
+            f"localStorage.setItem({state},'{ERROR}')}})"
         )
         return Request(web=True, slot=mailbox)
     except Exception:  # noqa: BLE001

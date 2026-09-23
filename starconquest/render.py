@@ -114,6 +114,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_invite_overlay(surface, ui)
     elif ui.awaiting_others(state):
         _draw_waiting_overlay(surface, state, ui)
+    elif ui.in_pbp and ui.pbp_msg:
+        _draw_pbp_notice(surface, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -2192,6 +2194,19 @@ def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
     for font, line, color in stack:
         _text(surface, font, line, color, center=(cx, y + font.get_height() // 2))
         y += font.get_height() + config.s(6)
+
+
+def _draw_pbp_notice(surface, ui: Ui) -> None:
+    """What the last call to a shared match said, once there is no veil to say it.
+
+    A refused submission hands the board back, which drops the waiting overlay
+    in the same frame — so the reason it was refused needs somewhere of its own,
+    or the press reads as having done nothing at all. Top of the map, clear of
+    the film caption at the bottom.
+    """
+    x, y, w, _ = config.play_rect()
+    _label_pill(surface, _fonts()["small"], ui.pbp_msg, config.COLOR_TEXT,
+                (x + w // 2, y + config.FILM_CAPTION_GAP))
 
 
 def _seat_name(state: GameState, seat: int) -> str:
