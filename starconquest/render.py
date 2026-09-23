@@ -110,6 +110,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_scrubber(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
+    elif ui.pbp_invite:
+        _draw_invite_overlay(surface, ui)
     elif ui.awaiting_others(state):
         _draw_waiting_overlay(surface, state, ui)
 
@@ -1450,12 +1452,16 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
 
     def label(pid: int, v: str, with_name: bool) -> str:
         p = state.players[pid]
+        # A shared match can seat a person at any colour, so the scoreboard is the
+        # one place that says outright which swatch is yours — a solo game has no
+        # such ambiguity (it is always the seat you are looking at), hence `in_pbp`.
+        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
         if v == "out":
-            return f"{p.name} out" if with_name else "out"
+            return f"{p.name} out{you}" if with_name else f"out{you}"
         systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
         name = f"{p.name} " if with_name else ""
         mark = "" if v == "live" else " ?"  # stale, last-known intel
-        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}"
+        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}{you}"
 
     def row_width(with_name: bool) -> int:
         return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
@@ -1513,6 +1519,8 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
         content_bottom = _draw_order_list(surface, state, ui)
 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
+    if ui.in_pbp:
+        y = _panel_you_are(surface, ui, x, y)
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
         ui.clear_dangerous_rect = (0, 0, 0, 0)
@@ -1739,6 +1747,15 @@ def _head(surface, x, y, text, color) -> int:
     """A panel section heading, in the larger font; returns the y below it."""
     _text(surface, _fonts()["normal"], text, color, topleft=(x, y))
     return y + _row_h("normal")
+
+
+def _panel_you_are(surface, ui: Ui, x, y) -> int:
+    """'You are {seat}', in that seat's own colour — the one line that says
+    outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
+    shared match can seat a person at any colour, but a solo game has no such
+    ambiguity, since it is always the one seat you are looking at."""
+    return _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+                config.player_color(ui.human_id))
 
 
 def _panel_w() -> int:
@@ -2035,6 +2052,66 @@ def draw_confirm_quit(surface) -> None:
     )
 
 
+def _draw_invite_overlay(surface, ui: Ui) -> None:
+    """Play-by-post: the match we just created, one row per other seat and its
+    own Copy button — 'a modal listing the seats with a Copy button each',
+    replacing a status line over a clipboard blob nobody thought to check.
+
+    Shown exactly once (`ui.pbp_invite`, set only by the creation path); the
+    clipboard write itself is main's job (`ui.pbp_copy_seat` names the row,
+    `input` sets it and this only reads `pbp_invite_copied` back for the
+    row's own feedback). Continue is the only way to dismiss it, and it never
+    reappears once dismissed.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 190))
+    surface.blit(veil, (0, 0))
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    title = "Match created — send each seat its own link"
+    copy_w = _btn_w(small, "Copy", config.s(64))
+    copy_h = max(config.s(28), small.get_height() + config.s(10))
+    sw = config.s(14)   # colour swatch side
+    row_gap = config.s(8)
+    row_h = max(normal.get_height(), copy_h) + config.s(4)
+    name_w = max((normal.size(config.player_name(seat))[0] for seat, _ in ui.pbp_invite), default=0)
+
+    pad = config.s(24)
+    inner_w = sw + config.s(10) + name_w + config.s(28) + copy_w
+    pw = max(inner_w, normal.size(title)[0]) + 2 * pad
+    done_w = _btn_w(normal, "Continue", config.s(140))
+    done_h = copy_h + config.s(6)
+    ph = (pad + big.get_height() + config.s(18)
+          + len(ui.pbp_invite) * (row_h + row_gap)
+          + config.s(10) + done_h + pad)
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+    pygame.draw.rect(surface, (18, 20, 30), panel, border_radius=config.s(10))
+    pygame.draw.rect(surface, (60, 66, 90), panel, config.s(2), border_radius=config.s(10))
+
+    y = panel.y + pad
+    _text(surface, big, title, config.COLOR_TEXT, center=(panel.centerx, y + big.get_height() // 2))
+    y += big.get_height() + config.s(18)
+
+    ui.pbp_invite_rects = {}
+    for seat, link in ui.pbp_invite:
+        color = config.player_color(seat)
+        swatch = pygame.Rect(panel.x + pad, y + (row_h - sw) // 2, sw, sw)
+        pygame.draw.rect(surface, color, swatch, border_radius=config.s(3))
+        _text(surface, normal, config.player_name(seat), color,
+              midleft=(swatch.right + config.s(10), y + row_h // 2))
+        r = pygame.Rect(panel.right - pad - copy_w, y + (row_h - copy_h) // 2, copy_w, copy_h)
+        copied = ui.pbp_invite_copied == seat
+        fill, edge = _BTN_ACTIVE if copied else _BTN_BLUE
+        ui.pbp_invite_rects[seat] = _btn(surface, r, "Copied" if copied else "Copy",
+                                         fill, edge, small)
+        y += row_h + row_gap
+
+    y += config.s(10)
+    done = pygame.Rect(panel.centerx - done_w // 2, y, done_w, done_h)
+    ui.pbp_invite_close_rect = _btn(surface, done, "Continue", *_BTN_GREEN, normal)
+
+
 def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
     """Play-by-post: our orders are in, and the turn is waiting on somebody else.
 
@@ -2071,12 +2148,10 @@ def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
     # Measured, then centred — a line that is not drawn tightens the stack up
     # rather than leaving a hole, and one too long for the map wraps rather than
     # spilling out of it.
-    note = "Fog here is a convenience, not a guarantee."
     stack: list[tuple[pygame.font.Font, str, tuple[int, int, int]]] = []
     for font, line, color in ((big, headline, config.COLOR_TEXT),
                               (normal, detail, config.COLOR_TEXT_DIM),
-                              (small, ui.pbp_msg, config.COLOR_TEXT_DIM),
-                              (small, note, config.COLOR_TEXT_DIM)):
+                              (small, ui.pbp_msg, config.COLOR_TEXT_DIM)):
         if not line:
             continue
         stack.extend((font, part, color) for part in _wrap(font, line, width))
@@ -2300,7 +2375,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     rww = _btn_w(font, rewind_label)
     rw = pygame.Rect(w - rww - config.HUD_PAD, y, rww, bh)
     right_limit = rw.x - config.HUD_PAD
-    if ui.history_turn >= ui.history_max:
+    # Never offered in a shared match: rewinding rebuilds a fresh, un-networked
+    # `Ui` (`resume_game`), which would quietly fork the local view away from a
+    # match the server and every other seat still think is at a later turn.
+    if ui.history_turn >= ui.history_max or ui.in_pbp:
         ui.rewind_button_rect = (0, 0, 0, 0)
     else:
         ui.rewind_button_rect = _btn(surface, rw, rewind_label, *_BTN_AMBER, font)

@@ -2442,3 +2442,30 @@ def test_a_click_at_the_origin_never_ends_the_turn_on_an_undrawn_button():
         assert _click_pos(state, ui, (0, 0)) is None
     finally:
         pygame.quit()
+
+
+def test_the_invite_overlay_is_modal_and_names_the_seat_it_copies():
+    """A Copy row never touches the clipboard itself (that's main's job) — it
+    only names the seat on `Ui` and returns the action that asks for it — and
+    Continue clears the overlay outright, since nothing outside `Ui` needs
+    telling that it closed."""
+    state, ui = _setup()
+    try:
+        ui.pbp_invite = ((2, "https://game/#pbp=x:y"), (3, "https://game/#pbp=x:z"))
+        ui.pbp_invite_rects = {2: (10, 10, 40, 20), 3: (10, 40, 40, 20)}
+        ui.pbp_invite_close_rect = (10, 70, 40, 20)
+
+        # A click elsewhere on the board must not fall through to selection —
+        # the overlay is modal, exactly like history or a finished game.
+        assert _click(state, ui, next(iter(state.systems))) is None
+        assert ui.selected is None
+
+        assert _click_pos(state, ui, (30, 20)) == "pbp_copy_seat"
+        assert ui.pbp_copy_seat == 2
+
+        assert _click_pos(state, ui, (30, 80)) is None   # Continue
+        assert ui.pbp_invite == ()
+        assert ui.pbp_invite_rects == {}
+        assert ui.pbp_invite_close_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
