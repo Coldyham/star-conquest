@@ -412,6 +412,11 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
 # cadence the endpoint's own rate limit is sized for (240 calls an hour, which
 # leaves room for several matches at once).
 PBP_POLL_MS = 5000
+# A read that failed is retried sooner than that, then later and later: a blip
+# (a cold function, a dropped reply) is over by the next try, while an endpoint
+# that is really down should not be asked twelve times a minute.
+PBP_RETRY_MS = 500
+PBP_RETRY_MAX_MS = 30000
 
 # The same taxonomy the replay fetch above uses, for the same reason: these send
 # the player somewhere different. A refused *token* is the one worth telling
@@ -425,6 +430,17 @@ PBP_SENDING_MSG = "Sending your orders..."
 PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
+
+
+def pbp_poll_delay(failures: int) -> int:
+    """How long to wait before the next read, after ``failures`` in a row.
+
+    The steady cadence while reads work; after a failure, doubling from
+    ``PBP_RETRY_MS`` — past ``PBP_POLL_MS`` by the fifth — up to ``PBP_RETRY_MAX_MS``.
+    """
+    if failures <= 0:
+        return PBP_POLL_MS
+    return min(PBP_RETRY_MS * 2 ** (failures - 1), PBP_RETRY_MAX_MS)
 
 
 def pbp_request() -> Optional[tuple[str, str]]:
@@ -1145,6 +1161,10 @@ async def main() -> None:
     pbp_make: pbp.Request | None = None
     pbp_making = ""
     pbp_accum = 0
+    pbp_wait = PBP_POLL_MS        # how long `pbp_accum` runs before the next read
+    pbp_failures = 0              # reads in a row that came back with no match
+    pbp_read_line = ""            # the line the last failed read put up, if any
+    pbp_resolving = False         # whether `pbp_write` is our own resolved turn
     # Every other seat's link, from a match *we* just created — handed to `Ui`
     # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
     # opens on the very first frame of the match rather than a status line that
@@ -1294,10 +1314,18 @@ async def main() -> None:
                 pbp_write = None
                 if ui is not None and ui.in_pbp:
                     pbp_heard(ui, status, body)
-                # Whatever it said, the match has moved or it has not, and only a
-                # read can tell us which. Ask on the next frame rather than in
-                # five seconds' time.
-                pbp_accum = PBP_POLL_MS
+                pbp_accum = 0
+                if status == pbp.OK and pbp_resolving:
+                    # Our own turn, accepted: the match now stands where our board
+                    # does, so a read would only say so. The next turn is ours to
+                    # play meanwhile, and the ordinary cadence picks up the rest.
+                    pbp_wait = PBP_POLL_MS
+                else:
+                    # Otherwise the match has moved or it has not, and only a read
+                    # can tell us which. Ask on the next frame rather than in five
+                    # seconds' time.
+                    pbp_wait = 0
+                pbp_resolving = False
         if pbp_poll is not None and reel is None and pbp_seat is not None:
             status, body = pbp_poll.poll()
             if status != pbp.PENDING:
@@ -1305,16 +1333,19 @@ async def main() -> None:
                 match = (pbp.match_from_dict(pbp.parse_body(body) or {})
                          if status == pbp.OK else None)
                 opening = state is None or ui is None or not ui.in_pbp
+                pbp_failures = pbp_failures + 1 if match is None else 0
+                pbp_wait = pbp_poll_delay(pbp_failures)
                 if match is None:
                     line = pbp_trouble(status, body) if status != pbp.OK \
                         else PBP_UNREADABLE_MSG
                     print(f"match read for {pbp_seat.match_id!r} ended in "
-                          f"state {status!r} ({len(body)} bytes)")
+                          f"state {status!r} ({len(body)} bytes)"
+                          + ("" if opening else f"; retrying in {pbp_wait} ms"))
                     if opening:
                         menu.set_status(menu_state, line, False)
                         invite, pbp_seat = None, None
                     else:
-                        ui.pbp_msg = line
+                        ui.pbp_msg = pbp_read_line = line
                 elif opening and match.rules_version != engine.RULES_VERSION:
                     # The same call `open_replay` makes about a stored log, for the
                     # same reason: rebuilding it under today's rules would show a
@@ -1335,6 +1366,9 @@ async def main() -> None:
                     auto_accum = 0
                 else:
                     assert state is not None and ui is not None and log is not None
+                    if pbp_read_line and ui.pbp_msg == pbp_read_line:
+                        ui.pbp_msg = ""   # the read that failed has since worked
+                    pbp_read_line = ""
                     pbp_adopt(match, pbp_seat, ui)
                     verdict = pbp_verdict(match, state)
                     if verdict == PBP_WAIT and match.lapsed and pbp_write is None:
@@ -1375,16 +1409,19 @@ async def main() -> None:
                             pbp_write = pbp.send_resolved(
                                 pbp_seat, turn, log, replay.digest_hex(state),
                                 state.winner is not None)
+                            pbp_resolving = pbp_write is not None
         if ui is not None and not ui.in_pbp:
             # Left the match — back to the menu, a new map, a retry. Nothing in
             # flight is about it anymore, and the seat itself stays remembered so
             # the link still works.
             pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
+            pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
+            pbp_resolving = False
         elif (ui is not None and pbp_seat is not None and pbp_poll is None
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
             pbp_accum += dt
-            if pbp_accum >= PBP_POLL_MS:
+            if pbp_accum >= pbp_wait:
                 pbp_accum = 0
                 pbp_poll = pbp.fetch_state(ui.pbp_match)
 

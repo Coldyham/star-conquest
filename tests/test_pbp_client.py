@@ -706,3 +706,15 @@ def test_our_own_lapse_is_never_filed_by_us():
     match.lapsed = {1: "bot"}
     assert pbp.lapse_orders(state, match, ai.decide, skip=1) == {}
     assert pbp.send_lapse(_seat(1), 0, {}) is None
+
+
+def test_a_failed_read_is_retried_quickly_then_backs_off():
+    """A blip is over by the next try, so the first retry is well inside the
+    steady cadence; an endpoint that keeps failing is asked less and less often,
+    never more often than the cadence and never less than the cap."""
+    delays = [app.pbp_poll_delay(n) for n in range(10)]
+    assert delays[0] == app.PBP_POLL_MS
+    assert delays[1] == app.PBP_RETRY_MS < app.PBP_POLL_MS
+    assert delays[1:] == sorted(delays[1:])
+    assert delays[5] > app.PBP_POLL_MS
+    assert delays[-1] == app.PBP_RETRY_MAX_MS

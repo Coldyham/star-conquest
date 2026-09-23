@@ -358,14 +358,50 @@ def test_a_poll_answers_pending_until_the_thread_lands():
 def test_the_web_mailbox_is_cleared_once_collected(monkeypatch):
     """A stale `ok` from an earlier session would otherwise read as an instant
     success carrying somebody else's answer (the trap `share` documents)."""
+    state_key, body_key = pbp._web_keys(3)
     monkeypatch.setattr(pbp.webstore, "get",
-                        lambda key: pbp.OK if key == pbp.WEB_PBP_STATE_KEY else "body")
+                        lambda key: pbp.OK if key == state_key else "body")
     cleared = []
     monkeypatch.setattr(pbp.webstore, "set",
                         lambda key, value: cleared.append((key, value)) or True)
-    assert pbp.Request(web=True).poll() == (pbp.OK, "body")
-    assert (pbp.WEB_PBP_STATE_KEY, "") in cleared
-    assert (pbp.WEB_PBP_BODY_KEY, "") in cleared
+    assert pbp.Request(web=True, slot=3).poll() == (pbp.OK, "body")
+    assert (state_key, "") in cleared
+    assert (body_key, "") in cleared
+
+
+def test_two_calls_in_flight_each_collect_their_own_answer(on_a_board, monkeypatch):
+    """A poll is routinely still out when End Turn submits. With one shared
+    mailbox, whichever reply landed first was handed to whichever request was
+    collected first — so the poll read the submission's reply, which names no
+    match, and the player was told the match answered with something unreadable."""
+    import re
+
+    store: dict[str, str] = {}
+    monkeypatch.setattr(pbp.webstore, "get", lambda key: store.get(key, ""))
+    monkeypatch.setattr(pbp.webstore, "set",
+                        lambda key, value: store.__setitem__(key, value) or True)
+    keys = []
+
+    class FakeWindow:
+        @staticmethod
+        def eval(js):
+            keys.append(re.findall(r'localStorage\.setItem\("([^"]+)"', js)[0])
+
+    monkeypatch.setattr(pbp, "is_web", lambda: True)
+    monkeypatch.setitem(__import__("sys").modules, "platform",
+                        type("P", (), {"window": FakeWindow}))
+    poll = pbp.fetch_state(MATCH)
+    submit = pbp.submit(pbp.Seat(MATCH, 1, TOKEN), 0, [])
+    assert poll is not None and submit is not None
+    assert keys[0] != keys[1], "two calls in flight must not share a mailbox"
+
+    # The submission lands first, then the read: each fetch parks its reply
+    # under the keys its own call named.
+    for request, body in ((submit, '{"seat": 1}'), (poll, '{"match_id": "x"}')):
+        state_key, body_key = pbp._web_keys(request._slot)
+        store[body_key], store[state_key] = body, pbp.OK
+    assert submit.poll() == (pbp.OK, '{"seat": 1}')
+    assert poll.poll() == (pbp.OK, '{"match_id": "x"}')
 
 
 def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, monkeypatch):
