@@ -72,7 +72,10 @@ What it changes, in descending order of measured value:
     honestly already. Small in a duel once correctly scoped (an honest ~50%
     null); a real, repeatable gap in melees, where dead-end branches are more
     common and the freed surplus has somewhere real to go (220 vs 179 in one
-    4-player cell).
+    4-player cell). A rival siege is gated too once its strike is
+    ``RIVAL_REFLOOD_MIN_TURNS`` (5) turns out — a long-lane regime the
+    advantage regression never reached: 55.2% over the bot without it
+    (z = +4.05, three slow cells), structurally inert at the default speed.
 
   * **Phase 4 does not flow surplus into a system Phase 2 is giving up this
     same turn.** ``live_frontier``/``_flow_to_front`` used to seed and route
@@ -200,7 +203,7 @@ DENY_SWAP = 1.0                # Phase 3b: a strike on a rival leaves its
 DENY_SWAP_SURPLUS_ONLY = True   # ...capping only the surplus pour, never
                                  # Phase 3's priced strike (that reads 33%)
 DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
-RIVAL_REFLOOD_MIN_TURNS = 0     # Phase 3: stop re-flooding a covered *rival*
+RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
                                  # siege too, when its horizon is at least this
                                  # many turns; 0 = never (neutrals only). See
                                  # "Phase 3b re-flooding" in docs/bot-design.md
@@ -708,11 +711,11 @@ def _flow_to_front(state, owned, frontier, pid, max_prod) -> dict[int, int]:
 def _gates_reflood(target, horizon: int) -> bool:
     """Whether a target already covered by inbound stops being fed in Phase 3b.
 
-    Always for a neutral. For a rival-held siege only once
-    `RIVAL_REFLOOD_MIN_TURNS` is set and the strike's horizon reaches it — off by
-    default, since gating every rival siege measured 45.1% at
-    `DEFENDER_ADVANTAGE 1.5` (the re-flood is the jitter cushion `_enemy_margin`
-    leaves out).
+    Always for a neutral. For a rival-held siege only once the strike's horizon
+    reaches `RIVAL_REFLOOD_MIN_TURNS`: gating every rival siege measured 45.1%
+    at `DEFENDER_ADVANTAGE 1.5` (the re-flood is the jitter cushion
+    `_enemy_margin` leaves out), but on a lane of 5+ turns the gate is worth
+    ~55% over `DENY_SWAP` alone, and no default-speed lane is that long.
     """
     if target.owner_id == 0:
         return True
@@ -911,8 +914,8 @@ def decide(state, pid):
             # stands and fights anyway — a lot more of them at high
             # DEFENDER_ADVANTAGE. Continuing to feed an already-"covered" siege
             # is exactly where that missing cushion was coming from by accident.
-            # `RIVAL_REFLOOD_MIN_TURNS` is the measured-and-declined exception
-            # for a long-horizon siege; see `_gates_reflood`.
+            # A long-horizon siege is the exception, gated like a neutral from
+            # `RIVAL_REFLOOD_MIN_TURNS` turns out; see `_gates_reflood`.
             struck[target.id] = chosen_h
             if RESERVE_PINCER:
                 # Those nearer sources are promised to next turn's converging

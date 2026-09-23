@@ -516,11 +516,11 @@ def _covered_siege(lane):
     return state
 
 
-def test_a_covered_rival_siege_is_still_fed_by_default(ma):
-    """The gate is scoped to neutrals: a rival siege already covered keeps
-    drawing the surplus, since `_enemy_margin` carries no jitter cushion and
-    that surplus is where one comes from. See `_gates_reflood`."""
-    assert ma.RIVAL_REFLOOD_MIN_TURNS == 0
+def test_a_covered_rival_siege_is_fed_with_the_gate_off(ma):
+    """At 0 the gate is scoped to neutrals: a rival siege already covered keeps
+    drawing the surplus on any lane, since `_enemy_margin` carries no jitter
+    cushion and that surplus is where one comes from. See `_gates_reflood`."""
+    ma.RIVAL_REFLOOD_MIN_TURNS = 0
     for lane in (2, 5):
         state = _covered_siege(lane)
         assert ma._required(state, 2, state.systems[2], lane) <= 30
@@ -528,10 +528,11 @@ def test_a_covered_rival_siege_is_still_fed_by_default(ma):
 
 
 def test_rival_reflood_gate_only_bites_at_its_horizon(ma):
-    """With `RIVAL_REFLOOD_MIN_TURNS` set, a covered rival siege stops being
-    fed once its horizon reaches the threshold and not before. The source
-    still borders a live rival, so the ships stay home rather than flow."""
-    ma.RIVAL_REFLOOD_MIN_TURNS = 5
+    """A covered rival siege stops being fed once its horizon reaches
+    `RIVAL_REFLOOD_MIN_TURNS` and not before — so no default-speed lane is
+    touched. The source still borders a live rival, so the ships stay home
+    rather than flow."""
+    assert ma.RIVAL_REFLOOD_MIN_TURNS == 5
     assert _totals(ai.decide(_covered_siege(2), 2)).get(2, 0) > 0
     assert ai.decide(_covered_siege(5), 2) == []
 

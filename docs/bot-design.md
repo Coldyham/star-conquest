@@ -1564,6 +1564,57 @@ re-tune of a margin, so no `RISK_PARITY`-style constant to float against
 `DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
 exactly the case that has no jitter cushion to lose.
 
+**Re-applied to rival sieges on long lanes, it pays** (`RIVAL_REFLOOD_MIN_TURNS
+= 5`). The regression above was measured at the default speed, where lanes run
+2-4 turns; the long-lane cell (57.7% -> 53.6%) is what the scoping gave back.
+So the gate now also covers a rival-held target once the strike's horizon is at
+least `RIVAL_REFLOOD_MIN_TURNS` turns. The neutral-only "settled" rule for
+Phase 4 is unchanged: a rival can reinforce, so a source facing a covered rival
+siege stays a live front and keeps its reserve. Measured against marshal with
+`DENY_SWAP` shipped (see "Denying the swap" below), since both touch the same
+Phase 3b pour into a rival:
+
+    tools/sweep.py, 200 seeds       K = 4           K = 5           K = 8
+    24n, 2 ly/turn                  56.0% +2.20     56.0% +2.20     56.2% +2.29
+    24n, 3 ly/turn                  52.2%           54.2% +1.56     51.4%
+    18n, 6 ly/turn                  48.3% -0.67     50.3%           50.0% (inert)
+    18n, 6 ly/turn, adv 1.5         49.6%           50.0% (inert)   50.0% (inert)
+
+K = 4 reaches the default-speed lanes and is the only arm leaning below 50%
+there, so K = 5 shipped: effectively inert wherever the advantage regression
+was measured. Fresh seeds confirm the gain and show no high-advantage cost on
+long lanes:
+
+    K = 5 over DENY_SWAP alone            W-L        n     rate      z
+    24n, 2 ly/turn, seeds 1-500         452-345     797    56.7%  +3.79
+    24n, 2 ly/turn, seeds 2001-2300     281-215     496    56.7%  +2.96
+    24n, 3 ly/turn, seeds 1001-1300     270-248     518    52.1%  +0.97
+    24n, 3 ly/turn, seeds 2001-2300     294-240     534    55.1%  +2.34
+    18n, 3 ly/turn, seeds 1001-1300     279-227     506    55.1%  +2.31
+    18n, 3 ly/turn, seeds 2001-2300     275-236     511    53.8%  +1.73
+    24n, 3 ly/turn, adv 1.25            222-206     428    51.9%  +0.77
+    24n, 3 ly/turn, adv 1.5             148-145     293    50.5%  +0.18
+    melee 3p + knower, 24n, 3 ly/turn   233-228    (knower 111 of 600)   null
+
+**It and `DENY_SWAP` overlap but are not the same fix.** Each alone, against
+neither, and against each other, on the same seeds (2001-2300), pooled over
+24n at 2 and 3 ly/turn and 18n at 3:
+
+    comparison                       W-L        n     rate      z
+    DENY_SWAP vs neither           886-675    1561    56.8%  +5.34
+    gate vs neither                873-665    1538    56.8%  +5.30
+    gate vs DENY_SWAP              790-755    1545    51.1%  +0.89
+    both vs DENY_SWAP              850-691    1541    55.2%  +4.05
+    both vs gate                   788-724    1512    52.1%  +1.65
+
+Equally strong alone and level head to head, so both are cutting the same
+waste: surplus poured after a rival siege that no longer needs it, leaving a
+long-exposed source. They are partly additive. The gate adds about five points
+on top of `DENY_SWAP` (reproduced over three seed batches), while `DENY_SWAP`
+adds about two on top of the gate (not significant). If only one were kept, the
+gate is the simpler one: a skip where `DENY_SWAP` has hold arithmetic. Both
+shipped, since the pair beats either.
+
 ## A non-oracle successor to marshal
 
 Three more fixes, built and measured on a byte-for-byte fork (`models/test.py`,
