@@ -1897,6 +1897,46 @@ is *smaller* on a long lane — so the likelier reading is how long a source sit
 exposed: on a long lane the emptied system is open for many turns to anything
 nearby, and the surplus kept home is what keeps it.
 
+### When a doomed garrison leaves: as soon as it is doomed, and it barely matters
+
+Phase 2 evacuates the turn a system is judged doomed. The alternative is to hold
+until the last turn out: the garrison keeps building (and those hulls leave with
+it instead of being lost), and the wait can open a capture for `_evacuate`'s
+step-forward branch, or a relief, or a diverted attacker. Against that, a
+garrison that leaves early is back in play sooner.
+
+There is room to wait. Turns between the doomed call and the blow, over every
+abandon decision in 20 mirror duels at 24 nodes (repeat decisions on an
+already-emptied system included, so this overstates volume):
+
+    ly/turn    1 turn   2    3    4    5+
+    6            51%   38%  11%   0%
+    3            23%   23%  22%  16%  17%
+    12          100%    —    —    —    —       (structurally inert)
+
+Built as `EVAC_AT` (hold until the blow is due within N turns) with
+`EVAC_STEP_EARLY` (while holding, still take a capture the moment one opens),
+and swept paired against stock marshal, 300 seeds:
+
+    arm                               default speed        3 ly/turn + adv 1.25
+    last turn, capture if one opens   50.7% (836-812)      52.3% (691-629)
+    last turn, no early capture       50.9% (827-799)      51.3% (671-638)
+    two turns to spare                50.3% (836-825)      51.7% (700-653)
+
+Null in every cell, but all twelve readings sat at or above 50%, which is what a
+real one-to-two-point lean toward waiting would look like — so the strongest arm
+was re-run on 400 fresh seeds against the bot as shipped (`DENY_SWAP` on): 50.2%
+(1087-1080) at the default speed and **48.6% (932-986)** in the slow cells, 46.2%
+at 24 nodes and 3 ly/turn. The lean did not replicate; if anything it turned.
+Deleted rather than kept at zero.
+
+The two effects roughly cancel, which is the same shape as holding a doomed
+system to sacrifice-and-retake (above): the hulls a waiting garrison saves are a
+turn or two of one system's production, and the turns it spends waiting are
+turns the whole garrison is out of the game. A capture that opens during the wait
+is rare, because the step-forward branch has already looked for one on the turn
+the system was doomed.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/

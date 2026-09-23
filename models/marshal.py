@@ -200,11 +200,6 @@ DENY_SWAP = 1.0                 # Phase 3b: a strike on a rival leaves its
 DENY_SWAP_SURPLUS_ONLY = True   # ...capping only the surplus pour, never
                                  # Phase 3's priced strike (that reads 33%)
 DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
-EVAC_AT = 0                     # Phase 2: 0 evacuates a doomed system the turn
-                                 # it is seen; N >= 1 holds until the blow is
-                                 # due within N turns (1 = the last turn out)
-EVAC_STEP_EARLY = True          # ...while holding, still take a capture
-                                 # (_evacuate's branch a) the moment one appears
 
 
 # --------------------------------------------------------------------------- #
@@ -537,8 +532,7 @@ def _required(state, pid, target, dist: int) -> int:
 # --------------------------------------------------------------------------- #
 # Movement
 # --------------------------------------------------------------------------- #
-def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool = False,
-              retreat: bool = True):
+def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool = False):
     """Route a doomed system's whole garrison to the most useful place — or hold.
 
     ``abandoned`` is the rest of this turn's doomed set (minus whatever
@@ -574,7 +568,7 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool
         caps.sort(reverse=True)
         return Order(pid, s.id, caps[0][2], ships)
 
-    if risk_ok or not retreat:
+    if risk_ok:
         return None
 
     # (b) Retreat to the nearest refuge, then the most defensible one (biggest
@@ -810,14 +804,8 @@ def decide(state, pid):
     abandoned = giving_up if AVOID_ABANDONED else frozenset()
     for sid in doomed:
         if sid not in saved and sid not in donated:
-            # EVAC_AT: a garrison with turns in hand may wait for the last one
-            # out — it keeps building, and a capture may open up meanwhile.
-            waiting = EVAC_AT > 0 and deficits[sid][1] > EVAC_AT
-            if waiting and not EVAC_STEP_EARLY:
-                order = None
-            else:
-                order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned,
-                                  risk_ok=sid in risk_ok, retreat=not waiting)
+            order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned,
+                              risk_ok=sid in risk_ok)
             if order is not None:
                 sends[(order.source_id, order.dest_id)] += order.ships
         budget[sid] = 0  # retreat, hold to inflict casualties, or stand — don't drain it
