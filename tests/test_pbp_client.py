@@ -266,6 +266,18 @@ def test_the_board_goes_on_hold_the_moment_the_press_lands(monkeypatch):
     assert ui.pbp_submitted and ui.awaiting_others(state)
 
 
+def test_we_are_never_on_the_list_of_seats_we_are_waiting_for(monkeypatch):
+    """Straight after the press, and again once the reply says who is left."""
+    monkeypatch.setattr(pbp, "call", lambda *a, **k: object())
+    _, state, ui, _ = _opened()
+    ui.pbp_waiting = (1, 2)
+    app.pbp_send(state, ui, _seat(1))
+    assert ui.pbp_waiting == (2,)
+    ui.pbp_waiting = (1, 2)       # ...a stale read landed in between
+    app.pbp_heard(ui, pbp.OK, '{"seat": 1, "turn": 0, "waiting": [2]}')
+    assert ui.pbp_waiting == (2,)
+
+
 def test_a_refused_submission_hands_the_turn_back():
     """Otherwise the player sits in front of a veil waiting on a turn they never
     actually entered."""

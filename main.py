@@ -537,6 +537,7 @@ def pbp_send(state: GameState, ui: Ui, seat: pbp.Seat) -> Optional[pbp.Request]:
         ui.pbp_msg = PBP_UNREACHABLE_MSG
         return None
     ui.pbp_submitted, ui.pbp_msg = True, PBP_SENDING_MSG
+    ui.pbp_waiting = tuple(s for s in ui.pbp_waiting if s != seat.seat)
     return request
 
 
@@ -571,6 +572,11 @@ def pbp_heard(ui: Ui, status: str, body: str) -> None:
     """
     if status == pbp.OK:
         ui.pbp_msg = ""
+        # A submission's reply names who is still to move, and it is newer than
+        # any read we hold — the read that would say so is a poll away.
+        waiting = (pbp.parse_body(body) or {}).get("waiting")
+        if isinstance(waiting, list):
+            ui.pbp_waiting = tuple(s for s in waiting if isinstance(s, int))
         return
     ui.pbp_submitted = False
     ui.pbp_msg = pbp_trouble(status, body)
@@ -1658,6 +1664,11 @@ async def main() -> None:
                     # declines a second press while we are waiting).
                     if pbp_seat is not None and pbp_write is None:
                         pbp_write = pbp_send(state, ui, pbp_seat)
+                        # A read already in flight was asked before our orders
+                        # existed, and landing after them it would put us back on
+                        # the list of seats still to move. The write's own
+                        # follow-up read replaces it.
+                        pbp_poll = None
                 else:
                     reel = resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step
