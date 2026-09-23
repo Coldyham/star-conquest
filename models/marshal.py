@@ -188,6 +188,7 @@ DENY_SWAP = 0.0                 # Phase 3/3b: a strike on a rival leaves its
                                  # source able to hold this fraction of the
                                  # target's garrison stepping back into it
 DENY_SWAP_SURPLUS_ONLY = False  # ...capping only Phase 3b's surplus pour
+DENY_SWAP_MIN_TURNS = 0         # ...and only across a lane at least this long
 
 
 # --------------------------------------------------------------------------- #
@@ -813,6 +814,8 @@ def decide(state, pid):
         if DENY_SWAP_SURPLUS_ONLY and not surplus:
             return b
         back = state.travel_turns(target.id, sid) or 1
+        if back < DENY_SWAP_MIN_TURNS:
+            return b
         hold = (math.ceil(DENY_SWAP * target.ships * _defend_margin())
                 - _production_by(sysmap[sid], back))
         left = sysmap[sid].ships - sum(n for (src, _dst), n in sends.items() if src == sid)
