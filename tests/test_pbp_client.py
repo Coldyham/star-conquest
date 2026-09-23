@@ -325,7 +325,12 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
     drawn = []
     monkeypatch.setattr(render, "_label_pill",
                         lambda surface, font, text, *a: drawn.append(text))
-    render.draw(pygame.display.get_surface(), state, ui)
+    # The display is opened at import time, and another test file quits pygame
+    # before this one runs: re-init, rebuild fonts under this session, and draw
+    # to our own surface rather than a display that may be gone.
+    pygame.init()
+    render._FONTS.clear()
+    render.draw(pygame.Surface((config.SCREEN_W, config.SCREEN_H)), state, ui)
     assert not ui.awaiting_others(state)
     assert app.PBP_ENDPOINT_MSGS["stale turn"] in drawn
 
