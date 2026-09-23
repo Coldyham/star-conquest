@@ -116,9 +116,9 @@ and would poison it.
 against the roster, the guard and margin sweeps, why the attack margin no longer
 carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
 a fight that mostly never happens), the ideas that were built, measured and then
-deleted, the known hole in its own guard, why — under "Two doomed neighbours" —
-the retreat rule leads on distance and the doomed are offered to each other
-before anyone else, and — under "Racing a third player for the same system" —
+deleted, why its empty interior is the retreat rule rather than a hole in the
+guard, why — under "Two doomed neighbours" — the retreat rule leads on distance
+and the doomed are offered to each other before anyone else, and — under "Racing a third player for the same system" —
 why the third-party reprice stops at rival-held targets and is deliberately not
 applied to neutral ones. **"A non-oracle successor to marshal"** covers the three
 most recent additions — the abandoned-flow fix, relief-aware pricing and the

@@ -713,11 +713,15 @@ of everything marshal loses was undefended at the start of the turn. A candidate
 fix — threat propagating one hop through a neutral buffer, priced with
 `combat._survivors` and discounted — measured 51.8% (z = 0.76) in self-play and
 **26.7% (8-22) at 12 nodes and 3 ly/turn**, where holding ships back against a
-threat many turns away is ruinous. Not shipped. The exposure is real and no bot
-in the roster punishes it; a probe written to exploit it deliberately (cheapest
-non-owned neighbour first, never consolidate) lost 240 games out of 240, so
-whether closing it is worth anything is **still unmeasured** and needs a probe
-that concentrates force to break one point rather than attacking everywhere.
+threat many turns away is ruinous. Not shipped. A probe written to exploit it
+deliberately (cheapest non-owned neighbour first, never consolidate) lost 240
+games out of 240, which left open whether the exposure was worth closing.
+
+> **Since measured, and the exposure is mostly not one.** Those empty systems are
+> overwhelmingly *evacuated* ones — the doomed branch doing its job — and a
+> concentrating probe built to punish the rest loses to stock marshal in every
+> cell. See "The empty interior is the retreat" under "A non-oracle successor to
+> marshal" below before building anything against it.
 
 **Two methodological notes.** The harness paired every line-up with its exact
 mirror (the two variants swapped between seats) on the same seed, so with
@@ -1690,9 +1694,9 @@ by what the rival's own garrison would need to step into it — piloted at
 unvalidated, unpiloted mechanism when the goal is already measurably met would
 be exactly the unmeasured complexity this file's own convention argues against.
 If pushing the win rate higher later becomes the goal rather than clearing the
-bar, the "empty interior" weakness under "Racing a third player for the same
-system" — properly scoped by travel time, which the one prior attempt at it
-lacked — looks better-motivated than `DENY_SWAP`.
+bar, this paragraph used to point at the "empty interior" weakness as the
+better-motivated target. It has since been measured and is not one (next
+section), which leaves `DENY_SWAP` as the remaining unbuilt candidate.
 
 **Folded into `models/marshal.py` directly** rather than shipped as a second
 bot (`models/test.py` deleted, `tests/test_test.py` deleted, its mechanism
@@ -1712,6 +1716,108 @@ while a direct 30-seed check read 17%. Diagnose with a direct 20-40-seed check
 before dropping a cell, and if reordering the cell list to land it on both smoke
 seeds instead of being starved to a handful after a bad one fixes it (as it did
 here), that is a legitimate workaround, not a fudge.
+
+### The empty interior is the retreat: a concentrating probe, and a fix with nothing to fix
+
+"The 2026-09 tuning sweep" left one exposure open: 35.8% of the systems marshal
+loses were empty when the turn began, and the only probe aimed at it had lost 240
+of 240 by spreading itself thin. Two things were needed — a breakdown of *where*
+those losses happen, and a probe that concentrates rather than spreads.
+
+**Where marshal loses systems.** A duel against itself, 24 nodes, 6 ly/turn, 40
+games, every loss classed by what the system bordered when the turn began:
+
+    bordering a rival       2317 lost   (84%)   900 of them empty at turn start
+    bordering only neutrals    7 lost   (0.3%)    3 empty
+    interior                 423 lost   (15%)   176 empty
+
+The neutral buffer the earlier fix propagated threat through is where marshal
+loses **seven systems in forty games** — the candidate fix was aimed at a case
+that effectively does not occur. And every one of the 423 interior losses (423 of
+423) is a fleet *already on the lane* when the turn began, landing that same
+turn, with no neighbour lane short enough to relieve it. The fleet was launched
+at a frontier system from a rival system marshal has since taken behind it — the
+swap — which is what makes the target read as "interior" by the time it falls.
+
+**They are evacuations, not an undefended rear.** Tracking each hostile fleet from
+the turn it is first visible: 410 of the 423 interior losses (97%) were out-shipped
+at first sight, and in 307 (73%) the garrison left while the fleet was on its way.
+Over *every* system lost while empty, 1027 of 1079 (95%) emptied while the
+attacking fleet was visible. The empty-at-start statistic is overwhelmingly
+Phase 2 moving a doomed garrison out ahead of a strike it cannot hold — which
+"Garrisons run away" measured as worth having and "Two doomed neighbours" tuned.
+At 12 ly/turn the residue is 66 empty losses in 40 games, every one a 1-turn
+strike, which is the trade `FAST_GUARD_WEIGHT = 0` already makes deliberately.
+
+**The concentrating probe** (`models/spearhead.py`, measured at `b4f7839` and
+then deleted — a probe, not a roster bot) is marshal itself plus one overlay, so
+it is exactly as competent everywhere else and any gap is the overlay's; an arm
+with the overlay switched off came back bit-identical to stock marshal in every
+smoke game, which is the check that licenses that claim:
+
+  * **One hammer.** Each turn, the largest garrison it holds that borders a rival
+    is the hammer. If that stack can take a rival neighbour at marshal's own
+    `_required` price it goes in, at the target that opens the most: its
+    production rate plus that of the rival systems past it the remainder could
+    still take (`DEPTH_WEIGHT`). Next turn the stack sits on the capture, is
+    still the largest garrison, now borders whatever lies behind, and goes
+    again. Nothing is remembered; the hammer is re-derived from the board.
+  * **Everything feeds it** (`FEED_HAMMER`). Every own-to-own move marshal
+    emits that is not relief for a threatened system is rerouted one hop along
+    the shortest owned path to the hammer, so the economy converges on one
+    point instead of marshal's flow to every front.
+  * **All in, or over the guard** (`LEAVE_GUARD`). The first version sent the
+    hammer's whole garrison; the second keeps marshal's own frontier guard at
+    home and swings only the rest.
+
+`tools/sweep.py` against stock marshal, 5 cells (18/24/40 nodes at 6 ly/turn, 24
+at 12 and at 3), every row REPRODUCED across both seed halves:
+
+    arm                                       W-L        n    rate       z
+    all in, fed (150 seeds)              336-1106     1442   23.3% -20.28
+      ...unfed                           375-1070     1445   26.0% -18.28
+      ...no depth term                   309-1123     1432   21.6% -21.51
+    over the guard, fed (100 seeds)       324-535      859   37.7%  -7.20
+      ...unfed                            367-501      868   42.3%  -4.55
+
+Worst at 3 ly/turn (9.2% all in, 24.6% over the guard) and least bad at
+12 ly/turn (42.4% and 44.0%, the latter not significant), where lanes are one turn
+and nothing sees a strike coming for either side. Feeding the hammer is worth
+nothing or less; leaving the source empty is what cost the first version most of
+its games, because marshal walks into the vacated source behind the stack.
+
+**It does get into the interior — and it does not matter.** Interior losses per
+game it inflicts on marshal, against what other opponents inflict:
+
+    opponent            24 nodes   40 nodes
+    marshal                 10.4       14.0
+    spearhead (guard)       15.2       19.2
+    thinker                  4.9        7.3
+    knower                   1.8        2.5
+
+The probe penetrates half as often again as marshal does, and still loses 38%
+to 62. The most dangerous bot on the roster, knower, penetrates least of all. A
+system taken in marshal's rear is retaken at the same one-ship price it fell for,
+and the stack that took it is not fighting anywhere that matters. Concentration
+pays through the square law only in a fight, and against a bot that evacuates
+what it cannot hold there is rarely a fight to win.
+
+**The travel-time-scoped fix, built and inert.** The best-motivated closure was
+`DEEP_RELIEF`: let Phase 1 draw relief from owned systems *past* the threatened
+system's neighbours, by owned-path travel time within the deadline — holding
+nothing back in advance, reacting only to fleets already visible, which is what
+the neutral-buffer attempt got wrong. It came back bit-identical to stock marshal
+in every smoke game, and instrumenting Phase 1 says why: of 6575 threatened-system
+decisions at 24 nodes and 6 ly/turn, **none** had a two-hop source inside the
+deadline (1 in 10047 at 3 ly/turn). The deadline is the earliest arrival, and two
+lanes never fit inside the one-lane warning a strike gives. Not shipped, since it
+does nothing.
+
+So the exposure is closed as a question rather than as a patch: what looks like
+an undefended interior is the retreat rule leaving systems empty on purpose, the
+residue is either a 1-turn strike no guard can see or a swap nobody could
+relieve, and the strongest probe built against it is a worse bot than the one it
+probes.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
