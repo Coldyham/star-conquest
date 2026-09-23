@@ -675,14 +675,16 @@ async function handleLapse(call, body, origin) {
  * that noticed does the work and reports the result. That sounds like trusting
  * the client, and it is worth being precise about what it actually trusts: the
  * orders were already stored, by their own seats, under their own tokens, and
- * are not re-sent here. What arrives is the *log* those orders produce, which
- * every other client recomputes for itself from the same stored inputs. A log
- * that disagreed would be caught by the next client to look, not believed.
+ * are not re-sent here. What arrives is the *log* those orders produce, and it
+ * becomes the record every other client applies — nobody decides the turn
+ * again, which is what keeps a bot on a wall clock from deciding it one way on
+ * one machine and another way on the next. Clients check it against the stored
+ * rows, so a log cannot file an order a person did not send.
  *
  * Idempotent by construction: the update is conditional on the turn still being
  * the one being resolved, so two clients noticing together is not a race. The
- * second is told the turn already moved and re-reads it, which is the same path
- * a client that was simply behind takes.
+ * second is told the turn already moved, throws its own result away and
+ * rebuilds from the log that won.
  */
 async function handleResolve(call, body, origin) {
   if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
@@ -735,8 +737,8 @@ async function handleResolve(call, body, origin) {
     });
   if (updated === null) return reply(502, { error: "store refused" }, origin);
   if (!updated.length) {
-    // Somebody else got there first. Not an error: they computed the same turn
-    // from the same orders, which is the point of the whole design.
+    // Somebody else got there first. Not an error: their log is the record, and
+    // the caller rebuilds from it.
     return reply(409, { error: "already resolved" }, origin);
   }
 

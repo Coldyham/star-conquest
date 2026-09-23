@@ -279,8 +279,8 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
     resolved, log, digest = pbp.resolve(
         pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
     # ...and the next client, seeing turn 1 with that turn now settled.
-    rebuilt, _ = pbp.rebuild(
-        pbp.match_from_dict(_state_payload(turn=1, turns=rows)))
+    rebuilt, _ = pbp.rebuild(pbp.match_from_dict(
+        _state_payload(turn=1, turns=rows, log=pbp.shareable(log).encoded())))
     assert replay.digest_hex(rebuilt) == digest
     assert replay.digest_hex(replay.reconstruct(log)[0]) == digest
 

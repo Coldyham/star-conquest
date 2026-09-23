@@ -9,33 +9,35 @@ keeps an appointment and nobody passes a laptop around.
 so far, and that is enough, because a board is a pure function of the settings,
 the seed and every turn's orders and dice — which is exactly what
 ``replay.reconstruct`` rebuilds while asking no seat to decide. So the position
-is rebuilt *here*, on each client, from inputs the server merely keeps. A
+is rebuilt *here*, on each client, from what the server merely keeps. A
 finished play-by-post match is therefore an ordinary ``GameLog``: it resumes,
 reviews, scrubs and verifies like any other, with nothing taught about it.
 
-That shape decides three things worth stating plainly:
+That shape decides four things worth stating plainly:
 
-* **Turns resolve wherever somebody is looking.** When the last seat submits,
-  whichever client notices runs the turn locally and uploads the resulting log.
-  Two clients noticing together is not a race — they compute the same turn from
-  the same inputs, and the second upload is refused as stale rather than
-  applied twice.
-* **Order sequence is the whole of determinism.** Fleets are appended as they
-  launch, arrivals are walked in that order and the combat dice are consumed
-  along that walk, so two clients that applied the same orders in a different
-  sequence would fight different battles. ``engine._collect_orders`` fixes the
-  sequence — ascending seat id — and ``seat_orders`` is how this module hands it
-  every seat's submission at once.
-* **Fog is honest, not enforced.** A client holds the whole log and could
-  reconstruct any seat's view. Fog still shapes play and is still worth having,
-  but it is a convenience between people who chose to play each other, and the
-  UI says so rather than implying a secrecy this design cannot keep.
+* **Turns resolve wherever somebody is looking, once.** When the last seat
+  submits, whichever client notices runs the turn locally and uploads the log.
+  That log is then *the* record of the turn: every other client applies it and
+  nobody decides the turn again. Two clients resolving together is settled by
+  the endpoint — the first upload wins, and the second client throws its own
+  result away and rebuilds from the winner's.
+* **A bot decides exactly once.** ``knower`` and ``marshal`` stop searching on a
+  wall clock, so the same position can yield different orders on a fast
+  machine and a slow one. Re-deciding a turn on every client would fork the
+  match; applying the resolver's record cannot.
+* **The live turn's rng is derived, never carried** (``reseed``). A rebuilt
+  board cannot know where a continuously played one's rng would stand, so the
+  resolver seeds it from the seed and the turn instead.
+* **Fog is honest, not enforced**, and so is the resolver. A client holds the
+  whole log and could reconstruct any seat's view, and the resolver writes the
+  bots' orders and the dice everyone applies. What it cannot write is a
+  person's orders: those are stored under their own seat's token, and
+  ``match_log`` refuses a log that files one they did not send.
 
-``board_digest`` (in ``replay``) is the tripwire underneath: every client reports
-what board it resolved a turn to, and the server keeps the first and compares the
-rest. Honest clients agree by construction, so a mismatch means a stale build or
-a real bug. It is emphatically not an anti-cheat measure — a client that would
-lie about its digest would lie about its orders.
+``board_digest`` (in ``replay``) is the resolver's report of the board it landed
+on, kept beside its order row — a record, and a tripwire for a log that does not
+reproduce. It is emphatically not an anti-cheat measure — a client that would
+lie about its digest would lie about its log.
 
 Pure core: no pygame, and the network is somebody else's (``share``-style
 ``Request`` objects the shell polls once a frame, never awaited).
@@ -334,13 +336,12 @@ def seat_board(match: Match) -> GameState:
 
 def advance(state: GameState, log: replay.GameLog, orders: dict[int, list[Order]],
             decide=None, on_event=None) -> engine.TurnRecord:
-    """Play one settled turn onto a live board, recording it into ``log``.
+    """Resolve the live turn onto a board, recording it into ``log``.
 
-    The single step every path through this module takes — rebuilding the match
-    from its opening, resolving the live turn, and (in the shell) advancing the
-    board a player is already looking at. One implementation because the sequence
-    of orders *is* the determinism: a second copy that collected them differently
-    would fight different battles on the same inputs.
+    The step ``resolve`` takes, and the one ``main.resolve_turn`` mirrors for the
+    board on screen: every seat's stored orders collected in ``engine``'s fixed
+    sequence, and any seat outside the roster asked to ``decide``. Only ever run
+    by the client resolving a turn; everyone else applies its log.
     """
     record = engine.end_turn(state, seat_orders=orders, decide=decide,
                              on_event=on_event)
@@ -350,35 +351,77 @@ def advance(state: GameState, log: replay.GameLog, orders: dict[int, list[Order]
     return record
 
 
-def rebuild(match: Match, decide=None) -> tuple[GameState, replay.GameLog]:
-    """The live board, and a log of the match so far.
+def match_log(match: Match) -> Optional[replay.GameLog]:
+    """The match so far, as the endpoint stores it. None if it cannot be trusted.
 
-    Every resolved turn is replayed through the engine from the stored orders,
-    which is the same thing ``replay.reconstruct`` does for a saved game — except
-    the dice are *drawn* here rather than replayed, because the server never
-    stored any. It does not need to: ``state.rng`` is seeded from the match seed,
-    so the same orders in the same sequence draw the same numbers on every
-    client. That is the determinism the whole design rests on, and
-    ``replay.digest_hex`` is what checks it held.
+    The log is the record of every resolved turn — each seat's orders and every
+    combat draw — uploaded by whichever client resolved it, and it is **the**
+    record: nobody else decides a resolved turn again. That is what keeps a bot on
+    a wall-clock budget (``knower``, ``marshal``) from deciding a turn one way on a
+    fast machine and another way on a slow one; it decides once, where the turn
+    was resolved, and every other client applies what it decided.
 
-    ``decide`` is how a seat *not* in the roster gets played: a match may seat two
-    people against two bots, and a bot still has to take its turn. It is injected
-    rather than imported for the reason the engine's own is (``engine.end_turn``)
-    — this module is pure core and must not depend on ``ai``. Left out, every
-    such seat simply holds; pass ``ai.decide`` on any client that can rebuild a
-    match with bots in it, and pass it on *all* of them, because whether a bot
-    moved is part of the position.
+    Trusting the resolver with the *bots'* orders and the dice is the same trust
+    fog already asks for (see the module doc). Trusting it with a *person's*
+    orders is not, and it does not have to be asked: those are stored, by their
+    own seats, under their own tokens. So every order the log files under a seat
+    with a stored row must be one that row holds. A log may carry fewer — the
+    engine drops an order out of a system that was lost before it launched — but
+    never one a person did not send.
     """
-    state = seat_board(match)
-    log = replay.GameLog(seed=match.seed, settings=match.settings.to_dict(),
-                         match_id=match.match_id)
-    for turn in range(match.turn):
-        if state.winner is not None:
-            break
-        advance(state, log, match.orders_for_turn(turn), decide)
-    if state.winner is not None:
-        log.mark_finished(state.winner)
+    if not match.log:
+        if match.turn != 0:
+            return None
+        return replay.GameLog(seed=match.seed, settings=match.settings.to_dict(),
+                              match_id=match.match_id)
+    try:
+        log = replay.GameLog.decode(match.log)
+    except Exception:  # noqa: BLE001 — any undecodable blob is simply untrusted
+        return None
+    if log.turn_count != match.turn or log.seed != match.seed:
+        return None
+    for turn in range(log.turn_count):
+        rows = match.orders_for_turn(turn)
+        for seat in set(rows) | set(match.seats):
+            sent = [(o.source_id, o.dest_id, o.ships) for o in rows.get(seat, [])]
+            for order in log.orders_for(turn):
+                if order.owner_id != seat:
+                    continue
+                key = (order.source_id, order.dest_id, order.ships)
+                if key not in sent:
+                    return None
+                sent.remove(key)
+    log.match_id = match.match_id
+    return log
+
+
+def rebuild(match: Match) -> Optional[tuple[GameState, replay.GameLog]]:
+    """The live board, and the log of the match so far. None if the log is bad.
+
+    ``replay.reconstruct`` over the stored log: recorded orders, recorded dice,
+    and no seat asked to decide anything — so every client lands on exactly the
+    board the resolver did, however fast its machine is.
+    """
+    log = match_log(match)
+    if log is None:
+        return None
+    state, _ = replay.reconstruct(log)
+    seat_people(state, match.seats)
     return state, log
+
+
+def reseed(state: GameState, seed: int) -> None:
+    """Put ``state.rng`` where the live turn's decisions and dice start from.
+
+    Derived from the seed and the turn rather than carried over from the turn
+    before, because a rebuilt board cannot carry it: ``reconstruct`` deals the
+    recorded dice and asks no bot to decide, so the rng never moves, and where a
+    continuously played board's rng would stand depends on every draw every bot
+    ever made. Deriving it makes that question go away — the rule
+    ``botio.decide_seed`` and ``settings.resolve_strategy`` already follow.
+    Called by every path that *resolves* a turn, and by none that replay one.
+    """
+    state.rng.seed(f"{seed}:pbp:{state.turn}")
 
 
 def lapse_orders(state: GameState, match: Match, decide=None,
@@ -396,13 +439,11 @@ def lapse_orders(state: GameState, match: Match, decide=None,
     about to take it. Any other client may still file it on their behalf, which
     is the whole point — but not this one, and not while they are looking at it.
 
-    Computed on a **copy of the board**, and that is the load-bearing line. Every
-    bot draws from ``state.rng``, and where the live rng stands is part of what
-    makes every client fight the same battles; a client that ran a bot on its own
-    board would take a draw nobody else took, and every roll after it would
-    differ. The copy is thrown away and only the orders travel, so a lapsed
-    seat's bot decides exactly once, on one client, and everybody else applies
-    what it decided — which is what the stored order rows are for.
+    Computed on a **copy of the board**: ``decide`` is not promised to leave a
+    board or its rng alone, and the live board is the one this client goes on to
+    play. The copy is thrown away and only the orders travel, so a lapsed seat's
+    bot decides exactly once, on one client, and everybody else applies what it
+    decided — which is what the stored order rows are for.
     """
     filing: dict[int, list[dict]] = {}
     for seat, action in sorted(match.lapsed.items()):
@@ -419,21 +460,50 @@ def lapse_orders(state: GameState, match: Match, decide=None,
     return filing
 
 
-def resolve(match: Match, decide=None,
-            on_event=None) -> tuple[GameState, replay.GameLog, str]:
+def resolve(match: Match, decide=None, on_event=None
+            ) -> Optional[tuple[GameState, replay.GameLog, str]]:
     """Play the live turn out, returning the new board, log and board digest.
 
-    Only meaningful once ``match.ready``; the caller checks that. The digest is
-    what goes back to the server beside the log, so a second client resolving the
-    same turn can be told it agreed.
+    Only meaningful once ``match.ready``; the caller checks that. None if the
+    stored log cannot be trusted. This is the one place a bot seat decides.
+
+    ``decide`` is how a seat *not* in the roster gets played; it is injected
+    rather than imported for the reason the engine's own is — this module is
+    pure core and must not depend on ``ai``. Left out, every such seat holds.
 
     ``on_event`` reports only the live turn, never the rebuild that precedes it:
     what a player watches is the turn that just happened, not the history they
     already saw.
     """
-    state, log = rebuild(match, decide)
+    rebuilt = rebuild(match)
+    if rebuilt is None:
+        return None
+    state, log = rebuilt
+    reseed(state, match.seed)
     advance(state, log, match.orders_for_turn(match.turn), decide, on_event)
     return state, log, replay.digest_hex(state)
+
+
+def settled_turn(match: Match, turn: int) -> Optional[engine.TurnRecord]:
+    """The record of ``turn`` as resolved elsewhere, for playing onto a live board."""
+    log = match_log(match)
+    if log is None or turn >= log.turn_count:
+        return None
+    return log.script_for(turn)
+
+
+def shareable(log: replay.GameLog) -> replay.GameLog:
+    """``log`` as it goes to the endpoint: without our standing forwarding rules.
+
+    Rules are a local convenience (``Ui.auto_forward``) the log records per turn
+    so a solo game resumes with them; in a shared match they are one player's
+    plan, and every other client opens from this log.
+    """
+    out = copy.deepcopy(log)
+    for entry in out.turns:
+        if isinstance(entry, dict):
+            entry.pop("rules", None)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -739,7 +809,7 @@ def send_resolved(seat: Seat, turn: int, log: replay.GameLog, digest: str,
         "match_id": seat.match_id,
         "token": seat.token,
         "turn": turn,
-        "log": log.encoded(),
+        "log": shareable(log).encoded(),
         "board_digest": digest,
         "finished": finished,
     })

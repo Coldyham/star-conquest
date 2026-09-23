@@ -174,9 +174,34 @@ files. Run `uv run pytest` and `node --test leaderboard/tests/*.test.mjs`.
 The server holds **no board** and runs no engine. A board is a pure function of
 the settings, the seed and every turn's orders — which is what
 `replay.reconstruct` already rebuilds while asking no seat to decide. So the
-server stores inputs, and each client rebuilds the position. Dice come from
-`state.rng`, seeded by the match seed, so the same orders in the same sequence
-draw the same numbers everywhere.
+server stores inputs, and each client rebuilds the position.
+
+**The stored log is the record, and a turn is decided once.** Whoever resolves a
+turn uploads its log; every other client applies that log (`pbp.match_log`,
+`pbp.settled_turn`) and nobody decides the turn again. This replaced an earlier
+version in which every client re-ran every bot from the stored order rows, which
+forked matches two ways:
+
+* `knower` and `marshal` stop searching on a wall clock, so a fast machine and a
+  slow one (or a background tab, or WASM vs desktop) can decide the same
+  position differently. Re-deciding on every client forks the match the first
+  time a bot runs short on one of them; even a one-human match could change
+  under you on reload.
+* A rebuilt board's `state.rng` is not where a continuously played board's is:
+  `reconstruct` deals recorded dice and asks no bot to decide, so its rng never
+  moves. The live turn's rng is therefore *derived* (`pbp.reseed`, seeded from
+  the seed and the turn) by whichever client resolves, the same
+  derive-don't-draw rule as `botio.decide_seed`.
+
+The trust this adds is bounded. The resolver writes the bots' orders and the
+dice, which is the same honesty fog already asks for; it cannot write a
+person's orders, because `match_log` refuses a log that files an order under a
+seat that the seat's stored row does not hold. A log may carry *fewer* — the
+engine drops an order out of a system lost before launch. The uploaded copy has
+the resolver's standing forwarding rules stripped (`pbp.shareable`); every
+other client opens from it, and a route plan is one player's own. Two clients
+resolving at once: the endpoint keeps the first upload, and the loser rebuilds
+from it (`pbp_stale` in `main`).
 
 Consequences worth knowing before touching any of it:
 
@@ -304,12 +329,10 @@ Four things make it work without a cron or a server-side engine:
   them: a row filed under a seat's own token is `human` and anything else was
   filed on its behalf. Nothing to keep in step, and a turn a seat genuinely
   played resets the run by being there.
-- **A lapsed bot's orders are computed on a copy of the board.** Every bot draws
-  from `state.rng`, and where the live rng stands is part of what makes every
-  client fight the same battles — a client that ran one on its own board would
-  take a draw nobody else took and every roll after it would differ. So the
-  copy is thrown away, only the orders travel, and every other client applies
-  what was stored. `test_filing_a_bots_turn_leaves_the_live_dice_exactly_where_
+- **A lapsed bot's orders are computed on a copy of the board.** `decide` is not
+  promised to leave a board or its rng alone, and the live board is the one this
+  client goes on to play. So the copy is thrown away, only the orders travel,
+  and every other client applies what was stored. `test_filing_a_bots_turn_leaves_the_live_dice_exactly_where_
   they_were` asserts on the rng directly, because a turn with no fight in it
   draws nothing and a board digest would agree for the wrong reason.
 - **A client never files its own lapse** (`lapse_orders(skip=…)`). Somebody who
@@ -339,7 +362,9 @@ other turn does.
   after the engine returns — the film, the marks, the fog, the log, the camera
   snap — is the same work whoever collected the orders. `tests/test_pbp_client.py`
   pins the join: the board the shell steps to and the board another client
-  rebuilds from the opening must be the same board.
+  rebuilds from the stored log must be the same board. A step passes the
+  resolver's record as `script`; only a resolve passes `seat_orders` and lets a
+  bot decide.
 * **Desktop resolves the leaderboard origin to *production*.** There is no page
   host to derive a sibling from off the web (`paths.sibling_host`), so testing a
   preview from a desktop build means overriding `webstore.leaderboard_origin`.
