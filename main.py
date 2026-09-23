@@ -535,8 +535,8 @@ def pbp_opened(ui: Ui) -> None:
     ui.pbp_submitted, ui.pbp_waiting, ui.pbp_msg = False, (), ""
 
 
-def pbp_open(settings: Settings, seed: int,
-            seats: Optional[list[int]] = None) -> tuple[str, Optional[pbp.Request]]:
+def pbp_open(settings: Settings, seed: int, seats: Optional[list[int]] = None,
+            deadline_hours: int = pbp.DEADLINE_HOURS) -> tuple[str, Optional[pbp.Request]]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -548,6 +548,12 @@ def pbp_open(settings: Settings, seed: int,
     .pbp_roster``, which always includes seat 1 — the creator ends up seated
     there — and lets 2+ be turned off one at a time).
 
+    ``deadline_hours`` is the same prompt's other knob (``menu.MenuState.
+    pbp_deadline_hours``) — how long a seat's clock runs before the first miss
+    holds and a second hands it to its bot. Defaulted rather than required for
+    the same reason ``seats`` is: every other caller (tests, a future script)
+    gets the format's own default without having to know it exists.
+
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
@@ -555,7 +561,7 @@ def pbp_open(settings: Settings, seed: int,
     match_id = replay._new_match_id()
     if seats is None:
         seats = [pid for pid in range(1, settings.players + 1)]
-    return match_id, pbp.create(match_id, settings, seed, seats)
+    return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours)
 
 
 def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
@@ -1510,15 +1516,16 @@ async def main() -> None:
                     auto_accum = 0
                 elif action == "play_by_post":
                     # The same setup, opened as a shared match — for the roster
-                    # the menu's own prompt just confirmed (seat 1 is always in
-                    # it; a seat left off plays whatever strategy it already
-                    # carries). The seed is resolved now and sent with it:
-                    # "roll a fresh seed" has to mean one seed for the whole
-                    # table, not one each.
+                    # and deadline the menu's own prompt just confirmed (seat 1
+                    # is always in the roster; a seat left off plays whatever
+                    # strategy it already carries). The seed is resolved now and
+                    # sent with it: "roll a fresh seed" has to mean one seed for
+                    # the whole table, not one each.
                     if pbp_make is None:
                         current_seed = resolve_seed(settings)
                         pbp_making, pbp_make = pbp_open(
-                            settings, current_seed, sorted(menu_state.pbp_roster) or None)
+                            settings, current_seed, sorted(menu_state.pbp_roster) or None,
+                            menu_state.pbp_deadline_hours)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:

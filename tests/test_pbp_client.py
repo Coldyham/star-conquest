@@ -329,6 +329,17 @@ def test_a_new_match_can_seat_a_roster_smaller_than_the_table(monkeypatch):
     assert sent["match_id"] == match_id
 
 
+def test_a_new_match_can_be_opened_with_a_chosen_deadline(monkeypatch):
+    """The menu's roster prompt carries a deadline alongside the roster — left
+    out, the format's own default (`pbp.DEADLINE_HOURS`) still applies, exactly
+    as it did before this was a choice."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(), seed=1, deadline_hours=72)
+    assert sent["deadline_hours"] == 72
+
+
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
     """Sent rather than handed back, so a retry after a lost reply opens a second
     match instead of quietly rewriting the first."""
