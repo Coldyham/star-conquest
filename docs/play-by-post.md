@@ -218,13 +218,25 @@ behaviour.
 
 Everything in the plan is built. A match is opened from the menu, its links
 handed out, played end to end by everyone who has one, and it keeps moving when
-somebody stops answering. What is left is a deployment, and two things left open
-on purpose.
+somebody stops answering. What is left is two things left open on purpose (below);
+the deployment itself is now verified.
 
-**The deploy itself is still unverified, and this environment cannot reach it.**
-The egress policy for the session that wrote this denies `*.netlify.app`, so
-`deploy-preview-60` was never actually called. Two things stand in for it, and
-between them they cover everything but the network hop:
+**The deploy is verified, against the real preview and the real Supabase
+project.** A prior session's egress policy denied `*.netlify.app`, so
+`deploy-preview-60` had never actually been called; a later session with network
+access ran `tools/check_pbp.py --origin
+https://deploy-preview-60--star-conquest-leaderboard.netlify.app` (note the site
+is `star-conquest-leaderboard`, not `star-conquest` — that's the repo's other
+Netlify site) and it played a throwaway two-seat match through four turns, every
+client agreeing on every board digest, forged/stale/foreign-owner submissions all
+refused as designed. `SUPABASE_*` is set on the deployed function, real PostgREST
+agrees with the stub about status codes, and the conditional `PATCH` behaves.
+What remains genuinely unknown is only whether a deadline elapsing in real
+wall-clock time behaves as the backdated-clock tests assume — nothing exercises
+that end to end yet.
+
+Two things stood in for the deploy check before this, and both remain useful
+regression coverage even now that the real thing has run:
 
 * `leaderboard/tests/pbp-handler.test.mjs` runs the **real handlers** over a stub
   PostgREST — so the query strings, the token hashing and the conditional update
@@ -241,14 +253,8 @@ between them they cover everything but the network hop:
   uv run python tools/check_pbp.py --origin https://deploy-preview-60--star-conquest-leaderboard.netlify.app
   ```
 
-  It was developed against the real handlers behind a local stub, so its own
-  logic is exercised; what it has never done is cross a network.
-
-What remains genuinely unknown is therefore narrow: whether the deployed
-function has its `SUPABASE_*` environment set, whether real PostgREST agrees
-with the stub about the unique-violation status code and the conditional
-`PATCH`'s empty result, and whether a deadline elapsing in wall-clock time
-behaves as the backdated clock does. Everything either side of that is pinned.
+  It was developed against the real handlers behind a local stub, and has since
+  also crossed the network for real (above).
 
 Done since, off the same "missing way to say it, not a missing capability" list:
 
