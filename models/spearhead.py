@@ -31,6 +31,7 @@ reach into this probe, and this probe's base play cannot drift from stock.
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 from collections import defaultdict, deque
 from pathlib import Path
@@ -40,6 +41,7 @@ from starconquest.model import Order
 HAMMER = True            # drive the largest rival-facing stack in, all in
 FEED_HAMMER = True       # reroute non-relief flow toward the hammer
 DEPTH_WEIGHT = 1.0       # weight on the takeable rival production past a target
+LEAVE_GUARD = False      # keep marshal's own frontier guard home; hammer the rest
 
 
 def _private_marshal():
@@ -81,8 +83,17 @@ def _hammer(state, pid):
     return best
 
 
+def _stack(state, pid, hammer) -> int:
+    """Ships the hammer swings: everything, or everything over marshal's guard."""
+    if not LEAVE_GUARD:
+        return hammer.ships
+    guard = math.ceil(_M.FRONTIER_GUARD * _M._max_adjacent_enemy(state, pid, hammer))
+    return max(0, hammer.ships - guard)
+
+
 def _target(state, pid, hammer):
     """The rival neighbour the whole stack should go through, or ``None``."""
+    stack = _stack(state, pid, hammer)
     best, best_key = None, None
     for n in sorted(hammer.neighbors):
         if not _rival(state, pid, n):
@@ -90,9 +101,9 @@ def _target(state, pid, hammer):
         t = state.systems[n]
         dist = state.travel_turns(hammer.id, n) or 1
         req = _M._required(state, pid, t, dist)
-        if hammer.ships < req:
+        if stack < req:
             continue
-        left = hammer.ships - req
+        left = stack - req
         behind = [m for m in t.neighbors
                   if m != hammer.id and state.systems[m].owner_id == t.owner_id
                   and state.systems[m].ships < left]
@@ -140,5 +151,5 @@ def decide(state, pid):
         else:
             sends[(o.source_id, o.dest_id)] += o.ships
     if target is not None:
-        sends[(hammer.id, target.id)] += hammer.ships
+        sends[(hammer.id, target.id)] += _stack(state, pid, hammer)
     return [Order(pid, s, d, n) for (s, d), n in sorted(sends.items()) if n > 0]
