@@ -46,7 +46,8 @@ def _restore_globals(ma):
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
-             "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS")
+             "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
+             "RIVAL_REFLOOD_MIN_TURNS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -454,6 +455,86 @@ def test_a_settled_dead_end_frontier_flows_its_surplus_onward(ma):
     totals = _totals(ai.decide(state, 2))
     assert totals.get(2, 0) == 0, "must not re-flood the already-covered neutral"
     assert totals.get(3, 0) == 40, f"1's surplus should flow to 3, the live front: {totals}"
+
+
+def _dead_end_branch(cover_both=True):
+    """A dead-end branch several systems wide, off a real front.
+
+    Our 1 and 5 both border neutral 2, which already has a sufficient wave from
+    1 in flight; 1 also borders neutral 6, covered likewise when ``cover_both``.
+    Neutral 7 sits past 2, out of reach of any of ours. Both 1 and 5 also border
+    our 3, which faces rival 4.
+    """
+    config.DEFENDER_ADVANTAGE = 1.0
+    config.COMBAT_JITTER = 0.10
+    state = _board({1: (2, 40, 3), 2: (0, 6, 3), 5: (2, 20, 3), 6: (0, 5, 2),
+                    3: (2, 5, 3), 4: (3, 50, 3), 7: (0, 9, 1)},
+                   [(1, 2, 3), (5, 2, 3), (1, 6, 2), (1, 3, 1), (5, 3, 1),
+                    (3, 4, 1), (2, 7, 2)])
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+                              turns_total=3, turns_remaining=2))
+    if cover_both:
+        state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=6, ships=8,
+                                  turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_a_multi_system_dead_end_flows_every_surplus_onward(ma):
+    """Two of our systems sharing one covered neutral, and one of them bordering a
+    second covered neutral: nothing re-floods either neutral, and both sources
+    count as dead ends, so both surpluses go to 3, the system facing a rival.
+    A neutral past the branch (7) touches none of ours and changes nothing."""
+    state = _dead_end_branch()
+    assert ma._required(state, 2, state.systems[2], 3) <= 8
+    assert ma._required(state, 2, state.systems[6], 2) <= 8
+
+    totals = _totals(ai.decide(state, 2))
+    assert totals.get(2, 0) == 0 and totals.get(6, 0) == 0, f"re-flooded: {totals}"
+    assert totals.get(3, 0) == 40 + 20, f"both surpluses should reach 3: {totals}"
+
+
+def test_one_live_neutral_keeps_a_dead_end_source_a_front(ma):
+    """Leave neutral 6 uncovered and 1 is a front again: it strikes 6 and keeps
+    the rest home, while 5 (whose only non-owned neighbour is still the settled
+    2) keeps flowing onward."""
+    state = _dead_end_branch(cover_both=False)
+    orders = ai.decide(state, 2)
+    totals = _totals(orders)
+    assert totals.get(2, 0) == 0, f"re-flooded the covered neutral: {totals}"
+    assert totals.get(6, 0) > 0, "the uncovered neutral should be struck"
+    assert not any(o.source_id == 1 and o.dest_id == 3 for o in orders), \
+        f"1 borders a live neutral, so it holds its reserve: {orders}"
+    assert any(o.source_id == 5 and o.dest_id == 3 and o.ships == 20 for o in orders)
+
+
+def _covered_siege(lane):
+    """Our 40 one ``lane``-turn lane from a rival 6, with a wave of 30 already
+    on the way — enough to take it on its own."""
+    state = _board({1: (2, 40, 3), 2: (1, 6, 3)}, [(1, 2, lane)], seats=2)
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=30,
+                              turns_total=lane, turns_remaining=lane - 1))
+    return state
+
+
+def test_a_covered_rival_siege_is_fed_with_the_gate_off(ma):
+    """At 0 the gate is scoped to neutrals: a rival siege already covered keeps
+    drawing the surplus on any lane, since `_enemy_margin` carries no jitter
+    cushion and that surplus is where one comes from. See `_gates_reflood`."""
+    ma.RIVAL_REFLOOD_MIN_TURNS = 0
+    for lane in (2, 5):
+        state = _covered_siege(lane)
+        assert ma._required(state, 2, state.systems[2], lane) <= 30
+        assert _totals(ai.decide(state, 2)).get(2, 0) > 0, f"lane {lane}"
+
+
+def test_rival_reflood_gate_only_bites_at_its_horizon(ma):
+    """A covered rival siege stops being fed once its horizon reaches
+    `RIVAL_REFLOOD_MIN_TURNS` and not before — so no default-speed lane is
+    touched. The source still borders a live rival, so the ships stay home
+    rather than flow."""
+    assert ma.RIVAL_REFLOOD_MIN_TURNS == 5
+    assert _totals(ai.decide(_covered_siege(2), 2)).get(2, 0) > 0
+    assert ai.decide(_covered_siege(5), 2) == []
 
 
 def test_commitment_does_not_touch_an_unstruck_target(ma):

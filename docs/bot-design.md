@@ -492,19 +492,39 @@ Weakest in the middle rather than at either end, and never below 68%.
 nodes, default settings — 900 games, 64 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
 docstring, the next time marshal or the roster's pricing changes. Re-run with
-`DENY_SWAP` shipped ("Denying the swap" below):
+`DENY_SWAP` and `RIVAL_REFLOOD_MIN_TURNS` shipped ("Denying the swap" and
+"Phase 3b re-flooding" below). The gate is inert here, since no lane on this
+cell is 5 turns, and the table moved by one game (258/249 and 57% with
+`DENY_SWAP` alone):
 
-    marshal 258 (31%), knower 249 (30%), thinker 160 (19%),
+    marshal 257 (31%), knower 250 (30%), thinker 160 (19%),
     claudebot 91 (11%), heuristic 50 (6%), rusherplus 28 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  marsha  thinke  claude  heuris  rusher
-      knower         —     43%     93%     96%    100%    100%
-      marshal      57%       —     94%    100%    100%     98%
+      knower         —     44%     93%     96%    100%    100%
+      marshal      56%       —     94%    100%    100%     98%
       thinker       7%      6%       —     94%     96%    100%
       claudebot     4%      0%      6%       —     78%     85%
       heuristic     0%      0%      4%     22%       —     68%
       rusherplus    0%      2%      0%     15%     32%       —
+
+The same ladder in two other cells, since this one cannot see anything keyed on
+long lanes. Both 30 seeds and 900 games; the second at `--max-turns 1500`:
+
+    symmetric, 18 nodes, 6 ly/turn     189 timeouts
+    marshal 221 (31%), knower 211 (30%), thinker 119 (17%),
+    claudebot 99 (14%), heuristic 41 (6%), rusherplus 20 (3%)
+    marshal vs knower 75%
+
+    random, 24 nodes, 3 ly/turn        96 timeouts
+    marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
+    claudebot 84 (10%), heuristic 64 (8%), rusherplus 5 (1%)
+    marshal vs knower 76%
+
+Same order in all three, but marshal leads knower by a much wider margin in
+both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
+Head to head it is 60 games a pair less timeouts, so read it as a direction.
 
 The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the
 head-to-head at 51% and 58 timeouts. The same caveat as the paragraph below
@@ -1563,6 +1583,65 @@ reported, with nothing borrowed from a mechanism that needed to stay put. Not a
 re-tune of a margin, so no `RISK_PARITY`-style constant to float against
 `DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
 exactly the case that has no jitter cushion to lose.
+
+**Re-applied to rival sieges on long lanes, it pays** (`RIVAL_REFLOOD_MIN_TURNS
+= 5`). The regression above was measured at the default speed, where lanes run
+2-4 turns; the long-lane cell (57.7% -> 53.6%) is what the scoping gave back.
+So the gate now also covers a rival-held target once the strike's horizon is at
+least `RIVAL_REFLOOD_MIN_TURNS` turns. The neutral-only "settled" rule for
+Phase 4 is unchanged: a rival can reinforce, so a source facing a covered rival
+siege stays a live front and keeps its reserve. Measured against marshal with
+`DENY_SWAP` shipped (see "Denying the swap" below), since both touch the same
+Phase 3b pour into a rival:
+
+    tools/sweep.py, 200 seeds       K = 4           K = 5           K = 8
+    24n, 2 ly/turn                  56.0% +2.20     56.0% +2.20     56.2% +2.29
+    24n, 3 ly/turn                  52.2%           54.2% +1.56     51.4%
+    18n, 6 ly/turn                  48.3% -0.67     50.3%           50.0% (inert)
+    18n, 6 ly/turn, adv 1.5         49.6%           50.0% (inert)   50.0% (inert)
+
+K = 4 reaches the default-speed lanes and is the only arm leaning below 50%
+there, so K = 5 shipped: effectively inert wherever the advantage regression
+was measured. Fresh seeds confirm the gain and show no high-advantage cost on
+long lanes:
+
+    K = 5 over DENY_SWAP alone            W-L        n     rate      z
+    24n, 2 ly/turn, seeds 1-500         452-345     797    56.7%  +3.79
+    24n, 2 ly/turn, seeds 2001-2300     281-215     496    56.7%  +2.96
+    24n, 3 ly/turn, seeds 1001-1300     270-248     518    52.1%  +0.97
+    24n, 3 ly/turn, seeds 2001-2300     294-240     534    55.1%  +2.34
+    18n, 3 ly/turn, seeds 1001-1300     279-227     506    55.1%  +2.31
+    18n, 3 ly/turn, seeds 2001-2300     275-236     511    53.8%  +1.73
+    24n, 3 ly/turn, adv 1.25            222-206     428    51.9%  +0.77
+    24n, 3 ly/turn, adv 1.5             148-145     293    50.5%  +0.18
+    melee 3p + knower, 24n, 3 ly/turn   233-228    (knower 111 of 600)   null
+
+**Symmetric maps cannot measure it.** Gate on against gate off, 300 symmetric
+seeds a cell: 85-94% of slow-lane games time out even at 1500 turns (51-91
+decided games per cell, 51.0-55.3%, all null), and the default-speed cell reads
+exactly 50% (inert). Against knower instead, on the same 150 seeds, the two
+arms read 90% / 88%, 80% / 77% and 88% / 85% of only 17-57 decided games.
+A perfectly fair start on long lanes is a stalemate between these bots, so
+there is nothing to read in either direction.
+
+**It and `DENY_SWAP` overlap but are not the same fix.** Each alone, against
+neither, and against each other, on the same seeds (2001-2300), pooled over
+24n at 2 and 3 ly/turn and 18n at 3:
+
+    comparison                       W-L        n     rate      z
+    DENY_SWAP vs neither           886-675    1561    56.8%  +5.34
+    gate vs neither                873-665    1538    56.8%  +5.30
+    gate vs DENY_SWAP              790-755    1545    51.1%  +0.89
+    both vs DENY_SWAP              850-691    1541    55.2%  +4.05
+    both vs gate                   788-724    1512    52.1%  +1.65
+
+Equally strong alone and level head to head, so both are cutting the same
+waste: surplus poured after a rival siege that no longer needs it, leaving a
+long-exposed source. They are partly additive. The gate adds about five points
+on top of `DENY_SWAP` (reproduced over three seed batches), while `DENY_SWAP`
+adds about two on top of the gate (not significant). If only one were kept, the
+gate is the simpler one: a skip where `DENY_SWAP` has hold arithmetic. Both
+shipped, since the pair beats either.
 
 ## A non-oracle successor to marshal
 
