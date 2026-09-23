@@ -28,11 +28,14 @@ That shape decides four things worth stating plainly:
 * **The live turn's rng is derived, never carried** (``reseed``). A rebuilt
   board cannot know where a continuously played one's rng would stand, so the
   resolver seeds it from the seed and the turn instead.
-* **Fog is honest, not enforced**, and so is the resolver. A client holds the
-  whole log and could reconstruct any seat's view, and the resolver writes the
-  bots' orders and the dice everyone applies. What it cannot write is a
-  person's orders: those are stored under their own seat's token, and
-  ``match_log`` refuses a log that files one they did not send.
+* **Fog is honest, not enforced**, and so is the resolver — but only as far as
+  it has to be. A client holds the whole log and could reconstruct any seat's
+  view, and the resolver writes the bots' orders everyone applies. It cannot
+  write a person's orders (stored under their own seat's token; ``match_log``
+  refuses a log that files one they did not send), and it cannot write the dice:
+  they are rolled after every order is fixed, from an rng derived for the turn,
+  so every client re-rolls them and refuses a turn that disagrees
+  (``verify_turn``).
 
 ``board_digest`` (in ``replay``) is the resolver's report of the board it landed
 on, kept beside its order row — a record, and a tripwire for a log that does not
@@ -339,9 +342,9 @@ def advance(state: GameState, log: replay.GameLog, orders: dict[int, list[Order]
     """Resolve the live turn onto a board, recording it into ``log``.
 
     The step ``resolve`` takes, and the one ``main.resolve_turn`` mirrors for the
-    board on screen: every seat's stored orders collected in ``engine``'s fixed
-    sequence, and any seat outside the roster asked to ``decide``. Only ever run
-    by the client resolving a turn; everyone else applies its log.
+    board on screen: every seat's orders applied in ``engine``'s fixed sequence.
+    ``resolve`` passes them all in already decided (``turn_orders``); ``decide``
+    is here for a caller that wants any seat left out asked instead.
     """
     record = engine.end_turn(state, seat_orders=orders, decide=decide,
                              on_event=on_event)
@@ -480,8 +483,47 @@ def resolve(match: Match, decide=None, on_event=None
         return None
     state, log = rebuilt
     reseed(state, match.seed)
-    advance(state, log, match.orders_for_turn(match.turn), decide, on_event)
+    advance(state, log, turn_orders(state, match, decide), None, on_event)
     return state, log, replay.digest_hex(state)
+
+
+def turn_orders(state: GameState, match: Match, decide=None) -> dict[int, list[Order]]:
+    """Every seat's orders for the live turn: the stored rows, plus each bot's.
+
+    The bots decide on a **scratch copy**, in ascending seat order — the very
+    sequence ``engine._collect_orders`` would have asked them in, sharing one
+    board and one rng stream between them, so an oracle that models the draws
+    of the seats before it still models them right. What the copy spares is the
+    live rng, which is left exactly where ``reseed`` put it. The turn is then run
+    with every seat's orders already fixed, so its dice are a pure function of
+    the seed, the turn and the orders — which is what lets every other client
+    check them (``verify_turn``). Only the bots' own orders stay unverifiable,
+    and must while they decide on a clock.
+    """
+    orders = match.orders_for_turn(state.turn)
+    if decide is None:
+        return orders
+    scratch = copy.deepcopy(state)
+    for pid in sorted(scratch.players):
+        player = scratch.players[pid]
+        if player.is_neutral or player.is_human or not player.alive or pid in orders:
+            continue
+        orders[pid] = decide(scratch, pid)
+    return orders
+
+
+def verify_turn(state: GameState, record: engine.TurnRecord, seed: int) -> bool:
+    """Whether ``record`` is what its orders really roll on ``state``.
+
+    Re-runs the turn on a copy with the recorded orders and freshly derived dice
+    and compares the dice. The resolver is trusted with the bots' orders — they
+    decide on a clock, so nothing could check them — but not with the dice: a
+    log that rolled its own would stop here instead of being applied.
+    """
+    scratch = copy.deepcopy(state)
+    reseed(scratch, seed)
+    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
+    return rolled.dice == list(record.dice)
 
 
 def settled_turn(match: Match, turn: int) -> Optional[engine.TurnRecord]:

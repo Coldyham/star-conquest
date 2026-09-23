@@ -193,10 +193,18 @@ forked matches two ways:
   the seed and the turn) by whichever client resolves, the same
   derive-don't-draw rule as `botio.decide_seed`.
 
-The trust this adds is bounded. The resolver writes the bots' orders and the
-dice, which is the same honesty fog already asks for; it cannot write a
-person's orders, because `match_log` refuses a log that files an order under a
-seat that the seat's stored row does not hold. A log may carry *fewer* — the
+The trust this adds is bounded to the bots' orders, which is the same honesty
+fog already asks for and cannot be checked while bots decide on a clock. It
+cannot write a person's orders: `match_log` refuses a log that files an order
+under a seat that the seat's stored row does not hold. And it cannot write the
+dice: `pbp.turn_orders` has the bots decide on a scratch copy (in the ascending
+sequence `_collect_orders` uses, one shared board and rng between them), so the
+turn itself runs with every order already fixed and rolls from the rng
+`reseed` put there — a pure function of seed, turn and orders. Every stepping
+client re-rolls it (`pbp.verify_turn`) and refuses a turn that disagrees. This
+only checks turns as they are stepped; a client rebuilding from the opening
+applies the older turns unchecked, since turns resolved before this existed
+rolled after their bots and would not verify. A log may carry *fewer* — the
 engine drops an order out of a system lost before launch. The uploaded copy has
 the resolver's standing forwarding rules stripped (`pbp.shareable`); every
 other client opens from it, and a route plan is one player's own. Two clients

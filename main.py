@@ -1457,15 +1457,19 @@ async def main() -> None:
                             history_states, history_fog, history_events = [], [], []
                             live_fog = None
                             pbp_stale = False
-                    elif (verdict == PBP_STEP
-                          and pbp.settled_turn(match, state.turn) is None):
+                    elif verdict == PBP_STEP and not (
+                            (script := pbp.settled_turn(match, state.turn))
+                            and pbp.verify_turn(state, script, match.seed)):
+                        # A record we cannot trust — missing, filing an order a
+                        # person never sent, or rolling dice its orders do not
+                        # roll. The board stays where it was, and says why.
                         ui.pbp_msg = PBP_BAD_LOG_MSG
                     elif verdict in (PBP_STEP, PBP_RESOLVE):
                         # One turn played onto the live board and watched like any
                         # other. Stepping applies the record the resolver stored,
-                        # decisions and dice both, so no bot here decides again;
-                        # resolving is the one place one does, from an rng derived
-                        # for this turn (`pbp.reseed`) rather than carried over.
+                        # checked above, so no bot here decides again; resolving is
+                        # the one place one does, on a scratch copy, before the
+                        # turn's dice roll from an rng derived for it (`pbp.reseed`).
                         turn = state.turn
                         if verdict == PBP_STEP:
                             reel = resolve_turn(state, ui, log, settings,
@@ -1474,7 +1478,7 @@ async def main() -> None:
                             pbp.reseed(state, match.seed)
                             reel = resolve_turn(
                                 state, ui, log, settings,
-                                seat_orders=match.orders_for_turn(turn))
+                                seat_orders=pbp.turn_orders(state, match, ai.decide))
                         pbp_opened(ui)
                         play_accum = auto_accum = 0
                         if verdict == PBP_RESOLVE:

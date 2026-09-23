@@ -191,6 +191,53 @@ def test_a_stepped_turn_applies_the_record_and_decides_nothing(monkeypatch):
     assert replay.digest_hex(state) == digest
 
 
+def _fought_turn():
+    """A board, and an honest record of a turn on it with at least one fight."""
+    ai.load_models()
+    settings = Settings(mode="random", players=3, nodes=12, seed=4)
+    over = dict(seats=(1, 2), players=3, settings_json=settings.to_dict(), seed=4)
+    for turn in range(60):
+        match = pbp.match_from_dict(_payload(turn=turn, submitted=[1, 2], **over))
+        if turn:
+            match.log = log_blob
+        rebuilt = pbp.rebuild(match)
+        assert rebuilt is not None
+        state, log = rebuilt
+        resolved, log, _ = pbp.resolve(match, ai.decide)
+        if log.dice_for(turn):
+            return state, log.script_for(turn), 4
+        log_blob = pbp.shareable(log).encoded()
+    pytest.fail("no fight in sixty turns")
+
+
+def test_a_turn_rolled_honestly_checks_out():
+    state, record, seed = _fought_turn()
+    assert pbp.verify_turn(state, record, seed)
+
+
+def test_a_turn_with_dice_its_orders_do_not_roll_is_caught():
+    """The resolver writes the bots' orders, which nothing can check; it cannot
+    also pick the dice."""
+    state, record, seed = _fought_turn()
+    record.dice[0] = 0.0 if record.dice[0] else 0.5
+    assert not pbp.verify_turn(state, record, seed)
+
+
+def test_deciding_the_bots_leaves_the_turns_dice_alone():
+    """The bots decide on a scratch copy, so the live rng still stands where the
+    turn's seed put it — which is the whole of what makes the dice checkable."""
+    ai.load_models()
+    settings = Settings(mode="random", players=3, nodes=14, seed=7)
+    match = pbp.match_from_dict(_payload(seats=(1,), players=3,
+                                         settings_json=settings.to_dict()))
+    state, _ = pbp.rebuild(match)
+    pbp.reseed(state, match.seed)
+    before = state.rng.getstate()
+    orders = pbp.turn_orders(state, match, ai.decide)
+    assert set(orders) >= {2, 3}, "both bots must really have been asked"
+    assert state.rng.getstate() == before
+
+
 def test_a_refused_resolve_rebuilds_from_the_log_that_won():
     """Our board may hold a turn the match never had: somebody else resolved it
     first, and their bots need not have decided as ours did."""
@@ -658,14 +705,16 @@ def _tick(server: _Endpoint, client) -> None:
     elif verdict == app.PBP_REBUILD:
         client[0], client[1], client[2] = app.open_match(match, seat, Settings())
     elif verdict == app.PBP_STEP:
-        app.resolve_turn(state, ui, log, Settings(),
-                         script=pbp.settled_turn(match, state.turn))
+        script = pbp.settled_turn(match, state.turn)
+        assert script is not None and pbp.verify_turn(state, script, match.seed), \
+            "an honest resolver's turn must check out on every other client"
+        app.resolve_turn(state, ui, log, Settings(), script=script)
         app.pbp_opened(ui)
     else:
         turn = state.turn
         pbp.reseed(state, match.seed)
         app.resolve_turn(state, ui, log, Settings(),
-                         seat_orders=match.orders_for_turn(turn))
+                         seat_orders=pbp.turn_orders(state, match, ai.decide))
         app.pbp_opened(ui)
         if not server.resolve(turn, replay.digest_hex(state), state.winner is not None,
                               pbp.shareable(log).encoded()):
