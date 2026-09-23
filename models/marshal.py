@@ -184,6 +184,9 @@ RELIEF_AWARE = 0.5              # _required: price a rival target against a
 FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
                                  # rival by this — a strike across it is never
                                  # visible, so 0.0 ignores it entirely
+DENY_SWAP = 0.0                 # Phase 3/3b: a strike on a rival leaves its
+                                 # source able to hold this fraction of the
+                                 # target's garrison stepping back into it
 
 
 # --------------------------------------------------------------------------- #
@@ -800,6 +803,18 @@ def decide(state, pid):
                 if sysmap[n].owner_id != pid}]
     targets.sort(key=lambda t: (-_richness(state, pid, t, max_prod), t.ships, t.id))
 
+    def spendable(sid, target) -> int:
+        """``budget[sid]``, less what ``sid`` must keep to hold against
+        ``target``'s own garrison stepping into it — see ``DENY_SWAP``."""
+        b = budget[sid]
+        if DENY_SWAP <= 0 or target.owner_id == 0 or target.ships <= 0:
+            return b
+        back = state.travel_turns(target.id, sid) or 1
+        hold = (math.ceil(DENY_SWAP * target.ships * _defend_margin())
+                - _production_by(sysmap[sid], back))
+        left = sysmap[sid].ships - sum(n for (src, _dst), n in sends.items() if src == sid)
+        return max(0, min(b, left - hold))
+
     struck: dict[int, int] = {}
     pincer_held: set[int] = set()
     settled: set[int] = set()   # neutral targets already covered — see Phase 4
@@ -818,7 +833,7 @@ def decide(state, pid):
         for h in sorted({d for d, _ in nbrs}):
             req = _required(state, pid, target, h)
             inbound = _inbound(state, target.id, pid, h)
-            committable = sum(budget[sid] for d, sid in nbrs if d <= h)
+            committable = sum(spendable(sid, target) for d, sid in nbrs if d <= h)
             if inbound + committable < req:
                 continue
             chosen_h, shortfall = h, req - inbound
@@ -835,13 +850,13 @@ def decide(state, pid):
         # Launch only the far wave (dist == H) now, covering the part the nearer
         # waves won't; those launch on later turns and converge, because next turn
         # this fleet shows up in the target's inbound tally.
-        nearer = sum(budget[sid] for d, sid in nbrs if d < chosen_h)
+        nearer = sum(spendable(sid, target) for d, sid in nbrs if d < chosen_h)
         need = max(0, shortfall - nearer)
         for sid in sorted((sid for d, sid in nbrs if d == chosen_h),
-                          key=lambda s: (-budget[s], s)):
+                          key=lambda s: (-spendable(s, target), s)):
             if need <= 0:
                 break
-            send = min(budget[sid], need)
+            send = min(spendable(sid, target), need)
             sends[(sid, target.id)] += send
             budget[sid] -= send
             need -= send
@@ -888,9 +903,10 @@ def decide(state, pid):
                      if target.id in sysmap[sid].neighbors
                      and budget.get(sid, 0) > 0 and sid not in pincer_held
                      and (state.travel_turns(sid, target.id) or 99) == chosen_h),
-                    key=lambda s: (-budget[s], s)):
-                sends[(sid, target.id)] += budget[sid]
-                budget[sid] = 0
+                    key=lambda s: (-spendable(s, target), s)):
+                send = spendable(sid, target)
+                sends[(sid, target.id)] += send
+                budget[sid] -= send
 
     # --- Phase 4: leapfrog / flow to the richest front ----------------------- #
     # A frontier system whose every non-owned neighbour is a `settled` neutral
