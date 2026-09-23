@@ -166,7 +166,7 @@ load-bearing:
 | 4e | Opening a match from the menu | `80b61e2` |
 | 5  | Deadlines | *(this branch)* |
 
-**Tests: 1144 passing, 1 skipped** (baseline on `main` was 1040), plus 9 JS
+**Tests: 1163 passing, none skipped** (baseline on `main` was 1040), plus 9 JS
 files. Run `uv run pytest` and `node --test leaderboard/tests/*.test.mjs`.
 
 ## The one idea everything follows from
@@ -344,12 +344,13 @@ other turn does.
   host to derive a sibling from off the web (`paths.sibling_host`), so testing a
   preview from a desktop build means overriding `webstore.leaderboard_origin`.
   This cost ten minutes of confusion; it is not a bug.
-* **`tests/test_seat_agnostic.py` has one skipped test.** It checks the overlay
-  does not overflow the map at 2.5x UI scale. The overflow was real, was found by
-  looking at a screenshot, and **is fixed** — the test passes alone and fails in
-  the full suite, so it is picking up global state another file leaves behind
-  (`config.apply_ui_scale`, or a font cache keyed on it). Fault in the test, not
-  the overlay.
+* **A render test here must re-init pygame itself.** These files open the
+  display at import time, and other files (`test_render`, …) call `pygame.quit()`
+  before they run — no display, font module down, and `render._FONTS` holding
+  dead fonts. Call `pygame.init()`, clear `render._FONTS`, and draw to your own
+  `pygame.Surface`. This is what the once-skipped 2.5x overlay test in
+  `test_seat_agnostic.py` and the refusal-pill test in `test_pbp_client.py`
+  tripped over; it was never UI-scale state.
 * **A new relation needs a grant** or `tests/test_schema_grants.py` fails. Its
   scrape was widened to see `pbp.mjs`'s helper-style calls — it was passing
   *vacuously* before that, which is the exact failure it exists to prevent.
