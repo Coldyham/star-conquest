@@ -456,6 +456,21 @@ PENDING, OK, ERROR, MISSING, REFUSED = (
 # before anyone quits. Same figure ``share`` uses, for the same reason.
 _TIMEOUT = 20
 
+# How many web mailboxes calls rotate through. Each call gets its own, because a
+# poll and a submission are routinely in flight together and one shared slot
+# handed whichever landed first to whichever was collected first — a
+# submission's reply read as a match is "unreadable". Rotated rather than unique
+# so a call abandoned mid-flight (leaving a match) strands a bounded number of
+# keys in the store, and wide enough that no slot comes round again while its
+# last call could still be out.
+_WEB_SLOTS = 16
+_web_calls = 0
+
+
+def _web_keys(slot: int) -> tuple[str, str]:
+    """The ``(state, body)`` localStorage keys of one mailbox."""
+    return f"{WEB_PBP_STATE_KEY}:{slot}", f"{WEB_PBP_BODY_KEY}:{slot}"
+
 
 class Request:
     """One in-flight call to the endpoint, polled once a frame.
@@ -469,8 +484,9 @@ class Request:
     ``poll`` answers ``(state, body)``.
     """
 
-    def __init__(self, web: bool) -> None:
+    def __init__(self, web: bool, slot: int = 0) -> None:
         self._web = web
+        self._slot = slot                           # which web mailbox is ours
         self._result: list[tuple[str, str]] = []   # a one-slot mailbox
 
     def poll(self) -> tuple[str, str]:
@@ -487,18 +503,19 @@ class Request:
         we already trust avoids depending on ``window.eval`` returning a value,
         which nothing else here needs (``share`` documents the same reasoning).
         """
-        state = webstore.get(WEB_PBP_STATE_KEY)
+        state_key, body_key = _web_keys(self._slot)
+        state = webstore.get(state_key)
         if state in (OK, ERROR, MISSING, REFUSED):
-            body = webstore.get(WEB_PBP_BODY_KEY) or ""
-            _clear_web_slot()
+            body = webstore.get(body_key) or ""
+            _clear_web_slot(self._slot)
             return state, body
         return PENDING, ""
 
 
-def _clear_web_slot() -> None:
+def _clear_web_slot(slot: int) -> None:
     """Empty the mailbox, so a stale answer is never read as a fresh one."""
-    webstore.set(WEB_PBP_STATE_KEY, "")
-    webstore.set(WEB_PBP_BODY_KEY, "")
+    for key in _web_keys(slot):
+        webstore.set(key, "")
 
 
 def call(action: str, payload: Optional[dict] = None, **params) -> Optional[Request]:
@@ -527,7 +544,10 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
     """
     import platform as _platform
 
-    state, slot = json.dumps(WEB_PBP_STATE_KEY), json.dumps(WEB_PBP_BODY_KEY)
+    global _web_calls
+    mailbox = _web_calls % _WEB_SLOTS
+    _web_calls += 1
+    state, slot = (json.dumps(key) for key in _web_keys(mailbox))
     init = ("{method:'POST',headers:{'Content-Type':'application/json'},body:"
             f"{json.dumps(body)}}}") if body is not None else "{}"
     try:
@@ -541,7 +561,7 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
             f".catch(function(e){{console.warn('pbp call failed',e);"
             f"localStorage.setItem({state},'{ERROR}')}})"
         )
-        return Request(web=True)
+        return Request(web=True, slot=mailbox)
     except Exception:  # noqa: BLE001
         return None
 
