@@ -2053,9 +2053,14 @@ def draw_confirm_quit(surface) -> None:
 
 
 def _draw_invite_overlay(surface, ui: Ui) -> None:
-    """Play-by-post: the match we just created, one row per other seat and its
-    own Copy button — 'a modal listing the seats with a Copy button each',
-    replacing a status line over a clipboard blob nobody thought to check.
+    """Play-by-post: the match we just created, one row per seat — including our
+    own — and its own Copy button: 'a modal listing the seats with a Copy button
+    each', replacing a status line over a clipboard blob nobody thought to check.
+
+    Our own row is in it too, not just remembered in this browser's local
+    storage: a reload, a cleared profile or opening on another device has
+    nothing else to recover the seat from, so it needs to be copyable exactly
+    like everyone else's.
 
     Shown exactly once (`ui.pbp_invite`, set only by the creation path); the
     clipboard write itself is main's job (`ui.pbp_copy_seat` names the row,
@@ -2069,20 +2074,40 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     surface.blit(veil, (0, 0))
 
     big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
-    title = "Match created — send each seat its own link"
+    title = "Match created — copy each seat's link"
+    # The one and only time these links are ever shown: `main.pbp_open` mints
+    # the tokens and hands them over right here, and nothing stores them again
+    # (`pbp.create`'s own docstring — "the reply is the one and only time the
+    # seat tokens exist in the clear"). A missed one has no second chance.
+    subtitle = "Save these somewhere — they won't be shown again"
     copy_w = _btn_w(small, "Copy", config.s(64))
     copy_h = max(config.s(28), small.get_height() + config.s(10))
     sw = config.s(14)   # colour swatch side
     row_gap = config.s(8)
     row_h = max(normal.get_height(), copy_h) + config.s(4)
-    name_w = max((normal.size(config.player_name(seat))[0] for seat, _ in ui.pbp_invite), default=0)
+
+    def seat_label(seat: int) -> str:
+        return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+
+    name_w = max((normal.size(seat_label(seat))[0] for seat, _ in ui.pbp_invite), default=0)
 
     pad = config.s(24)
     inner_w = sw + config.s(10) + name_w + config.s(28) + copy_w
-    pw = max(inner_w, normal.size(title)[0]) + 2 * pad
+    # The title can run longer than any row — measured and wrapped in the same
+    # font it is drawn in (a mismatch here is exactly what let it overflow the
+    # panel before), and capped so the panel never claims more width than the
+    # window actually has to give it.
+    cap = min(max(inner_w, config.s(280)), w - 2 * pad - config.s(48))
+    title_lines = _wrap(big, title, cap)
+    subtitle_lines = _wrap(small, subtitle, cap)
+    title_w = max((big.size(line)[0] for line in title_lines), default=0)
+    subtitle_w = max((small.size(line)[0] for line in subtitle_lines), default=0)
+    pw = max(inner_w, title_w, subtitle_w) + 2 * pad
     done_w = _btn_w(normal, "Continue", config.s(140))
     done_h = copy_h + config.s(6)
-    ph = (pad + big.get_height() + config.s(18)
+    title_h = len(title_lines) * _row_h("big")
+    subtitle_h = len(subtitle_lines) * _row_h("small")
+    ph = (pad + title_h + config.s(6) + subtitle_h + config.s(18)
           + len(ui.pbp_invite) * (row_h + row_gap)
           + config.s(10) + done_h + pad)
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
@@ -2090,15 +2115,21 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     pygame.draw.rect(surface, (60, 66, 90), panel, config.s(2), border_radius=config.s(10))
 
     y = panel.y + pad
-    _text(surface, big, title, config.COLOR_TEXT, center=(panel.centerx, y + big.get_height() // 2))
-    y += big.get_height() + config.s(18)
+    for line in title_lines:
+        _text(surface, big, line, config.COLOR_TEXT, center=(panel.centerx, y + big.get_height() // 2))
+        y += _row_h("big")
+    y += config.s(6)
+    for line in subtitle_lines:
+        _text(surface, small, line, _VERDICT_MISS, center=(panel.centerx, y + small.get_height() // 2))
+        y += _row_h("small")
+    y += config.s(18)
 
     ui.pbp_invite_rects = {}
     for seat, link in ui.pbp_invite:
         color = config.player_color(seat)
         swatch = pygame.Rect(panel.x + pad, y + (row_h - sw) // 2, sw, sw)
         pygame.draw.rect(surface, color, swatch, border_radius=config.s(3))
-        _text(surface, normal, config.player_name(seat), color,
+        _text(surface, normal, seat_label(seat), color,
               midleft=(swatch.right + config.s(10), y + row_h // 2))
         r = pygame.Rect(panel.right - pad - copy_w, y + (row_h - copy_h) // 2, copy_w, copy_h)
         copied = ui.pbp_invite_copied == seat

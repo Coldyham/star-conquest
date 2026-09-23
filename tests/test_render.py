@@ -911,11 +911,13 @@ def test_pbp_shows_which_seat_is_yours():
         pygame.quit()
 
 
-def test_the_invite_overlay_draws_a_copy_button_per_seat():
-    """One row per other seat, each with its own Copy button — 'a modal listing
-    the seats with a Copy button each' rather than a status line over a
-    clipboard blob nobody thought to check. Win/waiting overlays must stand
-    down while it is up, since a match this fresh has no winner and nothing
+def test_the_invite_overlay_draws_a_copy_button_per_seat_including_our_own():
+    """One row per seat — our own included, not just the others — each with its
+    own Copy button: 'a modal listing the seats with a Copy button each' rather
+    than a status line over a clipboard blob nobody thought to check. Our own
+    row is there too because a reload, a cleared profile or another device has
+    nothing else to recover the seat from. Win/waiting overlays must stand down
+    while it is up, since a match this fresh has no winner and nothing
     submitted yet to wait on anyway."""
     pygame.init()
     render._FONTS.clear()
@@ -924,10 +926,11 @@ def test_the_invite_overlay_draws_a_copy_button_per_seat():
         state = mapgen.generate_random(4, num_nodes=14, num_players=3)
         ui = _make_ui(state)
         ui.pbp_match = "abc123def456"
-        ui.pbp_invite = ((2, "https://game/#pbp=x:y"), (3, "https://game/#pbp=x:z"))
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"),
+                         (3, "https://game/#pbp=x:z"))
 
         render.draw(screen, state, ui)
-        assert set(ui.pbp_invite_rects) == {2, 3}
+        assert set(ui.pbp_invite_rects) == {1, 2, 3}
         for rect in ui.pbp_invite_rects.values():
             assert rect[2] and rect[3]   # actually drawn, not zeroed
         assert ui.pbp_invite_close_rect[2]
@@ -938,6 +941,71 @@ def test_the_invite_overlay_draws_a_copy_button_per_seat():
         for i, a in enumerate(pairs):
             for b in pairs[i + 1:]:
                 assert not a.colliderect(b)
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_warns_the_links_are_a_one_time_show():
+    """`pbp.create`'s own docstring says it: the reply is the one and only time
+    the tokens exist in the clear. Nothing here stores them again, so the
+    overlay has to say so plainly rather than let someone click past it and
+    assume they can come back for a link later."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"))
+
+        drawn: list[str] = []
+        real_text = render._text
+        render._text = lambda surf, font, text, col, **kw: (
+            drawn.append(text), real_text(surf, font, text, col, **kw))[1]
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        blob = " ".join(drawn)
+        assert "won't be shown again" in blob
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_title_never_overflows_the_panel():
+    """Regression: the title used to be *measured* in `normal` (to size the
+    panel) but *drawn* in `big` (which is wider), so the rendered line ran
+    past the panel border it was supposedly centred in. Wrapping now measures
+    and draws in the same font, and the wrap width itself is capped to what a
+    narrow window actually has to give it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((640, 480))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"))
+
+        big = render._fonts()["big"]
+        drawn_big: list[str] = []
+        real_text = render._text
+
+        def spy(surf, font, text, col, **kw):
+            if font is big and text:
+                drawn_big.append(text)
+            return real_text(surf, font, text, col, **kw)
+
+        render._text = spy
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        assert drawn_big, "the title never drew at all"
+        cap = screen.get_width() - 2 * config.s(24) - config.s(48)
+        for line in drawn_big:
+            assert big.size(line)[0] <= cap, f"{line!r} is wider than the panel can be: {big.size(line)[0]} > {cap}"
     finally:
         pygame.quit()
 
