@@ -441,6 +441,7 @@ PBP_SENDING_MSG = "Sending your orders..."
 PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
+PBP_BAD_LOG_MSG = "The match's record doesn't match its orders — can't play it on"
 
 # What the endpoint's own refusals mean from this side of the wire. Keyed by the
 # exact `error` string `pbp.mjs` sends; anything not here is relayed with a
@@ -492,32 +493,27 @@ def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
     ui.pbp_submitted = match.has_submitted(seat.seat)
 
 
-def open_match(match: pbp.Match, seat: pbp.Seat,
-               settings: Settings) -> tuple[GameState, Ui, GameLog]:
-    """Rebuild a shared match and sit down at our own seat.
+def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
+               ) -> Optional[tuple[GameState, Ui, GameLog]]:
+    """Rebuild a shared match and sit down at our own seat. None if its log is bad.
 
-    Two passes over the same turns, and deliberately: ``pbp.rebuild`` replays the
-    stored orders to *produce* a log — drawing the dice, because the server keeps
-    none — and ``resume_game`` then replays that log to recover everything a
-    position is besides its board, which is fog remembered across turns, the
-    standing rules in force, and how much of it was played by hand. They land on
-    the same board by construction; that is the property the whole design rests
-    on, so doing both is a check rather than a cost.
-
-    The one thing taken from the first pass rather than the second is
-    ``state.rng``. ``reconstruct`` deals every fight its recorded dice and asks
-    no bot to decide, so its rng never moves; the rebuild drew them, so its rng
-    stands where every other client's does. The next turn is drawn, not dealt,
-    and a board carrying the reconstructed rng fights it with different dice.
+    The stored log is the whole record (``pbp.match_log``), so this is an ordinary
+    resume of it: ``resume_game`` replays it for the board and for everything a
+    position is besides its board — fog remembered across turns, and how much of
+    it was played by hand. The standing rules are the exception, since they are
+    ours and the log came from whoever resolved last; the uploaded copy carries
+    none (``pbp.shareable``), and any a pre-strip log still holds are dropped.
 
     The roster is re-stamped afterwards because ``replay.reconstruct`` restores
     the single-seat claim a solo game records, which knows nothing of a match
     seated at two and three.
     """
     ai.load_models()      # a shared setup may name a drop-in strategy for a bot seat
-    rebuilt, log = pbp.rebuild(match, ai.decide)
+    log = pbp.match_log(match)
+    if log is None:
+        return None
     state, ui = resume_game(log, settings, seat.seat)
-    state.rng = rebuilt.rng
+    ui.auto_forward = {}
     pbp.seat_people(state, match.seats)
     pbp_adopt(match, seat, ui)
     return state, ui, log
@@ -703,7 +699,7 @@ def pbp_lapse(state: GameState, ui: Ui, match: pbp.Match,
 PBP_WAIT, PBP_STEP, PBP_RESOLVE, PBP_REBUILD = "wait", "step", "resolve", "rebuild"
 
 
-def pbp_verdict(match: pbp.Match, state: GameState) -> str:
+def pbp_verdict(match: pbp.Match, state: GameState, stale: bool = False) -> str:
     """What a client with ``state`` on screen should do about ``match``.
 
     * **step** — the match is exactly one turn ahead: somebody else resolved it,
@@ -716,7 +712,13 @@ def pbp_verdict(match: pbp.Match, state: GameState) -> str:
       they compute the same turn from the same inputs.
     * **wait** — anything else, including a match *behind* us, which is simply
       our own resolve not having landed yet.
+
+    ``stale`` overrides all of it with **rebuild**: our own resolve was not
+    accepted, so the board on screen is one the match may never have had —
+    somebody else's resolution won, and its bots may have decided differently.
     """
+    if stale:
+        return PBP_REBUILD
     if match.turn == state.turn + 1:
         return PBP_STEP
     if match.turn > state.turn:
@@ -829,7 +831,8 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
 
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
                  settings: Settings | None = None,
-                 seat_orders: dict[int, list[Order]] | None = None
+                 seat_orders: dict[int, list[Order]] | None = None,
+                 script: engine.TurnRecord | None = None
                  ) -> turnfilm.Reel | None:
     """Advance one turn. In autoplay the human seat is also driven by the AI.
 
@@ -839,6 +842,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     the film, the marks, the fog, the log, the camera snap — is the same work
     whoever decided the orders, and a second copy of it would be a second place
     for a turn to be drawn differently from how it was played.
+
+    ``script`` is a play-by-post turn somebody else already resolved: its record
+    (``pbp.settled_turn``) is applied verbatim, orders and dice, and nobody here
+    decides anything — a bot seat included, which is the point.
 
     The human orders actually applied are recorded into ``log`` and the file is
     rewritten, so the on-disk log always matches the live game (and a crash loses
@@ -860,9 +867,9 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # (`pbp.seat_people`), which is a fact about the match rather than about who
     # is looking at it — so there is nothing here to claim, and our own orders
     # are already in `seat_orders`, sent a turn ago.
-    unclaimed = state.human() is None and seat_orders is None
+    unclaimed = state.human() is None and seat_orders is None and script is None
     claim = ui.human_id if unclaimed and not ui.autoplay else None
-    if seat_orders is not None:
+    if seat_orders is not None or script is not None:
         human_orders = None
     elif unclaimed and ui.autoplay:
         # Nothing to attribute orders to, so pass none and let
@@ -893,7 +900,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     events: list[turnfilm.Event] = []
     record = engine.end_turn(state, human_orders=human_orders, decide=ai.decide,
                              on_event=events.append if marking else None,
-                             claim_seat=claim, seat_orders=seat_orders)
+                             claim_seat=claim, seat_orders=seat_orders,
+                             script=script)
     if not ui.autoplay:
         ui.hand_turns += 1      # mirrors the log's per-turn "ai" flag; see hand_turns()
     if log is not None:
@@ -1212,6 +1220,7 @@ async def main() -> None:
     pbp_failures = 0              # reads in a row that came back with no match
     pbp_read_line = ""            # the line the last failed read put up, if any
     pbp_resolving = False         # whether `pbp_write` is our own resolved turn
+    pbp_stale = False             # our resolve was refused: rebuild on the next read
     # Every other seat's link, from a match *we* just created — handed to `Ui`
     # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
     # opens on the very first frame of the match rather than a status line that
@@ -1372,6 +1381,9 @@ async def main() -> None:
                     # can tell us which. Ask on the next frame rather than in five
                     # seconds' time — unless we were told to slow down.
                     pbp_wait = PBP_THROTTLED_MS if pbp_throttled(body) else 0
+                    # A resolve that did not land leaves a board the match may
+                    # never have had; the stored log is the one that counts.
+                    pbp_stale = pbp_stale or pbp_resolving
                 pbp_resolving = False
         if pbp_poll is not None and reel is None and pbp_seat is not None:
             status, body = pbp_poll.poll()
@@ -1406,8 +1418,12 @@ async def main() -> None:
                           f"this build plays v{engine.RULES_VERSION}")
                     menu.set_status(menu_state, PBP_OUTDATED_MSG, False)
                     invite, pbp_seat = None, None
+                elif opening and (opened := open_match(match, pbp_seat,
+                                                       settings)) is None:
+                    menu.set_status(menu_state, PBP_BAD_LOG_MSG, False)
+                    invite, pbp_seat = None, None
                 elif opening:
-                    state, ui, log = open_match(match, pbp_seat, settings)
+                    state, ui, log = opened
                     current_seed = match.seed
                     if pending_invite_links:
                         ui.pbp_invite = tuple(pending_invite_links)
@@ -1420,7 +1436,7 @@ async def main() -> None:
                         ui.pbp_msg = ""   # the read that failed has since worked
                     pbp_read_line = ""
                     pbp_adopt(match, pbp_seat, ui)
-                    verdict = pbp_verdict(match, state)
+                    verdict = pbp_verdict(match, state, pbp_stale)
                     if verdict == PBP_WAIT and match.lapsed and pbp_write is None:
                         # The clock has run out on somebody. Filing their turn is
                         # what keeps a match from stopping dead because one person
@@ -1436,26 +1452,45 @@ async def main() -> None:
                         # `GameState`, so a rebuild is the only thing here that
                         # could quietly throw a route plan away.
                         rules = ui.auto_forward
-                        state, ui, log = open_match(match, pbp_seat, settings)
-                        ui.auto_forward = rules
-                        ui.prune_forward(state)   # ...minus any system lost since
-                        history_states, history_fog, history_events = [], [], []
-                        live_fog = None
+                        opened = open_match(match, pbp_seat, settings)
+                        if opened is None:
+                            ui.pbp_msg = PBP_BAD_LOG_MSG
+                        else:
+                            state, ui, log = opened
+                            ui.auto_forward = rules
+                            ui.prune_forward(state)   # ...minus any system lost since
+                            history_states, history_fog, history_events = [], [], []
+                            live_fog = None
+                            pbp_stale = False
+                    elif verdict == PBP_STEP and not (
+                            (script := pbp.settled_turn(match, state.turn))
+                            and pbp.verify_turn(state, script, match.seed)):
+                        # A record we cannot trust — missing, filing an order a
+                        # person never sent, or rolling dice its orders do not
+                        # roll. The board stays where it was, and says why.
+                        ui.pbp_msg = PBP_BAD_LOG_MSG
                     elif verdict in (PBP_STEP, PBP_RESOLVE):
-                        # One turn, settled, played onto the live board and
-                        # watched like any other — the orders came off the wire
-                        # rather than out of this process, and nothing downstream
-                        # of the engine cares which.
+                        # One turn played onto the live board and watched like any
+                        # other. Stepping applies the record the resolver stored,
+                        # checked above, so no bot here decides again; resolving is
+                        # the one place one does, on a scratch copy, before the
+                        # turn's dice roll from an rng derived for it (`pbp.reseed`).
                         turn = state.turn
-                        reel = resolve_turn(state, ui, log, settings,
-                                            seat_orders=match.orders_for_turn(turn))
+                        if verdict == PBP_STEP:
+                            reel = resolve_turn(state, ui, log, settings,
+                                                script=pbp.settled_turn(match, turn))
+                        else:
+                            pbp.reseed(state, match.seed)
+                            reel = resolve_turn(
+                                state, ui, log, settings,
+                                seat_orders=pbp.turn_orders(state, match, ai.decide))
                         pbp_opened(ui)
                         play_accum = auto_accum = 0
                         if verdict == PBP_RESOLVE:
                             # ...and we are the one who noticed, so we are the one
-                            # who reports it. A second client doing the same is not
-                            # a race: it computed the same turn from the same
-                            # inputs, and is told the turn already moved.
+                            # who reports it. A second client doing the same is
+                            # told the turn already moved, and rebuilds from the
+                            # log that won (`pbp_stale`).
                             pbp_write = pbp.send_resolved(
                                 pbp_seat, turn, log, replay.digest_hex(state),
                                 state.winner is not None)
@@ -1466,7 +1501,7 @@ async def main() -> None:
             # the link still works.
             pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
             pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
-            pbp_resolving = False
+            pbp_resolving = pbp_stale = False
         elif (ui is not None and pbp_seat is not None and pbp_poll is None
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
