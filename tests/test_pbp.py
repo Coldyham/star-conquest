@@ -12,7 +12,7 @@ import pytest
 
 from starconquest import engine, pbp, replay, webstore
 from starconquest.model import Order
-from starconquest.settings import Settings
+from starconquest.settings import Challenge, Settings
 
 
 @pytest.fixture(autouse=True)
@@ -464,6 +464,35 @@ def test_a_match_stores_its_setup_pruned_and_rebuilds_the_same_one(monkeypatch):
     assert sent["settings_json"] == settings.token_dict()
     assert "garrison_k" not in sent["settings_json"]
     assert Settings.from_dict(sent["settings_json"]) == settings
+
+
+def _challenged(**over):
+    settings = Settings(mode="random", players=2, nodes=16, seed=7, **over)
+    settings.challenge = Challenge(turns=71, lost=40, key=settings.challenge_key())
+    return settings
+
+
+def test_a_match_opened_from_a_challenge_does_not_carry_its_score(monkeypatch):
+    """The menu still holds a challenge link's score when a match is opened
+    from it; the setup goes up, the score to beat does not."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    pbp.create(MATCH, _challenged(), 7, [1, 2])
+    assert "challenge" not in sent["settings_json"]
+
+
+def test_a_score_already_stored_on_a_match_is_dropped_on_the_way_in():
+    """Matches opened before the score was stripped still hold one, on the row
+    and in any log a client uploaded since."""
+    stored = _challenged().to_dict()
+    assert pbp.match_from_dict(_state_payload(settings_json=stored)).settings.challenge is None
+
+    base = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
+    _state, log, _digest = pbp.resolve(base)
+    log.settings = stored
+    match = pbp.match_from_dict(_state_payload(turn=1, log=pbp.shareable(log).encoded()))
+    opened = pbp.match_log(match)
+    assert opened is not None and opened.settings["challenge"] is None
 
 
 def test_the_final_resolve_reports_the_winner_and_no_other_does(monkeypatch):

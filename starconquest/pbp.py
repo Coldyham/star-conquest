@@ -333,6 +333,7 @@ def match_from_dict(data: dict) -> Match | None:
         settings = Settings.from_dict(raw_settings)
     except (ValueError, TypeError):
         return None
+    settings.challenge = None     # a shared match has no score to beat
     return Match(
         match_id=match_id,
         settings=settings,
@@ -443,6 +444,7 @@ def match_log(match: Match) -> replay.GameLog | None:
                     return None
                 sent.remove(key)
     log.match_id = match.match_id
+    log.settings["challenge"] = None
     return log
 
 
@@ -802,7 +804,7 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
         return None
     return call("create", {
         "match_id": match_id,
-        "settings_json": settings.token_dict(),
+        "settings_json": settings.without_challenge().token_dict(),
         "seed": seed,
         "seats": sorted(set(seats)),
         "rules_version": engine.RULES_VERSION,
