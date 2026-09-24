@@ -8,7 +8,7 @@ named below). Deviation: the board pages' **▶ Play** link is a static
 always one level up, and that also works on a local server. Still to do, all
 manual:
 - [ ] Game site: add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. Scoping to Functions is a paid feature, so leave all scopes; the build command unsets the key before any build step runs.
-- [ ] Game site: confirm the sensitive-variable policy is "Require approval".
+- [x] Game site: sensitive-variable policy is "Require approval" (confirmed: the default, "all untrusted deploy requests require project member approval before building").
 - [ ] Deploy-preview checks (Verification below), including the client IP the
       rate limit sees.
 - [ ] Merge, then publish the game site (publish 1 of 2).
