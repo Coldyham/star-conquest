@@ -34,7 +34,7 @@ const MATCH = "00112233445566ff";
 // derived, so a column added there without a matching entry shows up as a
 // failure rather than as a row that happens to have whatever was inserted.
 const DEFAULTS = {
-  pbp_matches: { turn: 0, finished: false, log: "", deadline_hours: null,
+  pbp_matches: { turn: 0, finished: false, log: "", deadline_hours: null, public: false,
                  turn_opened_at: () => new Date().toISOString(),
                  created_at: "", updated_at: "" },
   pbp_orders: { source: "human", board_digest: "", submitted_at: "", id: 0 },
@@ -59,12 +59,14 @@ function install() {
     assert.ok(table in TABLES, `stub: no table ${table}`);
     const filters = [];
     for (const [key, val] of parsed.searchParams) {
-      if (key === "select" || key === "order") continue;
+      if (key === "select" || key === "order" || key === "limit") continue;
       const [op, ...rest] = val.split(".");
-      assert.equal(op, "eq", `stub: unsupported operator ${op}`);
-      filters.push([key, rest.join(".")]);
+      assert.ok(op === "eq" || op === "in", `stub: unsupported operator ${op}`);
+      filters.push([key, op, rest.join(".")]);
     }
-    const hit = (r) => filters.every(([col, val]) => String(r[col]) === val);
+    const hit = (r) => filters.every(([col, op, val]) => (op === "in"
+      ? val.replace(/^\(|\)$/g, "").split(",").includes(String(r[col]))
+      : String(r[col]) === val));
     const select = parsed.searchParams.get("select");
     const project = (r) => {
       if (!select || select === "*") return { ...r };
@@ -93,7 +95,8 @@ function install() {
           return 0;
         });
       }
-      return ok(rows.map(project));
+      const limit = Number(parsed.searchParams.get("limit") || Infinity);
+      return ok(rows.slice(0, limit).map(project));
     }
     if (method === "POST") {
       const incoming = JSON.parse(init.body).map((r) => withDefaults(table, r));
@@ -376,4 +379,108 @@ test("filing the last outstanding seat completes the turn without resolving it",
   const [, body] = await state();
   assert.equal(body.turn, 0, "a lapse advances nothing by itself");
   assert.deepEqual(body.submitted.sort(), [1, 2], "...it only makes the turn complete");
+});
+
+// --------------------------------------------------------------------------
+// Public matches: the lobby list, and claiming an open seat
+// --------------------------------------------------------------------------
+async function openedPublic(seats = [1, 2, 3], extra = {}) {
+  install();
+  const [status, body] = await call("create", {
+    match_id: MATCH, settings_json: { mode: "random", players: seats.length },
+    seed: 7, seats, rules_version: 2, public: true, claimed: [1], ...extra,
+  });
+  assert.equal(status, 201, JSON.stringify(body));
+  return body.tokens;
+}
+
+const list = () => call("list", null, "GET");
+
+test("a public match mints only the creator's token", async () => {
+  const tokens = await openedPublic();
+  assert.deepEqual(Object.keys(tokens), ["1"]);
+  assert.deepEqual(Object.keys(TABLES.pbp_matches[0].seats.tokens), ["1"]);
+});
+
+test("only a public match may leave a seat unminted", async () => {
+  install();
+  const [status] = await call("create", {
+    match_id: MATCH, settings_json: {}, seed: 7, seats: [1, 2], claimed: [1],
+  });
+  assert.equal(status, 400);
+});
+
+test("the lobby lists public matches only, and never a log or a hash", async () => {
+  await openedPublic();
+  TABLES.pbp_matches.push(withDefaults("pbp_matches", {
+    match_id: "ffffffffffffffff", settings_json: {}, seed: 1, rules_version: 2,
+    seats: { seats: [1], tokens: { 1: "a".repeat(64) } }, log: "SECRETLOG",
+  }));
+  TABLES.pbp_matches[0].log = "SECRETLOG";
+  const [status, body] = await list();
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.deepEqual(body.matches.map((m) => m.match_id), [MATCH]);
+  const text = JSON.stringify(body);
+  assert.ok(!text.includes("SECRETLOG") && !text.includes("tokens"));
+  const [m] = body.matches;
+  assert.equal(m.status, "open");
+  assert.deepEqual(m.unclaimed, [2, 3]);
+  assert.deepEqual(m.waiting, [1, 2, 3]);
+});
+
+test("a claimed seat's token works, and the seat cannot be claimed twice", async () => {
+  await openedPublic([1, 2]);
+  const [status, body] = await call("claim", { match_id: MATCH, seat: 2 });
+  assert.equal(status, 201, JSON.stringify(body));
+  const [seatStatus, seatBody] = await call("seat", { match_id: MATCH, token: body.token });
+  assert.equal(seatStatus, 200);
+  assert.equal(seatBody.seat, 2);
+  const [again, againBody] = await call("claim", { match_id: MATCH, seat: 2 });
+  assert.equal(again, 409);
+  assert.equal(againBody.error, "already claimed");
+  const [, listed] = await list();
+  assert.equal(listed.matches[0].status, "in_progress");
+  assert.deepEqual(listed.matches[0].unclaimed, []);
+});
+
+test("claiming keeps every other seat's hash", async () => {
+  const tokens = await openedPublic([1, 2, 3]);
+  await call("claim", { match_id: MATCH, seat: 2 });
+  await call("claim", { match_id: MATCH, seat: 3 });
+  const [status, body] = await call("seat", { match_id: MATCH, token: tokens[1] });
+  assert.equal(status, 200);
+  assert.equal(body.seat, 1);
+});
+
+test("a claim that raced another write is told to retry, not handed a seat", async () => {
+  await openedPublic([1, 2]);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if ((init?.method || "GET") === "PATCH") TABLES.pbp_matches[0].updated_at = "moved";
+    return realFetch(url, init);
+  };
+  const [status] = await call("claim", { match_id: MATCH, seat: 2 });
+  globalThis.fetch = realFetch;
+  assert.equal(status, 409);
+  assert.deepEqual(Object.keys(TABLES.pbp_matches[0].seats.tokens), ["1"]);
+});
+
+test("a private or finished match cannot be claimed into", async () => {
+  await opened([1, 2]);
+  const [privateStatus] = await call("claim", { match_id: MATCH, seat: 2 });
+  assert.equal(privateStatus, 404, "a private match reads as missing");
+  await openedPublic([1, 2]);
+  TABLES.pbp_matches[0].finished = true;
+  const [finishedStatus] = await call("claim", { match_id: MATCH, seat: 2 });
+  assert.equal(finishedStatus, 409);
+});
+
+test("a live match past its deadline lists as lapsed", async () => {
+  const tokens = await opened([1, 2]);
+  TABLES.pbp_matches[0].public = true;
+  await call("submit", { match_id: MATCH, token: tokens[1], turn: 0, orders: [] });
+  elapse();
+  const [, body] = await list();
+  assert.equal(body.matches[0].status, "lapsed");
+  assert.deepEqual(body.matches[0].lapsed, { 2: "hold" });
 });

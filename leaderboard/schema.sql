@@ -891,6 +891,24 @@ create table if not exists public.pbp_orders (
 create index if not exists pbp_orders_turn_idx
   on public.pbp_orders (match_id, turn);
 
+-- Public matches: listed on the lobby page (`pbp.html`, `?action=list`) and
+-- joinable from it (`?action=claim`). A private match stays reachable only by
+-- knowing its id, which is why this defaults to false and why nothing lists a
+-- row that is not flagged. A public match's open seats are the ones with no
+-- entry in `seats.tokens`: `create` mints only the creator's token, and a claim
+-- mints the rest one at a time, so "unclaimed" is a missing hash rather than a
+-- second field to keep in step with it.
+alter table public.pbp_matches
+  add column if not exists public boolean not null default false;
+
+create index if not exists pbp_matches_public_idx
+  on public.pbp_matches (updated_at desc) where public;
+
+-- ONE-OFF, testing only: list the matches that predate the flag. Run once when
+-- adding the column above, never again -- re-running it would publish every
+-- private match since.
+-- update public.pbp_matches set public = true;
+
 -- RLS on, and deliberately no policies at all: with row-level security enabled,
 -- a command with no policy is refused outright, so these two tables are closed
 -- to the publishable key exactly as game_logs is. That is the mechanism, not an

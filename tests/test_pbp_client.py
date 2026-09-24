@@ -401,6 +401,21 @@ def test_a_new_match_can_be_opened_with_a_chosen_deadline(monkeypatch):
     assert sent["deadline_hours"] == 72
 
 
+def test_a_public_match_mints_only_the_creators_seat(monkeypatch):
+    """A public match leaves seats 2+ to be claimed on the lobby page, so it asks
+    for seat 1's token alone; a private one still asks for every seat's."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(players=3), seed=1, public=True)
+    assert sent["public"] is True
+    assert sent["claimed"] == [1]
+    assert sent["seats"] == [1, 2, 3]
+    app.pbp_open(Settings(players=3), seed=1)
+    assert sent["public"] is False
+    assert sent["claimed"] == [1, 2, 3]
+
+
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
     """Sent rather than handed back, so a retry after a lost reply opens a second
     match instead of quietly rewriting the first."""

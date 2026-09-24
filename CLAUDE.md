@@ -475,6 +475,10 @@ already resolve simultaneously. The rationale for each rule is in
   lapse (`lapsedSeats`, re-checked in `handleLapse`) from the `source` column.
   Any client may file the bot's orders, computed on a board copy, but never a
   lapse for its own seat.
+- **Public matches are listed; open seats are claimed, not handed out.** Only
+  `public` rows appear on the lobby page (`leaderboard/pbp.html`, `?action=list`).
+  A public match mints the creator's token alone, and an open seat is one with
+  no stored hash until `?action=claim` mints it.
 
 ### Key conventions
 

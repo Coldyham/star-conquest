@@ -214,6 +214,22 @@ def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
         pygame.quit()
 
 
+def test_the_roster_prompt_public_checkbox_toggles_and_resets(monkeypatch):
+    """Off by default, toggled by its checkbox, and off again the next time
+    the prompt opens."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+        _click_key(screen, ms, settings, "pbp_public")
+        assert ms.pbp_public is True
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+    finally:
+        pygame.quit()
+
+
 def test_the_roster_prompt_deadline_stepper_moves_in_whole_days(monkeypatch):
     """Starts at `pbp.DEADLINE_HOURS`, moves a day (24h) per press, and is
     clamped to the endpoint's own bounds — a day at the low end, its 336h

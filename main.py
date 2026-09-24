@@ -594,7 +594,8 @@ def pbp_opened(ui: Ui) -> None:
 
 
 def pbp_open(settings: Settings, seed: int, seats: Optional[list[int]] = None,
-            deadline_hours: int = pbp.DEADLINE_HOURS) -> tuple[str, Optional[pbp.Request]]:
+            deadline_hours: int = pbp.DEADLINE_HOURS,
+            public: bool = False) -> tuple[str, Optional[pbp.Request]]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -612,6 +613,10 @@ def pbp_open(settings: Settings, seed: int, seats: Optional[list[int]] = None,
     the same reason ``seats`` is: every other caller (tests, a future script)
     gets the format's own default without having to know it exists.
 
+    ``public`` (``menu.MenuState.pbp_public``) lists the match on the
+    leaderboard's lobby page, where its other seats are claimed; the reply then
+    carries seat 1's token alone.
+
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
@@ -619,7 +624,7 @@ def pbp_open(settings: Settings, seed: int, seats: Optional[list[int]] = None,
     match_id = replay._new_match_id()
     if seats is None:
         seats = [pid for pid in range(1, settings.players + 1)]
-    return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours)
+    return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours, public)
 
 
 def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
@@ -1606,7 +1611,7 @@ async def main() -> None:
                         current_seed = resolve_seed(settings)
                         pbp_making, pbp_make = pbp_open(
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
-                            menu_state.pbp_deadline_hours)
+                            menu_state.pbp_deadline_hours, menu_state.pbp_public)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:

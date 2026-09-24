@@ -323,6 +323,9 @@ class MenuState:
     # moves in them rather than exposing raw hour arithmetic. Reset to the
     # default each time the prompt opens.
     pbp_deadline_hours: int = pbp.DEADLINE_HOURS
+    # List the match on the leaderboard's lobby page, where its other seats are
+    # claimed, rather than handing every seat's link to the creator.
+    pbp_public: bool = False
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -643,7 +646,9 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     deadline_w = f["normal"].size("Deadline")[0] + 10 + stepper_w
     pw = max(name_w + sw_size + _CH + 4 * pad, f["normal"].size(title)[0] + 2 * pad,
              deadline_w + 2 * pad, 2 * bw + gap + 2 * pad)
-    rows = settings.players + 1   # every seat, plus the deadline
+    public_w = f["normal"].size("Publicly joinable")[0] + 10 + _CH
+    pw = max(pw, public_w + 2 * pad)
+    rows = settings.players + 2   # every seat, plus the deadline and public rows
     ph = pad + f["normal"].get_height() + gap + rows * (row_h + gap) + bh + pad
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
@@ -677,6 +682,12 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
           midleft=(panel.x + pad, y + row_h // 2))
     _stepper(surface, ms, "pbp_deadline", _deadline_label(ms.pbp_deadline_hours),
              panel.right - pad, y + (row_h - _CH) // 2)
+    y += row_h + gap
+
+    _text(surface, f["normal"], "Publicly joinable", config.COLOR_TEXT,
+          midleft=(panel.x + pad, y + row_h // 2))
+    _checkbox(surface, ms, "pbp_public", ms.pbp_public,
+              panel.right - pad, y + (row_h - _CH) // 2)
     y += row_h + gap
 
     by = panel.bottom - pad - bh
@@ -1532,6 +1543,10 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str
             if rect is not None and rect.collidepoint(event.pos):
                 _step_deadline(ms, by)
                 return None
+        rect = ms.rects.get("pbp_public")
+        if rect is not None and rect.collidepoint(event.pos):
+            ms.pbp_public = not ms.pbp_public
+            return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
             ms.pbp_prompt = False
             return "play_by_post"
@@ -1757,6 +1772,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.pbp_prompt = True
         ms.pbp_roster = set(range(1, settings.players + 1))
         ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
+        ms.pbp_public = False
         return None
     if hit == "quit":
         return "quit"

@@ -12,8 +12,8 @@ import test from "node:test";
 
 import {
   allowedOrigin, consecutiveMisses, deadlinePassed, hashToken, lapsedAction,
-  lapsedSeats, MAX_READS_PER_WINDOW, mintToken, outstanding, rateLimited, sameToken, seatForToken,
-  validateMatch, validateOrders, validateSeats, visibleOrders,
+  lapsedSeats, matchStatus, MAX_READS_PER_WINDOW, mintToken, outstanding, rateLimited, sameToken, seatForToken,
+  unclaimedSeats, validateMatch, validateOrders, validateSeats, visibleOrders,
 } from "../netlify/functions/pbp.mjs";
 
 const MATCH = "00112233445566ff";
@@ -296,4 +296,23 @@ test("...and released the moment the turn is complete", () => {
 
 test("a resolved turn's orders are always visible", () => {
   assert.equal(visibleOrders(ROWS, 2, [1, 2]).length, 3);
+});
+
+test("a private match mints every seat, a public one only what it names", () => {
+  assert.deepEqual(validateMatch(match()).claimed, [1, 2]);
+  assert.equal(validateMatch(match()).public, false);
+  const pub = validateMatch(match({ public: true, claimed: [1] }));
+  assert.deepEqual([pub.public, pub.claimed], [true, [1]]);
+  assert.equal(typeof validateMatch(match({ public: true, claimed: [3] })), "string");
+  assert.equal(typeof validateMatch(match({ public: "yes" })), "string");
+});
+
+test("an open seat is a missing hash, and it outranks a lapse", () => {
+  const m = { seats: { seats: [1, 2, 3], tokens: { 1: "h", 3: "h" } }, finished: false };
+  assert.deepEqual(unclaimedSeats(m), [2]);
+  assert.equal(matchStatus(m, { 1: "hold" }), "open");
+  m.seats.tokens[2] = "h";
+  assert.equal(matchStatus(m, { 1: "hold" }), "lapsed");
+  assert.equal(matchStatus(m, {}), "in_progress");
+  assert.equal(matchStatus({ ...m, finished: true }, {}), "finished");
 });

@@ -623,8 +623,13 @@ def parse_body(text: str) -> Optional[dict]:
 
 
 def create(match_id: str, settings: Settings, seed: int, seats: list[int],
-           deadline_hours: Optional[int] = DEADLINE_HOURS) -> Optional[Request]:
+           deadline_hours: Optional[int] = DEADLINE_HOURS,
+           public: bool = False) -> Optional[Request]:
     """Open a match, seating a person at each of ``seats``.
+
+    A ``public`` match is listed on the leaderboard's lobby page and mints only
+    seat 1's token here; every other seat's is minted when somebody claims it
+    there (``?action=claim``), so the reply carries the creator's link alone.
 
     The reply is the one and only time the seat tokens exist in the clear —
     nothing stores them, here or there, so whoever opened the match is who hands
@@ -640,6 +645,8 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
         "seats": sorted(set(seats)),
         "rules_version": engine.RULES_VERSION,
         "deadline_hours": deadline_hours,
+        "public": public,
+        "claimed": [1] if public else sorted(set(seats)),
     })
 
 

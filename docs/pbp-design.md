@@ -292,6 +292,36 @@ Filing resolves nothing. It makes the turn complete, and the next read takes the
 ordinary resolve path — so a lapsed turn goes through the very same gate every
 other turn does.
 
+## Public matches and the lobby
+
+A match opened with **Publicly joinable** ticked is listed on the leaderboard's
+lobby page, `pbp.html`. That page is not linked from anywhere yet. It reads
+`?action=list` and groups matches as open, lapsed, in progress or finished. Only
+public rows are listed. A private match is reachable only by knowing its id, and
+a list of every id would undo that. `?action=claim` answers a private match with
+the same 404 it gives a missing one, for the same reason.
+
+**An open seat is a missing hash, not a flag.** Tokens are stored only as
+hashes, so no token can be shown twice. A public match therefore mints only the
+creator's token (`claimed: [1]` on create). Each other seat's token is minted
+when somebody presses *Get link* on the lobby page, and that reply is the one
+time it exists in the clear. Minting the token is what claims the seat, so there
+is no second field to keep in step with the hashes.
+
+The claim rewrites the whole `seats` column. It is conditional on `updated_at`
+not having moved since the read, so of two claims at once, the second is told to
+retry rather than landing on top of the first's hash. A resolve in between also
+trips that condition, and costs only a retry.
+
+An open seat behaves like any outstanding seat. With a deadline set, it holds
+and then falls to its bot like any other seat. With no deadline, the match waits
+for it.
+
+The `public` column defaults to false. A one-off, commented-out
+`update ... set public = true` in `schema.sql` flags the matches that predate
+the column, so there is something to test against. Nothing needs switching off
+before a deploy.
+
 ## Traps
 
 * **Nothing may resolve a play-by-post turn on a clock of its own.** That is the
