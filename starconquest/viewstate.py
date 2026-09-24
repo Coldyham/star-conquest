@@ -314,6 +314,7 @@ class Ui:
     # human-only concern is: the simulation neither knows nor cares that the seat
     # beside it is a person somewhere else.
     pbp_match: str = ""
+    pbp_title: str = ""          # the creator's title for it, "" for none
     pbp_submitted: bool = False
     pbp_waiting: tuple[int, ...] = ()
     pbp_msg: str = ""            # what the last call said, drawn on the overlay

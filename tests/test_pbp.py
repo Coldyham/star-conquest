@@ -422,3 +422,64 @@ def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, m
     assert ".catch(" in js, "an unhandled rejection reads as a crash"
     assert "'POST'" in js and "application/json" in js
     assert TOKEN in js
+
+
+# --------------------------------------------------------------------------- #
+# What the lobby is told, and the way back from it
+# --------------------------------------------------------------------------- #
+def test_a_bare_match_link_names_the_match_and_nothing_else():
+    assert pbp.bare_match(f"pbp={MATCH}") == MATCH
+    for fragment in (f"pbp={MATCH}:{TOKEN}", "pbp=nothex", f"log={MATCH}", ""):
+        assert pbp.bare_match(fragment) == ""
+    assert pbp.parse_link(f"pbp={MATCH}") is None, "a seat link still needs its token"
+
+
+def test_the_lobby_hand_off_carries_ids_and_never_a_token():
+    assert pbp.lobby_fragment() == ""
+    other = "ffeeddccbbaa0099"
+    pbp.remember(pbp.Seat(MATCH, 2, TOKEN))
+    pbp.remember(pbp.Seat(other, 1, TOKEN))
+    fragment = pbp.lobby_fragment()
+    assert fragment == f"#mine={MATCH},{other}"
+    assert TOKEN not in fragment
+    assert pbp.lobby_fragment(limit=1) == f"#mine={other}"
+
+
+def test_a_match_is_created_with_its_title_and_the_creators_name(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    pbp.create(MATCH, Settings(players=2), 7, [1, 2], title="  Friday  ",
+               name="x" * 40)
+    assert sent["title"] == "Friday"
+    assert sent["name"] == "x" * pbp.NAME_MAX
+
+
+def test_a_match_stores_its_setup_pruned_and_rebuilds_the_same_one(monkeypatch):
+    """The lobby lists non-default knobs by reading what is present, so the
+    setup goes up in `token_dict` form — which `from_dict` reads back whole."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    settings = Settings(players=3, nodes=20, combat_jitter=0.2, seed=5)
+    pbp.create(MATCH, settings, 5, [1, 2, 3])
+    assert sent["settings_json"] == settings.token_dict()
+    assert "garrison_k" not in sent["settings_json"]
+    assert Settings.from_dict(sent["settings_json"]) == settings
+
+
+def test_the_final_resolve_reports_the_winner_and_no_other_does(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    log = replay.GameLog(seed=7, settings=Settings().to_dict())
+    pbp.send_resolved(pbp.Seat(MATCH, 1, TOKEN), 3, log, "d", False, 2)
+    assert sent["winner"] is None
+    pbp.send_resolved(pbp.Seat(MATCH, 1, TOKEN), 4, log, "d", True, 2)
+    assert sent["winner"] == 2 and sent["finished"] is True
+
+
+def test_a_matchs_title_and_names_are_read_off_the_wire():
+    match = pbp.match_from_dict(_state_payload(title="Friday", names={"1": "Alice", "2": "", "x": "?"}))
+    assert match is not None
+    assert match.title == "Friday"
+    assert match.names == {1: "Alice"}
+    bare = pbp.match_from_dict(_state_payload())
+    assert bare is not None and bare.title == "" and bare.names == {}

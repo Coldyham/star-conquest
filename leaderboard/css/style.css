@@ -784,3 +784,46 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   color: var(--ink);
   font: inherit;
 }
+
+/* pbp.html: a seat's colour, as a square beside its name. */
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  vertical-align: -0.05rem;
+  background: var(--seat, var(--dim));
+  box-shadow: 0 0 6px var(--seat, transparent);
+}
+.chip.seat { color: var(--ink); }
+.chip.seat.open { color: var(--gold); border-color: var(--gold); }
+.chip.seat.bot { color: var(--dim); }
+.badge.yours { border-color: var(--green); color: var(--green); }
+
+/* One match's page: who is at the table, one row per seat. */
+.roster { margin: 0 0 1.25rem; padding: 0; list-style: none; }
+.roster-row {
+  display: grid;
+  grid-template-columns: 1rem 6rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px dashed var(--line);
+}
+.roster-seat { font-family: var(--pixel); font-size: 0.72rem; text-transform: uppercase; }
+.roster-who { overflow-wrap: anywhere; }
+.roster-row.open .roster-who { color: var(--gold); }
+.roster-row.bot .roster-who { color: var(--dim); }
+.roster-state { font-size: 0.8rem; color: var(--dim); text-align: right; }
+.roster-state.won { color: var(--green); }
+.roster-state.waiting { color: var(--gold); }
+.roster-state.hold, .roster-state.bot { color: var(--bad); }
+.yours-slot:empty { display: none; }
+.claims { margin-top: 1.5rem; }
+.seat-claim input.seat-name { flex: 0 1 16rem; width: auto; min-width: 0; padding: 0.55rem 0.7rem; font-size: 0.8rem; }
+.seat-claim button { margin-top: 0; align-self: center; font-size: 0.8rem; padding: 0.6rem 1rem; }
+
+@media (max-width: 40rem) {
+  .roster-row { grid-template-columns: 1rem minmax(0, 1fr); }
+  .roster-who, .roster-state { grid-column: 2; text-align: left; }
+}

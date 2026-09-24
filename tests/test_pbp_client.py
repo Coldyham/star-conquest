@@ -516,6 +516,20 @@ def test_a_public_match_mints_only_the_creators_seat(monkeypatch):
     assert sent["claimed"] == [1, 2, 3]
 
 
+def test_a_new_match_carries_its_title_and_name_and_the_name_is_kept(monkeypatch):
+    """The prompt's two optional fields go up with the match; the name is
+    remembered for the next prompt, and clearing it is remembered too."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(players=2), seed=1, title="Friday", name="Alice")
+    assert sent["title"] == "Friday" and sent["name"] == "Alice"
+    assert webstore.pbp_name() == "Alice"
+    app.pbp_open(Settings(players=2), seed=1)
+    assert sent["title"] == "" and sent["name"] == ""
+    assert webstore.pbp_name() == ""
+
+
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
     """Sent rather than handed back, so a retry after a lost reply opens a second
     match instead of quietly rewriting the first."""

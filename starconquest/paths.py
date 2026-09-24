@@ -66,6 +66,11 @@ WEB_PBP_BODY_KEY = "sc_pbp_body"
 # never in `Settings`, which travels in every shared link.
 WEB_PBP_SEATS_KEY = "sc_pbp_seats"
 
+# The name last typed into the play-by-post prompt's "Your name" field, offered
+# again next time. Display text only: it goes to the endpoint just when a match
+# is created with it filled in.
+WEB_PBP_NAME_KEY = "sc_pbp_name"
+
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.
 #
@@ -109,6 +114,9 @@ LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissio
 # menu's file row used to spend on a Save/Load row that never actually
 # persisted anything in the browser (see `menu._file_control`).
 LEADERBOARD_CONFIGS_PATH = "/index.html?group=config"
+# The play-by-post lobby, opened with `#mine=<id>,<id>` naming the matches this
+# installation holds a seat in (ids only, never a token).
+LEADERBOARD_LOBBY_PATH = "/pbp.html"
 
 
 def sibling_host(host: str, tag: str, *, add: bool) -> str:

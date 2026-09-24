@@ -17,7 +17,9 @@
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
  *   list    (GET)  the public matches, for the lobby page (`pbp.html`): each
- *                  one's status, who is outstanding, and which seats are open.
+ *                  one's setup, status, who is outstanding, and which seats are
+ *                  open. With `&ids=a,b,…`, those matches instead, public or
+ *                  not — the same knowing-the-id rule `state` follows.
  *   claim   (POST) mint the token for an open seat of a public match. The only
  *                  way a seat's token comes into being after `create`.
  *   seat    (POST) which seat a token holds — the one thing a client opening a
@@ -34,7 +36,8 @@
  * A seat token authorises one seat in one match and expires with it. It is
  * stored only as a SHA-256 hash: a leaked database still hands nobody a seat.
  * There is no account, no client id and nothing that groups one person's
- * matches — the same posture the rest of this board takes.
+ * matches — the same posture the rest of this board takes. A seat's name is
+ * self-declared display text, like a posted score's user name.
  *
  * Environment (set in the Netlify site's settings, never committed):
  *   SUPABASE_URL         https://<project>.supabase.co
@@ -86,6 +89,11 @@ const MAX_SEATS = 6;
 // A turn's orders are a handful of four-number objects per seat; a hundred is
 // already far more launches than a board has systems.
 const MAX_ORDERS = 256;
+// Display text, matching the column checks in schema.sql.
+export const NAME_MAX = 24;
+export const TITLE_MAX = 60;
+// How many ids one `list&ids=` read may ask about.
+export const MAX_LIST_IDS = 50;
 
 /**
  * Rate limit, per caller, in a sliding window — the same honest half-measure
@@ -197,6 +205,18 @@ export function validateOrders(raw) {
   return out;
 }
 
+/**
+ * Display text as stored: control characters dropped, whitespace collapsed,
+ * trimmed. `""` for a missing field; null for one that is not a string or runs
+ * past `max`.
+ */
+export function cleanText(raw, max) {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw !== "string") return null;
+  const text = raw.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  return text.length > max ? null : text;
+}
+
 /** The `seats` roster on a new match: `{seat: {token_hash}}` for each person. */
 export function validateSeats(raw) {
   if (!Array.isArray(raw) || raw.length < 1) return "seats must be a non-empty list";
@@ -233,6 +253,10 @@ export function validateMatch(body) {
       && (!Number.isInteger(hours) || hours < 1 || hours > 336)) {
     return "bad deadline_hours";
   }
+  const title = cleanText(body.title, TITLE_MAX);
+  if (title === null) return "bad title";
+  const name = cleanText(body.name, NAME_MAX);
+  if (name === null) return "bad name";
   return {
     match_id: matchId,
     settings_json: settings,
@@ -242,6 +266,8 @@ export function validateMatch(body) {
     claimed,
     public: pub === true,
     deadline_hours: hours === undefined ? null : hours,
+    title,
+    names: name && claimed.includes(1) ? { 1: name } : {},
   };
 }
 
@@ -426,7 +452,7 @@ export default async function handler(request) {
   if (limited) return reply(429, { error: "slow down" }, origin);
 
   const call = db(url, key);
-  if (reading && action === "list") return await handleList(call, origin);
+  if (reading && action === "list") return await handleList(call, query, origin);
   if (reading) return await handleState(call, query, origin);
   if (request.method !== "POST") return reply(405, { error: "POST only" }, origin);
 
@@ -481,6 +507,9 @@ async function handleState(call, query, origin) {
     finished: match.finished,
     turn_opened_at: match.turn_opened_at,
     deadline_hours: match.deadline_hours,
+    title: match.title ?? "",
+    names: match.names ?? {},
+    winner: match.winner ?? null,
     // Who is still to submit for the live turn. The waiting overlay is built
     // from exactly this.
     submitted: live.map((row) => row.seat),
@@ -526,6 +555,8 @@ async function handleCreate(call, body, origin) {
       seats: { seats: row.seats, tokens: hashes },
       public: row.public,
       deadline_hours: row.deadline_hours,
+      title: row.title,
+      names: row.names,
     }]),
   });
   if (stored === null) return reply(502, { error: "store refused" }, origin);
@@ -540,17 +571,66 @@ async function handleCreate(call, body, origin) {
 export const LIST_LIMIT = 100;
 
 /**
- * The public matches, as the lobby page shows them.
- *
- * Only `public` rows: a private match is reachable by knowing its id, and a
- * list of every id would undo that. The log is never selected — the lobby
- * shows status, not the game — and neither are the token hashes, which leave
- * this function as nothing but which seats are still open.
+ * The ids a `list&ids=` read asks about, or null for a malformed list. Deduped,
+ * in the order given.
  */
-async function handleList(call, origin) {
-  const matches = await call(
-    "/pbp_matches?select=match_id,settings_json,seats,turn,turn_opened_at,deadline_hours,"
-    + `finished,created_at,updated_at&public=eq.true&order=updated_at.desc&limit=${LIST_LIMIT}`);
+export function listIds(raw) {
+  const ids = [...new Set(String(raw).split(",").filter(Boolean))];
+  if (!ids.length || ids.length > MAX_LIST_IDS || !ids.every((id) => MATCH_ID.test(id))) return null;
+  return ids;
+}
+
+/** One match as the lobby shows it, from its row and its order history. */
+export function lobbyEntry(match, orders) {
+  const mine = orders.filter((row) => row.match_id === match.match_id);
+  const roster = match.seats.seats ?? match.seats;
+  const submitted = mine.filter((row) => row.turn === match.turn).map((row) => row.seat);
+  const waiting = match.finished ? [] : outstanding(roster, submitted);
+  const lapsed = match.finished ? {} : lapsedSeats(match, mine, waiting);
+  return {
+    match_id: match.match_id,
+    public: match.public === true,
+    title: match.title ?? "",
+    names: match.names ?? {},
+    winner: match.winner ?? null,
+    settings_json: match.settings_json ?? {},
+    seed: match.seed,
+    players: match.settings_json?.players ?? null,
+    mode: match.settings_json?.mode ?? null,
+    seats: roster,
+    turn: match.turn,
+    turn_opened_at: match.turn_opened_at,
+    deadline_hours: match.deadline_hours,
+    finished: match.finished,
+    created_at: match.created_at,
+    updated_at: match.updated_at,
+    status: matchStatus(match, lapsed),
+    waiting,
+    lapsed,
+    unclaimed: match.finished || !match.public ? [] : unclaimedSeats(match),
+  };
+}
+
+/**
+ * The public matches, as the lobby page shows them — or, given `ids`, exactly
+ * those matches, which is how the lobby shows the ones this browser holds a
+ * seat in.
+ *
+ * Without `ids`, only `public` rows: a private match is reachable by knowing its
+ * id, and a list of every id would undo that. The log is never selected — the
+ * lobby shows status, not the game — and neither are the token hashes, which
+ * leave this function as nothing but which seats are still open.
+ */
+async function handleList(call, query, origin) {
+  const columns = "match_id,settings_json,seed,seats,turn,turn_opened_at,deadline_hours,"
+    + "finished,public,title,names,winner,created_at,updated_at";
+  let filter = `public=eq.true&order=updated_at.desc&limit=${LIST_LIMIT}`;
+  if (query.has("ids")) {
+    const ids = listIds(query.get("ids"));
+    if (ids === null) return reply(400, { error: "bad ids" }, origin);
+    filter = `match_id=in.(${ids.join(",")})&order=updated_at.desc`;
+  }
+  const matches = await call(`/pbp_matches?select=${columns}&${filter}`);
   if (matches === null) return reply(502, { error: "store refused" }, origin);
 
   // Order history is needed for live matches only: it is what says who is
@@ -562,31 +642,7 @@ async function handleList(call, origin) {
       `/pbp_orders?select=match_id,turn,seat,source&match_id=in.(${live.join(",")})`);
     if (orders === null) return reply(502, { error: "store refused" }, origin);
   }
-
-  const out = matches.map((match) => {
-    const mine = orders.filter((row) => row.match_id === match.match_id);
-    const roster = match.seats.seats ?? match.seats;
-    const submitted = mine.filter((row) => row.turn === match.turn).map((row) => row.seat);
-    const waiting = match.finished ? [] : outstanding(roster, submitted);
-    const lapsed = match.finished ? {} : lapsedSeats(match, mine, waiting);
-    return {
-      match_id: match.match_id,
-      players: match.settings_json?.players ?? null,
-      mode: match.settings_json?.mode ?? null,
-      seats: roster,
-      turn: match.turn,
-      turn_opened_at: match.turn_opened_at,
-      deadline_hours: match.deadline_hours,
-      finished: match.finished,
-      created_at: match.created_at,
-      updated_at: match.updated_at,
-      status: matchStatus(match, lapsed),
-      waiting,
-      lapsed,
-      unclaimed: match.finished ? [] : unclaimedSeats(match),
-    };
-  });
-  return reply(200, { matches: out }, origin);
+  return reply(200, { matches: matches.map((match) => lobbyEntry(match, orders)) }, origin);
 }
 
 /**
@@ -604,9 +660,11 @@ async function handleClaim(call, body, origin) {
   const { match_id: matchId, seat } = body;
   if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
   if (!Number.isInteger(seat) || seat < 1 || seat > MAX_SEATS) return reply(400, { error: "bad seat" }, origin);
+  const name = cleanText(body.name, NAME_MAX);
+  if (name === null) return reply(400, { error: "bad name" }, origin);
 
   const rows = await call(
-    `/pbp_matches?select=match_id,seats,public,finished,updated_at&match_id=eq.${matchId}`);
+    `/pbp_matches?select=match_id,seats,names,public,finished,updated_at&match_id=eq.${matchId}`);
   if (rows === null) return reply(502, { error: "store refused" }, origin);
   // A private match answers exactly as a missing one does, so claim cannot be
   // used to learn which ids exist.
@@ -620,12 +678,14 @@ async function handleClaim(call, body, origin) {
   const token = mintToken();
   const seats = { seats: roster,
                   tokens: { ...(match.seats.tokens || {}), [seat]: await hashToken(token) } };
+  const patch = { seats, updated_at: new Date().toISOString() };
+  if (name) patch.names = { ...(match.names || {}), [seat]: name };
   const updated = await call(
     `/pbp_matches?match_id=eq.${matchId}&updated_at=eq.${encodeURIComponent(match.updated_at)}`,
     {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ seats, updated_at: new Date().toISOString() }),
+      body: JSON.stringify(patch),
     });
   if (updated === null) return reply(502, { error: "store refused" }, origin);
   if (!updated.length) return reply(409, { error: "match moved, try again" }, origin);
@@ -831,6 +891,11 @@ async function handleResolve(call, body, origin) {
   if (digest !== undefined && (typeof digest !== "string" || digest.length > 64)) {
     return reply(400, { error: "bad board_digest" }, origin);
   }
+  const winner = body.winner;
+  if (winner !== undefined && winner !== null
+      && (!Number.isInteger(winner) || winner < 0 || winner > MAX_SEATS)) {
+    return reply(400, { error: "bad winner" }, origin);
+  }
 
   const rows = await call(`/pbp_matches?select=*&match_id=eq.${matchId}`);
   if (rows === null) return reply(502, { error: "store refused" }, origin);
@@ -865,6 +930,7 @@ async function handleResolve(call, body, origin) {
         turn: turn + 1,
         log,
         finished: body.finished === true,
+        winner: body.finished === true && Number.isInteger(winner) ? winner : null,
         turn_opened_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }),

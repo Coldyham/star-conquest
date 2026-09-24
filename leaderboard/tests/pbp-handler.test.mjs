@@ -35,6 +35,7 @@ const MATCH = "00112233445566ff";
 // failure rather than as a row that happens to have whatever was inserted.
 const DEFAULTS = {
   pbp_matches: { turn: 0, finished: false, log: "", deadline_hours: null, public: false,
+                 title: "", names: () => ({}), winner: null,
                  turn_opened_at: () => new Date().toISOString(),
                  created_at: "", updated_at: "" },
   pbp_orders: { source: "human", board_digest: "", submitted_at: "", id: 0 },
@@ -483,4 +484,76 @@ test("a live match past its deadline lists as lapsed", async () => {
   const [, body] = await list();
   assert.equal(body.matches[0].status, "lapsed");
   assert.deepEqual(body.matches[0].lapsed, { 2: "hold" });
+});
+
+// --------------------------------------------------------------------------
+// What the lobby says about a match: title, seat names, winner, and a lookup by id
+// --------------------------------------------------------------------------
+test("a title and the creator's name are stored cleaned, and listed", async () => {
+  await openedPublic([1, 2], { title: "  Friday\n  night ", name: "Alice\u0007" });
+  assert.equal(TABLES.pbp_matches[0].title, "Friday night");
+  const [, body] = await list();
+  const [m] = body.matches;
+  assert.equal(m.title, "Friday night");
+  assert.deepEqual(m.names, { 1: "Alice" });
+  assert.equal(m.seed, 7);
+  assert.deepEqual(m.settings_json, { mode: "random", players: 2 });
+});
+
+test("an overlong or non-string title or name is refused", async () => {
+  install();
+  const base = { match_id: MATCH, settings_json: {}, seed: 7, seats: [1] };
+  for (const extra of [{ title: "x".repeat(61) }, { name: "x".repeat(25) }, { name: 7 }]) {
+    const [status] = await call("create", { ...base, ...extra });
+    assert.equal(status, 400, JSON.stringify(extra));
+  }
+});
+
+test("a claim may name its own seat, and keeps every other seat's name", async () => {
+  await openedPublic([1, 2, 3], { name: "Alice" });
+  const [status] = await call("claim", { match_id: MATCH, seat: 2, name: "Bob" });
+  assert.equal(status, 201);
+  await call("claim", { match_id: MATCH, seat: 3 });
+  assert.deepEqual(TABLES.pbp_matches[0].names, { 1: "Alice", 2: "Bob" });
+  const [bad] = await call("claim", { match_id: MATCH, seat: 3, name: "x".repeat(40) });
+  assert.equal(bad, 400);
+});
+
+test("ids= lists exactly those matches, private ones included, with no seat to claim", async () => {
+  await opened([1, 2]);
+  TABLES.pbp_matches.push(withDefaults("pbp_matches", {
+    match_id: "ffffffffffffffff", settings_json: {}, seed: 1, rules_version: 2, public: true,
+    seats: { seats: [1, 2], tokens: { 1: "a".repeat(64) } },
+  }));
+  const [, publicOnly] = await list();
+  assert.deepEqual(publicOnly.matches.map((m) => m.match_id), ["ffffffffffffffff"]);
+  const [status, body] = await call("list", { ids: `${MATCH},${MATCH}` }, "GET");
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.deepEqual(body.matches.map((m) => m.match_id), [MATCH]);
+  assert.equal(body.matches[0].public, false);
+  assert.deepEqual(body.matches[0].unclaimed, []);
+  assert.ok(!JSON.stringify(body).includes("tokens"));
+  for (const ids of ["", "nothex", Array(51).fill(MATCH).map((_, i) => i.toString(16).padStart(16, "0")).join(",")]) {
+    const [refused] = await call("list", { ids }, "GET");
+    assert.equal(refused, 400, ids.slice(0, 20));
+  }
+});
+
+test("the winner is stored only on the resolve that finishes the match", async () => {
+  const tokens = await opened();
+  const submitAll = async (turn) => {
+    for (const seat of [1, 2]) {
+      await call("submit", { match_id: MATCH, token: tokens[seat], turn, orders: [] });
+    }
+  };
+  await submitAll(0);
+  await call("resolve", { match_id: MATCH, token: tokens[1], turn: 0, log: "a", finished: false, winner: 2 });
+  assert.equal(TABLES.pbp_matches[0].winner, null, "not while the match runs");
+  await submitAll(1);
+  const [bad] = await call("resolve", { match_id: MATCH, token: tokens[1], turn: 1, log: "b", finished: true, winner: 9 });
+  assert.equal(bad, 400);
+  await call("resolve", { match_id: MATCH, token: tokens[1], turn: 1, log: "b", finished: true, winner: 2 });
+  const [, after] = await state();
+  assert.equal(after.winner, 2);
+  assert.equal(after.finished, true);
 });

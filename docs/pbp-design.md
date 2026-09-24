@@ -326,17 +326,66 @@ other turn does.
 ## Public matches and the lobby
 
 A match opened with **Publicly joinable** ticked is listed on the leaderboard's
-lobby page, `pbp.html`. That page is not linked from anywhere yet. It reads
-`?action=list` and groups matches as open, lapsed, in progress or finished. Only
-public rows are listed. A private match is reachable only by knowing its id, and
-a list of every id would undo that. `?action=claim` answers a private match with
-the same 404 it gives a missing one, for the same reason.
+lobby page, `pbp.html`. The game's **Shared matches** footer button (web only)
+opens it. It shows three groups: open invitations, the matches this browser
+holds a seat in, and finished results. A stranger's match that is under way is
+not listed at all: it offers nothing to do, and with no accounts nobody can tell
+from it whether they are in it. `?action=list` returns only public rows. A
+private match is reachable only by knowing its id, and a list of every id would
+undo that. `?action=claim` answers a private match with the same 404 it gives a
+missing one, for the same reason.
+
+**A match has a name, and the name is derived.** `matchnames.phrase` turns the
+id's first three bytes into an adjective and two nouns, `amber-boulder-comet`.
+The same word lists live in `leaderboard/js/matchnames.mjs`, and
+`tests/test_leaderboard_sync.py` pins the two together. Nothing stores it and
+nothing looks a match up by it: the 16-hex id is still the key everywhere,
+exactly as a star name sits on top of a system id. The id keeps its full 64
+bits, so collisions in the name (24 bits) cost only a confusing label.
+
+**Titles and seat names are self-declared display text.** The creator may give
+a title and their own name in the create prompt, and a joiner may give a name
+when claiming. `names` is `{seat: name}`, and a seat's entry is only ever
+written by whoever holds that seat, at create or claim. That is the same footing
+a posted score's user name has. The game remembers the last name typed
+(`webstore.pbp_name`), and the lobby pre-fills from its own last one or the
+board's posting name. There is no later rename yet. A seat handed out as a
+private link, rather than claimed, stays unnamed.
+
+**The winner is a claim, like `finished`.** The server holds no board, so it
+cannot know who won. The resolving client sends `winner` with the final turn,
+and it is trusted exactly as far as `finished` beside it. 0 is a draw. Any
+client can check it against the stored log.
+
+**"Yours" is this browser's, from two sources.** The lobby keeps
+`{id: {seat, link}}` in its own localStorage (`sc_pbp_mine`). A claim made there
+adds the seat with its full link: that token was minted on the lobby, so keeping
+it there is no weaker than the game's own `WEB_PBP_SEATS_KEY`. The game's button
+hands over `#mine=<id>,<id>` (`pbp.lobby_fragment`), ids only and never a token,
+and the lobby looks them up with `?action=list&ids=`, which returns a private
+match too. Knowing the id is already what `state` requires. *Open in game* uses
+the stored link where there is one, and otherwise a bare `#pbp=<id>`, which the
+game resolves against the seats it remembers (`pbp.bare_match`, `main`'s launch
+path) and refuses plainly when it holds none.
+
+The two stores are separate origins, and on iOS a home-screen web app's storage
+is separate from Safari's too. So the lobby's copy is only a cache: each hand-off
+re-supplies it, and a match the lookup no longer finds drops out of it. A bare
+`#pbp=<id>` opened in a browser that is not the one holding the seat is the case
+that says "open it with your seat link". A claimed seat's link is shown so it can
+be copied to another device.
+
+**The setup goes up pruned.** `pbp.create` sends `Settings.token_dict()`, which
+`from_dict` reads back whole, so the lobby's knob list (`setup.mjs`'s `tweaks`,
+which assumes a pruned dict) reads a match exactly as it reads a map. Matches
+created before this stored the full `to_dict()` form, and their pages list every
+knob.
 
 **An open seat is a missing hash, not a flag.** Tokens are stored only as
 hashes, so no token can be shown twice. A public match therefore mints only the
 creator's token (`claimed: [1]` on create). Each other seat's token is minted
-when somebody presses *Get link* on the lobby page, and that reply is the one
-time it exists in the clear. Minting the token is what claims the seat, so there
+when somebody takes the seat on the match's lobby page. That reply is the one
+time it exists in the clear, and the lobby keeps it in the browser that asked. Minting the token is what claims the seat, so there
 is no second field to keep in step with the hashes.
 
 The claim rewrites the whole `seats` column. It is conditional on `updated_at`

@@ -449,6 +449,7 @@ def pbp_throttled(body: str) -> bool:
 PBP_UNREACHABLE_MSG = "Couldn't reach the match — trying again"
 PBP_MISSING_MSG = "That match isn't on the board anymore"
 PBP_REFUSED_MSG = "That seat link isn't valid for this match"
+PBP_NOT_HELD_MSG = "No seat in that match is saved here — open it with your seat link"
 PBP_UNREADABLE_MSG = "The match answered with something unreadable"
 PBP_OUTDATED_MSG = "That match was started under rules this build has moved past"
 PBP_SENDING_MSG = "Sending your orders..."
@@ -503,6 +504,7 @@ def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
     cannot leave the board held for a turn nobody is waiting on.
     """
     ui.pbp_match = match.match_id
+    ui.pbp_title = match.title
     ui.pbp_waiting = tuple(match.waiting)
     ui.pbp_submitted = match.has_submitted(seat.seat)
 
@@ -605,7 +607,8 @@ def pbp_opened(ui: Ui) -> None:
 
 def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
             deadline_hours: int = pbp.DEADLINE_HOURS,
-            public: bool = False) -> tuple[str, pbp.Request | None]:
+            public: bool = False, title: str = "",
+            name: str = "") -> tuple[str, pbp.Request | None]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -627,6 +630,10 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
     leaderboard's lobby page, where its other seats are claimed; the reply then
     carries seat 1's token alone.
 
+    ``title`` and ``name`` are the prompt's optional display text for the lobby
+    (``menu.MenuState.pbp_title``/``pbp_name``); the name is remembered for the
+    next prompt, blank included, so clearing it sticks.
+
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
@@ -634,7 +641,9 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
     match_id = replay._new_match_id()
     if seats is None:
         seats = [pid for pid in range(1, settings.players + 1)]
-    return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours, public)
+    webstore.set_pbp_name(name)
+    return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours, public,
+                                title, name)
 
 
 def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
@@ -1242,6 +1251,16 @@ async def main() -> None:
     pending_invite_links: list[tuple[int, str]] = []
     invite = (pbp.parse_link(pbp.PBP_FRAGMENT + args.match.strip())
               if args.match.strip() else pbp_request())
+    if invite is None and not args.match.strip() and pending_replay is None:
+        # The lobby's "Open" link: a match id with no token, for a seat this
+        # installation already remembers.
+        bare = pbp.bare_match(webstore.url_token())
+        held = pbp.seat_for(bare) if bare else None
+        if held is not None:
+            invite = (held.match_id, held.token)
+        elif bare:
+            print(f"cannot open match {bare!r}: no seat in it is remembered here")
+            menu.set_status(menu_state, PBP_NOT_HELD_MSG, False)
     if invite is not None and pending_replay is None:
         known = pbp.seat_for(invite[0])
         if known is not None and known.token == invite[1]:
@@ -1507,7 +1526,7 @@ async def main() -> None:
                             # log that won (`pbp_stale`).
                             pbp_write = pbp.send_resolved(
                                 pbp_seat, turn, log, replay.digest_hex(state),
-                                state.winner is not None)
+                                state.winner is not None, state.winner)
                             pbp_resolving = pbp_write is not None
         if ui is not None and not ui.in_pbp:
             # Left the match — back to the menu, a new map, a retry. Nothing in
@@ -1660,7 +1679,8 @@ async def main() -> None:
                         current_seed = resolve_seed(settings)
                         pbp_making, pbp_make = pbp_open(
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
-                            menu_state.pbp_deadline_hours, menu_state.pbp_public)
+                            menu_state.pbp_deadline_hours, menu_state.pbp_public,
+                            menu_state.pbp_title, menu_state.pbp_name)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:

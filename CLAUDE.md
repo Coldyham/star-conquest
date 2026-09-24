@@ -69,7 +69,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`.
+  `pbp`, `matchnames`.
   This is what lets
   `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
   to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
@@ -482,6 +482,13 @@ already resolve simultaneously. The rationale for each rule is in
   `public` rows appear on the lobby page (`leaderboard/pbp.html`, `?action=list`).
   A public match mints the creator's token alone, and an open seat is one with
   no stored hash until `?action=claim` mints it.
+- **A match's name is derived; its title, seat names and winner are claims.**
+  `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by
+  `test_leaderboard_sync`) labels a match from its id and is never a key. Title
+  and `names` are self-declared at create/claim; `winner` rides on the final
+  resolve, trusted as far as `finished`. The lobby's "yours" is this browser's
+  alone: seats claimed there, plus the ids the game hands it as `#mine=` —
+  never a token (`pbp.lobby_fragment`, `pbp.bare_match`).
 
 ### Key conventions
 

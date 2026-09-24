@@ -905,6 +905,20 @@ alter table public.pbp_matches
 create index if not exists pbp_matches_public_idx
   on public.pbp_matches (updated_at desc) where public;
 
+-- What the lobby says about a match beyond its setup. All three are
+-- self-declared display text, set through the function and never read back for
+-- logic: `title` by the creator at `create`; `names` as `{seat: name}`, each
+-- entry written by that seat's own holder (the creator's at `create`, a joiner's
+-- at `claim`); `winner` the seat the resolving client reports on the final turn,
+-- trusted exactly as far as `finished` beside it (0 is a draw by elimination).
+alter table public.pbp_matches
+  add column if not exists title text not null default ''
+    check (char_length(title) <= 60),
+  add column if not exists names jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(names) = 'object' and octet_length(names::text) <= 1024),
+  add column if not exists winner integer
+    check (winner is null or winner between 0 and 6);
+
 -- ONE-OFF, testing only: list the matches that predate the flag. Run once when
 -- adding the column above, never again -- re-running it would publish every
 -- private match since.

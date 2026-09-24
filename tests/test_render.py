@@ -24,6 +24,7 @@ from starconquest import (
     engine,
     fog,
     mapgen,
+    matchnames,
     render,
     starnames,
     turnfilm,
@@ -914,10 +915,16 @@ def test_pbp_shows_which_seat_is_yours():
         assert "(you)" not in blob
         assert "You are" not in blob
 
-        ui.pbp_match = "abc123def456"
+        ui.pbp_match = "00112233445566ff"
         blob = drawn_text(state, ui)
         assert "(you)" in blob
         assert f"You are {config.player_name(1)}" in blob
+        assert matchnames.phrase(ui.pbp_match) in blob, "untitled: the pass-phrase"
+
+        ui.pbp_title = "Friday night"
+        blob = drawn_text(state, ui)
+        assert "Friday night" in blob
+        assert matchnames.phrase(ui.pbp_match) not in blob
     finally:
         pygame.quit()
 

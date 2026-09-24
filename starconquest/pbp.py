@@ -66,6 +66,10 @@ from .settings import Settings, build_state
 # A seat token as the endpoint mints one: 128 bits as hex.
 TOKEN_CHARS = 32
 
+# Display text limits, as the endpoint (`NAME_MAX`/`TITLE_MAX`) enforces them.
+NAME_MAX = 24
+TITLE_MAX = 60
+
 # How long a seat has to take its turn before the clock runs out on it. Two days
 # is what the format is for: play-by-post exists so that nobody keeps an
 # appointment, and a deadline short enough to be missed by an ordinary weekend
@@ -133,6 +137,19 @@ def parse_link(token_text: str) -> tuple[str, str] | None:
     return match_id, token
 
 
+def bare_match(token_text: str) -> str:
+    """The match id out of a token-less ``#pbp=<match id>`` fragment, or ``""``.
+
+    The lobby's way back into a match this installation already holds a seat
+    in: it knows the id but never the token, so the seat is looked up here
+    (``seat_for``).
+    """
+    if not token_text.startswith(PBP_FRAGMENT):
+        return ""
+    match_id = token_text[len(PBP_FRAGMENT):]
+    return match_id if replay._MATCH_ID_RE.fullmatch(match_id) else ""
+
+
 def link_fragment(match_id: str, token: str) -> str:
     """The fragment to hand a player, for the link that seats them."""
     return f"{PBP_FRAGMENT}{match_id}:{token}"
@@ -162,6 +179,14 @@ def remembered() -> dict:
     except (ValueError, TypeError):
         return {}
     return seats if isinstance(seats, dict) else {}
+
+
+def lobby_fragment(limit: int = 50) -> str:
+    """``#mine=<id>,<id>`` for the lobby page: the matches this installation holds
+    a seat in, in the order first remembered, ids only. ``""`` when there are none.
+    ``limit`` is the endpoint's own cap on one lookup (``MAX_LIST_IDS``)."""
+    ids = [mid for mid in remembered() if replay._MATCH_ID_RE.fullmatch(mid)][-limit:]
+    return f"#mine={','.join(ids)}" if ids else ""
 
 
 def seat_for(match_id: str) -> Seat | None:
@@ -211,6 +236,8 @@ class Match:
     rules_version: int = 1
     deadline_hours: int | None = None
     turn_opened_at: str = ""
+    title: str = ""
+    names: dict[int, str] = field(default_factory=dict)
 
     @property
     def waiting(self) -> list[int]:
@@ -268,6 +295,21 @@ def _lapsed_from(raw) -> dict[int, str]:
     return out
 
 
+def _names_from(raw) -> dict[int, str]:
+    """``{seat: name}`` out of the wire, dropping anything that isn't one."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[int, str] = {}
+    for seat, name in raw.items():
+        try:
+            pid = int(seat)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(name, str) and name.strip():
+            out[pid] = name.strip()
+    return out
+
+
 def match_from_dict(data: dict) -> Match | None:
     """Parse ``?action=state``. None if it cannot describe a match at all.
 
@@ -305,6 +347,8 @@ def match_from_dict(data: dict) -> Match | None:
         rules_version=int(data.get("rules_version", 1) or 1),
         deadline_hours=data.get("deadline_hours"),
         turn_opened_at=str(data.get("turn_opened_at", "") or ""),
+        title=str(data.get("title", "") or ""),
+        names=_names_from(data.get("names")),
     )
 
 
@@ -740,12 +784,14 @@ def parse_body(text: str) -> dict | None:
 
 def create(match_id: str, settings: Settings, seed: int, seats: list[int],
            deadline_hours: int | None = DEADLINE_HOURS,
-           public: bool = False) -> Request | None:
+           public: bool = False, title: str = "", name: str = "") -> Request | None:
     """Open a match, seating a person at each of ``seats``.
 
     A ``public`` match is listed on the leaderboard's lobby page and mints only
     seat 1's token here; every other seat's is minted when somebody claims it
     there (``?action=claim``), so the reply carries the creator's link alone.
+    ``title`` and ``name`` (the creator's own, for seat 1) are optional display
+    text for the lobby; the endpoint trims them and refuses one over its limit.
 
     The reply is the one and only time the seat tokens exist in the clear —
     nothing stores them, here or there, so whoever opened the match is who hands
@@ -756,13 +802,15 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
         return None
     return call("create", {
         "match_id": match_id,
-        "settings_json": settings.to_dict(),
+        "settings_json": settings.token_dict(),
         "seed": seed,
         "seats": sorted(set(seats)),
         "rules_version": engine.RULES_VERSION,
         "deadline_hours": deadline_hours,
         "public": public,
         "claimed": [1] if public else sorted(set(seats)),
+        "title": title.strip()[:TITLE_MAX],
+        "name": name.strip()[:NAME_MAX],
     })
 
 
@@ -854,8 +902,9 @@ def send_lapse(seat: Seat, turn: int,
 
 
 def send_resolved(seat: Seat, turn: int, log: replay.GameLog, digest: str,
-                  finished: bool) -> Request | None:
-    """Hand back the turn this client just played out."""
+                  finished: bool, winner: int | None = None) -> Request | None:
+    """Hand back the turn this client just played out — and, on the turn that
+    ends the match, who won it."""
     if not seat.valid():
         return None
     return call("resolve", {
@@ -865,4 +914,5 @@ def send_resolved(seat: Seat, turn: int, log: replay.GameLog, digest: str,
         "log": shareable(log).encoded(),
         "board_digest": digest,
         "finished": finished,
+        "winner": winner if finished else None,
     })

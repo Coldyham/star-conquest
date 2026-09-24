@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, paths, widgets
+from . import config, fog, matchnames, paths, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -1755,9 +1755,13 @@ def _panel_you_are(surface, ui: Ui, x, y) -> int:
     """'You are {seat}', in that seat's own colour — the one line that says
     outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
     shared match can seat a person at any colour, but a solo game has no such
-    ambiguity, since it is always the one seat you are looking at."""
-    return _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
-                config.player_color(ui.human_id))
+    ambiguity, since it is always the one seat you are looking at. Under it,
+    the match's title, or its pass-phrase name where it has none — whichever the
+    lobby headlines it by."""
+    y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+             config.player_color(ui.human_id))
+    label = ui.pbp_title or matchnames.phrase(ui.pbp_match)
+    return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
 
 def _panel_w() -> int:

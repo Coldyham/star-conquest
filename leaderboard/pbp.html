@@ -13,15 +13,15 @@
   <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
 </header>
 
-<!-- Not linked from anywhere yet. Lists the public play-by-post matches
-     (?action=list on /api/pbp) and mints a link for an open seat on request
-     (?action=claim). A minted link exists in the clear only in this page's
-     reply, so it is shown once. -->
+<!-- The list (?action=list on /api/pbp, plus ?action=list&ids= for the matches
+     this browser holds a seat in), or one match's page with ?match=<id>, where
+     an open seat is taken (?action=claim). The game's "Shared matches" button
+     opens this with #mine=<id>,<id>. -->
 <main>
-  <a class="back" href="index.html">← All maps</a>
-  <h1>Play by post</h1>
-  <p class="lede">Public matches. An open seat's link is made when you ask for
-    it and shown once — copy it before you leave the page.</p>
+  <a class="back" id="back" href="index.html">← All maps</a>
+  <h1 id="title">Play by post</h1>
+  <p class="lede" id="lede">Open invitations, your own matches, and finished results.
+    Open a match to see its setup and who is at the table before taking a seat.</p>
   <div id="lobby" class="loading">Loading…</div>
 </main>
 

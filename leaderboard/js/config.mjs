@@ -52,3 +52,8 @@ export const GAME_URL = siblingGame() || GAME_URL_FALLBACK;
 // reproduced the game (`GameLog.is_current` is the same check, on the Python
 // side, for the game's own Watch/resume).
 export const CURRENT_RULES_VERSION = 2;
+
+// Mirror `starconquest.config.PLAYER_NAMES`/`PLAYER_COLORS` by hand, index 0
+// neutral; pinned by `tests/test_leaderboard_sync.py`.
+export const PLAYER_NAMES = ["Neutral", "Azure", "Crimson", "Verdant", "Amber", "Violet", "Gold"];
+export const PLAYER_COLORS = ["#7a808c", "#56aaff", "#f05a5a", "#5fd282", "#f0aa46", "#be82f0", "#f0e66e"];

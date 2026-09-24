@@ -25,6 +25,7 @@ from . import paths
 from .paths import (
     WEB_ANIMATE_TURNS_KEY,
     WEB_BESTS_KEY,
+    WEB_PBP_NAME_KEY,
     WEB_SHARE_GAMES_KEY,
     WEB_SHARED_SETTINGS_KEY,
     data_dir,
@@ -106,6 +107,16 @@ def set_share_games(on: bool) -> bool:
     full quota, a read-only disk), which the caller may want to say out loud —
     an opt-in that silently forgets itself is worse than one that fails."""
     return set(WEB_SHARE_GAMES_KEY, "1" if on else "")
+
+
+def pbp_name() -> str:
+    """The name last given in the play-by-post prompt, or ``""``."""
+    return (get(WEB_PBP_NAME_KEY) or "").strip()
+
+
+def set_pbp_name(name: str) -> bool:
+    """Remember it for next time. False if the store refused."""
+    return set(WEB_PBP_NAME_KEY, name.strip())
 
 
 def animate_turns() -> bool:

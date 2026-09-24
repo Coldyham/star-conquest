@@ -43,7 +43,7 @@ import pygame
 
 from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
-from .paths import LEADERBOARD_CONFIGS_PATH, is_web, saves_dir
+from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -324,6 +324,12 @@ class MenuState:
     # List the match on the leaderboard's lobby page, where its other seats are
     # claimed, rather than handing every seat's link to the creator.
     pbp_public: bool = False
+    # Optional display text for the lobby: the creator's own name (remembered
+    # between matches, `webstore.pbp_name`) and a title for the match. Which of
+    # the two has the caret, if either: "name", "title" or None.
+    pbp_name: str = ""
+    pbp_title: str = ""
+    pbp_editing: str | None = None
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -618,6 +624,45 @@ def _step_deadline(ms: MenuState, by: int) -> None:
         _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
 
 
+# The prompt's two free-text rows: (label, which, character limit).
+_PBP_TEXT_ROWS = (("Your name", "name", pbp.NAME_MAX), ("Title", "title", pbp.TITLE_MAX))
+_PBP_FIELD_W = 300
+
+
+def _pbp_text(ms: MenuState, which: str) -> str:
+    return ms.pbp_name if which == "name" else ms.pbp_title
+
+
+def _set_pbp_text(ms: MenuState, which: str, text: str) -> None:
+    limit = next(cap for _, key, cap in _PBP_TEXT_ROWS if key == which)
+    text = _filter(text, _pbp_char, limit)
+    if which == "name":
+        ms.pbp_name = text
+    else:
+        ms.pbp_title = text
+
+
+def _pbp_char(ch: str) -> bool:
+    return ch.isprintable()
+
+
+def _open_pbp_prompt(ms: MenuState, settings: Settings) -> None:
+    """Open the roster prompt on its defaults: every seat a person, the format's
+    own deadline, private, and the name this installation last used."""
+    ms.pbp_prompt = True
+    ms.pbp_roster = set(range(1, settings.players + 1))
+    ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
+    ms.pbp_public = False
+    ms.pbp_name = _filter(webstore.pbp_name(), _pbp_char, pbp.NAME_MAX)
+    ms.pbp_title = ""
+    ms.pbp_editing = None
+
+
+def _close_pbp_prompt(ms: MenuState) -> None:
+    ms.pbp_prompt = False
+    ms.pbp_editing = None
+
+
 def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
     """Modal: who at the table is a person, and how long their clock runs,
     before the match is even opened.
@@ -629,7 +674,8 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     same as it always was; unchecking a seat leaves it to whatever strategy the
     AI tab already has it playing. The deadline row below the roster is the
     same idea for ``pbp.DEADLINE_HOURS``: a per-match choice made once, here,
-    rather than a fixed 48h nobody could change.
+    rather than a fixed 48h nobody could change. The last two rows are optional
+    text the lobby shows: the creator's name for seat 1, and a match title.
     """
     f = _fonts()
     row_h, gap, pad = 40, 10, 28
@@ -645,8 +691,9 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     pw = max(name_w + sw_size + _CH + 4 * pad, f["normal"].size(title)[0] + 2 * pad,
              deadline_w + 2 * pad, 2 * bw + gap + 2 * pad)
     public_w = f["normal"].size("Publicly joinable")[0] + 10 + _CH
-    pw = max(pw, public_w + 2 * pad)
-    rows = settings.players + 2   # every seat, plus the deadline and public rows
+    label_w = max(f["normal"].size(label)[0] for label, _, _ in _PBP_TEXT_ROWS)
+    pw = max(pw, public_w + 2 * pad, label_w + 16 + _PBP_FIELD_W + 2 * pad)
+    rows = settings.players + 2 + len(_PBP_TEXT_ROWS)
     ph = pad + f["normal"].get_height() + gap + rows * (row_h + gap) + bh + pad
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
@@ -687,6 +734,20 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     _checkbox(surface, ms, "pbp_public", ms.pbp_public,
               panel.right - pad, y + (row_h - _CH) // 2)
     y += row_h + gap
+
+    for label, which, _ in _PBP_TEXT_ROWS:
+        _text(surface, f["normal"], label, config.COLOR_TEXT,
+              midleft=(panel.x + pad, y + row_h // 2))
+        field = pygame.Rect(panel.right - pad - _PBP_FIELD_W, y + (row_h - _CH) // 2,
+                            _PBP_FIELD_W, _CH)
+        text = _pbp_text(ms, which)
+        editing = ms.pbp_editing == which
+        if text or editing:
+            _text_field(surface, f["normal"], field, text, editing, config.COLOR_TEXT)
+        else:
+            _text_field(surface, f["normal"], field, "optional", False, config.COLOR_TEXT_DIM)
+        ms.rects[f"pbp_{which}_field"] = field
+        y += row_h + gap
 
     by = panel.bottom - pad - bh
     go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
@@ -1259,7 +1320,7 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
-    ``_SAVE_DIR``. Web: '[Get Link] ... [Recently played]' — the web build's data
+    ``_SAVE_DIR``. Web: '[Get Link] [Shared matches] [Recently played]' — the web build's data
     dir is pygbag's in-memory virtual filesystem, which doesn't survive a reload,
     so a file saved there would silently vanish. Get Link (a URL token in the
     address bar plus ``localStorage``) is the persistence path that actually
@@ -1280,10 +1341,16 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
         _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         boards = pygame.Rect(rx - 190, y, 190, _CH)
         _button(surface, ms, "browse_configs", boards, "Recently played", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        if pbp.configured():
+            gap = boards.x - link.right
+            lobby = pygame.Rect(link.right + (gap - 190) // 2, y, 190, _CH)
+            _button(surface, ms, "browse_matches", lobby, "Shared matches", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        else:
+            ms.rects.pop("browse_matches", None)
         return
 
-    ms.rects.pop("get_link", None)
-    ms.rects.pop("browse_configs", None)
+    for key in ("get_link", "browse_configs", "browse_matches"):
+        ms.rects.pop(key, None)
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
     field = pygame.Rect(lx, y, save.x - 10 - lx, _CH)
@@ -1523,14 +1590,21 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
 
 def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     """Answer the play-by-post roster prompt: toggle a seat, nudge the deadline,
-    confirm (opens the match with whichever seats are still checked, on the
-    deadline shown), or cancel outright.
+    type a name or title, confirm (opens the match with whichever seats are
+    still checked, on the deadline shown), or cancel outright.
 
     Seat 1's row is never a hit target (`_draw_pbp_prompt` draws it but records
     no rect for it) — the creator ends up seated there regardless, so there is
-    nothing for a click on it to toggle.
+    nothing for a click on it to toggle. While a text field has the caret, Esc
+    leaves the field rather than the prompt, and Tab moves to the other field.
     """
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        ms.pbp_editing = None
+        for _, which, _ in _PBP_TEXT_ROWS:
+            rect = ms.rects.get(f"pbp_{which}_field")
+            if rect is not None and rect.collidepoint(event.pos):
+                ms.pbp_editing = which
+                return None
         for seat in range(2, settings.players + 1):
             rect = ms.rects.get(f"pbp_seat_{seat}")
             if rect is not None and rect.collidepoint(event.pos):
@@ -1546,17 +1620,27 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
             ms.pbp_public = not ms.pbp_public
             return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
-            ms.pbp_prompt = False
+            _close_pbp_prompt(ms)
             return "play_by_post"
         if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
-            ms.pbp_prompt = False
+            _close_pbp_prompt(ms)
             return None
+    elif event.type == pygame.TEXTINPUT and ms.pbp_editing is not None:
+        _set_pbp_text(ms, ms.pbp_editing, _pbp_text(ms, ms.pbp_editing) + event.text)
     elif event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            ms.pbp_prompt = False
+            _close_pbp_prompt(ms)
             return "play_by_post"
+        if ms.pbp_editing is not None:
+            if event.key == pygame.K_ESCAPE:
+                ms.pbp_editing = None
+            elif event.key == pygame.K_TAB:
+                ms.pbp_editing = "title" if ms.pbp_editing == "name" else "name"
+            elif event.key == pygame.K_BACKSPACE:
+                _set_pbp_text(ms, ms.pbp_editing, _pbp_text(ms, ms.pbp_editing)[:-1])
+            return None
         if event.key == pygame.K_ESCAPE:
-            ms.pbp_prompt = False
+            _close_pbp_prompt(ms)
             return None
     return None
 
@@ -1618,6 +1702,10 @@ def pump(ms: MenuState, settings: Settings) -> None:
         if text != ms.seed_text:
             ms.seed_text = text
             _apply_seed_text(ms, settings)
+    elif ms.pbp_editing is not None and field_name == f"pbp_{ms.pbp_editing}":
+        raw = softkeyboard.value(_pbp_text(ms, ms.pbp_editing))
+        _set_pbp_text(ms, ms.pbp_editing, raw)
+        text = _pbp_text(ms, ms.pbp_editing)
     else:
         raw = softkeyboard.value(ms.filename)
         text = _filter(raw, lambda c: c.isalnum() or c in "_-.", _FILENAME_MAX_LEN)
@@ -1628,6 +1716,7 @@ def pump(ms: MenuState, settings: Settings) -> None:
         softkeyboard.set_value(text)
     if softkeyboard.dismissed():  # Done/Go, or the keyboard swiped away
         ms.editing_seed = ms.editing_filename = False
+        ms.pbp_editing = None
         softkeyboard.close()
 
 
@@ -1637,7 +1726,10 @@ def _filter(text: str, allowed, limit: int) -> str:
 
 
 def _editing_field(ms: MenuState) -> str | None:
-    """Which text field has the caret, if any — ``"seed"``, ``"file"`` or None."""
+    """Which text field has the caret, if any — ``"seed"``, ``"file"``,
+    ``"pbp_name"``, ``"pbp_title"`` or None."""
+    if ms.pbp_prompt and ms.pbp_editing is not None:
+        return f"pbp_{ms.pbp_editing}"
     if ms.editing_seed:
         return "seed"
     return "file" if ms.editing_filename else None
@@ -1695,6 +1787,8 @@ def _sync_text_input(ms: MenuState, before: str | None) -> None:
         pass
     if now is None:
         softkeyboard.close()
+    elif now.startswith("pbp_"):
+        softkeyboard.open(_pbp_text(ms, now[len("pbp_"):]))
     else:
         softkeyboard.open(ms.seed_text if now == "seed" else ms.filename)
 
@@ -1766,10 +1860,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         # rather than the only option.
         if _start(ms, settings, "play_by_post") is None:
             return None
-        ms.pbp_prompt = True
-        ms.pbp_roster = set(range(1, settings.players + 1))
-        ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
-        ms.pbp_public = False
+        _open_pbp_prompt(ms, settings)
         return None
     if hit == "quit":
         return "quit"
@@ -1878,6 +1969,16 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             set_status(ms, "Link updated — copy it from the address bar", True)
         else:
             set_status(ms, "Couldn't create link", False)
+    elif hit == "browse_matches":
+        url = webstore.leaderboard_url(LEADERBOARD_LOBBY_PATH + pbp.lobby_fragment())
+        if not url:
+            set_status(ms, "No leaderboard is configured", False)
+        elif webstore.open_url(url):
+            set_status(ms, "Shared matches opened", True)
+        elif webstore.copy_to_clipboard(url):
+            set_status(ms, "Couldn't open a tab — link copied instead", True)
+        else:
+            set_status(ms, "Couldn't open the lobby", False)
     elif hit == "browse_configs":
         url = webstore.leaderboard_url(LEADERBOARD_CONFIGS_PATH)
         if not url:

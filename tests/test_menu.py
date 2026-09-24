@@ -264,6 +264,87 @@ def test_the_roster_prompt_deadline_stepper_moves_in_whole_days(monkeypatch):
         pygame.quit()
 
 
+def _press_field(screen, ms, settings, which):
+    menu.draw(screen, ms, settings)
+    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                            pos=ms.rects[f"pbp_{which}_field"].center, button=1)
+    return menu.handle_event(ev, ms, settings)
+
+
+def test_the_roster_prompt_takes_an_optional_name_and_title(monkeypatch, tmp_path):
+    """Two free-text rows: the name starts as the one used last time, the title
+    blank. Tab moves between them, Esc leaves the field rather than the prompt,
+    and Enter still confirms."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    menu.webstore.set_pbp_name("Alice")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert (ms.pbp_name, ms.pbp_title, ms.pbp_editing) == ("Alice", "", None)
+
+        _press_field(screen, ms, settings, "name")
+        assert ms.pbp_editing == "name"
+        _keydown(ms, settings, pygame.K_BACKSPACE)
+        _textinput(ms, settings, "x\n")
+        assert ms.pbp_name == "Alicx", "a control character is not text"
+
+        _keydown(ms, settings, pygame.K_TAB)
+        assert ms.pbp_editing == "title"
+        _textinput(ms, settings, "y" * 80)
+        assert ms.pbp_title == "y" * menu.pbp.TITLE_MAX
+
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert ms.pbp_prompt and ms.pbp_editing is None
+        _textinput(ms, settings, "z")
+        assert ms.pbp_title == "y" * menu.pbp.TITLE_MAX, "no field has the caret"
+
+        _press_field(screen, ms, settings, "name")
+        assert _keydown(ms, settings, pygame.K_RETURN) == "play_by_post"
+        assert not ms.pbp_prompt and ms.pbp_editing is None
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_fields_sit_inside_the_panel_and_clear_of_each_other():
+    screen, ms, settings = _setup()
+    try:
+        settings.players = 6
+        _click_key(screen, ms, settings, "play_by_post")
+        menu.draw(screen, ms, settings)
+        keys = ["pbp_name_field", "pbp_title_field", "pbp_public", "pbp_deadline_inc",
+                "pbp_confirm", "pbp_cancel"] + [f"pbp_seat_{s}" for s in range(2, 7)]
+        rects = [ms.rects[k] for k in keys]
+        for i, a in enumerate(rects):
+            for b in rects[i + 1:]:
+                assert not a.colliderect(b)
+    finally:
+        pygame.quit()
+
+
+def test_shared_matches_opens_the_lobby_with_the_seats_held_here(monkeypatch, tmp_path):
+    """Ids only: the lobby is handed which matches are ours, never a token."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
+    token = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    menu.pbp.remember(menu.pbp.Seat("00112233445566ff", 2, token))
+    opened = []
+    monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
+    screen, ms, settings = _setup()
+    real_is_web = menu.is_web
+    menu.is_web = lambda: True
+    try:
+        menu.draw(screen, ms, settings)
+        for other in ("get_link", "browse_configs"):
+            assert not ms.rects["browse_matches"].colliderect(ms.rects[other])
+        assert _click_key(screen, ms, settings, "browse_matches") is None
+        assert opened == [menu.webstore.leaderboard_url(
+            menu.LEADERBOARD_LOBBY_PATH + "#mine=00112233445566ff")]
+        assert token not in opened[0]
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
 def test_cancelling_the_roster_prompt_opens_no_match():
     screen, ms, settings = _setup()
     try:
