@@ -489,21 +489,47 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 900 games, 58 timed out and are excluded from the
+nodes, default settings — 900 games, 64 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
-docstring, the next time marshal or the roster's pricing changes:
+docstring, the next time marshal or the roster's pricing changes. Re-run with
+`DENY_SWAP` and `RIVAL_REFLOOD_MIN_TURNS` shipped ("Denying the swap" and
+"Phase 3b re-flooding" below). The gate is inert here, since no lane on this
+cell is 5 turns, and the table moved by one game (258/249 and 57% with
+`DENY_SWAP` alone):
 
-    marshal 251 (30%), knower 248 (29%), thinker 167 (20%),
-    claudebot 92 (11%), heuristic 46 (5%), rusherplus 38 (5%)
+    marshal 257 (31%), knower 250 (30%), thinker 160 (19%),
+    claudebot 91 (11%), heuristic 50 (6%), rusherplus 28 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  marsha  thinke  claude  heuris  rusher
-      knower         —     49%     84%     95%    100%    100%
-      marshal      51%       —     89%     98%    100%    100%
-      thinker      16%     11%       —     88%     98%     97%
-      claudebot     5%      2%     12%       —     81%     73%
-      heuristic     0%      0%      2%     19%       —     64%
-      rusherplus    0%      0%      3%     27%     36%       —
+      knower         —     44%     93%     96%    100%    100%
+      marshal      56%       —     94%    100%    100%     98%
+      thinker       7%      6%       —     94%     96%    100%
+      claudebot     4%      0%      6%       —     78%     85%
+      heuristic     0%      0%      4%     22%       —     68%
+      rusherplus    0%      2%      0%     15%     32%       —
+
+The same ladder in two other cells, since this one cannot see anything keyed on
+long lanes. Both 30 seeds and 900 games; the second at `--max-turns 1500`:
+
+    symmetric, 18 nodes, 6 ly/turn     189 timeouts
+    marshal 221 (31%), knower 211 (30%), thinker 119 (17%),
+    claudebot 99 (14%), heuristic 41 (6%), rusherplus 20 (3%)
+    marshal vs knower 75%
+
+    random, 24 nodes, 3 ly/turn        96 timeouts
+    marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
+    claudebot 84 (10%), heuristic 64 (8%), rusherplus 5 (1%)
+    marshal vs knower 76%
+
+Same order in all three, but marshal leads knower by a much wider margin in
+both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
+Head to head it is 60 games a pair less timeouts, so read it as a direction.
+
+The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the
+head-to-head at 51% and 58 timeouts. The same caveat as the paragraph below
+applies: 60 games a pair cannot resolve a few points, so this says nothing
+regressed, not that the knower cell moved.
 
 Re-run after the retreat fixes below and it did not move: 251/248 against
 251/249, the knower head-to-head 51% against 50%, one more timeout. That is not
@@ -713,11 +739,15 @@ of everything marshal loses was undefended at the start of the turn. A candidate
 fix — threat propagating one hop through a neutral buffer, priced with
 `combat._survivors` and discounted — measured 51.8% (z = 0.76) in self-play and
 **26.7% (8-22) at 12 nodes and 3 ly/turn**, where holding ships back against a
-threat many turns away is ruinous. Not shipped. The exposure is real and no bot
-in the roster punishes it; a probe written to exploit it deliberately (cheapest
-non-owned neighbour first, never consolidate) lost 240 games out of 240, so
-whether closing it is worth anything is **still unmeasured** and needs a probe
-that concentrates force to break one point rather than attacking everywhere.
+threat many turns away is ruinous. Not shipped. A probe written to exploit it
+deliberately (cheapest non-owned neighbour first, never consolidate) lost 240
+games out of 240, which left open whether the exposure was worth closing.
+
+> **Since measured, and the exposure is mostly not one.** Those empty systems are
+> overwhelmingly *evacuated* ones — the doomed branch doing its job — and a
+> concentrating probe built to punish the rest loses to stock marshal in every
+> cell. See "The empty interior is the retreat" under "A non-oracle successor to
+> marshal" below before building anything against it.
 
 **Two methodological notes.** The harness paired every line-up with its exact
 mirror (the two variants swapped between seats) on the same seed, so with
@@ -1458,6 +1488,62 @@ inference that removing the gate would let the converse pay.
 Nothing shipped. The value of the exercise is the correction: four null results
 with one shared explanation, and the explanation was checkable and false.
 
+### The attack side of the pile-up: shipped for correctness, measured null
+
+The re-tune above moved Phase 1 onto the garrison-fights-last rule; `_required`
+never followed it. It still folds every third-party bloc from `_rival_waves` into
+the garrison through `_after_clash`, including a bloc landing on **the same turn
+as our strike**, and under the current rule that one never meets the garrison
+first. Attackers fold among themselves at parity and the garrison fights
+whatever survives, so a same-turn bloc is fought by *us*. The old fold prices it
+as a discount (a 16 landing with us on a rival 20 drops the price from 21 to
+about 18), where the fight actually costs us roughly `sqrt(need^2 + R^2)`. The
+"distinguishing a bloc that lands *with* us is a wash" result in "Racing a third
+player" was measured under the old by-size fold, so it did not settle this.
+
+The fix folds earlier-turn blocs per turn through
+`_attacker_pileup` and then against the garrison. Same-turn blocs were priced by
+the smallest strike that still carries the rival-margin requirement out of an
+engine-order attacker fold, taking our unlucky jitter corner in each clash.
+At zero jitter it matches `combat.resolve_arrival` exactly
+(`test_pileup_survivors_matches_the_engine_fold`). It is inert in a duel by
+construction, so it was measured, behind a temporary flag, with the paired
+multi-seat harness
+(variant and stock marshal placed in every ordered seat pair per seed, fillers
+in the remaining seats):
+
+    cell                                        V-B        n     rate      z   timeouts
+    symmetric 24n 3p (thinker)               493-501     994    49.6%  -0.25   739/1800
+    symmetric 30n 4p (thinker+knower)        467-474     941    49.6%  -0.23   582/1800
+    symmetric 30n 4p (thinker+claudebot)     331-328     659    50.2%  +0.12   490/1200
+    symmetric 30n 4p, advantage 1.25         197-196     393    50.1%  +0.05   692/1200
+    random 30n 4p @ 3 ly/turn (th+kn)        382-387     769    49.7%  -0.18   187/1200
+    random 24n 3p @ 3 ly/turn (thinker)      405-400     805    50.3%  +0.18   275/1200
+    random 36n 5p (th+kn+claudebot)          261-257     518    50.4%  +0.18    30/800
+    ---- pooled                            2536-2543    5079    49.9%  -0.10
+
+**Why it is null.** Instrumented over 20 games, the price differed in 14 of
+18,103 rival-target lookups on symmetric 24n 3p, and 128 of 20,068 on random
+30n 4p. Every change was upward: a same-turn bloc has to be visible *and* due to
+land on exactly our horizon. The earlier-turn per-owner fold never changed a
+price at all, because two third parties landing on one rival system on the same
+earlier turn essentially never happens. A same-turn pile-up on a *neutral* is
+rarer still (3 lookups in 20 symmetric games), so the neutral branch keeps its
+measured static price. Symmetric maps are the regime this was aimed at, and they
+only make it rarer: their long stalemates are the 40-60% timeouts above, not
+races for the centre.
+
+**Shipped anyway, and unflagged.** This is not a tuning knob but the bot's
+estimate of a fight agreeing with the engine's rule. At a null it costs nothing,
+and a bot whose prices are right is easier to reason about and to build on than
+one carrying a known-wrong fold only because the error is rare. That makes it a
+deliberate exception to the usual "measured null, deleted" rule above. It applies
+to correctness fixes, never to new tactics: the remnant tactic and the neutral
+fold were *choices* about what to do, and a null there still means delete. The
+legacy fold was removed rather than kept behind a flag, and duels are untouched
+by construction, so the `--ladder` table under "Where marshal stands" stays
+current.
+
 ### Phase 3b re-flooding an already-covered target, and a settled dead end's stranded surplus
 
 Found by inspection of a real game, not a sweep: Phase 3's horizon search sets
@@ -1553,6 +1639,65 @@ reported, with nothing borrowed from a mechanism that needed to stay put. Not a
 re-tune of a margin, so no `RISK_PARITY`-style constant to float against
 `DEFENDER_ADVANTAGE` here; the fix is a bookkeeping correction, scoped to
 exactly the case that has no jitter cushion to lose.
+
+**Re-applied to rival sieges on long lanes, it pays** (`RIVAL_REFLOOD_MIN_TURNS
+= 5`). The regression above was measured at the default speed, where lanes run
+2-4 turns; the long-lane cell (57.7% -> 53.6%) is what the scoping gave back.
+So the gate now also covers a rival-held target once the strike's horizon is at
+least `RIVAL_REFLOOD_MIN_TURNS` turns. The neutral-only "settled" rule for
+Phase 4 is unchanged: a rival can reinforce, so a source facing a covered rival
+siege stays a live front and keeps its reserve. Measured against marshal with
+`DENY_SWAP` shipped (see "Denying the swap" below), since both touch the same
+Phase 3b pour into a rival:
+
+    tools/sweep.py, 200 seeds       K = 4           K = 5           K = 8
+    24n, 2 ly/turn                  56.0% +2.20     56.0% +2.20     56.2% +2.29
+    24n, 3 ly/turn                  52.2%           54.2% +1.56     51.4%
+    18n, 6 ly/turn                  48.3% -0.67     50.3%           50.0% (inert)
+    18n, 6 ly/turn, adv 1.5         49.6%           50.0% (inert)   50.0% (inert)
+
+K = 4 reaches the default-speed lanes and is the only arm leaning below 50%
+there, so K = 5 shipped: effectively inert wherever the advantage regression
+was measured. Fresh seeds confirm the gain and show no high-advantage cost on
+long lanes:
+
+    K = 5 over DENY_SWAP alone            W-L        n     rate      z
+    24n, 2 ly/turn, seeds 1-500         452-345     797    56.7%  +3.79
+    24n, 2 ly/turn, seeds 2001-2300     281-215     496    56.7%  +2.96
+    24n, 3 ly/turn, seeds 1001-1300     270-248     518    52.1%  +0.97
+    24n, 3 ly/turn, seeds 2001-2300     294-240     534    55.1%  +2.34
+    18n, 3 ly/turn, seeds 1001-1300     279-227     506    55.1%  +2.31
+    18n, 3 ly/turn, seeds 2001-2300     275-236     511    53.8%  +1.73
+    24n, 3 ly/turn, adv 1.25            222-206     428    51.9%  +0.77
+    24n, 3 ly/turn, adv 1.5             148-145     293    50.5%  +0.18
+    melee 3p + knower, 24n, 3 ly/turn   233-228    (knower 111 of 600)   null
+
+**Symmetric maps cannot measure it.** Gate on against gate off, 300 symmetric
+seeds a cell: 85-94% of slow-lane games time out even at 1500 turns (51-91
+decided games per cell, 51.0-55.3%, all null), and the default-speed cell reads
+exactly 50% (inert). Against knower instead, on the same 150 seeds, the two
+arms read 90% / 88%, 80% / 77% and 88% / 85% of only 17-57 decided games.
+A perfectly fair start on long lanes is a stalemate between these bots, so
+there is nothing to read in either direction.
+
+**It and `DENY_SWAP` overlap but are not the same fix.** Each alone, against
+neither, and against each other, on the same seeds (2001-2300), pooled over
+24n at 2 and 3 ly/turn and 18n at 3:
+
+    comparison                       W-L        n     rate      z
+    DENY_SWAP vs neither           886-675    1561    56.8%  +5.34
+    gate vs neither                873-665    1538    56.8%  +5.30
+    gate vs DENY_SWAP              790-755    1545    51.1%  +0.89
+    both vs DENY_SWAP              850-691    1541    55.2%  +4.05
+    both vs gate                   788-724    1512    52.1%  +1.65
+
+Equally strong alone and level head to head, so both are cutting the same
+waste: surplus poured after a rival siege that no longer needs it, leaving a
+long-exposed source. They are partly additive. The gate adds about five points
+on top of `DENY_SWAP` (reproduced over three seed batches), while `DENY_SWAP`
+adds about two on top of the gate (not significant). If only one were kept, the
+gate is the simpler one: a skip where `DENY_SWAP` has hold arithmetic. Both
+shipped, since the pair beats either.
 
 ## A non-oracle successor to marshal
 
@@ -1690,9 +1835,10 @@ by what the rival's own garrison would need to step into it — piloted at
 unvalidated, unpiloted mechanism when the goal is already measurably met would
 be exactly the unmeasured complexity this file's own convention argues against.
 If pushing the win rate higher later becomes the goal rather than clearing the
-bar, the "empty interior" weakness under "Racing a third player for the same
-system" — properly scoped by travel time, which the one prior attempt at it
-lacked — looks better-motivated than `DENY_SWAP`.
+bar, this paragraph used to point at the "empty interior" weakness as the
+better-motivated target. It has since been measured and is not one (next
+section), which left `DENY_SWAP` — since built, and shipped in a narrower form
+than the pilot described; see "Denying the swap" below.
 
 **Folded into `models/marshal.py` directly** rather than shipped as a second
 bot (`models/test.py` deleted, `tests/test_test.py` deleted, its mechanism
@@ -1712,6 +1858,219 @@ while a direct 30-seed check read 17%. Diagnose with a direct 20-40-seed check
 before dropping a cell, and if reordering the cell list to land it on both smoke
 seeds instead of being starved to a handful after a bad one fixes it (as it did
 here), that is a legitimate workaround, not a fudge.
+
+### The empty interior is the retreat: a concentrating probe, and a fix with nothing to fix
+
+"The 2026-09 tuning sweep" left one exposure open: 35.8% of the systems marshal
+loses were empty when the turn began, and the only probe aimed at it had lost 240
+of 240 by spreading itself thin. Two things were needed — a breakdown of *where*
+those losses happen, and a probe that concentrates rather than spreads.
+
+**Where marshal loses systems.** A duel against itself, 24 nodes, 6 ly/turn, 40
+games, every loss classed by what the system bordered when the turn began:
+
+    bordering a rival       2317 lost   (84%)   900 of them empty at turn start
+    bordering only neutrals    7 lost   (0.3%)    3 empty
+    interior                 423 lost   (15%)   176 empty
+
+The neutral buffer the earlier fix propagated threat through is where marshal
+loses **seven systems in forty games** — the candidate fix was aimed at a case
+that effectively does not occur. And every one of the 423 interior losses (423 of
+423) is a fleet *already on the lane* when the turn began, landing that same
+turn, with no neighbour lane short enough to relieve it. The fleet was launched
+at a frontier system from a rival system marshal has since taken behind it — the
+swap — which is what makes the target read as "interior" by the time it falls.
+
+**They are evacuations, not an undefended rear.** Tracking each hostile fleet from
+the turn it is first visible: 410 of the 423 interior losses (97%) were out-shipped
+at first sight, and in 307 (73%) the garrison left while the fleet was on its way.
+Over *every* system lost while empty, 1027 of 1079 (95%) emptied while the
+attacking fleet was visible. The empty-at-start statistic is overwhelmingly
+Phase 2 moving a doomed garrison out ahead of a strike it cannot hold — which
+"Garrisons run away" measured as worth having and "Two doomed neighbours" tuned.
+At 12 ly/turn the residue is 66 empty losses in 40 games, every one a 1-turn
+strike, which is the trade `FAST_GUARD_WEIGHT = 0` already makes deliberately.
+
+**The concentrating probe** (`models/spearhead.py`, measured at `b4f7839` and
+then deleted — a probe, not a roster bot) is marshal itself plus one overlay, so
+it is exactly as competent everywhere else and any gap is the overlay's; an arm
+with the overlay switched off came back bit-identical to stock marshal in every
+smoke game, which is the check that licenses that claim:
+
+  * **One hammer.** Each turn, the largest garrison it holds that borders a rival
+    is the hammer. If that stack can take a rival neighbour at marshal's own
+    `_required` price it goes in, at the target that opens the most: its
+    production rate plus that of the rival systems past it the remainder could
+    still take (`DEPTH_WEIGHT`). Next turn the stack sits on the capture, is
+    still the largest garrison, now borders whatever lies behind, and goes
+    again. Nothing is remembered; the hammer is re-derived from the board.
+  * **Everything feeds it** (`FEED_HAMMER`). Every own-to-own move marshal
+    emits that is not relief for a threatened system is rerouted one hop along
+    the shortest owned path to the hammer, so the economy converges on one
+    point instead of marshal's flow to every front.
+  * **All in, or over the guard** (`LEAVE_GUARD`). The first version sent the
+    hammer's whole garrison; the second keeps marshal's own frontier guard at
+    home and swings only the rest.
+
+`tools/sweep.py` against stock marshal, 5 cells (18/24/40 nodes at 6 ly/turn, 24
+at 12 and at 3), every row REPRODUCED across both seed halves:
+
+    arm                                       W-L        n    rate       z
+    all in, fed (150 seeds)              336-1106     1442   23.3% -20.28
+      ...unfed                           375-1070     1445   26.0% -18.28
+      ...no depth term                   309-1123     1432   21.6% -21.51
+    over the guard, fed (100 seeds)       324-535      859   37.7%  -7.20
+      ...unfed                            367-501      868   42.3%  -4.55
+
+Worst at 3 ly/turn (9.2% all in, 24.6% over the guard) and least bad at
+12 ly/turn (42.4% and 44.0%, the latter not significant), where lanes are one turn
+and nothing sees a strike coming for either side. Feeding the hammer is worth
+nothing or less; leaving the source empty is what cost the first version most of
+its games, because marshal walks into the vacated source behind the stack.
+
+**It does get into the interior — and it does not matter.** Interior losses per
+game it inflicts on marshal, against what other opponents inflict:
+
+    opponent            24 nodes   40 nodes
+    marshal                 10.4       14.0
+    spearhead (guard)       15.2       19.2
+    thinker                  4.9        7.3
+    knower                   1.8        2.5
+
+The probe penetrates half as often again as marshal does, and still loses 38%
+to 62. The most dangerous bot on the roster, knower, penetrates least of all. A
+system taken in marshal's rear is retaken at the same one-ship price it fell for,
+and the stack that took it is not fighting anywhere that matters. Concentration
+pays through the square law only in a fight, and against a bot that evacuates
+what it cannot hold there is rarely a fight to win.
+
+**The travel-time-scoped fix, built and inert.** The best-motivated closure was
+`DEEP_RELIEF`: let Phase 1 draw relief from owned systems *past* the threatened
+system's neighbours, by owned-path travel time within the deadline — holding
+nothing back in advance, reacting only to fleets already visible, which is what
+the neutral-buffer attempt got wrong. It came back bit-identical to stock marshal
+in every smoke game, and instrumenting Phase 1 says why: of 6575 threatened-system
+decisions at 24 nodes and 6 ly/turn, **none** had a two-hop source inside the
+deadline (1 in 10047 at 3 ly/turn). The deadline is the earliest arrival, and two
+lanes never fit inside the one-lane warning a strike gives. Not shipped, since it
+does nothing.
+
+So the exposure is closed as a question rather than as a patch: what looks like
+an undefended interior is the retreat rule leaving systems empty on purpose, the
+residue is either a 1-turn strike no guard can see or a swap nobody could
+relieve, and the strongest probe built against it is a worse bot than the one it
+probes.
+
+### Denying the swap: shipped for long lanes, and only on the surplus
+
+**The swap is common.** Every seat decides against the same start-of-turn board,
+so a strike from S on a rival's T and that rival's own launch from T into S go out
+on the same turn, neither side seeing the other's order, and both systems change
+hands. Instrumented over 20 duel seeds at 24 nodes and 6 ly/turn: **1440 of 6942**
+of marshal's strikes on a rival (21%) met a same-turn launch out of the target into
+the source against itself, 1878 of 8154 (23%) against knower, 475 of 3128 (15%)
+against thinker.
+
+**`DENY_SWAP`** caps a source's commitment so what stays behind can hold against
+the target's entire garrison stepping in: `ceil(DENY_SWAP * T.ships *
+_defend_margin())`, less what S will build over the lane back. Rival targets only
+— a neutral does not move.
+
+**Applied to Phase 3's priced strike it is a disaster**, and monotonically so.
+`tools/sweep.py` against stock marshal, six cells (18/24/40 nodes at 6 ly/turn,
+24 at 12 and at 3, and advantage 1.25), 200 seeds, every row REPRODUCED:
+
+    DENY_SWAP        W-L        n    rate       z
+       0.5        993-1085    2078   47.8%   -2.02
+       1.0        588-1175    1763   33.4%  -13.98
+       1.5        278-1253    1531   18.2%  -24.92
+
+with timeouts climbing 322 -> 637 -> 869 — the stalemate signature. Tracing it:
+the cap mostly *declines strikes* rather than protecting sources (strikes on a
+rival fell from ~10,000 to ~5,500 over the same games, and the per-launch
+step-in rate barely moved, 12.8% to 12.0%). A strike the cap prices out is a
+target the rival keeps.
+
+**Surplus-only is the version that works** (`DENY_SWAP_SURPLUS_ONLY`): Phase 3
+strikes at its price exactly as before, and the cap applies to Phase 3b's pour
+alone. Pooled over the same six cells it is a null — 50.3% at 0.5 and 51.4% at
+1.0 — but one cell stood out: **56.8% at 3 ly/turn** (z = +2.39). One cell of
+twelve readings is what a false positive looks like, so it was re-run alone on
+400 fresh seeds at 18 and 24 nodes: **56.8% again (706-537, z = +4.79),
+REPRODUCED**, and a win *share* of all games of 44.1% against 33.6%, so not a
+timeout artefact. At 12 ly/turn it read 48.5% — not significant, but the wrong
+side.
+
+**So it is a long-lane mechanism, gated per lane** (`DENY_SWAP_MIN_TURNS`), the
+same shape as `FAST_GUARD_WEIGHT`: keyed on `state.travel_turns` rather than on
+a global speed setting. Lane lengths by cell: 3 ly/turn is almost all 4-8 turns,
+6 ly/turn 2-4 (a third to a half at 4), 12 ly/turn 1-2. A third, fresh seed
+batch, 300 seeds:
+
+    gate          default speed + 12 ly/turn    3 ly/turn + adv 1.25
+    K = 4         50.8% (1129-1095)  null       55.1% (772-628)  z = +3.85
+    K = 5         50.2%              null       54.1%            z = +3.09
+    K = 6         bit-identical (inert)         53.5%            z = +2.60
+
+K = 4 keeps the whole slow-lane gain (57.0% and 57.7% in its two 3-ly cells), is
+an honest null at the default speed, reads **exactly** 50.0% at 12 ly/turn
+(structurally inert — no lane there is 4 turns) and 50.6% at advantage 1.25. It
+shipped at `DENY_SWAP = 1.0`, surplus-only, `K = 4`.
+
+**Against the rest of the roster** (200 fresh seeds, 24 and 18 nodes at 3 ly/turn
+plus 24 at 6, stock marshal and the shipped version each against the same
+opponent): against **knower** 72.5% -> 74.9% (78.2 -> 80.9 and 75.7 -> 79.4 in the
+two slow cells, level at 6 ly/turn) — not separated pairwise, but the same
+direction as self-play and nowhere below stock. Against **thinker** 97.3% ->
+96.9%, a ceiling carrying no information. The full `--ladder --trials 30` at 18
+nodes is a regression check at that sample, not a measurement: marshal 258
+(31%), knower 249, knower head-to-head 57%, 64 timeouts (from 251/248/51%/58).
+
+Why only on long lanes is not established. The arithmetic of the hold points the
+other way — the source builds for longer before a slow step-in lands, so the hold
+is *smaller* on a long lane — so the likelier reading is how long a source sits
+exposed: on a long lane the emptied system is open for many turns to anything
+nearby, and the surplus kept home is what keeps it.
+
+### When a doomed garrison leaves: as soon as it is doomed, and it barely matters
+
+Phase 2 evacuates the turn a system is judged doomed. The alternative is to hold
+until the last turn out: the garrison keeps building (and those hulls leave with
+it instead of being lost), and the wait can open a capture for `_evacuate`'s
+step-forward branch, or a relief, or a diverted attacker. Against that, a
+garrison that leaves early is back in play sooner.
+
+There is room to wait. Turns between the doomed call and the blow, over every
+abandon decision in 20 mirror duels at 24 nodes (repeat decisions on an
+already-emptied system included, so this overstates volume):
+
+    ly/turn    1 turn   2    3    4    5+
+    6            51%   38%  11%   0%
+    3            23%   23%  22%  16%  17%
+    12          100%    —    —    —    —       (structurally inert)
+
+Built as `EVAC_AT` (hold until the blow is due within N turns) with
+`EVAC_STEP_EARLY` (while holding, still take a capture the moment one opens),
+and swept paired against stock marshal, 300 seeds:
+
+    arm                               default speed        3 ly/turn + adv 1.25
+    last turn, capture if one opens   50.7% (836-812)      52.3% (691-629)
+    last turn, no early capture       50.9% (827-799)      51.3% (671-638)
+    two turns to spare                50.3% (836-825)      51.7% (700-653)
+
+Null in every cell, but all twelve readings sat at or above 50%, which is what a
+real one-to-two-point lean toward waiting would look like — so the strongest arm
+was re-run on 400 fresh seeds against the bot as shipped (`DENY_SWAP` on): 50.2%
+(1087-1080) at the default speed and **48.6% (932-986)** in the slow cells, 46.2%
+at 24 nodes and 3 ly/turn. The lean did not replicate; if anything it turned.
+Deleted rather than kept at zero.
+
+The two effects roughly cancel, which is the same shape as holding a doomed
+system to sacrifice-and-retake (above): the hulls a waiting garrison saves are a
+turn or two of one system's production, and the turns it spends waiting are
+turns the whole garrison is out of the game. A capture that opens during the wait
+is rare, because the step-forward branch has already looked for one on the turn
+the system was doomed.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 

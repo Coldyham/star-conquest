@@ -421,8 +421,8 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
     same frame. Its reason has to be drawn somewhere else, or the press reads as
     having done nothing."""
     from starconquest import render
-    pygame.font.init()
-    render._FONTS.clear()        # another file may have quit the font module
+    pygame.init()
+    render._FONTS.clear()        # another file may have quit pygame
     _, state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_heard(ui, pbp.ERROR, '{"error": "stale turn"}')

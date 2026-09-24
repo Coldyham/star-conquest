@@ -18,7 +18,6 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
-import pytest
 
 import main as app
 from starconquest import ai, config, fog, input, mapgen, render, replay
@@ -145,21 +144,16 @@ def test_a_game_of_our_own_never_waits():
     assert not ui.awaiting_others(state)
 
 
-@pytest.mark.skip(reason="WIP: passes alone, fails in the full run — see below")
 def test_the_overlay_stays_inside_the_map_at_a_large_ui_scale(monkeypatch):
     """It is centred on the viewport rather than the window, and wrapped to it —
     a headline long enough to name two players ran clean across the side panel
     before that, which is the kind of thing only a screenshot shows.
-
-    **Skipped, and the skip is the honest state of it.** The overflow it describes
-    is real, was found by looking at a screenshot at 2.5x, and *is fixed* — the
-    fix is verified by eye in `notes/feature-play-by-post.md`. This test passes on
-    its own and fails inside the full suite, which means it is picking up global
-    state (`config.apply_ui_scale`, or a font cache keyed on it) that another test
-    file leaves behind. That is a fault in the test, not in the overlay, and
-    fixing it properly means understanding which — worth doing, not worth leaving
-    a red suite over in the meantime.
     """
+    # Another test file quits pygame before this one runs, which uninitialises
+    # the font module and leaves `render._FONTS` holding fonts from the dead
+    # session: re-init and rebuild them, the way test_render does.
+    pygame.init()
+    render._FONTS.clear()
     state, ui = _waiting()
     ui.pbp_waiting = (2, 3)
     config.apply_ui_scale(2.5, touch=False)

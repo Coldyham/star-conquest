@@ -45,7 +45,9 @@ def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
-             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT")
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
+             "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
+             "RIVAL_REFLOOD_MIN_TURNS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -296,9 +298,8 @@ def test_the_reprice_is_inert_in_a_duel(ma):
 
 
 def test_a_rival_landing_with_us_is_folded_too(ma):
-    """`combat.resolve_arrival` totals every owner landing this turn, so a bloc
-    arriving *with* us is one more side of the fight — not a softening-up we get
-    for free. Folded like any other wave rather than distinguished by arrival turn.
+    """A bloc arriving *with* us is one more side of the fight, not a
+    softening-up we get for free — here a 30 we must beat before the garrison.
     """
     lanes = [(1, 2, 2), (2, 3, 2)]
     alone = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (3, 20, 4)}, lanes)
@@ -308,6 +309,68 @@ def test_a_rival_landing_with_us_is_folded_too(ma):
 
     assert (ma._required(shared, 2, shared.systems[2], 2)
             > ma._required(alone, 2, alone.systems[2], 2))
+
+
+def _joined(ships, turns):
+    """Marshal (P2) two turns from a rival-held 20; P3's ``ships`` land in ``turns``."""
+    state = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    state.fleets.append(Fleet(owner_id=3, source_id=3, dest_id=2, ships=ships,
+                              turns_total=2, turns_remaining=turns))
+    return state
+
+
+def test_a_rival_landing_with_us_is_fought_by_us_not_the_garrison(ma):
+    """A 16-ship bloc landing the same turn as us does not soften the garrison:
+    attackers fold among themselves first and the garrison fights last, so it
+    is *our* fleet those 16 grind down. Folding it into the garrison instead
+    prices it as a discount (21 down to about 18)."""
+    ma.RELIEF_AWARE = 0.0
+    alone = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    base = ma._required(alone, 2, alone.systems[2], 2)
+    joined = _joined(16, 2)
+
+    price = ma._required(joined, 2, joined.systems[2], 2)
+    assert price > base
+    assert price == ma._through_pileup(base, [16])
+
+
+def test_a_rival_landing_before_us_still_softens_the_garrison(ma):
+    """One turn earlier, the same bloc hits the garrison alone — that fight is
+    over before we arrive, so it is a discount."""
+    ma.RELIEF_AWARE = 0.0
+    early = _joined(16, 1)
+    defence = ma._after_clash(20 + ma._production_by(early.systems[2], 2), 16)
+    assert ma._required(early, 2, early.systems[2], 2) == max(
+        defence + 1, math.ceil(defence * ma._enemy_margin()))
+    alone = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    assert ma._required(early, 2, early.systems[2], 2) < ma._required(
+        alone, 2, alone.systems[2], 2)
+
+
+def test_through_pileup_is_the_fewest_ships_that_arrive_with_enough(ma):
+    for need, rivals in ((10, [8]), (10, [20]), (10, [5, 5]), (1, [12])):
+        x = ma._through_pileup(need, rivals)
+        assert ma._pileup_survivors(x, rivals) >= need
+        assert ma._pileup_survivors(x - 1, rivals) < need
+    assert ma._through_pileup(10, []) == 10
+
+
+def test_pileup_survivors_matches_the_engine_fold(ma):
+    """At zero jitter the corners collapse, so the estimate must be exactly what
+    `combat.resolve_arrival` leaves us against an empty garrison."""
+    config.COMBAT_JITTER = 0.0
+    for ours, rivals in ((20, [12]), (20, [12, 9]), (9, [12, 20]), (15, [15])):
+        state = _board({1: (0, 0, 0)}, [], seats=4)
+        fleets = [Fleet(owner_id=2, source_id=1, dest_id=1, ships=ours,
+                        turns_total=1, turns_remaining=0)]
+        fleets += [Fleet(owner_id=3 + i, source_id=1, dest_id=1, ships=n,
+                         turns_total=1, turns_remaining=0)
+                   for i, n in enumerate(rivals)]
+        owner, left = combat.resolve_arrival(state, 1, fleets)
+        assert ma._pileup_survivors(ours, rivals) == (left if owner == 2 else 0)
 
 
 def test_the_owners_own_reinforcements_are_not_counted_twice(ma):
@@ -347,6 +410,47 @@ def test_surplus_goes_in_with_the_wave(ma):
     assert lean == ma._required(state, 2, state.systems[2], 1), "baseline sent the price"
     assert committed == 30 - guard, "everything above the guard should go"
     assert committed > lean
+
+
+def _swap_board(turns):
+    """Our 30-stack one ``turns``-turn lane from a rival 6 — a strike whose
+    source the target's own garrison could step straight back into."""
+    return _board({1: (2, 30, 3), 2: (1, 6, 3)}, [(1, 2, turns)])
+
+
+def test_deny_swap_keeps_enough_home_to_stop_the_step_in(ma):
+    """Across a long lane, the surplus rides in only down to what the source
+    needs to hold against the target's whole garrison coming the other way."""
+    state = _swap_board(4)
+    ma.DENY_SWAP = 0.0
+    open_door = _totals(ai.decide(state, 2))[2]
+    ma.DENY_SWAP = 1.0
+    denied = _totals(ai.decide(state, 2))[2]
+
+    hold = (math.ceil(6 * ma._defend_margin())
+            - ma._production_by(state.systems[1], 4))
+    assert denied >= ma._required(state, 2, state.systems[2], 4), "the strike still goes"
+    assert 30 - denied >= hold, "the source can hold against the step-in"
+    assert denied < open_door
+
+
+def test_deny_swap_never_caps_the_priced_strike(ma):
+    """Surplus-only: Phase 3's strike at its price is untouched even where the
+    hold would eat into it — capping *that* measured 33% against stock."""
+    state = _board({1: (2, 12, 3), 2: (1, 6, 3)}, [(1, 2, 4)])
+    ma.DENY_SWAP = 1.0
+    price = ma._required(state, 2, state.systems[2], 4)
+    assert _totals(ai.decide(state, 2)).get(2, 0) >= price
+
+
+def test_deny_swap_is_off_below_its_lane_length(ma):
+    """A lane shorter than ``DENY_SWAP_MIN_TURNS`` plays exactly as with the
+    knob off, which is what keeps the default-speed game untouched."""
+    state = _swap_board(ma.DENY_SWAP_MIN_TURNS - 1)
+    ma.DENY_SWAP = 0.0
+    off = ai.decide(state, 2)
+    ma.DENY_SWAP = 1.0
+    assert ai.decide(state, 2) == off
 
 
 def test_commitment_only_ever_adds(ma):
@@ -412,6 +516,86 @@ def test_a_settled_dead_end_frontier_flows_its_surplus_onward(ma):
     totals = _totals(ai.decide(state, 2))
     assert totals.get(2, 0) == 0, "must not re-flood the already-covered neutral"
     assert totals.get(3, 0) == 40, f"1's surplus should flow to 3, the live front: {totals}"
+
+
+def _dead_end_branch(cover_both=True):
+    """A dead-end branch several systems wide, off a real front.
+
+    Our 1 and 5 both border neutral 2, which already has a sufficient wave from
+    1 in flight; 1 also borders neutral 6, covered likewise when ``cover_both``.
+    Neutral 7 sits past 2, out of reach of any of ours. Both 1 and 5 also border
+    our 3, which faces rival 4.
+    """
+    config.DEFENDER_ADVANTAGE = 1.0
+    config.COMBAT_JITTER = 0.10
+    state = _board({1: (2, 40, 3), 2: (0, 6, 3), 5: (2, 20, 3), 6: (0, 5, 2),
+                    3: (2, 5, 3), 4: (3, 50, 3), 7: (0, 9, 1)},
+                   [(1, 2, 3), (5, 2, 3), (1, 6, 2), (1, 3, 1), (5, 3, 1),
+                    (3, 4, 1), (2, 7, 2)])
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+                              turns_total=3, turns_remaining=2))
+    if cover_both:
+        state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=6, ships=8,
+                                  turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_a_multi_system_dead_end_flows_every_surplus_onward(ma):
+    """Two of our systems sharing one covered neutral, and one of them bordering a
+    second covered neutral: nothing re-floods either neutral, and both sources
+    count as dead ends, so both surpluses go to 3, the system facing a rival.
+    A neutral past the branch (7) touches none of ours and changes nothing."""
+    state = _dead_end_branch()
+    assert ma._required(state, 2, state.systems[2], 3) <= 8
+    assert ma._required(state, 2, state.systems[6], 2) <= 8
+
+    totals = _totals(ai.decide(state, 2))
+    assert totals.get(2, 0) == 0 and totals.get(6, 0) == 0, f"re-flooded: {totals}"
+    assert totals.get(3, 0) == 40 + 20, f"both surpluses should reach 3: {totals}"
+
+
+def test_one_live_neutral_keeps_a_dead_end_source_a_front(ma):
+    """Leave neutral 6 uncovered and 1 is a front again: it strikes 6 and keeps
+    the rest home, while 5 (whose only non-owned neighbour is still the settled
+    2) keeps flowing onward."""
+    state = _dead_end_branch(cover_both=False)
+    orders = ai.decide(state, 2)
+    totals = _totals(orders)
+    assert totals.get(2, 0) == 0, f"re-flooded the covered neutral: {totals}"
+    assert totals.get(6, 0) > 0, "the uncovered neutral should be struck"
+    assert not any(o.source_id == 1 and o.dest_id == 3 for o in orders), \
+        f"1 borders a live neutral, so it holds its reserve: {orders}"
+    assert any(o.source_id == 5 and o.dest_id == 3 and o.ships == 20 for o in orders)
+
+
+def _covered_siege(lane):
+    """Our 40 one ``lane``-turn lane from a rival 6, with a wave of 30 already
+    on the way — enough to take it on its own."""
+    state = _board({1: (2, 40, 3), 2: (1, 6, 3)}, [(1, 2, lane)], seats=2)
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=30,
+                              turns_total=lane, turns_remaining=lane - 1))
+    return state
+
+
+def test_a_covered_rival_siege_is_fed_with_the_gate_off(ma):
+    """At 0 the gate is scoped to neutrals: a rival siege already covered keeps
+    drawing the surplus on any lane, since `_enemy_margin` carries no jitter
+    cushion and that surplus is where one comes from. See `_gates_reflood`."""
+    ma.RIVAL_REFLOOD_MIN_TURNS = 0
+    for lane in (2, 5):
+        state = _covered_siege(lane)
+        assert ma._required(state, 2, state.systems[2], lane) <= 30
+        assert _totals(ai.decide(state, 2)).get(2, 0) > 0, f"lane {lane}"
+
+
+def test_rival_reflood_gate_only_bites_at_its_horizon(ma):
+    """A covered rival siege stops being fed once its horizon reaches
+    `RIVAL_REFLOOD_MIN_TURNS` and not before — so no default-speed lane is
+    touched. The source still borders a live rival, so the ships stay home
+    rather than flow."""
+    assert ma.RIVAL_REFLOOD_MIN_TURNS == 5
+    assert _totals(ai.decide(_covered_siege(2), 2)).get(2, 0) > 0
+    assert ai.decide(_covered_siege(5), 2) == []
 
 
 def test_commitment_does_not_touch_an_unstruck_target(ma):
