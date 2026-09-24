@@ -207,6 +207,9 @@ RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
                                  # siege too, when its horizon is at least this
                                  # many turns; 0 = never (neutrals only). See
                                  # "Phase 3b re-flooding" in docs/bot-design.md
+PILEUP_ATTACK = False           # _required: a rival bloc landing the *same* turn
+                                 # as our strike folds against us before the
+                                 # garrison, not against the garrison before us
 
 
 # --------------------------------------------------------------------------- #
@@ -531,9 +534,62 @@ def _required(state, pid, target, dist: int) -> int:
                + _production_by(target, dist))
     if RELIEF_AWARE > 0:
         defence += math.ceil(RELIEF_AWARE * _relief_capacity(state, target, dist - 1))
-    for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
-        defence = _after_clash(defence, incoming)
-    return max(defence + 1, math.ceil(defence * _enemy_margin()))
+    waves = _rival_waves(state, pid, target.id, dist)
+    if not PILEUP_ATTACK:
+        for _turn, _owner, incoming in waves:
+            defence = _after_clash(defence, incoming)
+        return max(defence + 1, math.ceil(defence * _enemy_margin()))
+    by_turn: dict[int, list[int]] = defaultdict(list)
+    for turn, _owner, incoming in waves:
+        by_turn[turn].append(incoming)
+    alongside = by_turn.pop(dist, [])
+    for turn in sorted(by_turn):
+        defence = _after_clash(defence, _attacker_pileup(by_turn[turn]))
+    need = max(defence + 1, math.ceil(defence * _enemy_margin()))
+    return _through_pileup(need, alongside)
+
+
+def _pileup_survivors(ours: int, rivals: list[int]) -> int:
+    """Worst-case ships ``ours`` carries out of a same-turn attacker fold.
+
+    ``combat.resolve_arrival`` folds every attacker landing on a turn pairwise,
+    strongest-first, with no ``DEFENDER_ADVANTAGE`` between them, and only the
+    survivor meets the garrison. We are one of those attackers, so a rival bloc
+    landing *with* us is fought by us, not by the garrison. Our side takes the
+    unlucky corner of each clash it is in; a clash between two rivals leaves the
+    most behind (``_attacker_clash``). Ties sort us after a rival of equal size.
+    """
+    sides = sorted([(n, 1) for n in rivals] + [(ours, 0)], reverse=True)
+    cur, mine = sides[0][0], sides[0][1] == 0
+    for n, tag in sides[1:]:
+        if not mine and tag:
+            cur = _attacker_clash(cur, n)
+            continue
+        us, them = (cur, n) if mine else (n, cur)
+        roll = combat.preview_fight(us, them, config.COMBAT_JITTER, 1.0).worst
+        if roll.winner != combat.ATTACKER:
+            return 0
+        cur, mine = roll.survivors, True
+    return cur if mine else 0
+
+
+def _through_pileup(need: int, rivals: list[int]) -> int:
+    """Fewest ships that still bring ``need`` to the garrison after folding
+    through ``rivals`` — the blocs landing on the same turn as us. See
+    ``PILEUP_ATTACK``."""
+    if not rivals:
+        return need
+    hi = need + 2 * sum(rivals) + 1
+    while _pileup_survivors(hi, rivals) < need:
+        hi *= 2
+    lo = need
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _pileup_survivors(mid, rivals) >= need:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
 
 
 # --------------------------------------------------------------------------- #
