@@ -13,14 +13,25 @@ from dataclasses import replace
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
-import pytest  # noqa: E402
+import itertools
 
-from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import Fleet, Order  # noqa: E402
-from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
+import pygame
+import pytest
+
+from starconquest import (
+    ai,
+    config,
+    engine,
+    fog,
+    mapgen,
+    render,
+    starnames,
+    turnfilm,
+)
+from starconquest import settings as settings_mod
+from starconquest.geometry import WorldView
+from starconquest.model import Fleet, Order
+from starconquest.viewstate import CHOOSING, SELECTED, Ui
 
 
 def _make_ui(state):
@@ -453,7 +464,7 @@ def test_rule_chevrons_fill_the_whole_lane():
                 assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
                 assert ds[-1] == pytest.approx(tail), f"run stops short of the destination: {at}"
                 step = (tail - head) / (len(ds) - 1)
-                assert all(b - a == pytest.approx(step) for a, b in zip(ds, ds[1:])), \
+                assert all(b - a == pytest.approx(step) for a, b in itertools.pairwise(ds)), \
                     f"uneven spacing: {at}"
 
                 # mid-cycle the run has walked forward by that spacing, one chevron

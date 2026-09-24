@@ -13,8 +13,7 @@ import json
 import pytest
 
 from starconquest import paths, webstore
-from starconquest.paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY,
-                               WEB_SHARE_GAMES_KEY)
+from starconquest.paths import WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +201,7 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
 # Netlify names every deploy `<context>--<site>.netlify.app` from the same context
 # on both — so a preview can find its own sibling instead of being configured.
 def test_the_sibling_site_is_derived_across_every_deploy_context():
-    add = lambda host: paths.sibling_host(host, "-leaderboard", add=True)   # noqa: E731
+    add = lambda host: paths.sibling_host(host, "-leaderboard", add=True)
     assert add("star-conquest.netlify.app") == "star-conquest-leaderboard.netlify.app"
     assert (add("deploy-preview-42--star-conquest.netlify.app")
             == "deploy-preview-42--star-conquest-leaderboard.netlify.app")
@@ -214,7 +213,7 @@ def test_the_rule_runs_backwards_for_the_board_finding_the_game():
     """`leaderboard/js/config.mjs` implements the same rule the other way; this
     pins that the two are inverses, since nothing can check them against each
     other at runtime."""
-    drop = lambda host: paths.sibling_host(host, "-leaderboard", add=False)  # noqa: E731
+    drop = lambda host: paths.sibling_host(host, "-leaderboard", add=False)
     for host in ("star-conquest.netlify.app",
                  "deploy-preview-42--star-conquest.netlify.app"):
         assert drop(paths.sibling_host(host, "-leaderboard", add=True)) == host

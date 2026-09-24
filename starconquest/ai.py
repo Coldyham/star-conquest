@@ -16,8 +16,8 @@ from __future__ import annotations
 import importlib.util
 import math
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from . import config, model
 from .model import AiParams, GameState, Order
@@ -200,7 +200,7 @@ def load_models(directory: Path = MODELS_DIR) -> list[str]:
 # --------------------------------------------------------------------------- #
 def _frontier_order(state: GameState, pid: int, sid: int, surplus: int, max_prod: int, params: AiParams):
     sys = state.systems[sid]
-    jitter = lambda: state.rng.uniform(0.0, 0.01)  # noqa: E731 — tiny tie-break noise
+    jitter = lambda: state.rng.uniform(0.0, 0.01)
     self_deficit = _threat(state, sid, pid) - sys.ships  # how far short of our own threat we are
 
     best = None  # (priority, score, target, ships)

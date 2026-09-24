@@ -68,11 +68,14 @@ from __future__ import annotations
 import json
 import threading
 
-from typing import Optional
-
 from . import webstore
-from .paths import (LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH,
-                    WEB_REPLAY_BODY_KEY, WEB_REPLAY_STATE_KEY, is_web)
+from .paths import (
+    LEADERBOARD_LOG_PATH,
+    LEADERBOARD_REPLAY_PATH,
+    WEB_REPLAY_BODY_KEY,
+    WEB_REPLAY_STATE_KEY,
+    is_web,
+)
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
@@ -218,8 +221,7 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
 
     try:
         _platform.window.eval(
-            "fetch(%s,{method:'POST',headers:%s,body:%s}).catch(function(){})"
-            % (json.dumps(log_url()), json.dumps(headers), json.dumps(body))
+            f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
         )
         return True
     except Exception:  # noqa: BLE001 — a bridge that isn't there is not an error
@@ -313,7 +315,7 @@ def _clear_web_slot() -> None:
     webstore.set(WEB_REPLAY_BODY_KEY, "")
 
 
-def fetch_log(match_id: str) -> Optional[Download]:
+def fetch_log(match_id: str) -> Download | None:
     """Start fetching the replay named ``match_id``. None if it cannot be tried.
 
     The id is checked here rather than trusted: it arrives from a URL fragment, so
@@ -332,7 +334,7 @@ def fetch_log(match_id: str) -> Optional[Download]:
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 
-def _fetch_web(url: str) -> Optional[Download]:
+def _fetch_web(url: str) -> Download | None:
     """Kick off a ``fetch`` that parks its own result on ``window``.
 
     The handlers are written to leave the slot in exactly one of the three states
@@ -356,7 +358,7 @@ def _fetch_web(url: str) -> Optional[Download]:
         return None
 
 
-def _fetch_desktop(url: str) -> Optional[Download]:
+def _fetch_desktop(url: str) -> Download | None:
     """The same download on a daemon thread, posting into the mailbox when done."""
     import urllib.error
     import urllib.request

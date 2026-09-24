@@ -36,10 +36,8 @@ loop needs no new action.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional
 
 import pygame
 
@@ -282,7 +280,7 @@ class MenuState:
     # Defaults to the fight the page's own prose works through.
     preview_attacker: int = 12
     preview_defender: int = 10
-    drag_key: Optional[str] = None  # slider currently being dragged
+    drag_key: str | None = None  # slider currently being dragged
     filename: str = _DEFAULT_FILENAME  # save/load target (no extension)
     editing_filename: bool = False
     status: str = ""  # transient save/load feedback
@@ -296,7 +294,7 @@ class MenuState:
     # challenge's score incomparable. `challenge_snapshot` is the last config that
     # still matched it, so "keep the challenge" can put the setup back.
     confirm_unchallenge: bool = False
-    challenge_snapshot: Optional[dict] = None
+    challenge_snapshot: dict | None = None
     # Clear-map confirm modal. Answered inside `_dispatch` rather than ahead of it,
     # so clearing still falls through to the un-challenge check that any other
     # edit to the setup would trip.
@@ -306,7 +304,7 @@ class MenuState:
     # walking someone through a whole authoring session and only then telling them
     # it invalidated their challenge is the wrong order — so the action waits here
     # and "Change it anyway" re-issues it.
-    pending_action: Optional[str] = None
+    pending_action: str | None = None
     # Play-by-post roster prompt: which seats will be played by a person, opened
     # by "Play by post" and confirmed into the match ``pbp_open`` creates. Seat 1
     # is always in it — the creator ends up seated there — so only seats 2+ are
@@ -372,7 +370,7 @@ def _fog_off(settings: Settings) -> bool:
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
-_CANVAS: Optional[pygame.Surface] = None
+_CANVAS: pygame.Surface | None = None
 
 
 def _get_canvas() -> pygame.Surface:
@@ -975,7 +973,7 @@ def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, 
         lost = f"They lose {d - s}" if s < d else "They lose nothing"
         detail = f"{lost}, you lose all {a}."
 
-    pct = int(round(preview.jitter * 100))
+    pct = round(preview.jitter * 100)
     if preview.jitter <= 0:
         band = "Jitter off: this result is exact."
     elif not preview.certain:
@@ -1186,7 +1184,7 @@ def _die_button(surface, ms, key, rect: pygame.Rect) -> None:
 
 
 def _fmt(value, is_int: bool) -> str:
-    return str(int(round(value))) if is_int else f"{value:.2f}"
+    return str(round(value)) if is_int else f"{value:.2f}"
 
 
 def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *, changed: bool = False) -> None:
@@ -1500,7 +1498,7 @@ def _comparable(settings: Settings) -> bool:
 
 def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
     """Answer the clear-map modal. Y/Enter discards the drawn map, N/Esc keeps it."""
-    answer: Optional[bool] = None
+    answer: bool | None = None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         for key, value in (("clear_map_yes", True), ("clear_map_no", False)):
             rect = ms.rects.get(key)
@@ -1512,7 +1510,7 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
         elif event.key in (pygame.K_n, pygame.K_ESCAPE):
             answer = False
     if answer is None:
-        return None
+        return
     ms.confirm_clear_map = False
     if answer:
         settings.custom_map = None
@@ -1520,10 +1518,10 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
         # floor, so put it back in range now that a generator has to honour it.
         settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, settings.nodes))
         set_status(ms, "Custom map cleared — maps come from the seed again", True)
-    return None
+    return
 
 
-def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str]:
+def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     """Answer the play-by-post roster prompt: toggle a seat, nudge the deadline,
     confirm (opens the match with whichever seats are still checked, on the
     deadline shown), or cancel outright.
@@ -1563,7 +1561,7 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> Optional[str
     return None
 
 
-def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[str]:
+def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> str | None:
     """Answer the un-challenge modal: keep the edit and drop the score, or put the
     setup back the way the link had it.
 
@@ -1571,7 +1569,7 @@ def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> Optional[st
     ``"create_map"`` today), so pressing *Change it anyway* carries straight on
     into the editor rather than making the player press the button twice.
     """
-    keep_edit: Optional[bool] = None
+    keep_edit: bool | None = None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         for key, answer in (("unchallenge_change", True), ("unchallenge_keep", False)):
             rect = ms.rects.get(key)
@@ -1638,7 +1636,7 @@ def _filter(text: str, allowed, limit: int) -> str:
     return "".join(ch for ch in text if allowed(ch))[:limit]
 
 
-def _editing_field(ms: MenuState) -> Optional[str]:
+def _editing_field(ms: MenuState) -> str | None:
     """Which text field has the caret, if any — ``"seed"``, ``"file"`` or None."""
     if ms.editing_seed:
         return "seed"
@@ -1678,7 +1676,7 @@ def _dispatch(event, ms: MenuState, settings: Settings):
     return None
 
 
-def _sync_text_input(ms: MenuState, before: Optional[str]) -> None:
+def _sync_text_input(ms: MenuState, before: str | None) -> None:
     """Raise/dismiss the on-screen keyboard as a text field gains/loses focus (or
     the caret moves between the two fields).
 
@@ -1713,7 +1711,6 @@ def _handle_text_input(text: str, ms: MenuState, settings: Settings):
         for ch in text:
             if (ch.isalnum() or ch in "_-.") and len(ms.filename) < _FILENAME_MAX_LEN:
                 ms.filename += ch
-    return None
 
 
 def _handle_key(event, ms: MenuState, settings: Settings):
@@ -1894,7 +1891,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     return None
 
 
-def _slider_spec(key: str, ms: MenuState, settings: Settings) -> Optional[tuple]:
+def _slider_spec(key: str, ms: MenuState, settings: Settings) -> tuple | None:
     """``_SLIDER_SPECS[key]``, except the aux knob, whose range belongs to the
     strategy the edited seat is running (None if it declares no aux knob)."""
     if key == _AUX_KEY:
@@ -1915,7 +1912,7 @@ def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
     raw = lo + t * (hi - lo)
     snapped = round(raw / step) * step
     snapped = max(lo, min(hi, snapped))
-    value = int(round(snapped)) if is_int else round(snapped, 4)
+    value = round(snapped) if is_int else round(snapped, 4)
     if kind == "adv":
         target = settings
     elif kind == "preview":
@@ -1933,14 +1930,14 @@ def _randomise_sliders(target, specs) -> None:
     for _key, _label, attr, lo, hi, step, is_int in specs:
         snapped = round(rng.uniform(lo, hi) / step) * step
         snapped = max(lo, min(hi, snapped))
-        setattr(target, attr, int(round(snapped)) if is_int else round(snapped, 4))
+        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
 
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
     settings.seed = int(ms.seed_text) if ms.seed_text else None
 
 
-def _open_creator(ms: MenuState, settings: Settings) -> Optional[str]:
+def _open_creator(ms: MenuState, settings: Settings) -> str | None:
     """Hand ``main`` the "open the map creator" action — or raise the un-challenge
     modal first and let *it* re-issue the action.
 
@@ -2005,8 +2002,7 @@ def _set_players(settings: Settings, n: int) -> None:
     if settings.custom_map is not None:
         return _interlocked()
     settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, n))
-    if settings.nodes < settings.min_nodes():
-        settings.nodes = settings.min_nodes()
+    settings.nodes = max(settings.nodes, settings.min_nodes())
 
 
 def _set_nodes(settings: Settings, n: int) -> None:
@@ -2021,4 +2017,4 @@ def _interlocked() -> None:
     until the next `from_dict` silently reconciled them back — moving the setup
     digest in between. The steppers aren't drawn in that state, so this only ever
     catches a caller that isn't the stepper."""
-    return None
+    return

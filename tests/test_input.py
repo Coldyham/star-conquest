@@ -12,15 +12,15 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
+import pygame
 
-import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, engine, mapgen, replay, turnfilm  # noqa: E402
-from starconquest import input as game_input  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import Fleet  # noqa: E402
-from starconquest.settings import Challenge, Settings  # noqa: E402
-from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
+import main
+from starconquest import config, engine, mapgen, replay, turnfilm
+from starconquest import input as game_input
+from starconquest.geometry import WorldView
+from starconquest.model import Fleet
+from starconquest.settings import Challenge, Settings
+from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
 def _setup():
@@ -897,7 +897,7 @@ def test_defeat_snaps_the_camera_out_once_not_every_turn(monkeypatch):
     monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
-        for sid, s in state.systems.items():
+        for s in state.systems.values():
             if s.owner_id == 1:
                 s.owner_id = 0            # strip every system from the human
         state.fleets = [f for f in state.fleets if f.owner_id != 1]
@@ -960,7 +960,7 @@ def test_winning_snaps_the_camera_out_to_the_whole_map(monkeypatch):
 def test_restart_only_carries_autoplay_out_of_a_pure_demo():
     """Autoplaying the tail of a hand-played game must not start the next map in
     autoplay too — but a demo that was never touched keeps running."""
-    state, ui = _setup()
+    _state, ui = _setup()
     try:
         ui.autoplay = True
         assert main.carry_autoplay(ui) is True       # never played a turn: a demo
@@ -1099,7 +1099,7 @@ def test_x_key_clears_forward_rule():
 # --------------------------------------------------------------------------- #
 # Editing / undoing queued orders
 # --------------------------------------------------------------------------- #
-from starconquest.model import Order  # noqa: E402
+from starconquest.model import Order
 
 
 def test_click_queued_lane_reopens_the_popup_on_that_order():
@@ -1774,7 +1774,7 @@ def test_a_downloaded_replay_opens_as_a_reviewable_game(tmp_path, monkeypatch):
         settings = Settings()          # whatever the menu happened to be showing
         opened = main.open_replay(log.encoded(), settings)
         assert opened is not None
-        state, ui, restored = opened
+        state, _ui, restored = opened
         assert restored.match_id == log.match_id
         assert state.turn == log.turn_count
         # ...and the menu now describes the replay's setup, not its own.
@@ -1809,7 +1809,7 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
     try:
         log = _watchable_log(tmp_path, monkeypatch)
         state, ui, _ = main.open_replay(log.encoded(), Settings())
-        states, fog, events, live = main.open_history(state, ui, log)
+        states, fog, _events, live = main.open_history(state, ui, log)
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
         assert ui.history_max == log.turn_count
@@ -2130,7 +2130,7 @@ def test_a_reel_comes_back_already_at_its_first_instant(monkeypatch):
     the per-frame update, past the point where a running film is stepped, so it is
     drawn once before any `run_to` reaches it. Un-advanced, that frame draws every
     continuing fleet a whole turn's worth of progress behind where it just was."""
-    _state, ui, reel = _won_with_animation(monkeypatch, playing=True)
+    _state, _ui, reel = _won_with_animation(monkeypatch, playing=True)
     due = [e for at, e in reel.film.cues if at <= 0.0]
     assert due and reel.at == len(due)
     assert reel.run_to(0.0) == []              # ...nothing of it left to apply
@@ -2142,7 +2142,7 @@ def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkey
     """The snap that reveals the whole board is the deciding turn's *ending*.
     Doing it first would play the last turn out on a map it had already given
     away, and yank the frame out from under the fight being watched."""
-    state, ui, reel = _won_with_animation(monkeypatch)
+    state, ui, _reel = _won_with_animation(monkeypatch)
     try:
         assert ui.deferred_view_snap
         assert ui.view.zoom == 2.0          # still framed where you were watching
@@ -2212,7 +2212,7 @@ def test_pausing_an_active_playthrough_freezes_the_film():
     """Toggling play *off* while a film is running must not lose it — it should
     freeze in place instead, so a paused review still shows what the turn did
     rather than the plain board a skip leaves behind."""
-    state, ui = _setup()
+    _state, ui = _setup()
     try:
         ui.film, ui.playing = _a_film(), True
         main.apply_toggle_play(ui)
@@ -2227,7 +2227,7 @@ def test_starting_play_while_a_manual_film_runs_does_not_freeze_it():
     """A single manually-triggered film runs with `playing` False throughout (it
     was never "playing" a sequence). Toggling play *on* in that state must leave it
     running rather than pausing it — the button reads "Play", not "Pause"."""
-    state, ui = _setup()
+    _state, ui = _setup()
     try:
         ui.film, ui.playing = _a_film(), False
         main.apply_toggle_play(ui)

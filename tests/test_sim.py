@@ -7,7 +7,8 @@ import time
 from collections import Counter
 from dataclasses import replace
 
-from starconquest import ai, engine, replay, settings as settings_mod
+from starconquest import ai, engine, replay
+from starconquest import settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
@@ -110,7 +111,7 @@ def test_no_seat_is_systematically_doomed():
 # play_settings: the leaderboard's bot-replay column (tools/bot_replay.py)
 # --------------------------------------------------------------------------- #
 def _setup(**kw) -> Settings:
-    base = dict(mode="random", players=3, nodes=16, seed=11)
+    base = {"mode": "random", "players": 3, "nodes": 16, "seed": 11}
     return Settings(**{**base, **kw})
 
 

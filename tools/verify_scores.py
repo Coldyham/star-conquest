@@ -52,7 +52,6 @@ job (same as ``bot_replay``).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,10 +59,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import engine, replay  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tools.bot_replay import (MISSING_CREDENTIALS, Supabase,  # noqa: E402
-                              credentials, replay_rev)
+from starconquest import engine, replay
+from starconquest.settings import Settings
+from tools.bot_replay import (
+    MISSING_CREDENTIALS,
+    Supabase,
+    credentials,
+    replay_rev,
+)
 
 VERDICTS = ("verified", "mismatch", "outdated", "unreadable", "missing")
 

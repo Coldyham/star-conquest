@@ -6,11 +6,9 @@ stays pure. Shared by input.py (mutates it) and render.py (reads it).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Optional
 
-from . import config, turnfilm
+from . import config, model, turnfilm
 from .geometry import WorldView
-from . import model
 from .model import GameState, Order
 
 # interaction modes
@@ -41,13 +39,13 @@ class FadingFight:
     """
 
     age_ms: float
-    node_id: Optional[int]
-    low_id: Optional[int]
-    high_id: Optional[int]
+    node_id: int | None
+    low_id: int | None
+    high_id: int | None
     at: float
     burst_color: tuple[int, int, int]
     cost: int
-    victor: Optional[int]
+    victor: int | None
 
 
 @dataclass(frozen=True)
@@ -75,9 +73,9 @@ class Ui:
     view: WorldView
     human_id: int = 1
     mode: str = IDLE
-    selected: Optional[int] = None  # source system id
-    hover: Optional[int] = None  # system under the cursor
-    dest: Optional[int] = None  # chosen destination system id
+    selected: int | None = None  # source system id
+    hover: int | None = None  # system under the cursor
+    dest: int | None = None  # chosen destination system id
     chosen: int = 0  # ships the active one-shot send commits
     keep: int = 0  # ships held back by the active forward rule
     # In CHOOSING the send is already committed: as a one-shot order at
@@ -93,12 +91,12 @@ class Ui:
     # bottom button's label (Cancel vs Delete) and how far `_close_send` unwinds.
     editing_existing: bool = False
     pending: list[Order] = field(default_factory=list)
-    sel_order: Optional[int] = None  # index into `pending` being edited, if any
+    sel_order: int | None = None  # index into `pending` being edited, if any
     # standing auto-forward rules: source_id -> (dest_id, keep). Human-only QoL,
     # so it lives here rather than in the pure GameState. Each turn a rule
     # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
     auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
-    sel_forward: Optional[int] = None  # source id of the rule being edited, if any
+    sel_forward: int | None = None  # source id of the rule being edited, if any
     # Route mode (see ROUTING above) has two sub-modes, both of which end in one
     # `route_plan` the player confirms. They differ only in how `model.flow_field`
     # is seeded, so everything downstream of the plan is shared.
@@ -129,7 +127,7 @@ class Ui:
     #                      mode; the separate flag is what stops render's
     #                      drag-to-target rubber band drawing over the box.
     route_sel: set[int] = field(default_factory=set)
-    route_dest: Optional[int] = None
+    route_dest: int | None = None
     # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
     # it alone so re-entering the mode comes back where you left it.
     route_rally: bool = True
@@ -199,7 +197,7 @@ class Ui:
     #     whether *further* turns start — a single manually-triggered film runs
     #     with `playing` False throughout, so gating its advance on that would
     #     freeze it on the first frame.
-    film: Optional[turnfilm.Film] = None
+    film: turnfilm.Film | None = None
     film_ms: float = 0.0
     film_visible: frozenset[int] = frozenset()
     film_paused: bool = False
@@ -256,14 +254,14 @@ class Ui:
     # popup_rect is the full panel rect (render writes it; input hit-tests it to
     # start a drag on the background — away from the buttons).
     popup_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    popup_pos: Optional[tuple[int, int]] = None
+    popup_pos: tuple[int, int] | None = None
     dragging_popup: bool = False
     popup_drag_off: tuple[int, int] = (0, 0)
     # Drag-to-target gesture (touch-friendly alternative to tap-source-then-tap-
     # dest): a press on an owned system arms `drag_src`; dragging past a threshold
     # sets `drag_active` and `drag_pos` follows the finger; releasing over an
     # adjacent system commits the send/rule. Render draws a line while active.
-    drag_src: Optional[int] = None
+    drag_src: int | None = None
     drag_active: bool = False
     drag_start: tuple[int, int] = (0, 0)
     drag_pos: tuple[int, int] = (0, 0)
@@ -330,7 +328,7 @@ class Ui:
     pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     pbp_invite_copied: int = 0   # seat whose row last showed "Copied" feedback
     pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
-    challenge_target: Optional[tuple[int, int]] = None
+    challenge_target: tuple[int, int] | None = None
     challenge_by: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
@@ -1121,7 +1119,7 @@ class Ui:
         for start in self.route_plan:
             walked: list[int] = []
             seen: set[int] = set()
-            node: Optional[int] = start
+            node: int | None = start
             while node is not None and node not in seen:
                 seen.add(node)
                 walked.append(node)

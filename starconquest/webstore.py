@@ -20,11 +20,16 @@ quota and a read-only disk all fail here, and every caller carries on regardless
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from . import paths
-from .paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY,
-                    WEB_SHARED_SETTINGS_KEY, data_dir, is_web)
+from .paths import (
+    WEB_ANIMATE_TURNS_KEY,
+    WEB_BESTS_KEY,
+    WEB_SHARE_GAMES_KEY,
+    WEB_SHARED_SETTINGS_KEY,
+    data_dir,
+    is_web,
+)
 
 _FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
@@ -56,7 +61,7 @@ def get(key: str) -> str:
         return ""
 
 
-def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
+def set(key: str, value: str) -> bool:
     """Store ``value`` under ``key``. True if it landed."""
     if not is_web():
         try:
@@ -121,7 +126,7 @@ def set_animate_turns(on: bool) -> bool:
     return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
 
 
-def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:
+def best(challenge_key: str, *legacy: str) -> tuple[int, int] | None:
     """Your best ``(turns, lost)`` on this setup, or None if you've not won it.
 
     ``legacy`` are superseded ids for the same setup (``Settings.challenge_keys``
@@ -184,7 +189,7 @@ def leaderboard_origin() -> str:
 
         try:
             host = str(_platform.window.location.hostname)
-        except Exception:  # noqa: BLE001 — no DOM, no derivation
+        except Exception:  # no DOM, no derivation
             host = ""
         sibling = paths.sibling_host(host, paths.LEADERBOARD_TAG, add=True)
         if sibling:

@@ -23,8 +23,8 @@ Nothing here is recorded. A film is derived per turn and discarded, so
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Union
 
 from . import config
 from .model import Fleet, GameState
@@ -79,8 +79,8 @@ class Clashed:
     b: int
     a_ships: int
     b_ships: int
-    survivor: Optional[int]  # the fleet that flew on; None on annihilation
-    survivor_owner: Optional[int]  # ...and whose it was, which `survivor` can't say
+    survivor: int | None  # the fleet that flew on; None on annihilation
+    survivor_owner: int | None  # ...and whose it was, which `survivor` can't say
     survivors: int
     dead: tuple[int, ...]
 
@@ -108,7 +108,7 @@ class Clashed:
         return brought - self.survivors
 
     @property
-    def victor(self) -> Optional[int]:
+    def victor(self) -> int | None:
         """Whose ships flew on, for the colour of that label."""
         return self.survivor_owner
 
@@ -185,7 +185,7 @@ class Landed:
         return dict(self.sides).get(self.owner_id, 0) - self.ships
 
     @property
-    def victor(self) -> Optional[int]:
+    def victor(self) -> int | None:
         """Who holds the system now, for the colour of that label; None if nobody
         came out of it."""
         if not self.steps or self.ships <= 0:
@@ -219,12 +219,12 @@ class Ended:
     """The turn closed: the win check ran and the clock moved."""
 
     turn: int
-    winner: Optional[int]
+    winner: int | None
     alive: tuple[tuple[int, bool], ...]
     ships_lost: tuple[tuple[int, int], ...]
 
 
-Event = Union[Launched, Advanced, Clashed, Landed, Produced, Ended]
+Event = Launched | Advanced | Clashed | Landed | Produced | Ended
 EventFn = Callable[[Event], None]
 
 # Which beat an event belongs to, and what that beat is called. `Clashed` is
@@ -293,7 +293,7 @@ class Film:
         """
         return any(beat.ms > 0 for beat in self.beats)
 
-    def beat_at(self, ms: float) -> Optional[Beat]:
+    def beat_at(self, ms: float) -> Beat | None:
         for beat in self.beats:
             if beat.holds(ms):
                 return beat
@@ -521,7 +521,7 @@ class Watch:
     dies mid-turn cannot have its address handed to a later one.
     """
 
-    def __init__(self, sink: Optional[EventFn]) -> None:
+    def __init__(self, sink: EventFn | None) -> None:
         self._sink = sink
         self._ids: dict[int, tuple[Fleet, int]] = {}
         self._next = 0
@@ -546,7 +546,7 @@ class Watch:
         for fleet in state.fleets:
             self._id(fleet)
 
-    def launched(self, state: GameState, fleet: Optional[Fleet]) -> None:
+    def launched(self, state: GameState, fleet: Fleet | None) -> None:
         if self._sink is None or fleet is None:  # an illegal order launched nothing
             return
         self._sink(Launched(
@@ -569,7 +569,7 @@ class Watch:
             self._sink(Advanced(steps))
 
     def clashed(self, crossing, lane, a: Fleet, b: Fleet, a_ships: int,
-                b_ships: int, survivor: Optional[Fleet], survivors: int,
+                b_ships: int, survivor: Fleet | None, survivors: int,
                 dead: tuple[Fleet, ...]) -> None:
         if self._sink is None:
             return
@@ -588,12 +588,12 @@ class Watch:
             dead=tuple(self._id(f) for f in dead),
         ))
 
-    def folds(self) -> Optional[list]:
+    def folds(self) -> list | None:
         """A sink for ``combat.resolve_arrival`` to log its pairwise fold into."""
         return [] if self._sink is not None else None
 
     def landed(self, state: GameState, node_id: int, arrived: list[Fleet],
-               was_owner: int, was_ships: int, folds: Optional[list]) -> None:
+               was_owner: int, was_ships: int, folds: list | None) -> None:
         if self._sink is None:
             return
         node = state.systems[node_id]
@@ -638,5 +638,5 @@ class Watch:
         ))
 
 
-def watcher(sink: Optional[EventFn]) -> Watch:
+def watcher(sink: EventFn | None) -> Watch:
     return Watch(sink)

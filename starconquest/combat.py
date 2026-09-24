@@ -21,7 +21,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 from . import config
 from .model import Fleet, GameState
@@ -41,7 +40,7 @@ def _apply_advantage(
     a_eff: float,
     b_owner: int,
     b_eff: float,
-    defender_owner: Optional[int],
+    defender_owner: int | None,
     advantage: float,
 ) -> tuple[float, float]:
     """Scale whichever side is holding the system. Applied *after* jitter, so the
@@ -72,7 +71,7 @@ def _resolve_effective(
     b_owner: int,
     b_ships: int,
     b_eff: float,
-    defender_owner: Optional[int],
+    defender_owner: int | None,
 ) -> tuple[int, int]:
     """The whole of a fight *after* the dice and the advantage: strengths in,
     ``(owner, ships)`` out. ``a_eff``/``b_eff`` are post-``_apply_advantage``."""
@@ -98,7 +97,7 @@ def resolve_fight(
     a_ships: int,
     b_owner: int,
     b_ships: int,
-    defender_owner: Optional[int] = None,
+    defender_owner: int | None = None,
 ) -> tuple[int, int]:
     """One pairwise engagement. Returns (winning_owner, surviving_ships).
 
@@ -354,7 +353,7 @@ def resolve_lane_clash(state: GameState, a: Fleet, b: Fleet, rng=None) -> tuple[
 
 
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
-                    rng=None, on_step: Optional[list] = None) -> tuple[int, int]:
+                    rng=None, on_step: list | None = None) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
 
     Handles reinforcement (single owner present), a straight attack (two owners),

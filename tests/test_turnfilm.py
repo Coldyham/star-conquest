@@ -6,6 +6,8 @@ which is the point: the applier the shell animates with is the applier tested he
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from starconquest import ai, combat, config, engine, turnfilm
@@ -153,10 +155,10 @@ def test_a_clash_rides_inside_the_move_beat_where_it_happened():
     film = turnfilm.film([advanced, clash])
     move = film.beats[0]
     assert move.kind == "move"
-    assert dict((e, ms) for ms, e in film.cues)[clash] == move.start + 0.25 * move.ms
+    assert {e: ms for ms, e in film.cues}[clash] == move.start + 0.25 * move.ms
     # the advance lands on the beat's first frame, since `travel` sweeps the
     # schedule it applies
-    assert dict((e, ms) for ms, e in film.cues)[advanced] == move.start
+    assert {e: ms for ms, e in film.cues}[advanced] == move.start
 
 
 def test_a_clash_with_no_move_beat_still_gets_shown():
@@ -174,11 +176,11 @@ def test_production_applies_in_place_with_no_dwell_of_its_own():
     in the sequence, whatever surrounds it. Here it comes *after* combat and there
     is no movement anywhere in the turn, so it has nothing to lead from either."""
     film = turnfilm.film([_landed(), _produced()])
-    produce = [b for b in film.beats if b.kind == "produce"][0]
+    produce = next(b for b in film.beats if b.kind == "produce")
     assert produce.ms == 0
     assert produce.holds(produce.start) is False   # an instant, not a stretch
     assert film.label(produce.start) == ""         # ...so it captions nothing
-    assert dict((e, ms) for ms, e in film.cues)[_produced()] == produce.start
+    assert {e: ms for ms, e in film.cues}[_produced()] == produce.start
 
 
 def test_production_leads_the_fight_it_fed_from_inside_the_glide():
@@ -333,7 +335,7 @@ def test_a_pile_up_reports_its_fold_step_by_step():
     assert [(f.winner, f.survivors) for f in folds] == [(2, 9), (1, 4)]
     assert (owner, ships) == (1, 4)
     # each step's carried force is the previous step's survivors
-    for earlier, later in zip(folds, folds[1:]):
+    for earlier, later in itertools.pairwise(folds):
         assert (later.attacker, later.attacker_ships) == (earlier.winner, earlier.survivors)
     # ...and the last step is the answer the node ends up with
     assert (folds[-1].winner, folds[-1].survivors) == (owner, ships)
@@ -592,7 +594,7 @@ def test_production_reports_the_hulls_it_finished_not_just_the_new_total():
     events: list[turnfilm.Event] = []
     engine.end_turn(s, on_event=events.append)
     tick = next(e for e in events if isinstance(e, turnfilm.Produced))
-    assert dict((sid, hulls) for sid, _, _, hulls in tick.ticks) == {0: 1, 1: 0}
+    assert {sid: hulls for sid, _, _, hulls in tick.ticks} == {0: 1, 1: 0}
     assert tick.hulls == ((0, 1),), "only the system that finished one is marked"
     assert s.systems[0].ships == 1 and s.systems[1].ships == 0
 

@@ -23,8 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import custommap, mapgen  # noqa: E402 — needs the path above
-from starconquest.settings import Challenge, Settings  # noqa: E402
+from starconquest import custommap, mapgen
+from starconquest.settings import Challenge, Settings
 
 OUT = ROOT / "leaderboard" / "tests" / "fixtures" / "tokens.json"
 

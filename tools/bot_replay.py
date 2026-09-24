@@ -64,15 +64,15 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, replay  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tests import sim  # noqa: E402  — the shared headless harness (see its docstring)
+from starconquest import ai, replay
+from starconquest.settings import Settings
+from tests import sim
 
 # Modules whose contents can change what a replay produces. Deliberately not
 # "every file in the package": the shell (render/input/menu) and the
@@ -374,7 +374,7 @@ def _row_for(job: Job, result: sim.ReplayResult, log: replay.GameLog, rev: str) 
         # Sent rather than left to the column default: on an upsert PostgREST
         # only SETs the columns present in the payload, so an omitted
         # computed_at would keep the *original* row's timestamp on a redo.
-        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "computed_at": datetime.now(UTC).isoformat(),
     }
     if result.won:
         row["match_id"] = log.match_id
@@ -490,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
     widened = ai.set_budget_scale(args.budget_scale)
 
     rev = engine_rev()
-    aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
+    aux_for = lambda bot: replay_aux(bot, overrides)
     profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
     print(f"engine_rev {rev} · models {', '.join(loaded) or 'none'} · "
           f"roster {', '.join(roster)}")

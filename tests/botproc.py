@@ -26,7 +26,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from starconquest import ai, botio
 from starconquest.model import GameState, Order
@@ -60,7 +60,7 @@ class Manifest:
     budget_scale: float = 1.0
 
     @classmethod
-    def load(cls, path: Path) -> Optional["Manifest"]:
+    def load(cls, path: Path) -> Manifest | None:
         """Parse one manifest, or None if it is unreadable — a bad file is
         skipped with a warning, the way a drop-in model that fails to import is.
         """
@@ -104,7 +104,7 @@ class _Session:
         )
         # A reader thread rather than select(): a pipe is not selectable on
         # Windows, and tests/sim already carries one such portability scar.
-        self._lines: queue.Queue[Optional[str]] = queue.Queue()
+        self._lines: queue.Queue[str | None] = queue.Queue()
         self._reader = threading.Thread(target=self._pump, daemon=True)
         self._reader.start()
 
@@ -118,7 +118,7 @@ class _Session:
         finally:
             self._lines.put(None)     # EOF sentinel: the process is finished
 
-    def ask(self, message: dict, timeout_ms: int) -> Optional[Any]:
+    def ask(self, message: dict, timeout_ms: int) -> Any | None:
         """Send one message, return its parsed reply, or None on any failure."""
         if self.proc.poll() is not None:
             return None
@@ -172,7 +172,7 @@ class Strategy:
     sessions: dict[tuple[int, int], _Session] = field(default_factory=dict)
     degraded: list[str] = field(default_factory=list)
 
-    def _session(self, state: GameState, pid: int) -> Optional[_Session]:
+    def _session(self, state: GameState, pid: int) -> _Session | None:
         key = (state.seed, pid)
         session = self.sessions.get(key)
         if session is not None and state.turn <= session.last_turn:
@@ -225,7 +225,7 @@ class Strategy:
 _registered: list[Strategy] = []
 
 
-def register_external(names: Optional[list[str]] = None, batch: bool = True,
+def register_external(names: list[str] | None = None, batch: bool = True,
                       reveal_opponents: bool = False,
                       directory: Path = BOTS_DIR,
                       stderr_to: Any = subprocess.DEVNULL) -> list[str]:

@@ -51,12 +51,16 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass, field
-from typing import Optional
 
 from . import engine, replay, webstore
 from .model import GameState, Order
-from .paths import (LEADERBOARD_PBP_PATH, WEB_PBP_BODY_KEY, WEB_PBP_SEATS_KEY,
-                    WEB_PBP_STATE_KEY, is_web)
+from .paths import (
+    LEADERBOARD_PBP_PATH,
+    WEB_PBP_BODY_KEY,
+    WEB_PBP_SEATS_KEY,
+    WEB_PBP_STATE_KEY,
+    is_web,
+)
 from .settings import Settings, build_state
 
 # A seat token as the endpoint mints one: 128 bits as hex.
@@ -114,7 +118,7 @@ class Seat:
 PBP_FRAGMENT = "pbp="
 
 
-def parse_link(token_text: str) -> Optional[tuple[str, str]]:
+def parse_link(token_text: str) -> tuple[str, str] | None:
     """``(match_id, token)`` out of a ``#pbp=…`` fragment, or None.
 
     Tolerant in the same spirit as ``Settings.from_token``: a fragment that is
@@ -160,7 +164,7 @@ def remembered() -> dict:
     return seats if isinstance(seats, dict) else {}
 
 
-def seat_for(match_id: str) -> Optional[Seat]:
+def seat_for(match_id: str) -> Seat | None:
     """The seat we hold in ``match_id``, if we have been handed one."""
     row = remembered().get(match_id)
     if not isinstance(row, dict):
@@ -205,7 +209,7 @@ class Match:
     log: str = ""
     finished: bool = False
     rules_version: int = 1
-    deadline_hours: Optional[int] = None
+    deadline_hours: int | None = None
     turn_opened_at: str = ""
 
     @property
@@ -264,7 +268,7 @@ def _lapsed_from(raw) -> dict[int, str]:
     return out
 
 
-def match_from_dict(data: dict) -> Optional[Match]:
+def match_from_dict(data: dict) -> Match | None:
     """Parse ``?action=state``. None if it cannot describe a match at all.
 
     Tolerant like the rest of this codebase's decoders — a field missing or of
@@ -354,7 +358,7 @@ def advance(state: GameState, log: replay.GameLog, orders: dict[int, list[Order]
     return record
 
 
-def match_log(match: Match) -> Optional[replay.GameLog]:
+def match_log(match: Match) -> replay.GameLog | None:
     """The match so far, as the endpoint stores it. None if it cannot be trusted.
 
     The log is the record of every resolved turn — each seat's orders and every
@@ -398,7 +402,7 @@ def match_log(match: Match) -> Optional[replay.GameLog]:
     return log
 
 
-def rebuild(match: Match) -> Optional[tuple[GameState, replay.GameLog]]:
+def rebuild(match: Match) -> tuple[GameState, replay.GameLog] | None:
     """The live board, and the log of the match so far. None if the log is bad.
 
     ``replay.reconstruct`` over the stored log: recorded orders, recorded dice,
@@ -464,7 +468,7 @@ def lapse_orders(state: GameState, match: Match, decide=None,
 
 
 def resolve(match: Match, decide=None, on_event=None
-            ) -> Optional[tuple[GameState, replay.GameLog, str]]:
+            ) -> tuple[GameState, replay.GameLog, str] | None:
     """Play the live turn out, returning the new board, log and board digest.
 
     Only meaningful once ``match.ready``; the caller checks that. None if the
@@ -526,7 +530,7 @@ def verify_turn(state: GameState, record: engine.TurnRecord, seed: int) -> bool:
     return rolled.dice == list(record.dice)
 
 
-def settled_turn(match: Match, turn: int) -> Optional[engine.TurnRecord]:
+def settled_turn(match: Match, turn: int) -> engine.TurnRecord | None:
     """The record of ``turn`` as resolved elsewhere, for playing onto a live board."""
     log = match_log(match)
     if log is None or turn >= log.turn_count:
@@ -630,7 +634,7 @@ def _clear_web_slot(slot: int) -> None:
         webstore.set(key, "")
 
 
-def call(action: str, payload: Optional[dict] = None, **params) -> Optional[Request]:
+def call(action: str, payload: dict | None = None, **params) -> Request | None:
     """Start a call to ``action``. None if it cannot be attempted at all.
 
     ``payload`` makes it a POST. Nothing is awaited and nothing blocks; the
@@ -645,7 +649,7 @@ def call(action: str, payload: Optional[dict] = None, **params) -> Optional[Requ
     return _call_web(url, body) if is_web() else _call_desktop(url, body)
 
 
-def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
+def _call_web(url: str, body: str | None) -> Request | None:
     """A ``fetch`` that parks its own result where the poll can collect it.
 
     The handlers leave the slot in exactly one of the three states whatever
@@ -678,7 +682,7 @@ def _call_web(url: str, body: Optional[str]) -> Optional[Request]:
         return None
 
 
-def _call_desktop(url: str, body: Optional[str]) -> Optional[Request]:
+def _call_desktop(url: str, body: str | None) -> Request | None:
     """The same call on a daemon thread, posting into the mailbox when done."""
     import threading
     import urllib.error
@@ -720,7 +724,7 @@ def _call_desktop(url: str, body: Optional[str]) -> Optional[Request]:
         return None
 
 
-def parse_body(text: str) -> Optional[dict]:
+def parse_body(text: str) -> dict | None:
     """A reply's JSON object, or None. Never raises.
 
     Every answer from the endpoint arrives as an untrusted string — a body that
@@ -735,8 +739,8 @@ def parse_body(text: str) -> Optional[dict]:
 
 
 def create(match_id: str, settings: Settings, seed: int, seats: list[int],
-           deadline_hours: Optional[int] = DEADLINE_HOURS,
-           public: bool = False) -> Optional[Request]:
+           deadline_hours: int | None = DEADLINE_HOURS,
+           public: bool = False) -> Request | None:
     """Open a match, seating a person at each of ``seats``.
 
     A ``public`` match is listed on the leaderboard's lobby page and mints only
@@ -782,7 +786,7 @@ def tokens_from(body: dict, match_id: str) -> dict[int, str]:
     return out
 
 
-def identify(match_id: str, token: str) -> Optional[Request]:
+def identify(match_id: str, token: str) -> Request | None:
     """Ask the endpoint which seat ``token`` holds.
 
     The seat is not in the link (see ``link_fragment``), so a client opening one
@@ -794,7 +798,7 @@ def identify(match_id: str, token: str) -> Optional[Request]:
     return call("seat", {"match_id": match_id, "token": token})
 
 
-def seat_from(body: dict, match_id: str, token: str) -> Optional[Seat]:
+def seat_from(body: dict, match_id: str, token: str) -> Seat | None:
     """The seat a ``?action=seat`` reply names, or None if it named none."""
     try:
         seat = Seat(match_id, int(body.get("seat", 0) or 0), token)
@@ -803,7 +807,7 @@ def seat_from(body: dict, match_id: str, token: str) -> Optional[Seat]:
     return seat if seat.valid() else None
 
 
-def fetch_state(match_id: str) -> Optional[Request]:
+def fetch_state(match_id: str) -> Request | None:
     """Ask for a match's current state."""
     if not replay._MATCH_ID_RE.match(match_id):
         return None
@@ -811,7 +815,7 @@ def fetch_state(match_id: str) -> Optional[Request]:
 
 
 def submit(seat: Seat, turn: int, orders: list[Order],
-           digest: str = "") -> Optional[Request]:
+           digest: str = "") -> Request | None:
     """Send ``seat``'s orders for ``turn``.
 
     The owner is left off every order: the endpoint stamps the seat from the
@@ -830,7 +834,7 @@ def submit(seat: Seat, turn: int, orders: list[Order],
 
 
 def send_lapse(seat: Seat, turn: int,
-               filing: dict[int, list[dict]]) -> Optional[Request]:
+               filing: dict[int, list[dict]]) -> Request | None:
     """File ``filing`` for the seats the clock has run out on.
 
     The one call that writes orders under somebody else's seat, which is why the
@@ -850,7 +854,7 @@ def send_lapse(seat: Seat, turn: int,
 
 
 def send_resolved(seat: Seat, turn: int, log: replay.GameLog, digest: str,
-                  finished: bool) -> Optional[Request]:
+                  finished: bool) -> Request | None:
     """Hand back the turn this client just played out."""
     if not seat.valid():
         return None

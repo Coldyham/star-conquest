@@ -14,13 +14,27 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
-from typing import Optional
 
 import pygame
 
-from starconquest import (ai, config, engine, fog, mapgen, mapmaker, menu, paths,
-                          pbp, render, replay, share, softkeyboard, turnfilm,
-                          viewstate, webstore)
+from starconquest import (
+    ai,
+    config,
+    engine,
+    fog,
+    mapgen,
+    mapmaker,
+    menu,
+    paths,
+    pbp,
+    render,
+    replay,
+    share,
+    softkeyboard,
+    turnfilm,
+    viewstate,
+    webstore,
+)
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
@@ -92,7 +106,7 @@ def _apply_shared_link(settings: Settings) -> None:
     webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.without_challenge().to_token())
 
 
-def new_ui(state: GameState, autoplay: bool, settings: Optional[Settings] = None,
+def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
            seat: int = 1) -> Ui:
     """A fresh view state for ``seat``.
 
@@ -366,7 +380,7 @@ def replay_request() -> str:
     return token[len(LOG_FRAGMENT):] if token.startswith(LOG_FRAGMENT) else ""
 
 
-def _decode_log(blob: str) -> Optional[GameLog]:
+def _decode_log(blob: str) -> GameLog | None:
     """``blob`` as a replayable log, or None if it can't be one at all — an
     unreadable/truncated encoding, or nothing recorded. Shared by ``open_replay``
     and its caller, which needs the same decode a second time only to tell an
@@ -471,7 +485,7 @@ def pbp_poll_delay(failures: int) -> int:
     return min(PBP_RETRY_MS * 2 ** (failures - 1), PBP_RETRY_MAX_MS)
 
 
-def pbp_request() -> Optional[tuple[str, str]]:
+def pbp_request() -> tuple[str, str] | None:
     """The ``(match id, token)`` a ``#pbp=<match>:<token>`` launch URL carries.
 
     Web only, like every other fragment read; ``--match`` is the desktop
@@ -494,7 +508,7 @@ def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
 
 
 def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
-               ) -> Optional[tuple[GameState, Ui, GameLog]]:
+               ) -> tuple[GameState, Ui, GameLog] | None:
     """Rebuild a shared match and sit down at our own seat. None if its log is bad.
 
     The stored log is the whole record (``pbp.match_log``), so this is an ordinary
@@ -519,7 +533,7 @@ def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
     return state, ui, log
 
 
-def pbp_send(state: GameState, ui: Ui, seat: pbp.Seat) -> Optional[pbp.Request]:
+def pbp_send(state: GameState, ui: Ui, seat: pbp.Seat) -> pbp.Request | None:
     """Submit this seat's orders for the live turn.
 
     The board goes on hold the moment the press lands rather than when the reply
@@ -589,9 +603,9 @@ def pbp_opened(ui: Ui) -> None:
     ui.pbp_submitted, ui.pbp_waiting, ui.pbp_msg = False, (), ""
 
 
-def pbp_open(settings: Settings, seed: int, seats: Optional[list[int]] = None,
+def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
             deadline_hours: int = pbp.DEADLINE_HOURS,
-            public: bool = False) -> tuple[str, Optional[pbp.Request]]:
+            public: bool = False) -> tuple[str, pbp.Request | None]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -670,7 +684,7 @@ def pbp_handed_out(match_id: str, tokens: dict[int, str]) -> str:
 
 
 def pbp_lapse(state: GameState, ui: Ui, match: pbp.Match,
-              seat: pbp.Seat) -> Optional[pbp.Request]:
+              seat: pbp.Seat) -> pbp.Request | None:
     """File the absent seats' turns, so a match nobody has abandoned can go on.
 
     Sent by whichever client notices, exactly as a resolution is, and for the
@@ -1021,7 +1035,7 @@ def land_film(state: GameState, ui: Ui) -> None:
 
 
 def _next_history_film(ui: Ui, history_states: list[GameState],
-                       history_fog: list, history_events: list) -> Optional[turnfilm.Reel]:
+                       history_fog: list, history_events: list) -> turnfilm.Reel | None:
     """Build the reel for the history turn after ``ui.history_turn``, if there is
     anything in it worth animating.
 
@@ -1985,7 +1999,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pygame.quit()
-    except BaseException as exc:   # noqa: BLE001 - surface *anything*, incl. SystemExit
+    except BaseException as exc:
         if isinstance(exc, SystemExit) and exc.code in (0, None):
             raise                 # a clean exit is not a crash
         import traceback

@@ -31,7 +31,6 @@ the design, not an omission.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Optional
 
 from . import config
 from .geometry import Point, dist, point_segment_dist, segments_intersect
@@ -92,7 +91,7 @@ class MapNode:
     def pos(self) -> Point:
         return (float(self.x), float(self.y))
 
-    def clamped(self) -> "MapNode":
+    def clamped(self) -> MapNode:
         """A copy with every field forced into range. Idempotent.
 
         An owner outside ``1..MAX_PLAYERS`` becomes neutral rather than being
@@ -150,14 +149,14 @@ class CustomMap:
             out[n.owner] = out.get(n.owner, 0) + 1
         return out
 
-    def copy(self) -> "CustomMap":
+    def copy(self) -> CustomMap:
         return CustomMap(nodes=[replace(n) for n in self.nodes], lanes=list(self.lanes))
 
     def neighbours(self, i: int) -> list[int]:
         return [b if a == i else a for a, b in self.lanes if i in (a, b)]
 
     # -- editing ------------------------------------------------------------ #
-    def without_node(self, i: int) -> "CustomMap":
+    def without_node(self, i: int) -> CustomMap:
         """A copy with node ``i`` gone and every surviving lane re-indexed.
 
         The single implementation of deletion. Node identity is positional, so
@@ -174,7 +173,7 @@ class CustomMap:
         ]
         return CustomMap(nodes=nodes, lanes=lanes)
 
-    def normalised(self) -> "CustomMap":
+    def normalised(self) -> CustomMap:
         """The canonical form of this map: clamped nodes, canonical lanes.
 
         Lanes come out ordered ``a < b``, de-duplicated in either direction,
@@ -236,7 +235,7 @@ class CustomMap:
         }
 
     @classmethod
-    def from_dict(cls, data) -> Optional["CustomMap"]:
+    def from_dict(cls, data) -> CustomMap | None:
         """Parse a wire-form dict, tolerantly. Never raises; ``None`` if unusable.
 
         Repairs what is local and bounded — a short row, an out-of-range number, a
@@ -285,13 +284,13 @@ class CustomMap:
 # --------------------------------------------------------------------------- #
 def _clamp(v, lo: int, hi: int) -> int:
     try:
-        n = int(round(float(v)))
+        n = round(float(v))
     except (TypeError, ValueError):
         return lo
     return max(lo, min(hi, n))
 
 
-def _number(v) -> Optional[float]:
+def _number(v) -> float | None:
     """``v`` as a float, or None if it is not a number. Booleans are not numbers
     here: ``True`` would read as an x of 1, which is a parse accident rather than
     a coordinate anyone wrote."""
@@ -300,7 +299,7 @@ def _number(v) -> Optional[float]:
     return float(v)
 
 
-def _node_from_row(row) -> Optional[MapNode]:
+def _node_from_row(row) -> MapNode | None:
     """One node from a positional row, padding a short one with defaults.
 
     ``[x, y]`` is a complete node — which is the payoff of positional rows over
@@ -313,16 +312,16 @@ def _node_from_row(row) -> Optional[MapNode]:
     x, y = _number(row[0]), _number(row[1])
     if x is None or y is None:
         return None
-    out = MapNode(x=int(round(x)), y=int(round(y)))
+    out = MapNode(x=round(x), y=round(y))
     for idx, name in ((2, "production"), (3, "ships"), (4, "owner")):
         if len(row) > idx:
             v = _number(row[idx])
             if v is not None:
-                setattr(out, name, int(round(v)))
+                setattr(out, name, round(v))
     return out.clamped()
 
 
-def _lane_from_row(row, count: int) -> Optional[tuple[int, int]]:
+def _lane_from_row(row, count: int) -> tuple[int, int] | None:
     """One canonical lane from a positional row, or None to drop it.
 
     Dropping rather than repairing is what keeps ``GameState.rebuild_topology``
@@ -333,7 +332,7 @@ def _lane_from_row(row, count: int) -> Optional[tuple[int, int]]:
     a, b = _number(row[0]), _number(row[1])
     if a is None or b is None:
         return None
-    ai, bi = int(round(a)), int(round(b))
+    ai, bi = round(a), round(b)
     if ai == bi or not (0 <= ai < count and 0 <= bi < count):
         return None
     return (min(ai, bi), max(ai, bi))
@@ -342,7 +341,7 @@ def _lane_from_row(row, count: int) -> Optional[tuple[int, int]]:
 # --------------------------------------------------------------------------- #
 # The validator, one rule per function
 # --------------------------------------------------------------------------- #
-def _size_problems(m: "CustomMap") -> list[Problem]:
+def _size_problems(m: CustomMap) -> list[Problem]:
     if not m.nodes:
         return [Problem(BLOCK, "empty", "Place some systems to build a map.")]
     if len(m.nodes) > config.CUSTOM_MAX_NODES:
@@ -353,7 +352,7 @@ def _size_problems(m: "CustomMap") -> list[Problem]:
     return []
 
 
-def _seat_problems(m: "CustomMap") -> list[Problem]:
+def _seat_problems(m: CustomMap) -> list[Problem]:
     """Seats must run 1..N with no gaps: the AI tab lists seats ``2..players``,
     ``challenge_keys`` blanks seats past ``players``, and ``GameState.players``
     needs a ``Player`` per owner id. A gap gets a message and a one-press fix
@@ -378,7 +377,7 @@ def _seat_problems(m: "CustomMap") -> list[Problem]:
     return []
 
 
-def _spacing_problems(m: "CustomMap") -> list[Problem]:
+def _spacing_problems(m: CustomMap) -> list[Problem]:
     """Systems drawn closer than the clearance overlap on screen. The same figure
     governs node-vs-lane below, and sits under the tightest pair ``mapgen`` itself
     produces, so loading a generated map never lights up."""
@@ -395,7 +394,7 @@ def _spacing_problems(m: "CustomMap") -> list[Problem]:
     return out
 
 
-def _lane_problems(m: "CustomMap") -> list[Problem]:
+def _lane_problems(m: CustomMap) -> list[Problem]:
     """Crossing lanes and lanes running under a third system — the two rules
     ``mapgen`` already enforces when it generates (``_crosses_any`` and
     ``_grazes_other_node``), applied to a hand-drawn graph.
@@ -436,7 +435,7 @@ def _lane_problems(m: "CustomMap") -> list[Problem]:
     return out
 
 
-def _connectivity_problems(m: "CustomMap") -> list[Problem]:
+def _connectivity_problems(m: CustomMap) -> list[Problem]:
     """Every system must be reachable, or part of the map cannot be taken and the
     win condition can never be met."""
     if not m.nodes:
@@ -480,8 +479,8 @@ def from_state(state: GameState) -> CustomMap:
     index = {sid: i for i, sid in enumerate(order)}
     nodes = [
         MapNode(
-            x=int(round(state.systems[sid].pos[0])),
-            y=int(round(state.systems[sid].pos[1])),
+            x=round(state.systems[sid].pos[0]),
+            y=round(state.systems[sid].pos[1]),
             production=state.systems[sid].production,
             ships=state.systems[sid].ships,
             owner=state.systems[sid].owner_id,

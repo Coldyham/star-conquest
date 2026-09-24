@@ -16,9 +16,11 @@ only what moves. Nothing here reads the wall clock, and nothing draws from
 from __future__ import annotations
 
 import random
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
-from . import combat, config, settings as settings_mod
+from . import combat, config
+from . import settings as settings_mod
 from .model import GameState, Order
 
 # Bumped when a message's meaning changes, not when a field is added: a bot that
@@ -160,7 +162,7 @@ def decide_seed(seed: int, turn: int, pid: int) -> int:
 
 
 def turn_payload(state: GameState, pid: int, budget_ms: int,
-                 rng_seed: Optional[int] = None) -> dict[str, Any]:
+                 rng_seed: int | None = None) -> dict[str, Any]:
     """What moved since the handshake, plus this decision's seed and budget.
 
     ``lane_turns`` rides along **only** when ship-speed growth is switched on,
@@ -193,7 +195,7 @@ def turn_payload(state: GameState, pid: int, budget_ms: int,
     return payload
 
 
-def _as_int(value: Any) -> Optional[int]:
+def _as_int(value: Any) -> int | None:
     """An exact integer, or None. Rejects bools, floats with a fraction, and NaN."""
     if isinstance(value, bool):
         return None
