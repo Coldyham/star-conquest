@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Play a whole play-by-post match against a real endpoint, and check it agreed.
 
-    uv run python tools/check_pbp.py --origin https://deploy-preview-60--star-conquest-leaderboard.netlify.app
+    uv run python tools/check_pbp.py --origin https://deploy-preview-60--star-conquest.netlify.app
 
 The suite already pins the two halves of this feature in isolation — the pure
 client (`tests/test_pbp.py`), what `main` does with it (`tests/test_pbp_client.py`,
@@ -108,9 +108,9 @@ def check(origin: str, seats: int, turns: int) -> int:
     """Play a match out, reporting as it goes. 0 if everything held."""
     # The one override: `pbp.endpoint` resolves per call through here, so aiming
     # at a preview is a matter of answering this differently rather than of
-    # editing a URL anywhere. Desktop has no page host to derive a sibling from
-    # (`paths.sibling_host`), so without this a desktop run silently asks
-    # *production* — which cost ten minutes of confusion once already.
+    # editing a URL anywhere. Desktop has no page host to read an origin from,
+    # so without this a desktop run silently asks *production* — which cost ten
+    # minutes of confusion once already.
     webstore.leaderboard_origin = lambda: origin.rstrip("/")
     if not pbp.configured():
         raise Failed(f"no endpoint resolves from origin {origin!r}")
@@ -240,8 +240,8 @@ def _orders_for(state, seat: int) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--origin", required=True,
-                    help="the leaderboard site to check, e.g. "
-                         "https://deploy-preview-60--star-conquest-leaderboard.netlify.app")
+                    help="the game site whose /api/ to check, e.g. "
+                         "https://deploy-preview-60--star-conquest.netlify.app")
     ap.add_argument("--seats", type=int, default=2, help="people to seat (default 2)")
     ap.add_argument("--turns", type=int, default=4,
                     help="turns to play (default 4); the match is left unfinished")

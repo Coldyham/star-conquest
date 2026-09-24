@@ -213,9 +213,10 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     Two things this leans on, both worth knowing before changing them. ``eval`` is
     available because pygbag's own bridge needs it — a Content-Security-Policy
     strict enough to block it would stop the game booting long before this line,
-    and neither ``netlify.toml`` sets one. And the request is cross-origin (the
-    game's site to the leaderboard's), which is why the function answers the
-    preflight and names the game's origin in its CORS headers.
+    and ``netlify.toml`` sets none. And on a deployed page the request is
+    same-origin (the functions are the game site's own), but from a local server
+    it goes to production cross-origin, which is why the function still answers
+    the preflight and names an allowed origin in its CORS headers.
     """
     import platform as _platform
 

@@ -115,7 +115,8 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     small key/value store (shared-settings tokens, personal bests). See the
     challenge-link notes under Key conventions.
   - `share.py` is the one bridge that talks to a network, and the one that is
-    not browser-only: it posts a finished match's replay to the leaderboard so a
+    not browser-only: it posts a finished match's replay to the leaderboard's
+    `/api/log` (same-origin on the web) so a
     posted score can be checked against the game that produced it. Same
     defensive style — guarded everywhere, silent on failure,
     fire-and-forget on both backends (a `fetch` whose promise
@@ -486,9 +487,10 @@ already resolve simultaneously. The rationale for each rule is in
   `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by
   `test_leaderboard_sync`) labels a match from its id and is never a key. Title
   and `names` are self-declared at create/claim; `winner` rides on the final
-  resolve, trusted as far as `finished`. The lobby's "yours" is this browser's
-  alone: seats claimed there, plus the ids the game hands it as `#mine=` —
-  never a token (`pbp.lobby_fragment`, `pbp.bare_match`).
+  resolve, trusted as far as `finished`. The lobby's "yours" is the game's own
+  seat store (`sc_pbp_seats`), read directly since the board shares the game's
+  origin. A claim there writes into it in `pbp.remember`'s `{seat, token}`
+  shape, and the lobby never prunes it.
 
 ### Key conventions
 
@@ -635,8 +637,8 @@ already resolve simultaneously. The rationale for each rule is in
       sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
       reproducible from its seed, so it is bytes without information.
     - **`game_logs` is the one table the public can neither read nor write.** RLS
-      on, no policies, no anon grants. Writes go through the leaderboard site's
-      own `netlify/functions/log.mjs` under the secret key, which is what
+      on, no policies, no anon grants. Writes go through the site's
+      own `leaderboard/netlify/functions/log.mjs` under the secret key, which is what
       makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
       insert path is a storage bill rather than a few junk rows. Reads are the
       worker's alone, so uploading a game does not publish it.
@@ -824,17 +826,26 @@ already resolve simultaneously. The rationale for each rule is in
       *defence* margin still prices the jitter in full, which is the asymmetry:
       our own garrison cannot decline the engagement. See "Garrisons run away"
       in bot-design before copying either half into another bot.
-  - **The game and the board find each other by hostname, not by configuration.**
-    They are two Netlify sites whose names differ by `paths.LEADERBOARD_TAG`, and
-    Netlify names every deploy `<context>--<site>.netlify.app` from the same
-    context on both — so `paths.sibling_host` (via `webstore.leaderboard_origin`,
-    and `siblingGame` in `leaderboard/js/config.mjs` for the reverse) makes a
-    deploy preview of one talk to the deploy preview of the other, with no URL
-    edited by hand. Endpoints are therefore built at *call* time from
-    `LEADERBOARD_*_PATH`, never stored as whole URLs; `paths.LEADERBOARD_ORIGIN`
-    is the fallback for a host the rule cannot read (desktop, a custom domain)
-    and blanking it disables every leaderboard feature — which is what `render`
-    tests, since resolving costs a DOM read it must not do once a frame.
+  - **The game and the board are one site.** The root `netlify.toml` builds the
+    game, and `tools/build_web.sh` stages the board's pages into `web/board/`
+    from an explicit allow-list. The functions are bundled from
+    `leaderboard/netlify/functions/` and answer at root `/api/`. On a
+    `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
+    and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
+    context, including a deploy preview, talks to itself with no URL edited by
+    hand. Endpoints are still built at *call* time from `LEADERBOARD_*_PATH`,
+    never stored as whole URLs. `paths.LEADERBOARD_ORIGIN` is the route for
+    everything else (desktop, Android, localhost, a custom domain). Blanking it
+    disables every leaderboard feature, which is what `render` tests, since
+    resolving costs a DOM read it must not do once a frame. One origin means one
+    localStorage: the lobby reads `sc_pbp_seats` and the posting name is
+    `sc_pbp_name` (`test_leaderboard_sync` pins both keys). The site now holds
+    `SUPABASE_SECRET_KEY`, so its sensitive-variable policy must stay on
+    "Require approval" (the root `netlify.toml` header explains the fork-preview
+    reasoning). The board's old host is a redirect shell (`legacy-board/`). It
+    *proxies* `/api/`, because installed builds POST there and urllib won't
+    follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
+    fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,

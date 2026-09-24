@@ -1,5 +1,22 @@
 # Merge the leaderboard into the game's site (option A)
 
+## Status
+Code done on `claude/leaderboard-game-netlify-merge-jtlpb8` (which carries
+`play-by-post`, so db910fa and 0d45010, in place of the `site-merge` branch
+named below). Deviation: the board pages' **▶ Play** link is a static
+`href="../"` rather than set from `GAME_URL` in JS: same origin, so the game is
+always one level up, and that also works on a local server. Still to do, all
+manual:
+- [ ] Game site: add `SUPABASE_URL`, and `SUPABASE_SECRET_KEY` scoped to Functions.
+- [ ] Game site: confirm the sensitive-variable policy is "Require approval".
+- [ ] Deploy-preview checks (Verification below), including the client IP the
+      rate limit sees.
+- [ ] Merge, then publish the game site (publish 1 of 2).
+- [ ] Old board site: switch Base directory to `legacy-board`, publish (2 of 2),
+      then remove `SUPABASE_SECRET_KEY` from it.
+- [ ] Afterwards: delete `leaderboard/netlify.toml` (kept only so the old site
+      builds until its base dir switches), and update the deploy-quota memory.
+
 ## Context
 The game (`star-conquest.netlify.app`) and the board (`star-conquest-leaderboard.netlify.app`) are two Netlify sites. They share about 20 production publishes a month and keep separate localStorage. They find each other through a hostname hack (`sibling_host` / `siblingGame`), and leaving the fullscreen PWA for the board loses the app's storage and chrome on iOS. The brief is `docs/site-merge-plan.md`.
 

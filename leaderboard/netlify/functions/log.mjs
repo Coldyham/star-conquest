@@ -12,7 +12,8 @@
  * What it does, in order: reject anything but a POST, rate-limit the caller,
  * check the row's shape and size, then forward it under the secret key.
  *
- * Environment (set in the Netlify site's settings, never committed):
+ * Environment (set in the game's Netlify site settings, scoped to Functions,
+ * never committed):
  *   SUPABASE_URL         https://<project>.supabase.co
  *   SUPABASE_SECRET_KEY  Supabase's secret key (`sb_secret_…`) — the same one the
  *                        GitHub Actions worker uses, and just as much not-in-git.
@@ -23,15 +24,17 @@
  * same "configured or cleanly inert" shape the rest of the board has.
  */
 
-// A browser upload is cross-origin (the game is a separate Netlify site), so the
-// preflight has to be answered with an origin the browser will accept. `*` would
-// do; this keeps the surface to the game's own deploys instead.
+// These functions are served by the game's own site, so a deployed page's upload
+// is same-origin. The browser still sends `Origin` on a POST, and a page on a
+// local server (`python -m http.server` in `web/`) posts to production
+// cross-origin, so the preflight still has to be answered with an origin the
+// browser will accept. `*` would do; this keeps the surface to the game's own
+// deploys instead.
 //
 // Matched by shape rather than listed, because the deploys that matter are
 // contextual: `deploy-preview-42--star-conquest.netlify.app` is as real a caller
-// as production, and a preview of the game posts to the preview of this site
-// (see `config.mjs`, and `paths.sibling_host` in the game). A desktop build sends
-// no Origin header at all, and CORS has nothing to say about it.
+// as production. A desktop build sends no Origin header at all, and CORS has
+// nothing to say about it.
 const GAME_SITE = "star-conquest";
 const LOCAL = ["http://localhost:8000", "http://127.0.0.1:8000"];
 

@@ -7,7 +7,11 @@
 
 import { el, userHref } from "./format.mjs";
 
-const NAME_KEY = "sc_leaderboard_name";
+// One name for everything on this origin: the name a score is posted under, the
+// name a play-by-post seat is claimed under, and the game's own pbp prompt
+// (`paths.WEB_PBP_NAME_KEY`, pinned by tests/test_leaderboard_sync.py). The
+// board shares the game's origin, so they are one stored value.
+export const NAME_KEY = "sc_pbp_name";
 
 export function myName() {
   try {

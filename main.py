@@ -449,7 +449,6 @@ def pbp_throttled(body: str) -> bool:
 PBP_UNREACHABLE_MSG = "Couldn't reach the match — trying again"
 PBP_MISSING_MSG = "That match isn't on the board anymore"
 PBP_REFUSED_MSG = "That seat link isn't valid for this match"
-PBP_NOT_HELD_MSG = "No seat in that match is saved here — open it with your seat link"
 PBP_UNREADABLE_MSG = "The match answered with something unreadable"
 PBP_OUTDATED_MSG = "That match was started under rules this build has moved past"
 PBP_SENDING_MSG = "Sending your orders..."
@@ -1251,16 +1250,6 @@ async def main() -> None:
     pending_invite_links: list[tuple[int, str]] = []
     invite = (pbp.parse_link(pbp.PBP_FRAGMENT + args.match.strip())
               if args.match.strip() else pbp_request())
-    if invite is None and not args.match.strip() and pending_replay is None:
-        # The lobby's "Open" link: a match id with no token, for a seat this
-        # installation already remembers.
-        bare = pbp.bare_match(webstore.url_token())
-        held = pbp.seat_for(bare) if bare else None
-        if held is not None:
-            invite = (held.match_id, held.token)
-        elif bare:
-            print(f"cannot open match {bare!r}: no seat in it is remembered here")
-            menu.set_status(menu_state, PBP_NOT_HELD_MSG, False)
     if invite is not None and pending_replay is None:
         known = pbp.seat_for(invite[0])
         if known is not None and known.token == invite[1]:

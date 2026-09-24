@@ -1970,7 +1970,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         else:
             set_status(ms, "Couldn't create link", False)
     elif hit == "browse_matches":
-        url = webstore.leaderboard_url(LEADERBOARD_LOBBY_PATH + pbp.lobby_fragment())
+        url = webstore.leaderboard_url(LEADERBOARD_LOBBY_PATH)
         if not url:
             set_status(ms, "No leaderboard is configured", False)
         elif webstore.open_url(url):

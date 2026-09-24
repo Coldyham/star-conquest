@@ -53,9 +53,9 @@
 // on Node and is simply unused wherever `globalThis.crypto` already exists.
 import { webcrypto as nodeWebcrypto } from "node:crypto";
 
-// Same rule as log.mjs: the game is a separate Netlify site, and a deploy
-// preview of it must reach the matching preview of this one. Matched by shape
-// rather than listed. A desktop build sends no Origin at all.
+// Same rule as log.mjs: same-origin from a deployed page, cross-origin from a
+// local server, matched by shape rather than listed. A desktop build sends no
+// Origin at all.
 const GAME_SITE = "star-conquest";
 const LOCAL = ["http://localhost:8000", "http://127.0.0.1:8000"];
 

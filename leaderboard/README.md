@@ -6,8 +6,9 @@ plain settings-share link works too, with no score yet: it registers the setup s
 others can play it and post their own — see "Sharing a setup with no score" below.
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
-API. It is a separate Netlify site from the game itself; nothing in the game or
-its `web/` build depends on it.
+API. It is served from the game's own Netlify site: `tools/build_web.sh` copies
+the pages into `web/board/` and the root `netlify.toml` bundles
+`netlify/functions/` to answer at `/api/`. The game itself works without it.
 
 ## Pages
 
@@ -449,9 +450,10 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    the legacy `service_role`) must never go in this repo. `GAME_URL_FALLBACK` is
    where the game is deployed; on a `.netlify.app` host it is usually not used at
    all — see "Finding each other" below.
-4. **Create a second Netlify site** from this repo with **Base directory** set to
-   `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
-   files as-is. The root `netlify.toml` and the game's own site are untouched.
+4. **Nothing to create on Netlify.** The game's site (root `netlify.toml`)
+   publishes these pages at `/board/` and runs the functions at `/api/`. The
+   files are copied by an explicit list in `tools/build_web.sh`, so a new page
+   has to be added there too (`tests/test_web_build.py` fails until it is).
 5. **Optional — turn on the bot column and score checking.** Add two repository secrets under
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
    `SUPABASE_SECRET_KEY` set to the project's **secret** key `sb_secret_…` (*not*
@@ -466,43 +468,48 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    leaderboard needs). Any run keeps a free Supabase project from idling into the
    pause noted under *Known limitations*.
 6. **Optional — accept replay uploads.** Set the *same two* values as
-   environment variables on this Netlify site (*Site configuration → Environment
-   variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_KEY`). That is what
-   both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
+   environment variables on the game's Netlify site (*Site configuration →
+   Environment variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or
+   `SUPABASE_SERVICE_KEY`), the key scoped to **Functions** only. Keep the
+   sensitive-variable policy on **Require approval**: a fork's deploy preview
+   runs the fork's own functions, and approval is the only thing between them and
+   the key (the root `netlify.toml` header has the reasoning). That is what
+   the functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
    back); with either unset they answer 503, and the game's uploads simply go
    nowhere and no replay is watchable — a working board without replays rather
    than a broken one.
 
    Netlify's secret scanner would otherwise fail the build over `SUPABASE_URL`,
    because `js/config.mjs` ships that value to every visitor on purpose. It is
-   declared not-a-secret in [`netlify.toml`](netlify.toml)
+   declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log` and `/api/replay` on this site
-   — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
-   somewhere else.
+   deployed file. The game talks to `/api/log`, `/api/replay` and `/api/pbp` on
+   its own origin (`paths.LEADERBOARD_*_PATH`).
 
 ## Finding each other
 
-The game and the board are two Netlify sites whose names differ by exactly
-`-leaderboard`, and Netlify names every other deploy `<context>--<site>.netlify.app`
-— `deploy-preview-42--…` for a PR, `<branch>--…` for a branch deploy. Both sites
-build from this one repository, so a PR produces the *same* context on each.
+The game and the board are one Netlify site, so they find each other by being
+the same origin. On a `.netlify.app` host, `GAME_URL` in `js/config.mjs` is the
+page's own root, and the game's `webstore.leaderboard_origin` is the page's own
+origin. A deploy preview's board therefore links to that preview's game, and the
+preview's game uploads to that preview's functions, with no URL edited by hand.
+Any other host (a custom domain, localhost, a desktop build) falls back to the
+production constants. `allowedOrigin` in `netlify/functions/log.mjs` still
+admits every `star-conquest` deploy and localhost, for the local-server case.
 
-That makes the sibling derivable instead of configured. Each side edits the tag
-into or out of its own hostname:
+One origin also means one localStorage. The lobby reads the game's seat store
+(`sc_pbp_seats`) and the posting name is the game's `sc_pbp_name`.
+`tests/test_leaderboard_sync.py` pins both keys against `starconquest/paths.py`.
+Every board page has a **▶ Play** link back to the game (`../`), because inside
+the fullscreen home-screen app there is no address bar or Back button.
 
-    deploy-preview-42--star-conquest.netlify.app
-    deploy-preview-42--star-conquest-leaderboard.netlify.app
-
-So a deploy preview of the game uploads to, and watches replays from, the deploy
-preview of the board; a branch deploy pairs with its branch deploy; production
-with production — with no URL edited by hand between them. `sibling_host` in
-`starconquest/paths.py` is one direction (used by `webstore.leaderboard_origin`),
-`siblingGame` in `js/config.mjs` the other, and `allowedOrigin` in
-`netlify/functions/log.mjs` accepts the same shape so a preview is not refused by
-CORS. Any host the rule cannot read — a custom domain, localhost, a desktop
-build — falls back to the constant, which is the behaviour this always had.
+**The old host.** `star-conquest-leaderboard.netlify.app` was the board's own
+site until the merge. It is now a redirect shell built from
+[`legacy-board/`](../legacy-board/netlify.toml): pages 301 to the same path under
+`/board/`, and `/api/*` is *proxied*, since installed builds still POST there and
+neither urllib nor `fetch` carries a POST across a redirect. Its sunset review
+date is in that file.
 
 **A preview shares production's database.** Netlify gives deploy previews the
 site's environment variables, so a test upload from a preview lands in the real
@@ -548,15 +555,17 @@ stored.
 ## Local development
 
 ```sh
-cd leaderboard && python3 -m http.server 8000   # then open localhost:8000
-netlify dev                                     # ...or this, to run the function too
+cd leaderboard && python3 -m http.server 8000   # quickest: open localhost:8000
+./tools/build_web.sh && cd web && python3 -m http.server 8000   # as deployed: localhost:8000/board/
+netlify dev                                     # ...or this, from the repo root, to run the functions too
 ```
 
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
 PostgREST accepts any origin for the publishable key. Without one, every page says so
 instead of failing obscurely. A plain static server does not run
-`netlify/functions/`, so uploads need `netlify dev` (with the two environment
-variables set); `localhost:8000` is in the function's CORS allowlist for that.
+`netlify/functions/`. From localhost the game falls back to the production
+`/api/` (`localhost:8000` is in the functions' CORS allowlist), and the board's
+`/api/pbp` needs `netlify dev` with the two environment variables set.
 
 ## Tests
 

@@ -11,12 +11,15 @@
 <body>
 <header class="bar">
   <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <nav class="actions">
+    <a class="btn" href="../">▶ Play</a>
+  </nav>
 </header>
 
 <!-- The list (?action=list on /api/pbp, plus ?action=list&ids= for the matches
      this browser holds a seat in), or one match's page with ?match=<id>, where
-     an open seat is taken (?action=claim). The game's "Shared matches" button
-     opens this with #mine=<id>,<id>. -->
+     an open seat is taken (?action=claim). "Yours" is read straight from the
+     game's own seat store (sc_pbp_seats), which this page shares an origin with. -->
 <main>
   <a class="back" id="back" href="index.html">← All maps</a>
   <h1 id="title">Play by post</h1>

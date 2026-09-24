@@ -116,9 +116,12 @@ load-bearing:
   `auto_forward`) in `record_turn` are single-seat, and both are shell-side
   metadata that replay does not consult. A play-by-post match therefore replays,
   resumes, verifies and is watchable on today's format.
-- **No secret may reach the game's own Netlify site.** `netlify.toml:10-36` — a
-  fork's PR preview runs the fork's own build script. Secrets live only in the
-  leaderboard site's functions or in Actions.
+- **No secret may reach a fork's preview.** A fork's PR preview runs the fork's
+  own build script and functions. When this was designed the game's site held no
+  secret at all. Since the site merge it holds `SUPABASE_SECRET_KEY` for its
+  functions, and the gate is Netlify's "Require approval" policy on untrusted
+  deploys (the root `netlify.toml` header). The secret lives only in the
+  functions' environment or in Actions, never in a build step.
 - **`window.eval` returning a value is not trusted.** The web fetch parks its
   result in `localStorage` and the poll reads it back through `webstore.get`
   (`share.py:54-60`). Any new networking must keep that shape.
@@ -233,9 +236,9 @@ behaviour.
 `tools/check_pbp.py` has played a two-seat match through four turns against a
 real preview (`deploy-preview-60--star-conquest-leaderboard.netlify.app`) and
 the real Supabase project. Every client agreed on every board digest, and
-forged, stale and foreign-owner submissions were all refused. Note the site is
-`star-conquest-leaderboard`, not `star-conquest`: that is the repo's other
-Netlify site. Real PostgREST agrees with the stub about status codes, and the
+forged, stale and foreign-owner submissions were all refused. (That was the
+board's old, separate site. The functions now live on the game's site, so the
+origin to check is `star-conquest` itself.) Real PostgREST agrees with the stub about status codes, and the
 conditional `PATCH` behaves. The one thing nothing tests end to end is a deadline
 running out in real wall-clock time. The tests only simulate it by backdating the
 clock.
@@ -256,8 +259,8 @@ Two layers of coverage, cheapest first:
   so either way the run leaves a throwaway match in the live `pbp_*` tables:
 
   ```sh
-  uv run python tools/check_pbp.py --origin https://star-conquest-leaderboard.netlify.app
-  uv run python tools/check_pbp.py --origin https://deploy-preview-<PR>--star-conquest-leaderboard.netlify.app
+  uv run python tools/check_pbp.py --origin https://star-conquest.netlify.app
+  uv run python tools/check_pbp.py --origin https://deploy-preview-<PR>--star-conquest.netlify.app
   ```
 
 ## Opening a match
@@ -348,8 +351,9 @@ a title and their own name in the create prompt, and a joiner may give a name
 when claiming. `names` is `{seat: name}`, and a seat's entry is only ever
 written by whoever holds that seat, at create or claim. That is the same footing
 a posted score's user name has. The game remembers the last name typed
-(`webstore.pbp_name`), and the lobby pre-fills from its own last one or the
-board's posting name. There is no later rename yet. A seat handed out as a
+(`webstore.pbp_name`, key `sc_pbp_name`). The board shares the game's origin
+and reads and writes that same key as its posting name (`me.mjs`), so there is
+one name for posting, claiming and creating. There is no later rename yet. A seat handed out as a
 private link, rather than claimed, stays unnamed.
 
 **The winner is a claim, like `finished`.** The server holds no board, so it
@@ -357,23 +361,23 @@ cannot know who won. The resolving client sends `winner` with the final turn,
 and it is trusted exactly as far as `finished` beside it. 0 is a draw. Any
 client can check it against the stored log.
 
-**"Yours" is this browser's, from two sources.** The lobby keeps
-`{id: {seat, link}}` in its own localStorage (`sc_pbp_mine`). A claim made there
-adds the seat with its full link: that token was minted on the lobby, so keeping
-it there is no weaker than the game's own `WEB_PBP_SEATS_KEY`. The game's button
-hands over `#mine=<id>,<id>` (`pbp.lobby_fragment`), ids only and never a token,
-and the lobby looks them up with `?action=list&ids=`, which returns a private
-match too. Knowing the id is already what `state` requires. *Open in game* uses
-the stored link where there is one, and otherwise a bare `#pbp=<id>`, which the
-game resolves against the seats it remembers (`pbp.bare_match`, `main`'s launch
-path) and refuses plainly when it holds none.
+**"Yours" is the game's own seat store.** The board is served from the game's
+origin, under `/board/`, so the lobby reads `WEB_PBP_SEATS_KEY` (`sc_pbp_seats`,
+`{id: {seat, token}}`) directly (`parseSeats`, tolerant of junk). It looks the
+newest 50 ids up with `?action=list&ids=`, which returns a private match too.
+Knowing the id is already what `state` requires. A claim made in the lobby
+writes the new seat into that same store in exactly `pbp.remember`'s shape
+(`withSeat`), so the game reopens it with no link at all. *Open in game* is
+always the full `#pbp=<id>:<token>` link built from the stored token, and a
+match with no stored seat has no Open button. The lobby never prunes the store
+on a lookup miss: the game owns it.
 
-The two stores are separate origins, and on iOS a home-screen web app's storage
-is separate from Safari's too. So the lobby's copy is only a cache: each hand-off
-re-supplies it, and a match the lookup no longer finds drops out of it. A bare
-`#pbp=<id>` opened in a browser that is not the one holding the seat is the case
-that says "open it with your seat link". A claimed seat's link is shown so it can
-be copied to another device.
+This replaced a two-origin design, when the board was its own Netlify site. The
+lobby then kept its own cache (`sc_pbp_mine`), the game handed it
+`#mine=<id>,<id>`, and a bare `#pbp=<id>` came back for the game to resolve
+against its seats. On iOS the lobby also opened outside the home-screen app's
+storage. Inside the app's scope it now shares that storage. A claimed seat's
+link is still shown so it can be copied to another device.
 
 **The setup goes up pruned.** `pbp.create` sends `Settings.token_dict()`, which
 `from_dict` reads back whole, so the lobby's knob list (`setup.mjs`'s `tweaks`,
@@ -424,8 +428,9 @@ before a deploy.
   resolver's record as `script`; only a resolve passes `seat_orders` and lets a
   bot decide.
 * **Desktop resolves the leaderboard origin to *production*.** There is no page
-  host to derive a sibling from off the web (`paths.sibling_host`), so testing a
-  preview from a desktop build means overriding `webstore.leaderboard_origin`.
+  host to read an origin from off the web, so testing a preview from a desktop
+  build means overriding `webstore.leaderboard_origin` (`tools/check_pbp.py`
+  does).
   This cost ten minutes of confusion; it is not a bug.
 * **A render test here must re-init pygame itself.** These files open the
   display at import time, and other files (`test_render`, …) call `pygame.quit()`

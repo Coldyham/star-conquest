@@ -7,32 +7,69 @@
 # pygame-ce WASM wheel from the pygame-web CDN into web/cdn/ (network is available
 # during Netlify builds), keeping the published site self-contained.
 #
-# This site must never be given a secret environment variable, and the build
-# below is why. On a public repository a pull request from a fork gets a deploy
-# preview built from *that fork's* tree — including its netlify.toml and its
-# tools/build_web.sh — so the command line here is whatever a stranger wrote,
-# running as a shell in the build container. Nothing above needs a credential
-# (uv, pygbag and a wheel download), so there is nothing for such a build to
-# read, and it should stay that way: the leaderboard's Supabase keys live in
-# leaderboard/js/config.mjs (the anon key, public on purpose) and in the
-# bot-replay workflow's Actions secrets (the service_role key, which no Netlify
-# build ever sees). Contrast .github/workflows/bot-replay.yml, which does hold
-# secrets and is safe for the mirror-image reason: it fires only on schedule and
-# workflow_dispatch, neither of which a fork can trigger.
+# The leaderboard is served from this site too: its pages at /board/ (staged by
+# tools/build_web.sh from leaderboard/, an explicit copy list) and its functions
+# at /api/ (bundled from leaderboard/netlify/functions/ by the [functions] block
+# below). One origin means one localStorage and one deploy for both halves.
 #
-# There is no approval gate on those previews, and it is worth knowing why not
-# rather than assuming one: Netlify's sensitive-variable policy (Project
-# configuration -> Environment variables, public repositories only, default
-# "Require approval") holds an untrusted deploy so it cannot read a secret — but
-# this site has no variables at all, so the policy gates nothing and a fork's
-# preview simply builds. That is the right trade while the list stays empty,
-# since what is left to lose is a share of the month's build minutes and a
-# stranger's content on a guessable deploy-preview-N--<site>.netlify.app
-# subdomain, both visible in the dashboard and revoked by closing the pull
-# request. Previews are worth that: a change to a game wants looking at in a
-# browser. Deploy Previews can be turned off entirely under Build & deploy ->
-# Continuous deployment -> Branches and deploy contexts. Add a variable here and
-# the policy appears — leave it on "Require approval".
+# That makes this a site with a secret, and the build below is why that needs
+# care. On a public repository a pull request from a fork gets a deploy preview
+# built from *that fork's* tree — its netlify.toml, its tools/build_web.sh and
+# its functions — so the command line here is whatever a stranger wrote, running
+# as a shell in the build container, and the functions are whatever a stranger
+# wrote, running with this site's function environment. Scoping
+# SUPABASE_SECRET_KEY to Functions keeps it out of the build shell but not out
+# of a fork's own functions, so the real gate is Netlify's sensitive-variable
+# policy (Project configuration -> Environment variables, public repositories
+# only): it MUST stay on "Require approval", which holds every untrusted deploy
+# until someone approves it in the dashboard. The cost is approving each fork
+# PR's preview by hand; the price of skipping it is the key that writes
+# game_logs and every pbp_* table. Deploy Previews for our own branches are
+# unaffected — they are not untrusted.
+#
+# The two values the site needs, set in the UI and never committed:
+#   SUPABASE_URL         — the project URL (public; see SECRETS_SCAN_OMIT_KEYS)
+#   SUPABASE_SECRET_KEY  — Supabase's secret key, scoped to Functions only
+# Everything else Supabase-side a browser uses is the anon key, public on
+# purpose in leaderboard/js/config.mjs. .github/workflows/bot-replay.yml holds
+# its own copy as an Actions secret, safe for the mirror-image reason: it fires
+# only on schedule and workflow_dispatch, neither of which a fork can trigger.
+#
+# The board's old site, star-conquest-leaderboard.netlify.app, is now a
+# redirect shell built from legacy-board/ (see its netlify.toml).
 [build]
   command = "curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
   publish = "web"
+
+# Netlify fails a build when the value of any environment variable appears in the
+# deployed files, and `SUPABASE_URL` does: `leaderboard/js/config.mjs` ships it to
+# every visitor on purpose, because a PostgREST endpoint is not a secret — the
+# publishable key beside it is designed to be public too, and row-level security
+# is the actual boundary (see leaderboard/schema.sql).
+#
+# So the URL is declared not-a-secret rather than the scan being switched off.
+# `SUPABASE_SECRET_KEY` is deliberately *not* listed: it is the one value that
+# genuinely must never reach a deployed file, and leaving it scanned means the
+# build still fails if it ever gets pasted into one.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
+
+# The board's functions: /api/log, /api/replay, /api/pbp (each names its own path
+# in `export const config`). Their source is outside the publish dir, so nothing
+# of it is served as a static file.
+[functions]
+  directory = "leaderboard/netlify/functions"
+
+# The board's pages link to each other relatively, so /board without its slash
+# would resolve `game.html` against the root.
+[[redirects]]
+  from = "/board"
+  to = "/board/"
+  status = 301
+
+# Scoped to the board: pygbag's own assets are left exactly as they were.
+[[headers]]
+  for = "/board/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

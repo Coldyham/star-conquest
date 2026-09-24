@@ -82,9 +82,9 @@ def endpoint(action: str) -> str:
     """The pbp endpoint for ``action``, resolved now rather than at import.
 
     Per call because on the web it depends on where the page is served from — a
-    deploy preview of the game talks to the matching preview of the board
-    (``webstore.leaderboard_origin``). Blank when no origin resolves at all,
-    which is how every leaderboard feature switches itself off.
+    deploy preview talks to its own functions (``webstore.leaderboard_origin``).
+    Blank when no origin resolves at all, which is how every leaderboard feature
+    switches itself off.
     """
     base = webstore.leaderboard_url(LEADERBOARD_PBP_PATH)
     return f"{base}?action={action}" if base else ""
@@ -137,19 +137,6 @@ def parse_link(token_text: str) -> tuple[str, str] | None:
     return match_id, token
 
 
-def bare_match(token_text: str) -> str:
-    """The match id out of a token-less ``#pbp=<match id>`` fragment, or ``""``.
-
-    The lobby's way back into a match this installation already holds a seat
-    in: it knows the id but never the token, so the seat is looked up here
-    (``seat_for``).
-    """
-    if not token_text.startswith(PBP_FRAGMENT):
-        return ""
-    match_id = token_text[len(PBP_FRAGMENT):]
-    return match_id if replay._MATCH_ID_RE.fullmatch(match_id) else ""
-
-
 def link_fragment(match_id: str, token: str) -> str:
     """The fragment to hand a player, for the link that seats them."""
     return f"{PBP_FRAGMENT}{match_id}:{token}"
@@ -179,14 +166,6 @@ def remembered() -> dict:
     except (ValueError, TypeError):
         return {}
     return seats if isinstance(seats, dict) else {}
-
-
-def lobby_fragment(limit: int = 50) -> str:
-    """``#mine=<id>,<id>`` for the lobby page: the matches this installation holds
-    a seat in, in the order first remembered, ids only. ``""`` when there are none.
-    ``limit`` is the endpoint's own cap on one lookup (``MAX_LIST_IDS``)."""
-    ids = [mid for mid in remembered() if replay._MATCH_ID_RE.fullmatch(mid)][-limit:]
-    return f"#mine={','.join(ids)}" if ids else ""
 
 
 def seat_for(match_id: str) -> Seat | None:

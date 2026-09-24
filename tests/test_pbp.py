@@ -424,27 +424,6 @@ def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, m
     assert TOKEN in js
 
 
-# --------------------------------------------------------------------------- #
-# What the lobby is told, and the way back from it
-# --------------------------------------------------------------------------- #
-def test_a_bare_match_link_names_the_match_and_nothing_else():
-    assert pbp.bare_match(f"pbp={MATCH}") == MATCH
-    for fragment in (f"pbp={MATCH}:{TOKEN}", "pbp=nothex", f"log={MATCH}", ""):
-        assert pbp.bare_match(fragment) == ""
-    assert pbp.parse_link(f"pbp={MATCH}") is None, "a seat link still needs its token"
-
-
-def test_the_lobby_hand_off_carries_ids_and_never_a_token():
-    assert pbp.lobby_fragment() == ""
-    other = "ffeeddccbbaa0099"
-    pbp.remember(pbp.Seat(MATCH, 2, TOKEN))
-    pbp.remember(pbp.Seat(other, 1, TOKEN))
-    fragment = pbp.lobby_fragment()
-    assert fragment == f"#mine={MATCH},{other}"
-    assert TOKEN not in fragment
-    assert pbp.lobby_fragment(limit=1) == f"#mine={other}"
-
-
 def test_a_match_is_created_with_its_title_and_the_creators_name(monkeypatch):
     sent = {}
     monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))

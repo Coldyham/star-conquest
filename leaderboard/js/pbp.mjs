@@ -3,21 +3,24 @@
 // where an open seat is taken. Pure helpers are exported for
 // tests/pbp-page.test.mjs; the DOM half runs only in a browser.
 //
-// "Yours" is whatever this browser has been told: seats claimed here, and the
-// match ids the game hands over as `#mine=<id>,<id>` (never a token). There is
-// no account behind it, so it is kept in localStorage and rebuilt by the next
-// hand-off if the browser clears it.
+// "Yours" is the game's own seat store, `sc_pbp_seats` (`pbp.remember` in
+// starconquest/pbp.py): this page is served from the game's origin, under
+// /board/, so the two share one localStorage. A seat claimed here is written into
+// that same store in the same shape, so the game reopens it with no link at all.
+// There is no account behind it; the game owns the store and this page never
+// prunes it.
 
 import { GAME_URL, PLAYER_COLORS, PLAYER_NAMES } from "./config.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 import { phrase } from "./matchnames.mjs";
-import { myName } from "./me.mjs";
+import { myName, rememberName } from "./me.mjs";
 import { configLabel, tweaks } from "./setup.mjs";
 
 const ENDPOINT = "/api/pbp";
 const MATCH_ID = /^[0-9a-f]{16}$/;
-export const MINE_KEY = "sc_pbp_mine";
-const NAME_KEY = "sc_pbp_name";
+const TOKEN = /^[0-9a-f]{32}$/;
+// `paths.WEB_PBP_SEATS_KEY` in the game; pinned by tests/test_leaderboard_sync.py.
+export const SEATS_KEY = "sc_pbp_seats";
 // `NAME_MAX` in netlify/functions/pbp.mjs.
 const NAME_MAX = 24;
 // `MAX_LIST_IDS` in netlify/functions/pbp.mjs.
@@ -176,16 +179,17 @@ export function seatLink(matchId, token, game = GAME_URL) {
   return `${game}#pbp=${matchId}:${token}`;
 }
 
-/**
- * The way back into a match this browser holds: the seat link it was given
- * here, or the bare `#pbp=<id>` the game resolves against its own saved seats.
- */
+/** "Open in game" for a seat this browser holds: always the full seat link. */
 export function openLink(matchId, entry, game = GAME_URL) {
-  return (entry && entry.link) || `${game}#pbp=${matchId}`;
+  return entry && entry.token ? seatLink(matchId, entry.token, game) : null;
 }
 
-/** `{id: {seat, link}}` out of storage, tolerating anything malformed. */
-export function parseMine(text) {
+/**
+ * `{id: {seat, token}}` out of the game's seat store, keeping only entries the
+ * game itself could use — a malformed store reads as empty, a junk entry is
+ * skipped. Never written back: the store is the game's.
+ */
+export function parseSeats(text) {
   let data;
   try {
     data = JSON.parse(text || "{}");
@@ -196,22 +200,29 @@ export function parseMine(text) {
   const out = {};
   for (const [id, entry] of Object.entries(data)) {
     if (!MATCH_ID.test(id)) continue;
-    const seat = Number.isInteger(entry?.seat) ? entry.seat : null;
-    const link = typeof entry?.link === "string" ? entry.link : null;
-    out[id] = { seat, link };
+    if (!Number.isInteger(entry?.seat) || entry.seat < 1) continue;
+    if (typeof entry?.token !== "string" || !TOKEN.test(entry.token)) continue;
+    out[id] = { seat: entry.seat, token: entry.token };
   }
   return out;
 }
 
-/** `mine` with the ids a `#mine=a,b` fragment names added (existing entries kept). */
-export function mergeFragment(mine, hash) {
-  const match = /^#?mine=(.*)$/.exec(hash || "");
-  if (!match) return mine;
-  const out = { ...mine };
-  for (const id of match[1].split(",")) {
-    if (MATCH_ID.test(id) && !(id in out)) out[id] = { seat: null, link: null };
+/**
+ * The store's text with one seat added, in exactly `pbp.remember`'s shape.
+ * Everything else in it is kept as it was, even entries this page can't read,
+ * and a store that isn't an object is replaced — which is what the game's own
+ * `remembered()` then `remember()` does too.
+ */
+export function withSeat(text, matchId, seat, token) {
+  let data;
+  try {
+    data = JSON.parse(text || "{}");
+  } catch {
+    data = {};
   }
-  return out;
+  if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
+  data[matchId] = { seat, token };
+  return JSON.stringify(data);
 }
 
 /** The ids to look up, newest last, capped at what one request may ask. */
@@ -223,35 +234,21 @@ export function mineIds(mine) {
 // Storage and network
 // --------------------------------------------------------------------------
 
-function readMine() {
+function readSeats() {
   try {
-    return parseMine(localStorage.getItem(MINE_KEY));
+    return parseSeats(localStorage.getItem(SEATS_KEY));
   } catch {
     return {};
   }
 }
 
-function writeMine(mine) {
+/** Keep a claimed seat where the game looks for it. False if storage refused. */
+function storeSeat(matchId, seat, token) {
   try {
-    localStorage.setItem(MINE_KEY, JSON.stringify(mine));
+    localStorage.setItem(SEATS_KEY, withSeat(localStorage.getItem(SEATS_KEY), matchId, seat, token));
+    return true;
   } catch {
-    // A convenience: without storage, "yours" lasts until the page closes.
-  }
-}
-
-function savedName() {
-  try {
-    return (localStorage.getItem(NAME_KEY) || "").trim() || myName();
-  } catch {
-    return myName();
-  }
-}
-
-function saveName(name) {
-  try {
-    localStorage.setItem(NAME_KEY, name.trim());
-  } catch {
-    // Fine — it only pre-fills the field next time.
+    return false;
   }
 }
 
@@ -317,12 +314,6 @@ async function renderList(node, mine) {
     fetchList(),
     ids.length ? fetchList(ids).catch(() => null) : Promise.resolve([]),
   ]);
-  if (mineList !== null && ids.length) {
-    // A match that no longer exists drops out of "yours".
-    const found = new Set(mineList.map((m) => m.match_id));
-    const kept = Object.fromEntries(Object.entries(mine).filter(([id]) => found.has(id) || !ids.includes(id)));
-    if (Object.keys(kept).length !== Object.keys(mine).length) writeMine(kept);
-  }
   const groups = groupMatches([...(mineList || []), ...publicList], mine);
 
   node.classList.remove("loading");
@@ -356,7 +347,8 @@ function rosterTable(match) {
 }
 
 function openButton(match, entry) {
-  return el("a", { class: "btn play", href: openLink(match.match_id, entry), text: "Open in game" });
+  const href = openLink(match.match_id, entry);
+  return href ? el("a", { class: "btn play", href, text: "Open in game" }) : null;
 }
 
 function claimControl(match, seat, mine, onClaimed) {
@@ -364,7 +356,7 @@ function claimControl(match, seat, mine, onClaimed) {
   const nameField = el("input", {
     type: "text", maxlength: String(NAME_MAX), class: "seat-name",
     placeholder: "Your name (optional)", "aria-label": `Your name for ${seatName(seat)}`,
-    value: savedName(),
+    value: myName(),
   });
   const button = el("button", { class: "btn", type: "submit" }, [swatch(seat), `Take ${seatName(seat)}`]);
   slot.append(nameField, button);
@@ -381,10 +373,10 @@ function claimControl(match, seat, mine, onClaimed) {
       body = {};
     }
     if (status === 201 && body.token) {
-      if (name) saveName(name);
+      if (name) rememberName(name);
       const link = seatLink(match.match_id, body.token);
-      mine[match.match_id] = { seat, link };
-      writeMine(mine);
+      const kept = storeSeat(match.match_id, seat, body.token);
+      if (kept) mine[match.match_id] = { seat, token: body.token };
       const field = el("input", { type: "text", readonly: "", value: link, class: "seat-link" });
       const copy = el("button", { class: "btn ghost", type: "button", text: "Copy" });
       copy.addEventListener("click", async () => {
@@ -397,7 +389,9 @@ function claimControl(match, seat, mine, onClaimed) {
       });
       field.addEventListener("focus", () => field.select());
       clear(slot).append(
-        el("span", { class: "hint", text: `${seatName(seat)} is yours. This browser keeps the link; copy it to play elsewhere:` }),
+        el("span", { class: "hint", text: kept
+          ? `${seatName(seat)} is yours, and this browser keeps it — this page will offer "Open in game". Copy the link to play elsewhere:`
+          : `${seatName(seat)} is yours. This browser couldn't save it — keep this link:` }),
         field, copy, el("a", { class: "btn play", href: link, text: "Open in game" }));
       onClaimed(slot);
       return;
@@ -444,14 +438,15 @@ async function renderDetail(node, matchId, mine) {
   );
 
   const yours = el("div", { class: "yours-slot" });
-  if (entry) yours.append(openButton(match, entry));
+  const button = entry ? openButton(match, entry) : null;
+  if (button) yours.append(button);
   node.append(yours);
 
   const open = match.finished ? [] : match.unclaimed || [];
   if (open.length && !entry) {
     const section = el("section", { class: "claims" }, [
       el("h2", { text: "Take a seat" }),
-      el("p", { class: "lede", text: "The name is optional and shows beside your colour. The link that seats you is kept in this browser — copy it to play from another device." }),
+      el("p", { class: "lede", text: "The name is optional and shows beside your colour. The seat is kept in this browser, beside the game's own, so this page can always reopen it — copy its link to play from another device." }),
     ]);
     const controls = open.map((seat) => claimControl(match, seat, mine, (taken) => {
       for (const other of controls) if (other !== taken) other.remove();
@@ -463,15 +458,7 @@ async function renderDetail(node, matchId, mine) {
 
 async function main() {
   const node = document.getElementById("lobby");
-  let mine = readMine();
-  if (location.hash) {
-    const merged = mergeFragment(mine, location.hash);
-    if (merged !== mine) {
-      mine = merged;
-      writeMine(mine);
-    }
-    history.replaceState(null, "", location.pathname + location.search);
-  }
+  const mine = readSeats();
   const matchId = new URLSearchParams(location.search).get("match");
   try {
     if (matchId) await renderDetail(node, matchId, mine);

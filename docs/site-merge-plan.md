@@ -1,6 +1,11 @@
 # Merging the game and leaderboard sites — planning brief
 
-Status: **not started**. This is the input to a planning session. It is not a plan.
+Status: **implemented, cutover pending.** The plan chosen from this brief is
+option A, in `site-merge-implementation-plan.md` at the repo root; the code is
+on `claude/leaderboard-game-netlify-merge-jtlpb8`. What remains is manual: the
+Netlify UI steps and the two publishes listed at the top of that plan. This
+brief is kept for its reasoning; the facts below describe the tree *before* the
+merge.
 It records why a merge is wanted, what the two sites look like today, the
 constraints any plan has to satisfy, the open decisions, and what gets simpler
 afterwards. Facts were checked against the tree on 2026-09-24 (`play-by-post` at

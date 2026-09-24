@@ -185,26 +185,23 @@ def record_best(challenge_key: str, turns: int, lost: int, *legacy: str) -> bool
 def leaderboard_origin() -> str:
     """Where the leaderboard lives, from where *we* are.
 
-    On the web the two sites' names differ by one string, and Netlify names every
-    deploy of both from the same context — so the board that matches this build is
-    derivable rather than configured (see ``paths.sibling_host``). A deploy
-    preview of the game therefore talks to the deploy preview of the board, with
-    nothing to edit by hand between them.
+    On a ``.netlify.app`` page it is this page's own origin: the board and its
+    functions are served by the game's site, so every deploy — production, a
+    deploy preview, a branch deploy — answers for itself.
 
-    Everywhere else, and for any host the rule cannot read — a custom domain,
-    localhost, desktop, Android — the configured production origin, which is what
-    the feature has always used.
+    Everywhere else — a custom domain, localhost, desktop, Android — the
+    configured production origin, ``paths.LEADERBOARD_ORIGIN``. (Localhost can
+    call it: the functions' CORS allow-list admits a local server.)
     """
     if is_web():
         import platform as _platform
 
         try:
             host = str(_platform.window.location.hostname)
-        except Exception:  # no DOM, no derivation
+        except Exception:  # no DOM, nothing to read
             host = ""
-        sibling = paths.sibling_host(host, paths.LEADERBOARD_TAG, add=True)
-        if sibling:
-            return f"https://{sibling}"
+        if host.endswith(paths.NETLIFY_SUFFIX):
+            return f"https://{host}"
     return paths.LEADERBOARD_ORIGIN
 
 

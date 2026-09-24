@@ -321,8 +321,9 @@ def test_the_roster_prompt_fields_sit_inside_the_panel_and_clear_of_each_other()
         pygame.quit()
 
 
-def test_shared_matches_opens_the_lobby_with_the_seats_held_here(monkeypatch, tmp_path):
-    """Ids only: the lobby is handed which matches are ours, never a token."""
+def test_shared_matches_opens_the_lobby_and_hands_it_nothing(monkeypatch, tmp_path):
+    """The lobby shares our origin and reads the seat store itself, so the link
+    carries no fragment — least of all a token."""
     monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
     monkeypatch.setattr(menu.pbp, "configured", lambda: True)
     token = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
@@ -338,7 +339,8 @@ def test_shared_matches_opens_the_lobby_with_the_seats_held_here(monkeypatch, tm
             assert not ms.rects["browse_matches"].colliderect(ms.rects[other])
         assert _click_key(screen, ms, settings, "browse_matches") is None
         assert opened == [menu.webstore.leaderboard_url(
-            menu.LEADERBOARD_LOBBY_PATH + "#mine=00112233445566ff")]
+            menu.LEADERBOARD_LOBBY_PATH)]
+        assert "#" not in opened[0]
         assert token not in opened[0]
     finally:
         menu.is_web = real_is_web

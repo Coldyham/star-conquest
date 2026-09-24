@@ -197,36 +197,8 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
 
 # --- finding the leaderboard from where we are -------------------------------- #
 #
-# The two halves are separate Netlify sites whose names differ by one string, and
-# Netlify names every deploy `<context>--<site>.netlify.app` from the same context
-# on both — so a preview can find its own sibling instead of being configured.
-def test_the_sibling_site_is_derived_across_every_deploy_context():
-    add = lambda host: paths.sibling_host(host, "-leaderboard", add=True)
-    assert add("star-conquest.netlify.app") == "star-conquest-leaderboard.netlify.app"
-    assert (add("deploy-preview-42--star-conquest.netlify.app")
-            == "deploy-preview-42--star-conquest-leaderboard.netlify.app")
-    assert (add("some-branch--star-conquest.netlify.app")
-            == "some-branch--star-conquest-leaderboard.netlify.app")
-
-
-def test_the_rule_runs_backwards_for_the_board_finding_the_game():
-    """`leaderboard/js/config.mjs` implements the same rule the other way; this
-    pins that the two are inverses, since nothing can check them against each
-    other at runtime."""
-    drop = lambda host: paths.sibling_host(host, "-leaderboard", add=False)
-    for host in ("star-conquest.netlify.app",
-                 "deploy-preview-42--star-conquest.netlify.app"):
-        assert drop(paths.sibling_host(host, "-leaderboard", add=True)) == host
-
-
-def test_a_host_the_rule_cannot_read_falls_back_rather_than_guessing():
-    """A custom domain, a local server or a host already in the wanted state: the
-    caller uses the configured origin instead, which is what desktop always does."""
-    for host in ("example.com", "localhost", "starconquest.example.org", "",
-                 "star-conquest-leaderboard.netlify.app"):   # already the board
-        assert paths.sibling_host(host, "-leaderboard", add=True) == ""
-
-
+# The board and its functions are served by the game's own site, so on a
+# `.netlify.app` page every deploy context answers for itself.
 def test_off_the_web_the_configured_origin_is_used():
     assert webstore.leaderboard_origin() == paths.LEADERBOARD_ORIGIN
     assert webstore.leaderboard_url("/api/log") == f"{paths.LEADERBOARD_ORIGIN}/api/log"
@@ -237,17 +209,30 @@ def test_a_blank_origin_disables_every_leaderboard_feature(monkeypatch):
     assert webstore.leaderboard_url("/api/log") == ""
 
 
-def test_on_the_web_the_endpoint_follows_the_page(monkeypatch):
-    """The whole point: a deploy preview of the game posts to the deploy preview
-    of the board, with nothing edited by hand between them."""
+def _on_page(monkeypatch, hostname):
     class _Window:
-        location = type("L", (), {"hostname": "deploy-preview-7--star-conquest.netlify.app"})
+        location = type("L", (), {"hostname": hostname})
 
     monkeypatch.setattr(webstore, "is_web", lambda: True)
     monkeypatch.setitem(__import__("sys").modules, "platform",
                         type("P", (), {"window": _Window()}))
-    assert webstore.leaderboard_url("/api/log") == (
-        "https://deploy-preview-7--star-conquest-leaderboard.netlify.app/api/log")
+
+
+def test_on_the_web_the_endpoint_is_the_pages_own(monkeypatch):
+    """The whole point: a deploy preview posts to its own functions, with
+    nothing edited by hand between them."""
+    for host in ("star-conquest.netlify.app",
+                 "deploy-preview-7--star-conquest.netlify.app",
+                 "some-branch--star-conquest.netlify.app"):
+        _on_page(monkeypatch, host)
+        assert webstore.leaderboard_url("/api/log") == f"https://{host}/api/log"
+
+
+def test_a_host_that_is_not_netlify_falls_back_to_the_configured_origin(monkeypatch):
+    """A local server or a custom domain has no functions of its own to call."""
+    for host in ("localhost", "127.0.0.1", "starconquest.example.org", ""):
+        _on_page(monkeypatch, host)
+        assert webstore.leaderboard_origin() == paths.LEADERBOARD_ORIGIN
 
 
 # --- the "animate turns" display preference ---------------------------------- #

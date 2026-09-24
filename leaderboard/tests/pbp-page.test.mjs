@@ -7,8 +7,8 @@ import test from "node:test";
 
 import { phrase } from "../js/matchnames.mjs";
 import {
-  deadlineLabel, deadlineNote, groupMatches, matchLabel, mergeFragment, mineIds, openLink,
-  parseMine, resultNote, roster, seatLink, seatWho, setupLine, waitingNote,
+  SEATS_KEY, deadlineLabel, deadlineNote, groupMatches, matchLabel, mineIds, openLink,
+  parseSeats, resultNote, roster, seatLink, seatWho, setupLine, waitingNote, withSeat,
 } from "../js/pbp.mjs";
 
 const ID = "00112233445566ff";
@@ -72,17 +72,28 @@ test("the lobby shows open invitations, your live matches and finished ones — 
   assert.deepEqual(groups.finished.map((m) => m.match_id[0]), ["d"]);
 });
 
-test("the #mine= hand-off adds ids and keeps any seat link already stored", () => {
-  const stored = { [ID]: { seat: 2, link: "https://g/#pbp=x" } };
-  const merged = mergeFragment(stored, `#mine=${ID},${"f".repeat(16)},nothex`);
-  assert.deepEqual(merged, { [ID]: { seat: 2, link: "https://g/#pbp=x" }, ["f".repeat(16)]: { seat: null, link: null } });
-  assert.equal(mergeFragment(stored, "#log=abc"), stored);
+const TOKEN = "ab".repeat(16);
+
+test("yours is read straight from the game's seat store", () => {
+  assert.equal(SEATS_KEY, "sc_pbp_seats");
+  const store = JSON.stringify({ [ID]: { seat: 2, token: TOKEN } });
+  assert.deepEqual(parseSeats(store), { [ID]: { seat: 2, token: TOKEN } });
 });
 
-test("a malformed store reads as empty, and junk entries are dropped", () => {
-  assert.deepEqual(parseMine("not json"), {});
-  assert.deepEqual(parseMine("[1]"), {});
-  assert.deepEqual(parseMine(JSON.stringify({ [ID]: { seat: "2" }, bad: {} })), { [ID]: { seat: null, link: null } });
+test("a malformed seat store reads as empty, and junk entries are skipped", () => {
+  assert.deepEqual(parseSeats("not json"), {});
+  assert.deepEqual(parseSeats("[1]"), {});
+  assert.deepEqual(parseSeats(null), {});
+  const junk = {
+    [ID]: { seat: 2, token: TOKEN },
+    nothex: { seat: 1, token: TOKEN },
+    ["f".repeat(16)]: { seat: "2", token: TOKEN },
+    ["e".repeat(16)]: { seat: 0, token: TOKEN },
+    ["d".repeat(16)]: { seat: 1, token: "short" },
+    ["c".repeat(16)]: { seat: 1 },
+    ["b".repeat(16)]: "a string",
+  };
+  assert.deepEqual(parseSeats(JSON.stringify(junk)), { [ID]: { seat: 2, token: TOKEN } });
 });
 
 test("at most one request's worth of ids is looked up, newest kept", () => {
@@ -92,9 +103,20 @@ test("at most one request's worth of ids is looked up, newest kept", () => {
   assert.equal(ids[49], (59).toString(16).padStart(16, "0"));
 });
 
-test("opening a match uses the stored seat link, else the game's bare #pbp=<id>", () => {
-  assert.equal(openLink(ID, { link: "https://g/#pbp=full" }, "https://g/"), "https://g/#pbp=full");
-  assert.equal(openLink(ID, { link: null }, "https://g/"), `https://g/#pbp=${ID}`);
+test("a claim writes the seat in pbp.remember's shape and keeps the rest", () => {
+  const other = "f".repeat(16);
+  const before = JSON.stringify({ [other]: { seat: 1, token: TOKEN, extra: "kept" } });
+  const after = JSON.parse(withSeat(before, ID, 3, TOKEN));
+  assert.deepEqual(after[ID], { seat: 3, token: TOKEN });
+  assert.deepEqual(after[other], { seat: 1, token: TOKEN, extra: "kept" }, "never pruned or rewritten");
+  assert.deepEqual(JSON.parse(withSeat("not json", ID, 1, TOKEN)), { [ID]: { seat: 1, token: TOKEN } });
+  assert.deepEqual(JSON.parse(withSeat(null, ID, 1, TOKEN)), { [ID]: { seat: 1, token: TOKEN } });
+});
+
+test("opening a match carries the seat's token, and there is no bare link", () => {
+  assert.equal(openLink(ID, { seat: 2, token: TOKEN }, "https://g/"), `https://g/#pbp=${ID}:${TOKEN}`);
+  assert.equal(openLink(ID, undefined, "https://g/"), null);
+  assert.equal(openLink(ID, { seat: 2 }, "https://g/"), null);
 });
 
 test("a seat link is the game's own #pbp fragment", () => {
