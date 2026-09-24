@@ -11,7 +11,8 @@ two companion files, keyed by matching headings — read them when you're actual
 touching that code, not as background reading.
 [`docs/system-design.md`](docs/system-design.md) covers the core and the shell;
 [`docs/bot-design.md`](docs/bot-design.md) covers the `models/` roster, the
-margins bots price fights with, and the measurements behind every AI constant.
+margins bots price fights with, and the measurements behind every AI constant;
+[`docs/pbp-design.md`](docs/pbp-design.md) covers play-by-post.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
 is the wire protocol for non-Python bots, and
 [`docs/bot-brief.md`](docs/bot-brief.md) is a self-contained brief a player
@@ -71,10 +72,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it). (`custommap` is the hand-authored map recipe and its validator —
   see Hand-authored maps below. `pbp` is play-by-post: one seat of a shared match,
-  held by a person at their own pace. It is **work in progress on a branch** and
-  is the one feature here whose working record is not yet in these docs — see
-  [`docs/play-by-post.md`](docs/play-by-post.md), which is temporary and goes away
-  when the branch lands. `fog` is presentation-only visibility — pure hop-distance queries the
+  held by a person at their own pace — see Play-by-post below. `fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
   presentation-only playback the *engine writes into* and never reads back — see
   Animated end of turn below. `replay` serializes a
@@ -439,6 +437,44 @@ live play from the viewed turn — mid-game it truncates the same log file
 (`GameLog.truncate`, confirmed first, since it discards later turns); on a
 finished game it forks a new file (`GameLog.fork`) so the completed record stays
 intact.
+
+### Play-by-post (pbp.py)
+
+A per-seat URL onto a shared match, played asynchronously. It fits because turns
+already resolve simultaneously. The rationale for each rule is in
+[`docs/pbp-design.md`](docs/pbp-design.md), under the same headings.
+
+- **Thin server; clients resolve.** `leaderboard/netlify/functions/pbp.mjs` and
+  the `pbp_*` tables store orders and the log. They never hold a board or run an
+  engine. The function holds the only write key, like `log.mjs`. A seat token is
+  scoped to one match, never to a person. Play-by-post matches never appear on
+  the leaderboard.
+- **The stored log is the record, and a turn is decided once.** Whoever resolves
+  a turn uploads its log, and every other client applies it (`pbp.match_log`,
+  `pbp.settled_turn`). Nobody decides that turn again, because the bots stop on
+  a wall clock. The resolver's rng is derived (`pbp.reseed`), never carried.
+  Bots decide on a scratch copy (`pbp.turn_orders`), so the dice roll after every
+  order is fixed. Each stepping client re-rolls them (`pbp.verify_turn`).
+  `match_log` refuses a log that files an order under a person's seat. The
+  endpoint keeps the first upload, and a client that loses the race rebuilds
+  from it.
+- **Order sequence is the whole of determinism.** `engine._collect_orders` runs
+  in ascending seat id and must never depend on submission order.
+  `RULES_VERSION` did not move for any of this, and must not.
+- **Fog is convenience, not secrecy.** A client holds the whole log. The board
+  digest is a tripwire against drift, not an anti-cheat mechanism. The live
+  turn's orders are released all at once, only when every seat is in
+  (`visibleOrders`).
+- **Nothing resolves a play-by-post turn on a clock.** End Turn submits
+  (`main.pbp_send`), and play and autoplay are unavailable. A settled turn still
+  goes through `main.resolve_turn`, passing the record as `script`.
+- **The roster is the truth about who is a person**, not the `is_human` flags
+  left by a rebuild (`pbp.seat_people`, re-stamped in `main.open_match`).
+- **How a deadline works.** A first miss holds (the seat files empty orders), and
+  a second consecutive miss hands the seat to its bot. The endpoint decides the
+  lapse (`lapsedSeats`, re-checked in `handleLapse`) from the `source` column.
+  Any client may file the bot's orders, computed on a board copy, but never a
+  lapse for its own seat.
 
 ### Key conventions
 
