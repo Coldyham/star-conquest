@@ -6,11 +6,11 @@ triangles for fleets, numbers for ship counts.
 from __future__ import annotations
 
 import math
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, paths, turnfilm, widgets
+from . import config, fog, paths, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -825,8 +825,8 @@ class _Mark(NamedTuple):
     phase: float
     fade: float                 # 0 fresh, 1 dissolved into the background
     cost: int                   # what it cost whoever came out of it
-    victor: Optional[int]       # ...and who that was; None when nobody did
-    node_id: Optional[int]      # the system it happened at, if it was not in open space
+    victor: int | None       # ...and who that was; None when nobody did
+    node_id: int | None      # the system it happened at, if it was not in open space
 
 
 def _mark_phase(age_ms: float) -> float:

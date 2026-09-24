@@ -34,12 +34,11 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import pygame
 
-from . import (config, custommap, mapgen, paths, settings as settings_mod,
-               softkeyboard, widgets)
+from . import config, custommap, mapgen, paths, softkeyboard, widgets
+from . import settings as settings_mod
 from .custommap import CustomMap, MapNode, Problem
 from .geometry import WorldView, dist, point_segment_dist
 from .settings import Settings
@@ -85,16 +84,16 @@ class Editor:
     # What *Generate* rolls, when it is pinned. `None` — every real caller — means
     # "resolve one off the Settings the way starting a game would", so the button
     # hands back a different map each press.
-    seed: Optional[int] = None
+    seed: int | None = None
 
     tool: str = SYSTEMS
     pick: object = PALETTE_RANDOM        # PALETTE_RANDOM, or an int production
 
-    sel_node: Optional[int] = None
-    sel_lane: Optional[int] = None
+    sel_node: int | None = None
+    sel_lane: int | None = None
     # Lane drawing: one armed source serving both gestures. A tap leaves it armed
     # so the next press commits; a drag past the threshold commits on release.
-    lane_src: Optional[int] = None
+    lane_src: int | None = None
     lane_drag: bool = False
     lane_pos: tuple[int, int] = (0, 0)
     # Refuse to *draw* a crossing lane. Editor-time only, and that is the whole
@@ -114,21 +113,21 @@ class Editor:
     # has", so the readout is the map's own truth until someone sets a number;
     # `_adopt` puts it back. Never `settings.players` — `commit` derives that from
     # the recipe, so a number written there is overwritten on the way out.
-    auto_seats: Optional[int] = None
+    auto_seats: int | None = None
     box_press: bool = False
     box_active: bool = False
     box_from: tuple[int, int] = (0, 0)
     box_to: tuple[int, int] = (0, 0)
 
-    drag_node: Optional[int] = None
-    drag_origin: Optional[tuple[int, int]] = None   # world coords, for the snap-back
+    drag_node: int | None = None
+    drag_origin: tuple[int, int] | None = None   # world coords, for the snap-back
     drag_start: tuple[int, int] = (0, 0)            # screen coords the press landed at
     drag_moved: bool = False
     drag_undone: bool = False                       # is this drag's undo snapshot taken?
     pan_active: bool = False
     pan_last: tuple[int, int] = (0, 0)
     pan_button: int = 3    # which button armed the pan (Lanes allows the left one)
-    drag_slider: Optional[str] = None
+    drag_slider: str | None = None
 
     # What the live validator is complaining about *right now*, so an illegal
     # drag rings amber under the cursor rather than only failing on release.
@@ -140,7 +139,7 @@ class Editor:
 
     filename: str = ""
     editing_filename: bool = False
-    confirm: Optional[str] = None        # an `_CONFIRMS` key, or None
+    confirm: str | None = None        # an `_CONFIRMS` key, or None
 
     status: str = ""
     status_ok: bool = True
@@ -167,7 +166,7 @@ class Editor:
 # --------------------------------------------------------------------------- #
 # Opening / committing
 # --------------------------------------------------------------------------- #
-def open_editor(settings: Settings, seed: Optional[int] = None) -> Editor:
+def open_editor(settings: Settings, seed: int | None = None) -> Editor:
     """The editor for ``settings`` — its existing hand map, or a blank canvas.
 
     Blank is the default because *Create map* means create: handing someone a
@@ -184,7 +183,7 @@ def open_editor(settings: Settings, seed: Optional[int] = None) -> Editor:
     return Editor(recipe=recipe, view=_build_view(), seed=seed)
 
 
-def _generated(settings: Settings, seed: Optional[int] = None) -> CustomMap:
+def _generated(settings: Settings, seed: int | None = None) -> CustomMap:
     """A recipe from a freshly generated map, honouring the menu's own knobs.
 
     Goes through ``settings.apply_globals`` rather than ``mapgen.generate``
@@ -208,8 +207,8 @@ def _centred(recipe: CustomMap) -> CustomMap:
         return recipe
     xs = [n.x for n in recipe.nodes]
     ys = [n.y for n in recipe.nodes]
-    dx = int(round((config.CUSTOM_WORLD_W - (max(xs) + min(xs))) / 2))
-    dy = int(round((config.WORLD_SIZE - (max(ys) + min(ys))) / 2))
+    dx = round((config.CUSTOM_WORLD_W - (max(xs) + min(xs))) / 2)
+    dy = round((config.WORLD_SIZE - (max(ys) + min(ys))) / 2)
     for node in recipe.nodes:
         node.x, node.y = node.x + dx, node.y + dy
     return recipe.normalised()
@@ -1040,13 +1039,13 @@ def _text_field(surface, font, rect: pygame.Rect, text: str, editing: bool) -> N
 
 _CONFIRMS = {
     "auto_lanes": ("Replace every lane?",
-                   "Auto-lanes rebuilds the whole network, so any bottleneck you "
-                   "drew by hand goes with it."),
+                   ("Auto-lanes rebuilds the whole network, so any bottleneck you "
+                    "drew by hand goes with it.")),
     "clear_lanes": ("Remove every lane?",
                     "The systems stay where they are; only the network goes."),
     "auto_owners": ("Replace every homeworld?",
-                    "Auto-placing spreads the starts around the rim, so any seat "
-                    "you painted by hand goes with it."),
+                    ("Auto-placing spreads the starts around the rim, so any seat "
+                     "you painted by hand goes with it.")),
     "new": ("Start from a blank canvas?", "The map you have drawn will be discarded."),
 }
 
@@ -1065,7 +1064,7 @@ def _draw_confirm(surface, ed: Editor) -> None:
 # --------------------------------------------------------------------------- #
 # Events
 # --------------------------------------------------------------------------- #
-def handle_event(event, ed: Editor, settings: Settings) -> Optional[str]:
+def handle_event(event, ed: Editor, settings: Settings) -> str | None:
     """Mutate ``ed`` (and, for the sliders, ``settings``); return a high-level
     action for ``main`` — ``"play"``, ``"menu"``, or ``None``."""
     if ed.confirm is not None:
@@ -1093,7 +1092,7 @@ def handle_event(event, ed: Editor, settings: Settings) -> Optional[str]:
     return None
 
 
-def _handle_press(event, ed: Editor, settings: Settings) -> Optional[str]:
+def _handle_press(event, ed: Editor, settings: Settings) -> str | None:
     pos = event.pos
     if event.button == 3:
         # Right-drag pans. Left-drag cannot: in the Systems tool a press on empty
@@ -1203,7 +1202,7 @@ def _press_lane(ed: Editor, pos) -> None:
         ed.pan_active, ed.pan_last, ed.pan_button = True, pos, 1
 
 
-def _hit(ed: Editor, pos) -> Optional[str]:
+def _hit(ed: Editor, pos) -> str | None:
     """The chrome control under ``pos``, if any.
 
     The single hit-tester, and the single place the "guard every rect test on its
@@ -1241,7 +1240,7 @@ def _arm_move(ed: Editor, node: int, pos) -> None:
     ed.drag_undone = False
 
 
-def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[str]:
+def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> str | None:
     """A press on a laid-out control: the toolbar, palette, sidebar or footer."""
     if hit != "filename":
         _stop_editing_filename(ed)
@@ -1282,7 +1281,7 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> Optional[st
     return _handle_action(hit, ed, settings)
 
 
-def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
+def _handle_action(hit: str, ed: Editor, settings: Settings) -> str | None:
     if hit == "zoom_in":
         ed.view.zoom_at(_view_centre(), config.ZOOM_BUTTON_STEP)
     elif hit == "zoom_out":
@@ -1346,7 +1345,7 @@ def _handle_action(hit: str, ed: Editor, settings: Settings) -> Optional[str]:
     return None
 
 
-def _play(ed: Editor, settings: Settings) -> Optional[str]:
+def _play(ed: Editor, settings: Settings) -> str | None:
     """Commit and start, or refuse with the first blocker said out loud."""
     blockers = ed.recipe.blockers()
     if blockers:
@@ -1433,7 +1432,7 @@ def _handle_release(event, ed: Editor) -> None:
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
 
-def _handle_key(event, ed: Editor, settings: Settings) -> Optional[str]:
+def _handle_key(event, ed: Editor, settings: Settings) -> str | None:
     if ed.editing_filename:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
             _stop_editing_filename(ed)    # commit and cancel are the same here
@@ -1459,7 +1458,7 @@ def _handle_key(event, ed: Editor, settings: Settings) -> Optional[str]:
 
 
 def _handle_confirm(event, ed: Editor, settings: Settings) -> None:
-    answer: Optional[bool] = None
+    answer: bool | None = None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         for key, value in (("confirm_yes", True), ("confirm_no", False)):
             rect = ed.rects.get(key)
@@ -1548,7 +1547,7 @@ def _adopt(ed: Editor, recipe: CustomMap) -> None:
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
 
-def _place(ed: Editor, settings: Settings, pos, link: Optional[int] = None) -> None:
+def _place(ed: Editor, settings: Settings, pos, link: int | None = None) -> None:
     """Place a system at ``pos``, if the rules allow it there.
 
     ``link`` is a system to lane the new one to — shift-click chaining, and its
@@ -1560,7 +1559,7 @@ def _place(ed: Editor, settings: Settings, pos, link: Optional[int] = None) -> N
         _set_status(ed, f"That's the limit — {config.MAX_NODES} systems.", False)
         return
     wx, wy = ed.view.to_world(pos)
-    node = MapNode(x=int(round(wx)), y=int(round(wy)),
+    node = MapNode(x=round(wx), y=round(wy),
                    production=_rolled_production(ed), ships=0).clamped()
     node.ships = _rolled_garrison(ed, settings, node)
 
@@ -1826,7 +1825,7 @@ def _nodes_in_box(ed: Editor, rect: tuple[int, int, int, int]) -> list[int]:
 
 
 def _lane_candidate(ed: Editor, recipe: CustomMap, a: int, b: int
-                    ) -> Optional[list[tuple[int, int]]]:
+                    ) -> list[tuple[int, int]] | None:
     """``recipe.lanes`` with ``a``-``b`` added, or ``None`` with the refusal said
     out loud. Split out of `_add_lane` so a placement that also links (shift-click
     chaining) can validate the new lane against a recipe that already holds the
@@ -1965,11 +1964,11 @@ def _illegal(ed: Editor, index: int) -> bool:
 
 def _move_node(ed: Editor, index: int, pos) -> None:
     wx, wy = ed.view.to_world(pos)
-    moved = MapNode(x=int(round(wx)), y=int(round(wy))).clamped()
+    moved = MapNode(x=round(wx), y=round(wy)).clamped()
     ed.recipe.nodes[index].x, ed.recipe.nodes[index].y = moved.x, moved.y
 
 
-def _pick_node(ed: Editor, pos) -> Optional[int]:
+def _pick_node(ed: Editor, pos) -> int | None:
     """The system under ``pos``, nearest first, with the tap floor every small
     system on the board already gets."""
     best, best_d = None, None
@@ -1985,7 +1984,7 @@ def _screen_of(ed: Editor, index: int) -> tuple[int, int]:
     return ed.view.to_screen(ed.recipe.nodes[index].pos)
 
 
-def _selected_lane(ed: Editor) -> Optional[tuple[int, int]]:
+def _selected_lane(ed: Editor) -> tuple[int, int] | None:
     """The selected lane as its node pair, or None. Returns the *pair* rather than
     the index, because an index into a list that has since been edited is at best
     meaningless and at worst the wrong lane."""
@@ -1998,7 +1997,7 @@ def _lane_length(a: MapNode, b: MapNode) -> float:
     return round(dist(a.pos, b.pos) * config.LY_PER_WORLD_UNIT, 1)
 
 
-def _pick_lane(ed: Editor, pos) -> Optional[int]:
+def _pick_lane(ed: Editor, pos) -> int | None:
     """The lane under ``pos``, nearest first — with a repeat press cycling through
     overlapping candidates rather than always grabbing the same one, the same
     shape ``input._pick_lane`` uses."""
@@ -2016,7 +2015,7 @@ def _pick_lane(ed: Editor, pos) -> Optional[int]:
     return order[0]
 
 
-def _selected(ed: Editor) -> Optional[MapNode]:
+def _selected(ed: Editor) -> MapNode | None:
     if ed.sel_node is None or not 0 <= ed.sel_node < len(ed.recipe.nodes):
         return None
     return ed.recipe.nodes[ed.sel_node]
@@ -2067,7 +2066,7 @@ def _set_slider(ed: Editor, settings: Settings, key: str, px: int) -> None:
     value = lo + t * (hi - lo)
     value = round(value / step) * step if step else value
     value = max(lo, min(hi, value))
-    setattr(settings, attr, int(round(value)) if is_int else round(value, 4))
+    setattr(settings, attr, round(value) if is_int else round(value, 4))
 
 
 def _set_garrison_slider(ed: Editor, px: int) -> None:

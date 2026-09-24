@@ -12,11 +12,11 @@ import sys
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
+import pygame
 
-from starconquest import ai, combat, config, menu  # noqa: E402
-from starconquest.menu import MenuState  # noqa: E402
-from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings  # noqa: E402
+from starconquest import ai, combat, config, menu
+from starconquest.menu import MenuState
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings
 
 
 def _setup():
@@ -214,6 +214,22 @@ def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
         pygame.quit()
 
 
+def test_the_roster_prompt_public_checkbox_toggles_and_resets(monkeypatch):
+    """Off by default, toggled by its checkbox, and off again the next time
+    the prompt opens."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+        _click_key(screen, ms, settings, "pbp_public")
+        assert ms.pbp_public is True
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+    finally:
+        pygame.quit()
+
+
 def test_the_roster_prompt_deadline_stepper_moves_in_whole_days(monkeypatch):
     """Starts at `pbp.DEADLINE_HOURS`, moves a day (24h) per press, and is
     clamped to the endpoint's own bounds — a day at the low end, its 336h
@@ -310,7 +326,7 @@ def test_web_scale_boost_enlarges_menu(monkeypatch):
         monkeypatch.setattr(menu, "is_web", lambda: True)
         menu.draw(screen, ms, settings)
         assert ms.canvas_scale > base_scale
-        cw, ch = menu._get_canvas().get_size()
+        cw, _ch = menu._get_canvas().get_size()
         sw, _ = screen.get_size()
         assert ms.canvas_scale <= sw / cw
     finally:
@@ -662,7 +678,7 @@ def _register_aux_bot(name, **attrs):
     module = type(menu)(modname)
     for key, value in attrs.items():
         setattr(module, key, value)
-    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn = lambda st, pid: []
     fn.__module__ = modname
     sys.modules[modname] = module
     ai.register(name, fn)
@@ -1031,7 +1047,7 @@ def test_the_generated_map_menu_is_unchanged():
 def test_players_and_nodes_are_interlocked_against_the_recipe():
     """A nudge from any path would desync them from the map until the next
     `from_dict` reconciled them back — moving the setup digest in between."""
-    screen, ms, settings = _with_map()
+    _screen, _ms, settings = _with_map()
     try:
         menu._set_players(settings, 5)
         menu._set_nodes(settings, 30)
@@ -1041,7 +1057,7 @@ def test_players_and_nodes_are_interlocked_against_the_recipe():
 
 
 def test_randomise_leaves_the_hidden_groups_alone():
-    screen, ms, settings = _with_map()
+    _screen, _ms, settings = _with_map()
     try:
         before = {spec[2]: getattr(settings, spec[2])
                   for spec in menu._ADV_MAP + menu._ADV_ECON}
@@ -1052,7 +1068,7 @@ def test_randomise_leaves_the_hidden_groups_alone():
 
 
 def test_the_basic_tab_marks_a_hand_map_as_a_change():
-    screen, ms, settings = _with_map()
+    _screen, _ms, settings = _with_map()
     try:
         assert menu._tab_changed("basic", settings)
     finally:

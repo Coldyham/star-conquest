@@ -20,7 +20,6 @@ import random
 import time
 import zlib
 from dataclasses import asdict, dataclass, field, fields, replace
-from typing import Optional
 
 from . import ai, config, mapgen
 from .custommap import CustomMap
@@ -143,7 +142,7 @@ class Challenge:
             out += f" ({self.hand} by hand)"
         return out
 
-    def matches(self, settings: "Settings") -> bool:
+    def matches(self, settings: Settings) -> bool:
         """True if ``settings`` is still the setup this score was made on.
 
         A blank ``key`` is taken on trust — a hand-written or pre-``key`` challenge
@@ -161,7 +160,7 @@ class Settings:
     mode: str = "random"
     players: int = config.DEFAULT_PLAYERS
     nodes: int = config.DEFAULT_NODES
-    seed: Optional[int] = None
+    seed: int | None = None
     autoplay: bool = False
 
     # -- Advanced: global balance knobs (defaults mirror config) ------------- #
@@ -199,19 +198,19 @@ class Settings:
     # two to the recipe, and `mode` stays "random"/"symmetric" because
     # `leaderboard/schema.sql` constrains the column (the *state* is stamped
     # "custom", not the setup).
-    custom_map: Optional[CustomMap] = None
+    custom_map: CustomMap | None = None
 
     # -- A score to beat on this exact setup, or None for an ordinary config --- #
     # Presentation context only: `build_state` ignores it, and it is excluded from
     # `challenge_key` so a config and the same config-plus-a-target agree.
-    challenge: Optional[Challenge] = None
+    challenge: Challenge | None = None
 
     @classmethod
-    def defaults(cls) -> "Settings":
+    def defaults(cls) -> Settings:
         return cls()
 
     @classmethod
-    def from_args(cls, args) -> "Settings":
+    def from_args(cls, args) -> Settings:
         """Build from the argparse namespace so CLI flags pre-fill the menu.
 
         Only the Basic fields come from argv; the Advanced/AI fields keep their
@@ -254,7 +253,7 @@ class Settings:
         return out
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Settings":
+    def from_dict(cls, data: dict) -> Settings:
         """Rebuild from a plain dict (e.g. parsed JSON), tolerantly.
 
         Unknown keys are ignored, missing keys keep their default, values are
@@ -313,7 +312,7 @@ class Settings:
             json.dump(self.to_dict(), fh, indent=2)
 
     @classmethod
-    def load(cls, path) -> "Settings":
+    def load(cls, path) -> Settings:
         """Read a config from ``path`` (raises on missing/invalid JSON)."""
         with open(path) as fh:
             return cls.from_dict(json.load(fh))
@@ -363,7 +362,7 @@ class Settings:
         return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
 
     @classmethod
-    def from_token(cls, token: str) -> "Settings":
+    def from_token(cls, token: str) -> Settings:
         """Rebuild from a ``to_token`` string, tolerantly (via ``from_dict``).
 
         Reads both the current deflated form and the original uncompressed one, so
@@ -382,7 +381,7 @@ class Settings:
         except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, zlib.error, ValueError) as e:
             raise ValueError(f"invalid settings token: {e}") from e
 
-    def without_challenge(self) -> "Settings":
+    def without_challenge(self) -> Settings:
         """A copy of this config with any attached score dropped.
 
         What gets *stored* and put in the address bar: a remembered challenge token
@@ -447,7 +446,7 @@ class Settings:
                 keys.append(key)
         return tuple(keys)
 
-    def copy_from(self, other: "Settings") -> None:
+    def copy_from(self, other: Settings) -> None:
         """Overwrite every field from ``other`` in place (copying its lists).
 
         Lets a caller holding this instance (e.g. ``main.py``) adopt a loaded
@@ -529,7 +528,7 @@ def _ai_from_dict(d) -> AiParams:
     return out
 
 
-def _challenge_from_dict(d) -> Optional[Challenge]:
+def _challenge_from_dict(d) -> Challenge | None:
     """A Challenge from a dict, or None if absent/malformed/scoreless.
 
     A zero ``turns`` is not a result anyone can beat, so it reads as "no

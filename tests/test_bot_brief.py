@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from starconquest import ai, combat, engine, mapgen, model
-from starconquest.model import AiParams, Fleet, GameState, Order, Player, System
+from starconquest.model import Fleet, GameState, Order, Player, System
 
 BRIEF = Path(__file__).resolve().parent.parent / "docs" / "bot-brief.md"
 

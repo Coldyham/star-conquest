@@ -16,7 +16,7 @@ import pytest
 
 from starconquest import ai, botio, combat, config, engine, mapgen
 from starconquest.model import Order
-from starconquest.settings import Settings, _GLOBAL_KNOBS
+from starconquest.settings import _GLOBAL_KNOBS, Settings
 
 from . import botproc
 

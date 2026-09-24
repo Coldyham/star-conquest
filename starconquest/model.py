@@ -11,7 +11,6 @@ import heapq
 import random
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
 
 from . import config
 
@@ -204,7 +203,7 @@ class Fleet:
     ships: int
     turns_total: int
     turns_remaining: int
-    route: Optional[list[int]] = None
+    route: list[int] | None = None
     # Which parallel track of the lane this fleet flies on — see `free_lane_slot`,
     # which hands one out at launch. Held for the whole flight, and the only
     # cosmetic field here: nothing in the rules reads it, and it is deliberately
@@ -290,12 +289,12 @@ class GameState:
     turn: int = 0
     seed: int = 0
     mode: str = "random"
-    winner: Optional[int] = None
+    winner: int | None = None
     rng: random.Random = field(default_factory=random.Random)
 
     # -- construction ------------------------------------------------------- #
     @classmethod
-    def new(cls, seed: int, mode: str = "random") -> "GameState":
+    def new(cls, seed: int, mode: str = "random") -> GameState:
         return cls(seed=seed, mode=mode, rng=random.Random(seed))
 
     def add_lane(self, a: int, b: int, length_ly: float, travel_turns: int) -> None:
@@ -314,7 +313,7 @@ class GameState:
             self.systems[lane.b].neighbors.append(lane.a)
 
     # -- queries ------------------------------------------------------------ #
-    def travel_turns(self, a: int, b: int) -> Optional[int]:
+    def travel_turns(self, a: int, b: int) -> int | None:
         """Turns to cross the a-b lane if launched *now*, or None if not adjacent.
 
         ``Lane.travel_turns`` (and ``adjacency``) hold the mapgen-time value; with
@@ -348,7 +347,7 @@ class GameState:
         player = self.players.get(pid)
         return player is not None and not player.alive
 
-    def human(self) -> Optional[Player]:
+    def human(self) -> Player | None:
         for p in self.players.values():
             if p.is_human:
                 return p

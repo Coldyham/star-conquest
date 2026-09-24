@@ -68,9 +68,7 @@ def segments_intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> bool:
         return True
     if d3 == 0 and _on_segment(p1, p2, p3):
         return True
-    if d4 == 0 and _on_segment(p1, p2, p4):
-        return True
-    return False
+    return bool(d4 == 0 and _on_segment(p1, p2, p4))
 
 
 class WorldView:
@@ -122,8 +120,8 @@ class WorldView:
 
     def to_screen(self, pos: Point) -> tuple[int, int]:
         return (
-            int(round(pos[0] * self.scale + self.off_x)),
-            int(round(pos[1] * self.scale + self.off_y)),
+            round(pos[0] * self.scale + self.off_x),
+            round(pos[1] * self.scale + self.off_y),
         )
 
     def to_world(self, screen_pos: Point) -> Point:

@@ -13,14 +13,14 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
+import pygame
 
-import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, mapgen, model, render  # noqa: E402
-from starconquest import input as game_input  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import GameState, Player, System  # noqa: E402
-from starconquest.viewstate import IDLE, ROUTING, Ui  # noqa: E402
+import main
+from starconquest import config, mapgen, model, render
+from starconquest import input as game_input
+from starconquest.geometry import WorldView
+from starconquest.model import GameState, Player, System
+from starconquest.viewstate import IDLE, ROUTING, Ui
 
 
 # --------------------------------------------------------------------------- #

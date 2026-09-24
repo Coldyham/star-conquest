@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play by post · Star Conquest Leaderboard</title>
+<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+</header>
+
+<!-- Not linked from anywhere yet. Lists the public play-by-post matches
+     (?action=list on /api/pbp) and mints a link for an open seat on request
+     (?action=claim). A minted link exists in the clear only in this page's
+     reply, so it is shown once. -->
+<main>
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Play by post</h1>
+  <p class="lede">Public matches. An open seat's link is made when you ask for
+    it and shown once — copy it before you leave the page.</p>
+  <div id="lobby" class="loading">Loading…</div>
+</main>
+
+<script type="module" src="js/pbp.mjs"></script>
+</body>
+</html>

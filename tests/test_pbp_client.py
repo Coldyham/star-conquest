@@ -178,7 +178,7 @@ def test_a_stepped_turn_applies_the_record_and_decides_nothing(monkeypatch):
     match = pbp.match_from_dict(_payload(
         seats=(1, 2), players=3, settings_json=settings.to_dict(),
         submitted=[1, 2]))
-    elsewhere, log, digest = pbp.resolve(match, ai.decide)
+    _elsewhere, log, digest = pbp.resolve(match, ai.decide)
 
     _, state, ui, local = _opened(seats=(1, 2), players=3,
                                   settings_json=settings.to_dict())
@@ -195,15 +195,16 @@ def _fought_turn():
     """A board, and an honest record of a turn on it with at least one fight."""
     ai.load_models()
     settings = Settings(mode="random", players=3, nodes=12, seed=4)
-    over = dict(seats=(1, 2), players=3, settings_json=settings.to_dict(), seed=4)
+    over = {"seats": (1, 2), "players": 3, "settings_json": settings.to_dict(), "seed": 4}
+    log_blob = None
     for turn in range(60):
         match = pbp.match_from_dict(_payload(turn=turn, submitted=[1, 2], **over))
-        if turn:
+        if log_blob is not None:
             match.log = log_blob
         rebuilt = pbp.rebuild(match)
         assert rebuilt is not None
         state, log = rebuilt
-        resolved, log, _ = pbp.resolve(match, ai.decide)
+        _resolved, log, _ = pbp.resolve(match, ai.decide)
         if log.dice_for(turn):
             return state, log.script_for(turn), 4
         log_blob = pbp.shareable(log).encoded()
@@ -383,7 +384,7 @@ def test_we_are_never_on_the_list_of_seats_we_are_waiting_for(monkeypatch):
 def test_a_refused_submission_hands_the_turn_back():
     """Otherwise the player sits in front of a veil waiting on a turn they never
     actually entered."""
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_heard(ui, pbp.REFUSED, "")
     assert not ui.pbp_submitted
@@ -391,7 +392,7 @@ def test_a_refused_submission_hands_the_turn_back():
 
 
 def test_a_submission_that_landed_says_nothing():
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted, ui.pbp_msg = True, "Sending..."
     app.pbp_heard(ui, pbp.OK, '{"seat": 1, "turn": 0, "waiting": [2]}')
     assert ui.pbp_submitted and ui.pbp_msg == ""
@@ -438,7 +439,7 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
 # What the endpoint says about the live turn, and what the overlay makes of it
 # --------------------------------------------------------------------------- #
 def test_the_overlay_is_built_from_what_the_endpoint_says():
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[1], seats=(1, 2, 3),
                                                players=3)), _seat(), ui)
     assert ui.pbp_submitted
@@ -448,7 +449,7 @@ def test_the_overlay_is_built_from_what_the_endpoint_says():
 def test_whether_we_submitted_is_the_endpoints_answer_and_never_ours():
     """A submission that failed on the way out must not leave the board held for
     a turn nobody is waiting on."""
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[2])), _seat(), ui)
     assert not ui.pbp_submitted
@@ -498,6 +499,21 @@ def test_a_new_match_can_be_opened_with_a_chosen_deadline(monkeypatch):
                         lambda action, payload=None, **kw: sent.update(payload or {}))
     app.pbp_open(Settings(), seed=1, deadline_hours=72)
     assert sent["deadline_hours"] == 72
+
+
+def test_a_public_match_mints_only_the_creators_seat(monkeypatch):
+    """A public match leaves seats 2+ to be claimed on the lobby page, so it asks
+    for seat 1's token alone; a private one still asks for every seat's."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(players=3), seed=1, public=True)
+    assert sent["public"] is True
+    assert sent["claimed"] == [1]
+    assert sent["seats"] == [1, 2, 3]
+    app.pbp_open(Settings(players=3), seed=1)
+    assert sent["public"] is False
+    assert sent["claimed"] == [1, 2, 3]
 
 
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):

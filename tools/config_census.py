@@ -46,9 +46,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tools.bot_replay import Supabase  # noqa: E402 — the same paged PostgREST client
+from starconquest import settings as settings_mod
+from starconquest.settings import Settings
+from tools.bot_replay import Supabase
 
 # Where the board keeps its own project details. The anon key is public by
 # design (RLS is the boundary, not the key), so this is a read of a committed

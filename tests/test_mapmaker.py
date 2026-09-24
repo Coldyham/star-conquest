@@ -16,13 +16,13 @@ import random
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
-import pytest  # noqa: E402
+import pygame
+import pytest
 
-from starconquest import config, custommap, mapgen, mapmaker, widgets  # noqa: E402
-from starconquest.custommap import CustomMap, MapNode  # noqa: E402
-from starconquest.geometry import dist  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
+from starconquest import config, custommap, mapgen, mapmaker, widgets
+from starconquest.custommap import CustomMap, MapNode
+from starconquest.geometry import dist
+from starconquest.settings import Settings
 
 
 @pytest.fixture
@@ -163,7 +163,7 @@ def test_a_palette_pick_retypes_the_selected_system(scene):
 
 
 def test_a_random_placement_only_ever_rolls_the_weighted_values(scene):
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     ed.pick = mapmaker.PALETTE_RANDOM
     rolled = {mapmaker._rolled_production(ed) for _ in range(200)}
     assert rolled <= set(config.PRODUCTION_WEIGHTS)
@@ -510,7 +510,7 @@ def test_auto_relane_folds_into_the_placements_own_undo(scene):
 def test_auto_relane_is_not_reset_by_adopting_a_new_recipe(scene):
     """A preference, like Planar — `_adopt` swaps out everything that pointed
     into the old recipe, but this isn't one of those things."""
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     ed.auto_relane = True
     mapmaker._adopt(ed, CustomMap())
     assert ed.auto_relane
@@ -530,7 +530,7 @@ def test_undo_and_redo_walk_the_same_path(scene):
 
 
 def test_undo_is_bounded(scene):
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     for _ in range(config.EDIT_UNDO_DEPTH + 20):
         mapmaker._push_undo(ed)
     assert len(ed.undo_stack) == config.EDIT_UNDO_DEPTH
@@ -578,7 +578,7 @@ def test_play_is_refused_while_a_blocker_stands(scene):
 
 
 def test_the_play_gate_is_exactly_the_validator(scene):
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     for mutate in (lambda: None,
                    lambda: ed.recipe.lanes.clear(),
                    lambda: setattr(ed.recipe.nodes[0], "owner", 0)):
@@ -610,7 +610,7 @@ def test_an_empty_canvas_commits_as_no_hand_map_at_all(scene):
 
 
 def test_commit_keeps_players_and_nodes_in_step_with_the_map(scene):
-    screen, ed, settings = scene
+    _screen, ed, settings = scene
     ed.recipe.nodes[3].owner = 3
     mapmaker.commit(ed, settings)
     assert settings.players == 3 and settings.nodes == 4
@@ -684,7 +684,7 @@ def test_every_control_stays_on_screen_at_any_ui_scale(scene, scale, tool):
 
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 def test_the_viewport_never_overlaps_the_chrome(scene, scale):
-    screen, ed, settings = scene
+    _screen, _ed, _settings = scene
     config.apply_ui_scale(scale)
     view = pygame.Rect(mapmaker._view_rect())
     assert view.w > 0 and view.h > 0
@@ -696,7 +696,7 @@ def test_the_viewport_never_overlaps_the_chrome(scene, scale):
 def test_the_viewport_does_not_move_when_the_tool_does(scene):
     """A band that resized as tools switched would shift the map under the cursor
     and invalidate the camera with it."""
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     before = mapmaker._view_rect()
     for tool in (mapmaker.LANES, mapmaker.OWNERS, mapmaker.SYSTEMS):
         ed.tool = tool
@@ -741,7 +741,7 @@ def test_a_control_not_drawn_this_frame_cannot_be_clicked(scene):
 def test_opening_without_a_map_starts_from_a_blank_canvas(scene):
     """*Create map* means create. A generated board to pick apart is a different
     task, and it is one press away on the footer's *Generate*."""
-    screen, ed, settings = scene
+    _screen, _ed, settings = scene
     fresh = mapmaker.open_editor(settings)
     assert fresh.recipe == CustomMap()
 
@@ -749,7 +749,7 @@ def test_opening_without_a_map_starts_from_a_blank_canvas(scene):
 def test_generate_rolls_the_map_the_seed_describes(scene):
     """Same layout as the seed's own board, only translated — `_centred` shifts it
     into the middle of the creator's wider canvas and changes nothing else."""
-    screen, ed, settings = scene
+    screen, _ed, settings = scene
     fresh = mapmaker.open_editor(settings, seed=11)
     _click_key(screen, fresh, settings, "generate")
     expected = mapmaker._centred(custommap.from_state(
@@ -759,7 +759,7 @@ def test_generate_rolls_the_map_the_seed_describes(scene):
 
 
 def test_opening_with_a_map_edits_a_copy_of_it(scene):
-    screen, ed, settings = scene
+    _screen, _ed, settings = scene
     settings.custom_map = _square()
     fresh = mapmaker.open_editor(settings)
     fresh.recipe.nodes[0].x = 123
@@ -776,7 +776,7 @@ def test_new_clears_to_a_blank_canvas(scene):
 
 
 def test_a_resize_keeps_the_zoom_and_reflows_the_viewport(scene):
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     ed.view.zoom_at(_empty_spot(ed), 2.5)
     zoomed = ed.view.zoom
     try:
@@ -1153,14 +1153,14 @@ def test_an_empty_space_tap_deselects_the_system_in_the_owners_tool(scene):
 def test_a_box_is_clipped_to_the_viewport_before_it_picks_anything(scene):
     """`to_screen` projects every system, including ones panned out under the
     sidebar — only the *drawing* is clipped."""
-    screen, ed, settings = _owners(scene)
+    _screen, ed, _settings = _owners(scene)
     side = mapmaker._side_rect()
     box = (side.x + 10, side.y + 10, side.w - 20, side.h - 20)
     assert mapmaker._nodes_in_box(ed, box) == []
 
 
 def test_a_box_paints_as_one_group_rather_than_half_toggling(scene):
-    screen, ed, settings = _owners(scene)
+    _screen, ed, _settings = _owners(scene)
     ed.owner_pick = 1                             # node 0 already holds seat 1
     mapmaker._paint(ed, [0, 1, 2, 3])
     assert [n.owner for n in ed.recipe.nodes] == [1, 1, 1, 1]
@@ -1197,7 +1197,7 @@ def test_a_seat_gap_blocks_and_offers_a_one_press_fix(scene):
 
 
 def test_renumbering_is_undoable(scene):
-    screen, ed, settings = _owners(scene)
+    _screen, ed, _settings = _owners(scene)
     ed.recipe.nodes[2].owner = 5
     mapmaker._renumber_seats(ed)
     assert ed.recipe.nodes[2].owner == 2
@@ -1354,7 +1354,7 @@ def test_the_seats_stepper_stops_at_the_player_limits(scene):
 def test_a_whole_recipe_swap_hands_the_seat_count_back_to_the_map(scene):
     """A count belongs to the map it was chosen for — the same argument `_adopt`
     already makes about a selection index."""
-    screen, ed, settings = _owners(scene)
+    _screen, ed, _settings = _owners(scene)
     ed.auto_seats = 6
     mapmaker._adopt(ed, _square())
     assert ed.auto_seats is None and ed.seat_target() == 2
@@ -1392,7 +1392,7 @@ def test_the_footer_reads_left_to_right_in_the_order_it_is_specified(scene):
 
 
 def test_an_unplayable_map_still_greys_the_play_button(scene):
-    screen, ed, settings = scene
+    _screen, ed, _settings = scene
     ed.recipe.lanes = []                   # disconnected: a blocker
     palettes = {spec[0]: (spec[2], spec[3]) for spec in mapmaker._footer_specs(ed)}
     assert palettes["play"] == mapmaker._DEAD_PALETTE

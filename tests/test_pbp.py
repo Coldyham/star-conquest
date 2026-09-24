@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from starconquest import engine, mapgen, pbp, replay, webstore
+from starconquest import engine, pbp, replay, webstore
 from starconquest.model import Order
 from starconquest.settings import Settings
 
@@ -204,7 +204,7 @@ def test_resolving_produces_a_log_that_reconstructs_to_the_same_board():
     """A play-by-post match is an ordinary GameLog — which is what lets it
     resume, review and verify with nothing taught about it."""
     match = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    state, log, digest = pbp.resolve(match)
+    _state, log, digest = pbp.resolve(match)
     rebuilt, _ = replay.reconstruct(log)
     assert replay.digest_hex(rebuilt) == digest
 
@@ -276,7 +276,7 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
     dest = next(iter(state.systems[src].neighbors))
     rows = [{"turn": 0, "seat": 2, "orders_json": [{"src": src, "dst": dest, "ships": 2}]}]
 
-    resolved, log, digest = pbp.resolve(
+    _resolved, log, digest = pbp.resolve(
         pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
     # ...and the next client, seeing turn 1 with that turn now settled.
     rebuilt, _ = pbp.rebuild(pbp.match_from_dict(

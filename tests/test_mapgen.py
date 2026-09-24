@@ -9,7 +9,6 @@ import random
 from starconquest import config, mapgen, starnames
 from starconquest.geometry import point_segment_dist, segments_intersect
 
-
 SEEDS = list(range(60))
 
 

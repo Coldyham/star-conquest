@@ -1,11 +1,10 @@
-# Play-by-post multiplayer — design and handover
+# Play-by-post design notes
 
-**Status: work in progress on branch `play-by-post`.** Not merged, not deployed
-to production. This document is the working record: what was decided and why,
-what is built, and what is left.
-
-It lives in `docs/` rather than `notes/` deliberately — `notes/` is gitignored,
-and this needs to travel between machines.
+Rationale and edge cases behind play-by-post (`pbp.py`, the `pbp_*` tables and
+`leaderboard/netlify/functions/pbp.mjs`): one seat of a shared match, held by a
+person at their own pace. `CLAUDE.md` states *what* each rule is; this file is
+*why*. Its companions are [`system-design.md`](system-design.md) for the core
+and shell, and [`bot-design.md`](bot-design.md) for the AI roster.
 
 ## Context
 
@@ -27,6 +26,8 @@ turn-order advantage and nothing about the rules needs redesigning. Play-by-post
 is the delivery mechanism the rules were already written for.
 
 ### Decisions taken up front
+
+These came before any code was written, and the rest of the design follows from them.
 
 1. **Thin server; clients resolve.** The server stores each seat's orders per
    turn and the growing log. Clients reconstruct locally. `replay.reconstruct`
@@ -77,9 +78,10 @@ is the delivery mechanism the rules were already written for.
    That is a natural second step and the schema below should not foreclose it —
    hence `pbp_matches.seats` recording which seats are claimed, so an unclaimed
    seat is already a representable thing. It is not built in these phases.
-5. **Phased, PR-preview-first.** Deploy previews on a PR are effectively
+5. **Verifiable on a PR preview.** Deploy previews on a PR are effectively
    unlimited; only publishing `main` costs credits (~20/month shared across both
-   Netlify sites). Every phase must be verifiable without spending a publish.
+   Netlify sites). Every change here must be checkable without spending a publish
+   — hence the stub-PostgREST handler tests and `tools/check_pbp.py` below.
 
 ## Constraints that shape the design
 
@@ -106,8 +108,8 @@ load-bearing:
 
   The one case that *would* diverge — a human seat that is not the lowest live
   pid, e.g. `[3,1,2,4]` — is unreachable today (`engine._claim_seat` accepts any
-  pid, but nothing ever passes one but 1). Phase 2 makes it reachable, which is
-  exactly why the ascending-pid rule goes in at Phase 1, before any seat can move.
+  pid, but nothing ever passed one but 1). Play-by-post makes it reachable, which
+  is exactly why the ascending-pid rule went in before any seat could move.
 - **The log format does not need a version bump.** `TurnRecord` already carries
   *every* seat's orders with `owner_id`, and `GameLog.script_for` needs only
   `orders` + `dice`. Only `"ai"` (one bool) and `"rules"` (one seat's
@@ -129,7 +131,7 @@ load-bearing:
 - Films/reels hold the board while running (`main.py:1150-1156`); a networked
   resolution must serialize against that, not race it.
 
-## What already exists and should be reused
+## What it reuses
 
 - `share.Download` (`share.py:261-302`) — a non-blocking, poll-once-a-frame
   request with both backends already written. Needs generalising from GET-only
@@ -147,27 +149,6 @@ load-bearing:
   validate-everything function holding the only key that may write its table.
 - The `#log=<id>` launch path (`main.replay_request` → `open_replay`) — the
   precedent for a fragment-driven entry point with a proper error taxonomy.
-
----
-
-# Handover
-
-## State: built and playable end to end
-
-| Phase | What | Commit |
-|---|---|---|
-| 1 | N human seats in the core | `f33b4bd` |
-| 2 | A seat-agnostic shell | `c0a12dc` |
-| 3 | Backend: two tables + one function | `f3e89ec` |
-| 4a | Client rebuild/resolve | `d1960da` |
-| 4b | Live-orders visibility fix | `f5b01a9` |
-| 4c | Wire + waiting overlay | `ae302e5` |
-| 4d | The loop: open, poll, submit, step | `957e03d` |
-| 4e | Opening a match from the menu | `80b61e2` |
-| 5  | Deadlines | *(this branch)* |
-
-**Tests: 1163 passing, none skipped** (baseline on `main` was 1040), plus 9 JS
-files. Run `uv run pytest` and `node --test leaderboard/tests/*.test.mjs`.
 
 ## The one idea everything follows from
 
@@ -220,7 +201,7 @@ Consequences worth knowing before touching any of it:
 * **`RULES_VERSION` did not move**, and must not for any of this. Verified by
   replaying 240 whole games through the old and new collection rules: identical.
 
-## What works, verified against the live preview
+## Verified against a real deploy
 
 Against `deploy-preview-60--star-conquest-leaderboard.netlify.app`, with the SQL
 run on the real Supabase project:
@@ -247,29 +228,19 @@ orders could read everyone else's; any later and the resolve is empty. Regressio
 tests on both sides, and the Python one verified to fail against the old
 behaviour.
 
-## Where it stops
+## Testing the backend
 
-Everything in the plan is built. A match is opened from the menu, its links
-handed out, played end to end by everyone who has one, and it keeps moving when
-somebody stops answering. What is left is two things left open on purpose (below);
-the deployment itself is now verified.
+`tools/check_pbp.py` has played a two-seat match through four turns against a
+real preview (`deploy-preview-60--star-conquest-leaderboard.netlify.app`) and
+the real Supabase project. Every client agreed on every board digest, and
+forged, stale and foreign-owner submissions were all refused. Note the site is
+`star-conquest-leaderboard`, not `star-conquest`: that is the repo's other
+Netlify site. Real PostgREST agrees with the stub about status codes, and the
+conditional `PATCH` behaves. The one thing nothing tests end to end is a deadline
+running out in real wall-clock time. The tests only simulate it by backdating the
+clock.
 
-**The deploy is verified, against the real preview and the real Supabase
-project.** A prior session's egress policy denied `*.netlify.app`, so
-`deploy-preview-60` had never actually been called; a later session with network
-access ran `tools/check_pbp.py --origin
-https://deploy-preview-60--star-conquest-leaderboard.netlify.app` (note the site
-is `star-conquest-leaderboard`, not `star-conquest` — that's the repo's other
-Netlify site) and it played a throwaway two-seat match through four turns, every
-client agreeing on every board digest, forged/stale/foreign-owner submissions all
-refused as designed. `SUPABASE_*` is set on the deployed function, real PostgREST
-agrees with the stub about status codes, and the conditional `PATCH` behaves.
-What remains genuinely unknown is only whether a deadline elapsing in real
-wall-clock time behaves as the backdated-clock tests assume — nothing exercises
-that end to end yet.
-
-Two things stood in for the deploy check before this, and both remain useful
-regression coverage even now that the real thing has run:
+Two layers of coverage, cheapest first:
 
 * `leaderboard/tests/pbp-handler.test.mjs` runs the **real handlers** over a stub
   PostgREST — so the query strings, the token hashing and the conditional update
@@ -280,16 +251,16 @@ regression coverage even now that the real thing has run:
   each fail it.
 * `tools/check_pbp.py` is the real-deploy version: it plays a throwaway match out
   against an origin you give it and asserts the same properties end to end. Run
-  it against a preview before trusting one:
+  it against production, or against a PR's deploy preview before merging one
+  that touches the backend. Previews and production share one Supabase project,
+  so either way the run leaves a throwaway match in the live `pbp_*` tables:
 
   ```sh
-  uv run python tools/check_pbp.py --origin https://deploy-preview-60--star-conquest-leaderboard.netlify.app
+  uv run python tools/check_pbp.py --origin https://star-conquest-leaderboard.netlify.app
+  uv run python tools/check_pbp.py --origin https://deploy-preview-<PR>--star-conquest-leaderboard.netlify.app
   ```
 
-  It was developed against the real handlers behind a local stub, and has since
-  also crossed the network for real (above).
-
-Done since, off the same "missing way to say it, not a missing capability" list:
+## Opening a match
 
 * **A shared match can seat a roster smaller than the table.** `menu`'s "Play by
   post" button opens a roster prompt (`MenuState.pbp_prompt`/`pbp_roster`) rather
@@ -297,12 +268,12 @@ Done since, off the same "missing way to say it, not a missing capability" list:
   is still the default), seat 1 has no checkbox at all (the creator ends up
   seated there regardless), and unchecking any other seat leaves it to play
   whatever strategy the AI tab already has it set to. Confirming calls
-  `main.pbp_open(settings, seed, seats=sorted(ms.pbp_roster))`; nothing on the
-  endpoint or in `pbp.rebuild` had to change; they always supported this.
+  `main.pbp_open(settings, seed, seats=sorted(ms.pbp_roster))`. The endpoint
+  and `pbp.rebuild` needed nothing for it: both were seat-agnostic from the start.
 * **Seat links are copied individually, not as one clipboard blob.** The moment
   the match we created opens, `Ui.pbp_invite` carries `(seat, link)` for every
   *other* seat and `render._draw_invite_overlay` shows one row per seat with its
-  own Copy button — the modal the note above called for. `input._handle_invite_
+  own Copy button. `input._handle_invite_
   event` never touches `webstore` itself (it only names the seat on `ui.pbp_copy_
   seat` and returns `"pbp_copy_seat"`); `main.py` is where the clipboard write
   actually happens, same as every other share path. Continue clears the overlay
@@ -352,7 +323,37 @@ Filing resolves nothing. It makes the turn complete, and the next read takes the
 ordinary resolve path — so a lapsed turn goes through the very same gate every
 other turn does.
 
-## Traps for whoever picks this up
+## Public matches and the lobby
+
+A match opened with **Publicly joinable** ticked is listed on the leaderboard's
+lobby page, `pbp.html`. That page is not linked from anywhere yet. It reads
+`?action=list` and groups matches as open, lapsed, in progress or finished. Only
+public rows are listed. A private match is reachable only by knowing its id, and
+a list of every id would undo that. `?action=claim` answers a private match with
+the same 404 it gives a missing one, for the same reason.
+
+**An open seat is a missing hash, not a flag.** Tokens are stored only as
+hashes, so no token can be shown twice. A public match therefore mints only the
+creator's token (`claimed: [1]` on create). Each other seat's token is minted
+when somebody presses *Get link* on the lobby page, and that reply is the one
+time it exists in the clear. Minting the token is what claims the seat, so there
+is no second field to keep in step with the hashes.
+
+The claim rewrites the whole `seats` column. It is conditional on `updated_at`
+not having moved since the read, so of two claims at once, the second is told to
+retry rather than landing on top of the first's hash. A resolve in between also
+trips that condition, and costs only a retry.
+
+An open seat behaves like any outstanding seat. With a deadline set, it holds
+and then falls to its bot like any other seat. With no deadline, the match waits
+for it.
+
+The `public` column defaults to false. A one-off, commented-out
+`update ... set public = true` in `schema.sql` flags the matches that predate
+the column, so there is something to test against. Nothing needs switching off
+before a deploy.
+
+## Traps
 
 * **Nothing may resolve a play-by-post turn on a clock of its own.** That is the
   whole difference from a single-player game: the turn advances when the last
@@ -387,9 +388,3 @@ other turn does.
 * **A new relation needs a grant** or `tests/test_schema_grants.py` fails. Its
   scrape was widened to see `pbp.mjs`'s helper-style calls — it was passing
   *vacuously* before that, which is the exact failure it exists to prevent.
-
-## Screenshots
-
-Rendered at 1.0x and 2.5x while building the overlay. Not committed (scratch),
-but reproducible: seat a `Ui`, set `pbp_match`/`pbp_submitted`/`pbp_waiting`, and
-call `render.draw` on a surface.

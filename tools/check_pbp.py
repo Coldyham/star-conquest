@@ -40,8 +40,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from starconquest import ai, pbp, replay, webstore          # noqa: E402
-from starconquest.settings import Settings                  # noqa: E402
+from starconquest import ai, pbp, replay, webstore
+from starconquest.settings import Settings
 
 # Long enough for a cold Netlify function on a preview deploy, which can take a
 # few seconds to wake, and for the several round trips a turn costs.
@@ -150,7 +150,7 @@ def check(origin: str, seats: int, turns: int) -> int:
     print("a public read carries no token, hashed or otherwise")
 
     seated = {s: pbp.Seat(match_id, s, t) for s, t in tokens.items()}
-    state, log = pbp.rebuild(read_match(match_id), ai.decide)
+    state, _log = pbp.rebuild(read_match(match_id), ai.decide)
 
     # --- play it out ------------------------------------------------------ #
     for _ in range(turns):
@@ -202,7 +202,7 @@ def check(origin: str, seats: int, turns: int) -> int:
                          f"on turn {after.turn}")
         # A client that was never here rebuilds the same board from stored rows
         # alone — the property the whole thin server rests on.
-        state, log = pbp.rebuild(after, ai.decide)
+        state, _log = pbp.rebuild(after, ai.decide)
         if replay.digest_hex(state) != one_digest:
             raise Failed(f"turn {match.turn}: a fresh rebuild from the stored "
                          f"orders disagrees with the board that was reported")
