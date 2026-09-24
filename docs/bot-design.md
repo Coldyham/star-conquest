@@ -1488,7 +1488,7 @@ inference that removing the gate would let the converse pay.
 Nothing shipped. The value of the exercise is the correction: four null results
 with one shared explanation, and the explanation was checkable and false.
 
-### The attack side of the pile-up: correctly stale, measured null
+### The attack side of the pile-up: shipped for correctness, measured null
 
 The re-tune above moved Phase 1 onto the garrison-fights-last rule; `_required`
 never followed it. It still folds every third-party bloc from `_rival_waves` into
@@ -1501,12 +1501,14 @@ about 18), where the fight actually costs us roughly `sqrt(need^2 + R^2)`. The
 "distinguishing a bloc that lands *with* us is a wash" result in "Racing a third
 player" was measured under the old by-size fold, so it did not settle this.
 
-Built as `PILEUP_ATTACK`: earlier-turn blocs folded per turn through
+The fix folds earlier-turn blocs per turn through
 `_attacker_pileup` and then against the garrison. Same-turn blocs were priced by
 the smallest strike that still carries the rival-margin requirement out of an
 engine-order attacker fold, taking our unlucky jitter corner in each clash.
-At zero jitter it matched `combat.resolve_arrival` exactly. It is inert in a
-duel by construction, so it was measured with the paired multi-seat harness
+At zero jitter it matches `combat.resolve_arrival` exactly
+(`test_pileup_survivors_matches_the_engine_fold`). It is inert in a duel by
+construction, so it was measured, behind a temporary flag, with the paired
+multi-seat harness
 (variant and stock marshal placed in every ordered seat pair per seed, fillers
 in the remaining seats):
 
@@ -1520,17 +1522,27 @@ in the remaining seats):
     random 36n 5p (th+kn+claudebot)          261-257     518    50.4%  +0.18    30/800
     ---- pooled                            2536-2543    5079    49.9%  -0.10
 
-**Why it is null is the reason not to rebuild it.** Instrumented over 20 games,
-the price differed in 14 of 18,103 rival-target lookups on symmetric 24n 3p, and
-128 of 20,068 on random 30n 4p. Every change was upward: a same-turn bloc has to
-be visible *and* due to land on exactly our horizon. The earlier-turn
-per-owner fold never changed a price at all, because two third parties landing on
-one rival system on the same earlier turn essentially never happens. A same-turn
-pile-up on a *neutral* is rarer still (3 lookups in 20 symmetric games), so the
-neutral branch was not revisited. Symmetric maps are the regime this was aimed
-at, and they only make it rarer: their long stalemates are the 40-60% timeouts
-above, not races for the centre. Code deleted; the stale fold stays, and is
-harmless for the same reason.
+**Why it is null.** Instrumented over 20 games, the price differed in 14 of
+18,103 rival-target lookups on symmetric 24n 3p, and 128 of 20,068 on random
+30n 4p. Every change was upward: a same-turn bloc has to be visible *and* due to
+land on exactly our horizon. The earlier-turn per-owner fold never changed a
+price at all, because two third parties landing on one rival system on the same
+earlier turn essentially never happens. A same-turn pile-up on a *neutral* is
+rarer still (3 lookups in 20 symmetric games), so the neutral branch keeps its
+measured static price. Symmetric maps are the regime this was aimed at, and they
+only make it rarer: their long stalemates are the 40-60% timeouts above, not
+races for the centre.
+
+**Shipped anyway, and unflagged.** This is not a tuning knob but the bot's
+estimate of a fight agreeing with the engine's rule. At a null it costs nothing,
+and a bot whose prices are right is easier to reason about and to build on than
+one carrying a known-wrong fold only because the error is rare. That makes it a
+deliberate exception to the usual "measured null, deleted" rule above. It applies
+to correctness fixes, never to new tactics: the remnant tactic and the neutral
+fold were *choices* about what to do, and a null there still means delete. The
+legacy fold was removed rather than kept behind a flag, and duels are untouched
+by construction, so the `--ladder` table under "Where marshal stands" stays
+current.
 
 ### Phase 3b re-flooding an already-covered target, and a settled dead end's stranded surplus
 

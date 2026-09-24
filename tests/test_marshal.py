@@ -298,9 +298,8 @@ def test_the_reprice_is_inert_in_a_duel(ma):
 
 
 def test_a_rival_landing_with_us_is_folded_too(ma):
-    """`combat.resolve_arrival` totals every owner landing this turn, so a bloc
-    arriving *with* us is one more side of the fight — not a softening-up we get
-    for free. Folded like any other wave rather than distinguished by arrival turn.
+    """A bloc arriving *with* us is one more side of the fight, not a
+    softening-up we get for free — here a 30 we must beat before the garrison.
     """
     lanes = [(1, 2, 2), (2, 3, 2)]
     alone = _board({1: (2, 40, 3), 2: (1, 5, 3), 3: (3, 20, 4)}, lanes)
@@ -310,6 +309,68 @@ def test_a_rival_landing_with_us_is_folded_too(ma):
 
     assert (ma._required(shared, 2, shared.systems[2], 2)
             > ma._required(alone, 2, alone.systems[2], 2))
+
+
+def _joined(ships, turns):
+    """Marshal (P2) two turns from a rival-held 20; P3's ``ships`` land in ``turns``."""
+    state = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    state.fleets.append(Fleet(owner_id=3, source_id=3, dest_id=2, ships=ships,
+                              turns_total=2, turns_remaining=turns))
+    return state
+
+
+def test_a_rival_landing_with_us_is_fought_by_us_not_the_garrison(ma):
+    """A 16-ship bloc landing the same turn as us does not soften the garrison:
+    attackers fold among themselves first and the garrison fights last, so it
+    is *our* fleet those 16 grind down. Folding it into the garrison instead
+    prices it as a discount (21 down to about 18)."""
+    ma.RELIEF_AWARE = 0.0
+    alone = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    base = ma._required(alone, 2, alone.systems[2], 2)
+    joined = _joined(16, 2)
+
+    price = ma._required(joined, 2, joined.systems[2], 2)
+    assert price > base
+    assert price == ma._through_pileup(base, [16])
+
+
+def test_a_rival_landing_before_us_still_softens_the_garrison(ma):
+    """One turn earlier, the same bloc hits the garrison alone — that fight is
+    over before we arrive, so it is a discount."""
+    ma.RELIEF_AWARE = 0.0
+    early = _joined(16, 1)
+    defence = ma._after_clash(20 + ma._production_by(early.systems[2], 2), 16)
+    assert ma._required(early, 2, early.systems[2], 2) == max(
+        defence + 1, math.ceil(defence * ma._enemy_margin()))
+    alone = _board({1: (2, 60, 3), 2: (1, 20, 3), 3: (3, 30, 4)},
+                   [(1, 2, 2), (2, 3, 2)])
+    assert ma._required(early, 2, early.systems[2], 2) < ma._required(
+        alone, 2, alone.systems[2], 2)
+
+
+def test_through_pileup_is_the_fewest_ships_that_arrive_with_enough(ma):
+    for need, rivals in ((10, [8]), (10, [20]), (10, [5, 5]), (1, [12])):
+        x = ma._through_pileup(need, rivals)
+        assert ma._pileup_survivors(x, rivals) >= need
+        assert ma._pileup_survivors(x - 1, rivals) < need
+    assert ma._through_pileup(10, []) == 10
+
+
+def test_pileup_survivors_matches_the_engine_fold(ma):
+    """At zero jitter the corners collapse, so the estimate must be exactly what
+    `combat.resolve_arrival` leaves us against an empty garrison."""
+    config.COMBAT_JITTER = 0.0
+    for ours, rivals in ((20, [12]), (20, [12, 9]), (9, [12, 20]), (15, [15])):
+        state = _board({1: (0, 0, 0)}, [], seats=4)
+        fleets = [Fleet(owner_id=2, source_id=1, dest_id=1, ships=ours,
+                        turns_total=1, turns_remaining=0)]
+        fleets += [Fleet(owner_id=3 + i, source_id=1, dest_id=1, ships=n,
+                         turns_total=1, turns_remaining=0)
+                   for i, n in enumerate(rivals)]
+        owner, left = combat.resolve_arrival(state, 1, fleets)
+        assert ma._pileup_survivors(ours, rivals) == (left if owner == 2 else 0)
 
 
 def test_the_owners_own_reinforcements_are_not_counted_twice(ma):
