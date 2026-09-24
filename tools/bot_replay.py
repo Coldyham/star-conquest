@@ -295,6 +295,25 @@ class Supabase:
                    body=json.dumps(rows).encode("utf-8"),
                    extra={"Prefer": "resolution=merge-duplicates,return=minimal"})
 
+    def insert(self, table: str, rows: list[dict]) -> None:
+        """Insert rows outright; a duplicate key is an error, not a merge."""
+        if not rows:
+            return
+        self._call(table, method="POST",
+                   body=json.dumps(rows).encode("utf-8"),
+                   extra={"Prefer": "return=minimal"})
+
+    def update(self, table: str, query: str, patch: dict) -> list[dict]:
+        """Patch the rows a filter selects and return them as they now stand. An
+        empty list means the filter matched nothing, which is how a conditional
+        write (``updated_at=eq.…``) reports that it lost a race. Refuses an
+        unfiltered call for the same reason ``delete`` does."""
+        if not query.strip():
+            raise ValueError("refusing to update without a filter")
+        return self._call(f"{table}?{query}", method="PATCH",
+                          body=json.dumps(patch).encode("utf-8"),
+                          extra={"Prefer": "return=representation"}) or []
+
     def delete(self, table: str, query: str) -> None:
         """Delete the rows a filter selects. Refuses an unfiltered call, which
         PostgREST would happily read as "every row in the table"."""

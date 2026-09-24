@@ -187,8 +187,9 @@ and new keys for the setups that matter and move the `configs` row across, the s
 way `fold-game-key.sql` moves `scores` rows after a `Challenge.key` split.
 
 Naming a config is **first name wins, permanently** — `configs` is append-only
-like every other table here (no UPDATE policy), so a typo can only be fixed from
-the SQL editor, the same trade `users.name` already makes. Since `config_key` is
+like every other table here (no UPDATE policy), so a typo can only be fixed by
+the owner (`tools/admin.py delete-config-name`, see [Moderation](#moderation)),
+the same trade `users.name` already makes. Since `config_key` is
 derived rather than stored, there's also no link between it and `games`: anyone
 can post a name for a config key nobody has played yet, or the wrong hex string
 entirely. Harmless — `game_summary`'s join only ever surfaces a name that
@@ -508,6 +509,41 @@ site's environment variables, so a test upload from a preview lands in the real
 `game_logs`. If that matters, set a different `SUPABASE_URL` for the *Deploy
 previews* context (Netlify supports per-context values) and point it at a scratch
 project.
+
+## Moderation
+
+Nothing on the site can remove or change a row, so moderation is a local
+command run by the owner with the project's secret key — the same
+`SUPABASE_URL`/`SUPABASE_SECRET_KEY` the worker uses. Nothing is deployed for
+it, and no admin credential exists anywhere a browser can reach.
+
+```sh
+uv run python tools/admin.py scores --user NAME      # look first
+uv run python tools/admin.py tags
+uv run python tools/admin.py matches                 # private matches included
+
+uv run python tools/admin.py delete-score 123 --reason "impossible score"
+uv run python tools/admin.py delete-score 123 --reason "impossible score" --yes
+```
+
+Each command that writes only describes what it would do until `--yes` is
+passed. An applied one first records itself in `admin_actions` (what, to what,
+the `--reason`, and a copy of every row it is about to remove or overwrite), so
+nothing is moderated without a trace and a deletion can be put back by hand.
+
+| Command | Does |
+|---|---|
+| `delete-score ID…` | Removes scores and the tags posted with them. Their replays stop being public; the uploads stay private. |
+| `delete-game KEY` | Removes a map with its scores, tags, bot results and uploaded replays. |
+| `rename-user NAME NEW` | Renames a player everywhere their name shows. |
+| `delete-tag TAG [--config KEY]` | Removes a tag everywhere, or from one config. |
+| `delete-config-name KEY` | Clears a config's name, so the next one posted sticks. |
+| `new-link MATCH SEAT` | Mints a play-by-post seat a new link and prints it once. The old link stops working and the seat stays claimed: the way to hand a seat on privately. `--game-url` points the link at a preview build. |
+| `open-seat MATCH SEAT` | Forgets a seat's token, so the next *Get link* on the lobby claims it. A private match is refused unless `--publish` lists it too, since otherwise nothing could claim the seat. |
+| `delete-match MATCH` | Removes a play-by-post match and its orders. |
+
+The *same* seat link can never be shown twice: only a hash of each token is
+stored.
 
 ## Local development
 

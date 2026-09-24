@@ -26,7 +26,8 @@ SCHEMA = ROOT / "leaderboard" / "schema.sql"
 FUNCTIONS = ROOT / "leaderboard" / "netlify" / "functions"
 
 # What each caller verb needs to be granted.
-_PYTHON_CALLS = {"select": {"select"}, "upsert": {"insert", "update"}, "delete": {"delete"}}
+_PYTHON_CALLS = {"select": {"select"}, "upsert": {"insert", "update"}, "insert": {"insert"},
+                 "update": {"update"}, "delete": {"delete"}}
 
 
 def _granted(role: str) -> dict[str, set[str]]:
@@ -112,12 +113,14 @@ def test_the_scrape_actually_found_the_callers():
     assert ("pbp_matches", "select") in uses        # netlify/functions/pbp.mjs
     assert ("pbp_matches", "insert") in uses        # ...which opens a match
     assert ("pbp_orders", "insert") in uses         # ...and takes a submission
+    assert ("admin_actions", "insert") in uses      # tools/admin.py's audit row
+    assert ("pbp_matches", "update") in uses        # ...and a seat's token rewritten
     assert len(uses) >= 8
 
 
 @pytest.mark.parametrize("relation",
                          ["game_logs", "public_replays", "public_watchable_replays",
-                          "pbp_matches", "pbp_orders"])
+                          "pbp_matches", "pbp_orders", "admin_actions"])
 def test_a_replay_is_never_granted_to_the_public(relation):
     """The other half of the rule, and the one that matters more: `game_logs` is
     readable by nobody but the worker, `public_replays` lends out only the
@@ -134,7 +137,8 @@ def test_a_replay_is_never_granted_to_the_public(relation):
     assert "insert" not in public.get(relation, set())
     assert "update" not in public.get(relation, set())
     assert "delete" not in public.get(relation, set())
-    if relation in ("game_logs", "public_watchable_replays", "pbp_matches", "pbp_orders"):
+    if relation in ("game_logs", "public_watchable_replays", "pbp_matches", "pbp_orders",
+                    "admin_actions"):
         assert public.get(relation, set()) == set(), f"{relation} is not directly public"
 
 
