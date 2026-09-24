@@ -17,9 +17,9 @@
 # built from *that fork's* tree — its netlify.toml, its tools/build_web.sh and
 # its functions — so the command line here is whatever a stranger wrote, running
 # as a shell in the build container, and the functions are whatever a stranger
-# wrote, running with this site's function environment. Scoping
-# SUPABASE_SECRET_KEY to Functions keeps it out of the build shell but not out
-# of a fork's own functions, so the real gate is Netlify's sensitive-variable
+# wrote, running with this site's function environment. Nothing in this file
+# can keep the key from a fork's own functions, so the real gate is Netlify's
+# sensitive-variable
 # policy (Project configuration -> Environment variables, public repositories
 # only): it MUST stay on "Require approval", which holds every untrusted deploy
 # until someone approves it in the dashboard. The cost is approving each fork
@@ -27,9 +27,17 @@
 # game_logs and every pbp_* table. Deploy Previews for our own branches are
 # unaffected — they are not untrusted.
 #
+# Our own builds are the other half. Netlify can scope a variable to Functions
+# only, but not on this plan, so the key is also in the build environment, where
+# third-party code runs: the uv installer piped from curl, pygbag and what it
+# downloads. The build command therefore unsets it (and the legacy name) before
+# running anything. The functions are unaffected: Netlify hands them their own
+# environment at runtime, not the build shell's. This protects trusted builds
+# only, since a fork writes its own command, which is why approval stays the gate.
+#
 # The two values the site needs, set in the UI and never committed:
 #   SUPABASE_URL         — the project URL (public; see SECRETS_SCAN_OMIT_KEYS)
-#   SUPABASE_SECRET_KEY  — Supabase's secret key, scoped to Functions only
+#   SUPABASE_SECRET_KEY  — Supabase's secret key (all scopes; see above)
 # Everything else Supabase-side a browser uses is the anon key, public on
 # purpose in leaderboard/js/config.mjs. .github/workflows/bot-replay.yml holds
 # its own copy as an Actions secret, safe for the mirror-image reason: it fires
@@ -38,7 +46,7 @@
 # The board's old site, star-conquest-leaderboard.netlify.app, is now a
 # redirect shell built from legacy-board/ (see its netlify.toml).
 [build]
-  command = "curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
+  command = "unset SUPABASE_SECRET_KEY SUPABASE_SERVICE_KEY && curl -LsSf https://astral.sh/uv/install.sh | sh && PATH=$HOME/.local/bin:$PATH ./tools/build_web.sh"
   publish = "web"
 
 # Netlify fails a build when the value of any environment variable appears in the

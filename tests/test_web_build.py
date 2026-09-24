@@ -59,6 +59,16 @@ def test_the_root_site_bundles_the_boards_functions():
     assert toml["build"]["environment"]["SECRETS_SCAN_OMIT_KEYS"] == "SUPABASE_URL"
 
 
+def test_the_build_drops_the_secret_before_running_anything():
+    """The free plan can't scope the key to Functions, so it reaches the build
+    shell too; the command has to unset it before the first third-party step."""
+    command = tomllib.loads((ROOT / "netlify.toml").read_text())["build"]["command"]
+    first, _, rest = command.partition("&&")
+    assert first.split()[0] == "unset"
+    assert {"SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY"} <= set(first.split()[1:])
+    assert "curl" in rest and "build_web.sh" in rest
+
+
 def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
     for path, name in ((paths.LEADERBOARD_LOG_PATH, "log.mjs"),

@@ -470,7 +470,9 @@ paths and a folded key would make a `game_key` lookup quietly miss.
 6. **Optional — accept replay uploads.** Set the *same two* values as
    environment variables on the game's Netlify site (*Site configuration →
    Environment variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or
-   `SUPABASE_SERVICE_KEY`), the key scoped to **Functions** only. Keep the
+   `SUPABASE_SERVICE_KEY`). Scoping the key to Functions needs a paid plan, so
+   the root `netlify.toml`'s build command unsets it before any build step runs
+   instead. Keep the
    sensitive-variable policy on **Require approval**: a fork's deploy preview
    runs the fork's own functions, and approval is the only thing between them and
    the key (the root `netlify.toml` header has the reasoning). That is what

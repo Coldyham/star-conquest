@@ -7,7 +7,7 @@ named below). Deviation: the board pages' **▶ Play** link is a static
 `href="../"` rather than set from `GAME_URL` in JS: same origin, so the game is
 always one level up, and that also works on a local server. Still to do, all
 manual:
-- [ ] Game site: add `SUPABASE_URL`, and `SUPABASE_SECRET_KEY` scoped to Functions.
+- [ ] Game site: add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. Scoping to Functions is a paid feature, so leave all scopes; the build command unsets the key before any build step runs.
 - [ ] Game site: confirm the sensitive-variable policy is "Require approval".
 - [ ] Deploy-preview checks (Verification below), including the client IP the
       rate limit sees.
@@ -40,7 +40,7 @@ Work goes on a new branch `site-merge` cut from `play-by-post`, so it includes d
   - `[[headers]] for="/board/*"` with nosniff and `Referrer-Policy: no-referrer`, scoped to the board so pygbag's assets aren't affected
 - The header comment in root `netlify.toml` is rewritten. The "no secrets on this site" rule becomes "the secret is scoped to Functions and fork previews need approval", with the reasoning carried over.
 - **Netlify UI steps (manual, listed in the PR):**
-  - On the game site, add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, the latter scoped to Functions only.
+  - On the game site, add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. (Scoping to Functions only turned out to need a paid plan; the build command unsets the key instead.)
   - Confirm the sensitive-variable policy is set to "Require approval".
 
 ## Host references

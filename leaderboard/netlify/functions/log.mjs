@@ -12,8 +12,8 @@
  * What it does, in order: reject anything but a POST, rate-limit the caller,
  * check the row's shape and size, then forward it under the secret key.
  *
- * Environment (set in the game's Netlify site settings, scoped to Functions,
- * never committed):
+ * Environment (set in the game's Netlify site settings, never committed; the
+ * build command unsets the key before any build step runs):
  *   SUPABASE_URL         https://<project>.supabase.co
  *   SUPABASE_SECRET_KEY  Supabase's secret key (`sb_secret_…`) — the same one the
  *                        GitHub Actions worker uses, and just as much not-in-git.

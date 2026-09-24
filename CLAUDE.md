@@ -840,7 +840,8 @@ already resolve simultaneously. The rationale for each rule is in
     resolving costs a DOM read it must not do once a frame. One origin means one
     localStorage: the lobby reads `sc_pbp_seats` and the posting name is
     `sc_pbp_name` (`test_leaderboard_sync` pins both keys). The site now holds
-    `SUPABASE_SECRET_KEY`, so its sensitive-variable policy must stay on
+    `SUPABASE_SECRET_KEY` (unscoped on the free plan, so the build command
+    unsets it first), and its sensitive-variable policy must stay on
     "Require approval" (the root `netlify.toml` header explains the fork-preview
     reasoning). The board's old host is a redirect shell (`legacy-board/`). It
     *proxies* `/api/`, because installed builds POST there and urllib won't
