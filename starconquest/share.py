@@ -68,11 +68,14 @@ from __future__ import annotations
 import json
 import threading
 
-from typing import Optional
-
 from . import webstore
-from .paths import (LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH,
-                    WEB_REPLAY_BODY_KEY, WEB_REPLAY_STATE_KEY, is_web)
+from .paths import (
+    LEADERBOARD_LOG_PATH,
+    LEADERBOARD_REPLAY_PATH,
+    WEB_REPLAY_BODY_KEY,
+    WEB_REPLAY_STATE_KEY,
+    is_web,
+)
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
@@ -105,7 +108,7 @@ def log_url() -> str:
     """The upload endpoint, resolved now rather than at import.
 
     Resolved per call because on the web it depends on where the page is being
-    served from — a deploy preview posts to the matching preview of the board
+    served from — a deploy preview posts to its own functions
     (``webstore.leaderboard_origin``).
     """
     return webstore.leaderboard_url(LEADERBOARD_LOG_PATH)
@@ -210,16 +213,16 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     Two things this leans on, both worth knowing before changing them. ``eval`` is
     available because pygbag's own bridge needs it — a Content-Security-Policy
     strict enough to block it would stop the game booting long before this line,
-    and neither ``netlify.toml`` sets one. And the request is cross-origin (the
-    game's site to the leaderboard's), which is why the function answers the
-    preflight and names the game's origin in its CORS headers.
+    and ``netlify.toml`` sets none. And on a deployed page the request is
+    same-origin (the functions are the game site's own), but from a local server
+    it goes to production cross-origin, which is why the function still answers
+    the preflight and names an allowed origin in its CORS headers.
     """
     import platform as _platform
 
     try:
         _platform.window.eval(
-            "fetch(%s,{method:'POST',headers:%s,body:%s}).catch(function(){})"
-            % (json.dumps(log_url()), json.dumps(headers), json.dumps(body))
+            f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
         )
         return True
     except Exception:  # noqa: BLE001 — a bridge that isn't there is not an error
@@ -313,7 +316,7 @@ def _clear_web_slot() -> None:
     webstore.set(WEB_REPLAY_BODY_KEY, "")
 
 
-def fetch_log(match_id: str) -> Optional[Download]:
+def fetch_log(match_id: str) -> Download | None:
     """Start fetching the replay named ``match_id``. None if it cannot be tried.
 
     The id is checked here rather than trusted: it arrives from a URL fragment, so
@@ -332,7 +335,7 @@ def fetch_log(match_id: str) -> Optional[Download]:
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 
-def _fetch_web(url: str) -> Optional[Download]:
+def _fetch_web(url: str) -> Download | None:
     """Kick off a ``fetch`` that parks its own result on ``window``.
 
     The handlers are written to leave the slot in exactly one of the three states
@@ -356,7 +359,7 @@ def _fetch_web(url: str) -> Optional[Download]:
         return None
 
 
-def _fetch_desktop(url: str) -> Optional[Download]:
+def _fetch_desktop(url: str) -> Download | None:
     """The same download on a daemon thread, posting into the mailbox when done."""
     import urllib.error
     import urllib.request

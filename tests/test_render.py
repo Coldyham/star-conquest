@@ -13,14 +13,26 @@ from dataclasses import replace
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
-import pytest  # noqa: E402
+import itertools
 
-from starconquest import ai, config, engine, fog, mapgen, render, starnames, turnfilm  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import Fleet, Order  # noqa: E402
-from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
+import pygame
+import pytest
+
+from starconquest import (
+    ai,
+    config,
+    engine,
+    fog,
+    mapgen,
+    matchnames,
+    render,
+    starnames,
+    turnfilm,
+)
+from starconquest import settings as settings_mod
+from starconquest.geometry import WorldView
+from starconquest.model import Fleet, Order
+from starconquest.viewstate import CHOOSING, SELECTED, Ui
 
 
 def _make_ui(state):
@@ -453,7 +465,7 @@ def test_rule_chevrons_fill_the_whole_lane():
                 assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
                 assert ds[-1] == pytest.approx(tail), f"run stops short of the destination: {at}"
                 step = (tail - head) / (len(ds) - 1)
-                assert all(b - a == pytest.approx(step) for a, b in zip(ds, ds[1:])), \
+                assert all(b - a == pytest.approx(step) for a, b in itertools.pairwise(ds)), \
                     f"uneven spacing: {at}"
 
                 # mid-cycle the run has walked forward by that spacing, one chevron
@@ -809,6 +821,37 @@ def test_help_text_fits_the_empty_panel_whole():
         pygame.quit()
 
 
+def test_the_pbp_you_are_line_does_not_land_under_clear_forwarding():
+    """`_draw_clear_forward_button` used to be called with a hardcoded y near the
+    panel top, ignoring however far `_panel_you_are`'s "You are ..." / title
+    lines had already pushed the cursor down — so in a play-by-post match with
+    any standing forward rule, the button was drawn back over that text instead
+    of below it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_match = "00112233445566ff"
+        ui.pbp_title = "Friday night"
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+
+        render.draw(screen, state, ui)
+        assert ui.clear_forward_rect != (0, 0, 0, 0)
+
+        px = config.SCREEN_W - config.HUD_RIGHT_W
+        py = config.HUD_TOP_H
+        you_are_bottom = render._panel_you_are(screen, ui, px + config.PANEL_PAD, py + config.PANEL_PAD)
+        assert ui.clear_forward_rect[1] >= you_are_bottom, (
+            "the button must be drawn below the pbp You-are/title text, not over it"
+        )
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
 def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
     """Review mode is a different scene, so the panel must not teach live play in it.
 
@@ -903,10 +946,16 @@ def test_pbp_shows_which_seat_is_yours():
         assert "(you)" not in blob
         assert "You are" not in blob
 
-        ui.pbp_match = "abc123def456"
+        ui.pbp_match = "00112233445566ff"
         blob = drawn_text(state, ui)
         assert "(you)" in blob
         assert f"You are {config.player_name(1)}" in blob
+        assert matchnames.phrase(ui.pbp_match) in blob, "untitled: the pass-phrase"
+
+        ui.pbp_title = "Friday night"
+        blob = drawn_text(state, ui)
+        assert "Friday night" in blob
+        assert matchnames.phrase(ui.pbp_match) not in blob
     finally:
         pygame.quit()
 

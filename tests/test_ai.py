@@ -103,7 +103,7 @@ def _register_aux_bot(name: str, **attrs):
     module = type(ai)(modname)
     for key, value in attrs.items():
         setattr(module, key, value)
-    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn = lambda st, pid: []
     fn.__module__ = modname
     sys.modules[modname] = module
     ai.register(name, fn)

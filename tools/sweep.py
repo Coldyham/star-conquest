@@ -55,16 +55,16 @@ import sys
 import time
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, Self
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.model import AiParams  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tests import sim  # noqa: E402 — the shared headless harness
+from starconquest import ai, engine, mapgen
+from starconquest import settings as settings_mod
+from starconquest.model import AiParams
+from starconquest.settings import Settings
+from tests import sim
 
 RESULTS = ROOT / "results"
 LEDGER = RESULTS / "ledger.jsonl"
@@ -106,7 +106,7 @@ def _fatal(message: str, *detail: str) -> NoReturn:
     print(f"\nFATAL: {message}", file=sys.stderr)
     for line in detail:
         print(f"       {line}", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -409,7 +409,7 @@ class Ledger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fd: int | None = None
 
-    def open(self) -> "Ledger":
+    def open(self) -> Ledger:
         self._fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         return self
 
@@ -418,7 +418,7 @@ class Ledger:
             os.close(self._fd)
             self._fd = None
 
-    def __enter__(self) -> "Ledger":
+    def __enter__(self) -> Self:
         return self.open()
 
     def __exit__(self, *exc) -> None:

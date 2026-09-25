@@ -166,7 +166,7 @@ def test_web_backend_hands_javascript_a_quoted_payload(configured, monkeypatch):
     scripts: list[str] = []
 
     class _Window:
-        def eval(self, script):        # noqa: A003 - the JS bridge's own name
+        def eval(self, script):
             scripts.append(script)
 
     monkeypatch.setattr(share, "is_web", lambda: True)
@@ -187,7 +187,7 @@ def test_web_backend_hands_javascript_a_quoted_payload(configured, monkeypatch):
 
 def test_a_broken_bridge_is_not_an_error(configured, monkeypatch):
     class _Window:
-        def eval(self, script):        # noqa: A003
+        def eval(self, script):
             raise RuntimeError("no DOM here")
 
     monkeypatch.setattr(share, "is_web", lambda: True)
@@ -231,7 +231,7 @@ class _EvalWindow:
     def __init__(self):
         self.scripts = []
 
-    def eval(self, script):        # noqa: A003 - the bridge's own name
+    def eval(self, script):
         self.scripts.append(script)
 
 

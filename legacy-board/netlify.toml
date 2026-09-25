@@ -1,0 +1,46 @@
+# The board's OLD site, star-conquest-leaderboard.netlify.app: a redirect shell.
+#
+# The leaderboard now lives on the game's own site (pages at /board/, functions at
+# /api/ — see the root netlify.toml). This site's Base directory is set to
+# `legacy-board` in its Netlify settings, so it publishes nothing but the
+# placeholder page beside this file and answers everything else with a redirect,
+# so the links already out in the world keep working:
+#
+# - /api/* is PROXIED (200), not redirected. Installed desktop and Android builds
+#   name this host as their LEADERBOARD_ORIGIN and POST /api/log and /api/pbp
+#   here, and a redirect would lose those: Python's urllib refuses to follow a
+#   307/308 on a POST (HTTPRedirectHandler.redirect_request), and a browser's
+#   fetch turns a POST that meets a 301/302 into a GET. Those desktop clients send
+#   no Origin, so CORS is unaffected. The functions' rate limit may see Netlify's
+#   proxy rather than the client for this tail and bucket it together, which is
+#   acceptable for how few requests it is.
+# - /submit is what old game builds open (a pretty URL); /board/submit.html is
+#   its new home.
+# - Everything else keeps its path and query under /board/: /, game.html?key=…,
+#   user.html?name=…, pbp.html?match=….
+#
+# This site needs no environment variables any more: remove SUPABASE_SECRET_KEY
+# from it once the cutover is done.
+#
+# Sunset: keep it until installed desktop/Android builds have updated. Review on
+# 2027-03-01.
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://star-conquest.netlify.app/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/submit"
+  to = "https://star-conquest.netlify.app/board/submit.html"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "https://star-conquest.netlify.app/board/:splat"
+  status = 301
+  force = true

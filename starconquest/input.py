@@ -8,22 +8,20 @@ engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 
 from __future__ import annotations
 
-from typing import Optional
-
 import pygame
 
-from .geometry import dist, point_segment_dist
 from . import config
+from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
 
-def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
+def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> int | None:
     """The system under ``pos`` — the *nearest* one within reach, so overlapping
     or clustered nodes resolve to the closest rather than whichever draws first.
     Tiny systems get a minimum tap reach (``config.NODE_TAP_MIN``) so they stay
     comfortably tappable on touch screens."""
-    best: Optional[int] = None
+    best: int | None = None
     best_d = 0.0
     for sid, sys in state.systems.items():
         sp = ui.view.to_screen(sys.pos)
@@ -59,7 +57,7 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     ui.history_turn = round(t * ui.history_max)
 
 
-def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
     """Modal history-review input: scrub the turn, rewind, or exit. Mutates only
     the scrub position / drag flag; enter/exit and rewind are returned to main."""
     if event.type == pygame.KEYDOWN:
@@ -192,7 +190,7 @@ def _toggles_autoplay(ui: Ui, event) -> bool:
     return False
 
 
-def _handle_invite_event(event, ui: Ui) -> Optional[str]:
+def _handle_invite_event(event, ui: Ui) -> str | None:
     """Answer the play-by-post invite overlay: copy one seat's link, or dismiss
     it for good.
 
@@ -216,7 +214,7 @@ def _handle_invite_event(event, ui: Ui) -> Optional[str]:
     return None
 
 
-def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def handle_event(event, state: GameState, ui: Ui) -> str | None:
     # Play-by-post's invite overlay is modal too, and ahead of everything below:
     # a match this fresh (right after we created it) can be running no film and
     # holds no history or win to check first.
@@ -418,7 +416,7 @@ def _clear_selected(ui: Ui) -> None:
         ui.clear_forward(ui.selected)
 
 
-def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_key(event, state: GameState, ui: Ui) -> str | None:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         # A play-by-post turn we have already submitted is not ours to end again:
         # the turn advances when the last seat is in, not when anyone presses a
@@ -459,7 +457,7 @@ def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
     """Route mode's whole event stream: build a proposal, confirm it or drop it.
 
     No stages: a tap on a system means exactly one thing given what is on screen
@@ -515,7 +513,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
+def _handle_route_click(state: GameState, ui: Ui, pos) -> str | None:
     """A left-press in route mode: a control, a system, or empty space."""
     handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
@@ -550,7 +548,7 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     return None
 
 
-def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     """Keys in route mode. Enter confirms rather than ending the turn — the turn
     can't be ended from here at all (render records no end_turn_rect), so the most
     obvious key keeps pointing at the most obvious action."""
@@ -586,7 +584,7 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, Optional[str]]:
+def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
     """The bar/on-map buttons that mean the same thing in every interaction scene.
 
     Returns ``(handled, action)``. Shared by live play and route mode rather than
@@ -625,7 +623,7 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, Optiona
     return False, None
 
 
-def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
+def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> str | None:
     # Tested before the autoplay early-out so these stay clickable under autoplay
     # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
     handled, action = _handle_global_buttons(state, ui, pos)
@@ -778,7 +776,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     return None
 
 
-def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
+def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int] | None:
     """The queued order or standing rule whose lane is under ``pos``, tagged as
     ``("order", index)`` / ``("rule", source_id)`` — or None.
 

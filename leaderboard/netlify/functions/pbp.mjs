@@ -13,9 +13,15 @@
  * seat to decide. So this stores the inputs, and each client rebuilds the
  * position. What arrives here is orders; what leaves is orders.
  *
- * Five actions, chosen by `?action=`:
+ * Seven actions, chosen by `?action=`:
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
+ *   list    (GET)  the public matches, for the lobby page (`pbp.html`): each
+ *                  one's setup, status, who is outstanding, and which seats are
+ *                  open. With `&ids=a,b,…`, those matches instead, public or
+ *                  not — the same knowing-the-id rule `state` follows.
+ *   claim   (POST) mint the token for an open seat of a public match. The only
+ *                  way a seat's token comes into being after `create`.
  *   seat    (POST) which seat a token holds — the one thing a client opening a
  *                  link cannot work out for itself.
  *   submit  (POST) one seat's orders for the live turn, authorised by its token.
@@ -30,7 +36,8 @@
  * A seat token authorises one seat in one match and expires with it. It is
  * stored only as a SHA-256 hash: a leaked database still hands nobody a seat.
  * There is no account, no client id and nothing that groups one person's
- * matches — the same posture the rest of this board takes.
+ * matches — the same posture the rest of this board takes. A seat's name is
+ * self-declared display text, like a posted score's user name.
  *
  * Environment (set in the Netlify site's settings, never committed):
  *   SUPABASE_URL         https://<project>.supabase.co
@@ -46,9 +53,9 @@
 // on Node and is simply unused wherever `globalThis.crypto` already exists.
 import { webcrypto as nodeWebcrypto } from "node:crypto";
 
-// Same rule as log.mjs: the game is a separate Netlify site, and a deploy
-// preview of it must reach the matching preview of this one. Matched by shape
-// rather than listed. A desktop build sends no Origin at all.
+// Same rule as log.mjs: same-origin from a deployed page, cross-origin from a
+// local server, matched by shape rather than listed. A desktop build sends no
+// Origin at all.
 const GAME_SITE = "star-conquest";
 const LOCAL = ["http://localhost:8000", "http://127.0.0.1:8000"];
 
@@ -82,6 +89,11 @@ const MAX_SEATS = 6;
 // A turn's orders are a handful of four-number objects per seat; a hundred is
 // already far more launches than a board has systems.
 const MAX_ORDERS = 256;
+// Display text, matching the column checks in schema.sql.
+export const NAME_MAX = 24;
+export const TITLE_MAX = 60;
+// How many ids one `list&ids=` read may ask about.
+export const MAX_LIST_IDS = 50;
 
 /**
  * Rate limit, per caller, in a sliding window — the same honest half-measure
@@ -193,6 +205,18 @@ export function validateOrders(raw) {
   return out;
 }
 
+/**
+ * Display text as stored: control characters dropped, whitespace collapsed,
+ * trimmed. `""` for a missing field; null for one that is not a string or runs
+ * past `max`.
+ */
+export function cleanText(raw, max) {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw !== "string") return null;
+  const text = raw.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  return text.length > max ? null : text;
+}
+
 /** The `seats` roster on a new match: `{seat: {token_hash}}` for each person. */
 export function validateSeats(raw) {
   if (!Array.isArray(raw) || raw.length < 1) return "seats must be a non-empty list";
@@ -215,19 +239,55 @@ export function validateMatch(body) {
   if (rules !== undefined && (!Number.isInteger(rules) || rules < 1)) return "bad rules_version";
   const roster = validateSeats(seats);
   if (typeof roster === "string") return roster;
+  const pub = body.public;
+  if (pub !== undefined && typeof pub !== "boolean") return "bad public";
+  let claimed = roster;
+  if (body.claimed !== undefined) {
+    claimed = validateSeats(body.claimed);
+    if (typeof claimed === "string") return `claimed: ${claimed}`;
+    if (claimed.some((seat) => !roster.includes(seat))) return "claimed seat not in seats";
+  }
+  if (!pub && claimed.length !== roster.length) return "only a public match may leave a seat open";
   const hours = body.deadline_hours;
   if (hours !== undefined && hours !== null
       && (!Number.isInteger(hours) || hours < 1 || hours > 336)) {
     return "bad deadline_hours";
   }
+  const title = cleanText(body.title, TITLE_MAX);
+  if (title === null) return "bad title";
+  const name = cleanText(body.name, NAME_MAX);
+  if (name === null) return "bad name";
   return {
     match_id: matchId,
     settings_json: settings,
     seed,
     rules_version: rules === undefined ? 1 : rules,
     seats: roster,
+    claimed,
+    public: pub === true,
     deadline_hours: hours === undefined ? null : hours,
+    title,
+    names: name && claimed.includes(1) ? { 1: name } : {},
   };
+}
+
+/**
+ * The roster seats nobody holds a token for yet — the open seats of a public
+ * match. An open seat is a *missing* hash rather than a flag, so there is
+ * nothing to keep in step: minting its token is what claims it.
+ */
+export function unclaimedSeats(match) {
+  const roster = match?.seats?.seats ?? match?.seats ?? [];
+  const tokens = match?.seats?.tokens || {};
+  return roster.filter((seat) => !(String(seat) in tokens));
+}
+
+/** How the lobby files a match: finished, open, lapsed or in progress. */
+export function matchStatus(match, lapsed) {
+  if (match.finished) return "finished";
+  if (unclaimedSeats(match).length) return "open";
+  if (Object.keys(lapsed).length) return "lapsed";
+  return "in_progress";
 }
 
 /**
@@ -385,13 +445,14 @@ export default async function handler(request) {
     || "unknown";
   const query = new URL(request.url).searchParams;
   const action = query.get("action") || "state";
-  const reading = action === "state" && request.method === "GET";
+  const reading = (action === "state" || action === "list") && request.method === "GET";
   const limited = reading
     ? rateLimited(`read:${ip}`, Date.now(), seen, MAX_READS_PER_WINDOW)
     : rateLimited(ip);
   if (limited) return reply(429, { error: "slow down" }, origin);
 
   const call = db(url, key);
+  if (reading && action === "list") return await handleList(call, query, origin);
   if (reading) return await handleState(call, query, origin);
   if (request.method !== "POST") return reply(405, { error: "POST only" }, origin);
 
@@ -402,6 +463,7 @@ export default async function handler(request) {
     return reply(400, { error: "bad json" }, origin);
   }
   if (action === "create") return await handleCreate(call, body, origin);
+  if (action === "claim") return await handleClaim(call, body, origin);
   if (action === "seat") return await handleSeat(call, body, origin);
   if (action === "submit") return await handleSubmit(call, body, origin);
   if (action === "lapse") return await handleLapse(call, body, origin);
@@ -445,6 +507,9 @@ async function handleState(call, query, origin) {
     finished: match.finished,
     turn_opened_at: match.turn_opened_at,
     deadline_hours: match.deadline_hours,
+    title: match.title ?? "",
+    names: match.names ?? {},
+    winner: match.winner ?? null,
     // Who is still to submit for the live turn. The waiting overlay is built
     // from exactly this.
     submitted: live.map((row) => row.seat),
@@ -473,7 +538,7 @@ async function handleCreate(call, body, origin) {
 
   const tokens = {};
   const hashes = {};
-  for (const seat of row.seats) {
+  for (const seat of row.claimed) {
     const token = mintToken();
     tokens[seat] = token;
     hashes[seat] = await hashToken(token);
@@ -488,7 +553,10 @@ async function handleCreate(call, body, origin) {
       seed: row.seed,
       rules_version: row.rules_version,
       seats: { seats: row.seats, tokens: hashes },
+      public: row.public,
       deadline_hours: row.deadline_hours,
+      title: row.title,
+      names: row.names,
     }]),
   });
   if (stored === null) return reply(502, { error: "store refused" }, origin);
@@ -496,6 +564,132 @@ async function handleCreate(call, body, origin) {
   // The one and only time the tokens exist in the clear. Nothing stores them;
   // whoever asked for the match is responsible for handing them out.
   return reply(201, { match_id: row.match_id, tokens }, origin);
+}
+
+// How many matches the lobby lists. Newest activity first; a lobby that has
+// outgrown this wants paging, not a bigger number.
+export const LIST_LIMIT = 100;
+
+/**
+ * The ids a `list&ids=` read asks about, or null for a malformed list. Deduped,
+ * in the order given.
+ */
+export function listIds(raw) {
+  const ids = [...new Set(String(raw).split(",").filter(Boolean))];
+  if (!ids.length || ids.length > MAX_LIST_IDS || !ids.every((id) => MATCH_ID.test(id))) return null;
+  return ids;
+}
+
+/** One match as the lobby shows it, from its row and its order history. */
+export function lobbyEntry(match, orders) {
+  const mine = orders.filter((row) => row.match_id === match.match_id);
+  const roster = match.seats.seats ?? match.seats;
+  const submitted = mine.filter((row) => row.turn === match.turn).map((row) => row.seat);
+  const waiting = match.finished ? [] : outstanding(roster, submitted);
+  const lapsed = match.finished ? {} : lapsedSeats(match, mine, waiting);
+  return {
+    match_id: match.match_id,
+    public: match.public === true,
+    title: match.title ?? "",
+    names: match.names ?? {},
+    winner: match.winner ?? null,
+    settings_json: match.settings_json ?? {},
+    seed: match.seed,
+    players: match.settings_json?.players ?? null,
+    mode: match.settings_json?.mode ?? null,
+    seats: roster,
+    turn: match.turn,
+    turn_opened_at: match.turn_opened_at,
+    deadline_hours: match.deadline_hours,
+    finished: match.finished,
+    created_at: match.created_at,
+    updated_at: match.updated_at,
+    status: matchStatus(match, lapsed),
+    waiting,
+    lapsed,
+    unclaimed: match.finished || !match.public ? [] : unclaimedSeats(match),
+  };
+}
+
+/**
+ * The public matches, as the lobby page shows them — or, given `ids`, exactly
+ * those matches, which is how the lobby shows the ones this browser holds a
+ * seat in.
+ *
+ * Without `ids`, only `public` rows: a private match is reachable by knowing its
+ * id, and a list of every id would undo that. The log is never selected — the
+ * lobby shows status, not the game — and neither are the token hashes, which
+ * leave this function as nothing but which seats are still open.
+ */
+async function handleList(call, query, origin) {
+  const columns = "match_id,settings_json,seed,seats,turn,turn_opened_at,deadline_hours,"
+    + "finished,public,title,names,winner,created_at,updated_at";
+  let filter = `public=eq.true&order=updated_at.desc&limit=${LIST_LIMIT}`;
+  if (query.has("ids")) {
+    const ids = listIds(query.get("ids"));
+    if (ids === null) return reply(400, { error: "bad ids" }, origin);
+    filter = `match_id=in.(${ids.join(",")})&order=updated_at.desc`;
+  }
+  const matches = await call(`/pbp_matches?select=${columns}&${filter}`);
+  if (matches === null) return reply(502, { error: "store refused" }, origin);
+
+  // Order history is needed for live matches only: it is what says who is
+  // outstanding now and how many turns in a row a seat has missed.
+  const live = matches.filter((m) => !m.finished).map((m) => m.match_id);
+  let orders = [];
+  if (live.length) {
+    orders = await call(
+      `/pbp_orders?select=match_id,turn,seat,source&match_id=in.(${live.join(",")})`);
+    if (orders === null) return reply(502, { error: "store refused" }, origin);
+  }
+  return reply(200, { matches: matches.map((match) => lobbyEntry(match, orders)) }, origin);
+}
+
+/**
+ * Mint the token for one open seat of a public match, and hand it back once.
+ *
+ * The same "exists in the clear exactly once" rule `create` keeps: the hash is
+ * stored and the token is not, so whoever pressed the button is who holds the
+ * seat. The write is conditional on `updated_at` not having moved since the
+ * read, which is what makes two claims at once safe — the whole `seats` column
+ * is rewritten, so the loser must not land on top of the winner's hash. A
+ * resolve in between trips it too; that loser is simply told to try again.
+ */
+async function handleClaim(call, body, origin) {
+  if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
+  const { match_id: matchId, seat } = body;
+  if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
+  if (!Number.isInteger(seat) || seat < 1 || seat > MAX_SEATS) return reply(400, { error: "bad seat" }, origin);
+  const name = cleanText(body.name, NAME_MAX);
+  if (name === null) return reply(400, { error: "bad name" }, origin);
+
+  const rows = await call(
+    `/pbp_matches?select=match_id,seats,names,public,finished,updated_at&match_id=eq.${matchId}`);
+  if (rows === null) return reply(502, { error: "store refused" }, origin);
+  // A private match answers exactly as a missing one does, so claim cannot be
+  // used to learn which ids exist.
+  if (!rows.length || !rows[0].public) return reply(404, { error: "no such match" }, origin);
+  const match = rows[0];
+  if (match.finished) return reply(409, { error: "match is over" }, origin);
+  const roster = match.seats.seats ?? match.seats;
+  if (!roster.includes(seat)) return reply(400, { error: "no such seat" }, origin);
+  if (!unclaimedSeats(match).includes(seat)) return reply(409, { error: "already claimed" }, origin);
+
+  const token = mintToken();
+  const seats = { seats: roster,
+                  tokens: { ...(match.seats.tokens || {}), [seat]: await hashToken(token) } };
+  const patch = { seats, updated_at: new Date().toISOString() };
+  if (name) patch.names = { ...(match.names || {}), [seat]: name };
+  const updated = await call(
+    `/pbp_matches?match_id=eq.${matchId}&updated_at=eq.${encodeURIComponent(match.updated_at)}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    });
+  if (updated === null) return reply(502, { error: "store refused" }, origin);
+  if (!updated.length) return reply(409, { error: "match moved, try again" }, origin);
+  return reply(201, { match_id: matchId, seat, token }, origin);
 }
 
 /**
@@ -675,14 +869,16 @@ async function handleLapse(call, body, origin) {
  * that noticed does the work and reports the result. That sounds like trusting
  * the client, and it is worth being precise about what it actually trusts: the
  * orders were already stored, by their own seats, under their own tokens, and
- * are not re-sent here. What arrives is the *log* those orders produce, which
- * every other client recomputes for itself from the same stored inputs. A log
- * that disagreed would be caught by the next client to look, not believed.
+ * are not re-sent here. What arrives is the *log* those orders produce, and it
+ * becomes the record every other client applies — nobody decides the turn
+ * again, which is what keeps a bot on a wall clock from deciding it one way on
+ * one machine and another way on the next. Clients check it against the stored
+ * rows, so a log cannot file an order a person did not send.
  *
  * Idempotent by construction: the update is conditional on the turn still being
  * the one being resolved, so two clients noticing together is not a race. The
- * second is told the turn already moved and re-reads it, which is the same path
- * a client that was simply behind takes.
+ * second is told the turn already moved, throws its own result away and
+ * rebuilds from the log that won.
  */
 async function handleResolve(call, body, origin) {
   if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
@@ -694,6 +890,11 @@ async function handleResolve(call, body, origin) {
   if (!BASE64URL.test(log)) return reply(400, { error: "bad log encoding" }, origin);
   if (digest !== undefined && (typeof digest !== "string" || digest.length > 64)) {
     return reply(400, { error: "bad board_digest" }, origin);
+  }
+  const winner = body.winner;
+  if (winner !== undefined && winner !== null
+      && (!Number.isInteger(winner) || winner < 0 || winner > MAX_SEATS)) {
+    return reply(400, { error: "bad winner" }, origin);
   }
 
   const rows = await call(`/pbp_matches?select=*&match_id=eq.${matchId}`);
@@ -729,14 +930,15 @@ async function handleResolve(call, body, origin) {
         turn: turn + 1,
         log,
         finished: body.finished === true,
+        winner: body.finished === true && Number.isInteger(winner) ? winner : null,
         turn_opened_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }),
     });
   if (updated === null) return reply(502, { error: "store refused" }, origin);
   if (!updated.length) {
-    // Somebody else got there first. Not an error: they computed the same turn
-    // from the same orders, which is the point of the whole design.
+    // Somebody else got there first. Not an error: their log is the record, and
+    // the caller rebuilds from it.
     return reply(409, { error: "already resolved" }, origin);
   }
 

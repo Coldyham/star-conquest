@@ -51,10 +51,10 @@ import hashlib
 import json
 import re
 import zlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 from . import engine, turnfilm
 from .model import GameState, Order
@@ -77,7 +77,7 @@ _MATCH_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def board_digest(state: GameState) -> tuple:
@@ -133,12 +133,35 @@ def _order_to_dict(o: Order) -> dict:
     return {"owner": o.owner_id, "src": o.source_id, "dest": o.dest_id, "ships": o.ships}
 
 
-def _order_from_dict(d: dict) -> Optional[Order]:
+def _order_from_dict(d: dict) -> Order | None:
     """Rebuild one Order, or None if the entry is malformed (skip, don't crash)."""
     try:
         return Order(int(d["owner"]), int(d["src"]), int(d["dest"]), int(d["ships"]))
     except (TypeError, ValueError, KeyError):
         return None
+
+
+def rules_to_dict(rules: dict[int, tuple[int, int]] | None) -> dict:
+    """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": [dest,
+    keep]}``. The one form they are stored in, by a log turn and by play-by-post's
+    local copy (``pbp.remember_rules``) alike."""
+    return {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()}
+
+
+def rules_from_dict(raw) -> dict[int, tuple[int, int]]:
+    """``rules_to_dict`` read back, shaped for ``Ui.auto_forward``. Malformed
+    entries are dropped rather than raising, in keeping with the rest of this
+    format."""
+    rules: dict[int, tuple[int, int]] = {}
+    if not isinstance(raw, dict):
+        return rules
+    for src, rule in raw.items():
+        try:
+            dest, keep = rule
+            rules[int(src)] = (int(dest), int(keep))
+        except (TypeError, ValueError):
+            continue
+    return rules
 
 
 @dataclass
@@ -158,12 +181,12 @@ class GameLog:
     # thing as `version`, which is the *format* of this file: one says how to read
     # the log, the other says whether replaying it still reproduces the game.
     rules_version: int = field(default_factory=lambda: engine.RULES_VERSION)
-    winner: Optional[int] = None
+    winner: int | None = None
     finished: bool = False
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
     version: int = FORMAT_VERSION
-    path: Optional[Path] = field(default=None, compare=False)
+    path: Path | None = field(default=None, compare=False)
 
     @property
     def turn_count(self) -> int:
@@ -197,7 +220,7 @@ class GameLog:
         return sum(1 for i in range(self.turn_count) if not self.turn_is_ai(i))
 
     def record_turn(self, record: engine.TurnRecord, human_ai: bool = False,
-                    rules: Optional[dict[int, tuple[int, int]]] = None) -> None:
+                    rules: dict[int, tuple[int, int]] | None = None) -> None:
         """Append one resolved turn exactly as ``engine.end_turn`` played it.
 
         ``human_ai`` records that the human seat was AI-driven this turn (autoplay)
@@ -210,12 +233,12 @@ class GameLog:
                 "ai": bool(human_ai),
                 "orders": [_order_to_dict(o) for o in record.orders],
                 "dice": list(record.dice),
-                "rules": {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()},
+                "rules": rules_to_dict(rules),
             }
         )
         self.updated_at = _now_iso()
 
-    def mark_finished(self, winner: Optional[int]) -> None:
+    def mark_finished(self, winner: int | None) -> None:
         self.winner = winner
         self.finished = True
         self.updated_at = _now_iso()
@@ -237,7 +260,7 @@ class GameLog:
         self.rules_version = engine.RULES_VERSION
         self.updated_at = _now_iso()
 
-    def fork(self, n: int) -> "GameLog":
+    def fork(self, n: int) -> GameLog:
         """A fresh log branching from turn ``n`` (finished-game rewind).
 
         Same seed and settings, ``turns[:n]``, outcome cleared, and a brand-new
@@ -287,15 +310,7 @@ class GameLog:
         raising, in keeping with the rest of this format.
         """
         entry = self.turns[turn_index]
-        raw = entry.get("rules", {}) if isinstance(entry, dict) else {}
-        rules: dict[int, tuple[int, int]] = {}
-        for src, rule in (raw or {}).items():
-            try:
-                dest, keep = rule
-                rules[int(src)] = (int(dest), int(keep))
-            except (TypeError, ValueError):
-                continue
-        return rules
+        return rules_from_dict(entry.get("rules", {}) if isinstance(entry, dict) else {})
 
     # -- serialization ------------------------------------------------------- #
     def to_dict(self) -> dict:
@@ -313,7 +328,7 @@ class GameLog:
         }
 
     @classmethod
-    def from_dict(cls, data: dict, path: Optional[Path] = None) -> "GameLog":
+    def from_dict(cls, data: dict, path: Path | None = None) -> GameLog:
         """Rebuild from parsed JSON, tolerantly (missing keys keep defaults)."""
         turns_raw = data.get("turns")
         turns = list(turns_raw) if isinstance(turns_raw, list) else []
@@ -379,7 +394,7 @@ class GameLog:
         return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
 
     @classmethod
-    def decode(cls, blob: str) -> "GameLog":
+    def decode(cls, blob: str) -> GameLog:
         """The inverse of ``encoded`` (raises ``ValueError`` on anything else).
 
         Tolerates the uncompressed form the same way ``Settings.from_token`` does
@@ -388,19 +403,19 @@ class GameLog:
         """
         try:
             raw = base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4))
-            if not raw[:1] == b"{":
+            if raw[:1] != b"{":
                 raw = zlib.decompress(raw)
             data = json.loads(raw.decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001 — one bad blob, one message
+        except Exception as exc:
             raise ValueError(f"unreadable game log: {exc}") from exc
         if not isinstance(data, dict):
-            raise ValueError("unreadable game log: not an object")
+            raise ValueError("unreadable game log: not an object")  # noqa: TRY004
         return cls.from_dict(data)
 
 
 def _game_path(seed: int) -> Path:
     """A fresh, sortable filename for a new match (timestamp keeps them ordered)."""
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
     return GAMES_DIR / f"game_{stamp}_{seed}.json"
 
 
@@ -423,7 +438,7 @@ def load(path: Path) -> GameLog:
         return GameLog.from_dict(json.load(fh), path=path)
 
 
-def latest_log() -> Optional[GameLog]:
+def latest_log() -> GameLog | None:
     """The most recently updated saved match that can still be replayed exactly.
 
     Skips files that fail to load (corrupt / hand-broken) rather than crashing, so
@@ -462,8 +477,8 @@ HUMAN_SEAT = 1
 
 def reconstruct(
     log: GameLog,
-    on_turn: Optional[Callable[[GameState], object]] = None,
-    on_event: Optional[turnfilm.EventFn] = None,
+    on_turn: Callable[[GameState], object] | None = None,
+    on_event: turnfilm.EventFn | None = None,
 ) -> tuple[GameState, Settings]:
     """Replay a log's turns through the engine to rebuild its current state.
 

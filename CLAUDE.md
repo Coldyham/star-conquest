@@ -11,7 +11,8 @@ two companion files, keyed by matching headings — read them when you're actual
 touching that code, not as background reading.
 [`docs/system-design.md`](docs/system-design.md) covers the core and the shell;
 [`docs/bot-design.md`](docs/bot-design.md) covers the `models/` roster, the
-margins bots price fights with, and the measurements behind every AI constant.
+margins bots price fights with, and the measurements behind every AI constant;
+[`docs/pbp-design.md`](docs/pbp-design.md) covers play-by-post.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
 is the wire protocol for non-Python bots, and
 [`docs/bot-brief.md`](docs/bot-brief.md) is a self-contained brief a player
@@ -44,6 +45,9 @@ uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, comput
                                                 # but not posted (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
+uv run python tools/admin.py matches            # moderation: delete scores/maps/
+                                                # matches, rename, drop tags, reissue
+                                                # or reopen a seat (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/config_census.py            # which setups people actually
@@ -65,16 +69,13 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`.
+  `pbp`, `matchnames`.
   This is what lets
   `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
   to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it). (`custommap` is the hand-authored map recipe and its validator —
   see Hand-authored maps below. `pbp` is play-by-post: one seat of a shared match,
-  held by a person at their own pace. It is **work in progress on a branch** and
-  is the one feature here whose working record is not yet in these docs — see
-  [`docs/play-by-post.md`](docs/play-by-post.md), which is temporary and goes away
-  when the branch lands. `fog` is presentation-only visibility — pure hop-distance queries the
+  held by a person at their own pace — see Play-by-post below. `fog` is presentation-only visibility — pure hop-distance queries the
   shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
   presentation-only playback the *engine writes into* and never reads back — see
   Animated end of turn below. `replay` serializes a
@@ -114,7 +115,8 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     small key/value store (shared-settings tokens, personal bests). See the
     challenge-link notes under Key conventions.
   - `share.py` is the one bridge that talks to a network, and the one that is
-    not browser-only: it posts a finished match's replay to the leaderboard so a
+    not browser-only: it posts a finished match's replay to the leaderboard's
+    `/api/log` (same-origin on the web) so a
     posted score can be checked against the game that produced it. Same
     defensive style — guarded everywhere, silent on failure,
     fire-and-forget on both backends (a `fetch` whose promise
@@ -440,6 +442,58 @@ live play from the viewed turn — mid-game it truncates the same log file
 finished game it forks a new file (`GameLog.fork`) so the completed record stays
 intact.
 
+### Play-by-post (pbp.py)
+
+A per-seat URL onto a shared match, played asynchronously. It fits because turns
+already resolve simultaneously. The rationale for each rule is in
+[`docs/pbp-design.md`](docs/pbp-design.md), under the same headings.
+
+- **Thin server; clients resolve.** `leaderboard/netlify/functions/pbp.mjs` and
+  the `pbp_*` tables store orders and the log. They never hold a board or run an
+  engine. The function holds the only write key, like `log.mjs`. A seat token is
+  scoped to one match, never to a person. Play-by-post matches never appear on
+  the leaderboard.
+- **The stored log is the record, and a turn is decided once.** Whoever resolves
+  a turn uploads its log, and every other client applies it (`pbp.match_log`,
+  `pbp.settled_turn`). Nobody decides that turn again, because the bots stop on
+  a wall clock. The resolver's rng is derived (`pbp.reseed`), never carried.
+  Bots decide on a scratch copy (`pbp.turn_orders`), so the dice roll after every
+  order is fixed. Each stepping client re-rolls them (`pbp.verify_turn`).
+  `match_log` refuses a log that files an order under a person's seat. The
+  endpoint keeps the first upload, and a client that loses the race rebuilds
+  from it. The uploaded log carries no forwarding rules (`pbp.shareable`), so
+  each device keeps its own seat's (`pbp.remember_rules`, `sc_pbp_rules`),
+  saved on submit and at every turn's end, and `main.open_match` restores them.
+- **Order sequence is the whole of determinism.** `engine._collect_orders` runs
+  in ascending seat id and must never depend on submission order.
+  `RULES_VERSION` did not move for any of this, and must not.
+- **Fog is convenience, not secrecy.** A client holds the whole log. The board
+  digest is a tripwire against drift, not an anti-cheat mechanism. The live
+  turn's orders are released all at once, only when every seat is in
+  (`visibleOrders`).
+- **Nothing resolves a play-by-post turn on a clock.** End Turn submits
+  (`main.pbp_send`), and play and autoplay are unavailable. A settled turn still
+  goes through `main.resolve_turn`, passing the record as `script`.
+- **The roster is the truth about who is a person**, not the `is_human` flags
+  left by a rebuild (`pbp.seat_people`, re-stamped in `main.open_match`).
+- **How a deadline works.** A first miss holds (the seat files empty orders), and
+  a second consecutive miss hands the seat to its bot. The endpoint decides the
+  lapse (`lapsedSeats`, re-checked in `handleLapse`) from the `source` column.
+  Any client may file the bot's orders, computed on a board copy, but never a
+  lapse for its own seat.
+- **Public matches are listed; open seats are claimed, not handed out.** Only
+  `public` rows appear on the lobby page (`leaderboard/pbp.html`, `?action=list`).
+  A public match mints the creator's token alone, and an open seat is one with
+  no stored hash until `?action=claim` mints it.
+- **A match's name is derived; its title, seat names and winner are claims.**
+  `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by
+  `test_leaderboard_sync`) labels a match from its id and is never a key. Title
+  and `names` are self-declared at create/claim; `winner` rides on the final
+  resolve, trusted as far as `finished`. The lobby's "yours" is the game's own
+  seat store (`sc_pbp_seats`), read directly since the board shares the game's
+  origin. A claim there writes into it in `pbp.remember`'s `{seat, token}`
+  shape, and the lobby never prunes it.
+
 ### Key conventions
 
 - **All balance/aesthetic constants live in `config.py`.** Do not hardcode a
@@ -585,8 +639,8 @@ intact.
       sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
       reproducible from its seed, so it is bytes without information.
     - **`game_logs` is the one table the public can neither read nor write.** RLS
-      on, no policies, no anon grants. Writes go through the leaderboard site's
-      own `netlify/functions/log.mjs` under the secret key, which is what
+      on, no policies, no anon grants. Writes go through the site's
+      own `leaderboard/netlify/functions/log.mjs` under the secret key, which is what
       makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
       insert path is a storage bill rather than a few junk rows. Reads are the
       worker's alone, so uploading a game does not publish it.
@@ -774,17 +828,27 @@ intact.
       *defence* margin still prices the jitter in full, which is the asymmetry:
       our own garrison cannot decline the engagement. See "Garrisons run away"
       in bot-design before copying either half into another bot.
-  - **The game and the board find each other by hostname, not by configuration.**
-    They are two Netlify sites whose names differ by `paths.LEADERBOARD_TAG`, and
-    Netlify names every deploy `<context>--<site>.netlify.app` from the same
-    context on both — so `paths.sibling_host` (via `webstore.leaderboard_origin`,
-    and `siblingGame` in `leaderboard/js/config.mjs` for the reverse) makes a
-    deploy preview of one talk to the deploy preview of the other, with no URL
-    edited by hand. Endpoints are therefore built at *call* time from
-    `LEADERBOARD_*_PATH`, never stored as whole URLs; `paths.LEADERBOARD_ORIGIN`
-    is the fallback for a host the rule cannot read (desktop, a custom domain)
-    and blanking it disables every leaderboard feature — which is what `render`
-    tests, since resolving costs a DOM read it must not do once a frame.
+  - **The game and the board are one site.** The root `netlify.toml` builds the
+    game, and `tools/build_web.sh` stages the board's pages into `web/board/`
+    from an explicit allow-list. The functions are bundled from
+    `leaderboard/netlify/functions/` and answer at root `/api/`. On a
+    `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
+    and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
+    context, including a deploy preview, talks to itself with no URL edited by
+    hand. Endpoints are still built at *call* time from `LEADERBOARD_*_PATH`,
+    never stored as whole URLs. `paths.LEADERBOARD_ORIGIN` is the route for
+    everything else (desktop, Android, localhost, a custom domain). Blanking it
+    disables every leaderboard feature, which is what `render` tests, since
+    resolving costs a DOM read it must not do once a frame. One origin means one
+    localStorage: the lobby reads `sc_pbp_seats` and the posting name is
+    `sc_pbp_name` (`test_leaderboard_sync` pins both keys). The site now holds
+    `SUPABASE_SECRET_KEY` (unscoped on the free plan, so the build command
+    unsets it first), and its sensitive-variable policy must stay on
+    "Require approval" (the root `netlify.toml` header explains the fork-preview
+    reasoning). The board's old host is a redirect shell (`legacy-board/`). It
+    *proxies* `/api/`, because installed builds POST there and urllib won't
+    follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
+    fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
   - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
     (only the AI tab's aux slider writes it); each strategy assigns its own
     meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,

@@ -6,6 +6,7 @@ import {
   relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { configTitle } from "./setup.mjs";
 import { encodeToken, newSeedSetup } from "./token-encode.mjs";
 
@@ -256,6 +257,7 @@ function configRow(config) {
 }
 
 async function load() {
+  mountNav();
   mountMyScores();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");

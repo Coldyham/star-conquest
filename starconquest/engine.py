@@ -27,9 +27,10 @@ everything the turn consumed — and accepting one back in ``script`` to replay 
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Callable, Iterable, NamedTuple, Optional
+from typing import NamedTuple
 
 from . import combat, config, turnfilm
 from .model import Fleet, GameState, Order, free_lane_slot, lane_key
@@ -81,7 +82,7 @@ class _Dice:
     than half-resolved.
     """
 
-    def __init__(self, rng, recorded: Optional[Iterable[float]] = None) -> None:
+    def __init__(self, rng, recorded: Iterable[float] | None = None) -> None:
         self._rng = rng
         self._recorded = deque(recorded or ())
         self.drawn: list[float] = []
@@ -95,7 +96,7 @@ class _Dice:
 # --------------------------------------------------------------------------- #
 # Issuing orders
 # --------------------------------------------------------------------------- #
-def apply_order(state: GameState, order: Order) -> Optional[Fleet]:
+def apply_order(state: GameState, order: Order) -> Fleet | None:
     """Validate and launch a fleet, deducting ships from the source at once.
 
     Returns the created Fleet, or None if the order is illegal (unknown/foreign
@@ -132,12 +133,12 @@ def apply_order(state: GameState, order: Order) -> Optional[Fleet]:
 # --------------------------------------------------------------------------- #
 def end_turn(
     state: GameState,
-    human_orders: Optional[list[Order]] = None,
-    decide: Optional[DecideFn] = None,
-    script: Optional[TurnRecord] = None,
-    on_event: Optional[turnfilm.EventFn] = None,
-    claim_seat: Optional[int] = None,
-    seat_orders: Optional[dict[int, list[Order]]] = None,
+    human_orders: list[Order] | None = None,
+    decide: DecideFn | None = None,
+    script: TurnRecord | None = None,
+    on_event: turnfilm.EventFn | None = None,
+    claim_seat: int | None = None,
+    seat_orders: dict[int, list[Order]] | None = None,
 ) -> TurnRecord:
     """Resolve one turn with simultaneous decision-making.
 
@@ -210,9 +211,9 @@ def _claim_seat(state: GameState, pid: int) -> None:
         player.is_human = True
 
 
-def _collect_orders(state: GameState, human_orders: Optional[list[Order]],
-                    decide: Optional[DecideFn],
-                    seat_orders: Optional[dict[int, list[Order]]] = None) -> list[Order]:
+def _collect_orders(state: GameState, human_orders: list[Order] | None,
+                    decide: DecideFn | None,
+                    seat_orders: dict[int, list[Order]] | None = None) -> list[Order]:
     """Every seat's orders for this turn, in the sequence they will be applied.
 
     Seats are walked in **ascending id**, people and bots alike: a seat a person
@@ -262,7 +263,7 @@ def _collect_orders(state: GameState, human_orders: Optional[list[Order]],
     return orders
 
 
-def _own_orders(orders: Optional[list[Order]], seat: Optional[int]) -> list[Order]:
+def _own_orders(orders: list[Order] | None, seat: int | None) -> list[Order]:
     """Keep only the orders ``seat`` is entitled to issue.
 
     A seat commands its own ships and nothing else. This has to be enforced here,

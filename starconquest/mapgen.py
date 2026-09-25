@@ -64,7 +64,7 @@ def generate_random(
     return state
 
 
-def generate_custom(seed: int, design: "CustomMap") -> GameState:
+def generate_custom(seed: int, design: CustomMap) -> GameState:
     """Build the board a hand-authored recipe describes.
 
     Draws nothing: every position, production, garrison and owner in the recipe is
@@ -359,7 +359,7 @@ def _planar_edges(positions: list[Point]) -> list[tuple[int, int]]:
     mst_count = len(accepted)
 
     max_len = config.MAX_EDGE_LENGTH_FRAC * config.WORLD_SIZE
-    extra_budget = int(round(config.EXTRA_EDGE_FRACTION * mst_count))
+    extra_budget = round(config.EXTRA_EDGE_FRACTION * mst_count)
     added = 0
     accepted_set = set(accepted)
     for d, i, j in pairs:

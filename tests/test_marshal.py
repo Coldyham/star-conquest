@@ -20,7 +20,7 @@ import sys
 import pytest
 
 from starconquest import ai, combat, config, engine, mapgen
-from starconquest.model import Fleet, GameState, Order, Player, System
+from starconquest.model import Fleet, GameState, Player, System
 from tests import sim
 
 

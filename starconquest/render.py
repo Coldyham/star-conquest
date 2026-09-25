@@ -6,11 +6,11 @@ triangles for fleets, numbers for ship counts.
 from __future__ import annotations
 
 import math
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, paths, turnfilm, widgets
+from . import config, fog, matchnames, paths, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -825,8 +825,8 @@ class _Mark(NamedTuple):
     phase: float
     fade: float                 # 0 fresh, 1 dissolved into the background
     cost: int                   # what it cost whoever came out of it
-    victor: Optional[int]       # ...and who that was; None when nobody did
-    node_id: Optional[int]      # the system it happened at, if it was not in open space
+    victor: int | None       # ...and who that was; None when nobody did
+    node_id: int | None      # the system it happened at, if it was not in open space
 
 
 def _mark_phase(age_ms: float) -> float:
@@ -1534,7 +1534,7 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     # nothing — the same reason route mode zeroes them just above, arrived at from
     # the other side (there they must not fire, here they cannot).
     if ui.auto_forward and not ui.history:
-        y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
+        y = _draw_clear_forward_button(surface, ui, px, y)
     # below it, a narrower button for just the rules currently tinted dangerous
     # (pointed at a system we don't hold) — shown only while at least one exists
     dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
@@ -1755,9 +1755,13 @@ def _panel_you_are(surface, ui: Ui, x, y) -> int:
     """'You are {seat}', in that seat's own colour — the one line that says
     outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
     shared match can seat a person at any colour, but a solo game has no such
-    ambiguity, since it is always the one seat you are looking at."""
-    return _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
-                config.player_color(ui.human_id))
+    ambiguity, since it is always the one seat you are looking at. Under it,
+    the match's title, or its pass-phrase name where it has none — whichever the
+    lobby headlines it by."""
+    y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+             config.player_color(ui.human_id))
+    label = ui.pbp_title or matchnames.phrase(ui.pbp_match)
+    return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
 
 def _panel_w() -> int:

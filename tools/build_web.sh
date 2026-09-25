@@ -24,7 +24,12 @@ find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || 
 # --width/--height set the canvas framebuffer size: render at a high native
 # resolution so text/edges stay crisp instead of the browser upscaling pygbag's
 # 1280x720 default. Must match config.WEB_FB_W/WEB_FB_H (set_mode uses those).
-( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --width 2560 --height 1440 main.py )
+# --ume_block 0 drops pygbag's "Ready to start! Please click/touch page" gate. It
+# waits for a tap so the browser will allow sound, and the game plays none; with
+# the board on the same site, it was one more stop on every trip back to the game.
+# (--can_close stays at its default on purpose: its "leave site?" prompt is what
+# warns before a single-player match in progress is navigated away from.)
+( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --ume_block 0 --width 2560 --height 1440 main.py )
 
 rm -rf "$ROOT/web"
 mkdir -p "$ROOT/web"
@@ -44,6 +49,16 @@ cp "$ROOT/tools/pwa/icon-192.png" "$ROOT/tools/pwa/icon-512.png" \
 cp "$ROOT/tools/pwa/screenshot-wide.png" "$ROOT/tools/pwa/screenshot-mobile.png" "$ROOT/web/"
 uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/index.html"
 
+# The leaderboard's pages, served at /board/ on this same origin (its functions
+# are bundled separately, from netlify.toml's [functions] directory). An explicit
+# list of what is servable rather than a copy with excludes, so function source,
+# tests, SQL and the README can never end up published by accident.
+BOARD_FILES=(index.html game.html submit.html user.html pbp.html favicon.png)
+BOARD_DIRS=(css js fonts)
+mkdir -p "$ROOT/web/board"
+for f in "${BOARD_FILES[@]}"; do cp "$ROOT/leaderboard/$f" "$ROOT/web/board/"; done
+for d in "${BOARD_DIRS[@]}"; do cp -r "$ROOT/leaderboard/$d" "$ROOT/web/board/"; done
+
 # pygbag fetches the pygame-ce WASM wheel from <origin>/cdn/ at runtime. Mirror it
 # into the build so the deployment is fully self-contained — works on any static
 # host and on a phone over LAN, with no dependency on the pygame-web CDN at run
@@ -56,5 +71,5 @@ if ! curl -fsSL -o "$ROOT/web/cdn/cp312/$WHEEL" "https://pygame-web.github.io/cd
 fi
 echo
 echo "Web build ready in: $ROOT/web"
-echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000"
+echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000 (board: /board/)"
 echo "Deploy it: copy the contents of $ROOT/web to any static host."

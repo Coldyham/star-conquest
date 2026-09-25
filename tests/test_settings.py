@@ -12,10 +12,18 @@ import pytest
 from starconquest import config
 from starconquest.custommap import CustomMap, MapNode
 from starconquest.model import AiParams
-from starconquest.settings import (_GLOBAL_KNOBS, _LEGACY_KEY_DROPS, Challenge,
-                                   RANDOM_STRATEGY, Settings, _hash_setup,
-                                   build_state, random_seed, resolve_seed,
-                                   resolve_strategy)
+from starconquest.settings import (
+    _GLOBAL_KNOBS,
+    _LEGACY_KEY_DROPS,
+    RANDOM_STRATEGY,
+    Challenge,
+    Settings,
+    _hash_setup,
+    build_state,
+    random_seed,
+    resolve_seed,
+    resolve_strategy,
+)
 
 
 @contextlib.contextmanager
@@ -702,7 +710,7 @@ def test_no_core_module_imports_pygame():
     import pathlib
 
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
-            "settings", "fog", "replay", "turnfilm", "custommap", "pbp")
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames")
     pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
     for name in core:
         tree = ast.parse((pkg / f"{name}.py").read_text())

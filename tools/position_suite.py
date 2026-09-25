@@ -54,8 +54,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, replay  # noqa: E402
-from tests import sim  # noqa: E402 — the shared headless harness
+from starconquest import ai, replay
+from tests import sim
 
 # A position is only worth playing if there is a game left to play from it. The
 # defaults sample every 20 turns and drop the last 20, where a decided match is a
@@ -109,9 +109,12 @@ def supabase_logs(limit: int = 0) -> list[replay.GameLog]:
     Imported lazily so the local path — the one that needs no credentials — does
     not depend on the worker's HTTP client at all.
     """
-    from tools.bot_replay import (MISSING_CREDENTIALS, Supabase,  # noqa: PLC0415
-                                  credentials)
-    from tools.verify_scores import best_logs      # noqa: PLC0415
+    from tools.bot_replay import (
+        MISSING_CREDENTIALS,
+        Supabase,
+        credentials,
+    )
+    from tools.verify_scores import best_logs
 
     url, key = credentials()
     if not url or not key:
@@ -219,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     # wall-clock guard is worth lifting out of the way, and a bot with a measured
     # best profile (today, just knower) is worth measuring there rather than at
     # its untuned default.
-    from tools.bot_replay import BUDGET_SCALE, replay_aux  # noqa: PLC0415
+    from tools.bot_replay import BUDGET_SCALE, replay_aux
 
     args = parse_args(argv)
     try:
@@ -231,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
 
     loaded = ai.load_models()
     roster = args.bots or ai.available_strategies()
-    aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
+    aux_for = lambda bot: replay_aux(bot, overrides)
     profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
     scale = BUDGET_SCALE if args.budget_scale is None else args.budget_scale
     widened = ai.set_budget_scale(scale)
@@ -253,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(logs)} games · {len(plan)} positions · {len(roster)} bots "
           f"= {len(plan) * len(roster)} runs")
 
-    def _cancel(signum, frame):  # noqa: ARG001
+    def _cancel(signum, frame):
         raise _Cancelled()
 
     signal.signal(signal.SIGTERM, _cancel)

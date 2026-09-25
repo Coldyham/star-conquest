@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from starconquest import engine, mapgen, pbp, replay, webstore
+from starconquest import engine, pbp, replay, webstore
 from starconquest.model import Order
-from starconquest.settings import Settings
+from starconquest.settings import Challenge, Settings
 
 
 @pytest.fixture(autouse=True)
@@ -204,7 +204,7 @@ def test_resolving_produces_a_log_that_reconstructs_to_the_same_board():
     """A play-by-post match is an ordinary GameLog — which is what lets it
     resume, review and verify with nothing taught about it."""
     match = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    state, log, digest = pbp.resolve(match)
+    _state, log, digest = pbp.resolve(match)
     rebuilt, _ = replay.reconstruct(log)
     assert replay.digest_hex(rebuilt) == digest
 
@@ -276,11 +276,11 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
     dest = next(iter(state.systems[src].neighbors))
     rows = [{"turn": 0, "seat": 2, "orders_json": [{"src": src, "dst": dest, "ships": 2}]}]
 
-    resolved, log, digest = pbp.resolve(
+    _resolved, log, digest = pbp.resolve(
         pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
     # ...and the next client, seeing turn 1 with that turn now settled.
-    rebuilt, _ = pbp.rebuild(
-        pbp.match_from_dict(_state_payload(turn=1, turns=rows)))
+    rebuilt, _ = pbp.rebuild(pbp.match_from_dict(
+        _state_payload(turn=1, turns=rows, log=pbp.shareable(log).encoded())))
     assert replay.digest_hex(rebuilt) == digest
     assert replay.digest_hex(replay.reconstruct(log)[0]) == digest
 
@@ -422,3 +422,72 @@ def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, m
     assert ".catch(" in js, "an unhandled rejection reads as a crash"
     assert "'POST'" in js and "application/json" in js
     assert TOKEN in js
+
+
+def test_a_match_is_created_with_its_title_and_the_creators_name(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    pbp.create(MATCH, Settings(players=2), 7, [1, 2], title="  Friday  ",
+               name="x" * 40)
+    assert sent["title"] == "Friday"
+    assert sent["name"] == "x" * pbp.NAME_MAX
+
+
+def test_a_match_stores_its_setup_pruned_and_rebuilds_the_same_one(monkeypatch):
+    """The lobby lists non-default knobs by reading what is present, so the
+    setup goes up in `token_dict` form — which `from_dict` reads back whole."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    settings = Settings(players=3, nodes=20, combat_jitter=0.2, seed=5)
+    pbp.create(MATCH, settings, 5, [1, 2, 3])
+    assert sent["settings_json"] == settings.token_dict()
+    assert "garrison_k" not in sent["settings_json"]
+    assert Settings.from_dict(sent["settings_json"]) == settings
+
+
+def _challenged(**over):
+    settings = Settings(mode="random", players=2, nodes=16, seed=7, **over)
+    settings.challenge = Challenge(turns=71, lost=40, key=settings.challenge_key())
+    return settings
+
+
+def test_a_match_opened_from_a_challenge_does_not_carry_its_score(monkeypatch):
+    """The menu still holds a challenge link's score when a match is opened
+    from it; the setup goes up, the score to beat does not."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    pbp.create(MATCH, _challenged(), 7, [1, 2])
+    assert "challenge" not in sent["settings_json"]
+
+
+def test_a_score_already_stored_on_a_match_is_dropped_on_the_way_in():
+    """Matches opened before the score was stripped still hold one, on the row
+    and in any log a client uploaded since."""
+    stored = _challenged().to_dict()
+    assert pbp.match_from_dict(_state_payload(settings_json=stored)).settings.challenge is None
+
+    base = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
+    _state, log, _digest = pbp.resolve(base)
+    log.settings = stored
+    match = pbp.match_from_dict(_state_payload(turn=1, log=pbp.shareable(log).encoded()))
+    opened = pbp.match_log(match)
+    assert opened is not None and opened.settings["challenge"] is None
+
+
+def test_the_final_resolve_reports_the_winner_and_no_other_does(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(pbp, "call", lambda action, payload=None, **kw: sent.update(payload or {}))
+    log = replay.GameLog(seed=7, settings=Settings().to_dict())
+    pbp.send_resolved(pbp.Seat(MATCH, 1, TOKEN), 3, log, "d", False, 2)
+    assert sent["winner"] is None
+    pbp.send_resolved(pbp.Seat(MATCH, 1, TOKEN), 4, log, "d", True, 2)
+    assert sent["winner"] == 2 and sent["finished"] is True
+
+
+def test_a_matchs_title_and_names_are_read_off_the_wire():
+    match = pbp.match_from_dict(_state_payload(title="Friday", names={"1": "Alice", "2": "", "x": "?"}))
+    assert match is not None
+    assert match.title == "Friday"
+    assert match.names == {1: "Alice"}
+    bare = pbp.match_from_dict(_state_payload())
+    assert bare is not None and bare.title == "" and bare.names == {}

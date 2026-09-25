@@ -1,3 +1,9 @@
+# RETIRED at the site merge. The board is now served by the game's site (root
+# netlify.toml: pages at /board/, functions at /api/). This file only keeps the
+# old board site building from `leaderboard/` until the cutover switches that
+# site's Base directory to `legacy-board/` (a redirect shell). Delete it after
+# that switch; nothing else reads it.
+#
 # Netlify config for the leaderboard — a *second*, separate site from the same
 # repo, with its Base directory set to `leaderboard` in the site's settings.
 # Netlify then reads this file instead of the root one (which builds the game

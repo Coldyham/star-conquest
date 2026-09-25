@@ -22,3 +22,13 @@ dev = [
     "pygbag>=0.9.3",
     "pip",            # pygbag's build/dev server shells out to `python -m pip`
 ]
+
+[tool.ruff.lint]
+# Guarded calls that must never take the game down swallow failures on purpose.
+ignore = ["S110", "S112"]
+
+[tool.ruff.lint.per-file-ignores]
+# The browser/storage bridges: every DOM or filesystem call is guarded wholesale.
+"starconquest/{webstore,softkeyboard,paths,settings}.py" = ["BLE001"]
+"main.py" = ["BLE001"]
+"tools/{check_bot,config_census}.py" = ["BLE001"]

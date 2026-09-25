@@ -66,36 +66,44 @@ WEB_PBP_BODY_KEY = "sc_pbp_body"
 # never in `Settings`, which travels in every shared link.
 WEB_PBP_SEATS_KEY = "sc_pbp_seats"
 
+# Our own standing forwarding rules in each match we hold a seat in, by match id:
+# `{"<match id>": {"<src>": [dest, keep]}}` (`replay.rules_to_dict`). A solo game
+# keeps them in its log, but a shared match's log is uploaded for every seat, so
+# `pbp.shareable` strips them and this is the only copy. Local, like the token.
+WEB_PBP_RULES_KEY = "sc_pbp_rules"
+
+# The name last typed into the play-by-post prompt's "Your name" field, offered
+# again next time. Display text only: it goes to the endpoint just when a match
+# is created with it filled in.
+WEB_PBP_NAME_KEY = "sc_pbp_name"
+
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.
 #
-# The two halves are separate Netlify sites whose names differ by exactly one
-# string: `star-conquest` and `star-conquest-leaderboard`. Netlify names every
-# other deploy `<context>--<site>.netlify.app` — `deploy-preview-42--…` for a PR,
-# `<branch>--…` for a branch deploy — and both sites build from this one
-# repository, so a PR produces the same `<context>` on each.
+# The board is served from the game's own site: its pages under `/board/`
+# (staged by `tools/build_web.sh` from `leaderboard/`), its functions at `/api/`.
+# One origin means one localStorage, so the lobby reads the seats this file's
+# keys name directly, and every deploy — production, a PR's deploy preview, a
+# branch deploy — carries its own matching board with nothing to derive. On the
+# web `webstore.leaderboard_origin` therefore answers with the page's own host.
 #
-# That makes the sibling derivable at runtime rather than configured: insert the
-# tag into our own site name and a deploy preview of the game talks to the
-# matching preview of the board, a branch deploy to its branch deploy, and
-# production to production, with nothing to edit by hand between them. See
-# `sibling_host`, and `webstore.leaderboard_origin` for the DOM half.
-#
-# The constant below is the fallback for everywhere that reasoning does not
-# reach: desktop, Android, a local server, or a custom domain that is not a
-# `.netlify.app` name at all. Blank disables every leaderboard feature — the win
-# overlay stops offering the button, uploads no-op, replays are unwatchable.
-LEADERBOARD_ORIGIN = "https://star-conquest-leaderboard.netlify.app"
-LEADERBOARD_TAG = "-leaderboard"     # what the board's site name has and ours does not
-_NETLIFY_SUFFIX = ".netlify.app"
+# The constant below is the route for everywhere that is not a `.netlify.app`
+# page: desktop, Android, a local server, or a custom domain. Blank disables
+# every leaderboard feature — the win overlay stops offering the button, uploads
+# no-op, replays are unwatchable. (The board's old host,
+# `star-conquest-leaderboard.netlify.app`, is a redirect shell that proxies
+# `/api/` here, so an installed build still naming it keeps working — see
+# `legacy-board/netlify.toml`.)
+LEADERBOARD_ORIGIN = "https://star-conquest.netlify.app"
+NETLIFY_SUFFIX = ".netlify.app"
 
-# Paths on that origin. `/submit` is written without the `.html` the way the host
-# serves it: that form answers too, but this is the canonical URL and avoids a
-# redirect hop. The two `/api` paths are the site's own functions
-# (`leaderboard/netlify/functions/`), which hold the only key that may touch
-# `game_logs` — posting straight to PostgREST would mean shipping a key with
-# insert rights inside the game.
-LEADERBOARD_SUBMIT_PATH = "/submit"    # the score-entry form, opened with #<token>
+# Paths on that origin. The page paths carry an explicit `.html`, which the
+# host answers directly and which also works on a plain local static server
+# (`python -m http.server` in `web/`). The `/api` paths are the site's own
+# functions (`leaderboard/netlify/functions/`), which hold the only key that may
+# touch `game_logs` — posting straight to PostgREST would mean shipping a key
+# with insert rights inside the game.
+LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened with #<token>
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
@@ -108,36 +116,10 @@ LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissio
 # is deliberately computed nowhere but there). This is the same link the web
 # menu's file row used to spend on a Save/Load row that never actually
 # persisted anything in the browser (see `menu._file_control`).
-LEADERBOARD_CONFIGS_PATH = "/index.html?group=config"
-
-
-def sibling_host(host: str, tag: str, *, add: bool) -> str:
-    """``host`` with ``tag`` added to or removed from its Netlify *site name*.
-
-    The site name is the last `--`-separated part of the label before
-    ``.netlify.app``, which is what makes this work across contexts:
-
-        star-conquest.netlify.app                  -> star-conquest-leaderboard.…
-        deploy-preview-42--star-conquest.netlify…  -> deploy-preview-42--star-conquest-leaderboard.…
-
-    Returns ``""`` for anything it cannot reason about — a custom domain,
-    localhost, a host already in the wanted state — and the caller then falls
-    back to the configured origin. Deliberately pure, so the string rule is
-    testable without a browser.
-    """
-    if not host.endswith(_NETLIFY_SUFFIX):
-        return ""
-    label = host[: -len(_NETLIFY_SUFFIX)]
-    prefix, sep, site = label.rpartition("--")
-    if add:
-        if site.endswith(tag):
-            return ""                      # already the sibling; nothing to add
-        site += tag
-    else:
-        if not site.endswith(tag):
-            return ""                      # already the sibling; nothing to remove
-        site = site[: -len(tag)]
-    return f"{prefix}{sep}{site}{_NETLIFY_SUFFIX}" if site else ""
+LEADERBOARD_CONFIGS_PATH = "/board/index.html?group=config"
+# The play-by-post lobby. It reads `WEB_PBP_SEATS_KEY` itself, being on the
+# same origin, so the game hands it nothing.
+LEADERBOARD_LOBBY_PATH = "/board/pbp.html"
 
 
 def _android_data_dir() -> Path | None:

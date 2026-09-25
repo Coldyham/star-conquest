@@ -1,12 +1,13 @@
 -- Star Conquest leaderboard schema. Paste into the Supabase SQL editor once.
 --
 -- Trust model: no auth, no accounts. Anyone may read everything and insert a
--- user/game/score; nobody may update or delete anything. Scores are append-only
--- and "the best score" is a query, never a row that gets overwritten.
+-- user/game/score; the public may not update or delete anything. Scores are
+-- append-only and "the best score" is a query, never a row that gets overwritten.
 --
 -- With RLS enabled, a command with no policy is refused outright — so the absence
--- of UPDATE/DELETE policies below is the mechanism, not an omission. Fixing a bad
--- row means using this SQL editor, which runs as `postgres` and bypasses RLS.
+-- of UPDATE/DELETE policies below is the mechanism, not an omission. Removing or
+-- correcting a bad row is the owner's job, through `tools/admin.py` under the
+-- secret key, which logs every change it makes to `admin_actions` (end of file).
 --
 -- Statement order matters below: the functions must come before the views that
 -- call them, and `configs`/`config_tags` before the views that join them
@@ -891,6 +892,38 @@ create table if not exists public.pbp_orders (
 create index if not exists pbp_orders_turn_idx
   on public.pbp_orders (match_id, turn);
 
+-- Public matches: listed on the lobby page (`pbp.html`, `?action=list`) and
+-- joinable from it (`?action=claim`). A private match stays reachable only by
+-- knowing its id, which is why this defaults to false and why nothing lists a
+-- row that is not flagged. A public match's open seats are the ones with no
+-- entry in `seats.tokens`: `create` mints only the creator's token, and a claim
+-- mints the rest one at a time, so "unclaimed" is a missing hash rather than a
+-- second field to keep in step with it.
+alter table public.pbp_matches
+  add column if not exists public boolean not null default false;
+
+create index if not exists pbp_matches_public_idx
+  on public.pbp_matches (updated_at desc) where public;
+
+-- What the lobby says about a match beyond its setup. All three are
+-- self-declared display text, set through the function and never read back for
+-- logic: `title` by the creator at `create`; `names` as `{seat: name}`, each
+-- entry written by that seat's own holder (the creator's at `create`, a joiner's
+-- at `claim`); `winner` the seat the resolving client reports on the final turn,
+-- trusted exactly as far as `finished` beside it (0 is a draw by elimination).
+alter table public.pbp_matches
+  add column if not exists title text not null default ''
+    check (char_length(title) <= 60),
+  add column if not exists names jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(names) = 'object' and octet_length(names::text) <= 1024),
+  add column if not exists winner integer
+    check (winner is null or winner between 0 and 6);
+
+-- ONE-OFF, testing only: list the matches that predate the flag. Run once when
+-- adding the column above, never again -- re-running it would publish every
+-- private match since.
+-- update public.pbp_matches set public = true;
+
 -- RLS on, and deliberately no policies at all: with row-level security enabled,
 -- a command with no policy is refused outright, so these two tables are closed
 -- to the publishable key exactly as game_logs is. That is the mechanism, not an
@@ -912,6 +945,38 @@ grant select, insert, update on public.pbp_matches to service_role;
 -- never rewritten — that is what the unique constraint per (match, turn, seat)
 -- is for.
 grant select, insert, update on public.pbp_orders to service_role;
+
+-- ---------------------------------------------------------------------------
+-- Moderation: tools/admin.py
+--
+-- The one place anything on the board is deleted or rewritten, by the owner,
+-- under the secret key. admin_actions is its log: one row per applied command,
+-- written *before* the command runs, holding what was done, to what, why, and
+-- the rows about to be removed or overwritten — so a moderation can be undone
+-- by hand, and none happens without a trace. Closed like game_logs: RLS on, no
+-- policies, no public grants.
+-- ---------------------------------------------------------------------------
+create table if not exists public.admin_actions (
+  id       bigint generated always as identity primary key,
+  action   text not null check (char_length(action) between 1 and 40),
+  target   text not null check (char_length(target) between 1 and 200),
+  reason   text not null default '',
+  detail   jsonb not null default '{}'::jsonb,
+  acted_at timestamptz not null default now()
+);
+
+alter table public.admin_actions enable row level security;
+grant select, insert on public.admin_actions to service_role;
+
+-- What the moderation commands read and change. Deleting a score cascades to
+-- its config_tags and score_checks rows through their foreign keys; config_tags
+-- is also deleted from directly, when a tag is removed on its own.
+grant select, update on public.users to service_role;
+grant select, update, delete on public.configs to service_role;
+grant select, delete on public.config_tags to service_role;
+grant delete on public.scores, public.games, public.bot_scores to service_role;
+-- A seat's token rewritten or forgotten, or a whole match removed.
+grant delete on public.pbp_matches, public.pbp_orders to service_role;
 
 -- New relations aren't visible to PostgREST until it reloads its schema cache.
 -- Supabase's DDL event triggers usually fire this already; idempotent either way.

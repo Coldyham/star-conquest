@@ -1742,7 +1742,7 @@ under a key describing no particular map.
 and it has no policies and no anon grants at all — every other table here takes a
 row from anyone, and for a hundred-byte score that is a fine trade. A replay is
 5-14 KiB, so an open insert path is a storage bill rather than a nuisance. Writes
-go through the leaderboard site's own function (`netlify/functions/log.mjs`),
+go through the site's own function (`leaderboard/netlify/functions/log.mjs`),
 which validates the row, caps its size and rate-limits the caller, and holds the
 secret key that is the table's only writer. Reads are the worker's alone,
 so uploading a game does not publish it.

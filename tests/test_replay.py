@@ -55,7 +55,7 @@ def _manual_order(state, hid):
     if not owned:
         return []
     s = owned[0]
-    return [Order(hid, s.id, sorted(s.neighbors)[0], s.ships // 2)]
+    return [Order(hid, s.id, min(s.neighbors), s.ships // 2)]
 
 
 def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
@@ -224,7 +224,7 @@ def unreproducible_bot():
         if not owned:
             return []
         s = owned[calls[0] % len(owned)]      # the drift: same board, different move
-        return [Order(pid, s.id, sorted(s.neighbors)[0], s.ships // 2)]
+        return [Order(pid, s.id, min(s.neighbors), s.ships // 2)]
 
     ai.register("wobbly", wobbly)
     try:
@@ -251,7 +251,7 @@ def test_reconstruct_survives_an_unreproducible_bot(unreproducible_bot):
 def test_reconstruct_unfinished_stops_at_recorded_turn():
     """A partial (unfinished) log rebuilds to exactly where recording stopped."""
     with _preserve_config():
-        state, log = _play(999, policy="autoplay", max_turns=20)
+        _state, log = _play(999, policy="autoplay", max_turns=20)
         # cut the log short to simulate a game abandoned mid-match
         log.turns = log.turns[:12]
         log.finished = False
@@ -297,7 +297,7 @@ def test_truncate_drops_later_turns_and_reopens():
     """Mid-game rewind: keep turns[:n] and clear the finished/winner outcome so
     the reconstructed board is exactly the one after n turns."""
     with _preserve_config():
-        original, log = _play(1234, policy="autoplay", max_turns=30)
+        _original, log = _play(1234, policy="autoplay", max_turns=30)
         assert log.finished
         full = log.turn_count
         log.truncate(5)
@@ -357,7 +357,8 @@ def test_list_and_latest_log_newest_first(games_dir):
     old = replay.new_log(Settings(seed=1), 1); old.record_turn(_record([])); old.save()
     new = replay.new_log(Settings(seed=2), 2); new.record_turn(_record([])); new.save()
     # make ``new`` unambiguously the more recently modified file
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(old.path, (t - 100, t - 100))
     os.utime(new.path, (t, t))
@@ -372,7 +373,8 @@ def test_latest_log_skips_older_format(games_dir):
     current.record_turn(_record([])); current.save()
     stale = replay.new_log(Settings(seed=9), 9)
     stale.record_turn(_record([])); stale.version = 1; stale.save()
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(current.path, (t - 100, t - 100))
     os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
@@ -389,7 +391,8 @@ def test_latest_log_skips_outdated_rules(games_dir):
     stale.record_turn(_record([]))
     stale.rules_version = engine.RULES_VERSION - 1
     stale.save()
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(current.path, (t - 100, t - 100))
     os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
@@ -411,7 +414,8 @@ def test_latest_log_skips_corrupt_file(games_dir):
     good = replay.new_log(Settings(seed=8), 8); good.record_turn(_record([])); good.save()
     bad = games_dir / "game_99999999_999999_0.json"
     bad.write_text("{ this is not valid json ")
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(good.path, (t - 100, t - 100))
     os.utime(bad, (t, t))          # corrupt file is "newest" but must be skipped

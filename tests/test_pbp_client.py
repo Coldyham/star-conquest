@@ -3,10 +3,11 @@
 `test_pbp.py` pins the pure module: links, seats, and the determinism two clients
 must agree on. This pins what `main` does with it, and the property that matters
 most is at the join between the two: **the turn the shell plays onto a live board
-must be the same turn another client rebuilds from scratch.** One is
-`main.resolve_turn` with the wire's orders, the other is `pbp.resolve`, and they
-are different code paths over the same inputs. If they ever disagree, the match
-has silently forked and nothing on either screen would say so.
+must be the same turn another client rebuilds from the stored log.** One is
+`main.resolve_turn` (resolving with the wire's orders, or stepping with the
+resolver's record), the other is `pbp.resolve`/`pbp.rebuild`, and they are
+different code paths. If they ever disagree, the match has silently forked and
+nothing on either screen would say so.
 
 Pure/headless: `main` imports pygame, but nothing here draws.
 """
@@ -122,29 +123,181 @@ def test_a_shared_match_is_never_ours_to_post():
     assert ui.can_post(state)
 
 
+def _resolved_log(rows, **over) -> str:
+    """The log a client would have uploaded for turn 0 played with ``rows``."""
+    _, log, _ = pbp.resolve(pbp.match_from_dict(
+        _payload(turn=0, submitted=[1, 2], turns=rows, **over)))
+    return pbp.shareable(log).encoded()
+
+
 def test_a_match_opens_on_the_turn_the_endpoint_says_it_is_on():
     rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
-    _, state, _, log = _opened(turn=1, turns=rows)
+    _, state, _, log = _opened(turn=1, turns=rows, log=_resolved_log(rows))
     assert state.turn == 1
     assert log.turn_count == 1
 
 
-def test_a_match_opened_mid_game_draws_its_next_turn_where_everyone_else_does():
-    """The board looks right either way; the rng is what forks.
+def test_a_match_with_no_record_of_its_turns_does_not_open():
+    """Past turn 0 the log is the only record of what the bots decided, so a
+    match without one cannot be rebuilt — and must say so, not guess."""
+    rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
+    assert app.open_match(pbp.match_from_dict(_payload(turn=1, turns=rows)),
+                          _seat(1), Settings()) is None
 
-    `open_match` lands its board through `replay.reconstruct`, which deals each
-    fight its recorded dice and so never moves `state.rng`. The next turn is
-    drawn, not dealt, so a client that opened the match mid-game has to carry the
-    rng the rebuild drew — or it fights that turn with different dice from a
-    client that has been stepping all along. A bot seat keeps the fights coming.
-    """
+
+def test_a_log_that_files_an_order_a_person_never_sent_is_refused():
+    """The resolver writes the bots' orders and the dice; a person's orders are
+    stored under their own token, and the log may not add to them."""
+    state = pbp.rebuild(pbp.match_from_dict(_payload()))[0]
+    rows = [_a_move(state, 1, 2)]
+    log = replay.GameLog.decode(_resolved_log(rows))
+    src, dst = _lane(state, 2)
+    log.turns[0]["orders"].append(replay._order_to_dict(Order(2, src, dst, 1)))
+    forged = pbp.match_from_dict(_payload(turn=1, turns=rows, log=log.encoded()))
+    assert pbp.match_log(forged) is None
+    honest = pbp.match_from_dict(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
+    assert pbp.match_log(honest) is not None
+
+
+def test_the_uploaded_log_carries_none_of_our_standing_rules():
+    """Every other client opens from it, and a route plan is ours alone."""
+    _, state, ui, log = _opened()
+    src, dst = _lane(state, 1)
+    ui.auto_forward = {src: (dst, 0)}
+    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    app.resolve_turn(state, ui, log, Settings(),
+                     seat_orders=match.orders_for_turn(0))
+    assert log.rules_for(0), "recorded locally, so our own resume keeps them"
+    assert not pbp.shareable(log).rules_for(0)
+
+
+def test_reopening_a_match_brings_back_our_standing_rules():
+    """A solo game resumes its rules from its own log. A shared match's log goes
+    up without them, so this device keeps its own copy, updated as each turn
+    ends, and opening the match again reads it back."""
+    _, state, ui, log = _opened()
+    src, dst = _lane(state, 1)
+    ui.auto_forward = {src: (dst, 1)}
+    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    app.resolve_turn(state, ui, log, Settings(),
+                     seat_orders=match.orders_for_turn(0))
+    assert not pbp.shareable(log).rules_for(0), "still never uploaded"
+
+    reopened = pbp.match_from_dict(_payload(
+        turn=1, log=pbp.shareable(log).encoded(),
+        turns=[{"turn": 0, "seat": 1, "orders_json": []},
+               {"turn": 0, "seat": 2, "orders_json": []}]))
+    opened = app.open_match(reopened, _seat(), Settings())
+    assert opened is not None
+    assert opened[1].auto_forward == {src: (dst, 1)}
+
+
+def test_a_saved_rule_out_of_a_system_since_lost_does_not_come_back():
+    _, state, ui, _ = _opened()
+    src, dst = _lane(state, 1)
+    pbp.remember_rules(MATCH, {src: (dst, 0), dst: (src, 0)})   # dst was never ours
+    _, _, ui2, _ = _opened()
+    assert ui2.auto_forward == {src: (dst, 0)}
+
+
+def test_submitting_saves_the_rules_it_sent(monkeypatch):
+    """Closing the game while waiting on the other seats must not lose them."""
+    monkeypatch.setattr(pbp, "call", lambda *a, **kw: None)
+    _, state, ui, _ = _opened()
+    src, dst = _lane(state, 1)
+    ui.auto_forward = {src: (dst, 0)}
+    app.pbp_send(state, ui, _seat())
+    assert pbp.remembered_rules(MATCH) == {src: (dst, 0)}
+
+
+def test_forgetting_a_match_forgets_its_rules_too():
+    pbp.remember(_seat())
+    pbp.remember_rules(MATCH, {3: (4, 0)})
+    other = "ffeeddccbbaa0099"
+    pbp.remember_rules(other, {5: (6, 1)})
+    pbp.forget(MATCH)
+    assert pbp.remembered_rules(MATCH) == {}
+    assert pbp.remembered_rules(other) == {5: (6, 1)}, "another match's are kept"
+    pbp.remember_rules(other, {})
+    assert pbp.remembered_rules(other) == {}
+
+
+def test_a_stepped_turn_applies_the_record_and_decides_nothing(monkeypatch):
+    """The whole fix for a bot on a wall clock: only the resolver asks it."""
     ai.load_models()
-    match = pbp.match_from_dict(_payload(seats=(1,), turn=40))
-    rebuilt, _ = pbp.rebuild(match, ai.decide)
-    assert any(t.get("dice") for t in pbp.rebuild(match, ai.decide)[1].turns), \
-        "no fight in the history, so nothing here moved the rng"
-    _, state, _, _ = _opened(seats=(1,), turn=40)
-    assert state.rng.getstate() == rebuilt.rng.getstate()
+    settings = Settings(mode="random", players=3, nodes=16, seed=7)
+    match = pbp.match_from_dict(_payload(
+        seats=(1, 2), players=3, settings_json=settings.to_dict(),
+        submitted=[1, 2]))
+    _elsewhere, log, digest = pbp.resolve(match, ai.decide)
+
+    _, state, ui, local = _opened(seats=(1, 2), players=3,
+                                  settings_json=settings.to_dict())
+    monkeypatch.setattr(app.ai, "decide", lambda *a: pytest.fail("decided again"))
+    stepped = pbp.match_from_dict(_payload(
+        seats=(1, 2), players=3, settings_json=settings.to_dict(), turn=1,
+        log=pbp.shareable(log).encoded()))
+    app.resolve_turn(state, ui, local, Settings(),
+                     script=pbp.settled_turn(stepped, 0))
+    assert replay.digest_hex(state) == digest
+
+
+def _fought_turn():
+    """A board, and an honest record of a turn on it with at least one fight."""
+    ai.load_models()
+    settings = Settings(mode="random", players=3, nodes=12, seed=4)
+    over = {"seats": (1, 2), "players": 3, "settings_json": settings.to_dict(), "seed": 4}
+    log_blob = None
+    for turn in range(60):
+        match = pbp.match_from_dict(_payload(turn=turn, submitted=[1, 2], **over))
+        if log_blob is not None:
+            match.log = log_blob
+        rebuilt = pbp.rebuild(match)
+        assert rebuilt is not None
+        state, log = rebuilt
+        _resolved, log, _ = pbp.resolve(match, ai.decide)
+        if log.dice_for(turn):
+            return state, log.script_for(turn), 4
+        log_blob = pbp.shareable(log).encoded()
+    pytest.fail("no fight in sixty turns")
+
+
+def test_a_turn_rolled_honestly_checks_out():
+    state, record, seed = _fought_turn()
+    assert pbp.verify_turn(state, record, seed)
+
+
+def test_a_turn_with_dice_its_orders_do_not_roll_is_caught():
+    """The resolver writes the bots' orders, which nothing can check; it cannot
+    also pick the dice."""
+    state, record, seed = _fought_turn()
+    record.dice[0] = 0.0 if record.dice[0] else 0.5
+    assert not pbp.verify_turn(state, record, seed)
+
+
+def test_deciding_the_bots_leaves_the_turns_dice_alone():
+    """The bots decide on a scratch copy, so the live rng still stands where the
+    turn's seed put it — which is the whole of what makes the dice checkable."""
+    ai.load_models()
+    settings = Settings(mode="random", players=3, nodes=14, seed=7)
+    match = pbp.match_from_dict(_payload(seats=(1,), players=3,
+                                         settings_json=settings.to_dict()))
+    state, _ = pbp.rebuild(match)
+    pbp.reseed(state, match.seed)
+    before = state.rng.getstate()
+    orders = pbp.turn_orders(state, match, ai.decide)
+    assert set(orders) >= {2, 3}, "both bots must really have been asked"
+    assert state.rng.getstate() == before
+
+
+def test_a_refused_resolve_rebuilds_from_the_log_that_won():
+    """Our board may hold a turn the match never had: somebody else resolved it
+    first, and their bots need not have decided as ours did."""
+    _, state, _, _ = _opened()
+    match = pbp.match_from_dict(_payload(turn=1))
+    state.turn = 1
+    assert app.pbp_verdict(match, state) != app.PBP_REBUILD
+    assert app.pbp_verdict(match, state, stale=True) == app.PBP_REBUILD
 
 
 # --------------------------------------------------------------------------- #
@@ -222,7 +375,8 @@ def test_an_incomplete_turn_is_waited_on():
 
 
 def test_a_match_behind_us_is_simply_our_own_resolve_not_landing_yet():
-    _, state, _, _ = _opened(turn=2, turns=[])
+    _, state, _, _ = _opened()
+    state.turn = 2
     assert app.pbp_verdict(pbp.match_from_dict(_payload(turn=1)), state) == app.PBP_WAIT
 
 
@@ -281,7 +435,7 @@ def test_we_are_never_on_the_list_of_seats_we_are_waiting_for(monkeypatch):
 def test_a_refused_submission_hands_the_turn_back():
     """Otherwise the player sits in front of a veil waiting on a turn they never
     actually entered."""
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_heard(ui, pbp.REFUSED, "")
     assert not ui.pbp_submitted
@@ -289,7 +443,7 @@ def test_a_refused_submission_hands_the_turn_back():
 
 
 def test_a_submission_that_landed_says_nothing():
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted, ui.pbp_msg = True, "Sending..."
     app.pbp_heard(ui, pbp.OK, '{"seat": 1, "turn": 0, "waiting": [2]}')
     assert ui.pbp_submitted and ui.pbp_msg == ""
@@ -319,17 +473,14 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
     same frame. Its reason has to be drawn somewhere else, or the press reads as
     having done nothing."""
     from starconquest import render
+    pygame.init()
+    render._FONTS.clear()        # another file may have quit pygame
     _, state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_heard(ui, pbp.ERROR, '{"error": "stale turn"}')
     drawn = []
     monkeypatch.setattr(render, "_label_pill",
                         lambda surface, font, text, *a: drawn.append(text))
-    # The display is opened at import time, and another test file quits pygame
-    # before this one runs: re-init, rebuild fonts under this session, and draw
-    # to our own surface rather than a display that may be gone.
-    pygame.init()
-    render._FONTS.clear()
     render.draw(pygame.Surface((config.SCREEN_W, config.SCREEN_H)), state, ui)
     assert not ui.awaiting_others(state)
     assert app.PBP_ENDPOINT_MSGS["stale turn"] in drawn
@@ -339,7 +490,7 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
 # What the endpoint says about the live turn, and what the overlay makes of it
 # --------------------------------------------------------------------------- #
 def test_the_overlay_is_built_from_what_the_endpoint_says():
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[1], seats=(1, 2, 3),
                                                players=3)), _seat(), ui)
     assert ui.pbp_submitted
@@ -349,7 +500,7 @@ def test_the_overlay_is_built_from_what_the_endpoint_says():
 def test_whether_we_submitted_is_the_endpoints_answer_and_never_ours():
     """A submission that failed on the way out must not leave the board held for
     a turn nobody is waiting on."""
-    _, state, ui, _ = _opened()
+    _, _state, ui, _ = _opened()
     ui.pbp_submitted = True
     app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[2])), _seat(), ui)
     assert not ui.pbp_submitted
@@ -399,6 +550,35 @@ def test_a_new_match_can_be_opened_with_a_chosen_deadline(monkeypatch):
                         lambda action, payload=None, **kw: sent.update(payload or {}))
     app.pbp_open(Settings(), seed=1, deadline_hours=72)
     assert sent["deadline_hours"] == 72
+
+
+def test_a_public_match_mints_only_the_creators_seat(monkeypatch):
+    """A public match leaves seats 2+ to be claimed on the lobby page, so it asks
+    for seat 1's token alone; a private one still asks for every seat's."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(players=3), seed=1, public=True)
+    assert sent["public"] is True
+    assert sent["claimed"] == [1]
+    assert sent["seats"] == [1, 2, 3]
+    app.pbp_open(Settings(players=3), seed=1)
+    assert sent["public"] is False
+    assert sent["claimed"] == [1, 2, 3]
+
+
+def test_a_new_match_carries_its_title_and_name_and_the_name_is_kept(monkeypatch):
+    """The prompt's two optional fields go up with the match; the name is
+    remembered for the next prompt, and clearing it is remembered too."""
+    sent = {}
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, **kw: sent.update(payload or {}))
+    app.pbp_open(Settings(players=2), seed=1, title="Friday", name="Alice")
+    assert sent["title"] == "Friday" and sent["name"] == "Alice"
+    assert webstore.pbp_name() == "Alice"
+    app.pbp_open(Settings(players=2), seed=1)
+    assert sent["title"] == "" and sent["name"] == ""
+    assert webstore.pbp_name() == ""
 
 
 def test_a_new_match_mints_its_own_id_rather_than_being_handed_one(monkeypatch):
@@ -491,6 +671,7 @@ class _Endpoint:
         self.settings, self.seed, self.seats = settings, seed, sorted(seats)
         self.turn, self.finished = 0, False
         self.rows: list[dict] = []
+        self.log = ""                          # the winning resolver's upload
         self.digests: dict[int, str] = {}      # first digest per turn wins
         # `lapse_now` stands in for a clock that has already run out, since these
         # tests have no two days to wait: it is the one thing `deadlinePassed`
@@ -527,7 +708,7 @@ class _Endpoint:
             "seed": self.seed, "seats": list(self.seats), "turn": self.turn,
             "submitted": [r["seat"] for r in self.rows if r["turn"] == self.turn],
             "turns": settled if self.waiting() else list(self.rows),
-            "log": "", "finished": self.finished,
+            "log": self.log, "finished": self.finished,
             "rules_version": engine.RULES_VERSION, "lapsed": self.lapsed(),
             "deadline_hours": 48, "turn_opened_at": "2020-01-01T00:00:00Z",
         }
@@ -550,7 +731,7 @@ class _Endpoint:
                 "turn": turn, "seat": seat, "source": allowed[seat],
                 "orders_json": orders if allowed[seat] == "bot" else []})
 
-    def resolve(self, turn: int, digest: str, finished: bool) -> bool:
+    def resolve(self, turn: int, digest: str, finished: bool, log: str) -> bool:
         if turn != self.turn:
             return False                  # somebody else got there first
         assert not self.waiting(), "a turn is resolved only once every seat is in"
@@ -558,7 +739,7 @@ class _Endpoint:
         # later one is compared against it.
         assert self.digests.setdefault(turn, digest) == digest, \
             f"two clients resolved turn {turn} to different boards"
-        self.turn, self.finished = turn + 1, finished
+        self.turn, self.finished, self.log = turn + 1, finished, log
         return True
 
 
@@ -604,13 +785,23 @@ def _tick(server: _Endpoint, client) -> None:
             server.submit(seat.seat, state.turn, _orders_for(state, seat.seat))
     elif verdict == app.PBP_REBUILD:
         client[0], client[1], client[2] = app.open_match(match, seat, Settings())
+    elif verdict == app.PBP_STEP:
+        script = pbp.settled_turn(match, state.turn)
+        assert script is not None and pbp.verify_turn(state, script, match.seed), \
+            "an honest resolver's turn must check out on every other client"
+        app.resolve_turn(state, ui, log, Settings(), script=script)
+        app.pbp_opened(ui)
     else:
         turn = state.turn
+        pbp.reseed(state, match.seed)
         app.resolve_turn(state, ui, log, Settings(),
-                         seat_orders=match.orders_for_turn(turn))
+                         seat_orders=pbp.turn_orders(state, match, ai.decide))
         app.pbp_opened(ui)
-        if verdict == app.PBP_RESOLVE:
-            server.resolve(turn, replay.digest_hex(state), state.winner is not None)
+        if not server.resolve(turn, replay.digest_hex(state), state.winner is not None,
+                              pbp.shareable(log).encoded()):
+            # Somebody else's resolution won: theirs is the record.
+            client[0], client[1], client[2] = app.open_match(
+                pbp.match_from_dict(server.state()), seat, Settings())
 
 
 def test_two_clients_play_a_match_out_and_never_disagree():
@@ -633,6 +824,39 @@ def test_two_clients_play_a_match_out_and_never_disagree():
     # ...and each client's log is an ordinary one that rebuilds its own board.
     for state, _, log, _ in (one, two):
         assert replay.digest_hex(replay.reconstruct(log)[0]) == replay.digest_hex(state)
+
+
+def test_a_bot_that_decides_differently_every_time_cannot_fork_the_match(monkeypatch):
+    """A bot on a wall-clock budget, at its worst: the same position never gets
+    the same orders twice. Two people and one such bot, and the clients still
+    agree on every board — because only the resolver ever asks it."""
+    asked = [0]
+
+    def fickle(state, pid):
+        asked[0] += 1
+        out = []
+        for sid, system in sorted(state.systems.items()):
+            if system.owner_id == pid and system.ships >= 2 and system.neighbors:
+                lanes = sorted(system.neighbors)
+                out.append(Order(pid, sid, lanes[asked[0] % len(lanes)],
+                                 1 + asked[0] % system.ships))
+        return out
+
+    monkeypatch.setattr(app.ai, "decide", fickle)
+    settings = Settings(mode="random", players=3, nodes=14, seed=5)
+    server = _Endpoint(settings, 5, [1, 2])
+    one, two = _client(server, 1), _client(server, 2)
+    for _ in range(200):
+        _tick(server, one)
+        _tick(server, two)
+        if server.finished or server.turn >= 20:
+            break
+
+    assert server.turn >= 10 and asked[0] >= 10, "the bot has to have played"
+    assert one[0].turn == two[0].turn == server.turn
+    assert replay.digest_hex(one[0]) == replay.digest_hex(two[0])
+    late = _client(server, 1)
+    assert replay.digest_hex(late[0]) == replay.digest_hex(one[0])
 
 
 def test_a_client_that_looks_away_for_several_turns_catches_up():
