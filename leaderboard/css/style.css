@@ -34,6 +34,13 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute is only a UA-stylesheet `display: none`, so any rule
+ * here that sets `display` on an element silently un-hides it — which is how
+ * submit.html's embargo field stayed on screen for a map already on the board
+ * (`#embargo-fields { display: flex }` beat it). The scripts toggle `hidden`
+ * everywhere, so make it win outright. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   min-height: 100vh;
