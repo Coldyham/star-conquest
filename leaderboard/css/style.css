@@ -116,9 +116,37 @@ a { color: var(--cyan); }
 .btn:hover { background: #10283f; }
 .btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.4); }
 
-/* The marquee's right-hand side. "My scores" is added there at runtime for a
- * browser that has posted before (js/me.mjs), so it holds one button or two. */
-.actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+/* The marquee's right-hand side, tucked inside the `.menu` dropdown below. "My
+ * scores" is added there at runtime for a browser that has posted before
+ * (js/me.mjs), so it holds anywhere from three items to four. */
+.actions { display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; }
+.actions .btn { text-align: center; }
+
+/* Every page's own links (Play, All maps, Shared matches, Enter score, plus a
+ * runtime "My scores") collapse into one `<details>` menu rather than a row of
+ * buttons — a row grows with every feature that earns its own page, and on a
+ * phone it wrapped onto a second line under the brand. Native <details> needs
+ * no JS to open; js/nav.mjs only adds closing it on an outside click, since
+ * that's the one thing <details> won't do on its own. */
+.menu { position: relative; }
+.menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { background: #10283f; }
+.menu > .actions {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  min-width: 11rem;
+  padding: 0.75rem;
+  background: linear-gradient(180deg, #150f33 0%, var(--cabinet) 100%);
+  border: 2px solid var(--cyan);
+  border-radius: 4px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 14px rgba(53, 230, 255, 0.28);
+}
 
 .btn.ghost { border-color: var(--dim); color: var(--dim); box-shadow: 0 3px 0 #1b2036; }
 .btn.ghost:hover { background: #131829; color: var(--ink); }

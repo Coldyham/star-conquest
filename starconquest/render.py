@@ -1534,7 +1534,7 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     # nothing — the same reason route mode zeroes them just above, arrived at from
     # the other side (there they must not fire, here they cannot).
     if ui.auto_forward and not ui.history:
-        y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
+        y = _draw_clear_forward_button(surface, ui, px, y)
     # below it, a narrower button for just the rules currently tinted dangerous
     # (pointed at a system we don't hold) — shown only while at least one exists
     dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]

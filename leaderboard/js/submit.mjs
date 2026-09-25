@@ -5,6 +5,7 @@ import { inflate } from "./inflate-browser.mjs";
 // whole point of arriving here from the game's win screen is one click. The same
 // remembered name is what puts "My scores" in the marquee.
 import { mountMyScores, myName, rememberName } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { normalizeTags } from "./tags.mjs";
 import { decodeToken, fragmentOf, setupIdentity } from "./token-decode.mjs";
 
@@ -311,6 +312,7 @@ async function prefill() {
   (name || scoreFields.hidden ? button : nameField).focus();
 }
 
+mountNav();
 mountMyScores();
 prefill();
 

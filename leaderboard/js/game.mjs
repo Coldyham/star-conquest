@@ -6,6 +6,7 @@ import {
   embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import { bestBot, botOrder, botWatchKind, displayOrder, humanVsBots } from "./standings.mjs";
@@ -328,6 +329,7 @@ async function renderEmbargoed(game, embargoText, bots) {
 }
 
 async function load() {
+  mountNav();
   mountMyScores();
   if (!configured()) {
     heading.textContent = "Not connected";

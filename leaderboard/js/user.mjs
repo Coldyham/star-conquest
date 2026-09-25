@@ -3,6 +3,7 @@ import {
   clear, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { standings, tally } from "./standings.mjs";
 
 // Four names is as many as a cabinet row holds before the score column collapses,
@@ -179,6 +180,7 @@ const asEntry = (row) => ({
 });
 
 async function load() {
+  mountNav();
   mountMyScores();
   mountCompare();
   setHeading(asked);

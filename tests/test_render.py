@@ -821,6 +821,37 @@ def test_help_text_fits_the_empty_panel_whole():
         pygame.quit()
 
 
+def test_the_pbp_you_are_line_does_not_land_under_clear_forwarding():
+    """`_draw_clear_forward_button` used to be called with a hardcoded y near the
+    panel top, ignoring however far `_panel_you_are`'s "You are ..." / title
+    lines had already pushed the cursor down — so in a play-by-post match with
+    any standing forward rule, the button was drawn back over that text instead
+    of below it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_match = "00112233445566ff"
+        ui.pbp_title = "Friday night"
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+
+        render.draw(screen, state, ui)
+        assert ui.clear_forward_rect != (0, 0, 0, 0)
+
+        px = config.SCREEN_W - config.HUD_RIGHT_W
+        py = config.HUD_TOP_H
+        you_are_bottom = render._panel_you_are(screen, ui, px + config.PANEL_PAD, py + config.PANEL_PAD)
+        assert ui.clear_forward_rect[1] >= you_are_bottom, (
+            "the button must be drawn below the pbp You-are/title text, not over it"
+        )
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
 def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
     """Review mode is a different scene, so the panel must not teach live play in it.
 

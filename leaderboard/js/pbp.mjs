@@ -14,6 +14,7 @@ import { GAME_URL, PLAYER_COLORS, PLAYER_NAMES } from "./config.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 import { phrase } from "./matchnames.mjs";
 import { myName, rememberName } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { configLabel, tweaks } from "./setup.mjs";
 
 const ENDPOINT = "/api/pbp";
@@ -457,6 +458,7 @@ async function renderDetail(node, matchId, mine) {
 }
 
 async function main() {
+  mountNav();
   const node = document.getElementById("lobby");
   const mine = readSeats();
   const matchId = new URLSearchParams(location.search).get("match");
