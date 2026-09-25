@@ -102,3 +102,21 @@ def test_the_old_host_proxies_the_api_rather_than_redirecting_it():
     assert api["status"] == 200
     assert api["to"] == f"{paths.LEADERBOARD_ORIGIN}/api/:splat"
     assert rules.index(api) < next(i for i, r in enumerate(rules) if r["from"] == "/*")
+
+
+def _z_index(css: str, selector: str) -> int:
+    match = re.search(rf"^{re.escape(selector)} \{{(.*?)^\}}", css, re.MULTILINE | re.DOTALL)
+    assert match is not None, f"{selector} rule not found"
+    z = re.search(r"z-index:\s*(\d+)", match.group(1))
+    assert z is not None, f"{selector} sets no z-index"
+    return int(z.group(1))
+
+
+def test_the_board_header_paints_over_the_page_so_its_menu_can_drop_down():
+    """The menu's dropdown lives inside `.bar`, so it can only ever be as high as
+    the header itself. `main` and the footer come later in the page, so at an
+    equal z-index they painted over the open menu and swallowed its clicks."""
+    css = (ROOT / "leaderboard" / "css" / "style.css").read_text()
+    header = _z_index(css, ".bar")
+    for later in ("main", ".attract"):
+        assert header > _z_index(css, later), f".bar must stack above {later}"

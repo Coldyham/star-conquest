@@ -68,7 +68,10 @@ a { color: var(--cyan); }
 /* -- cabinet marquee ------------------------------------------------------ */
 .bar {
   position: relative;
-  z-index: 10;
+  /* Above `main` and the footer (both 10, and later in the page, so they would
+   * otherwise paint over it): the header's menu drops down over the content,
+   * and a z-index set on the dropdown itself only counts inside the header. */
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -139,7 +142,6 @@ a { color: var(--cyan); }
   position: absolute;
   top: calc(100% + 0.5rem);
   right: 0;
-  z-index: 20;
   min-width: 11rem;
   padding: 0.75rem;
   background: linear-gradient(180deg, #150f33 0%, var(--cabinet) 100%);
@@ -773,6 +775,9 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 
 @media (max-width: 40rem) {
   .bar { flex-direction: column; align-items: flex-start; }
+  /* Stacked, the menu button sits at the left, so the panel hangs from its left
+   * edge; pinned right, it would grow off the screen. */
+  .menu > .actions { left: 0; right: auto; }
   .brand { font-size: 1.05rem; }
   main { padding-top: 1.5rem; }
   h1 { font-size: 1.15rem; }
