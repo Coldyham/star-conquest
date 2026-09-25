@@ -108,7 +108,7 @@ def log_url() -> str:
     """The upload endpoint, resolved now rather than at import.
 
     Resolved per call because on the web it depends on where the page is being
-    served from — a deploy preview posts to the matching preview of the board
+    served from — a deploy preview posts to its own functions
     (``webstore.leaderboard_origin``).
     """
     return webstore.leaderboard_url(LEADERBOARD_LOG_PATH)
