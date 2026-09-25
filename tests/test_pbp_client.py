@@ -171,6 +171,57 @@ def test_the_uploaded_log_carries_none_of_our_standing_rules():
     assert not pbp.shareable(log).rules_for(0)
 
 
+def test_reopening_a_match_brings_back_our_standing_rules():
+    """A solo game resumes its rules from its own log. A shared match's log goes
+    up without them, so this device keeps its own copy, updated as each turn
+    ends, and opening the match again reads it back."""
+    _, state, ui, log = _opened()
+    src, dst = _lane(state, 1)
+    ui.auto_forward = {src: (dst, 1)}
+    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    app.resolve_turn(state, ui, log, Settings(),
+                     seat_orders=match.orders_for_turn(0))
+    assert not pbp.shareable(log).rules_for(0), "still never uploaded"
+
+    reopened = pbp.match_from_dict(_payload(
+        turn=1, log=pbp.shareable(log).encoded(),
+        turns=[{"turn": 0, "seat": 1, "orders_json": []},
+               {"turn": 0, "seat": 2, "orders_json": []}]))
+    opened = app.open_match(reopened, _seat(), Settings())
+    assert opened is not None
+    assert opened[1].auto_forward == {src: (dst, 1)}
+
+
+def test_a_saved_rule_out_of_a_system_since_lost_does_not_come_back():
+    _, state, ui, _ = _opened()
+    src, dst = _lane(state, 1)
+    pbp.remember_rules(MATCH, {src: (dst, 0), dst: (src, 0)})   # dst was never ours
+    _, _, ui2, _ = _opened()
+    assert ui2.auto_forward == {src: (dst, 0)}
+
+
+def test_submitting_saves_the_rules_it_sent(monkeypatch):
+    """Closing the game while waiting on the other seats must not lose them."""
+    monkeypatch.setattr(pbp, "call", lambda *a, **kw: None)
+    _, state, ui, _ = _opened()
+    src, dst = _lane(state, 1)
+    ui.auto_forward = {src: (dst, 0)}
+    app.pbp_send(state, ui, _seat())
+    assert pbp.remembered_rules(MATCH) == {src: (dst, 0)}
+
+
+def test_forgetting_a_match_forgets_its_rules_too():
+    pbp.remember(_seat())
+    pbp.remember_rules(MATCH, {3: (4, 0)})
+    other = "ffeeddccbbaa0099"
+    pbp.remember_rules(other, {5: (6, 1)})
+    pbp.forget(MATCH)
+    assert pbp.remembered_rules(MATCH) == {}
+    assert pbp.remembered_rules(other) == {5: (6, 1)}, "another match's are kept"
+    pbp.remember_rules(other, {})
+    assert pbp.remembered_rules(other) == {}
+
+
 def test_a_stepped_turn_applies_the_record_and_decides_nothing(monkeypatch):
     """The whole fix for a bot on a wall clock: only the resolver asks it."""
     ai.load_models()

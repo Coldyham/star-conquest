@@ -141,6 +141,29 @@ def _order_from_dict(d: dict) -> Order | None:
         return None
 
 
+def rules_to_dict(rules: dict[int, tuple[int, int]] | None) -> dict:
+    """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": [dest,
+    keep]}``. The one form they are stored in, by a log turn and by play-by-post's
+    local copy (``pbp.remember_rules``) alike."""
+    return {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()}
+
+
+def rules_from_dict(raw) -> dict[int, tuple[int, int]]:
+    """``rules_to_dict`` read back, shaped for ``Ui.auto_forward``. Malformed
+    entries are dropped rather than raising, in keeping with the rest of this
+    format."""
+    rules: dict[int, tuple[int, int]] = {}
+    if not isinstance(raw, dict):
+        return rules
+    for src, rule in raw.items():
+        try:
+            dest, keep = rule
+            rules[int(src)] = (int(dest), int(keep))
+        except (TypeError, ValueError):
+            continue
+    return rules
+
+
 @dataclass
 class GameLog:
     """The complete input history of one match — settings, seed and every turn's
@@ -210,7 +233,7 @@ class GameLog:
                 "ai": bool(human_ai),
                 "orders": [_order_to_dict(o) for o in record.orders],
                 "dice": list(record.dice),
-                "rules": {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()},
+                "rules": rules_to_dict(rules),
             }
         )
         self.updated_at = _now_iso()
@@ -287,15 +310,7 @@ class GameLog:
         raising, in keeping with the rest of this format.
         """
         entry = self.turns[turn_index]
-        raw = entry.get("rules", {}) if isinstance(entry, dict) else {}
-        rules: dict[int, tuple[int, int]] = {}
-        for src, rule in (raw or {}).items():
-            try:
-                dest, keep = rule
-                rules[int(src)] = (int(dest), int(keep))
-            except (TypeError, ValueError):
-                continue
-        return rules
+        return rules_from_dict(entry.get("rules", {}) if isinstance(entry, dict) else {})
 
     # -- serialization ------------------------------------------------------- #
     def to_dict(self) -> dict:

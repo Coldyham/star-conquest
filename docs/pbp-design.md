@@ -191,7 +191,12 @@ applies the older turns unchecked, since turns resolved before this existed
 rolled after their bots and would not verify. A log may carry *fewer* — the
 engine drops an order out of a system lost before launch. The uploaded copy has
 the resolver's standing forwarding rules stripped (`pbp.shareable`); every
-other client opens from it, and a route plan is one player's own. Two clients
+other client opens from it, and a route plan is one player's own. So each
+device keeps its own seat's rules instead (`sc_pbp_rules`, by match id),
+saved when a turn is submitted and again as each turn ends
+(`pbp.remember_rules`). Opening the match reads them back
+(`pbp.remembered_rules`), minus any whose source has been lost since, which
+is what a solo game gets from its own log's `"rules"`. Two clients
 resolving at once: the endpoint keeps the first upload, and the loser rebuilds
 from it (`pbp_stale` in `main`).
 

@@ -66,6 +66,12 @@ WEB_PBP_BODY_KEY = "sc_pbp_body"
 # never in `Settings`, which travels in every shared link.
 WEB_PBP_SEATS_KEY = "sc_pbp_seats"
 
+# Our own standing forwarding rules in each match we hold a seat in, by match id:
+# `{"<match id>": {"<src>": [dest, keep]}}` (`replay.rules_to_dict`). A solo game
+# keeps them in its log, but a shared match's log is uploaded for every seat, so
+# `pbp.shareable` strips them and this is the only copy. Local, like the token.
+WEB_PBP_RULES_KEY = "sc_pbp_rules"
+
 # The name last typed into the play-by-post prompt's "Your name" field, offered
 # again next time. Display text only: it goes to the endpoint just when a match
 # is created with it filled in.

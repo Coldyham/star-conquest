@@ -518,6 +518,8 @@ def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
     it was played by hand. The standing rules are the exception, since they are
     ours and the log came from whoever resolved last; the uploaded copy carries
     none (``pbp.shareable``), and any a pre-strip log still holds are dropped.
+    Ours come from this device's own copy instead (``pbp.remembered_rules``),
+    minus any whose source system has been lost since they were saved.
 
     The roster is re-stamped afterwards because ``replay.reconstruct`` restores
     the single-seat claim a solo game records, which knows nothing of a match
@@ -528,7 +530,8 @@ def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
     if log is None:
         return None
     state, ui = resume_game(log, settings, seat.seat)
-    ui.auto_forward = {}
+    ui.auto_forward = pbp.remembered_rules(match.match_id)
+    ui.prune_forward(state)
     pbp.seat_people(state, match.seats)
     pbp_adopt(match, seat, ui)
     return state, ui, log
@@ -543,6 +546,9 @@ def pbp_send(state: GameState, ui: Ui, seat: pbp.Seat) -> pbp.Request | None:
     back if the submission turns out not to have landed.
     """
     orders = list(ui.pending) + auto_forward_orders(state, ui)
+    # The rules as they stood when the turn was sent, so closing the game before
+    # it resolves still reopens with them (see `pbp.remember_rules`).
+    pbp.remember_rules(seat.match_id, ui.auto_forward)
     request = pbp.submit(seat, state.turn, orders)
     if request is None:
         ui.pbp_msg = PBP_UNREACHABLE_MSG
@@ -953,6 +959,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
+    if ui.in_pbp:
+        # A shared match's log goes up without our rules, so this device keeps its
+        # own copy — the one a solo game gets from `log.record_turn` above.
+        pbp.remember_rules(ui.pbp_match, ui.auto_forward)
     ui.reset_selection()
     ui.reset_route()          # a plan is only valid for the ownership it was built on
     refresh_fog(state, ui)

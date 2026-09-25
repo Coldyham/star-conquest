@@ -461,7 +461,9 @@ already resolve simultaneously. The rationale for each rule is in
   order is fixed. Each stepping client re-rolls them (`pbp.verify_turn`).
   `match_log` refuses a log that files an order under a person's seat. The
   endpoint keeps the first upload, and a client that loses the race rebuilds
-  from it.
+  from it. The uploaded log carries no forwarding rules (`pbp.shareable`), so
+  each device keeps its own seat's (`pbp.remember_rules`, `sc_pbp_rules`),
+  saved on submit and at every turn's end, and `main.open_match` restores them.
 - **Order sequence is the whole of determinism.** `engine._collect_orders` runs
   in ascending seat id and must never depend on submission order.
   `RULES_VERSION` did not move for any of this, and must not.

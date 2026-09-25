@@ -57,6 +57,7 @@ from .model import GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
     WEB_PBP_BODY_KEY,
+    WEB_PBP_RULES_KEY,
     WEB_PBP_SEATS_KEY,
     WEB_PBP_STATE_KEY,
     is_web,
@@ -179,11 +180,44 @@ def seat_for(match_id: str) -> Seat | None:
 
 def forget(match_id: str) -> bool:
     """Drop a match's token — a match that is over, or one we are done with."""
+    remember_rules(match_id, {})
     seats = remembered()
     if match_id not in seats:
         return False
     del seats[match_id]
     return webstore.set(WEB_PBP_SEATS_KEY, json.dumps(seats))
+
+
+def _stored_rules() -> dict:
+    try:
+        stored = json.loads(webstore.get(WEB_PBP_RULES_KEY) or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def remember_rules(match_id: str, rules: dict[int, tuple[int, int]]) -> bool:
+    """Keep our standing forwarding rules in ``match_id`` on this device.
+
+    A solo game resumes them from its own log. A shared match's log is uploaded
+    for every seat and goes up without them (``shareable``), so without this copy
+    reopening the match would quietly drop a route plan. No rules removes the
+    entry rather than storing an empty one. Best-effort, like every store write.
+    """
+    stored = _stored_rules()
+    if rules:
+        stored[match_id] = replay.rules_to_dict(rules)
+    elif match_id in stored:
+        del stored[match_id]
+    else:
+        return True
+    return webstore.set(WEB_PBP_RULES_KEY, json.dumps(stored))
+
+
+def remembered_rules(match_id: str) -> dict[int, tuple[int, int]]:
+    """``remember_rules`` read back, shaped for ``Ui.auto_forward``; ``{}`` when
+    there are none or the store is unreadable."""
+    return replay.rules_from_dict(_stored_rules().get(match_id))
 
 
 # --------------------------------------------------------------------------- #
