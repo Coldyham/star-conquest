@@ -24,7 +24,12 @@ find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || 
 # --width/--height set the canvas framebuffer size: render at a high native
 # resolution so text/edges stay crisp instead of the browser upscaling pygbag's
 # 1280x720 default. Must match config.WEB_FB_W/WEB_FB_H (set_mode uses those).
-( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --width 2560 --height 1440 main.py )
+# --ume_block 0 drops pygbag's "Ready to start! Please click/touch page" gate. It
+# waits for a tap so the browser will allow sound, and the game plays none; with
+# the board on the same site, it was one more stop on every trip back to the game.
+# (--can_close stays at its default on purpose: its "leave site?" prompt is what
+# warns before a single-player match in progress is navigated away from.)
+( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --ume_block 0 --width 2560 --height 1440 main.py )
 
 rm -rf "$ROOT/web"
 mkdir -p "$ROOT/web"

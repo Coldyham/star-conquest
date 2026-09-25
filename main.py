@@ -1169,8 +1169,9 @@ async def main() -> None:
         # yielding a beat for the browser's layout to settle. This alone isn't
         # enough on a phone: the address bar/toolbar often only collapses (changing
         # the real viewport height) off the player's first tap/click on the *page
-        # itself* — the one that dismisses pygbag's own "Ready to start!" gate — and
-        # that collapse can lag the gesture by more than this beat. So the main loop
+        # itself* (pygbag's own "Ready to start!" gate used to force that tap; the
+        # build turns it off with --ume_block 0, so it is now simply the first one)
+        # and that collapse can lag the gesture by more than this beat. So the main loop
         # below fires a second, identical nudge off its own first input event, which
         # is the earliest point simulation code can observe that tap having landed.
         asyncio.ensure_future(_kick_web_resize())

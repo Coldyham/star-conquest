@@ -69,6 +69,15 @@ def test_the_build_drops_the_secret_before_running_anything():
     assert "curl" in rest and "build_web.sh" in rest
 
 
+def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
+    """The game plays no sound, so pygbag's wait-for-a-tap (`--ume_block`) is
+    only a delay. Its "leave site?" prompt (`--can_close`) is kept: it is what
+    warns before a single-player match in progress is navigated away from."""
+    call = next(line for line in BUILD.splitlines() if "pygbag --build" in line)
+    assert "--ume_block 0" in call
+    assert "--can_close" not in call
+
+
 def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
     for path, name in ((paths.LEADERBOARD_LOG_PATH, "log.mjs"),
