@@ -1067,7 +1067,9 @@ already resolve simultaneously. The rationale for each rule is in
     no baseline at all, and both are a direction rather than a verdict, since the
     sample is whatever games happen to exist. See bot-design.
   - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
-    fixed, so a lane's length in light-years rises as the node count falls, and
+    fixed up to a standard board, so a lane's length in light-years rises as the
+    node count falls (past `config.STANDARD_MAX_NODES` the box grows instead, and
+    lanes hold at a full standard board's spread), and
     `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
     lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
     a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
@@ -1081,8 +1083,23 @@ don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
 (one base sector rotated N times about a shared contested centre for a perfectly
 fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
 both. Note `symmetric` rounds the node count up to a whole number per sector and
-adds the shared centre, so it can return **more than `config.MAX_NODES`** systems
-(41 at 40 nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+adds the shared centre, so it can return **more than it was asked for** (41 at 40
+nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+
+**Past a standard board the box grows; below it nothing moves.** `config.world_side(n)`
+is exactly `WORLD_SIZE` up to `config.STANDARD_MAX_NODES` (40, the old cap) and grows
+with `sqrt(n)` past it, up to `config.MAX_NODES` (120), so a big map keeps a full
+standard board's spacing and lane lengths instead of just getting denser. Every
+seed a map could be shared on before lays out identically, so `RULES_VERSION` did
+not move, and `nodes` was already a `Settings` field, so no digest moved either.
+Only the box scales: lane clearance and the extra-edge cap stay in `WORLD_SIZE`
+units, since spacing is what is being preserved. The map creator stays at a
+standard board (its canvas is sized for one): it refuses a 41st system and adopts
+a generated map at `min(nodes, STANDARD_MAX_NODES)`. The menu's Advanced tab
+reports the setup's lane spread in turns (`settings.lane_lengths`/`lane_turns`),
+surveyed in `menu.pump` — never `draw` — keyed by `settings.lane_survey_key`
+(which leaves ship speed out, so that slider just re-times the cached lengths),
+held off mid-drag, and restoring `config` after it generates.
 
 ### Hand-authored maps (custommap.py, mapmaker.py)
 

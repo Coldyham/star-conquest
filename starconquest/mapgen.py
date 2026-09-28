@@ -48,8 +48,9 @@ def generate_random(
     num_players = max(2, num_players)
     num_nodes = max(num_players + 3, num_nodes)
 
-    positions = _place_nodes(state, num_nodes)
-    _relax(positions, state)
+    bounds = _play_bounds(num_nodes)
+    positions = _place_nodes(state, num_nodes, bounds)
+    _relax(positions, state, bounds)
 
     for i, pos in enumerate(positions):
         state.systems[i] = System(id=i, pos=pos)
@@ -111,8 +112,9 @@ def generate_symmetric(
     num_players = max(2, num_players)
     per_player = max(2, round((num_nodes - 1) / num_players))
 
-    cx = cy = config.WORLD_SIZE / 2.0
-    r_outer = config.WORLD_SIZE / 2.0 - config.WORLD_MARGIN
+    side = config.world_side(num_nodes)
+    cx = cy = side / 2.0
+    r_outer = side / 2.0 - config.WORLD_MARGIN
     r_inner = 0.28 * r_outer
     sector = 2.0 * math.pi / num_players
 
@@ -229,14 +231,20 @@ def _add_lane_between(state: GameState, a: int, b: int) -> None:
 # --------------------------------------------------------------------------- #
 # Node placement
 # --------------------------------------------------------------------------- #
-def _play_bounds() -> tuple[float, float, float, float]:
+def _play_bounds(nodes: int) -> tuple[float, float, float, float]:
+    """Where a generated map of ``nodes`` systems may place them: the world box
+    (``config.world_side``, which only grows past a standard board) less its margin.
+
+    Only the box scales. Lane clearance and the extra-edge length cap stay in
+    ``WORLD_SIZE`` units, because spacing is what the box is scaled to preserve."""
     m = config.WORLD_MARGIN
-    return (m, m, config.WORLD_SIZE - m, config.WORLD_SIZE - m)
+    side = config.world_side(nodes)
+    return (m, m, side - m, side - m)
 
 
-def _place_nodes(state: GameState, n: int) -> list[Point]:
+def _place_nodes(state: GameState, n: int, bounds: tuple[float, float, float, float]) -> list[Point]:
     """Jittered grid: one node per randomly chosen cell -> even, readable spread."""
-    lo_x, lo_y, hi_x, hi_y = _play_bounds()
+    lo_x, lo_y, hi_x, hi_y = bounds
     cols = math.ceil(math.sqrt(n))
     rows = math.ceil(n / cols)
     cell_w = (hi_x - lo_x) / cols
@@ -257,11 +265,12 @@ def _place_nodes(state: GameState, n: int) -> list[Point]:
     return points
 
 
-def _relax(points: list[Point], state: GameState) -> None:
+def _relax(points: list[Point], state: GameState,
+           bounds: tuple[float, float, float, float]) -> None:
     """A few passes of nearest-neighbour repulsion to even out clumps."""
     if config.LLOYD_PASSES <= 0 or len(points) < 2:
         return
-    lo_x, lo_y, hi_x, hi_y = _play_bounds()
+    lo_x, lo_y, hi_x, hi_y = bounds
     # target separation ~ average of two cell dimensions
     area = (hi_x - lo_x) * (hi_y - lo_y)
     # only separate genuinely-close nodes so natural length variety survives

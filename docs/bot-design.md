@@ -12,9 +12,12 @@ measurement of your own, and read the note on paired null cells under "The
 
 ## Lane length across the parameter space
 
-`WORLD_SIZE` is a constant, so the map is always laid out in the same box and
-the *node count* sets how far apart systems are: fewer nodes means physically
-longer lanes, not a smaller board. `config.SHIP_LY_PER_TURN` (1-30 on the
+`WORLD_SIZE` is a constant up to a standard board (`config.STANDARD_MAX_NODES`,
+40), so the map is laid out in the same box and the *node count* sets how far
+apart systems are: fewer nodes means physically longer lanes, not a smaller
+board. Past 40 the box grows with the node count (`config.world_side`) and the
+spread holds at the 40-node figures — measured 7/13/19, 7/13/20 and 8/13/21 at
+40, 80 and 120 nodes and 1 ly/turn, identical from 3 ly/turn up. `config.SHIP_LY_PER_TURN` (1-30 on the
 slider, 6 by default) then divides all of it. The two together move lane length
 over more than an order of magnitude — measured over three seeds a cell,
 min/median/max lane in turns:

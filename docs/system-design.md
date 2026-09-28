@@ -269,7 +269,8 @@ top, independent of base speed and past any lane on any map — which is what
 sets that 2%.
 
 How far a lane actually is depends on the node count as much as on the speed,
-because `WORLD_SIZE` is fixed — see "Lane length across the parameter space" in
+because `WORLD_SIZE` is fixed (up to a standard 40-system board; larger maps
+grow the box to keep that spacing) — see "Lane length across the parameter space" in
 [`bot-design.md`](bot-design.md) for the measured grid, and for why a margin
 tuned at the default speed is tuned in only one of three regimes.
 

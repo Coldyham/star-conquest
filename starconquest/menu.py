@@ -44,7 +44,8 @@ import pygame
 from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
-from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
+from .settings import (RANDOM_STRATEGY, Settings, fresh_rng, lane_lengths, lane_survey_key,
+                       lane_turns, random_seed)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -330,6 +331,11 @@ class MenuState:
     pbp_name: str = ""
     pbp_title: str = ""
     pbp_editing: str | None = None
+    # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
+    # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
+    # never by `draw`, which only shows it while the key still matches.
+    lane_key: tuple | None = None
+    lane_ly: list[float] = field(default_factory=list)
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -892,6 +898,7 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
         y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+    y = _lane_readout(surface, ms, settings, lx, y)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
@@ -1200,6 +1207,43 @@ def _visible_adv(settings: Settings):
     if settings.custom_map is None:
         return _ADV_ALL
     return _ADV_TRAVEL + _ADV_FOG
+
+
+def _survey_lanes(ms: MenuState, settings: Settings) -> None:
+    """Re-survey the setup's lanes if anything that shapes them has changed —
+    but never mid-drag, so a map slider only costs one generation, on release."""
+    if ms.drag_key is not None:
+        return
+    key = lane_survey_key(settings)
+    if key != ms.lane_key:
+        ms.lane_key, ms.lane_ly = key, lane_lengths(settings)
+
+
+def _lane_readout_lines(ms: MenuState, settings: Settings) -> list[str]:
+    """What the setup does to travel: the lane spread in turns at the chosen
+    speed, and how much bigger than a standard board the map is laid out. Empty
+    until `pump` has surveyed *this* setup — a stale figure is worse than none."""
+    if ms.lane_key != lane_survey_key(settings):
+        return []
+    spread = lane_turns(ms.lane_ly, settings.ship_ly_per_turn)
+    if spread is None:
+        return []
+    lo, mid, hi = spread
+    span = f"{lo} turn" + ("" if lo == 1 else "s") if lo == hi else f"{lo}-{hi} turns"
+    # "~" when the seed is left to chance: then it is a sample, not your map.
+    sampled = "~" if settings.seed is None and settings.custom_map is None else ""
+    lines = [f"Lanes: {sampled}{span}, median {mid}"]
+    if settings.custom_map is None and settings.nodes > config.STANDARD_MAX_NODES:
+        scale = config.world_side(settings.nodes) / config.WORLD_SIZE
+        lines.append(f"Map: {scale:.1f}x standard width")
+    return lines
+
+
+def _lane_readout(surface, ms: MenuState, settings: Settings, x: int, y: int) -> int:
+    for line in _lane_readout_lines(ms, settings):
+        _text(surface, _fonts()["small"], line, config.COLOR_TEXT_DIM, midleft=(x, y + _NOTE_H // 2))
+        y += _NOTE_H
+    return y + 6
 
 
 def _derived(surface, text: str, right: int, y: int) -> None:
@@ -1692,7 +1736,12 @@ def pump(ms: MenuState, settings: Settings) -> None:
     Typing on a soft keyboard produces no SDL events at all, so the text arrives
     by reading the hidden DOM field back (``softkeyboard``) and filtering it into
     the same edit buffers ``_handle_text_input`` fills. This is the mutate half of
-    the scene, alongside ``handle_event`` — ``draw`` still only reads."""
+    the scene, alongside ``handle_event`` — ``draw`` still only reads.
+
+    Also refreshes the lane readout, here rather than per event because a map
+    slider mid-drag changes on every motion and generating a large board on each
+    one would stall the drag: the survey waits for the release."""
+    _survey_lanes(ms, settings)
     field_name = _editing_field(ms)
     if field_name is None:
         return
@@ -1908,9 +1957,9 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "players_inc":
         _set_players(settings, settings.players + 1)
     elif hit == "nodes_dec":
-        _set_nodes(settings, settings.nodes - 1)
+        _set_nodes(settings, _node_step(settings.nodes, up=False))
     elif hit == "nodes_inc":
-        _set_nodes(settings, settings.nodes + 1)
+        _set_nodes(settings, _node_step(settings.nodes, up=True))
     elif hit == "mode_random":
         settings.mode = "random"
     elif hit == "mode_symmetric":
@@ -2104,6 +2153,16 @@ def _set_players(settings: Settings, n: int) -> None:
         return _interlocked()
     settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, n))
     settings.nodes = max(settings.nodes, settings.min_nodes())
+
+
+def _node_step(n: int, up: bool) -> int:
+    """The Systems stepper's next value: one at a time up to a standard board,
+    then whole ``config.NODES_BIG_STEP`` multiples, or reaching ``MAX_NODES`` takes
+    eighty presses."""
+    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
+    if up:
+        return n + 1 if n < big else (n // step + 1) * step
+    return n - 1 if n <= big else max(big, -(-n // step) * step - step)
 
 
 def _set_nodes(settings: Settings, n: int) -> None:

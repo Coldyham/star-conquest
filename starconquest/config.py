@@ -47,7 +47,15 @@ SEED_MAX = 1_000_000          # rolled seeds are 0..SEED_MAX-1 (short enough to 
 # Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
 MIN_PLAYERS = 2               # a game needs at least two sides
 MAX_PLAYERS = 6               # == distinct entries in PLAYER_COLORS below
-MAX_NODES = 40                # cap: edge build is O(n^2), keep map-gen responsive
+MAX_NODES = 120               # cap: edge build is O(n^2), keep map-gen responsive
+# Up to this many systems fill the fixed WORLD_SIZE box, as every map always has;
+# past it the box grows with the node count (`world_side`) so spacing, and so lane
+# length, holds steady instead of the board just getting denser. Also the map
+# creator's authoring ceiling: its canvas is CUSTOM_WORLD_W x WORLD_SIZE, sized
+# for a standard board, and a scaled one would not fit it.
+STANDARD_MAX_NODES = 40
+NODES_BIG_STEP = 5            # the Systems stepper moves this far at a time past it
+LANE_SURVEY_SEEDS = 3         # maps the menu's lane readout samples when the seed is random
 
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
@@ -88,14 +96,15 @@ CUSTOM_GARRISON_SLIDER_MAX = 50
 
 # The recipe parser's structural ceiling -- what bounds a malformed blob, not a
 # game rule. It must sit above anything the generator itself can produce, and
-# MAX_NODES is *not* that bound: `generate_symmetric` rounds the node count up to
+# STANDARD_MAX_NODES is *not* that bound: `generate_symmetric` rounds the node count up to
 # a whole number per sector and adds the shared centre, so it returns
 # `players * round((nodes-1)/players) + 1` -- 41 systems at 40 nodes, and up to
-# MAX_NODES + MAX_PLAYERS/2 + 1 in general. Capping the parser at MAX_NODES would
-# make a map the game generates and plays today un-importable into the creator.
-# The authoring ceiling is separate and *is* MAX_NODES: the editor refuses the
-# 41st hand-placed system.
-CUSTOM_MAX_NODES = MAX_NODES + MAX_PLAYERS
+# STANDARD_MAX_NODES + MAX_PLAYERS/2 + 1 for any board the creator adopts. Capping
+# the parser there would make such a map un-importable into the creator.
+# The authoring ceiling is separate and *is* STANDARD_MAX_NODES: the editor
+# refuses the 41st hand-placed system, and "start from a generated map" caps the
+# node count there too, since a larger board is laid out in a larger box.
+CUSTOM_MAX_NODES = STANDARD_MAX_NODES + MAX_PLAYERS
 
 # --------------------------------------------------------------------------- #
 # Combat  (Lanchester square law + jitter)
@@ -432,6 +441,18 @@ def s(px: float) -> int:
     (e.g. the menu's row pitches), so they scale with everything else.
     """
     return max(1, round(px * ui_scale))
+
+
+def world_side(nodes: int) -> float:
+    """Side of the square box a generated map of ``nodes`` systems is laid out in.
+
+    Exactly ``WORLD_SIZE`` up to ``STANDARD_MAX_NODES``, so every board that could
+    be generated before larger maps existed is laid out as it always was (no seed
+    re-rolls, no ``RULES_VERSION`` bump). Past that the *area* grows with the node
+    count, which keeps the spacing between neighbours -- and so the lane lengths --
+    where a full standard board has them.
+    """
+    return WORLD_SIZE * max(1.0, math.sqrt(nodes / STANDARD_MAX_NODES))
 
 
 def ship_speed(turn: int) -> float:

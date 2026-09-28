@@ -723,3 +723,34 @@ def test_no_core_module_imports_pygame():
                 continue
             assert not any(n.split(".")[0] == "pygame" for n in names), \
                 f"{name}.py is core and must not import pygame"
+
+
+def test_the_lane_survey_leaves_config_as_it_found_it():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    s.ship_ly_per_turn, s.node_jitter = 2.0, 0.3
+    before = (config.SHIP_LY_PER_TURN, config.NODE_JITTER)
+    assert settings_mod.lane_lengths(s)
+    assert (config.SHIP_LY_PER_TURN, config.NODE_JITTER) == before
+
+
+def test_the_lane_survey_is_stable_and_matches_the_map_it_describes():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    assert settings_mod.lane_lengths(s) == settings_mod.lane_lengths(s)   # seed left to chance
+    s.seed = 7
+    state = build_state(s, 7)
+    turns = sorted(lane.travel_turns for lane in state.lanes.values())
+    assert settings_mod.lane_turns(settings_mod.lane_lengths(s), s.ship_ly_per_turn) == (
+        turns[0], turns[len(turns) // 2], turns[-1])
+    assert settings_mod.lane_turns([], 6.0) is None
+
+
+def test_ship_speed_does_not_move_the_lane_survey_key():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    key = settings_mod.lane_survey_key(s)
+    s.ship_ly_per_turn = 12.0
+    assert settings_mod.lane_survey_key(s) == key
+    s.nodes += 1
+    assert settings_mod.lane_survey_key(s) != key

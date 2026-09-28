@@ -582,6 +582,63 @@ _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "seed_random", "create_map", "clear_map"}
 
 
+def test_the_node_stepper_takes_big_steps_past_a_standard_board():
+    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
+    assert menu._node_step(big - 1, up=True) == big
+    assert menu._node_step(big, up=True) == big + step
+    assert menu._node_step(big + step, up=False) == big
+    assert menu._node_step(big, up=False) == big - 1
+    # an off-grid count (a hand-edited token) rejoins the grid either way
+    assert menu._node_step(big + 3, up=True) == big + step
+    assert menu._node_step(big + 3, up=False) == big
+
+
+def test_the_lane_readout_describes_the_setup_being_shown():
+    screen, ms, settings = _setup()
+    try:
+        assert menu._lane_readout_lines(ms, settings) == []   # nothing surveyed yet
+        menu.pump(ms, settings)
+        lines = menu._lane_readout_lines(ms, settings)
+        assert len(lines) == 1 and lines[0].startswith("Lanes: ")
+        settings.nodes = config.MAX_NODES
+        assert menu._lane_readout_lines(ms, settings) == []   # stale: never shown
+        menu.pump(ms, settings)
+        assert menu._lane_readout_lines(ms, settings)[1].startswith("Map: ")
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_fits_its_column_at_its_longest():
+    """Slowest ships on the sparsest map give the widest figures; the line must
+    still stop short of the Advanced tab's right-hand column."""
+    screen, ms, settings = _setup()
+    try:
+        settings.players, settings.nodes = config.MIN_PLAYERS, settings.min_nodes()
+        settings.ship_ly_per_turn = 1.0
+        menu.pump(ms, settings)
+        col_w = (560 - 22 * 3) // 2
+        for line in menu._lane_readout_lines(ms, settings):
+            assert menu._fonts()["small"].size(line)[0] <= col_w, line
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_waits_for_a_slider_drag_to_end():
+    screen, ms, settings = _setup()
+    try:
+        menu.pump(ms, settings)
+        key = ms.lane_key
+        ms.drag_key = "adv_node_jitter"
+        settings.node_jitter = 0.2
+        menu.pump(ms, settings)
+        assert ms.lane_key == key
+        ms.drag_key = None
+        menu.pump(ms, settings)
+        assert ms.lane_key != key
+    finally:
+        pygame.quit()
+
+
 def test_tab_content_stays_inside_the_panel():
     """Every tab's widgets must fit the fixed 560x496 panel — the menu has no
     scrolling, and the Advanced tab silently overflowed it before the Combat page
@@ -595,6 +652,10 @@ def test_tab_content_stays_inside_the_panel():
             for a, d, jit, adv in ((1, 1, 0.0, 0.75), (50, 50, 0.5, 2.0)):
                 ms.preview_attacker, ms.preview_defender = a, d
                 settings.combat_jitter, settings.defender_advantage = jit, adv
+                # The biggest map shows the lane readout at its tallest (two lines),
+                # which pushes the Advanced tab's die down the left column.
+                settings.nodes = config.MAX_NODES
+                menu.pump(ms, settings)
                 menu.draw(screen, ms, settings)
                 for key, rect in ms.rects.items():
                     if key.startswith("tab_") or key in chrome:

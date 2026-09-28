@@ -15,6 +15,7 @@ import binascii
 import hashlib
 import itertools
 import json
+import math
 import os
 import random
 import time
@@ -655,3 +656,60 @@ def build_state(settings: Settings, seed: int) -> GameState:
         if settings.autoplay:
             player.is_human = False
     return state
+
+
+# --------------------------------------------------------------------------- #
+# Lane survey: what a setup does to travel time, for the menu's readout
+# --------------------------------------------------------------------------- #
+_LANE_SHAPERS = ("mode", "players", "nodes", "seed", "node_jitter", "relax_min_sep_frac",
+                 "lloyd_passes", "extra_edge_fraction", "max_edge_length_frac")
+
+
+def lane_survey_key(settings: Settings) -> tuple:
+    """Every field that decides where a setup's lanes run, and so how long they
+    are. Ship speed is deliberately absent: it only divides the lengths, so the
+    menu re-times a cached survey on every drag of that slider for nothing."""
+    recipe = settings.custom_map
+    drawn = json.dumps(recipe.to_dict(), sort_keys=True) if recipe is not None else None
+    return tuple(getattr(settings, attr) for attr in _LANE_SHAPERS) + (drawn,)
+
+
+def lane_lengths(settings: Settings) -> list[float]:
+    """Length in light-years of every lane this setup generates.
+
+    With a fixed seed that is the map you will play; left to chance it is a
+    sample over ``config.LANE_SURVEY_SEEDS`` fixed seeds, so the readout is stable
+    rather than re-rolled each time it is asked. A hand map is its own answer.
+
+    Generation reads the knobs live off ``config``, so they are pushed there for
+    the survey and put back after it: the menu asking a question must leave
+    nothing behind for whatever reads ``config`` next.
+    """
+    saved = [(const, getattr(config, const)) for _attr, const in _GLOBAL_KNOBS]
+    _apply_globals(settings)
+    try:
+        if settings.custom_map is not None:
+            if settings.custom_map.blockers():
+                return []
+            states = [mapgen.generate_custom(0, settings.custom_map)]
+        else:
+            seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
+            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players)
+                      for s in seeds]
+    finally:
+        for const, value in saved:
+            setattr(config, const, value)
+    return [
+        math.dist(st.systems[lane.a].pos, st.systems[lane.b].pos) * config.LY_PER_WORLD_UNIT
+        for st in states
+        for lane in st.lanes.values()
+    ]
+
+
+def lane_turns(lengths: list[float], speed: float) -> tuple[int, int, int] | None:
+    """(shortest, median, longest) lane in turns at ``speed`` ly/turn -- the same
+    ``ceil`` mapgen bakes into ``Lane.travel_turns`` -- or None for no lanes."""
+    if not lengths:
+        return None
+    turns = sorted(max(1, math.ceil(ly / speed)) for ly in lengths)
+    return turns[0], turns[len(turns) // 2], turns[-1]
