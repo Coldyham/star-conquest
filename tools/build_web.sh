@@ -53,7 +53,7 @@ uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/index.htm
 # are bundled separately, from netlify.toml's [functions] directory). An explicit
 # list of what is servable rather than a copy with excludes, so function source,
 # tests, SQL and the README can never end up published by accident.
-BOARD_FILES=(index.html game.html submit.html user.html pbp.html favicon.png)
+BOARD_FILES=(index.html game.html submit.html user.html pbp.html crowns.html favicon.png)
 BOARD_DIRS=(css js fonts)
 mkdir -p "$ROOT/web/board"
 for f in "${BOARD_FILES[@]}"; do cp "$ROOT/leaderboard/$f" "$ROOT/web/board/"; done

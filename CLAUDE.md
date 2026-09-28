@@ -666,6 +666,16 @@ already resolve simultaneously. The rationale for each rule is in
       log rather than trusted. Key the log by `GameLog.setup_key()`, never the
       live `Settings`: `main` resolves "roll a fresh seed" at game start and never
       writes it back.
+  - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
+    by contested maps whose record they hold (`crown_holders`) and counts, per
+    Monday-to-Monday UTC week, scores that strictly beat somebody else's record
+    (`crown_steals`); a tie never steals, the earliest holder keeps it, as
+    `game_summary` credits. Both read `counted_scores`, the one place the rule
+    lives: every score but a `mismatch` replay counts, since the game uploads a
+    log once with no retry and an offline or hand-pasted score could otherwise
+    never count. Nothing is stored, so moderation recomputes them for free.
+    `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
+    against a real Postgres when `SC_TEST_PG` is set.
   - **A map can be registered with no score at all, and can carry a one-time
     reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
     Star Conquest link, not just a challenge one — `token-decode.mjs`'s

@@ -665,6 +665,85 @@ left join lateral (
 ) tagc on true;
 
 -- ---------------------------------------------------------------------------
+-- Crowns and steals: the board's weekly contest (crowns.html, js/crowns.mjs).
+-- What it rewards is *taking first place from somebody else* on a map more than
+-- one person has played -- not volume, which a count of wins or of maps would
+-- pay out for grinding easy setups.
+--
+-- counted_scores is the one place the eligibility rule lives: every posted score
+-- counts unless the worker replayed its log and found it wrong (`mismatch`). An
+-- unchecked, missing or outdated replay still counts, because the game uploads a
+-- log once, with no retry, so a score posted offline or pasted as a hand-made
+-- link can never become `verified` -- and shutting those out would shut out
+-- whole ways of playing. Nothing is stored: deleting a score (tools/admin.py)
+-- recomputes both views below for free.
+-- ---------------------------------------------------------------------------
+create or replace view public.counted_scores
+  with (security_invoker = true) as
+select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at
+from public.scores s
+join public.users u on u.id = s.user_id
+left join public.score_checks c on c.score_id = s.id
+where c.verdict is distinct from 'mismatch';
+
+-- ---------------------------------------------------------------------------
+-- crown_holders: one row per *contested* map (counted scores from two or more
+-- distinct players), naming whoever holds its record. The record is chosen the
+-- way game_summary.best is -- fewest turns, then fewest lost, then earliest -- so
+-- a tie never takes a crown: the first to reach a result keeps it.
+-- ---------------------------------------------------------------------------
+create or replace view public.crown_holders
+  with (security_invoker = true) as
+select
+  field.game_key,
+  best.user_id,
+  best.user_name,
+  best.turns,
+  (field.players - 1)::integer as rivals
+from (
+  select game_key, count(distinct user_id) as players
+  from public.counted_scores
+  group by game_key
+  having count(distinct user_id) >= 2
+) field
+cross join lateral (
+  select cs.user_id, cs.user_name, cs.turns
+  from public.counted_scores cs
+  where cs.game_key = field.game_key
+  order by cs.turns asc, cs.lost asc, cs.submitted_at asc, cs.id asc
+  limit 1
+) best;
+
+-- ---------------------------------------------------------------------------
+-- crown_steals: one row per counted score that strictly beat the record it
+-- found on arrival, where that record belonged to somebody else. Beating your
+-- own record, tying one, and the first score on an empty map are not steals.
+-- Names and turns only -- the same detail game_summary already shows on an
+-- embargoed map, so this reveals nothing an embargo hides.
+-- ---------------------------------------------------------------------------
+create or replace view public.crown_steals
+  with (security_invoker = true) as
+select
+  s.id as score_id,
+  s.game_key,
+  s.submitted_at,
+  s.user_name  as taker_name,
+  prior.user_name as from_name,
+  s.turns,
+  prior.turns  as from_turns
+from public.counted_scores s
+cross join lateral (
+  select p.user_id, p.user_name, p.turns, p.lost
+  from public.counted_scores p
+  where p.game_key = s.game_key
+    and (p.submitted_at, p.id) < (s.submitted_at, s.id)
+  order by p.turns asc, p.lost asc, p.submitted_at asc, p.id asc
+  limit 1
+) prior
+where prior.user_id <> s.user_id
+  and (s.turns, s.lost) < (prior.turns, prior.lost);
+
+-- ---------------------------------------------------------------------------
 -- Policies
 -- ---------------------------------------------------------------------------
 alter table public.users   enable row level security;
@@ -728,7 +807,8 @@ create policy "score_checks public read" on public.score_checks for select using
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
 grant select on public.users, public.games, public.scores, public.configs,
   public.config_tags, public.game_summary, public.config_summary,
-  public.bot_scores, public.score_checks, public.public_replays
+  public.bot_scores, public.score_checks, public.public_replays,
+  public.counted_scores, public.crown_holders, public.crown_steals
   to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The

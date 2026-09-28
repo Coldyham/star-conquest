@@ -17,6 +17,7 @@ the pages into `web/board/` and the root `netlify.toml` bundles
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
+| [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
@@ -597,11 +598,35 @@ is why that logic sits in a module with no DOM or fetch in it. It also covers th
 map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.mjs`
 covers a config's derived label (`js/setup.mjs`), and `tests/tags.test.mjs` covers
 tag normalisation (`js/tags.mjs`'s `normalizeTags` — trim, lowercase, dedupe, the
-6-tag cap) the same way, with no DOM or database needed to exercise it. Neither
-`schema.sql` nor its functions have a test harness — verify a change to
+6-tag cap) the same way, with no DOM or database needed to exercise it. The crown views are
+the one part of `schema.sql` with a test (`tests/test_crowns_sql.py`, opt-in via
+`SC_TEST_PG`, which applies the whole file to a scratch Postgres). Otherwise
+`schema.sql` and its functions have no test harness — verify a change to
 `sc_config_key`/`sc_bots`/`config_tag_counts` by pasting the file into a scratch
 Postgres or Supabase project and querying `game_summary`/`config_summary`
 directly.
+
+## Crowns
+
+The one contest on the board, and it rewards *taking first place from somebody
+else* — a count of wins or of maps would pay out for grinding easy setups
+instead. A **crown** is a contested map (counted scores from two or more players)
+whose record you hold; a **steal** is a score that strictly beat the record it
+found, where that record was somebody else's. Tying never steals — the earliest
+to reach a result keeps it, as `game_summary` already credits — and beating your
+own record is just an improvement. Steals count in the week they were posted,
+Monday 00:00 UTC to the next; `?week=` browses back.
+
+All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
+is the eligibility rule (every score except a replay the worker found to be a
+`mismatch` — the game uploads a log once with no retry, so an offline or
+hand-pasted score can never become `verified`, and requiring that would shut
+those ways of playing out), `crown_holders` and `crown_steals` read it. Deleting
+a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
+maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.
+It is as cheesable as any identity here — a second name can make a map
+"contested" — but a crown still needs a real record on a map, and a steal a real
+better score.
 
 ## Known limitations, accepted on purpose
 

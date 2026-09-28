@@ -34,6 +34,24 @@ function nameCell(score) {
     : el("span", { class: "nm", text: credit(score) });
 }
 
+/**
+ * Did the worker replay this score's log and get the same result? The embed is
+ * one-to-one (score_checks is keyed by score_id), which PostgREST hands back as
+ * an object or, on an older server, a one-element array; absent means unchecked.
+ */
+function isVerified(score) {
+  const check = [].concat(score.score_checks || [])[0];
+  return Boolean(check && check.verdict === "verified");
+}
+
+function verifiedMark() {
+  return el("span", {
+    class: "verified",
+    title: "Verified: this score's replay was re-run and reached the same result",
+    text: "✓",
+  });
+}
+
 function scoreRow(score, rank, replays) {
   const version = replays.get(score.match_id);
   const watchable = version === CURRENT_RULES_VERSION;
@@ -44,6 +62,7 @@ function scoreRow(score, rank, replays) {
     // name: a name long enough to wrap used to drag the dots into the middle of it.
     el("span", { class: "who" }, [
       nameCell(score),
+      ...(isVerified(score) ? [verifiedMark()] : []),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     // Watch (or its outdated-replay note) rides *inside* the result cell rather
@@ -389,7 +408,7 @@ async function load() {
     }
 
     const scores = await select(
-      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
+      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),score_checks(verdict)` +
         `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
     );
 
