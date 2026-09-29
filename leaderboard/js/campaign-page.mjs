@@ -104,7 +104,9 @@ function attemptNote(node, holder) {
     const beat = holder ? ` Beat ${holder.turns} turns · ${holder.lost} lost to take it.` : "";
     return el("p", { class: "can", text: `You can make this move.${beat}` });
   }
-  if (holder && holder.key === me.toLowerCase()) return el("p", { class: "can", text: "Yours. Bettering your score here raises the bar." });
+  if (holder && holder.key === me.toLowerCase()) return el("p", { class: "can", text: node.kind === "home"
+    ? "Your home. Homes can't be taken, so it's yours for the week."
+    : "Yours. Bettering your score here raises the bar." });
   if (node.kind === "home") return el("p", { class: "cannot", text: holder ? "Claimed — homes can't be taken." : "You already have a home this week." });
   return el("p", { class: "cannot", text: state.homes.has(me.toLowerCase())
     ? "Not next to anything you hold yet."
