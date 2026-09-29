@@ -723,6 +723,14 @@ already resolve simultaneously. The rationale for each rule is in
       read apart from anyone else's, so the only boundary that can be
       enforced for everyone alike, the setter included, is on *how* a score
       was made rather than on whether one exists.
+    - **A campaign node is embargoed until its week ends, and that is derived,
+      never stored.** `game_embargoes` (schema.sql) is the embargo in force:
+      the later of `games.embargo_until` and the end of any live campaign week
+      the map is a node of (matched through `campaign_games`). `public_replays`
+      and `game_summary.embargo_until` both read it, so every page that honours
+      an embargo honours this one with no JS of its own. It cannot be stamped on
+      the row instead: a node's seed is fresh, so its `games` row is created
+      mid-week by whoever posts first, and `games` is append-only after that.
   - **A replay is never shown as if it still reproduced the game once the engine
     has moved past it.** `GameLog.is_current` (`rules_version == engine.
     RULES_VERSION`) is the same check on both sides of the wire, and both were
