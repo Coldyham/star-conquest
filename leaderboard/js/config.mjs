@@ -13,20 +13,20 @@ export const SUPABASE_ANON_KEY = "sb_publishable_6zAnA0eBt8wAahb6rplDpg_Rik3sE29
 // on any score whose replay is public; leave it blank and neither is shown.
 //
 // These pages are served by the game's own site, under /board/, so on a
-// `.netlify.app` host the game is simply this origin's root — production,
+// `.netlify.app` host the game is simply this origin's /game/ — production,
 // a deploy preview and a branch deploy each link to their own build, with
 // nothing to edit by hand. `starconquest/webstore.py`'s `leaderboard_origin`
 // is the same rule from the other side.
 //
 // The constant is the fallback for any other host: a custom domain, a local
 // server, a file:// page.
-const GAME_URL_FALLBACK = "https://star-conquest.netlify.app/";
+const GAME_URL_FALLBACK = "https://star-conquest.netlify.app/game/";
 const NETLIFY = ".netlify.app";
 
-/** This origin's root when it is a Netlify deploy of the game, else "". */
+/** This origin's /game/ when it is a Netlify deploy of the game, else "". */
 function ownGame() {
   const host = (globalThis.location && globalThis.location.hostname) || "";
-  return host.endsWith(NETLIFY) ? `https://${host}/` : "";
+  return host.endsWith(NETLIFY) ? `https://${host}/game/` : "";
 }
 
 export const GAME_URL = ownGame() || GAME_URL_FALLBACK;

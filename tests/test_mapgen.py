@@ -213,3 +213,42 @@ def test_a_generated_map_never_violates_the_hand_placement_rules():
                         for b in design.nodes[i + 1:]:
                             gap = math.hypot(a.x - b.x, a.y - b.y)
                             assert gap >= sep, f"{mode}/{nodes}n seed {seed}: gap {gap:.1f}"
+
+
+def test_a_standard_board_is_laid_out_in_the_box_it_always_was():
+    """Larger maps must not move a single existing seed: up to the old cap the
+    world is exactly ``WORLD_SIZE``, so every map ever shared still generates."""
+    for n in (8, 18, config.STANDARD_MAX_NODES):
+        assert config.world_side(n) == config.WORLD_SIZE
+    m = config.WORLD_MARGIN
+    assert mapgen._play_bounds(config.STANDARD_MAX_NODES) == (
+        m, m, config.WORLD_SIZE - m, config.WORLD_SIZE - m)
+
+
+def test_a_larger_board_keeps_a_standard_boards_lanes():
+    """Past the old cap the box grows instead of the board getting denser, so a
+    lane is about as long at MAX_NODES as on a full standard board."""
+    def median_turns(n: int) -> float:
+        turns = [lane.travel_turns
+                 for seed in range(4)
+                 for lane in mapgen.generate_random(seed, n, 4).lanes.values()]
+        return sorted(turns)[len(turns) // 2]
+
+    assert abs(median_turns(config.MAX_NODES) - median_turns(config.STANDARD_MAX_NODES)) <= 1
+    state = mapgen.generate_random(0, config.MAX_NODES, 4)
+    assert max(s.pos[0] for s in state.systems.values()) > config.WORLD_SIZE
+
+
+def test_the_largest_maps_are_connected_and_graze_nothing():
+    clearance = config.LANE_NODE_CLEARANCE_FRAC * config.WORLD_SIZE
+    for mode in ("random", "symmetric"):
+        for seed in range(3):
+            state = mapgen.generate(seed, mode, config.MAX_NODES, 6)
+            assert mapgen.is_connected(state)
+            if mode == "random":
+                assert len(state.systems) == config.MAX_NODES
+                for lane in state.lanes.values():
+                    a, b = state.systems[lane.a].pos, state.systems[lane.b].pos
+                    for sid, s in state.systems.items():
+                        if sid not in (lane.a, lane.b):
+                            assert point_segment_dist(s.pos, a, b) >= clearance

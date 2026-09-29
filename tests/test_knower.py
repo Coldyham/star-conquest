@@ -627,3 +627,99 @@ def test_a_decided_line_is_carried_not_stepped(kn):
 
     out = kn._expand([line], 2, frozenset())
     assert out == [line], "a decided line was expanded"
+
+
+# --------------------------------------------------------------------------- #
+# What a setup costs (`ply_ms`, `_search_run`, `setup_warning`)
+# --------------------------------------------------------------------------- #
+def test_the_cost_model_stops_where_the_real_guard_does(kn, monkeypatch):
+    # A clock that moves only when a rollout runs, each costing its share of a
+    # ply, so `_search`'s own guard can be compared with `_search_run` without
+    # timing anything.
+    from types import SimpleNamespace
+    state = _state(nodes=24, players=3)
+    pid = 2
+    state.players[pid].ai_params.aux = 12
+    base = kn._plan(state, pid, None)
+    cands = len(list(kn._candidates(state, pid, None, base)))
+    assert cands == kn.SEARCH_WIDTH + len(kn.EXTERNAL_CANDIDATES)
+    real_rollout, real_expand = kn._rollout, kn._expand
+    for ply in (7.0, 40.0, 70.0, 149.0, 400.0):
+        clock, expands = [0.0], [0]
+
+        def rollout(*a, _ply=ply, _clock=clock):
+            _clock[0] += _ply / cands ** 2 / 1000
+            return real_rollout(*a)
+
+        def expand(*a, _n=expands):
+            _n[0] += 1
+            return real_expand(*a)
+
+        monkeypatch.setattr(kn, "_rollout", rollout)
+        monkeypatch.setattr(kn, "_expand", expand)
+        monkeypatch.setattr(kn, "time", SimpleNamespace(perf_counter=lambda _c=clock: _c[0]))
+        kn.decide(state, pid)
+        assert 2 + expands[0] == kn._search_run(ply, 12)[0], ply
+
+
+def test_the_ply_that_crosses_the_budget_still_runs(kn):
+    assert kn._search_run(1.0, 12)[0] == 12
+    assert kn._search_run(400.0, 12)[0] == 3    # the root fits, so one ply more runs
+    assert kn._search_run(1e6, 12)[0] == 2      # the root alone overruns: nothing more
+    assert kn._search_run(1e6, 2) == (2, 1e6 * kn._root_share())
+    assert kn._search_run(5.0, 1) == (1, 0.0)
+
+
+def test_a_ply_costs_more_on_bigger_maps_with_more_seats_and_slower_ships(kn):
+    base = kn.ply_ms(40, 3, 6.0)
+    assert kn.ply_ms(120, 3, 6.0) > base
+    assert kn.ply_ms(40, 6, 6.0) > base
+    assert kn.ply_ms(40, 3, 1.0) > base > kn.ply_ms(40, 3, 18.0)
+
+
+def _knower_setup(depth, **kw):
+    from starconquest.model import AiParams
+    from starconquest.settings import Settings
+    s = Settings(**kw)
+    s.ai_strategy = ["knower"] * len(s.ai_strategy)
+    s.ai = [AiParams(aux=depth) for _ in s.ai]
+    return s
+
+
+def test_knower_never_warns_without_a_search(kn):
+    for depth in (0, 1):
+        s = _knower_setup(depth, nodes=120, players=6, ship_ly_per_turn=1.0)
+        assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
+
+
+def test_the_default_map_never_warns_even_at_the_top_of_the_slider(kn):
+    s = _knower_setup(kn.SEARCH_DEPTH_MAX)
+    assert kn.setup_warning(s, list(range(2, s.players + 1))) == []
+
+
+def test_the_largest_map_warns_and_says_how_deep_it_will_really_look(kn):
+    s = _knower_setup(12, nodes=120, players=6)
+    lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
+    reach = kn._search_run(kn.ply_ms(120, 6, s.ship_ly_per_turn), 12)[0]
+    assert reach < kn.WARN_USEFUL_DEPTH
+    assert any(f"about {reach} turns ahead, not 12" in line for line in lines)
+    assert any("5 Knower seats" in line for line in lines)
+    assert "Systems (Basic tab)" in lines[-1]
+
+
+def test_the_menu_hears_knowers_warning(kn):
+    from starconquest.settings import setup_warnings
+    s = _knower_setup(12, nodes=120, players=6)
+    assert setup_warnings(s) == kn.setup_warning(s, [2, 3, 4, 5, 6])
+    s.ai_strategy[1:6] = ["thinker"] * 5
+    assert setup_warnings(s) == []
+
+
+def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn):
+    from types import SimpleNamespace
+    s = _knower_setup(12, nodes=18, players=6, ship_ly_per_turn=1.0)
+    assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
+    s.custom_map = SimpleNamespace(nodes=[None] * 120)
+    lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
+    assert "on 120 systems" in lines[0]
+    assert "a smaller map" in lines[-1]

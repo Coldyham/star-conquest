@@ -115,6 +115,42 @@ def _drop_aux_bot(name: str, modname: str) -> None:
     sys.modules.pop(modname, None)
 
 
+def test_setup_warning_is_empty_without_a_hook():
+    modname = _register_aux_bot("warn_none_test")
+    try:
+        assert ai.setup_warning("warn_none_test", None, [2]) == []
+        assert ai.setup_warning("no_such_strategy", None, [2]) == []
+    finally:
+        _drop_aux_bot("warn_none_test", modname)
+
+
+def test_setup_warning_passes_the_seats_and_keeps_only_real_lines():
+    seen = []
+
+    def hook(settings, seats):
+        seen.append(seats)
+        return ["too big", "", 7, "  "]
+
+    modname = _register_aux_bot("warn_test", setup_warning=hook)
+    try:
+        assert ai.setup_warning("warn_test", "cfg", (2, 3)) == ["too big"]
+        assert seen == [[2, 3]]
+    finally:
+        _drop_aux_bot("warn_test", modname)
+
+
+def test_a_broken_setup_warning_never_blocks_a_start():
+    def boom(settings, seats):
+        raise RuntimeError("bug in a drop-in")
+
+    for name, hook in (("warn_boom", boom), ("warn_junk", lambda s, q: "not a list")):
+        modname = _register_aux_bot(name, setup_warning=hook)
+        try:
+            assert ai.setup_warning(name, None, [2]) == []
+        finally:
+            _drop_aux_bot(name, modname)
+
+
 def test_aux_spec_is_none_without_a_declaration():
     """The heuristic, an unknown name, and a bot that ignores `aux` all opt out."""
     assert ai.aux_spec("heuristic") is None

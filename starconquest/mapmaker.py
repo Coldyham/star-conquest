@@ -197,7 +197,10 @@ def _generated(settings: Settings, seed: int | None = None) -> CustomMap:
     """
     settings_mod.apply_globals(settings)
     concrete = settings_mod.resolve_seed(settings) if seed is None else seed
-    state = mapgen.generate(concrete, settings.mode, settings.nodes, settings.players)
+    # A larger board is laid out in a larger box (`config.world_side`) that this
+    # canvas cannot hold, so the creator only ever adopts a standard-sized one.
+    nodes = min(settings.nodes, config.STANDARD_MAX_NODES)
+    state = mapgen.generate(concrete, settings.mode, nodes, settings.players)
     return _centred(custommap.from_state(state))
 
 
@@ -1555,8 +1558,8 @@ def _place(ed: Editor, settings: Settings, pos, link: int | None = None) -> None
     since the lane's far end didn't exist a moment ago; a refused link never
     refuses the placement, it only leaves the status saying which half failed.
     """
-    if len(ed.recipe.nodes) >= config.MAX_NODES:
-        _set_status(ed, f"That's the limit — {config.MAX_NODES} systems.", False)
+    if len(ed.recipe.nodes) >= config.STANDARD_MAX_NODES:
+        _set_status(ed, f"That's the limit — {config.STANDARD_MAX_NODES} systems.", False)
         return
     wx, wy = ed.view.to_world(pos)
     node = MapNode(x=round(wx), y=round(wy),

@@ -1,9 +1,11 @@
 import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { campaignMark } from "./campaign.mjs";
 import { GAME_URL } from "./config.mjs";
+import { weekParam, weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botLeadBadge, clear, configBadge, el, embargoBadge, embargoNote, leaderCredit, mapSummary,
-  relativeTime, showError,
+  botChips, botLeadBadge, campaignBadge, clear, configBadge, el, embargoBadge, embargoNote, leaderCredit,
+  mapSummary, relativeTime, showError,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -192,7 +194,19 @@ async function configHead(game) {
   return wrap;
 }
 
-function row(game) {
+/**
+ * This week's campaign nodes that have a map on the board, by game_key. Quiet
+ * on failure: a board without the campaign views just shows no badge.
+ */
+async function campaignMarks() {
+  const thisWeek = weekStart(new Date());
+  const rows = await select(
+    `campaign_games?select=game_key,week_start,node_id,kind&week_start=${eq(weekParam(thisWeek))}`,
+  ).catch(() => []);
+  return new Map(rows.map((entry) => [entry.game_key, campaignMark(entry, thisWeek)]));
+}
+
+function row(game, campaigns) {
   const holder = leaderCredit(game);
   const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
   // While embargoed, the card keeps the leader and the turn count next to
@@ -226,7 +240,10 @@ function row(game) {
 
   return el("div", { class: "card" }, [
     body,
-    el("div", { class: "card-tags" }, [configBadge(game), botLeadBadge(game), embargoBadge(game), ...botChips(game)]),
+    el("div", { class: "card-tags" }, [
+      configBadge(game), campaignBadge(campaigns.get(game.game_key)), botLeadBadge(game), embargoBadge(game),
+      ...botChips(game),
+    ]),
   ]);
 }
 
@@ -267,7 +284,7 @@ async function load() {
   try {
     // Filtering happens server-side, on purpose: filtering only the visible
     // 50 client-side would silently hide older matches instead.
-    const { kind, rows } = await fetchGames(filters);
+    const [{ kind, rows }, campaigns] = await Promise.all([fetchGames(filters), campaignMarks()]);
     target.classList.remove("loading");
 
     clear(groupTarget);
@@ -292,7 +309,7 @@ async function load() {
       );
       return;
     }
-    clear(target).append(...rows.map(kind === "config" ? configRow : row));
+    clear(target).append(...rows.map((r) => (kind === "config" ? configRow(r) : row(r, campaigns))));
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

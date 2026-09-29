@@ -44,7 +44,9 @@ import pygame
 from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
-from .settings import RANDOM_STRATEGY, Settings, fresh_rng, random_seed
+from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
+                       Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
+                       randomise_knobs, random_seed, setup_warnings)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -92,24 +94,11 @@ _SAVE_DIR = saves_dir()
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
-_ADV_MAP = (
-    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
-    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
-    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
-    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
-    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
-)
-_ADV_TRAVEL = (
-    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
-    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
-)
-_ADV_ECON = (
-    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
-    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
-    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
-    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
-    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
-)
+# The Advanced groups live in `settings` (pure core) so the weekly campaign
+# worker can roll a "?" map from the same ranges the dice button uses.
+_ADV_MAP = ADV_MAP
+_ADV_TRAVEL = ADV_TRAVEL
+_ADV_ECON = ADV_ECON
 
 
 def lane_sliders():
@@ -134,18 +123,7 @@ def econ_sliders():
     return _ADV_ECON
 
 
-# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
-# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
-# namespace written to, not the tab drawn on.
-_ADV_COMBAT = (
-    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
-    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
-    # setting and becomes a stalemate. Both sides produce symmetrically, so a
-    # fortress bonus that large grows the defence as fast as any assault can be
-    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
-    # resolve at a 3000-turn cap either. See bot-design for the measurements.
-    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
-)
+_ADV_COMBAT = ADV_COMBAT
 # The Combat tab's demo. The one slider group that does *not* touch `Settings`:
 # these are transient view state on `MenuState`, so playing with them never lands
 # in a save file or a share token, and never trips the un-challenge confirm modal.
@@ -155,13 +133,7 @@ _PREVIEW = (
     ("preview_attacker", "Attacker ships", "preview_attacker", 1, config.COMBAT_PREVIEW_MAX, 1, True),
     ("preview_defender", "Defender ships", "preview_defender", 1, config.COMBAT_PREVIEW_MAX, 1, True),
 )
-# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
-# detail); scout floors at 1 so immediate neighbours stay visible enough to target
-# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
-_ADV_FOG = (
-    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
-    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
-)
+_ADV_FOG = ADV_FOG
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
 # `_ADV_COMBAT` is deliberately absent: it lives on the Combat tab now, and a die
 # should only roll what you can see (silently changing an off-screen knob would
@@ -330,6 +302,19 @@ class MenuState:
     pbp_name: str = ""
     pbp_title: str = ""
     pbp_editing: str | None = None
+    # Slow-setup confirm: a bot in this setup warned it would stall or search
+    # shallower than asked (`settings.setup_warnings`), so Start / Play by post
+    # waits on an answer. `slow_action` is the action "Play anyway" re-issues and
+    # `slow_ack` the warning last played through, so the same setup asks once.
+    confirm_slow: bool = False
+    slow_lines: list[str] = field(default_factory=list)
+    slow_action: str | None = None
+    slow_ack: tuple[str, ...] | None = None
+    # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
+    # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
+    # never by `draw`, which only shows it while the key still matches.
+    lane_key: tuple | None = None
+    lane_ly: list[float] = field(default_factory=list)
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -457,6 +442,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _draw_clear_map(surface, ms, w, surface.get_height())
     if ms.pbp_prompt:
         _draw_pbp_prompt(surface, ms, settings, w, surface.get_height())
+    if ms.confirm_slow:
+        _draw_slow(surface, ms, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
@@ -594,6 +581,30 @@ def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
         ],
         ("clear_map_yes", clear, _BTN_FILL, _WARN),
         ("clear_map_no", keep, _HL_FILL, _HL_BORDER),
+    )
+
+
+def _slow_labels() -> tuple[str, str]:
+    """(play-anyway, go-back) labels; key hints dropped on a touch build, as
+    `_unchallenge_labels` does."""
+    if config.touch_ui:
+        return ("Play anyway", "Change settings")
+    return ("Play anyway (Y)", "Change settings (Esc)")
+
+
+def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
+    """Modal: a bot says this setup is more than it can search in the time it
+    is given — asked before the match exists rather than discovered as a stalled
+    turn once it does."""
+    f = _fonts()
+    go, back = _slow_labels()
+    _draw_menu_modal(
+        surface, ms, w, h,
+        [("This setup may play slowly", f["normal"], config.COLOR_TEXT)]
+        + [(line, f["small"], _WARN if i == 0 else config.COLOR_TEXT_DIM)
+           for i, line in enumerate(ms.slow_lines)],
+        ("slow_go", go, _BTN_FILL, _WARN),
+        ("slow_back", back, _HL_FILL, _HL_BORDER),
     )
 
 
@@ -892,6 +903,7 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
         y = _sliders(surface, ms, settings, _ADV_MAP, lx, y, col_w)
     y = _section(surface, "Travel", lx, y)
     y = _sliders(surface, ms, settings, _ADV_TRAVEL, lx, y, col_w)
+    y = _lane_readout(surface, ms, settings, lx, y)
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
@@ -1200,6 +1212,43 @@ def _visible_adv(settings: Settings):
     if settings.custom_map is None:
         return _ADV_ALL
     return _ADV_TRAVEL + _ADV_FOG
+
+
+def _survey_lanes(ms: MenuState, settings: Settings) -> None:
+    """Re-survey the setup's lanes if anything that shapes them has changed —
+    but never mid-drag, so a map slider only costs one generation, on release."""
+    if ms.drag_key is not None:
+        return
+    key = lane_survey_key(settings)
+    if key != ms.lane_key:
+        ms.lane_key, ms.lane_ly = key, lane_lengths(settings)
+
+
+def _lane_readout_lines(ms: MenuState, settings: Settings) -> list[str]:
+    """What the setup does to travel: the lane spread in turns at the chosen
+    speed, and how much bigger than a standard board the map is laid out. Empty
+    until `pump` has surveyed *this* setup — a stale figure is worse than none."""
+    if ms.lane_key != lane_survey_key(settings):
+        return []
+    spread = lane_turns(ms.lane_ly, settings.ship_ly_per_turn)
+    if spread is None:
+        return []
+    lo, mid, hi = spread
+    span = f"{lo} turn" + ("" if lo == 1 else "s") if lo == hi else f"{lo}-{hi} turns"
+    # "~" when the seed is left to chance: then it is a sample, not your map.
+    sampled = "~" if settings.seed is None and settings.custom_map is None else ""
+    lines = [f"Lanes: {sampled}{span}, median {mid}"]
+    if settings.custom_map is None and settings.nodes > config.STANDARD_MAX_NODES:
+        scale = config.world_side(settings.nodes) / config.WORLD_SIZE
+        lines.append(f"Map: {scale:.1f}x standard width")
+    return lines
+
+
+def _lane_readout(surface, ms: MenuState, settings: Settings, x: int, y: int) -> int:
+    for line in _lane_readout_lines(ms, settings):
+        _text(surface, _fonts()["small"], line, config.COLOR_TEXT_DIM, midleft=(x, y + _NOTE_H // 2))
+        y += _NOTE_H
+    return y + 6
 
 
 def _derived(surface, text: str, right: int, y: int) -> None:
@@ -1542,6 +1591,8 @@ def handle_event(event, ms: MenuState, settings: Settings):
     event = _to_canvas_event(event, ms)
     if ms.confirm_unchallenge:  # modal: swallows everything until answered
         return _handle_unchallenge(event, ms, settings)
+    if ms.confirm_slow:
+        return _handle_slow(event, ms)
     if event.type in _MUTATING_EVENTS and _comparable(settings):
         # Remember the last setup the challenge's score still applied to, before
         # this event gets a chance to change it. A slider drag is covered by the
@@ -1621,7 +1672,7 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
             return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
             _close_pbp_prompt(ms)
-            return "play_by_post"
+            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
         if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
             _close_pbp_prompt(ms)
             return None
@@ -1630,7 +1681,7 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     elif event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             _close_pbp_prompt(ms)
-            return "play_by_post"
+            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
         if ms.pbp_editing is not None:
             if event.key == pygame.K_ESCAPE:
                 ms.pbp_editing = None
@@ -1692,7 +1743,12 @@ def pump(ms: MenuState, settings: Settings) -> None:
     Typing on a soft keyboard produces no SDL events at all, so the text arrives
     by reading the hidden DOM field back (``softkeyboard``) and filtering it into
     the same edit buffers ``_handle_text_input`` fills. This is the mutate half of
-    the scene, alongside ``handle_event`` — ``draw`` still only reads."""
+    the scene, alongside ``handle_event`` — ``draw`` still only reads.
+
+    Also refreshes the lane readout, here rather than per event because a map
+    slider mid-drag changes on every motion and generating a large board on each
+    one would stall the drag: the survey waits for the release."""
+    _survey_lanes(ms, settings)
     field_name = _editing_field(ms)
     if field_name is None:
         return
@@ -1908,9 +1964,9 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "players_inc":
         _set_players(settings, settings.players + 1)
     elif hit == "nodes_dec":
-        _set_nodes(settings, settings.nodes - 1)
+        _set_nodes(settings, _node_step(settings.nodes, up=False))
     elif hit == "nodes_inc":
-        _set_nodes(settings, settings.nodes + 1)
+        _set_nodes(settings, _node_step(settings.nodes, up=True))
     elif hit == "mode_random":
         settings.mode = "random"
     elif hit == "mode_symmetric":
@@ -2027,11 +2083,7 @@ def _randomise_sliders(target, specs) -> None:
     """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
     on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
     snap-and-clamp logic with ``_apply_slider``."""
-    rng = fresh_rng()
-    for _key, _label, attr, lo, hi, step, is_int in specs:
-        snapped = round(rng.uniform(lo, hi) / step) * step
-        snapped = max(lo, min(hi, snapped))
-        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
+    randomise_knobs(target, specs, fresh_rng())
 
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
@@ -2087,6 +2139,51 @@ def _start(ms: MenuState, settings: Settings, action: str = "start"):
     if blockers:
         set_status(ms, blockers[0].text, False)
         return None
+    if action == "start":
+        # Play by post passes through here only to reach its roster prompt, and
+        # which seats are bots is not known until that is confirmed — it asks
+        # there instead (`_handle_pbp_prompt`).
+        return _unless_slow(ms, settings, action)
+    return action
+
+
+def _unless_slow(ms: MenuState, settings: Settings, action: str,
+                 people: set[int] | None = None) -> str | None:
+    """``action``, unless a bot in the setup warns it will struggle — then raise
+    the slow-setup modal holding ``action`` for "Play anyway" to re-issue.
+
+    ``people`` is which seats a person holds (see `settings.setup_warnings`).
+    A warning already played through once is not asked again for the same
+    setup; any change that moves its text asks afresh.
+    """
+    lines = setup_warnings(settings, people)
+    if not lines or tuple(lines) == ms.slow_ack:
+        return action
+    ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
+    return None
+
+
+def _handle_slow(event, ms: MenuState) -> str | None:
+    """Answer the slow-setup modal. Y/Enter plays anyway (re-issuing the held
+    action), N/Esc goes back to the settings."""
+    answer: bool | None = None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for key, value in (("slow_go", True), ("slow_back", False)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                answer = value
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+            answer = True
+        elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+            answer = False
+    if answer is None:
+        return None
+    action, ms.slow_action = ms.slow_action, None
+    ms.confirm_slow = False
+    if not answer:
+        return None
+    ms.slow_ack = tuple(ms.slow_lines)
     return action
 
 
@@ -2104,6 +2201,16 @@ def _set_players(settings: Settings, n: int) -> None:
         return _interlocked()
     settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, n))
     settings.nodes = max(settings.nodes, settings.min_nodes())
+
+
+def _node_step(n: int, up: bool) -> int:
+    """The Systems stepper's next value: one at a time up to a standard board,
+    then whole ``config.NODES_BIG_STEP`` multiples, or reaching ``MAX_NODES`` takes
+    eighty presses."""
+    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
+    if up:
+        return n + 1 if n < big else (n // step + 1) * step
+    return n - 1 if n <= big else max(big, -(-n // step) * step - step)
 
 
 def _set_nodes(settings: Settings, n: int) -> None:

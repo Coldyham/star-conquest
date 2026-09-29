@@ -666,6 +666,34 @@ already resolve simultaneously. The rationale for each rule is in
       log rather than trusted. Key the log by `GameLog.setup_key()`, never the
       live `Settings`: `main` resolves "roll a fresh seed" at game start and never
       writes it back.
+  - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
+    by contested maps whose record they hold (`crown_holders`) and counts, per
+    Monday-to-Monday UTC week, scores that strictly beat somebody else's record
+    (`crown_steals`); a tie never steals, the earliest holder keeps it, as
+    `game_summary` credits. Both read `counted_scores`, the one place the rule
+    lives: every score but a `mismatch` replay counts, since the game uploads a
+    log once with no retry and an offline or hand-pasted score could otherwise
+    never count. Nothing is stored, so moderation recomputes them for free.
+    `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
+    against a real Postgres when `SC_TEST_PG` is set.
+  - **The weekly campaign stores its map and derives its state.**
+    `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
+    writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
+    out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
+    (sometimes its symmetric variant, plus one or two "?" nodes rolled with
+    `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
+    nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
+    pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
+    matches it to its game by seed plus jsonb *equality* — never
+    `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
+    browser posts, and so misses nearly every node. `campaign_scores` sits on
+    that view, and so do the green campaign badge on a map's page and index row
+    and the link back to `campaign.html?node=`. Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
+    week's hand-played counted scores in posting order — a home goes to the
+    first win from a player without one and can't be taken; a field node falls
+    to a win posted while holding a neighbour, and a held one only to a strictly
+    better score. The Advanced slider ranges live in `settings` (`ADV_*`) for
+    this reason; `menu` aliases them.
   - **A map can be registered with no score at all, and can carry a one-time
     reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
     Star Conquest link, not just a challenge one — `token-decode.mjs`'s
@@ -695,6 +723,14 @@ already resolve simultaneously. The rationale for each rule is in
       read apart from anyone else's, so the only boundary that can be
       enforced for everyone alike, the setter included, is on *how* a score
       was made rather than on whether one exists.
+    - **A campaign node is embargoed until its week ends, and that is derived,
+      never stored.** `game_embargoes` (schema.sql) is the embargo in force:
+      the later of `games.embargo_until` and the end of any live campaign week
+      the map is a node of (matched through `campaign_games`). `public_replays`
+      and `game_summary.embargo_until` both read it, so every page that honours
+      an embargo honours this one with no JS of its own. It cannot be stamped on
+      the row instead: a node's seed is fresh, so its `games` row is created
+      mid-week by whoever posts first, and `games` is append-only after that.
   - **A replay is never shown as if it still reproduced the game once the engine
     has moved past it.** `GameLog.is_current` (`rules_version == engine.
     RULES_VERSION`) is the same check on both sides of the wire, and both were
@@ -737,6 +773,32 @@ already resolve simultaneously. The rationale for each rule is in
     `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
     rather than added as a field here — that would move `challenge_key()` for
     every map instead of only the config grouping.
+- **Whole-number floats don't survive the browser, so never compare setups as
+  text across writers.** Python writes `0.0`, `1.0`, `18.0`; the leaderboard's
+  JavaScript has one number type, so everything it writes (`games.settings_json`,
+  a token it re-encodes, `pbp_*` rows) says `0`, `1`, `18`. Postgres jsonb keeps
+  whichever text it was sent, so a Python-written row and a browser-written one
+  can hold the same setup and differ as text — and `json.dumps`, `md5(…::text)`
+  (`sc_config_key`) or `JSON.stringify` then call them different. This has
+  bitten four times: the int `aux` a decode keeps, integer hand-map coordinates,
+  `verify_scores._aux_widened`, and `campaign_games`, whose node settings come
+  from `tools/campaign.py` (every campaign node sat unclaimable until the match
+  moved to jsonb `=`). The rules:
+  - **Compare by value, or after `Settings.from_dict`.** `from_dict` coerces every
+    field back to its type, `aux` alone excepted (`_ai_from_dict`), so two
+    decoded setups agree however they travelled — pinned by
+    `test_a_browser_round_trip_moves_the_challenge_key_only_through_aux`, which
+    fails if a new field escapes the coercion. In SQL, jsonb `=` compares numbers
+    by value; a digest of the text does not.
+  - **`sc_config_key` and `setupIdentity` are text identities, safe only among
+    browser-written rows** — every `games` row is. A Python-written setup (a
+    worker's, a log's) is matched to them by value, never by those.
+  - **`aux` is the one digest leak left.** A board-made link (*Play this map* on
+    an unscored map, *Play a new seed*, the campaign's *Play*, a legacy bot
+    *Watch*) reaches the game as ints, so a customised seat's default `1.0`
+    becomes `1` and `challenge_key` moves. `submit.findTwin` rehomes the score
+    onto the right row and `_aux_widened` covers the verifier; what is left is a
+    personal best filed under two keys.
 - **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
   paths in `main`/`menu`, and `upload`, which is the one that also runs off the
   web): `get`/`set` are `localStorage` on the web and
@@ -830,7 +892,12 @@ already resolve simultaneously. The rationale for each rule is in
       in bot-design before copying either half into another bot.
   - **The game and the board are one site.** The root `netlify.toml` builds the
     game, and `tools/build_web.sh` stages the board's pages into `web/board/`
-    from an explicit allow-list. The functions are bundled from
+    from an explicit allow-list. The game itself is at `/game/`; the root is
+    `tools/pwa/root.html`, a router that opens the board for a visitor and
+    forwards a fragment (every challenge, replay and seat link the game ever
+    shared is the root plus one) or an installed app's launch to `/game/`. The
+    manifest, icons and service worker stay at the root, so old installs keep
+    their scope and manifest `id`. The functions are bundled from
     `leaderboard/netlify/functions/` and answer at root `/api/`. On a
     `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
     and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
@@ -863,14 +930,23 @@ already resolve simultaneously. The rationale for each rule is in
     preserves that — `aux` is the one field whose int/float form survives a
     decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
     it and every link carrying an int aux reads as edited the moment it opens.
-    The board is the one place that cannot hold the distinction (jsonb drops the
-    `.0`), so `verify_scores.same_setup` widens both sides through `_aux_widened`
-    before hashing — drop that and every posted score with an aux reads as a
-    different map.
+    The board cannot hold the distinction (its rows are browser-written — see
+    "Whole-number floats" below), so `verify_scores.same_setup` widens both sides
+    through `_aux_widened` before hashing — drop that and every posted score with
+    an aux reads as a different map.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
     its depth-0 seats are predicted for real, and trusted, instead of approximated).
+  - **A bot can warn about a setup before it starts.** A module-level
+    `setup_warning(settings, seats) -> list[str]` (read by `ai.setup_warning`,
+    collected per strategy by `settings.setup_warnings`) raises the menu's
+    "This setup may play slowly" confirm on Start, and on the play-by-post
+    roster's Confirm — not the first press, since which seats are bots is only
+    known once the roster is. `models/knower.py`'s is fitted from measured
+    per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut the
+    search below `WARN_USEFUL_DEPTH` or a turn's knower thinking passes
+    `WARN_TURN_MS`; see "Cost per decide" in bot-design.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through
@@ -1067,7 +1143,9 @@ already resolve simultaneously. The rationale for each rule is in
     no baseline at all, and both are a direction rather than a verdict, since the
     sample is whatever games happen to exist. See bot-design.
   - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
-    fixed, so a lane's length in light-years rises as the node count falls, and
+    fixed up to a standard board, so a lane's length in light-years rises as the
+    node count falls (past `config.STANDARD_MAX_NODES` the box grows instead, and
+    lanes hold at a full standard board's spread), and
     `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
     lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
     a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
@@ -1081,8 +1159,23 @@ don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
 (one base sector rotated N times about a shared contested centre for a perfectly
 fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
 both. Note `symmetric` rounds the node count up to a whole number per sector and
-adds the shared centre, so it can return **more than `config.MAX_NODES`** systems
-(41 at 40 nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+adds the shared centre, so it can return **more than it was asked for** (41 at 40
+nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+
+**Past a standard board the box grows; below it nothing moves.** `config.world_side(n)`
+is exactly `WORLD_SIZE` up to `config.STANDARD_MAX_NODES` (40, the old cap) and grows
+with `sqrt(n)` past it, up to `config.MAX_NODES` (120), so a big map keeps a full
+standard board's spacing and lane lengths instead of just getting denser. Every
+seed a map could be shared on before lays out identically, so `RULES_VERSION` did
+not move, and `nodes` was already a `Settings` field, so no digest moved either.
+Only the box scales: lane clearance and the extra-edge cap stay in `WORLD_SIZE`
+units, since spacing is what is being preserved. The map creator stays at a
+standard board (its canvas is sized for one): it refuses a 41st system and adopts
+a generated map at `min(nodes, STANDARD_MAX_NODES)`. The menu's Advanced tab
+reports the setup's lane spread in turns (`settings.lane_lengths`/`lane_turns`),
+surveyed in `menu.pump` — never `draw` — keyed by `settings.lane_survey_key`
+(which leaves ship speed out, so that slider just re-times the cached lengths),
+held off mid-drag, and restoring `config` after it generates.
 
 ### Hand-authored maps (custommap.py, mapmaker.py)
 
@@ -1136,9 +1229,9 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   hashes what `to_dict` writes, so a form the reader would normalise differently
   makes a sender's own link read as edited the moment it is opened — the trap
   `_ai_from_dict` documents for an int `aux`. Coordinates are **integers** for the
-  same family of reasons: `verify_scores.same_setup` hashes a jsonb side (which
-  drops `100.0` to `100`) against a plain-JSON side, and `_aux_widened` already
-  papers over that for one field. Don't make it two.
+  same family of reasons: `verify_scores.same_setup` hashes a browser-written
+  side (where `100.0` is `100`) against the game's own JSON, and `_aux_widened`
+  already papers over that for one field. Don't make it two.
 - **Node identity is positional**, so deleting node *i* shifts every later lane
   index. `CustomMap.without_node` is the single implementation; don't open-code it.
 - **`mapmaker` draws on the real surface, not `menu`'s fixed canvas.**

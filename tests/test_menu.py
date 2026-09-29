@@ -582,6 +582,63 @@ _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "seed_random", "create_map", "clear_map"}
 
 
+def test_the_node_stepper_takes_big_steps_past_a_standard_board():
+    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
+    assert menu._node_step(big - 1, up=True) == big
+    assert menu._node_step(big, up=True) == big + step
+    assert menu._node_step(big + step, up=False) == big
+    assert menu._node_step(big, up=False) == big - 1
+    # an off-grid count (a hand-edited token) rejoins the grid either way
+    assert menu._node_step(big + 3, up=True) == big + step
+    assert menu._node_step(big + 3, up=False) == big
+
+
+def test_the_lane_readout_describes_the_setup_being_shown():
+    screen, ms, settings = _setup()
+    try:
+        assert menu._lane_readout_lines(ms, settings) == []   # nothing surveyed yet
+        menu.pump(ms, settings)
+        lines = menu._lane_readout_lines(ms, settings)
+        assert len(lines) == 1 and lines[0].startswith("Lanes: ")
+        settings.nodes = config.MAX_NODES
+        assert menu._lane_readout_lines(ms, settings) == []   # stale: never shown
+        menu.pump(ms, settings)
+        assert menu._lane_readout_lines(ms, settings)[1].startswith("Map: ")
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_fits_its_column_at_its_longest():
+    """Slowest ships on the sparsest map give the widest figures; the line must
+    still stop short of the Advanced tab's right-hand column."""
+    screen, ms, settings = _setup()
+    try:
+        settings.players, settings.nodes = config.MIN_PLAYERS, settings.min_nodes()
+        settings.ship_ly_per_turn = 1.0
+        menu.pump(ms, settings)
+        col_w = (560 - 22 * 3) // 2
+        for line in menu._lane_readout_lines(ms, settings):
+            assert menu._fonts()["small"].size(line)[0] <= col_w, line
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_waits_for_a_slider_drag_to_end():
+    screen, ms, settings = _setup()
+    try:
+        menu.pump(ms, settings)
+        key = ms.lane_key
+        ms.drag_key = "adv_node_jitter"
+        settings.node_jitter = 0.2
+        menu.pump(ms, settings)
+        assert ms.lane_key == key
+        ms.drag_key = None
+        menu.pump(ms, settings)
+        assert ms.lane_key != key
+    finally:
+        pygame.quit()
+
+
 def test_tab_content_stays_inside_the_panel():
     """Every tab's widgets must fit the fixed 560x496 panel — the menu has no
     scrolling, and the Advanced tab silently overflowed it before the Combat page
@@ -595,6 +652,10 @@ def test_tab_content_stays_inside_the_panel():
             for a, d, jit, adv in ((1, 1, 0.0, 0.75), (50, 50, 0.5, 2.0)):
                 ms.preview_attacker, ms.preview_defender = a, d
                 settings.combat_jitter, settings.defender_advantage = jit, adv
+                # The biggest map shows the lane readout at its tallest (two lines),
+                # which pushes the Advanced tab's die down the left column.
+                settings.nodes = config.MAX_NODES
+                menu.pump(ms, settings)
                 menu.draw(screen, ms, settings)
                 for key, rect in ms.rects.items():
                     if key.startswith("tab_") or key in chrome:
@@ -1277,5 +1338,88 @@ def test_start_is_unaffected_by_a_playable_hand_map():
     screen, ms, settings = _with_map()
     try:
         assert _click_key(screen, ms, settings, "start") == "start"
+    finally:
+        pygame.quit()
+
+
+def _warns(monkeypatch, lines=("Knower would search 3 turns deep, not 12",)):
+    """Stand in for `settings.setup_warnings`, recording who it was told holds a
+    seat — the flow is under test here, not any bot's numbers."""
+    asked: list = []
+
+    def fake(settings, people=None):
+        asked.append(people)
+        return list(lines)
+
+    monkeypatch.setattr(menu, "setup_warnings", fake)
+    return asked
+
+
+def test_start_asks_before_a_setup_a_bot_warns_about(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") is None
+        assert ms.confirm_slow
+        # The modal swallows everything else until answered.
+        assert _keydown(ms, settings, pygame.K_SPACE) is None and ms.confirm_slow
+        assert _click_key(screen, ms, settings, "slow_go") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_going_back_from_the_slow_warning_starts_nothing(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _keydown(ms, settings, pygame.K_RETURN) is None and ms.confirm_slow
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert not ms.confirm_slow
+        # Not acknowledged, so the next press asks again.
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_a_warning_played_through_once_is_not_asked_again(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "start")
+        assert _keydown(ms, settings, pygame.K_y) == "start"
+        assert _click_key(screen, ms, settings, "start") == "start"
+        # Different text means a different setup, which asks afresh.
+        _warns(monkeypatch, ("Knower would search 2 turns deep, not 12",))
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_no_warning_no_modal(monkeypatch):
+    _warns(monkeypatch, ())
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_play_by_post_asks_on_confirm_with_the_roster_as_the_people(monkeypatch):
+    """Which seats are bots is only known once the roster is confirmed, so that
+    is where the warning is asked — not on the first press."""
+    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
+    asked = _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        settings.players = 4
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+        assert ms.pbp_prompt and not ms.confirm_slow and asked == []
+        _click_key(screen, ms, settings, "pbp_seat_3")   # seat 3 left to its bot
+        assert _click_key(screen, ms, settings, "pbp_confirm") is None
+        assert ms.confirm_slow and asked == [{1, 2, 4}]
+        assert _click_key(screen, ms, settings, "slow_go") == "play_by_post"
+        assert ms.pbp_roster == {1, 2, 4}   # what main opens the match with
     finally:
         pygame.quit()

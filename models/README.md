@@ -70,6 +70,23 @@ guard can be lifted right out of the way and your search runs to its natural,
 iteration-bounded end. It stays 1.0 in every real game, so declaring it changes
 nothing about how your bot plays. Bots without it are simply left alone.
 
+### Optional: warn about a setup before it starts
+
+If some setups are more than your bot can play in the time it has (a huge map,
+a deep search), say so before the match exists rather than stalling once it
+does. Define:
+
+```python
+def setup_warning(settings, seats) -> list[str]:
+    """Short lines for the menu's confirm, or [] when this setup is fine."""
+```
+
+`settings` is the menu's `Settings`; `seats` is every seat your bot will play,
+so the lines can count the whole cost. When it returns anything, Start (and the
+play-by-post confirm) shows a "This setup may play slowly" modal with those
+lines and a *Play anyway* button. A hook that raises or returns junk is ignored.
+`models/knower.py` is the worked example.
+
 ## What you can read off `state`
 
 Import what you need from `starconquest.model`:

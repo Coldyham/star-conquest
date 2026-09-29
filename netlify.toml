@@ -7,6 +7,10 @@
 # pygame-ce WASM wheel from the pygame-web CDN into web/cdn/ (network is available
 # during Netlify builds), keeping the published site self-contained.
 #
+# The game itself is served at /game/, and the root is a router page
+# (tools/pwa/root.html) that opens the leaderboard for a visitor and forwards
+# the game's own links (a fragment on the root URL) to /game/.
+#
 # The leaderboard is served from this site too: its pages at /board/ (staged by
 # tools/build_web.sh from leaderboard/, an explicit copy list) and its functions
 # at /api/ (bundled from leaderboard/netlify/functions/ by the [functions] block
@@ -73,6 +77,12 @@
 [[redirects]]
   from = "/board"
   to = "/board/"
+  status = 301
+
+# Same for the game: pygbag's page loads its bundle relative to itself.
+[[redirects]]
+  from = "/game"
+  to = "/game/"
   status = 301
 
 # Scoped to the board: pygbag's own assets are left exactly as they were.

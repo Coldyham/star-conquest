@@ -15,6 +15,7 @@ import binascii
 import hashlib
 import itertools
 import json
+import math
 import os
 import random
 import time
@@ -66,6 +67,60 @@ _GLOBAL_KNOBS = (
     ("fog_sight", "FOG_SIGHT"),
     ("fog_scout", "FOG_SCOUT"),
 )
+
+
+# The Advanced-tab knobs as slider specs: (key, label, attr, lo, hi, step, is_int).
+# Here rather than in `menu` so pure code can use the same ranges: the menu draws
+# and edits them, and `randomise_knobs` rolls them for its dice button and for
+# the weekly campaign's "?" maps (tools/campaign.py), which has no pygame.
+ADV_MAP = (
+    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
+    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
+    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
+    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
+    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
+)
+ADV_TRAVEL = (
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
+    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
+)
+ADV_ECON = (
+    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
+    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
+    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
+    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
+    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
+)
+
+
+# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
+# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
+# namespace written to, not the tab drawn on.
+ADV_COMBAT = (
+    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
+    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
+    # setting and becomes a stalemate. Both sides produce symmetrically, so a
+    # fortress bonus that large grows the defence as fast as any assault can be
+    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
+    # resolve at a 3000-turn cap either. See bot-design for the measurements.
+    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
+)
+# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
+# detail); scout floors at 1 so immediate neighbours stay visible enough to target
+# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
+ADV_FOG = (
+    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
+    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
+)
+
+
+def randomise_knobs(target, specs, rng: random.Random) -> None:
+    """Set every knob in ``specs`` on ``target`` to a random in-bounds value,
+    snapped to its step and clamped the way the menu's sliders are."""
+    for _key, _label, attr, lo, hi, step, is_int in specs:
+        snapped = round(rng.uniform(lo, hi) / step) * step
+        snapped = max(lo, min(hi, snapped))
+        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
 
 
 # Token fields always emitted, even at their default value. Everything else is
@@ -594,6 +649,33 @@ def _apply_globals(settings: Settings) -> None:
         setattr(config, const, getattr(settings, attr))
 
 
+def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[str]:
+    """What the bots in this setup want said before it starts (`ai.setup_warning`).
+
+    ``people`` is which seats a person will hold: seat 1 alone by default, none
+    under autoplay, a play-by-post roster when there is one. Every other seat up
+    to ``players`` is a bot, asked once per strategy with all the seats it plays.
+    A ``random`` seat is resolved when the seed is already fixed, and otherwise
+    left out, since nobody yet knows what it will be.
+    """
+    if people is None:
+        people = set() if settings.autoplay else {1}
+    by_strategy: dict[str, list[int]] = {}
+    for seat in range(1, settings.players + 1):
+        if seat in people:
+            continue
+        name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY:
+            if settings.seed is None:
+                continue
+            name = resolve_strategy(name, settings.seed, seat)
+        by_strategy.setdefault(name, []).append(seat)
+    lines: list[str] = []
+    for name, seats in by_strategy.items():
+        lines.extend(ai.setup_warning(name, settings, seats))
+    return lines
+
+
 def resolve_strategy(name: str, seed: int, pid: int) -> str:
     """A seat's concrete strategy name: ``name`` itself, unless it is
     ``RANDOM_STRATEGY``, in which case one is drawn for it from the match seed.
@@ -655,3 +737,60 @@ def build_state(settings: Settings, seed: int) -> GameState:
         if settings.autoplay:
             player.is_human = False
     return state
+
+
+# --------------------------------------------------------------------------- #
+# Lane survey: what a setup does to travel time, for the menu's readout
+# --------------------------------------------------------------------------- #
+_LANE_SHAPERS = ("mode", "players", "nodes", "seed", "node_jitter", "relax_min_sep_frac",
+                 "lloyd_passes", "extra_edge_fraction", "max_edge_length_frac")
+
+
+def lane_survey_key(settings: Settings) -> tuple:
+    """Every field that decides where a setup's lanes run, and so how long they
+    are. Ship speed is deliberately absent: it only divides the lengths, so the
+    menu re-times a cached survey on every drag of that slider for nothing."""
+    recipe = settings.custom_map
+    drawn = json.dumps(recipe.to_dict(), sort_keys=True) if recipe is not None else None
+    return tuple(getattr(settings, attr) for attr in _LANE_SHAPERS) + (drawn,)
+
+
+def lane_lengths(settings: Settings) -> list[float]:
+    """Length in light-years of every lane this setup generates.
+
+    With a fixed seed that is the map you will play; left to chance it is a
+    sample over ``config.LANE_SURVEY_SEEDS`` fixed seeds, so the readout is stable
+    rather than re-rolled each time it is asked. A hand map is its own answer.
+
+    Generation reads the knobs live off ``config``, so they are pushed there for
+    the survey and put back after it: the menu asking a question must leave
+    nothing behind for whatever reads ``config`` next.
+    """
+    saved = [(const, getattr(config, const)) for _attr, const in _GLOBAL_KNOBS]
+    _apply_globals(settings)
+    try:
+        if settings.custom_map is not None:
+            if settings.custom_map.blockers():
+                return []
+            states = [mapgen.generate_custom(0, settings.custom_map)]
+        else:
+            seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
+            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players)
+                      for s in seeds]
+    finally:
+        for const, value in saved:
+            setattr(config, const, value)
+    return [
+        math.dist(st.systems[lane.a].pos, st.systems[lane.b].pos) * config.LY_PER_WORLD_UNIT
+        for st in states
+        for lane in st.lanes.values()
+    ]
+
+
+def lane_turns(lengths: list[float], speed: float) -> tuple[int, int, int] | None:
+    """(shortest, median, longest) lane in turns at ``speed`` ly/turn -- the same
+    ``ceil`` mapgen bakes into ``Lane.travel_turns`` -- or None for no lanes."""
+    if not lengths:
+        return None
+    turns = sorted(max(1, math.ceil(ly / speed)) for ly in lengths)
+    return turns[0], turns[len(turns) // 2], turns[-1]

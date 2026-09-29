@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Map scores · Star Conquest Leaderboard</title>
+<title>Campaign · Star Conquest Leaderboard</title>
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
@@ -26,28 +26,31 @@
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1 id="setup">Loading…</h1>
-  <div id="setup-tags" class="card-tags"></div>
-  <p class="lede" id="subtitle"></p>
-  <div id="sort"></div>
-  <div id="scores" class="loading">Loading…</div>
+  <h1>Campaign</h1>
+  <p class="lede">
+    A new map every week, each node a fresh challenge. Win a home to join, then take
+    any node next to one you hold &mdash; somebody else's only by beating their score
+    there. Homes can't be taken. Most nodes held at Monday 00:00 UTC wins the week.
+  </p>
 
-  <!-- How each models/ bot fares in the player's seat on this exact map,
-       computed offline by .github/workflows/bot-replay.yml. Empty until that
-       job has run, so the whole section hides itself rather than showing a
-       placeholder on a board that has never had a worker pointed at it. -->
-  <section id="bots" class="bots" hidden>
-    <h2>How the bots did</h2>
-    <p class="lede" id="bots-lede"></p>
-    <div id="bots-table"></div>
-  </section>
+  <nav class="weeks" id="weeks"></nav>
+  <p class="campaign-status" id="status"></p>
+  <div id="map" class="campaign-map loading">Loading…</div>
+  <div id="detail" class="campaign-detail"></div>
+
+  <h2 class="section-title">Standings</h2>
+  <div id="standings"></div>
+
+  <h2 class="section-title">Moves</h2>
+  <div id="feed"></div>
 </main>
 
 <footer class="attract">
-  <span class="coin">▚</span> Think you can beat that? &nbsp;·&nbsp;
+  <span class="coin">▚</span> Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
   <a href="submit.html">Enter a score</a>
 </footer>
 
-<script type="module" src="js/game.mjs"></script>
+<script type="module" src="js/campaign-page.mjs"></script>
 </body>
 </html>

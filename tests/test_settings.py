@@ -6,6 +6,7 @@ Pure/headless (settings.py imports no pygame), so this needs no display.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 
 import pytest
 
@@ -413,6 +414,44 @@ def test_challenge_key_survives_a_round_trip_of_an_int_aux():
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
 
 
+def _through_a_browser(value):
+    """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
+    one number type, so an integral float comes back an int."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _through_a_browser(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_through_a_browser(v) for v in value]
+    return value
+
+
+def test_a_browser_round_trip_moves_the_challenge_key_only_through_aux():
+    """Every float knob, scalar and per-seat, at a whole-number value no default
+    holds, then through the leaderboard's JavaScript. `from_dict` coerces each
+    field back to its type, so the digest survives, except for `aux`, whose int
+    form is kept on purpose. That leaves `aux` as the only thing
+    `verify_scores._aux_widened` has to cover. A new field `from_dict` does not
+    coerce fails here, instead of as a verifier mismatch or a split map."""
+    s = Settings(seed=7)
+    for f in dataclasses.fields(Settings):
+        value = getattr(s, f.name)
+        if isinstance(value, float):
+            setattr(s, f.name, float(int(value)) + 1.0)
+    whole = {f.name: float(int(getattr(AiParams(), f.name))) + 1.0
+             for f in dataclasses.fields(AiParams)
+             if isinstance(getattr(AiParams(), f.name), float) and f.name != "aux"}
+    s.ai[1] = AiParams(**whole)
+    s = Settings.from_dict(s.to_dict())            # the clamps, applied once
+    back = Settings.from_dict(_through_a_browser(s.token_dict()))
+    assert back.challenge_key() != s.challenge_key()   # the default aux 1.0 came back as 1
+
+    for cfg in (s, back):
+        for params in cfg.ai:
+            params.aux = float(params.aux)
+    assert back.challenge_key() == s.challenge_key()
+
+
 def test_a_challenge_link_with_an_int_aux_still_matches():
     """5 players, 33 nodes, seed 749187, a knower at search depth 12 — a real link
     whose key was stamped over the int the slider left in `aux`."""
@@ -723,3 +762,88 @@ def test_no_core_module_imports_pygame():
                 continue
             assert not any(n.split(".")[0] == "pygame" for n in names), \
                 f"{name}.py is core and must not import pygame"
+
+
+def test_the_lane_survey_leaves_config_as_it_found_it():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    s.ship_ly_per_turn, s.node_jitter = 2.0, 0.3
+    before = (config.SHIP_LY_PER_TURN, config.NODE_JITTER)
+    assert settings_mod.lane_lengths(s)
+    assert (config.SHIP_LY_PER_TURN, config.NODE_JITTER) == before
+
+
+def test_the_lane_survey_is_stable_and_matches_the_map_it_describes():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    assert settings_mod.lane_lengths(s) == settings_mod.lane_lengths(s)   # seed left to chance
+    s.seed = 7
+    state = build_state(s, 7)
+    turns = sorted(lane.travel_turns for lane in state.lanes.values())
+    assert settings_mod.lane_turns(settings_mod.lane_lengths(s), s.ship_ly_per_turn) == (
+        turns[0], turns[len(turns) // 2], turns[-1])
+    assert settings_mod.lane_turns([], 6.0) is None
+
+
+def test_ship_speed_does_not_move_the_lane_survey_key():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    key = settings_mod.lane_survey_key(s)
+    s.ship_ly_per_turn = 12.0
+    assert settings_mod.lane_survey_key(s) == key
+    s.nodes += 1
+    assert settings_mod.lane_survey_key(s) != key
+
+
+@contextlib.contextmanager
+def _warning_bot(name, record):
+    """A strategy whose module warns, recording the seats it was asked about."""
+    import sys
+    from starconquest import ai
+    modname = f"sc_model_{name}"
+    module = type(ai)(modname)
+    module.setup_warning = lambda settings, seats: (record.append(seats), [f"{name} {seats}"])[1]
+    fn = lambda state, pid: []
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register(name, fn)
+    try:
+        yield
+    finally:
+        ai.STRATEGIES.pop(name, None)
+        sys.modules.pop(modname, None)
+
+
+def test_setup_warnings_asks_each_strategy_once_about_its_bot_seats():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=4)
+    s.ai_strategy[1:4] = ["warn_a", "heuristic", "warn_a"]
+    with _warning_bot("warn_a", asked):
+        assert setup_warnings(s) == ["warn_a [2, 4]"]
+        assert asked == [[2, 4]]
+
+
+def test_setup_warnings_counts_seat_one_only_when_no_person_holds_it():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=3)
+    s.ai_strategy[:3] = ["warn_b"] * 3
+    with _warning_bot("warn_b", asked):
+        setup_warnings(s)
+        s.autoplay = True
+        setup_warnings(s)
+        setup_warnings(s, people={1, 3})    # a play-by-post roster
+    assert asked == [[2, 3], [1, 2, 3], [2]]
+
+
+def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
+    from starconquest.settings import resolve_strategy, setup_warnings
+    asked: list = []
+    s = Settings(players=2)
+    s.ai_strategy[1] = RANDOM_STRATEGY
+    with _roster("warn_c"), _warning_bot("warn_c", asked):
+        assert setup_warnings(s) == []          # no seed: nobody knows the bot yet
+        s.seed = 17
+        assert resolve_strategy(RANDOM_STRATEGY, 17, 2) == "warn_c"
+        assert setup_warnings(s) == ["warn_c [2]"]

@@ -275,7 +275,7 @@ def test_a_symmetric_map_bigger_than_max_nodes_still_imports():
     generates and plays today. The parser's ceiling has to clear that, or "start
     from a generated map" would fail on a setup anyone can pick."""
     state = mapgen.generate_symmetric(0, 40, 2)
-    assert len(state.systems) > config.MAX_NODES
+    assert len(state.systems) > config.STANDARD_MAX_NODES
     recipe = custommap.from_state(state)
     assert recipe.problems() == []
     assert CustomMap.from_dict(recipe.to_dict()) == recipe
@@ -284,7 +284,7 @@ def test_a_symmetric_map_bigger_than_max_nodes_still_imports():
 def test_the_wire_form_stays_short():
     """A guard against someone reintroducing a verbose encoding: this rides in
     every shared URL, so a keyed-object-per-node form would roughly treble it."""
-    state = mapgen.generate(3, "random", config.MAX_NODES, 4)
+    state = mapgen.generate(3, "random", config.STANDARD_MAX_NODES, 4)
     raw = json.dumps(custommap.from_state(state).to_dict(), separators=(",", ":"))
     token = base64.urlsafe_b64encode(zlib.compress(raw.encode(), 9)).rstrip(b"=")
     assert len(token) < 1200, len(token)

@@ -7,7 +7,8 @@ others can play it and post their own — see "Sharing a setup with no score" be
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
 API. It is served from the game's own Netlify site: `tools/build_web.sh` copies
-the pages into `web/board/` and the root `netlify.toml` bundles
+the pages into `web/board/` (the site root sends visitors here; the game is at
+`/game/`) and the root `netlify.toml` bundles
 `netlify/functions/` to answer at `/api/`. The game itself works without it.
 
 ## Pages
@@ -17,6 +18,8 @@ the pages into `web/board/` and the root `netlify.toml` bundles
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
+| [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
+| [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
@@ -144,6 +147,15 @@ plays it, or set one on your own first submission.
 The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
 own `first_seen_at`), not a promise about the *right* length — same spirit as
 the loose checks on every other column of that table.
+
+**Every map in the weekly campaign is embargoed until its week ends** (Monday
+00:00 UTC), with nothing to fill in. That one is not stored: `game_embargoes`
+(schema.sql) takes the later of a map's own `embargo_until` and the end of any
+live campaign week it is a node of, and both `public_replays` and
+`game_summary.embargo_until` read it — so the map page, its card and the Watch
+links treat a campaign node exactly like a map embargoed by hand. It has to be
+derived, since a node's `games` row doesn't exist until someone first posts on
+it, and nothing on the board may update that row afterwards.
 
 ## Same setup, different seed
 
@@ -597,11 +609,65 @@ is why that logic sits in a module with no DOM or fetch in it. It also covers th
 map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.mjs`
 covers a config's derived label (`js/setup.mjs`), and `tests/tags.test.mjs` covers
 tag normalisation (`js/tags.mjs`'s `normalizeTags` — trim, lowercase, dedupe, the
-6-tag cap) the same way, with no DOM or database needed to exercise it. Neither
-`schema.sql` nor its functions have a test harness — verify a change to
+6-tag cap) the same way, with no DOM or database needed to exercise it. The crown views are
+the one part of `schema.sql` with a test (`tests/test_crowns_sql.py`, opt-in via
+`SC_TEST_PG`, which applies the whole file to a scratch Postgres). Otherwise
+`schema.sql` and its functions have no test harness — verify a change to
 `sc_config_key`/`sc_bots`/`config_tag_counts` by pasting the file into a scratch
 Postgres or Supabase project and querying `game_summary`/`config_summary`
 directly.
+
+## Crowns
+
+The one contest on the board, and it rewards *taking first place from somebody
+else* — a count of wins or of maps would pay out for grinding easy setups
+instead. A **crown** is a contested map (counted scores from two or more players)
+whose record you hold; a **steal** is a score that strictly beat the record it
+found, where that record was somebody else's. Tying never steals — the earliest
+to reach a result keeps it, as `game_summary` already credits — and beating your
+own record is just an improvement. Steals count in the week they were posted,
+Monday 00:00 UTC to the next; `?week=` browses back.
+
+All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
+is the eligibility rule (every score except a replay the worker found to be a
+`mismatch` — the game uploads a log once with no retry, so an offline or
+hand-pasted score can never become `verified`, and requiring that would shut
+those ways of playing out), `crown_holders` and `crown_steals` read it. Deleting
+a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
+maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.
+It is as cheesable as any identity here — a second name can make a map
+"contested" — but a crown still needs a real record on a map, and a steal a real
+better score.
+
+## Campaign
+
+A new map every Monday 00:00 UTC. Each node is a fresh challenge: an unplayed
+seed on a config somebody has already played (so it is known to be playable),
+sometimes its symmetric variant, and one or two "?" nodes with randomised
+settings. Hand-drawn maps are left out, since their seed changes only the star
+names and the dice. A node's circle is sized, and labelled, by its systems.
+
+- **Homes** ring the map, one lane each off an edge node. The first win on an
+  empty home, from a player without one, claims it for the week, and a home
+  can never be taken — so there is always a seat for a newcomer and a way back
+  for anyone who loses the field.
+- **Field nodes** fall to a win posted while you hold a neighbour; somebody
+  else's only to a strictly better score (a tie defends). Bettering your own
+  score on a node raises the bar for attackers.
+- A score counts if it had at least one turn played by hand and its replay
+  wasn't found to be a `mismatch`. Anything else is just an ordinary score.
+- The week runs its full length; most field nodes held at the close wins.
+
+Only the map is stored (`campaigns`, written once per week by
+`tools/campaign.py` on the hourly job, with the secret key as its only writer).
+The standing is a replay of the week's scores in posting order
+(`campaign_scores` → `js/campaign.mjs`'s `fold`), so a deleted or re-checked
+score changes it on the next page load. `campaign_games` is the node-to-map
+match underneath it (seed plus the setup compared as jsonb, so `0.0` and `0`
+agree). It is also what puts a campaign badge on a map's page and its index
+row, linking back to that node on the campaign page. Tests: `tests/test_campaign.py` for the
+generator, `tests/campaign.test.mjs` for the rules, and the opt-in
+`tests/test_crowns_sql.py` for the view.
 
 ## Known limitations, accepted on purpose
 

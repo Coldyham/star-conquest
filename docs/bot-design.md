@@ -12,9 +12,12 @@ measurement of your own, and read the note on paired null cells under "The
 
 ## Lane length across the parameter space
 
-`WORLD_SIZE` is a constant, so the map is always laid out in the same box and
-the *node count* sets how far apart systems are: fewer nodes means physically
-longer lanes, not a smaller board. `config.SHIP_LY_PER_TURN` (1-30 on the
+`WORLD_SIZE` is a constant up to a standard board (`config.STANDARD_MAX_NODES`,
+40), so the map is laid out in the same box and the *node count* sets how far
+apart systems are: fewer nodes means physically longer lanes, not a smaller
+board. Past 40 the box grows with the node count (`config.world_side`) and the
+spread holds at the 40-node figures — measured 7/13/19, 7/13/20 and 8/13/21 at
+40, 80 and 120 nodes and 1 ly/turn, identical from 3 ly/turn up. `config.SHIP_LY_PER_TURN` (1-30 on the
 slider, 6 by default) then divides all of it. The two together move lane length
 over more than an order of magnitude — measured over three seeds a cell,
 min/median/max lane in turns:
@@ -172,6 +175,227 @@ the engine asks for them: there's no fixed point to solve, one forward pass
 of their real code *is* the answer. knower folds those predictions into a
 "post-launch board" (predicted orders applied via `engine.apply_order` but
 not advanced) and runs thinker's phases against it.
+
+Forked from `models/thinker.py` at commit f94ff20; the four phases and the
+helpers below `_richness` are thinker's, changed only where the oracle changes
+them.
+
+### What the oracle buys, and where
+
+The largest gain is **a turn of warning thinker structurally cannot have.**
+thinker only sees fleets already on a lane, so a strike along an L-turn lane
+reaches it with L-1 turns to spare, and a 1-turn strike is never visible at all,
+because `end_turn` launches, advances and resolves it in one call. How much that
+costs depends on the ship-speed slider:
+
+- At the default 6 ly/turn no lane is shorter than 2 turns, so nothing is wholly
+  invisible, but a blow landing next turn still cannot be answered: the
+  reinforcement filter `travel_turns(sid, n) <= t_bind` has no lane short enough
+  to find. Over 12 thinker-vs-thinker games at 24 nodes, 43.7% of the threats
+  thinker detects sit at that horizon and *none* of them are reinforceable.
+- At 18 ly/turn, 72.5% of lanes are 1 turn; at 30, all of them are. There thinker
+  cannot see most attacks until they have landed.
+
+Measured at depth 1 against thinker, ladder, both seatings, 24-node random maps
+(2026-08, when knower was new):
+
+    default 6 ly/turn, 200 games   73% (119-45)
+    18 ly/turn, 100 games          91% (88-9)     <- mostly 1-turn lanes
+
+The gap between those rows is the thesis of the bot: the faster ships are, the
+more of the game thinker cannot see, and the oracle scales with it. The full
+roster ladder of the day read knower 143 > thinker 117 > claudebot 72 >
+heuristic 33 > rusherplus 10. That predates both marshal and the depth search,
+so treat it as history rather than a current ranking.
+
+Depth 0 is thinker-*strength*, not thinker: `RESERVE_FLOOR` is 0 against
+thinker's 1, `_richness` peeks a hop further (`BEYOND_DECAY`), and tie-breaks
+are deterministic where thinker's draw from `state.rng`. It measures stronger
+than thinker (80%-20%), so the two are not interchangeable.
+
+### Built, measured, removed
+
+- **Pricing three-way pile-ups.** The oracle knows who else lands on a node this
+  turn, so knower can fold the pile-up with the jitter pinned against it and
+  demand enough mass to survive it. 71% vs 72% head-to-head over 200 games, and
+  33 vs 35 wins in a 3-player free-for-all: a wash, if anything worse. It makes
+  knower skip attacks it cannot overpay for, and this game rewards the leaner
+  strike (the same finding that set thinker's margins).
+- **Striking perishable targets first.** A vacated garrison refills, so ordering
+  targets by how much of theirs is leaving looks obviously right. It changes
+  nothing: 118-45 vs 119-45 over 200 games, 35 vs 36 in the free-for-all.
+  Pricing the target correctly is what wins; the order it happens in does not.
+
+Don't re-add either without a measurement.
+
+### The depth search: why it branches every ply and cuts per opening
+
+An earlier version deviated for one ply and then played the tuned default for
+the rest. That prices a candidate as "what if I did this now and then went back
+to normal", so it cannot represent "rush now, consolidate next turn" at all, and
+a posture is exactly the kind of thing worth holding for three turns or not
+adopting. Hence branching at every ply.
+
+**The cut is per opening, not pooled** (`_prune`). The default's line branches
+as widely as anyone else's, so a single pooled beam fills with continuations of
+whichever opening leads on material right now: measured, 94% of survivors
+descended from the default and a borrowed opening never survived a single cut,
+which made the whole tree a costly way to re-derive depth 1.
+
+`SEARCH_BEAM` stays 1. Wider measured no better and costs linearly. An
+opening's score is the max over its surviving lines, and a max over more noisy
+rollouts is biased upward by sampling, unevenly across openings; the comparison
+the search needs is between openings, not within one.
+
+The remaining ceilings are the evaluation and the roster. `_evaluate` reads
+material off the final board, so within one opening `_prune` can still drop a
+line that gives ground early to win later; an eval integrated over the path
+would fix that. The roster is the dominant cost term, so a fifth candidate has
+to beat `candidates**2`: the cheap direction is a *better* four, not more.
+
+### Borrowed candidates (`EXTERNAL_CANDIDATES`)
+
+The single largest measured win in the search. At depth 12 against thinker:
+
+    with rusherplus + heuristic     97.5%  (390-10, n=400)   0 timeouts
+    postures only                   89.7%  (96-11,  n=107)  13 timeouts
+
+Without them extra depth stops paying entirely: postures-only measures 92.0% at
+depth 8 and 89.7% at depth 12, no better than depth 1. Rolling "knower, more or
+less aggressive" forward a dozen turns only compounds a fiction; depth converts
+into wins because there is something structurally different in the tree to
+find.
+
+How often each candidate wins the search, over 1128 **contested** decisions (we
+hold a system adjacent to a live rival):
+
+    default 54.8%   rusherplus 16.9%   heuristic 14.9%   timid 13.4%
+
+Measure this on contested positions only. During the land-grab nothing is in
+contact, every candidate rolls out to the same material and the tie-break
+returns the default by construction; the same 1128 decisions read 85% default
+with the opening phase folded in. Nearly a third of real decisions are moves
+knower's own four phases cannot express.
+
+That is also why `SEARCH_WIDTH` is 2. Over 1355 contested decisions with the
+full posture list in play:
+
+    default 53.6%   rusherplus 17.3%   timid 14.2%   heuristic 13.1%
+    all-in   1.3%   push-for-depth 0.5%
+
+The two aggressive postures stopped paying once a real rusher was a candidate,
+which expresses "commit everything" far better than a margin tweak to knower's
+own phases. Dropping them paid for the whole depth increase and more. They are
+still listed in `POSTURE_VARIANTS`, outside the width.
+
+### How much depth is worth
+
+Against thinker, both seatings, 24-node maps (n = decided games):
+
+    depth  1    90.4%   n=114     6 timeouts
+    depth  5    96.6%   n=119     1
+    depth  8    96.0%   n=400     0
+    depth 12    97.5%   n=400     0     <- the top of the slider
+    depth 16    95.8%   n=118     2
+
+Depth 1 -> 5 is real and large. **Everything past 5 is inside the noise**: 12
+over 8 is +1.5 pt with SE 1.25 (z = 1.20), and head-to-head knower@12 vs
+knower@8 finished 63-57 (52.5%, SE 4.6), even. Depth 12 came out ahead in every
+measurement taken and behind in none, which is why the slider goes there, but it
+is a mild preference and not a proven gain. Don't re-tune this on a hundred
+games; the differences are smaller than that.
+
+Depth also plays faster and less passively: from depth 1 to 12 against thinker,
+timeouts fall 6 -> 0 and games shorten 112 -> 100 turns.
+
+How much depth is worth depends on whether the opponent is an oracle. Against
+knower@1, depth 12 wins 66.1% (78-40); against knower@8 only 52.5%.
+`_rollout_decide` plays a non-oracle seat with its real `decide`, so a rollout
+against thinker is a faithful simulation for a dozen turns; it plays an oracle
+seat with `_blind`, a poor model of a deep knower, so a mirror compounds a
+fiction. Useful depth tracks how well the rollout can model the opposition.
+Against claudebot there is little headroom: 96.2% at depth 1, 98.8% (79-1) at
+12.
+
+### Cost per decide, and where the search guard trips
+
+Measured 2026-09-29, when maps grew to 120 systems. Every seat knower, one
+game per cell driven at depth 1, each live seat's decide timed every 20 turns
+at depth 1 and depth 12 with both guards lifted (`BUDGET_SCALE` inf), so these
+are the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores,
+4 threads), native CPython, load average under 1.8 throughout:
+
+    systems seats ly/turn   ply p75   depth-12 median / max   depth-1 max
+       24     2      6        12         122 /   142            2
+       24     6      1        38         305 /   674           10
+       24     6      6        15         159 /   225            3
+       40     2      6        14         129 /   182            1
+       40     6      1        53         428 /   727           10
+       40     6      6        23         203 /   288            4
+       40     6     18        14         145 /   188            2
+       80     2      1        66         250 /  1239            7
+       80     6      1       130         674 /  1607           21
+       80     6      6        55         544 /   667            7
+       80     6     18        26         271 /   324            5
+      120     2      6        89         774 /  1177            5
+      120     6      1       159         710 /  3540           28
+      120     6      6        99         885 /  1340           14
+      120     6     18        38         396 /   651            4
+
+(A ply is `(depth-12 - depth-1) / 11` for one decide; the p75 is over every
+decide in the game. The full 24-cell grid, 2/6 seats x 1/6/18 ly x
+24/40/80/120 systems, is the fit's input.)
+
+What it shows:
+
+- **Depth 1 is free at any size.** 28 ms is the worst decide in the grid, so
+  `ORACLE_BUDGET_S` (50 ms) never fires and a depth-1 seat never needs a warning.
+- **At depth >= 2 the guard is a real limit, not a catastrophe guard, from 40
+  systems up.** 40 nodes / 6 seats at depth 12 already needs ~200 ms against the
+  150 ms `SEARCH_BUDGET_S`. The cost table knower carried (57 ms there, 69 ms at
+  the tail, "better than 2x headroom") no longer holds; the search has grown
+  since. On 120 systems a depth-12 decide needs 0.4-0.9 s typically and up to
+  3.5 s.
+- **Cost is linear in map size, and slow ships are the tail.** The p75 ply fits
+  `17.5 ms x (systems/40)^1.0 x (seats/2)^0.42 x (ly/6)^-0.41` (`ply_ms`),
+  within +/-25% on most cells and a factor of 1.85 on the worst — one game per
+  cell, and a slow game varies turn to turn. At 1 ly/turn fleets stay in flight
+  for many turns, so every rollout has more to simulate; the p75 is 2-3x the
+  median there, against ~1.2x at 18 ly/turn.
+
+With the guard on, a clipped decide stops after the ply that crosses 150 ms.
+`_search_run` models that (the root rolls each of the four candidates out once,
+a quarter of a ply; the guard is checked before each ply after it), pinned
+against the real `_search` by a fake-clock test. Checked against guarded runs,
+the p75 prediction sits at the low end of the depth actually reached:
+
+    setup (systems/seats/ly, depth)   predicted   reached, median (range)
+    120 / 6 / 6,  d12                     4          4  (4-9)
+    120 / 2 / 1,  d8                      4          8  (4-8)
+     80 / 6 / 6,  d12                     5          5  (5-11)
+     40 / 6 / 6,  d12                     8          9  (8-12)
+     24 / 2 / 6,  d12                    12         12  (7-12)
+
+**The menu warns only where it matters** (`setup_warning`): when the guard
+would cut a search short of `WARN_USEFUL_DEPTH` (5, where the depth curve above
+flattens into noise), or a turn's knower thinking summed over its seats passes
+`WARN_TURN_MS` (1 s). A 12 that plays as a 7 costs nothing anyone can measure,
+so clipping alone is not worth interrupting Start for. In practice nothing up
+to 40 systems warns; from 60 systems with 6 seats, or 80 with fewer, slow ships
+warn; at 120 systems with 6 seats, the default speed warns too. Depth 1, the
+default, never does.
+
+**The browser is not modelled.** Every figure here is native CPython; the
+pygbag build is slower by an unmeasured factor, so there the guard clips
+harder and a turn stalls longer than the warning says (its text says as much).
+Measure that before tightening the thresholds on the web build.
+
+**Don't measure this on a loaded machine.** A first pass of this grid ran three
+jobs at once beside other work, at load average 16 on 4 threads. Thread CPU time
+excludes being descheduled but not sharing a core, its cache and its clock with
+a busy neighbour, and every cell read ~1.9x high (the same seed's 120/6/1 p75
+ply: 299 ms loaded, 159 ms quiet). The warning fitted to it fired on 40-system
+maps. Run one job at a time and record `os.getloadavg()` beside the numbers.
 
 ## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Map scores · Star Conquest Leaderboard</title>
+<title>Crowns · Star Conquest Leaderboard</title>
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
@@ -26,28 +26,27 @@
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1 id="setup">Loading…</h1>
-  <div id="setup-tags" class="card-tags"></div>
-  <p class="lede" id="subtitle"></p>
-  <div id="sort"></div>
-  <div id="scores" class="loading">Loading…</div>
+  <h1>Crowns</h1>
+  <p class="lede">
+    A crown is a map at least two players have posted on, and you hold its record.
+    A steal is a score that took a record from somebody else &mdash; tying one isn't
+    enough, the first to reach a result keeps it. Steals count in the week they were
+    posted, Monday to Monday (UTC).
+  </p>
 
-  <!-- How each models/ bot fares in the player's seat on this exact map,
-       computed offline by .github/workflows/bot-replay.yml. Empty until that
-       job has run, so the whole section hides itself rather than showing a
-       placeholder on a board that has never had a worker pointed at it. -->
-  <section id="bots" class="bots" hidden>
-    <h2>How the bots did</h2>
-    <p class="lede" id="bots-lede"></p>
-    <div id="bots-table"></div>
-  </section>
+  <nav class="weeks" id="weeks"></nav>
+  <div id="standings" class="loading">Loading…</div>
+
+  <h2 class="section-title" id="feed-title">Steals this week</h2>
+  <div id="feed"></div>
 </main>
 
 <footer class="attract">
-  <span class="coin">▚</span> Think you can beat that? &nbsp;·&nbsp;
+  <span class="coin">▚</span> Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
   <a href="submit.html">Enter a score</a>
 </footer>
 
-<script type="module" src="js/game.mjs"></script>
+<script type="module" src="js/crowns-page.mjs"></script>
 </body>
 </html>

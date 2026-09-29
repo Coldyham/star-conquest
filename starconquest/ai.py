@@ -130,6 +130,30 @@ def aux_spec(name: str) -> AuxSpec | None:
     return label.strip(), lo, hi, step, bool(getattr(module, "AUX_INT", False))
 
 
+def setup_warning(name: str, settings, seats: list[int]) -> list[str]:
+    """Lines strategy ``name`` wants shown before a match on ``settings`` starts
+    with it playing ``seats`` — typically "this setup is too big for me to play
+    well or quickly". Empty when it has nothing to say.
+
+    Declarative like `aux_spec`: a model opts in with a module-level
+    ``setup_warning(settings, seats) -> list[str]``. Tolerant the same way — a
+    hook that is missing, raises or returns junk says nothing rather than
+    keeping the match from starting.
+    """
+    fn = STRATEGIES.get(name)
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    hook = getattr(module, "setup_warning", None)
+    if not callable(hook):
+        return []
+    try:
+        lines = hook(settings, list(seats))
+    except Exception:  # noqa: BLE001 — a model's opinion must never block Start
+        return []
+    if not isinstance(lines, (list, tuple)):
+        return []
+    return [line for line in lines if isinstance(line, str) and line.strip()]
+
+
 def set_budget_scale(scale: float) -> list[str]:
     """Widen (or restore) every registered strategy's wall-clock guards.
 

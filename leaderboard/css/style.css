@@ -339,6 +339,11 @@ h1::after {
 .badge.embargo { border-color: var(--gold); color: var(--gold); cursor: help; }
 .badge.embargo:hover { background: #2a2000; }
 
+/* This map is a node on a campaign — a link to it there, green like the
+ * campaign's "you can make this move". */
+.badge.campaign { border-color: var(--green); color: var(--green); }
+.badge.campaign:hover { background: #0a2412; }
+
 /* -- the main list's filter bar and a filtered config's header ------------- */
 .filters {
   display: flex;
@@ -503,6 +508,8 @@ h1::after {
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
+.map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.map-actions .btn { margin-top: 0; }
 
 /* -- the bot replays ------------------------------------------------------ */
 /* Deliberately the same .scores/.score grid as the human table above, so the two
@@ -867,3 +874,69 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   .roster-row { grid-template-columns: 1rem minmax(0, 1fr); }
   .roster-who, .roster-state { grid-column: 2; text-align: left; }
 }
+
+/* -- crowns: the weekly contest (crowns.html) ----------------------------- */
+.weeks {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+.weeks .week-label {
+  flex: 1 1 auto;
+  text-align: center;
+  font-family: var(--pixel);
+  font-size: 0.8rem;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+.weeks .btn.ghost { opacity: 0.4; }
+#feed-title, .section-title {
+  margin: 2.5rem 0 0.6rem;
+  font-family: var(--pixel);
+  font-size: 0.95rem;
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.steals { margin: 0; padding: 0; list-style: none; }
+.steals .steal { padding: 0.55rem 0; overflow-wrap: anywhere; }
+.steals .steal + .steal { border-top: 1px dashed rgba(42, 35, 80, 0.9); }
+.steals .when { color: var(--dim); font-size: 0.9em; }
+
+/* A score whose replay the worker checked (score_checks.verdict = 'verified'). */
+.verified { margin-left: 0.35em; color: var(--green); cursor: help; }
+
+/* -- the weekly campaign (campaign.html) --------------------------------- */
+.campaign-status { margin: 0 0 1rem; color: var(--dim); }
+.campaign-map svg { display: block; width: 100%; height: auto; }
+.campaign-map .lane { stroke: #2a3350; stroke-width: 3; }
+.campaign-map .node { cursor: pointer; }
+.campaign-map .node circle.body { stroke: #0b0f1d; stroke-width: 2; }
+.campaign-map .node.home circle.body { stroke: var(--gold); stroke-width: 3; stroke-dasharray: 5 4; }
+.campaign-map .node.open circle.ring { fill: none; stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 3 4; }
+.campaign-map .node.selected circle.body { stroke: var(--magenta); stroke-width: 4; stroke-dasharray: none; }
+.campaign-map .node:focus { outline: none; }
+.campaign-map .node:focus-visible circle.body { stroke: var(--cyan); stroke-width: 4; }
+.campaign-map .node text {
+  font-family: var(--pixel); font-size: 18px; fill: #0b0f1d;
+  text-anchor: middle; dominant-baseline: central; pointer-events: none;
+}
+.campaign-map .node.neutral text { fill: var(--ink); }
+.campaign-detail {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-left: 4px solid var(--cyan);
+  background: rgba(11, 26, 44, 0.6);
+  overflow-wrap: anywhere;
+}
+.campaign-detail:empty { display: none; }
+.campaign-detail h3 {
+  margin: 0 0 0.5rem; font-family: var(--pixel); font-size: 0.85rem;
+  color: var(--gold); text-transform: uppercase;
+}
+.campaign-detail p { margin: 0.35rem 0; }
+.campaign-detail .can { color: var(--green); }
+.campaign-detail .cannot { color: var(--dim); }
+.campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
+.campaign-detail .btn + .btn { margin-left: 0.5rem; }

@@ -139,10 +139,10 @@ def test_a_placement_on_a_lane_is_refused(scene):
 def test_placement_stops_at_the_node_cap(scene):
     screen, ed, settings = scene
     ed.recipe = CustomMap(
-        nodes=[MapNode(0, 0, 3, 1, 1)] * config.MAX_NODES, lanes=[])
+        nodes=[MapNode(0, 0, 3, 1, 1)] * config.STANDARD_MAX_NODES, lanes=[])
     _press(screen, ed, settings, _empty_spot(ed))
-    assert len(ed.recipe.nodes) == config.MAX_NODES
-    assert str(config.MAX_NODES) in ed.status
+    assert len(ed.recipe.nodes) == config.STANDARD_MAX_NODES
+    assert str(config.STANDARD_MAX_NODES) in ed.status
 
 
 def test_a_palette_pick_sets_the_next_placement(scene):

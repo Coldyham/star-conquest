@@ -1,8 +1,10 @@
 import { configured, eq, select } from "./api.mjs";
+import { campaignMark } from "./campaign.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
+import { weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botProfile, botSummary, clear, competitionRanks, configBadge, credit, el,
+  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, el,
   embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores } from "./me.mjs";
@@ -34,6 +36,24 @@ function nameCell(score) {
     : el("span", { class: "nm", text: credit(score) });
 }
 
+/**
+ * Did the worker replay this score's log and get the same result? The embed is
+ * one-to-one (score_checks is keyed by score_id), which PostgREST hands back as
+ * an object or, on an older server, a one-element array; absent means unchecked.
+ */
+function isVerified(score) {
+  const check = [].concat(score.score_checks || [])[0];
+  return Boolean(check && check.verdict === "verified");
+}
+
+function verifiedMark() {
+  return el("span", {
+    class: "verified",
+    title: "Verified: this score's replay was re-run and reached the same result",
+    text: "✓",
+  });
+}
+
 function scoreRow(score, rank, replays) {
   const version = replays.get(score.match_id);
   const watchable = version === CURRENT_RULES_VERSION;
@@ -44,6 +64,7 @@ function scoreRow(score, rank, replays) {
     // name: a name long enough to wrap used to drag the dots into the middle of it.
     el("span", { class: "who" }, [
       nameCell(score),
+      ...(isVerified(score) ? [verifiedMark()] : []),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     // Watch (or its outdated-replay note) rides *inside* the result cell rather
@@ -213,6 +234,18 @@ async function renderBots(rows, best, gameSettings) {
   botsSection.hidden = false;
 }
 
+/**
+ * The ways on from this map: back into the game, and — while the map is a node
+ * on this week's campaign — back to that node, to see what is open next.
+ */
+function mapActions(link, campaign) {
+  const back = campaign && campaign.current
+    ? el("a", { class: "btn", href: campaign.href, text: "Campaign map" })
+    : null;
+  const buttons = [link, back].filter(Boolean);
+  return buttons.length ? [el("div", { class: "map-actions" }, buttons)] : [];
+}
+
 /** A link back into the game, carrying the leader's score as the target to beat. */
 function playLink(token) {
   if (!GAME_URL || !token) return null;
@@ -281,8 +314,9 @@ async function replayVersions(scores) {
 }
 
 /**
- * The map page while its embargo is still live (`games.embargo_until`,
- * schema.sql) — a compromise, not a blackout. The full per-score list is
+ * The map page while its embargo is still live (`game_summary.embargo_until`,
+ * which is `game_embargoes` in schema.sql: a map's own reveal date, or the end
+ * of a live campaign week it is a node of) — a compromise, not a blackout. The full per-score list is
  * never even requested here, so a competitor cannot see who else has played,
  * when, or how: lost, hand and submission time all say more about *how* a
  * score was made than the bare turn count does, and that "how" is exactly
@@ -303,7 +337,7 @@ async function replayVersions(scores) {
  * very lost/hand/by fields this view is holding back, sitting right there in
  * the page's own HTML whether or not they're ever rendered as text.
  */
-async function renderEmbargoed(game, embargoText, bots) {
+async function renderEmbargoed(game, embargoText, bots, campaign) {
   subtitle.textContent = [
     game.score_count
       ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
@@ -322,7 +356,7 @@ async function renderEmbargoed(game, embargoText, bots) {
     : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
   const link = await freshPlayLink(game);
-  clear(target).append(lede, ...(link ? [link] : []));
+  clear(target).append(lede, ...mapActions(link, campaign));
 
   const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
@@ -347,7 +381,7 @@ async function load() {
     // not to be embargoed, below. Fetching the full list up front and simply
     // not rendering it would still hand every score's detail to the page
     // (and anyone watching the network tab) before a single row is drawn.
-    const [games, bots] = await Promise.all([
+    const [games, bots, nodes] = await Promise.all([
       select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
       // The one query allowed to fail quietly. A board running an older
       // schema.sql has no bot_scores table, and PostgREST answers 404 — which
@@ -357,6 +391,12 @@ async function load() {
         `bot_scores?select=bot,won,turns,lost,bot_timeouts,aux,aux_label,computed_at,` +
           `match_id,rules_version` +
           `&game_key=${eq(gameKey)}`,
+      ).catch(() => []),
+      // Quiet for the same reason: a board without the campaign views just
+      // shows no badge.
+      select(
+        `campaign_games?select=week_start,node_id,kind&game_key=${eq(gameKey)}` +
+          `&order=week_start.desc&limit=1`,
       ).catch(() => []),
     ]);
     target.classList.remove("loading");
@@ -379,17 +419,19 @@ async function load() {
       return;
     }
     const game = games[0];
+    const campaign = nodes.length ? campaignMark(nodes[0], weekStart(new Date())) : null;
     heading.textContent = mapSummary(game);
-    clear(tagsTarget).append(configBadge(game), ...botChips(game));
+    clear(tagsTarget).append(
+      ...[configBadge(game), campaignBadge(campaign)].filter(Boolean), ...botChips(game));
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {
-      await renderEmbargoed(game, embargo, bots);
+      await renderEmbargoed(game, embargo, bots, campaign);
       return;
     }
 
     const scores = await select(
-      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name)` +
+      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),score_checks(verdict)` +
         `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
     );
 
@@ -411,7 +453,7 @@ async function load() {
     const replays = await replayVersions(scores);
     clear(target).append(
       el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays))),
-      ...(link ? [link] : []),
+      ...mapActions(link, campaign),
     );
 
     // After the human table, and off the same fetch: the bots are context for

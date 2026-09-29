@@ -108,9 +108,9 @@ def test_a_replay_of_another_map_cannot_back_a_score(posted):
 
 
 def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(posted):
-    """Postgres jsonb normalises ``12.0`` to ``12``, so `settings_json` reads back
-    with integer ``aux`` values whatever the game sent, while the uploaded log is
-    plain JSON and keeps the float. One setup, two reprs — and `challenge_key`
+    """The site writes `settings_json` from the browser, which turns ``12.0`` into
+    ``12``, so it reads back with integer ``aux`` values whatever the game sent,
+    while the uploaded log is the game's own JSON and keeps the float. One setup, two reprs — and `challenge_key`
     hashes JSON, so the comparison has to drop the distinction (`_aux_widened`)
     or every posted score carrying an aux reads as somebody else's map."""
     score, blob, setup = posted
