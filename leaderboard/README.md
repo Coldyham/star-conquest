@@ -7,7 +7,8 @@ others can play it and post their own — see "Sharing a setup with no score" be
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
 API. It is served from the game's own Netlify site: `tools/build_web.sh` copies
-the pages into `web/board/` and the root `netlify.toml` bundles
+the pages into `web/board/` (the site root sends visitors here; the game is at
+`/game/`) and the root `netlify.toml` bundles
 `netlify/functions/` to answer at `/api/`. The game itself works without it.
 
 ## Pages

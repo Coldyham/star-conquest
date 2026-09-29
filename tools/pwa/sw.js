@@ -16,8 +16,12 @@
 // - /board/ is network-first, falling back to the cache only offline. Its pages
 //   are thin shells over live data, and a single stale load after a deploy could
 //   pair old JS with a new API or rules version.
+//
+// It is served from the site root, not /game/ beside the game, so its scope stays
+// "/" — the scope every install from before the game moved to /game/ registered —
+// and it keeps covering the board. v3 drops the v2 cache, whose "/" was the game.
 
-const CACHE = "starconquest-v2";
+const CACHE = "starconquest-v3";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

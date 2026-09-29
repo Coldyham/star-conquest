@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0c14">
+<title>Star Conquest</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<!--
+  The site root, staged as web/index.html by tools/build_web.sh. The leaderboard
+  is the front page (/board/) and the game lives at /game/, but every link the
+  game ever shared points at this root with the payload in the fragment —
+  challenge (#<token>), replay (#log=…) and play-by-post seat links alike — and a
+  fragment never reaches the server, so only a script here can tell them apart:
+
+  - a fragment goes to the game, fragment intact;
+  - an installed app (standalone/fullscreen) goes to the game too, since a home
+    screen install from before the move still launches /index.html;
+  - anything else is a visitor, and gets the board.
+-->
+<script>
+(function () {
+  var standalone = navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia(
+      "(display-mode: standalone), (display-mode: fullscreen)").matches);
+  var game = location.hash.length > 1 || standalone;
+  location.replace((game ? "/game/" : "/board/") + location.search + location.hash);
+})();
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=/board/"></noscript>
+<style>html, body { background: #0a0c14; color: #c8cdd7; font-family: system-ui, sans-serif; }</style>
+</head>
+<body>
+<p><a href="/board/" style="color:#56aaff">Leaderboard</a> · <a href="/game/" style="color:#56aaff">Play Star Conquest</a></p>
+</body>
+</html>

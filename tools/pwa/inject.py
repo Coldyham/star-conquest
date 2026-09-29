@@ -8,7 +8,7 @@ place: it adds the manifest/apple-touch/theme-color head tags, registers the
 service worker, and restyles pygbag's default (green-on-blue) loading screen to
 match the game's dark palette.
 
-    uv run python tools/pwa/inject.py web/index.html
+    uv run python tools/pwa/inject.py web/game/index.html
 
 Anchors it relies on (the <head>/<title> boilerplate pygbag stamps out) are
 asserted so the build fails loudly if a future pygbag version changes them, rather
@@ -25,16 +25,18 @@ from pathlib import Path
 # use !important so they win over pygbag's base rules and the inline body colour
 # JS sets during boot; the SW registration is what tips the page over the PWA
 # installability bar (and enables offline play).
+# The page is served at /game/, but the manifest, icons and service worker sit at
+# the site root (see tools/build_web.sh), hence the absolute paths.
 HEAD_BLOCK = """
     <!-- PWA wiring — injected by tools/pwa/inject.py -->
-    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#0a0c14">
     <meta name="description" content="A minimalist turn-based strategy game: take every star system to win.">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Star Conquest">
-    <link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <link rel="icon" type="image/png" href="icon-192.png" sizes="192x192">
-    <link rel="icon" type="image/png" href="icon-512.png" sizes="512x512">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192">
+    <link rel="icon" type="image/png" href="/icon-512.png" sizes="512x512">
     <style>
         html, body { background: #0a0c14 !important; }
         #status {
@@ -62,7 +64,7 @@ HEAD_BLOCK = """
     <script>
         if ("serviceWorker" in navigator) {
             window.addEventListener("load", function () {
-                navigator.serviceWorker.register("./sw.js").catch(function (e) {
+                navigator.serviceWorker.register("/sw.js").catch(function (e) {
                     console.warn("Star Conquest SW registration failed", e);
                 });
             });
@@ -72,7 +74,7 @@ HEAD_BLOCK = """
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "web/index.html")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "web/game/index.html")
     html = path.read_text(encoding="utf-8")
 
     if "</head>" not in html:
