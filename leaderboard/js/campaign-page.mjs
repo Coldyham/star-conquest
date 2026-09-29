@@ -18,15 +18,17 @@ const detailBox = document.getElementById("detail");
 const standingsBox = document.getElementById("standings");
 const feedBox = document.getElementById("feed");
 
+const params = new URLSearchParams(location.search);
 const now = new Date();
 const thisWeek = weekStart(now);
-const week = parseWeek(new URLSearchParams(location.search).get("week"), now);
+const week = parseWeek(params.get("week"), now);
 const current = week.getTime() === thisWeek.getTime();
 const me = myName();
 
 let graph = null;
 let state = null;
-let selected = null;
+let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
+let selected = params.has("node") ? Number(params.get("node")) : null;
 
 const dayLabel = (date) =>
   date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
@@ -123,6 +125,10 @@ async function drawDetail() {
       play = null;
     }
   }
+  const board = boards.get(node.id);
+  const scores = board
+    ? el("a", { class: "btn ghost", href: `game.html?key=${encodeURIComponent(board)}`, text: "Scores" })
+    : null;
   clear(detailBox).append(
     el("h3", { text: title }),
     el("p", { text: node.mystery ? "Mystery map — settings randomised" : mapSummary(setup) }),
@@ -132,6 +138,7 @@ async function drawDetail() {
       : [node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."]),
     attemptNote(node, holder),
     play,
+    scores,
   );
 }
 
@@ -179,10 +186,11 @@ async function load() {
   }
   try {
     const day = weekParam(week);
-    const [rows, scores] = await Promise.all([
+    const [rows, scores, games] = await Promise.all([
       select(`campaigns?select=week_start,graph&week_start=${eq(day)}`),
       select(`campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at` +
         `&week_start=${eq(day)}&order=submitted_at.asc,score_id.asc`),
+      select(`campaign_games?select=node_id,game_key&week_start=${eq(day)}`).catch(() => []),
     ]);
     if (!rows.length) {
       mapBox.classList.remove("loading");
@@ -193,8 +201,10 @@ async function load() {
     }
     graph = rows[0].graph;
     state = fold(graph, scores);
+    boards = new Map(games.map((row) => [row.node_id, row.game_key]));
     drawStatus();
     drawMap();
+    drawDetail();
     drawStandings();
     drawFeed();
   } catch (err) {

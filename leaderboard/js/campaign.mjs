@@ -17,6 +17,7 @@
 //
 // No DOM and no fetch, so tests/ can exercise it directly.
 
+import { weekParam } from "./crowns.mjs";
 import { compareScores } from "./standings.mjs";
 
 const keyOf = (name) => String(name || "").trim().toLowerCase();
@@ -113,6 +114,21 @@ export function canAttempt(graph, state, nodeId, name) {
   if (node.kind === "home") return !held && !state.homes.has(key);
   if (held && held.key === key) return false;
   return [...neighbours(graph).get(nodeId)].some((other) => state.holders.get(other)?.key === key);
+}
+
+/**
+ * What a map's campaign badge says and where it goes, for one `campaign_games`
+ * row: that node on the campaign page, preselected, in its own week.
+ */
+export function campaignMark(entry, thisWeek) {
+  const current = entry.week_start === weekParam(thisWeek);
+  const node = `${entry.kind === "home" ? "Home" : "Node"} ${entry.node_id}`;
+  const week = current ? "" : `week=${entry.week_start}&`;
+  return {
+    current,
+    label: `${current ? "Campaign" : "Past campaign"} · ${node}`,
+    href: `campaign.html?${week}node=${entry.node_id}`,
+  };
 }
 
 /** A node's circle radius in the page's own units, growing with its systems. */

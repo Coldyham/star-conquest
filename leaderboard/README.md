@@ -652,7 +652,10 @@ Only the map is stored (`campaigns`, written once per week by
 `tools/campaign.py` on the hourly job, with the secret key as its only writer).
 The standing is a replay of the week's scores in posting order
 (`campaign_scores` → `js/campaign.mjs`'s `fold`), so a deleted or re-checked
-score changes it on the next page load. Tests: `tests/test_campaign.py` for the
+score changes it on the next page load. `campaign_games` is the node-to-map
+match underneath it (seed plus the setup compared as jsonb, so `0.0` and `0`
+agree). It is also what puts a campaign badge on a map's page and its index
+row, linking back to that node on the campaign page. Tests: `tests/test_campaign.py` for the
 generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 `tests/test_crowns_sql.py` for the view.
 

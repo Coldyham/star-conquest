@@ -240,6 +240,10 @@ alter table public.score_checks add  constraint score_checks_verdict check (
 -- every identifier here resolves to pg_catalog, and pinning search_path would
 -- make sc_config_key non-inlinable, which is what lets an expression index
 -- match it.
+--
+-- A digest of the text, so it only groups rows written the same way: every
+-- games row comes from the browser. A Python-written setup (Python keeps `0.0`,
+-- the browser writes `0`) is matched by jsonb `=` instead -- see campaign_games.
 -- ---------------------------------------------------------------------------
 create or replace function public.sc_config_key(settings jsonb)
 returns text
@@ -755,8 +759,10 @@ where prior.user_id <> s.user_id
 --
 -- graph = {nodes: [{id, kind: 'home'|'field', x, y, systems, mystery,
 -- settings}], lanes: [[a, b], ...]}, where `settings` is the node's setup in the
--- exact pruned form a posted link stores in games.settings_json, so the view
--- below can match a node to its game by config and seed.
+-- pruned form a posted link stores in games.settings_json, so the views below
+-- can match a node to its game by config and seed. The same fields, not the
+-- same text: the worker writes Python's `0.0` where the site stores a browser's
+-- `0`.
 --
 -- Who holds what is *not* stored: it is a replay of the week's posted scores in
 -- time order, done by the page, the same way crowns are derived. Public read,
@@ -770,31 +776,45 @@ create table if not exists public.campaigns (
 );
 
 -- ---------------------------------------------------------------------------
--- campaign_scores: every counted score posted during a campaign's week on one
--- of its nodes, with at least one turn played by hand. A node is matched to
--- whichever games row carries its config and seed — however that row got its
--- game_key — through the same sc_config_key the config grouping uses.
+-- campaign_games: which game row each campaign node has, once somebody has
+-- posted on it -- whichever row carries the node's config and seed, however
+-- that row got its game_key. Compared as jsonb, which is equal by value, never
+-- through sc_config_key: a digest of the text tells the node's `0.0` from the
+-- posted row's `0`.
 -- ---------------------------------------------------------------------------
-create or replace view public.campaign_scores
+create or replace view public.campaign_games
   with (security_invoker = true) as
 select
   c.week_start,
   (node ->> 'id')::integer as node_id,
+  node ->> 'kind' as kind,
+  g.game_key
+from public.campaigns c
+cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
+join public.games g
+  on g.seed = (node -> 'settings' ->> 'seed')::integer
+ and (g.settings_json - array['seed', 'autoplay']) = ((node -> 'settings') - array['seed', 'autoplay']);
+
+-- ---------------------------------------------------------------------------
+-- campaign_scores: every counted score posted during a campaign's week on one
+-- of its nodes, with at least one turn played by hand.
+-- ---------------------------------------------------------------------------
+create or replace view public.campaign_scores
+  with (security_invoker = true) as
+select
+  cg.week_start,
+  cg.node_id,
   cs.id as score_id,
   cs.user_id,
   cs.user_name,
   cs.turns,
   cs.lost,
   cs.submitted_at
-from public.campaigns c
-cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
-join public.games g
-  on public.sc_config_key(g.settings_json) = public.sc_config_key(node -> 'settings')
- and g.seed = (node -> 'settings' ->> 'seed')::integer
-join public.counted_scores cs on cs.game_key = g.game_key
+from public.campaign_games cg
+join public.counted_scores cs on cs.game_key = cg.game_key
 where cs.hand > 0
-  and cs.submitted_at >= c.week_start::timestamp at time zone 'UTC'
-  and cs.submitted_at <  (c.week_start + 7)::timestamp at time zone 'UTC';
+  and cs.submitted_at >= cg.week_start::timestamp at time zone 'UTC'
+  and cs.submitted_at <  (cg.week_start + 7)::timestamp at time zone 'UTC';
 
 -- ---------------------------------------------------------------------------
 -- Policies
@@ -865,7 +885,7 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.config_tags, public.game_summary, public.config_summary,
   public.bot_scores, public.score_checks, public.public_replays,
   public.counted_scores, public.crown_holders, public.crown_steals,
-  public.campaigns, public.campaign_scores
+  public.campaigns, public.campaign_games, public.campaign_scores
   to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The

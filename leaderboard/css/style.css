@@ -339,6 +339,11 @@ h1::after {
 .badge.embargo { border-color: var(--gold); color: var(--gold); cursor: help; }
 .badge.embargo:hover { background: #2a2000; }
 
+/* This map is a node on a campaign — a link to it there, green like the
+ * campaign's "you can make this move". */
+.badge.campaign { border-color: var(--green); color: var(--green); }
+.badge.campaign:hover { background: #0a2412; }
+
 /* -- the main list's filter bar and a filtered config's header ------------- */
 .filters {
   display: flex;
@@ -503,6 +508,8 @@ h1::after {
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
+.map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.map-actions .btn { margin-top: 0; }
 
 /* -- the bot replays ------------------------------------------------------ */
 /* Deliberately the same .scores/.score grid as the human table above, so the two
@@ -932,3 +939,4 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail .can { color: var(--green); }
 .campaign-detail .cannot { color: var(--dim); }
 .campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
+.campaign-detail .btn + .btn { margin-left: 0.5rem; }

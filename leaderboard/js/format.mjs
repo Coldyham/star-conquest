@@ -249,6 +249,15 @@ export function embargoBadge(game) {
   return el("span", { class: "badge embargo", title: note, text: "Embargoed" });
 }
 
+/**
+ * This map is a node on a campaign (`campaignMark`, campaign.mjs) — a link to
+ * that node on the campaign page, or null for a map on none.
+ */
+export function campaignBadge(mark) {
+  if (!mark) return null;
+  return el("a", { class: "badge campaign", href: mark.href, text: mark.label });
+}
+
 export function showError(node, message) {
   node.classList.remove("loading");
   clear(node).append(el("p", { class: "error", text: message }));

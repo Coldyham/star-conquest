@@ -6,6 +6,7 @@ Pure/headless (settings.py imports no pygame), so this needs no display.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 
 import pytest
 
@@ -411,6 +412,44 @@ def test_challenge_key_survives_a_round_trip_of_an_int_aux():
     s.ai_strategy[4] = "knower"
     assert Settings.from_dict(s.to_dict()).challenge_key() == s.challenge_key()
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
+
+
+def _through_a_browser(value):
+    """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
+    one number type, so an integral float comes back an int."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _through_a_browser(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_through_a_browser(v) for v in value]
+    return value
+
+
+def test_a_browser_round_trip_moves_the_challenge_key_only_through_aux():
+    """Every float knob, scalar and per-seat, at a whole-number value no default
+    holds, then through the leaderboard's JavaScript. `from_dict` coerces each
+    field back to its type, so the digest survives, except for `aux`, whose int
+    form is kept on purpose. That leaves `aux` as the only thing
+    `verify_scores._aux_widened` has to cover. A new field `from_dict` does not
+    coerce fails here, instead of as a verifier mismatch or a split map."""
+    s = Settings(seed=7)
+    for f in dataclasses.fields(Settings):
+        value = getattr(s, f.name)
+        if isinstance(value, float):
+            setattr(s, f.name, float(int(value)) + 1.0)
+    whole = {f.name: float(int(getattr(AiParams(), f.name))) + 1.0
+             for f in dataclasses.fields(AiParams)
+             if isinstance(getattr(AiParams(), f.name), float) and f.name != "aux"}
+    s.ai[1] = AiParams(**whole)
+    s = Settings.from_dict(s.to_dict())            # the clamps, applied once
+    back = Settings.from_dict(_through_a_browser(s.token_dict()))
+    assert back.challenge_key() != s.challenge_key()   # the default aux 1.0 came back as 1
+
+    for cfg in (s, back):
+        for params in cfg.ai:
+            params.aux = float(params.aux)
+    assert back.challenge_key() == s.challenge_key()
 
 
 def test_a_challenge_link_with_an_int_aux_still_matches():

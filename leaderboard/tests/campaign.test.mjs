@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canAttempt, fold, nodeRadius, playerHue } from "../js/campaign.mjs";
+import { campaignMark, canAttempt, fold, nodeRadius, playerHue } from "../js/campaign.mjs";
 
 // Homes 10 and 11 hang off field nodes 0 and 2; the field is a line 0 - 1 - 2.
 //
@@ -96,4 +96,14 @@ test("what you may attempt: an empty home once, or a node beside one you hold", 
 test("bigger maps draw bigger, and one name is one colour", () => {
   assert.ok(nodeRadius(120) > nodeRadius(40) && nodeRadius(40) > nodeRadius(12));
   assert.equal(playerHue("Ann"), playerHue("ann"));
+});
+
+test("a map's campaign badge points at its node, in its own week", () => {
+  const monday = new Date(Date.UTC(2026, 8, 28));
+  assert.deepEqual(campaignMark({ week_start: "2026-09-28", node_id: 15, kind: "home" }, monday), {
+    current: true, label: "Campaign · Home 15", href: "campaign.html?node=15",
+  });
+  assert.deepEqual(campaignMark({ week_start: "2026-09-21", node_id: 3, kind: "field" }, monday), {
+    current: false, label: "Past campaign · Node 3", href: "campaign.html?week=2026-09-21&node=3",
+  });
 });

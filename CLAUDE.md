@@ -683,9 +683,12 @@ already resolve simultaneously. The rationale for each rule is in
     (sometimes its symmetric variant, plus one or two "?" nodes rolled with
     `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
     nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
-    exact pruned `token_dict` form `games.settings_json` holds, which is what
-    lets `campaign_scores` match it to its games by `sc_config_key` plus seed.
-    Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
+    pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
+    matches it to its game by seed plus jsonb *equality* — never
+    `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
+    browser posts, and so misses nearly every node. `campaign_scores` sits on
+    that view, and so do the green campaign badge on a map's page and index row
+    and the link back to `campaign.html?node=`. Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
     week's hand-played counted scores in posting order — a home goes to the
     first win from a player without one and can't be taken; a field node falls
     to a win posted while holding a neighbour, and a held one only to a strictly
@@ -762,6 +765,32 @@ already resolve simultaneously. The rationale for each rule is in
     `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
     rather than added as a field here — that would move `challenge_key()` for
     every map instead of only the config grouping.
+- **Whole-number floats don't survive the browser, so never compare setups as
+  text across writers.** Python writes `0.0`, `1.0`, `18.0`; the leaderboard's
+  JavaScript has one number type, so everything it writes (`games.settings_json`,
+  a token it re-encodes, `pbp_*` rows) says `0`, `1`, `18`. Postgres jsonb keeps
+  whichever text it was sent, so a Python-written row and a browser-written one
+  can hold the same setup and differ as text — and `json.dumps`, `md5(…::text)`
+  (`sc_config_key`) or `JSON.stringify` then call them different. This has
+  bitten four times: the int `aux` a decode keeps, integer hand-map coordinates,
+  `verify_scores._aux_widened`, and `campaign_games`, whose node settings come
+  from `tools/campaign.py` (every campaign node sat unclaimable until the match
+  moved to jsonb `=`). The rules:
+  - **Compare by value, or after `Settings.from_dict`.** `from_dict` coerces every
+    field back to its type, `aux` alone excepted (`_ai_from_dict`), so two
+    decoded setups agree however they travelled — pinned by
+    `test_a_browser_round_trip_moves_the_challenge_key_only_through_aux`, which
+    fails if a new field escapes the coercion. In SQL, jsonb `=` compares numbers
+    by value; a digest of the text does not.
+  - **`sc_config_key` and `setupIdentity` are text identities, safe only among
+    browser-written rows** — every `games` row is. A Python-written setup (a
+    worker's, a log's) is matched to them by value, never by those.
+  - **`aux` is the one digest leak left.** A board-made link (*Play this map* on
+    an unscored map, *Play a new seed*, the campaign's *Play*, a legacy bot
+    *Watch*) reaches the game as ints, so a customised seat's default `1.0`
+    becomes `1` and `challenge_key` moves. `submit.findTwin` rehomes the score
+    onto the right row and `_aux_widened` covers the verifier; what is left is a
+    personal best filed under two keys.
 - **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
   paths in `main`/`menu`, and `upload`, which is the one that also runs off the
   web): `get`/`set` are `localStorage` on the web and
@@ -888,10 +917,10 @@ already resolve simultaneously. The rationale for each rule is in
     preserves that — `aux` is the one field whose int/float form survives a
     decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
     it and every link carrying an int aux reads as edited the moment it opens.
-    The board is the one place that cannot hold the distinction (jsonb drops the
-    `.0`), so `verify_scores.same_setup` widens both sides through `_aux_widened`
-    before hashing — drop that and every posted score with an aux reads as a
-    different map.
+    The board cannot hold the distinction (its rows are browser-written — see
+    "Whole-number floats" below), so `verify_scores.same_setup` widens both sides
+    through `_aux_widened` before hashing — drop that and every posted score with
+    an aux reads as a different map.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
@@ -1178,9 +1207,9 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   hashes what `to_dict` writes, so a form the reader would normalise differently
   makes a sender's own link read as edited the moment it is opened — the trap
   `_ai_from_dict` documents for an int `aux`. Coordinates are **integers** for the
-  same family of reasons: `verify_scores.same_setup` hashes a jsonb side (which
-  drops `100.0` to `100`) against a plain-JSON side, and `_aux_widened` already
-  papers over that for one field. Don't make it two.
+  same family of reasons: `verify_scores.same_setup` hashes a browser-written
+  side (where `100.0` is `100`) against the game's own JSON, and `_aux_widened`
+  already papers over that for one field. Don't make it two.
 - **Node identity is positional**, so deleting node *i* shifts every later lane
   index. `CustomMap.without_node` is the single implementation; don't open-code it.
 - **`mapmaker` draws on the real surface, not `menu`'s fixed canvas.**

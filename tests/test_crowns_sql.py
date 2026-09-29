@@ -92,15 +92,19 @@ def test_only_beating_somebody_elses_record_is_a_steal(board):
 
 def test_campaign_scores_are_the_weeks_hand_played_scores_on_its_nodes(board):
     """Matched by config and seed, inside the week, with a turn played by hand,
-    and not a proven mismatch — everything else is an ordinary score."""
+    and not a proven mismatch — everything else is an ordinary score. The node
+    was written by Python (`18.0`) and the game row by a browser (`18`)."""
     _psql("""
       insert into campaigns (week_start, graph) values ('2026-09-28', jsonb_build_object(
         'nodes', jsonb_build_array(
-          jsonb_build_object('id', 0, 'kind', 'field',
-            'settings', '{"mode":"random","players":3,"nodes":18,"seed":100}'::jsonb)),
-        'lanes', '[]'::jsonb));
+          jsonb_build_object('id', 0, 'kind', 'field', 'settings',
+            '{"mode":"random","players":3,"nodes":18,"seed":100,"ship_ly_per_turn":18.0}'::jsonb),
+          jsonb_build_object('id', 1, 'kind', 'home', 'settings',
+            '{"mode":"random","players":3,"nodes":18,"seed":102}'::jsonb)),
+        'lanes', '[[0, 1]]'::jsonb));
       insert into games (game_key, mode, players, nodes, seed, settings_json) values
-        ('node', 'random', 3, 18, 100, '{"mode":"random","players":3,"nodes":18,"seed":100}'),
+        ('node', 'random', 3, 18, 100,
+         '{"mode":"random","players":3,"nodes":18,"seed":100,"ship_ly_per_turn":18}'),
         ('other-seed', 'random', 3, 18, 101, '{"mode":"random","players":3,"nodes":18,"seed":101}'),
         ('other-config', 'random', 4, 18, 100, '{"mode":"random","players":4,"nodes":18,"seed":100}');
       insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at) values
@@ -118,3 +122,6 @@ def test_campaign_scores_are_the_weeks_hand_played_scores_on_its_nodes(board):
     rows = _psql("select node_id, user_name, turns from campaign_scores"
                  " where week_start = '2026-09-28' order by submitted_at", board)
     assert rows.splitlines() == ["0|alice|40", "0|bob|38"]
+    games = _psql("select node_id, kind, game_key from campaign_games"
+                  " where week_start = '2026-09-28'", board)
+    assert games.splitlines() == ["0|field|node"]   # nobody has posted on the home

@@ -141,9 +141,9 @@ def _aux_widened(cfg: Settings) -> Settings:
     ``settings._ai_from_dict`` keeps an int ``aux`` as one, since a knob declaring
     ``AUX_INT`` is a whole number and ``challenge_key`` hashes JSON, where ``12``
     and ``12.0`` are different setups. A ``games`` row cannot hold that
-    distinction — Postgres jsonb normalises ``12.0`` to ``12``, so a posted setup
-    reads back as ints whatever was sent — while an uploaded log is plain JSON and
-    keeps it. So the two sides are compared with the distinction dropped rather
+    distinction: the site writes it from the browser, whose one number type turns
+    ``12.0`` into ``12``, so a posted setup reads back as ints whatever the game
+    sent, while an uploaded log is the game's own JSON and keeps it. So the two sides are compared with the distinction dropped rather
     than trusted; it is a repr, and no setup differs from another only by it.
     """
     for params in cfg.ai:
