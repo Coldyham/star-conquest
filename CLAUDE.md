@@ -676,6 +676,21 @@ already resolve simultaneously. The rationale for each rule is in
     never count. Nothing is stored, so moderation recomputes them for free.
     `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
     against a real Postgres when `SC_TEST_PG` is set.
+  - **The weekly campaign stores its map and derives its state.**
+    `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
+    writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
+    out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
+    (sometimes its symmetric variant, plus one or two "?" nodes rolled with
+    `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
+    nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
+    exact pruned `token_dict` form `games.settings_json` holds, which is what
+    lets `campaign_scores` match it to its games by `sc_config_key` plus seed.
+    Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
+    week's hand-played counted scores in posting order — a home goes to the
+    first win from a player without one and can't be taken; a field node falls
+    to a win posted while holding a neighbour, and a held one only to a strictly
+    better score. The Advanced slider ranges live in `settings` (`ADV_*`) for
+    this reason; `menu` aliases them.
   - **A map can be registered with no score at all, and can carry a one-time
     reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
     Star Conquest link, not just a challenge one — `token-decode.mjs`'s

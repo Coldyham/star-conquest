@@ -88,3 +88,33 @@ def test_only_beating_somebody_elses_record_is_a_steal(board):
     rows = _psql("select game_key, taker_name, from_name, turns, from_turns"
                  " from crown_steals order by game_key", board)
     assert rows.splitlines() == ["lost|cara|alice|20|20", "steal|bob|alice|40|50"]
+
+
+def test_campaign_scores_are_the_weeks_hand_played_scores_on_its_nodes(board):
+    """Matched by config and seed, inside the week, with a turn played by hand,
+    and not a proven mismatch — everything else is an ordinary score."""
+    _psql("""
+      insert into campaigns (week_start, graph) values ('2026-09-28', jsonb_build_object(
+        'nodes', jsonb_build_array(
+          jsonb_build_object('id', 0, 'kind', 'field',
+            'settings', '{"mode":"random","players":3,"nodes":18,"seed":100}'::jsonb)),
+        'lanes', '[]'::jsonb));
+      insert into games (game_key, mode, players, nodes, seed, settings_json) values
+        ('node', 'random', 3, 18, 100, '{"mode":"random","players":3,"nodes":18,"seed":100}'),
+        ('other-seed', 'random', 3, 18, 101, '{"mode":"random","players":3,"nodes":18,"seed":101}'),
+        ('other-config', 'random', 4, 18, 100, '{"mode":"random","players":4,"nodes":18,"seed":100}');
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at) values
+        ('node', 1, 40, 2, 40, '', '2026-09-28 00:00Z'),          -- counts
+        ('node', 2, 38, 2, 5,  '', '2026-10-04 23:59Z'),          -- counts: any hand turns
+        ('node', 3, 30, 0, 0,  '', '2026-09-30 12:00Z'),          -- autoplayed
+        ('node', 3, 30, 0, 30, '', '2026-09-27 23:59Z'),          -- the week before
+        ('node', 3, 30, 0, 30, '', '2026-10-05 00:00Z'),          -- the week after
+        ('node', 3, 29, 0, 29, '', '2026-09-29 12:00Z'),          -- a proven mismatch
+        ('other-seed', 3, 20, 0, 20, '', '2026-09-29 12:00Z'),
+        ('other-config', 3, 20, 0, 20, '', '2026-09-29 12:00Z');
+      insert into score_checks (score_id, verdict)
+        select id, 'mismatch' from scores where game_key = 'node' and turns = 29;
+    """, board)
+    rows = _psql("select node_id, user_name, turns from campaign_scores"
+                 " where week_start = '2026-09-28' order by submitted_at", board)
+    assert rows.splitlines() == ["0|alice|40", "0|bob|38"]

@@ -69,6 +69,60 @@ _GLOBAL_KNOBS = (
 )
 
 
+# The Advanced-tab knobs as slider specs: (key, label, attr, lo, hi, step, is_int).
+# Here rather than in `menu` so pure code can use the same ranges: the menu draws
+# and edits them, and `randomise_knobs` rolls them for its dice button and for
+# the weekly campaign's "?" maps (tools/campaign.py), which has no pygame.
+ADV_MAP = (
+    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
+    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
+    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
+    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
+    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
+)
+ADV_TRAVEL = (
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
+    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
+)
+ADV_ECON = (
+    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
+    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
+    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
+    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
+    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
+)
+
+
+# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
+# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
+# namespace written to, not the tab drawn on.
+ADV_COMBAT = (
+    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
+    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
+    # setting and becomes a stalemate. Both sides produce symmetrically, so a
+    # fortress bonus that large grows the defence as fast as any assault can be
+    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
+    # resolve at a 3000-turn cap either. See bot-design for the measurements.
+    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
+)
+# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
+# detail); scout floors at 1 so immediate neighbours stay visible enough to target
+# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
+ADV_FOG = (
+    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
+    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
+)
+
+
+def randomise_knobs(target, specs, rng: random.Random) -> None:
+    """Set every knob in ``specs`` on ``target`` to a random in-bounds value,
+    snapped to its step and clamped the way the menu's sliders are."""
+    for _key, _label, attr, lo, hi, step, is_int in specs:
+        snapped = round(rng.uniform(lo, hi) / step) * step
+        snapped = max(lo, min(hi, snapped))
+        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
+
+
 # Token fields always emitted, even at their default value. Everything else is
 # pruned and inferred by the reader, but these four *are* the identity of the
 # match: pruning makes a token depend on the reader's defaults, so if a

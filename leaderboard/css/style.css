@@ -877,7 +877,7 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   text-transform: uppercase;
 }
 .weeks .btn.ghost { opacity: 0.4; }
-#feed-title {
+#feed-title, .section-title {
   margin: 2.5rem 0 0.6rem;
   font-family: var(--pixel);
   font-size: 0.95rem;
@@ -892,3 +892,36 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 
 /* A score whose replay the worker checked (score_checks.verdict = 'verified'). */
 .verified { margin-left: 0.35em; color: var(--green); cursor: help; }
+
+/* -- the weekly campaign (campaign.html) --------------------------------- */
+.campaign-status { margin: 0 0 1rem; color: var(--dim); }
+.campaign-map svg { display: block; width: 100%; height: auto; }
+.campaign-map .lane { stroke: #2a3350; stroke-width: 3; }
+.campaign-map .node { cursor: pointer; }
+.campaign-map .node circle.body { stroke: #0b0f1d; stroke-width: 2; }
+.campaign-map .node.home circle.body { stroke: var(--gold); stroke-width: 3; stroke-dasharray: 5 4; }
+.campaign-map .node.open circle.ring { fill: none; stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 3 4; }
+.campaign-map .node.selected circle.body { stroke: var(--magenta); stroke-width: 4; stroke-dasharray: none; }
+.campaign-map .node:focus { outline: none; }
+.campaign-map .node:focus-visible circle.body { stroke: var(--cyan); stroke-width: 4; }
+.campaign-map .node text {
+  font-family: var(--pixel); font-size: 18px; fill: #0b0f1d;
+  text-anchor: middle; dominant-baseline: central; pointer-events: none;
+}
+.campaign-map .node.neutral text { fill: var(--ink); }
+.campaign-detail {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-left: 4px solid var(--cyan);
+  background: rgba(11, 26, 44, 0.6);
+  overflow-wrap: anywhere;
+}
+.campaign-detail:empty { display: none; }
+.campaign-detail h3 {
+  margin: 0 0 0.5rem; font-family: var(--pixel); font-size: 0.85rem;
+  color: var(--gold); text-transform: uppercase;
+}
+.campaign-detail p { margin: 0.35rem 0; }
+.campaign-detail .can { color: var(--green); }
+.campaign-detail .cannot { color: var(--dim); }
+.campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }

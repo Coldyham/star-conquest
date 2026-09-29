@@ -680,7 +680,9 @@ left join lateral (
 -- ---------------------------------------------------------------------------
 create or replace view public.counted_scores
   with (security_invoker = true) as
-select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at
+select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
+  -- New columns go last: `create or replace view` can add one, never reorder.
+  s.hand
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
@@ -744,6 +746,57 @@ where prior.user_id <> s.user_id
   and (s.turns, s.lost) < (prior.turns, prior.lost);
 
 -- ---------------------------------------------------------------------------
+-- campaigns: the weekly meta-map (campaign.html, js/campaign.mjs). One row per
+-- week, written once near its start by the worker (tools/campaign.py) and never
+-- again — the only stored part of the campaign. It has to be stored: which
+-- configs existed and which seeds were free are facts about the moment it was
+-- made, the "?" nodes are random rolls, and the layout comes from the game's
+-- own mapgen, which the board cannot run.
+--
+-- graph = {nodes: [{id, kind: 'home'|'field', x, y, systems, mystery,
+-- settings}], lanes: [[a, b], ...]}, where `settings` is the node's setup in the
+-- exact pruned form a posted link stores in games.settings_json, so the view
+-- below can match a node to its game by config and seed.
+--
+-- Who holds what is *not* stored: it is a replay of the week's posted scores in
+-- time order, done by the page, the same way crowns are derived. Public read,
+-- no insert policy and no insert grant, so the worker's secret key is its only
+-- writer, as with bot_scores.
+-- ---------------------------------------------------------------------------
+create table if not exists public.campaigns (
+  week_start date primary key,
+  graph      jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- campaign_scores: every counted score posted during a campaign's week on one
+-- of its nodes, with at least one turn played by hand. A node is matched to
+-- whichever games row carries its config and seed — however that row got its
+-- game_key — through the same sc_config_key the config grouping uses.
+-- ---------------------------------------------------------------------------
+create or replace view public.campaign_scores
+  with (security_invoker = true) as
+select
+  c.week_start,
+  (node ->> 'id')::integer as node_id,
+  cs.id as score_id,
+  cs.user_id,
+  cs.user_name,
+  cs.turns,
+  cs.lost,
+  cs.submitted_at
+from public.campaigns c
+cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
+join public.games g
+  on public.sc_config_key(g.settings_json) = public.sc_config_key(node -> 'settings')
+ and g.seed = (node -> 'settings' ->> 'seed')::integer
+join public.counted_scores cs on cs.game_key = g.game_key
+where cs.hand > 0
+  and cs.submitted_at >= c.week_start::timestamp at time zone 'UTC'
+  and cs.submitted_at <  (c.week_start + 7)::timestamp at time zone 'UTC';
+
+-- ---------------------------------------------------------------------------
 -- Policies
 -- ---------------------------------------------------------------------------
 alter table public.users   enable row level security;
@@ -754,6 +807,7 @@ alter table public.config_tags enable row level security;
 alter table public.bot_scores enable row level security;
 alter table public.game_logs enable row level security;
 alter table public.score_checks enable row level security;
+alter table public.campaigns enable row level security;
 
 drop policy if exists "users public read"    on public.users;
 drop policy if exists "users public insert"  on public.users;
@@ -768,6 +822,7 @@ drop policy if exists "config_tags public insert" on public.config_tags;
 drop policy if exists "bot_scores public read" on public.bot_scores;
 drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
 drop policy if exists "score_checks public read" on public.score_checks;
+drop policy if exists "campaigns public read" on public.campaigns;
 
 create policy "users public read"    on public.users  for select using (true);
 create policy "users public insert"  on public.users  for insert with check (true);
@@ -789,6 +844,7 @@ create policy "bot_scores public read" on public.bot_scores for select using (tr
 -- under the service_role key (which bypasses RLS entirely). score_checks is a
 -- bot_scores-shaped table again — the worker writes the verdicts, everyone reads.
 create policy "score_checks public read" on public.score_checks for select using (true);
+create policy "campaigns public read" on public.campaigns for select using (true);
 
 -- No update or delete policy anywhere: that is what makes every row append-only
 -- — for configs, that's what makes the first name posted for a setup permanent,
@@ -808,7 +864,8 @@ create policy "score_checks public read" on public.score_checks for select using
 grant select on public.users, public.games, public.scores, public.configs,
   public.config_tags, public.game_summary, public.config_summary,
   public.bot_scores, public.score_checks, public.public_replays,
-  public.counted_scores, public.crown_holders, public.crown_steals
+  public.counted_scores, public.crown_holders, public.crown_steals,
+  public.campaigns, public.campaign_scores
   to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The
@@ -858,6 +915,10 @@ grant insert, update on public.bot_scores to service_role;
 grant select on public.scores to service_role;
 -- select: which scores already have a verdict (`verify_scores.pending`).
 grant select, insert, update on public.score_checks to service_role;
+-- The weekly campaign worker (tools/campaign.py) writes each week's map once.
+grant select, insert on public.campaigns to service_role;
+-- ...and counts last week's active players off the same rule the board uses.
+grant select on public.counted_scores to service_role;
 -- select + delete for the worker (read a replay, prune one a longer upload has
 -- superseded); insert for netlify/functions/log.mjs, which holds the same key.
 grant select, insert, delete on public.game_logs to service_role;

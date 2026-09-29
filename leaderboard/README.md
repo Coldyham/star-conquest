@@ -17,6 +17,7 @@ the pages into `web/board/` and the root `netlify.toml` bundles
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
+| [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 
@@ -627,6 +628,33 @@ maths is `tests/crowns.test.mjs`); the map page marks a verified score with a �
 It is as cheesable as any identity here — a second name can make a map
 "contested" — but a crown still needs a real record on a map, and a steal a real
 better score.
+
+## Campaign
+
+A new map every Monday 00:00 UTC. Each node is a fresh challenge: an unplayed
+seed on a config somebody has already played (so it is known to be playable),
+sometimes its symmetric variant, and one or two "?" nodes with randomised
+settings. Hand-drawn maps are left out, since their seed changes only the star
+names and the dice. A node's circle is sized, and labelled, by its systems.
+
+- **Homes** ring the map, one lane each off an edge node. The first win on an
+  empty home, from a player without one, claims it for the week, and a home
+  can never be taken — so there is always a seat for a newcomer and a way back
+  for anyone who loses the field.
+- **Field nodes** fall to a win posted while you hold a neighbour; somebody
+  else's only to a strictly better score (a tie defends). Bettering your own
+  score on a node raises the bar for attackers.
+- A score counts if it had at least one turn played by hand and its replay
+  wasn't found to be a `mismatch`. Anything else is just an ordinary score.
+- The week runs its full length; most field nodes held at the close wins.
+
+Only the map is stored (`campaigns`, written once per week by
+`tools/campaign.py` on the hourly job, with the secret key as its only writer).
+The standing is a replay of the week's scores in posting order
+(`campaign_scores` → `js/campaign.mjs`'s `fold`), so a deleted or re-checked
+score changes it on the next page load. Tests: `tests/test_campaign.py` for the
+generator, `tests/campaign.test.mjs` for the rules, and the opt-in
+`tests/test_crowns_sql.py` for the view.
 
 ## Known limitations, accepted on purpose
 

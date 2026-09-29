@@ -124,3 +124,15 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python tools/verify_scores.py --prune
+
+      # Make this week's campaign map, if it hasn't been made yet. Hourly is what
+      # makes it robust: the first run after Monday 00:00 UTC writes the row and
+      # every later one that week finds it and does nothing, so a missed or
+      # failed hour can never skip a week.
+      - name: Weekly campaign map
+        if: always() && steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python tools/campaign.py

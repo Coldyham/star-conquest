@@ -44,8 +44,9 @@ import pygame
 from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
-from .settings import (RANDOM_STRATEGY, Settings, fresh_rng, lane_lengths, lane_survey_key,
-                       lane_turns, random_seed)
+from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
+                       Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
+                       randomise_knobs, random_seed)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -93,24 +94,11 @@ _SAVE_DIR = saves_dir()
 
 # Slider spec: (key, label, attr, lo, hi, step, is_int). Advanced sliders set a
 # Settings attribute; AI sliders set an attribute on the selected seat's AiParams.
-_ADV_MAP = (
-    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
-    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
-    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
-    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
-    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
-)
-_ADV_TRAVEL = (
-    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
-    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
-)
-_ADV_ECON = (
-    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
-    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
-    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
-    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
-    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
-)
+# The Advanced groups live in `settings` (pure core) so the weekly campaign
+# worker can roll a "?" map from the same ranges the dice button uses.
+_ADV_MAP = ADV_MAP
+_ADV_TRAVEL = ADV_TRAVEL
+_ADV_ECON = ADV_ECON
 
 
 def lane_sliders():
@@ -135,18 +123,7 @@ def econ_sliders():
     return _ADV_ECON
 
 
-# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
-# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
-# namespace written to, not the tab drawn on.
-_ADV_COMBAT = (
-    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
-    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
-    # setting and becomes a stalemate. Both sides produce symmetrically, so a
-    # fortress bonus that large grows the defence as fast as any assault can be
-    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
-    # resolve at a 3000-turn cap either. See bot-design for the measurements.
-    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
-)
+_ADV_COMBAT = ADV_COMBAT
 # The Combat tab's demo. The one slider group that does *not* touch `Settings`:
 # these are transient view state on `MenuState`, so playing with them never lands
 # in a save file or a share token, and never trips the un-challenge confirm modal.
@@ -156,13 +133,7 @@ _PREVIEW = (
     ("preview_attacker", "Attacker ships", "preview_attacker", 1, config.COMBAT_PREVIEW_MAX, 1, True),
     ("preview_defender", "Defender ships", "preview_defender", 1, config.COMBAT_PREVIEW_MAX, 1, True),
 )
-# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
-# detail); scout floors at 1 so immediate neighbours stay visible enough to target
-# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
-_ADV_FOG = (
-    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
-    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
-)
+_ADV_FOG = ADV_FOG
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
 # `_ADV_COMBAT` is deliberately absent: it lives on the Combat tab now, and a die
 # should only roll what you can see (silently changing an off-screen knob would
@@ -2076,11 +2047,7 @@ def _randomise_sliders(target, specs) -> None:
     """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
     on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
     snap-and-clamp logic with ``_apply_slider``."""
-    rng = fresh_rng()
-    for _key, _label, attr, lo, hi, step, is_int in specs:
-        snapped = round(rng.uniform(lo, hi) / step) * step
-        snapped = max(lo, min(hi, snapped))
-        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
+    randomise_knobs(target, specs, fresh_rng())
 
 
 def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
