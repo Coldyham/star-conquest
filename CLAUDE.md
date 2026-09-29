@@ -925,6 +925,15 @@ already resolve simultaneously. The rationale for each rule is in
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
     which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
     its depth-0 seats are predicted for real, and trusted, instead of approximated).
+  - **A bot can warn about a setup before it starts.** A module-level
+    `setup_warning(settings, seats) -> list[str]` (read by `ai.setup_warning`,
+    collected per strategy by `settings.setup_warnings`) raises the menu's
+    "This setup may play slowly" confirm on Start, and on the play-by-post
+    roster's Confirm — not the first press, since which seats are bots is only
+    known once the roster is. `models/knower.py`'s is fitted from measured
+    per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut the
+    search below `WARN_USEFUL_DEPTH` or a turn's knower thinking passes
+    `WARN_TURN_MS`; see "Cost per decide" in bot-design.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through

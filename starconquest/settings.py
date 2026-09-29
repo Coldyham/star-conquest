@@ -649,6 +649,33 @@ def _apply_globals(settings: Settings) -> None:
         setattr(config, const, getattr(settings, attr))
 
 
+def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[str]:
+    """What the bots in this setup want said before it starts (`ai.setup_warning`).
+
+    ``people`` is which seats a person will hold: seat 1 alone by default, none
+    under autoplay, a play-by-post roster when there is one. Every other seat up
+    to ``players`` is a bot, asked once per strategy with all the seats it plays.
+    A ``random`` seat is resolved when the seed is already fixed, and otherwise
+    left out, since nobody yet knows what it will be.
+    """
+    if people is None:
+        people = set() if settings.autoplay else {1}
+    by_strategy: dict[str, list[int]] = {}
+    for seat in range(1, settings.players + 1):
+        if seat in people:
+            continue
+        name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY:
+            if settings.seed is None:
+                continue
+            name = resolve_strategy(name, settings.seed, seat)
+        by_strategy.setdefault(name, []).append(seat)
+    lines: list[str] = []
+    for name, seats in by_strategy.items():
+        lines.extend(ai.setup_warning(name, settings, seats))
+    return lines
+
+
 def resolve_strategy(name: str, seed: int, pid: int) -> str:
     """A seat's concrete strategy name: ``name`` itself, unless it is
     ``RANDOM_STRATEGY``, in which case one is drawn for it from the match seed.

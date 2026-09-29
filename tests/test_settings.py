@@ -793,3 +793,57 @@ def test_ship_speed_does_not_move_the_lane_survey_key():
     assert settings_mod.lane_survey_key(s) == key
     s.nodes += 1
     assert settings_mod.lane_survey_key(s) != key
+
+
+@contextlib.contextmanager
+def _warning_bot(name, record):
+    """A strategy whose module warns, recording the seats it was asked about."""
+    import sys
+    from starconquest import ai
+    modname = f"sc_model_{name}"
+    module = type(ai)(modname)
+    module.setup_warning = lambda settings, seats: (record.append(seats), [f"{name} {seats}"])[1]
+    fn = lambda state, pid: []
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register(name, fn)
+    try:
+        yield
+    finally:
+        ai.STRATEGIES.pop(name, None)
+        sys.modules.pop(modname, None)
+
+
+def test_setup_warnings_asks_each_strategy_once_about_its_bot_seats():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=4)
+    s.ai_strategy[1:4] = ["warn_a", "heuristic", "warn_a"]
+    with _warning_bot("warn_a", asked):
+        assert setup_warnings(s) == ["warn_a [2, 4]"]
+        assert asked == [[2, 4]]
+
+
+def test_setup_warnings_counts_seat_one_only_when_no_person_holds_it():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=3)
+    s.ai_strategy[:3] = ["warn_b"] * 3
+    with _warning_bot("warn_b", asked):
+        setup_warnings(s)
+        s.autoplay = True
+        setup_warnings(s)
+        setup_warnings(s, people={1, 3})    # a play-by-post roster
+    assert asked == [[2, 3], [1, 2, 3], [2]]
+
+
+def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
+    from starconquest.settings import resolve_strategy, setup_warnings
+    asked: list = []
+    s = Settings(players=2)
+    s.ai_strategy[1] = RANDOM_STRATEGY
+    with _roster("warn_c"), _warning_bot("warn_c", asked):
+        assert setup_warnings(s) == []          # no seed: nobody knows the bot yet
+        s.seed = 17
+        assert resolve_strategy(RANDOM_STRATEGY, 17, 2) == "warn_c"
+        assert setup_warnings(s) == ["warn_c [2]"]

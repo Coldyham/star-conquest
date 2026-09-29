@@ -46,7 +46,7 @@ from .model import AiParams
 from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
                        Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
-                       randomise_knobs, random_seed)
+                       randomise_knobs, random_seed, setup_warnings)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -302,6 +302,14 @@ class MenuState:
     pbp_name: str = ""
     pbp_title: str = ""
     pbp_editing: str | None = None
+    # Slow-setup confirm: a bot in this setup warned it would stall or search
+    # shallower than asked (`settings.setup_warnings`), so Start / Play by post
+    # waits on an answer. `slow_action` is the action "Play anyway" re-issues and
+    # `slow_ack` the warning last played through, so the same setup asks once.
+    confirm_slow: bool = False
+    slow_lines: list[str] = field(default_factory=list)
+    slow_action: str | None = None
+    slow_ack: tuple[str, ...] | None = None
     # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
     # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
     # never by `draw`, which only shows it while the key still matches.
@@ -434,6 +442,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _draw_clear_map(surface, ms, w, surface.get_height())
     if ms.pbp_prompt:
         _draw_pbp_prompt(surface, ms, settings, w, surface.get_height())
+    if ms.confirm_slow:
+        _draw_slow(surface, ms, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
 
@@ -571,6 +581,30 @@ def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
         ],
         ("clear_map_yes", clear, _BTN_FILL, _WARN),
         ("clear_map_no", keep, _HL_FILL, _HL_BORDER),
+    )
+
+
+def _slow_labels() -> tuple[str, str]:
+    """(play-anyway, go-back) labels; key hints dropped on a touch build, as
+    `_unchallenge_labels` does."""
+    if config.touch_ui:
+        return ("Play anyway", "Change settings")
+    return ("Play anyway (Y)", "Change settings (Esc)")
+
+
+def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
+    """Modal: a bot says this setup is more than it can search in the time it
+    is given — asked before the match exists rather than discovered as a stalled
+    turn once it does."""
+    f = _fonts()
+    go, back = _slow_labels()
+    _draw_menu_modal(
+        surface, ms, w, h,
+        [("This setup may play slowly", f["normal"], config.COLOR_TEXT)]
+        + [(line, f["small"], _WARN if i == 0 else config.COLOR_TEXT_DIM)
+           for i, line in enumerate(ms.slow_lines)],
+        ("slow_go", go, _BTN_FILL, _WARN),
+        ("slow_back", back, _HL_FILL, _HL_BORDER),
     )
 
 
@@ -1557,6 +1591,8 @@ def handle_event(event, ms: MenuState, settings: Settings):
     event = _to_canvas_event(event, ms)
     if ms.confirm_unchallenge:  # modal: swallows everything until answered
         return _handle_unchallenge(event, ms, settings)
+    if ms.confirm_slow:
+        return _handle_slow(event, ms)
     if event.type in _MUTATING_EVENTS and _comparable(settings):
         # Remember the last setup the challenge's score still applied to, before
         # this event gets a chance to change it. A slider drag is covered by the
@@ -1636,7 +1672,7 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
             return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
             _close_pbp_prompt(ms)
-            return "play_by_post"
+            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
         if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
             _close_pbp_prompt(ms)
             return None
@@ -1645,7 +1681,7 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     elif event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             _close_pbp_prompt(ms)
-            return "play_by_post"
+            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
         if ms.pbp_editing is not None:
             if event.key == pygame.K_ESCAPE:
                 ms.pbp_editing = None
@@ -2103,6 +2139,51 @@ def _start(ms: MenuState, settings: Settings, action: str = "start"):
     if blockers:
         set_status(ms, blockers[0].text, False)
         return None
+    if action == "start":
+        # Play by post passes through here only to reach its roster prompt, and
+        # which seats are bots is not known until that is confirmed — it asks
+        # there instead (`_handle_pbp_prompt`).
+        return _unless_slow(ms, settings, action)
+    return action
+
+
+def _unless_slow(ms: MenuState, settings: Settings, action: str,
+                 people: set[int] | None = None) -> str | None:
+    """``action``, unless a bot in the setup warns it will struggle — then raise
+    the slow-setup modal holding ``action`` for "Play anyway" to re-issue.
+
+    ``people`` is which seats a person holds (see `settings.setup_warnings`).
+    A warning already played through once is not asked again for the same
+    setup; any change that moves its text asks afresh.
+    """
+    lines = setup_warnings(settings, people)
+    if not lines or tuple(lines) == ms.slow_ack:
+        return action
+    ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
+    return None
+
+
+def _handle_slow(event, ms: MenuState) -> str | None:
+    """Answer the slow-setup modal. Y/Enter plays anyway (re-issuing the held
+    action), N/Esc goes back to the settings."""
+    answer: bool | None = None
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for key, value in (("slow_go", True), ("slow_back", False)):
+            rect = ms.rects.get(key)
+            if rect is not None and rect.collidepoint(event.pos):
+                answer = value
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+            answer = True
+        elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+            answer = False
+    if answer is None:
+        return None
+    action, ms.slow_action = ms.slow_action, None
+    ms.confirm_slow = False
+    if not answer:
+        return None
+    ms.slow_ack = tuple(ms.slow_lines)
     return action
 
 

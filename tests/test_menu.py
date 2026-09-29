@@ -1340,3 +1340,86 @@ def test_start_is_unaffected_by_a_playable_hand_map():
         assert _click_key(screen, ms, settings, "start") == "start"
     finally:
         pygame.quit()
+
+
+def _warns(monkeypatch, lines=("Knower would search 3 turns deep, not 12",)):
+    """Stand in for `settings.setup_warnings`, recording who it was told holds a
+    seat — the flow is under test here, not any bot's numbers."""
+    asked: list = []
+
+    def fake(settings, people=None):
+        asked.append(people)
+        return list(lines)
+
+    monkeypatch.setattr(menu, "setup_warnings", fake)
+    return asked
+
+
+def test_start_asks_before_a_setup_a_bot_warns_about(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") is None
+        assert ms.confirm_slow
+        # The modal swallows everything else until answered.
+        assert _keydown(ms, settings, pygame.K_SPACE) is None and ms.confirm_slow
+        assert _click_key(screen, ms, settings, "slow_go") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_going_back_from_the_slow_warning_starts_nothing(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _keydown(ms, settings, pygame.K_RETURN) is None and ms.confirm_slow
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert not ms.confirm_slow
+        # Not acknowledged, so the next press asks again.
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_a_warning_played_through_once_is_not_asked_again(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "start")
+        assert _keydown(ms, settings, pygame.K_y) == "start"
+        assert _click_key(screen, ms, settings, "start") == "start"
+        # Different text means a different setup, which asks afresh.
+        _warns(monkeypatch, ("Knower would search 2 turns deep, not 12",))
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_no_warning_no_modal(monkeypatch):
+    _warns(monkeypatch, ())
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_play_by_post_asks_on_confirm_with_the_roster_as_the_people(monkeypatch):
+    """Which seats are bots is only known once the roster is confirmed, so that
+    is where the warning is asked — not on the first press."""
+    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
+    asked = _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        settings.players = 4
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+        assert ms.pbp_prompt and not ms.confirm_slow and asked == []
+        _click_key(screen, ms, settings, "pbp_seat_3")   # seat 3 left to its bot
+        assert _click_key(screen, ms, settings, "pbp_confirm") is None
+        assert ms.confirm_slow and asked == [{1, 2, 4}]
+        assert _click_key(screen, ms, settings, "slow_go") == "play_by_post"
+        assert ms.pbp_roster == {1, 2, 4}   # what main opens the match with
+    finally:
+        pygame.quit()
