@@ -56,7 +56,9 @@ create table if not exists public.games (
 -- be decided before anyone has seen what it would hide).
 --
 -- It gates one thing only — a replay's visibility (`public_replays` below) —
--- never a score. Scores and rankings post and rank normally throughout: a
+-- never a score. It is not the whole story, either: a campaign node is
+-- embargoed until its week ends without this column saying so, and readers
+-- take the embargo in force from `game_embargoes` below, never from here. Scores and rankings post and rank normally throughout: a
 -- friend's turn count tells you you're behind, not how they did it. That is a
 -- deliberate, narrower promise than "hide the whole map": with no accounts to
 -- check identity against, a stricter blackout could only be enforced by hiding
@@ -422,6 +424,84 @@ create index if not exists bot_scores_match_idx
   on public.bot_scores (match_id) where match_id <> '';
 
 -- ---------------------------------------------------------------------------
+-- campaigns: the weekly meta-map (campaign.html, js/campaign.mjs). One row per
+-- week, written once near its start by the worker (tools/campaign.py) and never
+-- again — the only stored part of the campaign. It has to be stored: which
+-- configs existed and which seeds were free are facts about the moment it was
+-- made, the "?" nodes are random rolls, and the layout comes from the game's
+-- own mapgen, which the board cannot run.
+--
+-- graph = {nodes: [{id, kind: 'home'|'field', x, y, systems, mystery,
+-- settings}], lanes: [[a, b], ...]}, where `settings` is the node's setup in the
+-- pruned form a posted link stores in games.settings_json, so the views below
+-- can match a node to its game by config and seed. The same fields, not the
+-- same text: the worker writes Python's `0.0` where the site stores a browser's
+-- `0`.
+--
+-- Who holds what is *not* stored: it is a replay of the week's posted scores in
+-- time order, done by the page, the same way crowns are derived. Public read,
+-- no insert policy and no insert grant, so the worker's secret key is its only
+-- writer, as with bot_scores.
+-- ---------------------------------------------------------------------------
+create table if not exists public.campaigns (
+  week_start date primary key,
+  graph      jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- campaign_games: which game row each campaign node has, once somebody has
+-- posted on it -- whichever row carries the node's config and seed, however
+-- that row got its game_key. Compared as jsonb, which is equal by value, never
+-- through sc_config_key: a digest of the text tells the node's `0.0` from the
+-- posted row's `0`.
+-- ---------------------------------------------------------------------------
+create or replace view public.campaign_games
+  with (security_invoker = true) as
+select
+  c.week_start,
+  (node ->> 'id')::integer as node_id,
+  node ->> 'kind' as kind,
+  g.game_key
+from public.campaigns c
+cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
+join public.games g
+  on g.seed = (node -> 'settings' ->> 'seed')::integer
+ and (g.settings_json - array['seed', 'autoplay']) = ((node -> 'settings') - array['seed', 'autoplay']);
+
+-- ---------------------------------------------------------------------------
+-- game_embargoes: the embargo actually in force on each map — the stored
+-- `games.embargo_until`, or the end of a live campaign week the map is a node
+-- of, whichever is later. A campaign's maps are hidden until its week is over
+-- (the same Monday-to-Monday UTC boundary campaign_scores counts by), since a
+-- replay posted on Tuesday would otherwise hand every rival the way through a
+-- node they are still racing for.
+--
+-- Derived rather than stored, and it has to be: a campaign node's seed is
+-- fresh (tools/campaign.py), so its `games` row does not exist when the week's
+-- campaign is written — it is created by whoever posts on it first, from the
+-- site, which knows nothing about campaigns. And `games` is append-only, so
+-- there is no later moment to stamp it either. Only live weeks are consulted:
+-- a lifted embargo reads the same as none, and it keeps the scan to this
+-- week's row however many campaigns pile up.
+--
+-- Read by public_replays (the gate) and game_summary (what the pages show),
+-- so neither needs to know where an embargo came from.
+-- ---------------------------------------------------------------------------
+create or replace view public.game_embargoes
+  with (security_invoker = true) as
+select
+  g.game_key,
+  greatest(g.embargo_until, camp.ends_at) as embargo_until
+from public.games g
+left join lateral (
+  select max((cg.week_start + 7)::timestamp at time zone 'UTC') as ends_at
+  from public.campaign_games cg
+  where cg.game_key = g.game_key
+    and (cg.week_start + 7)::timestamp at time zone 'UTC' > now()
+) camp on true;
+
+-- ---------------------------------------------------------------------------
 -- public_replays: the replays anyone may watch — and the *only* rows of
 -- game_logs that ever leave this database to a visitor.
 --
@@ -468,8 +548,8 @@ select distinct on (l.match_id)
   l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
 join public.scores s on s.match_id = l.match_id
-left join public.games g on g.game_key = s.game_key
-where g.embargo_until is null or g.embargo_until <= now()
+left join public.game_embargoes e on e.game_key = s.game_key
+where e.embargo_until is null or e.embargo_until <= now()
 order by l.match_id, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
@@ -569,11 +649,12 @@ select
   bot.turns as bot_turns,
   bot.lost  as bot_lost,
   bot.bot   as bot_name,
-  -- Read straight off games (this view's own base table), never re-derived:
-  -- see the comment on the column itself for what it gates and why it's here
-  -- rather than on a per-config table.
-  g.embargo_until
+  -- The embargo in force, not just the stored one: game_embargoes folds in a
+  -- live campaign week, so a campaign node reads as embargoed on every page
+  -- that already honours `games.embargo_until`.
+  e.embargo_until
 from public.games g
+join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
   select s.turns, s.lost, s.hand, s.by_name, u.name as user_name
   from public.scores s
@@ -750,52 +831,6 @@ where prior.user_id <> s.user_id
   and (s.turns, s.lost) < (prior.turns, prior.lost);
 
 -- ---------------------------------------------------------------------------
--- campaigns: the weekly meta-map (campaign.html, js/campaign.mjs). One row per
--- week, written once near its start by the worker (tools/campaign.py) and never
--- again — the only stored part of the campaign. It has to be stored: which
--- configs existed and which seeds were free are facts about the moment it was
--- made, the "?" nodes are random rolls, and the layout comes from the game's
--- own mapgen, which the board cannot run.
---
--- graph = {nodes: [{id, kind: 'home'|'field', x, y, systems, mystery,
--- settings}], lanes: [[a, b], ...]}, where `settings` is the node's setup in the
--- pruned form a posted link stores in games.settings_json, so the views below
--- can match a node to its game by config and seed. The same fields, not the
--- same text: the worker writes Python's `0.0` where the site stores a browser's
--- `0`.
---
--- Who holds what is *not* stored: it is a replay of the week's posted scores in
--- time order, done by the page, the same way crowns are derived. Public read,
--- no insert policy and no insert grant, so the worker's secret key is its only
--- writer, as with bot_scores.
--- ---------------------------------------------------------------------------
-create table if not exists public.campaigns (
-  week_start date primary key,
-  graph      jsonb not null,
-  created_at timestamptz not null default now()
-);
-
--- ---------------------------------------------------------------------------
--- campaign_games: which game row each campaign node has, once somebody has
--- posted on it -- whichever row carries the node's config and seed, however
--- that row got its game_key. Compared as jsonb, which is equal by value, never
--- through sc_config_key: a digest of the text tells the node's `0.0` from the
--- posted row's `0`.
--- ---------------------------------------------------------------------------
-create or replace view public.campaign_games
-  with (security_invoker = true) as
-select
-  c.week_start,
-  (node ->> 'id')::integer as node_id,
-  node ->> 'kind' as kind,
-  g.game_key
-from public.campaigns c
-cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
-join public.games g
-  on g.seed = (node -> 'settings' ->> 'seed')::integer
- and (g.settings_json - array['seed', 'autoplay']) = ((node -> 'settings') - array['seed', 'autoplay']);
-
--- ---------------------------------------------------------------------------
 -- campaign_scores: every counted score posted during a campaign's week on one
 -- of its nodes, with at least one turn played by hand.
 -- ---------------------------------------------------------------------------
@@ -885,7 +920,8 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.config_tags, public.game_summary, public.config_summary,
   public.bot_scores, public.score_checks, public.public_replays,
   public.counted_scores, public.crown_holders, public.crown_steals,
-  public.campaigns, public.campaign_games, public.campaign_scores
+  public.campaigns, public.campaign_games, public.campaign_scores,
+  public.game_embargoes
   to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The

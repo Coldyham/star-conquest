@@ -314,8 +314,9 @@ async function replayVersions(scores) {
 }
 
 /**
- * The map page while its embargo is still live (`games.embargo_until`,
- * schema.sql) — a compromise, not a blackout. The full per-score list is
+ * The map page while its embargo is still live (`game_summary.embargo_until`,
+ * which is `game_embargoes` in schema.sql: a map's own reveal date, or the end
+ * of a live campaign week it is a node of) — a compromise, not a blackout. The full per-score list is
  * never even requested here, so a competitor cannot see who else has played,
  * when, or how: lost, hand and submission time all say more about *how* a
  * score was made than the bare turn count does, and that "how" is exactly

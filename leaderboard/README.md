@@ -147,6 +147,15 @@ The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
 own `first_seen_at`), not a promise about the *right* length — same spirit as
 the loose checks on every other column of that table.
 
+**Every map in the weekly campaign is embargoed until its week ends** (Monday
+00:00 UTC), with nothing to fill in. That one is not stored: `game_embargoes`
+(schema.sql) takes the later of a map's own `embargo_until` and the end of any
+live campaign week it is a node of, and both `public_replays` and
+`game_summary.embargo_until` read it — so the map page, its card and the Watch
+links treat a campaign node exactly like a map embargoed by hand. It has to be
+derived, since a node's `games` row doesn't exist until someone first posts on
+it, and nothing on the board may update that row afterwards.
+
 ## Same setup, different seed
 
 Every game with a `game_key` still gets its own row and its own board — a seed is
