@@ -136,9 +136,7 @@ async function drawDetail() {
       ? ["Held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
         ` — ${holder.turns} turns · ${holder.lost} lost`]
       : [node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."]),
-    attemptNote(node, holder),
-    play,
-    scores,
+    ...[attemptNote(node, holder), play, scores].filter(Boolean),
   );
 }
 
