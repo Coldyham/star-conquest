@@ -174,7 +174,7 @@ function botRow(row, rank, watchCell) {
       // A strategy name comes from a models/*.py filename, so it goes in as text
       // and links to the main list filtered to that bot — the same chip target
       // the map heading already uses.
-      // The label carries the profile ("knower · search depth 12") but the link
+      // The label carries the profile ("knower · oracle: search") but the link
       // still filters on the bare strategy name, which is what index.html and
       // game_summary.bots key on.
       el("a", { class: "nm", href: `index.html?bot=${encodeURIComponent(row.bot)}`, text: botProfile(row) }),

@@ -1187,7 +1187,9 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     y += 46
     if not ms.strategy_open:
         params = settings.ai[ms.ai_seat - 1]
-        _sliders(surface, ms, params, _ai_specs(ms, settings), x, y, panel.width - 48)
+        names = ai.aux_names(settings.seat_strategy(ms.ai_seat))
+        _sliders(surface, ms, params, _ai_specs(ms, settings), x, y, panel.width - 48,
+                 names={_AUX_KEY: names} if names else None)
 
 
 def _section(surface, title: str, x: int, y: int) -> int:
@@ -1195,11 +1197,13 @@ def _section(surface, title: str, x: int, y: int) -> int:
     return y + _HEADER_H
 
 
-def _sliders(surface, ms, target, specs, x: int, y: int, width: int) -> int:
-    """Draw a group of sliders reading each value off ``target``; returns next y."""
+def _sliders(surface, ms, target, specs, x: int, y: int, width: int, names=None) -> int:
+    """Draw a group of sliders reading each value off ``target``; returns next y.
+    ``names`` maps a slider key to what its stops are called (`ai.aux_names`)."""
     for key, label, attr, lo, hi, step, is_int in specs:
         changed = _changed(target, attr)
-        _slider(surface, ms, key, label, getattr(target, attr), lo, hi, is_int, x, y, width, changed=changed)
+        _slider(surface, ms, key, label, getattr(target, attr), lo, hi, is_int, x, y, width,
+                changed=changed, names=(names or {}).get(key))
         y += _SLIDER_H
     return y
 
@@ -1297,14 +1301,21 @@ def _fmt(value, is_int: bool) -> str:
     return str(round(value)) if is_int else f"{value:.2f}"
 
 
-def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *, changed: bool = False) -> None:
-    """Two-line slider: label + value on top, a full-width track below."""
+def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *,
+            changed: bool = False, names=None) -> None:
+    """Two-line slider: label + value on top, a full-width track below. ``names``,
+    one per stop from ``lo``, replaces the number with what that stop is called."""
     f = _fonts()
     if changed:
         _changed_dot(surface, x - 8, y + 8)
     _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, y + 8))
-    # a fog range at its max means "unlimited" — read it as "All", not a bare number
-    vtext = "All" if key.startswith("adv_fog_") and value >= hi else _fmt(value, is_int)
+    if names:
+        vtext = names[max(0, min(len(names) - 1, round(value - lo)))]
+    elif key.startswith("adv_fog_") and value >= hi:
+        # a fog range at its max means "unlimited" — read it as "All", not a bare number
+        vtext = "All"
+    else:
+        vtext = _fmt(value, is_int)
     _text(surface, f["small"], vtext, config.COLOR_TEXT, midright=(x + width, y + 8))
 
     cy = y + 26

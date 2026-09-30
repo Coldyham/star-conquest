@@ -79,8 +79,14 @@ test("leaderCredit credits every holder of a shared record, singular and plural"
 });
 
 test("a bot replayed at a tuned profile says so; a default one just gives its name", () => {
-  // knower goes on the board at search depth 12, not the depth 1 an untuned seat
-  // gets, so the row has to disclose which version answered.
+  // knower goes on the board on Search, not the Predict an untuned seat gets, so
+  // the row has to disclose which version answered. A named stop is already the
+  // whole story; the number would only add noise.
+  assert.equal(
+    botProfile({ bot: "knower", aux: 2, aux_label: "Oracle: Search" }),
+    "knower · oracle: search",
+  );
+  // A row cached while the knob was still a depth keeps reading as it did.
   assert.equal(
     botProfile({ bot: "knower", aux: 12, aux_label: "Search depth" }),
     "knower · search depth 12",

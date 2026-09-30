@@ -38,19 +38,28 @@ draws **nothing** from ``state.rng`` — every tie-break here is deterministic, 
 leaves the rng exactly where the seats after us expect to find it and so keeps
 their prediction bit-exact.
 
---- Depth: how far forward to look ------------------------------------------- #
+--- Oracle: Off, Predict, Search -------------------------------------------- #
 
-The seat's generic ``ai_params.aux`` knob (``AUX_LABEL``: *Search depth*) is a dial:
+The seat's generic ``ai_params.aux`` knob (``AUX_LABEL``: *Oracle*) has three stops,
+named in the menu by ``AUX_NAMES``:
 
-    0   no oracle at all — the blind ``_plan``, thinker-strength (not thinker)
-    1   the one-turn oracle described above (the default, `config.AI_AUX`)
-    N   the oracle, then N-1 turns actually *played out* and scored
+    0   Off      no oracle at all — the blind ``_plan``, thinker-strength (not thinker)
+    1   Predict  the one-turn oracle described above (the default, `config.AI_AUX`)
+    2   Search   the oracle, then the board *played out* and scored, far enough
+                 for every lane to land: the longest lane in current travel turns
+                 plus ``LANE_CUSHION`` (`_horizon`)
 
-Depth >= 2 is a **search over openings**. ``engine.end_turn`` is drivable on a
-clone, so ``_rollout`` steps one ply of one line: every candidate opening is played
-on the root board, each line is then played on by the blind default plan
-(``_advance``) for the rest of the depth, and ``_evaluate`` scores where each one
-ends up. The branching is at the root only, and four things keep that sound:
+It used to be a depth slider, 0-12. Measured, a depth only paid once the horizon
+covered the lanes and a fixed one was wrong somewhere — 12 was too long on 1-turn
+lanes and too short on 26-turn ones — so the horizon is read off the map instead,
+every decide (lanes shorten with `SHIP_SPEED_GROWTH_PCT`). Any stored value above 2
+is clamped to Search, so an old setup or link keeps its meaning and its digest.
+
+Search is a **search over openings**. ``engine.end_turn`` is drivable on a clone, so
+``_rollout`` steps one ply of one line: every candidate opening is played on the
+root board, each line is then played on by the blind default plan (``_advance``) to
+the horizon, and ``_evaluate`` scores where each one ends up. The branching is at
+the root only, and four things keep that sound:
 
   * **The root is the only ply worth branching.** Below it the one-ply score that
     would pick a continuation cannot see a launch land (ships in transit count at
@@ -75,7 +84,7 @@ Work is *iteration*-bounded, so the same board plans the same way:
 
     rollouts per ply = candidates
 
-linear in depth and **linear in the candidate count**. ``SEARCH_BUDGET_S`` and
+linear in the horizon and **linear in the candidate count**. ``SEARCH_BUDGET_S`` and
 ``ORACLE_BUDGET_S`` are catastrophe guards on top of that bound; tripping one makes
 the plan depend on the wall clock. What the search costs on a given setup, and
 where the guard trips, is ``estimated_decide_ms`` and ``setup_warning`` below.
@@ -140,10 +149,13 @@ TRUST_HUMAN = False             # True lets a human-seat prediction relax guards
                                 # default: a real human is not obliged to comply.
 
 # --- search ----------------------------------------------------------------- #
-# Depth comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
+# The mode comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
 # 1.0 default is what keeps an untuned seat on the plain one-turn oracle).
 SEARCH_DEPTH_DEFAULT = 1        # what a malformed or absent `aux` falls back to
-SEARCH_DEPTH_MAX = 12           # matches the menu slider's top end
+SEARCH_DEPTH_MAX = 2            # Off, Predict, Search; anything higher is Search
+LANE_CUSHION = 5                # plies searched past the longest lane (`_horizon`)
+HORIZON_MAX = 60                # an iteration bound for a pathological hand map;
+                                # `SEARCH_BUDGET_S` stops a real one long before
 SEARCH_WIDTH = 2                # candidate postures offered as openings
 
 # Candidate plans borrowed whole from *other* registered bots and rolled out beside
@@ -158,11 +170,13 @@ SEARCH_WIDTH = 2                # candidate postures offered as openings
 # yet when this line runs.
 EXTERNAL_CANDIDATES = ("rusherplus", "heuristic", "marshal", "claudebot")
 
-# What the AI tab's generic aux slider is called when this bot holds the seat, and
-# the range/step it offers (`ai.aux_spec` reads these; see models/README.md).
-AUX_LABEL = "Search depth"
+# What the AI tab's generic aux slider is called when this bot holds the seat, the
+# range/step it offers and what each stop is called (`ai.aux_spec`/`ai.aux_names`
+# read these; see models/README.md).
+AUX_LABEL = "Oracle"
 AUX_RANGE = (0, SEARCH_DEPTH_MAX, 1)
 AUX_INT = True
+AUX_NAMES = ("Off", "Predict", "Search")
 
 # A second budget, kept separate from ORACLE_BUDGET_S so depth 1 stays byte-exact.
 # Checked *between plies*, so every line is the same depth whenever it fires and the
@@ -201,7 +215,6 @@ COST_NODES_EXP = 1.0
 COST_SEATS_EXP = 0.28
 COST_SPEED_EXP = -0.41          # slow ships keep more fleets in flight to simulate
 COST_ROOT_PLIES = 1.1           # the root also builds every candidate's plan
-WARN_USEFUL_DEPTH = 5           # the depth past which more measured as noise
 WARN_TURN_MS = 1000.0           # knower thinking per turn, summed over its seats
 
 
@@ -340,7 +353,7 @@ def decide(state, pid):
             # into `decide`, which `_surrogate`'s identity check cannot see.
             _DEPTH += 1
             try:
-                return _search(state, pid, orc, depth - 1,
+                return _search(state, pid, orc, _horizon(state),
                                time.perf_counter() + SEARCH_BUDGET_S * BUDGET_SCALE)
             finally:
                 _DEPTH -= 1
@@ -487,12 +500,13 @@ def _is_oracle(fn, player=None):
 
 
 def _seat_depth(player) -> int:
-    """This seat's search depth, from its generic ``ai_params.aux`` knob.
+    """This seat's oracle mode, from its generic ``ai_params.aux`` knob.
 
-    0 = no oracle (the blind planner), 1 = the plain one-turn oracle, N = the oracle
-    plus N-1 turns of rollout. Tolerant by design: a hand-edited token or a seat with
-    no params at all must never take a bot down, so anything unreadable is depth
-    ``SEARCH_DEPTH_DEFAULT``.
+    0 = Off (the blind planner), 1 = Predict (the plain one-turn oracle), 2 = Search
+    (the oracle plus a `_horizon` of rollout); anything higher is Search, which is
+    what every depth past 1 meant when this was a depth slider. Tolerant by design: a
+    hand-edited token or a seat with no params at all must never take a bot down, so
+    anything unreadable is ``SEARCH_DEPTH_DEFAULT``.
     """
     return _depth_of(getattr(player, "ai_params", None))
 
@@ -502,6 +516,21 @@ def _depth_of(params) -> int:
         return max(0, min(SEARCH_DEPTH_MAX, int(params.aux)))
     except Exception:                     # noqa: BLE001
         return SEARCH_DEPTH_DEFAULT
+
+
+def _horizon(state) -> int:
+    """Plies a Search seat plays out: the longest lane on the board, in *current*
+    travel turns, plus ``LANE_CUSHION``.
+
+    A launch is only priced once it lands — `_material` counts ships in transit at
+    full value — so a horizon shorter than the lanes cannot tell a good opening from
+    a bad one, and one far longer mostly compounds the blind rollout's model of our
+    own later play. Read per decide rather than once, because
+    `SHIP_SPEED_GROWTH_PCT` shortens every lane as the game goes on.
+    """
+    longest = max((state.travel_turns(a, b) for a, nbrs in state.adjacency.items()
+                   for b in nbrs), default=1)
+    return max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
 
 
 # --------------------------------------------------------------------------- #
@@ -518,58 +547,72 @@ def ply_ms(nodes: int, seats: int, ship_ly: float) -> float:
             * (max(1.0, ship_ly) / 6) ** COST_SPEED_EXP)
 
 
-def _search_run(ply: float, depth: int) -> tuple[int, float]:
-    """(depth reached, ms spent) by a ``depth`` search whose ply costs ``ply``,
+def _search_run(ply: float, plies: int) -> tuple[int, float]:
+    """(plies reached, ms spent) by a ``plies``-deep search whose ply costs ``ply``,
     mirroring `_search`: the root rolls each candidate out once and builds its
     plan, `COST_ROOT_PLIES` of a ply, and ``SEARCH_BUDGET_S`` is checked before
     each ply after it, so the ply that crosses the budget still runs."""
-    if depth <= 1:
-        return depth, 0.0
-    spent, reached = ply * COST_ROOT_PLIES, 2
-    while reached < depth and spent <= SEARCH_BUDGET_S * 1000:
+    if plies <= 0:
+        return 0, 0.0
+    spent, reached = ply * COST_ROOT_PLIES, 1
+    while reached < plies and spent <= SEARCH_BUDGET_S * 1000:
         spent += ply
         reached += 1
     return reached, spent
 
 
-def estimated_decide_ms(nodes: int, seats: int, ship_ly: float, depth: int) -> float:
-    """Typical CPU ms of one decide at ``depth`` with no guard to stop it. Depth 0
-    and 1 run no search, and cost a few ms at any size the menu allows."""
-    if depth <= 1:
+def estimated_decide_ms(nodes: int, seats: int, ship_ly: float, plies: int) -> float:
+    """Typical CPU ms of one Search decide ``plies`` deep with no guard to stop it.
+    Off and Predict run no search, and cost a few ms at any size the menu allows."""
+    if plies <= 0:
         return 0.0
-    return ply_ms(nodes, seats, ship_ly) * (depth - 2 + COST_ROOT_PLIES)
+    return ply_ms(nodes, seats, ship_ly) * (plies - 1 + COST_ROOT_PLIES)
+
+
+def _longest_lane(settings) -> int:
+    """The longest lane this setup generates, in turns at its starting ship speed —
+    what `_horizon` will read on turn one. Off the same survey the menu's Advanced
+    tab reports (`settings.lane_lengths`), so a random seed is priced on a sample
+    of maps rather than on one of them."""
+    from starconquest.settings import lane_lengths, lane_turns   # core; import on use
+    spread = lane_turns(lane_lengths(settings), settings.ship_ly_per_turn)
+    return spread[2] if spread else 1
 
 
 def setup_warning(settings, seats) -> list[str]:
-    """The menu's warning (`ai.setup_warning`): lines when this setup would cut
-    the search short of the depth that still pays, or stall a turn too long.
+    """The menu's warning (`ai.setup_warning`): lines when a Search seat on this
+    setup would be cut off before its own launches land, or would stall a turn
+    too long.
 
-    Clipping alone is not worth a warning: past `WARN_USEFUL_DEPTH` extra depth
-    measured as noise, so a 12 that plays as a 7 costs nothing anyone can see.
+    Clipping alone is not worth a warning. Past the lanes, extra horizon is the
+    cushion, and losing some of it costs little; short of the longest lane the
+    search cannot price a launch it makes, which is the whole of what it is for.
     """
+    searchers = [seat for seat in seats if _depth_of(settings.seat_params(seat)) >= 2]
+    if not searchers:
+        return []
     drawn = settings.custom_map is not None
     nodes = len(settings.custom_map.nodes) if drawn else settings.nodes
-    depths = [_depth_of(settings.seat_params(seat)) for seat in seats]
-    if not depths or max(depths) <= 1:
-        return []
+    longest = _longest_lane(settings)
+    plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
     ply = ply_ms(nodes, settings.players, settings.ship_ly_per_turn)
-    turn_ms = sum(_search_run(ply, d)[1] for d in depths)
-    worst = max(depths)
-    reach = _search_run(ply, worst)[0]
-    clipped = reach < min(worst, WARN_USEFUL_DEPTH)
+    reach, one = _search_run(ply, plies)
+    turn_ms = one * len(searchers)
+    clipped = reach < longest
     if not clipped and turn_ms < WARN_TURN_MS:
         return []
-    need = _secs(estimated_decide_ms(nodes, settings.players, settings.ship_ly_per_turn, worst))
-    lines = [f"Knower at search depth {worst} on {nodes} systems needs ~{need} a turn"]
+    need = _secs(estimated_decide_ms(nodes, settings.players, settings.ship_ly_per_turn, plies))
+    lines = [f"Knower searching {plies} turns ahead on {nodes} systems needs ~{need} a turn"]
     if clipped:
         lines.append(f"It stops thinking at {_secs(SEARCH_BUDGET_S * 1000)}, so it will "
-                     f"look about {reach} turns ahead, not {worst}")
-    if turn_ms >= WARN_TURN_MS or len(depths) > 1:
-        who = "1 Knower seat" if len(depths) == 1 else f"{len(depths)} Knower seats"
-        lines.append(f"{who}: about {_secs(turn_ms)} per turn to resolve, "
+                     f"look about {reach} turns ahead, short of its {longest}-turn lanes")
+    if turn_ms >= WARN_TURN_MS or len(searchers) > 1:
+        who = "1 Knower seat" if len(searchers) == 1 else f"{len(searchers)} Knower seats"
+        lines.append(f"{who} on Search: about {_secs(turn_ms)} per turn to resolve, "
                      "longer in a browser")
     smaller = "a smaller map" if drawn else "Systems (Basic tab)"
-    lines.append(f"Lower Search depth (AI tab) or {smaller} to avoid this")
+    lines.append(f"Set Oracle to Predict (AI tab), or use {smaller} or faster ships, "
+                 "to avoid this")
     return lines
 
 

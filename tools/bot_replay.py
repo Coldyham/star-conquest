@@ -105,17 +105,16 @@ _OUTCOME_HARNESS = ("tests", "sim.py")
 # best" is a judgement only a caller can make. 1.0 is the documented untuned
 # value and stays the default for everything not named here.
 #
-# knower reads aux as search depth, and 12 is the top of its own slider
-# (`SEARCH_DEPTH_MAX`) and the setting its measurements favour — "ahead in every
-# measurement taken and behind in none". Its work is iteration-bounded, so the
-# result stays reproducible; the caveat is `knower.SEARCH_BUDGET_S`, a 150 ms
-# per-decide catastrophe guard that, if it ever trips, makes the plan depend on
-# the wall clock. Measured headroom at depth 12 is comfortable on an ordinary map
-# and thin (~1.1x) on the largest the menu can build — 40 nodes and 6 seats. Depth
-# 12 also costs ~100x depth 1 in wall clock, which is what --limit and the
-# deadline are for.
+# knower reads aux as its Oracle mode, and 2 is Search, the top of its own slider
+# (`SEARCH_DEPTH_MAX`): the oracle plus a rollout as long as the map's longest lane
+# and a cushion. It was 12 when that slider was a search depth, which now clamps to
+# the same Search. Its work is iteration-bounded, so the result stays reproducible;
+# the caveat is `knower.SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard
+# that, if it ever trips, makes the plan depend on the wall clock, which is why the
+# worker lifts it (`BUDGET_SCALE` below). Search costs tens of times Predict in
+# wall clock, which is what --limit and the deadline are for.
 REPLAY_AUX: dict[str, float] = {
-    "knower": 12,
+    "knower": 2,
 }
 
 # How far to lift the bots' own wall-clock catastrophe guards (`ai.set_budget_scale`).
@@ -210,17 +209,23 @@ def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:
 
 
 def aux_note(bot: str, aux: float) -> str:
-    """How to say what a non-default `aux` meant, e.g. "Search depth" for knower.
+    """How to say what a non-default `aux` meant, e.g. "Oracle: Search" for knower.
 
-    Read off the strategy's own `AUX_LABEL` through `ai.aux_spec`, the same
-    declaration the menu's slider uses, so the board never invents a name for a
-    knob it doesn't own. Empty for a bot at its default, or one that ignores aux
-    entirely — there is nothing to disclose in either case.
+    Read off the strategy's own `AUX_LABEL` (and `AUX_NAMES`, when its stops are
+    named) through `ai.aux_spec`/`ai.aux_stop_name`, the same declarations the
+    menu's slider uses, so the board never invents a name for a knob it doesn't own.
+    A named stop comes back as "Label: Stop", which `format.mjs`'s `botProfile`
+    prints as it stands rather than appending the bare number. Empty for a bot at
+    its default, or one that ignores aux entirely — there is nothing to disclose in
+    either case.
     """
     if aux == 1.0:
         return ""
     spec = ai.aux_spec(bot)
-    return spec[0] if spec else ""
+    if not spec:
+        return ""
+    stop = ai.aux_stop_name(bot, aux)
+    return f"{spec[0]}: {stop}" if stop else spec[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -384,7 +389,7 @@ def _row_for(job: Job, result: sim.ReplayResult, log: replay.GameLog, rev: str) 
         "lost": result.lost,
         "bot_timeouts": result.bot_timeouts,
         # The profile this answer belongs to. Recorded, not implied: a board
-        # showing knower at search depth 12 beside a menu default of 1 owes
+        # showing knower on Search beside a menu default of Predict owes
         # the reader that much, and `pending` reads it back to notice when
         # the policy has moved.
         "aux": job.aux,

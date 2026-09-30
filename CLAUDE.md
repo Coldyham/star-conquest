@@ -562,8 +562,8 @@ already resolve simultaneously. The rationale for each rule is in
     than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
     only funnel that pushes them into `config`. The replayed seat gets default
     `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
-    `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` at
-    search depth 12) and the value in force is stored on the row; opponents keep
+    `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` on
+    Oracle: Search) and the value in force is stored on the row; opponents keep
     theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
     `is_human`, sets the strategy and params; plain `engine.end_turn(state,
     decide=decide)` then drives every seat, the replayed one included, just as
@@ -922,11 +922,16 @@ already resolve simultaneously. The rationale for each rule is in
     so a bot's default behaviour must be what it does at 1.0 — a stale token or
     save with no `aux` key deserialises to it. Add per-bot knobs here rather than
     growing `AiParams` one field per strategy. A strategy names its knob with
-    module-level `AUX_LABEL` (+ optional `AUX_RANGE`, `AUX_INT`), read by
-    `ai.aux_spec`; `menu._ai_specs` appends that slider to `_AI_PARAMS` for the
-    edited seat, so a strategy declaring nothing (the built-in heuristic,
-    `thinker`, …) shows no aux slider at all. `models/knower.py` labels it
-    *Search depth*. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
+    module-level `AUX_LABEL` (+ optional `AUX_RANGE`, `AUX_INT`, and `AUX_NAMES`
+    naming each stop of a step-1 int knob), read by `ai.aux_spec`/`ai.aux_names`;
+    `menu._ai_specs` appends that slider to `_AI_PARAMS` for the edited seat, so a
+    strategy declaring nothing (the built-in heuristic, `thinker`, …) shows no aux
+    slider at all. `models/knower.py` labels it *Oracle*, stops Off / Predict /
+    Search, and clamps a stored value above 2 (its old 0-12 depths) to Search —
+    narrowing a knob by clamping on read, never by rewriting what was stored, is
+    what keeps every old link's digest. `bot_replay.aux_note` sends a named stop
+    to the board as "Label: Stop", which `format.mjs`'s `botProfile` prints
+    without a number. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
     preserves that — `aux` is the one field whose int/float form survives a
     decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
     it and every link carrying an int aux reads as edited the moment it opens.
@@ -936,17 +941,19 @@ already resolve simultaneously. The rationale for each rule is in
     an aux reads as a different map.
   - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
     prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
-    which callers prefer over the flag (`knower.is_oracle_seat` is "depth ≥ 1", so
-    its depth-0 seats are predicted for real, and trusted, instead of approximated).
+    which callers prefer over the flag (`knower.is_oracle_seat` is "not Off", so
+    its Off seats are predicted for real, and trusted, instead of approximated).
   - **A bot can warn about a setup before it starts.** A module-level
     `setup_warning(settings, seats) -> list[str]` (read by `ai.setup_warning`,
     collected per strategy by `settings.setup_warnings`) raises the menu's
     "This setup may play slowly" confirm on Start, and on the play-by-post
     roster's Confirm — not the first press, since which seats are bots is only
     known once the roster is. `models/knower.py`'s is fitted from measured
-    per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut the
-    search below `WARN_USEFUL_DEPTH` or a turn's knower thinking passes
-    `WARN_TURN_MS`; see "Cost per decide" in bot-design.
+    per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut a
+    Search seat's horizon (the setup's longest lane plus `LANE_CUSHION`, off the
+    same lane survey the Advanced tab reports) short of its own longest lane, or
+    a turn's knower thinking passes `WARN_TURN_MS`; see "Cost per decide" in
+    bot-design.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through

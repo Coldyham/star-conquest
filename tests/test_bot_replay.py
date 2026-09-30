@@ -79,3 +79,13 @@ def test_engine_rev_moves_if_the_replay_harness_changes():
 
     sim_path = bot_replay.ROOT.joinpath(*bot_replay._OUTCOME_HARNESS)
     assert isinstance(sim_path, Path) and sim_path.is_file()
+
+
+def test_a_tuned_profile_is_disclosed_by_its_stop_name():
+    """The board prints `aux_label`; a named stop must say what it is rather than
+    leave the reader to decode "oracle 2" (`format.mjs`'s `botProfile`)."""
+    ai.load_models()
+    assert bot_replay.aux_note("knower", 1.0) == ""                   # the default: nothing to say
+    assert bot_replay.aux_note("knower", bot_replay.REPLAY_AUX["knower"]) == "Oracle: Search"
+    assert bot_replay.aux_note("knower", 12) == "Oracle: Search"      # an old depth, clamped
+    assert bot_replay.aux_note("marshal", 4) == ""                    # ignores aux entirely

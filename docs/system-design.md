@@ -1598,7 +1598,7 @@ That exception is `aux`, the one bot-defined knob. Every other field belongs to
 the built-in heuristic's own tuning and says nothing about a drop-in's identity,
 but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
 statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
-makes it, and today it holds one entry: `knower` at search depth 12. Opponent
+makes it, and today it holds one entry: `knower` on Oracle: Search. Opponent
 seats keep both the strategy and the params the setup gave them — those *are* the
 map's difficulty, and changing them would answer a different question.
 

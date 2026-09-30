@@ -131,19 +131,27 @@ slider must still play well. Being per-seat, it is also readable on *rivals*, so
 bot can tell a shallow opponent from a deep one.
 
 Tell the AI tab what yours means and it gets a properly labelled slider whenever
-your bot holds the seat — three optional module-level names, all read by
-`ai.aux_spec`:
+your bot holds the seat — four optional module-level names, read by
+`ai.aux_spec` and `ai.aux_names`:
 
 ```python
 AUX_LABEL = "Search depth"   # required to show the slider at all
 AUX_RANGE = (0, 8, 1)        # (lo, hi, step); defaults to (0.0, 8.0, 1.0)
 AUX_INT = True               # show/store whole numbers (default: 2dp floats)
+AUX_NAMES = ("Off", ...)     # one name per stop, shown instead of the number
 ```
+
+`AUX_NAMES` applies only to a whole-number knob stepping by one, and only with
+exactly one name per stop (`AUX_NAMES[i]` is `lo + i`); anything else is ignored
+and the number shows. The leaderboard's bot column says a named stop in words too
+("knower · oracle: search").
 
 Declare no `AUX_LABEL` and the slider is simply hidden for your bot, which is the
 right answer if you ignore `aux`. `models/knower.py` is the worked example: it
-labels it *Search depth* and reads it as exactly that (0 = no prediction, 1 =
-predict one turn, N = predict then search N−1 plies forward).
+labels it *Oracle* with three named stops — Off (no prediction), Predict (predict
+this turn), Search (predict, then play the board forward until every lane has
+landed). It was a 0-12 depth once; knower clamps any stored value above 2 to
+Search, which is how an old link keeps its meaning when a knob is narrowed.
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 

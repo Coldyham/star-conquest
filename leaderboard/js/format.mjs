@@ -70,18 +70,21 @@ export function botSummary(row) {
 }
 
 /**
- * "knower · search depth 12" — a bot replayed at something other than its default
+ * "knower · oracle: search" — a bot replayed at something other than its default
  * profile, so the board never quietly compares two different versions of one bot.
  * Just the name for the ordinary case, since `aux` is 1.0 nearly everywhere and a
  * suffix on every row would say nothing (see schema.sql's bot_scores).
  *
  * The label is the strategy's own `AUX_LABEL`, carried on the row rather than
  * guessed here: the knob belongs to the bot, and JS has no way to read a
- * models/*.py declaration.
+ * models/*.py declaration. A knob with named stops arrives as "Label: Stop"
+ * (`bot_replay.aux_note`) and already says everything, so no number is appended;
+ * any other label gets the value ("greed 0.75", or an older row's "search depth 12").
  */
 export function botProfile(row) {
   const aux = Number(row.aux ?? 1);
   if (aux === 1 || !row.aux_label) return row.bot;
+  if (row.aux_label.includes(": ")) return `${row.bot} · ${row.aux_label.toLowerCase()}`;
   const value = Number.isInteger(aux) ? aux : aux.toFixed(2);
   return `${row.bot} · ${row.aux_label.toLowerCase()} ${value}`;
 }

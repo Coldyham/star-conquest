@@ -122,7 +122,7 @@ class AiParams:
     Every field but ``aux`` is read only by the built-in heuristic
     (``ai.compute_orders``). ``aux`` is the opposite: the core never interprets it,
     and each strategy is free to define its own meaning (``models/knower.py`` reads
-    it as search depth). See ``models/README.md``.
+    it as its Oracle mode: Off, Predict or Search). See ``models/README.md``.
     """
 
     reserve_fraction: float = config.AI_RESERVE_FRACTION
