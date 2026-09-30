@@ -2372,6 +2372,207 @@ turns the whole garrison is out of the game. A capture that opens during the wai
 is rare, because the step-forward branch has already looked for one on the turn
 the system was doomed.
 
+### What the board's human wins say (2026-09-30)
+
+The leaderboard holds human wins on maps the bot column could not win, and
+those are always posted scores, so their replays are public (`public_replays`,
+readable with the anon key in `leaderboard/js/config.mjs` — no secret needed).
+42 of them are still reproducible under the current rules. Each was rebuilt with
+`replay.reconstruct` and set against marshal in seat 1 on the same setup via
+`sim.play_settings`, then measured identically on both sides. Marshal lost 22 of
+those setups and won 20; the 20 are the control.
+
+Read it for what it is. In most of the 22, **marshal is also the opponent**
+(seat 2, three-player 11-node maps and 7-node duels), so this is how a person
+beats marshal, set against marshal's own mirror on that seed — which is partly a
+coin flip. The maps are few, often replayed several times, and a person gets
+retries.
+
+    seat 1, the 22 setups marshal lost            human    marshal
+    median length (turns)                            57       167   (3 hit 600)
+    systems owned at turn 40                        51%       29%
+    income share at turns 20 / 40 / 60         43/67/88  34/34/26
+    systems lost per game                           3.5        25
+    attack landings that failed                      7%       20%
+    launched ships that were own-to-own transfers   64%       42%
+
+**Captures stick.** Call a rival capture *safe* when the ships that landed,
+plus our garrisons next to it, outnumber what can strike back — the adjacent
+rival stacks, rival fleets inbound, and the garrison that just fled. 76% of the
+person's are safe and 87% of those are still theirs ten turns on. Marshal's are
+safe about half the time (51% in seat 1, 54% as the opponent) and kept 58%/46%;
+its unsafe ones flip back 82% of the time. Nearly every system *any* bot loses
+is one it had just evacuated (86-95%), so marshal against marshal is a loop —
+evacuate, the other side takes it empty, the evacuee takes it back — at about
+25 systems lost per seat per game, against the person's 4.
+
+**Where the loop comes from** — every marshal launch tagged by the branch that
+issued it, mirror duels at 24 nodes / 6 ly-per-turn, 60 seeds (a strike carrying
+surplus is tagged by its Phase 3b pour):
+
+    branch                        rival captures/seat/game   kept 10 turns
+    Phase 3b pour                         43.8                   52%
+    _evacuate (a) step forward            19.6                   18%
+    Phase 3 fresh strike                   4.3                   25%
+    _evacuate (c) cornered sortie          3.7                   11%
+    Phase 3 follow-up wave                 1.8                   46%
+
+#### Built, measured, deleted: a hold test on the capture
+
+`_holds(target, force, kept)` asked whether a capture survives the counter in
+both outcomes: the garrison stands (keep the survivors, face the largest rival
+stack next door) or flees (keep the whole force, face a neighbour plus the
+returning garrison), with our adjacent garrisons counted in at `HOLD_SUPPORT`.
+Board facts only. Duels against stock marshal, `tools/sweep.py`, 200 seeds, four
+cells (random 18/24/30 nodes at 6 ly/turn, 24 at 12), each seed both seatings:
+
+    arm                                              pooled     verdict
+    Phase 3 fresh rival strikes, weight 1.0           49.1%     null
+      ...weight 0.75 / 0.5                       49.2 / 49.3%   null
+      ...weight 1.0, no support counted               41.9%     REPRODUCED worse
+    _evacuate step-forward, weight 1.0                46.7%     REPRODUCED worse
+      ...weight 0.5                                   48.9%     null
+    both at 1.0                                       45.9%     REPRODUCED worse
+    step-forward, also counting the force that        42.2%     REPRODUCED worse
+      takes the system being left, weight 1.0
+      ...weight 0.5                                   46.4%     REPRODUCED worse
+
+Free-for-all rotations (the variant, stock marshal and fillers, 60 seeds, share
+of the wins the two marshals took between them) agree: 46-56% for the Phase 3
+gate, 47-51% for the step-forward gate, and 42-48% once it counts the force
+behind it (11 nodes 3p, 18 nodes 3p, 21 nodes 4p with thinker, 31 nodes 5p with
+thinker and knower). The same variant on the 22 lost human setups won 2 against
+stock's 1.
+
+Monotone in how hard the loop is suppressed — 48.9, 46.7, 46.4, 42.2 — and for
+the strongest arm worse in every 6 ly/turn cell (38.9-41.3%), null only at 12
+ly/turn (47.7%), where most lanes are a single turn and the counter lands before
+any of this can matter. No cell to gate it into.
+
+The mechanism works and the result does not follow it. The step-forward gate
+halved that branch's captures (19.6 to 10.7); counting the force behind it
+brought all rival captures from about 73 to 19 per seat per game, and the ones
+still made held longer (60% for a Phase 3b pour). Win rate went the other way.
+A capture that is lost again in three turns is not wasted: it is a doomed
+garrison spent taking a system the rival then has to spend a turn and a fleet
+retaking, rather than a garrison that retreats and waits. The person keeps what
+they take by feeding it afterwards, not by declining to take it — which is
+what the next subsection builds.
+
+#### Shipped: feed what was just taken (`FEED`, `FEED_FRONT`, `FEED_MAX_TURNS = 2`)
+
+The person's forwarding rules run on about 90% of turns and 64% of the ships
+they launch go own-to-own; their frontier garrisons sit near parity with the
+largest rival stack next door (median ratio 1.0, marshal 0.87), and fewer of
+them are out-stacked (45% against 57-67%). Phase 4 seeded `_flow_to_front` on
+every live frontier system, and a frontier system's leftover stayed home.
+
+`_shortfalls` lists the live frontier systems whose garrison — after this turn's
+sends and counting our fleets inbound — is under `FEED` times their largest
+rival neighbour. While any are, Phase 4 seeds the rear's flow on those alone,
+and with `FEED_FRONT` a frontier system's leftover budget first tops up a short
+neighbour, never past its shortfall. Not a `FRONTIER_GUARD` change: nothing is
+held back that was being spent before, only where the surplus goes. In the
+mirror at 24 nodes / 6 ly-per-turn it cut rival captures from about 73 to 41
+per seat per game without making them stick much better (a Phase 3b pour kept
+56% against 52%) — what it buys is not visible in that table.
+
+Duels against stock marshal, `tools/sweep.py`:
+
+    arm (200 seeds, the four cells above)             pooled     verdict
+    FEED 1.0, rear flow only                           50.7%     null
+    FEED 1.0 + FEED_FRONT                              52.3%     null (z = 1.68)
+    FEED 0.75 + FEED_FRONT                             50.8%     null
+    FEED 1.0 + FEED_FRONT + Phase 3 hold test          52.3%     null (z = 1.72)
+    FEED 1.0 + Phase 3 hold test                       50.3%     null
+    FEED 1.0 + FEED_FRONT + step-forward hold 0.5      51.4%     null
+    FEED 1.0 + FEED_FRONT + both hold tests            49.6%     null
+
+    replicated on 400 fresh seeds, plus random 18 nodes at 12 ly/turn
+    FEED 1.0 + FEED_FRONT                              52.9%     REPRODUCED (z = 3.46)
+    FEED 1.0 + FEED_FRONT + Phase 3 hold test          51.3%     null
+
+    FEED 1.0 + FEED_FRONT, by cell      median lane    rate
+      random 18 / 6 ly                       3.5       51.1%
+      random 24 / 6 ly                       3         50.6%
+      random 30 / 6 ly                       3         52.5%
+      random 24 / 12 ly                      2         53.8%   better
+      random 18 / 12 ly                      2         56.2%   better
+      random 18 / 9 ly                       2.5       56.9%   better   (300 fresh seeds)
+      random 21 / 8.5 ly                     2         52.0%            (300 fresh seeds)
+      random 30 / 12 ly                      2         53.5%            (300 fresh seeds)
+      random 24 / 18 ly                      1         56.3%   better   (300 fresh seeds)
+      symmetric 18 / 12 ly                   2         57.5%   better   (53% timeouts)
+
+At or above 50% in every cell, and significant wherever the median lane is 2.5
+turns or less. The hold test above adds nothing on top of it. Feeding does rescue
+the hold test — both gates together go from 45.9% to 49.6% — but only back to
+null, so it was deleted rather than shipped alongside.
+
+Against knower at depth 0 (200 seeds): 87.0% of decided games against stock
+marshal's 86.2%, with fewer losses (91 against 103), but at 24 nodes / 6
+ly-per-turn it doubles the timeouts (72 against 36), so it takes fewer boards
+outright — 72% of games against 80%. At 18 nodes / 12 ly-per-turn it is level or
+better on every count. Free-for-alls (60 seeds, share of the two marshals' wins)
+read 48-54% at 6 ly/turn and 48-56% at 12 ly/turn, pooled 53.0% (z = 1.47) at
+12. On the 42 human setups it won 23 against stock's 20 (7 of the 22 stock lost,
+across five distinct setups at 3-18 ly/turn) — too few maps, and knower's clock
+moves stock between runs by two or three wins.
+
+`FEED_MAX_TURNS = 2` gates it to boards whose median lane (re-timed each turn)
+is at most two turns, where every measure agrees: 54.0% on the 300 fresh seeds
+above (REPRODUCED), identical to ungated wherever the median is 2 or less, but
+52.7% against 56.9% at the 2.5-turn boundary, and 22 against 23 on the human
+setups. The gate buys back only the knower stalemates at 6 ly/turn — a
+timeout is a board the bot column records as not taken — at the price of the
+6 ly/turn gain against marshal itself, which the fresh seeds below show was not
+there.
+
+Two more gates, against the ungated and two-turn versions on 300 fresh seeds.
+`FEED_MAX_TURNS = 3`, and `FEED_LOCAL`, which compares the lane a feed travels
+along with the lanes a counter would come along: a front's top-up, or a rear
+system's whole route to the short system, must arrive within `FEED_LOCAL` times
+that system's fastest rival lane, or the rear system flows to the nearest front
+as before.
+
+    vs stock marshal           pooled   18/6   24/6   30/6   18/9   24/12
+    ungated                     51.6%   48.2   50.9   51.5   52.9   54.3
+    FEED_MAX_TURNS 2            51.1%   50.0   50.0   50.0   51.3   54.3
+    FEED_MAX_TURNS 3            51.7%   48.7   50.9   51.5   52.9   54.3
+    FEED_LOCAL 1.0              52.1%   50.2   52.9   52.0   52.6   52.5   REPRODUCED
+    FEED_LOCAL 2.0              51.9%   49.8   51.9   52.3   51.9   53.2
+
+    vs knower depth 0, share of all games won (stock marshal 78.5%)
+    ungated 75.5%   FEED_MAX_TURNS 3 75.5%   FEED_LOCAL 1.0 76.6%   2.0 75.5%
+
+On fresh seeds the 6 ly/turn cells are null for the ungated version (the 52.9%
+above was carried by the fast cells). A three-turn cap gates nothing, since
+those boards' median lane *is* three. `FEED_LOCAL 1.0` does what it says — best
+at 6 ly/turn against marshal, fewer knower stalemates than ungated — but is
+still below stock against knower there and two points short at 12 ly/turn, so
+it trades one regime for the other. The two-turn cap is the only arm that costs
+nothing anywhere: off where feeding is null against marshal and slightly
+negative against knower, on where it clearly wins.
+
+Shipped with the two-turn cap: `FEED = 1.0`, `FEED_FRONT = True`,
+`FEED_MAX_TURNS = 2`. `FEED_LOCAL` was deleted rather than kept at zero. The
+constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
+
+#### Not yet measured: no lone trickles into a rival
+
+40% of marshal's failed attack landings are one or two ships landing alone
+(the person's: 33% of a much smaller number). Of 340 failures in the 42
+setups, 162 met a garrison that grew after launch, 92 a reinforcement landing
+the same turn, 57 were launched at or under the garrison they could see (a
+stagger's far wave whose nearer wave never followed) and 26 were pile-ups. The
+candidate: a Phase 3b top-up on a rival target leaves only if it lands on the
+same turn as a wave already inbound, so the siege's own production stops
+arriving one hull at a time after the main strike has resolved. Gating *every*
+rival re-flood measured 45.1% at `DEFENDER_ADVANTAGE 1.5` (see "Phase 3b
+re-flooding" above), because the trickle was supplying the jitter cushion
+`_enemy_margin` leaves out; if it reads the same way there, gate it off at high
+advantage rather than drop it, since that setting is rarely played.
+
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 
 Started as a marshal-only fix (above) and generalised: `combat.edge_attacking`/
