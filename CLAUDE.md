@@ -952,8 +952,9 @@ already resolve simultaneously. The rationale for each rule is in
     per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut a
     Search seat's horizon (the setup's longest lane plus `LANE_CUSHION`, off the
     same lane survey the Advanced tab reports) short of its own longest lane, or
-    a turn's knower thinking passes `WARN_TURN_MS`; see "Cost per decide" in
-    bot-design.
+    a turn's knower thinking passes `WARN_TURN_MS`. It prices turn one, so with
+    ship-speed growth on it also names the turn the clipping ends
+    (`_sees_lanes_from`); see "Cost per decide" in bot-design.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through

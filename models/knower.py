@@ -579,6 +579,30 @@ def _longest_lane(settings) -> int:
     return spread[2] if spread else 1
 
 
+def _sees_lanes_from(settings, nodes: int) -> int | None:
+    """With ship-speed growth on, the first turn a Search seat's guarded search
+    reaches past the setup's longest lane, or None if it never does before speed
+    tops out. The turn-one figures above are the slowest the game gets; this is
+    how long that lasts. Mirrors `config.ship_speed` off the *setup's* knobs,
+    since `config` still holds the previous game's until `build_state` applies
+    them."""
+    from starconquest import config
+    from starconquest.settings import lane_lengths   # core; import on use
+    lengths = lane_lengths(settings)
+    base, rate = settings.ship_ly_per_turn, 1.0 + settings.ship_speed_growth_pct / 100.0
+    if not lengths or rate <= 1.0 or base >= config.SHIP_SPEED_MAX:
+        return None
+    longest_ly = max(lengths)
+    full = math.ceil(math.log(config.SHIP_SPEED_MAX / base, rate))
+    for turn in range(full + 1):
+        speed = min(config.SHIP_SPEED_MAX, base * rate ** turn)
+        longest = max(1, math.ceil(longest_ly / speed))
+        plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
+        if _search_run(ply_ms(nodes, settings.players, speed), plies)[0] >= longest:
+            return turn
+    return None
+
+
 def setup_warning(settings, seats) -> list[str]:
     """The menu's warning (`ai.setup_warning`): lines when a Search seat on this
     setup would be cut off before its own launches land, or would stall a turn
@@ -606,6 +630,12 @@ def setup_warning(settings, seats) -> list[str]:
     if clipped:
         lines.append(f"It stops thinking at {_secs(SEARCH_BUDGET_S * 1000)}, so it will "
                      f"look about {reach} turns ahead, short of its {longest}-turn lanes")
+        if settings.ship_speed_growth_pct > 0:
+            # Every figure above is turn one's, the slowest the game gets.
+            clear = _sees_lanes_from(settings, nodes)
+            lines.append("That is at the start: ships speed up, and from about turn "
+                         f"{clear} it looks past its lanes" if clear is not None else
+                         "Ships speed up, but not enough for it to see past its lanes")
     if turn_ms >= WARN_TURN_MS or len(searchers) > 1:
         who = "1 Knower seat" if len(searchers) == 1 else f"{len(searchers)} Knower seats"
         lines.append(f"{who} on Search: about {_secs(turn_ms)} per turn to resolve, "

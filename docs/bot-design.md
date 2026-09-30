@@ -511,6 +511,14 @@ longest lane / plies reached, W where it warns:
 So it is a slow-ship warning now: almost every map at 1 ly/turn, the largest at
 3, never at the default speed or faster. Off and Predict never warn.
 
+Every figure it quotes is turn one's. With `SHIP_SPEED_GROWTH_PCT` on that is the
+slowest the game gets — lanes shorten and plies cheapen as ships speed up, and
+`_horizon` follows them every decide — so a clipped warning then adds the turn
+from which the guarded search first reaches past the longest lane
+(`_sees_lanes_from`, which re-runs the same `_search_run` at each turn's speed off
+the setup's own knobs, since `config` still holds the last game's). At 24 systems
+and 1 ly/turn that is about turn 31 at 1%/turn and turn 16 at 2%/turn.
+
 **The browser is not modelled.** Every figure here is native CPython; the
 pygbag build is slower by an unmeasured factor, so there the guard clips
 harder and a turn stalls longer than the warning says (its text says as much).

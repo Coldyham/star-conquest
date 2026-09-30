@@ -752,6 +752,33 @@ def test_a_search_that_covers_its_lanes_does_not_warn(kn, monkeypatch):
     assert kn.setup_warning(s, [2])
 
 
+def test_with_speed_growth_the_warning_says_when_the_clipping_ends(kn):
+    """Every figure a warning quotes is turn one's, the slowest the game gets; with
+    growth on it says so, and names the turn the search first sees past its lanes."""
+    import math
+    from starconquest import config
+    s = _knower_setup(2, nodes=24, players=2, ship_ly_per_turn=1.0)
+    assert not any("ships speed up" in line.lower() for line in kn.setup_warning(s, [2]))
+
+    s.ship_speed_growth_pct = 2.0
+    clear = kn._sees_lanes_from(s, 24)
+    assert clear is not None and clear > 0
+    assert any(f"from about turn {clear} it looks past its lanes" in line
+               for line in kn.setup_warning(s, [2]))
+
+    # ...and that turn is the first one the guarded search really does reach them.
+    from starconquest.settings import lane_lengths
+    longest_ly = max(lane_lengths(s))
+
+    def reaches(turn):
+        speed = min(config.SHIP_SPEED_MAX, 1.0 * 1.02 ** turn)
+        longest = math.ceil(longest_ly / speed)
+        plies = min(kn.HORIZON_MAX, longest + kn.LANE_CUSHION)
+        return kn._search_run(kn.ply_ms(24, 2, speed), plies)[0] >= longest
+
+    assert reaches(clear) and not reaches(clear - 1)
+
+
 def test_the_menu_hears_knowers_warning(kn):
     from starconquest.settings import setup_warnings
     s = _knower_setup(2, nodes=120, players=6, ship_ly_per_turn=1.0)
