@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { insert, rpc } from "../js/api.mjs";
+import { insert, rpc, selectPage } from "../js/api.mjs";
 
 /** Stub fetch to answer with `body` (JSON-encoded on the way out, exactly as
  * PostgREST would), and hand back every call made so a test can inspect the
@@ -92,6 +92,26 @@ test("rpc against a scalar-returning function resolves to the bare value, not a 
   try {
     const key = await rpc("sc_config_key", { settings: {} });
     assert.equal(key, "a1b2c3d4e5f6a7b8");
+  } finally {
+    restore();
+  }
+});
+
+test("selectPage asks for one row past the page and reports whether it came back", async () => {
+  const { calls, restore } = mockFetch([{ id: 1 }, { id: 2 }, { id: 3 }]);
+  try {
+    const page = await selectPage("game_summary?select=game_key&order=game_key", { offset: 50, size: 2 });
+    assert.match(calls[0].url, /game_summary\?select=game_key&order=game_key&limit=3&offset=50$/);
+    assert.deepEqual(page, { rows: [{ id: 1 }, { id: 2 }], more: true });
+  } finally {
+    restore();
+  }
+});
+
+test("selectPage reports no more once a page comes back short", async () => {
+  const { restore } = mockFetch([{ id: 1 }]);
+  try {
+    assert.deepEqual(await selectPage("game_summary?select=game_key", { size: 2 }), { rows: [{ id: 1 }], more: false });
   } finally {
     restore();
   }
