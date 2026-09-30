@@ -1,4 +1,4 @@
-import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, contains, eq, insert, select, selectPage, UNIQUE_VIOLATION } from "./api.mjs";
 import { campaignMark } from "./campaign.mjs";
 import { GAME_URL } from "./config.mjs";
 import { weekParam, weekStart } from "./crowns.mjs";
@@ -14,7 +14,7 @@ import { encodeToken, newSeedSetup } from "./token-encode.mjs";
 
 // Columns spelled out rather than `select=*`: game_summary now carries
 // settings_json for the badge label, and that's a real payload increase for a
-// 50-row list — worth it, but worth stating rather than growing silently the
+// 50-row page — worth it, but worth stating rather than growing silently the
 // next time a column is appended.
 const COLUMNS = [
   "game_key", "mode", "players", "nodes", "seed", "last_activity", "score_count",
@@ -52,22 +52,61 @@ function urlFor(filters) {
   return qs ? `index.html?${qs}` : "index.html";
 }
 
+// How many cards one press of "Show more" adds (and the first load shows).
+const PAGE_SIZE = 50;
+
 /**
  * "By config" only means something above a single config's own game list, so
  * a `config` filter always falls back to the plain per-game query regardless
  * of what `?group=` says — that keeps a hand-edited URL from landing on a
  * grouped view of one group.
+ *
+ * Each order ends on the view's own key: last_activity ties (and nulls), and
+ * offset paging over a tied order can repeat or skip a row between pages.
  */
-async function fetchGames(filters) {
+function gamesQuery(filters) {
   if (filters.group === "config" && !filters.config) {
-    let query = `config_summary?select=${CONFIG_COLUMNS}&order=last_activity.desc.nullslast&limit=50`;
+    let query = `config_summary?select=${CONFIG_COLUMNS}&order=last_activity.desc.nullslast,config_key`;
     if (filters.bot) query += `&bots=${contains([filters.bot])}`;
-    return { kind: "config", rows: await select(query) };
+    return { kind: "config", query };
   }
-  let query = `game_summary?select=${COLUMNS}&score_count=gt.0&order=last_activity.desc.nullslast&limit=50`;
+  let query = `game_summary?select=${COLUMNS}&score_count=gt.0&order=last_activity.desc.nullslast,game_key`;
   if (filters.config) query += `&config_key=${eq(filters.config)}`;
   if (filters.bot) query += `&bots=${contains([filters.bot])}`;
-  return { kind: "game", rows: await select(query) };
+  return { kind: "game", query };
+}
+
+/**
+ * The "Show more" control under the list. Each press fetches the next page and
+ * appends it. A card already on screen is skipped rather than drawn twice:
+ * the list is ordered by last activity, so a score posted since the last page
+ * moves its map to the top and pushes everything below it down one row.
+ * Offsets count rows fetched, not rows drawn, which keeps the paging lined up
+ * with the server. A failed page leaves the list alone and lets you retry.
+ */
+function showMore(list, { kind, query }, render, offset) {
+  const keyOf = (r) => r[kind === "config" ? "config_key" : "game_key"];
+  const seen = new Set(list.map(keyOf));
+  const button = el("button", { class: "mini", type: "button", text: "Show more" });
+  const status = el("span", { class: "name-status" });
+  const wrap = el("div", { class: "show-more" }, [button, status]);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "";
+    try {
+      const page = await selectPage(query, { offset, size: PAGE_SIZE });
+      offset += page.rows.length;
+      const fresh = page.rows.filter((r) => !seen.has(keyOf(r)) && seen.add(keyOf(r)));
+      wrap.before(...fresh.map(render));
+      if (page.more) button.disabled = false;
+      else wrap.remove();
+    } catch (err) {
+      button.disabled = false;
+      status.textContent = err.message;
+    }
+  });
+  return wrap;
 }
 
 /** By-game vs. by-config, styled like game.mjs's turns/lost ranking toggle.
@@ -282,9 +321,13 @@ async function load() {
   }
   const filters = filtersFromUrl();
   try {
-    // Filtering happens server-side, on purpose: filtering only the visible
-    // 50 client-side would silently hide older matches instead.
-    const [{ kind, rows }, campaigns] = await Promise.all([fetchGames(filters), campaignMarks()]);
+    // Filtering happens server-side, on purpose: filtering only the loaded
+    // page client-side would silently hide older matches instead.
+    const list = gamesQuery(filters);
+    const { kind } = list;
+    const [{ rows, more }, campaigns] = await Promise.all([
+      selectPage(list.query, { size: PAGE_SIZE }), campaignMarks(),
+    ]);
     target.classList.remove("loading");
 
     clear(groupTarget);
@@ -309,7 +352,9 @@ async function load() {
       );
       return;
     }
-    clear(target).append(...rows.map((r) => (kind === "config" ? configRow(r) : row(r, campaigns))));
+    const render = (r) => (kind === "config" ? configRow(r) : row(r, campaigns));
+    clear(target).append(...rows.map(render));
+    if (more) target.append(showMore(rows, list, render, rows.length));
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);
