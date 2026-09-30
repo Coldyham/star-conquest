@@ -349,11 +349,57 @@ which expresses "commit everything" far better than a margin tweak to knower's
 own phases. Dropping them paid for the whole depth increase and more. They are
 still listed in `POSTURE_VARIANTS`, outside the width.
 
-### How much depth is worth
+### How far to look: the longest lane, plus a cushion
 
-Measured on the old branch-every-ply search; the depth curve of the root-only one
-has not been re-measured, and `WARN_USEFUL_DEPTH` still rests on this one. Against
-thinker, both seatings, 24-node maps (n = decided games):
+The Oracle knob was a search depth, 0-12, until 2026-09-30. The root-only search's
+depth curve showed that no fixed depth is right: a depth pays only once the
+horizon covers the lanes, and then stops paying. Against marshal, depth 12 guards
+lifted, 24-node 2-seat random maps, both seatings, knower's score (a game capped at
+600 turns — 1200 at 1 ly — scored to whoever leads on `_evaluate`):
+
+    depth              1     2     3     5     8    12    20
+    6 ly  (n=80)      36%   38%   40%   66%   74%   75%   65%
+    18 ly (n=40)      72%   85%   80%   78%   72%   65%   80%
+    1 ly  (n=20)      20%    -    15%   20%    -    45%   55%
+
+    6 ly head-to-head vs depth 12:  1 19%, 2 29%, 3 34%, 5 55%, 8 47.5%, 20 51%
+
+Lanes on that map run 2-5 turns at 6 ly/turn, 1-2 at 18 and 10-26 at 1. At 6 ly
+nothing pays until depth 5 and 8-12 is a plateau; at 18 ly depth is flat to
+harmful (against the pre-`FEED` marshal, depth 12 read 25 points below depth 1,
+z = -3.2; against the current one the gap is 7.5 and within noise); at 1 ly
+nothing pays until the horizon approaches the lanes, and 20 was still rising.
+The mechanism is the one the root-only search was built on: ships in transit
+count at full value, so a horizon short of a lane cannot tell a good launch from a
+bad one, while one far past it spends its extra turns compounding the blind
+rollout's model of our own play.
+
+So Search sets its horizon from the map: the longest lane in *current* travel
+turns plus `LANE_CUSHION` (`_horizon`, re-read every decide, since
+`SHIP_SPEED_GROWTH_PCT` shortens lanes as the game goes on). Against a fixed 12 on
+the same seeds, paired, knower's score against marshal (6 ly: seeds 1-80, n=160,
+except +0 at n=80):
+
+    cushion       +0          +2          +3          +4          +5
+    18 ly     +15.0 ± 6.7 +12.5 ± 8.2 +15.0 ± 6.7 +15.0 ± 7.6  +7.5 ± 7.5
+     6 ly      -7.5 ± 5.6  -5.0 ± 3.5  -2.5 ± 3.5  -5.0 ± 3.5  +2.5 ± 3.8
+     1 ly     +15.0 ±13.1 +40.0 ±11.2 +30.0 ±12.8 +35.0 ±13.1 +25.0 ± 9.9
+    pooled     +2.9 ± 4.1  +1.0 ± 3.1  +2.9 ± 3.0  +0.6 ± 3.1  +5.7 ± 3.2
+
+Every cushion beats a fixed 12 where the lanes are short or long and matches it
+at the default speed, where +5 is about the old horizon anyway (lanes of 4-6
+turns). Between +2 and +5 the differences are noise — not even monotonic — so the
+cushion is +5, the best pooled and the only one at or above 12 at 6 ly. A shared
+gain at 1 ly needs the guard lifted (below); inside `SEARCH_BUDGET_S` a slow-ship
+search is clipped long before its horizon.
+
+That left three settings that behave differently — Off, Predict (the one-turn
+oracle) and Search — so the slider is those three named stops (`AUX_NAMES`). Any
+stored value above 2 is read as Search, which is what every depth past 1 meant, so
+no setup or link changed its digest.
+
+**The previous depth curve** (branch-every-ply search). Against thinker, both
+seatings, 24-node maps (n = decided games):
 
     depth  1    90.4%   n=114     6 timeouts
     depth  5    96.6%   n=119     1
@@ -436,10 +482,9 @@ What it shows:
 - **Depth 1 is free at any size.** 28 ms was the worst decide in the old grid, so
   `ORACLE_BUDGET_S` (50 ms) never fires and a depth-1 seat never needs a warning.
 - **A ply is ~0.4x what it was, so the guard trips far later.** At the default
-  6 ly/turn a depth-12 search now fits `SEARCH_BUDGET_S` (150 ms) at every map up to
-  60 systems at any seat count and 80 with two seats; slow ships are still the
-  tail (40 systems, 6 seats, 1 ly/turn reaches about 9). On 120 systems a depth-12
-  decide needs roughly 0.15-0.7 s unguarded.
+  6 ly/turn a Search horizon (4-6 lanes plus 5) fits `SEARCH_BUDGET_S` (150 ms)
+  on most maps; slow ships are the tail twice over, since their lanes are longer
+  *and* each ply costs more.
 - **Cost is linear in map size, and slow ships are the tail.** At 1 ly/turn
   fleets stay in flight for many turns, so every rollout has more to simulate.
 
@@ -450,13 +495,21 @@ fake-clock test. The guarded runs that validated the old model's reach against
 real ones have not been repeated for the new one.
 
 **The menu warns only where it matters** (`setup_warning`): when the guard
-would cut a search short of `WARN_USEFUL_DEPTH` (5, where the old depth curve
-above flattens into noise), or a turn's knower thinking summed over its seats
-passes `WARN_TURN_MS` (1 s). A 12 that plays as a 7 costs nothing anyone can
-measure, so clipping alone is not worth interrupting Start for. In practice only
-100+ systems with 6 seats at 1 ly/turn warns now, where the search would reach 4;
-under the old search 60 systems with 6 seats, or 80 with fewer, warned at slow
-speeds and 120 with 6 seats at the default. Depth 1, the default, never does.
+would stop a Search seat short of the setup's longest lane (read off the same lane
+survey the Advanced tab reports), or a turn's Search thinking summed over its seats
+passes `WARN_TURN_MS` (1 s). Losing some of the cushion costs little; stopping short
+of the lanes means the search cannot price the launches it makes. One Search seat,
+longest lane / plies reached, W where it warns:
+
+    nodes   2p/1ly  2p/3ly  2p/6ly  2p/18ly    6p/1ly  6p/3ly  6p/6ly  6p/18ly
+      12    33/34   11/16    6/11    2/7      W 33/25  11/16    6/11    2/7
+      24  W 26/17    9/14    5/10    2/7      W 26/13   9/14    5/10    2/7
+      40  W 19/10    7/12    4/9     2/7      W 19/8    7/12    4/9     2/7
+      80  W 20/5     7/8     4/9     2/7      W 20/4  W 7/6     4/8     2/7
+     120  W 21/4   W 7/6     4/7     2/7      W 21/3  W 7/4     4/6     2/7
+
+So it is a slow-ship warning now: almost every map at 1 ly/turn, the largest at
+3, never at the default speed or faster. Off and Predict never warn.
 
 **The browser is not modelled.** Every figure here is native CPython; the
 pygbag build is slower by an unmeasured factor, so there the guard clips
@@ -480,10 +533,11 @@ posted map (`tools/bot_replay.py`; the infrastructure is in
 roster fall out of that, and both were measured.
 
 **Which version of a bot goes on the board.** Its best one, not its menu default.
-`REPLAY_AUX` names the exceptions and today holds one: `knower` at search depth
-12. That is the top of knower's own slider (`SEARCH_DEPTH_MAX`) and the setting
-its own measurements favour — "ahead in every measurement taken and behind in
-none". It is not a small difference. On a 16-node map, same seed, same opponents:
+`REPLAY_AUX` names the exceptions and today holds one: `knower` on Oracle: Search
+(it was search depth 12 until the knob became three named stops; see "How far to
+look" above). That is the top of knower's own slider (`SEARCH_DEPTH_MAX`). It is
+not a small difference. On a 16-node map, same seed, same opponents, at the old
+depth 12:
 
     knower @ 1 (default)     336 turns, 346 ships lost
     knower @ 12             121 turns, 137 ships lost
