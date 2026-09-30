@@ -544,7 +544,7 @@ def test_search_works_for_the_autoplayed_human_seat(kn):
 
 
 # --------------------------------------------------------------------------- #
-# The beam: borrowed openings, and keeping every opening alive
+# The search: borrowed openings, and keeping every opening alive
 # --------------------------------------------------------------------------- #
 def test_external_candidates_are_offered_as_openings(kn):
     """The search must actually reach the other bots, not silently skip them.
@@ -598,24 +598,30 @@ def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
         kn.EXTERNAL_CANDIDATES = saved
 
 
-def test_pruning_keeps_every_opening_alive_to_the_bottom(kn):
-    """The invariant the whole search rests on.
+def test_every_opening_is_carried_to_the_bottom_in_candidate_order(kn, monkeypatch):
+    """The invariant the whole search rests on: one line per opening, all the way down.
 
-    A pooled beam fills with continuations of whichever opening is ahead on material
-    right now, so the rival openings — the only thing being compared — die after one
-    ply. Grouping the cut by `origin` is what prevents that; measured on the pooled
-    version, 94% of survivors descended from the default alone.
+    The search compares openings, so every candidate has to reach the last ply, and
+    in candidate order — the tuned default first, so an exact tie keeps it.
     """
-    lines = [kn._Line(root=[], origin=o, board=None, score=score)
-             for o, score in enumerate((100.0, -50.0, -60.0, -70.0, -80.0, -90.0))]
-    # ...and a swarm of continuations of the *winning* opening, which under a pooled
-    # cut would take every slot.
-    lines += [kn._Line(root=[], origin=0, board=None, score=99.0 - i) for i in range(20)]
+    state = _state()
+    orc = kn._build_oracle(state, 2)
+    base = kn._plan(state, 2, orc)
+    openings = list(kn._candidates(state, 2, orc, base))
+    seen = []
+    real_advance = kn._advance
 
-    kept = kn._prune(lines)
-    assert {line.origin for line in kept} == {0, 1, 2, 3, 4, 5}, "an opening was cut"
-    assert all(sum(1 for k in kept if k.origin == o) <= kn.SEARCH_BEAM for o in range(6))
-    assert kept[0].origin == 0, "the tuned default must stay first, so ties favour it"
+    def advance(lines, pid, humans):
+        out = real_advance(lines, pid, humans)
+        seen.append([line.root for line in out])
+        return out
+
+    monkeypatch.setattr(kn, "_advance", advance)
+    kn._search(state, 2, orc, 4, float("inf"))
+    assert len(seen) == 3, "a ply was skipped"
+    for roots in seen:
+        assert len(roots) == len(openings), "an opening was dropped"
+        assert roots[0] == base, "the tuned default must stay first, so ties favour it"
 
 
 def test_a_decided_line_is_carried_not_stepped(kn):
@@ -623,19 +629,19 @@ def test_a_decided_line_is_carried_not_stepped(kn):
     state = _state()
     board = kn._clone(state, kn._priv(state, 2, 1))
     board.winner = 1
-    line = kn._Line(root=[], origin=0, board=board, score=-kn.EVAL_DECIDED)
+    line = kn._Line(root=[], board=board, score=-kn.EVAL_DECIDED)
 
-    out = kn._expand([line], 2, frozenset())
-    assert out == [line], "a decided line was expanded"
+    out = kn._advance([line], 2, frozenset())
+    assert out == [line], "a decided line was stepped"
 
 
 # --------------------------------------------------------------------------- #
 # What a setup costs (`ply_ms`, `_search_run`, `setup_warning`)
 # --------------------------------------------------------------------------- #
 def test_the_cost_model_stops_where_the_real_guard_does(kn, monkeypatch):
-    # A clock that moves only when a rollout runs, each costing its share of a
-    # ply, so `_search`'s own guard can be compared with `_search_run` without
-    # timing anything.
+    # A clock that moves only when a rollout runs — a root rollout costing its share
+    # of `COST_ROOT_PLIES`, every later one its share of a ply — so `_search`'s own
+    # guard can be compared with `_search_run` without timing anything.
     from types import SimpleNamespace
     state = _state(nodes=24, players=3)
     pid = 2
@@ -643,30 +649,32 @@ def test_the_cost_model_stops_where_the_real_guard_does(kn, monkeypatch):
     base = kn._plan(state, pid, None)
     cands = len(list(kn._candidates(state, pid, None, base)))
     assert cands == kn.SEARCH_WIDTH + len(kn.EXTERNAL_CANDIDATES)
-    real_rollout, real_expand = kn._rollout, kn._expand
-    for ply in (7.0, 40.0, 70.0, 149.0, 400.0):
-        clock, expands = [0.0], [0]
+    real_rollout, real_advance = kn._rollout, kn._advance
+    for ply in (7.0, 40.0, 70.0, 130.0, 149.0, 400.0):
+        clock, calls, plies = [0.0], [0], [0]
 
-        def rollout(*a, _ply=ply, _clock=clock):
-            _clock[0] += _ply / cands ** 2 / 1000
+        def rollout(*a, _ply=ply, _clock=clock, _calls=calls):
+            share = kn.COST_ROOT_PLIES if _calls[0] < cands else 1.0
+            _calls[0] += 1
+            _clock[0] += _ply * share / cands / 1000
             return real_rollout(*a)
 
-        def expand(*a, _n=expands):
+        def advance(*a, _n=plies):
             _n[0] += 1
-            return real_expand(*a)
+            return real_advance(*a)
 
         monkeypatch.setattr(kn, "_rollout", rollout)
-        monkeypatch.setattr(kn, "_expand", expand)
+        monkeypatch.setattr(kn, "_advance", advance)
         monkeypatch.setattr(kn, "time", SimpleNamespace(perf_counter=lambda _c=clock: _c[0]))
         kn.decide(state, pid)
-        assert 2 + expands[0] == kn._search_run(ply, 12)[0], ply
+        assert 2 + plies[0] == kn._search_run(ply, 12)[0], ply
 
 
 def test_the_ply_that_crosses_the_budget_still_runs(kn):
     assert kn._search_run(1.0, 12)[0] == 12
-    assert kn._search_run(400.0, 12)[0] == 3    # the root fits, so one ply more runs
+    assert kn._search_run(100.0, 12)[0] == 3    # the root fits, so one ply more runs
     assert kn._search_run(1e6, 12)[0] == 2      # the root alone overruns: nothing more
-    assert kn._search_run(1e6, 2) == (2, 1e6 * kn._root_share())
+    assert kn._search_run(1e6, 2) == (2, 1e6 * kn.COST_ROOT_PLIES)
     assert kn._search_run(5.0, 1) == (1, 0.0)
 
 
@@ -698,7 +706,7 @@ def test_the_default_map_never_warns_even_at_the_top_of_the_slider(kn):
 
 
 def test_the_largest_map_warns_and_says_how_deep_it_will_really_look(kn):
-    s = _knower_setup(12, nodes=120, players=6)
+    s = _knower_setup(12, nodes=120, players=6, ship_ly_per_turn=1.0)
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
     reach = kn._search_run(kn.ply_ms(120, 6, s.ship_ly_per_turn), 12)[0]
     assert reach < kn.WARN_USEFUL_DEPTH

@@ -228,32 +228,93 @@ than thinker (80%-20%), so the two are not interchangeable.
 
 Don't re-add either without a measurement.
 
-### The depth search: why it branches every ply and cuts per opening
+### The depth search: branch the root, play the rest on
 
-An earlier version deviated for one ply and then played the tuned default for
-the rest. That prices a candidate as "what if I did this now and then went back
-to normal", so it cannot represent "rush now, consolidate next turn" at all, and
-a posture is exactly the kind of thing worth holding for three turns or not
-adopting. Hence branching at every ply.
+Every candidate opening is rolled out on the root board, then each line is played
+on by the blind default plan for the rest of the depth (`_advance`), and the lines
+are compared where they end. One rollout per candidate per ply, so cost is linear
+in the candidate count. Until 2026-09 the search branched every line across every
+candidate at *every* ply and cut back per opening (`_prune`); that version, and why
+it went, is below.
 
-**The cut is per opening, not pooled** (`_prune`). The default's line branches
-as widely as anyone else's, so a single pooled beam fills with continuations of
-whichever opening leads on material right now: measured, 94% of survivors
-descended from the default and a borrowed opening never survived a single cut,
-which made the whole tree a costly way to re-derive depth 1.
+**Why deeper branching did nothing.** The per-ply cut ranked children on a one-ply
+`_evaluate`, and `_material` counts ships in transit at full value, so a launch that
+will fail scores like one that will land until the turn it arrives. Children of one
+node therefore mostly tied, and ties go to the default. Instrumented at depth 12
+against thinker on 24-node maps, one game per cell, the default child won 97-100%
+of the nodes below the root. Rerunning every search on the same positions with the
+deeper plies replaced by the default alone changed the root pick in:
 
-`SEARCH_BEAM` stays 1. Wider measured no better and costs linearly. An
-opening's score is the max over its surviving lines, and a max over more noisy
-rollouts is biased upward by sampling, unevenly across openings; the comparison
-the search needs is between openings, not within one.
+    1 ly/turn   0 of 250 decisions (0%)
+    3 ly/turn   18 of 203 (8.9%)
+    6 ly/turn   8 of 104 (7.7%), 4 seats 10 of 82 (12.2%)
+    18 ly/turn  12 of 40 (30%)      <- 1-2 turn lanes land inside one ply
 
-The remaining ceilings are the evaluation and the roster. `_evaluate` reads
-material off the final board, so within one opening `_prune` can still drop a
-line that gives ground early to win later; an eval integrated over the path
-would fix that. The roster is the dominant cost term, so a fifth candidate has
-to beat `candidates**2`: the cheap direction is a *better* four, not more.
+while that branching was ~75% of the search's cost. Picking *which* plies to branch
+cannot fix a myopic cut, and the cheap signals do not find the plies that mattered
+anyway: "a system changed hands last turn" fired at 11-44% of nodes but caught only
+33-69% of those where a non-default child won (1% of the score gap at 1 ly), and
+"a fleet arrives" / "an enemy launched" fired at 73-98%.
+
+**Head-to-head, depth 12, guards lifted, 2 seats, 24-node random maps, both
+seatings of seeds 1-20 (1 ly: seeds 1-10, 1-20 for E vs A, at a 1200-turn cap — 600
+for B, C and D against A — with a capped game scored to whoever leads on
+`_evaluate`).** A is the old search; B branches the root only with
+the old two borrowed candidates; E is B plus marshal and claudebot, i.e. what ships:
+
+    E vs A     18 ly 72.5% (n=40)   6 ly 53.8% (n=80)   1 ly 60.0% (n=40)
+               pooled 60%, z ~ 2.6
+    B vs A     18 ly 52.5%          6 ly 50.0%          1 ly 55.6%   (n=40/40/20)
+
+    vs marshal, paired        A      B      E
+               18 ly         62%    65%    57%    E-A  -5.0 +/- 9.4
+                6 ly         50%    45%    75%    E-A +25.0 +/- 6.0 (n=80)
+                1 ly         15%    20%    45%    E-A +30.0 +/- 10.5 (n=20)
+
+So root-only branching alone (B) is even with A at a quarter of the cost, and the
+headroom it frees, spent on more *openings*, is what beat A. Spending it on more
+*turns* instead did not: rolling every line on with the default until the fleets it
+launched had landed (all lines to the same turn, capped at 30 more) lost to A
+head-to-head whether stacked on B (40%, 40%, 47% at 18/6/1 ly) or on A itself
+(52.5%, 40%, 40%), although it did well against marshal. The rollout models a
+non-oracle rival with its real `decide` but an oracle or a human with `_blind`, so a
+longer rollout is faithful against the former and compounds a fiction against the
+latter — the same reason depth past 5 was noise (below).
+
+**Most of E's marshal result is marshal.** F, E without marshal as a candidate,
+scores 45% against marshal at 6 ly — F-E -32.5 +/- 9.0, F-A -7.5 +/- 8.3 — and 30%
+at 1 ly (F-E -15.0 +/- 8.2). Borrowing a predictable rival's own planner is worth a
+lot *against that rival*: its plan is priced by a rollout that simulates the rival
+exactly. Against A (an oracle, so not borrowable) the added candidates are worth
+roughly the 8 points between B and E. That is why the ladder moves only at the top:
+
+    6 ly/turn, 40 games a pair (80 for A/E/marshal), row's score vs column
+                A     E   marshal claudebot thinker rusherplus heuristic  mean
+    E          54%    -     75%     100%     100%     100%      100%      88%
+    A           -    46%    50%     100%     100%     100%      100%      83%
+    marshal    50%   25%     -      100%      98%     100%      100%      79%
+    thinker     0%    0%     2%      90%       -      100%       95%      48%
+    claudebot   0%    0%     0%       -       10%      92%       85%      31%
+    heuristic   0%    0%     0%      15%       5%      85%        -       18%
+    rusherplus  0%    0%     0%       8%       0%       -        15%       4%
+
+Every other seat is already 100% for both, so the ranking below knower is unchanged.
+At 40-80 games a cell, treat anything within ~10 points as unresolved.
 
 ### Borrowed candidates (`EXTERNAL_CANDIDATES`)
+
+Four now: rusherplus, heuristic, marshal, claudebot (see the search above for what
+the last two bought). How often each wins E's search, over every decision of the
+games above (the land-grab included, so the default share is inflated — see below):
+
+    6 ly    default 54%  rusherplus 12%  marshal 11%  timid 9%  heuristic 8%  claudebot 5%
+    18 ly   default 80%  timid 6%  marshal 5%  rusherplus 5%  heuristic 3%  claudebot 2%
+    1 ly    default 85%  rusherplus 6%  heuristic 4%  marshal 3%  claudebot 1%  timid 1%
+
+Neither marshal nor claudebot reads a clock, and `_external_plan` gives each a
+private clone and rng (claudebot tie-breaks through `state.rng`), so both keep the
+search iteration-bounded. Everything below was measured on the old
+branch-every-ply search with the first two candidates only.
 
 The single largest measured win in the search. At depth 12 against thinker:
 
@@ -290,7 +351,9 @@ still listed in `POSTURE_VARIANTS`, outside the width.
 
 ### How much depth is worth
 
-Against thinker, both seatings, 24-node maps (n = decided games):
+Measured on the old branch-every-ply search; the depth curve of the root-only one
+has not been re-measured, and `WARN_USEFUL_DEPTH` still rests on this one. Against
+thinker, both seatings, 24-node maps (n = decided games):
 
     depth  1    90.4%   n=114     6 timeouts
     depth  5    96.6%   n=119     1
@@ -319,11 +382,13 @@ Against claudebot there is little headroom: 96.2% at depth 1, 98.8% (79-1) at
 
 ### Cost per decide, and where the search guard trips
 
-Measured 2026-09-29, when maps grew to 120 systems. Every seat knower, one
-game per cell driven at depth 1, each live seat's decide timed every 20 turns
-at depth 1 and depth 12 with both guards lifted (`BUDGET_SCALE` inf), so these
-are the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores,
-4 threads), native CPython, load average under 1.8 throughout:
+Two measurements, chained, because they were taken on different machines.
+
+**The old search, 2026-09-29, when maps grew to 120 systems.** Every seat knower,
+one game per cell driven at depth 1, each live seat's decide timed every 20 turns
+at depth 1 and depth 12 with both guards lifted (`BUDGET_SCALE` inf), so these are
+the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores, 4
+threads), native CPython, load average under 1.8 throughout:
 
     systems seats ly/turn   ply p75   depth-12 median / max   depth-1 max
        24     2      6        12         122 /   142            2
@@ -344,58 +409,68 @@ are the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores,
 
 (A ply is `(depth-12 - depth-1) / 11` for one decide; the p75 is over every
 decide in the game. The full 24-cell grid, 2/6 seats x 1/6/18 ly x
-24/40/80/120 systems, is the fit's input.)
+24/40/80/120 systems, was the fit's input: `17.5 ms x (systems/40)^1.0 x
+(seats/2)^0.42 x (ly/6)^-0.41`, within +/-25% on most cells.)
+
+**The root-only search, 2026-09-30, as a ratio to the old one.** The same 24 cells,
+every seat knower at depth 1, seed 1, sampled every 25 turns to turn 250, each
+live seat timed with the old search and the new one *on the same position*, both
+unguarded: a ply is `(depth-12 - depth-2) / 10`, the root is depth 2. A different,
+faster container, so only ratios are carried over, never its milliseconds:
+
+    new ply / old ply, p75 per cell    0.34 - 0.51, median 0.37
+    fit                                0.414 x (systems/40)^+0.03 x (seats/2)^-0.14 x (ly/6)^+0.01
+    new root / new ply                 median 1.09 (0.97 - 1.24)
+    old root / old ply                 median 0.24 (the old model's 1/4)
+
+The last line is the check on the method: it recovers the old model's root share
+to within a point. Folding the fit into the i5 figures gives `ply_ms` =
+`7.2 ms x (systems/40)^1.0 x (seats/2)^0.28 x (ly/6)^-0.41` (map size and ship
+speed barely move the ratio, so their exponents stand; more seats lowers it, since
+a rollout's rival decides are the part that did not shrink), and
+`COST_ROOT_PLIES` = 1.1: the root rolls each opening out once, like a ply, and also
+builds every candidate's plan.
 
 What it shows:
 
-- **Depth 1 is free at any size.** 28 ms is the worst decide in the grid, so
+- **Depth 1 is free at any size.** 28 ms was the worst decide in the old grid, so
   `ORACLE_BUDGET_S` (50 ms) never fires and a depth-1 seat never needs a warning.
-- **At depth >= 2 the guard is a real limit, not a catastrophe guard, from 40
-  systems up.** 40 nodes / 6 seats at depth 12 already needs ~200 ms against the
-  150 ms `SEARCH_BUDGET_S`. The cost table knower carried (57 ms there, 69 ms at
-  the tail, "better than 2x headroom") no longer holds; the search has grown
-  since. On 120 systems a depth-12 decide needs 0.4-0.9 s typically and up to
-  3.5 s.
-- **Cost is linear in map size, and slow ships are the tail.** The p75 ply fits
-  `17.5 ms x (systems/40)^1.0 x (seats/2)^0.42 x (ly/6)^-0.41` (`ply_ms`),
-  within +/-25% on most cells and a factor of 1.85 on the worst — one game per
-  cell, and a slow game varies turn to turn. At 1 ly/turn fleets stay in flight
-  for many turns, so every rollout has more to simulate; the p75 is 2-3x the
-  median there, against ~1.2x at 18 ly/turn.
+- **A ply is ~0.4x what it was, so the guard trips far later.** At the default
+  6 ly/turn a depth-12 search now fits `SEARCH_BUDGET_S` (150 ms) at every map up to
+  60 systems at any seat count and 80 with two seats; slow ships are still the
+  tail (40 systems, 6 seats, 1 ly/turn reaches about 9). On 120 systems a depth-12
+  decide needs roughly 0.15-0.7 s unguarded.
+- **Cost is linear in map size, and slow ships are the tail.** At 1 ly/turn
+  fleets stay in flight for many turns, so every rollout has more to simulate.
 
 With the guard on, a clipped decide stops after the ply that crosses 150 ms.
-`_search_run` models that (the root rolls each of the four candidates out once,
-a quarter of a ply; the guard is checked before each ply after it), pinned
-against the real `_search` by a fake-clock test. Checked against guarded runs,
-the p75 prediction sits at the low end of the depth actually reached:
-
-    setup (systems/seats/ly, depth)   predicted   reached, median (range)
-    120 / 6 / 6,  d12                     4          4  (4-9)
-    120 / 2 / 1,  d8                      4          8  (4-8)
-     80 / 6 / 6,  d12                     5          5  (5-11)
-     40 / 6 / 6,  d12                     8          9  (8-12)
-     24 / 2 / 6,  d12                    12         12  (7-12)
+`_search_run` models that (the root is `COST_ROOT_PLIES` of a ply; the guard is
+checked before each ply after it), pinned against the real `_search` by a
+fake-clock test. The guarded runs that validated the old model's reach against
+real ones have not been repeated for the new one.
 
 **The menu warns only where it matters** (`setup_warning`): when the guard
-would cut a search short of `WARN_USEFUL_DEPTH` (5, where the depth curve above
-flattens into noise), or a turn's knower thinking summed over its seats passes
-`WARN_TURN_MS` (1 s). A 12 that plays as a 7 costs nothing anyone can measure,
-so clipping alone is not worth interrupting Start for. In practice nothing up
-to 40 systems warns; from 60 systems with 6 seats, or 80 with fewer, slow ships
-warn; at 120 systems with 6 seats, the default speed warns too. Depth 1, the
-default, never does.
+would cut a search short of `WARN_USEFUL_DEPTH` (5, where the old depth curve
+above flattens into noise), or a turn's knower thinking summed over its seats
+passes `WARN_TURN_MS` (1 s). A 12 that plays as a 7 costs nothing anyone can
+measure, so clipping alone is not worth interrupting Start for. In practice only
+100+ systems with 6 seats at 1 ly/turn warns now, where the search would reach 4;
+under the old search 60 systems with 6 seats, or 80 with fewer, warned at slow
+speeds and 120 with 6 seats at the default. Depth 1, the default, never does.
 
 **The browser is not modelled.** Every figure here is native CPython; the
 pygbag build is slower by an unmeasured factor, so there the guard clips
 harder and a turn stalls longer than the warning says (its text says as much).
 Measure that before tightening the thresholds on the web build.
 
-**Don't measure this on a loaded machine.** A first pass of this grid ran three
-jobs at once beside other work, at load average 16 on 4 threads. Thread CPU time
-excludes being descheduled but not sharing a core, its cache and its clock with
-a busy neighbour, and every cell read ~1.9x high (the same seed's 120/6/1 p75
+**Don't measure this on a loaded machine.** A first pass of the old grid ran
+three jobs at once beside other work, at load average 16 on 4 threads. Thread CPU
+time excludes being descheduled but not sharing a core, its cache and its clock
+with a busy neighbour, and every cell read ~1.9x high (the same seed's 120/6/1 p75
 ply: 299 ms loaded, 159 ms quiet). The warning fitted to it fired on 40-system
-maps. Run one job at a time and record `os.getloadavg()` beside the numbers.
+maps. Run one job at a time and record `os.getloadavg()` beside the numbers. The
+ratio grid ran three at a time, which is safe for a ratio only because both
+searches were timed back to back on the same position under the same load.
 
 ## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
 
@@ -415,8 +490,9 @@ none". It is not a small difference. On a 16-node map, same seed, same opponents
 
 There is no point putting a deliberately hobbled version of the best bot on a
 board whose whole purpose is to give a human score something to be measured
-against. The cost is wall clock: depth 12 is roughly 100x depth 1, taking a
-40-node six-seat game from well under a second to tens of seconds. The worker's
+against. The cost is wall clock: depth 12 was roughly 100x depth 1, taking a
+40-node six-seat game from well under a second to tens of seconds (both figures
+from the branch-every-ply search; a root-only ply costs ~0.4x). The worker's
 `--limit` and deadline exist for that, and it banks each result as it goes.
 
 **Why the offline runner gets a bigger time budget, not a shallower search.**
