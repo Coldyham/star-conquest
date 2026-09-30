@@ -383,14 +383,18 @@ def test_knower_beats_thinker_head_to_head(kn):
 
 
 # --------------------------------------------------------------------------- #
-# Depth: the `aux` knob, and the rollout search above depth 1
+# The Oracle knob (`aux`): Off, Predict, and the rollout search on Search
 # --------------------------------------------------------------------------- #
-def test_aux_slider_is_declared_as_search_depth(kn):
-    """The AI tab labels the generic aux knob from these, and offers our range."""
+def test_aux_slider_is_declared_as_three_named_stops(kn):
+    """The AI tab labels the generic aux knob from these, offers our range, and
+    shows each stop's name in place of its number."""
     assert kn.AUX_LABEL and kn.AUX_INT
     assert ai.aux_spec("knower") == (
         kn.AUX_LABEL, 0.0, float(kn.SEARCH_DEPTH_MAX), 1.0, True
     )
+    assert ai.aux_names("knower") == ("Off", "Predict", "Search")
+    assert ai.aux_stop_name("knower", 1.0) == "Predict"
+    assert ai.aux_stop_name("knower", 12) == "Search", "an old depth reads as Search"
 
 
 def test_seat_depth_is_tolerant(kn):
@@ -400,7 +404,9 @@ def test_seat_depth_is_tolerant(kn):
 
     p = _P()
     p.ai_params = _P()
-    for raw, want in ((0.0, 0), (1.0, 1), (3.0, 3),
+    # Anything past Predict is Search: that is what every depth above 1 meant when
+    # this was a 0-12 slider, so an old link keeps playing the search it asked for.
+    for raw, want in ((0.0, 0), (1.0, 1), (2.0, 2), (3.0, 2), (12, 2),
                       (999.0, kn.SEARCH_DEPTH_MAX), (-5.0, 0)):
         p.ai_params.aux = raw
         assert kn._seat_depth(p) == want, raw
@@ -428,7 +434,7 @@ def test_depth_one_matches_the_plain_oracle(kn):
     assert plain == _totals(kn._plan(state, 2, kn.LAST_ORACLE))
 
 
-@pytest.mark.parametrize("depth", [2, 3, 5, 8, 12])
+@pytest.mark.parametrize("depth", [2, 12])     # Search, and a legacy depth clamped to it
 def test_search_is_deterministic_and_pure(kn, depth):
     """Common random numbers, state-derived rngs: same board in, same plan out.
 
@@ -544,7 +550,7 @@ def test_search_works_for_the_autoplayed_human_seat(kn):
 
 
 # --------------------------------------------------------------------------- #
-# The beam: borrowed openings, and keeping every opening alive
+# The search: borrowed openings, and keeping every opening alive
 # --------------------------------------------------------------------------- #
 def test_external_candidates_are_offered_as_openings(kn):
     """The search must actually reach the other bots, not silently skip them.
@@ -598,24 +604,30 @@ def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
         kn.EXTERNAL_CANDIDATES = saved
 
 
-def test_pruning_keeps_every_opening_alive_to_the_bottom(kn):
-    """The invariant the whole search rests on.
+def test_every_opening_is_carried_to_the_bottom_in_candidate_order(kn, monkeypatch):
+    """The invariant the whole search rests on: one line per opening, all the way down.
 
-    A pooled beam fills with continuations of whichever opening is ahead on material
-    right now, so the rival openings — the only thing being compared — die after one
-    ply. Grouping the cut by `origin` is what prevents that; measured on the pooled
-    version, 94% of survivors descended from the default alone.
+    The search compares openings, so every candidate has to reach the last ply, and
+    in candidate order — the tuned default first, so an exact tie keeps it.
     """
-    lines = [kn._Line(root=[], origin=o, board=None, score=score)
-             for o, score in enumerate((100.0, -50.0, -60.0, -70.0, -80.0, -90.0))]
-    # ...and a swarm of continuations of the *winning* opening, which under a pooled
-    # cut would take every slot.
-    lines += [kn._Line(root=[], origin=0, board=None, score=99.0 - i) for i in range(20)]
+    state = _state()
+    orc = kn._build_oracle(state, 2)
+    base = kn._plan(state, 2, orc)
+    openings = list(kn._candidates(state, 2, orc, base))
+    seen = []
+    real_advance = kn._advance
 
-    kept = kn._prune(lines)
-    assert {line.origin for line in kept} == {0, 1, 2, 3, 4, 5}, "an opening was cut"
-    assert all(sum(1 for k in kept if k.origin == o) <= kn.SEARCH_BEAM for o in range(6))
-    assert kept[0].origin == 0, "the tuned default must stay first, so ties favour it"
+    def advance(lines, pid, humans):
+        out = real_advance(lines, pid, humans)
+        seen.append([line.root for line in out])
+        return out
+
+    monkeypatch.setattr(kn, "_advance", advance)
+    kn._search(state, 2, orc, 4, float("inf"))
+    assert len(seen) == 3, "a ply was skipped"
+    for roots in seen:
+        assert len(roots) == len(openings), "an opening was dropped"
+        assert roots[0] == base, "the tuned default must stay first, so ties favour it"
 
 
 def test_a_decided_line_is_carried_not_stepped(kn):
@@ -623,51 +635,71 @@ def test_a_decided_line_is_carried_not_stepped(kn):
     state = _state()
     board = kn._clone(state, kn._priv(state, 2, 1))
     board.winner = 1
-    line = kn._Line(root=[], origin=0, board=board, score=-kn.EVAL_DECIDED)
+    line = kn._Line(root=[], board=board, score=-kn.EVAL_DECIDED)
 
-    out = kn._expand([line], 2, frozenset())
-    assert out == [line], "a decided line was expanded"
+    out = kn._advance([line], 2, frozenset())
+    assert out == [line], "a decided line was stepped"
 
 
 # --------------------------------------------------------------------------- #
 # What a setup costs (`ply_ms`, `_search_run`, `setup_warning`)
 # --------------------------------------------------------------------------- #
+def test_the_horizon_is_the_longest_lane_plus_the_cushion(kn):
+    state = _state()
+    longest = max(state.travel_turns(a, b) for a, nbrs in state.adjacency.items() for b in nbrs)
+    assert kn._horizon(state) == longest + kn.LANE_CUSHION
+
+
+def test_the_horizon_follows_the_ships_as_they_speed_up(kn, monkeypatch):
+    """`SHIP_SPEED_GROWTH_PCT` shortens every lane as the game goes on, so the
+    horizon is read per decide rather than fixed at the start."""
+    from starconquest import config
+    monkeypatch.setattr(config, "SHIP_SPEED_GROWTH_PCT", 10.0)
+    state = _state()
+    early = kn._horizon(state)
+    state.turn += 40
+    assert kn._horizon(state) < early
+
+
 def test_the_cost_model_stops_where_the_real_guard_does(kn, monkeypatch):
-    # A clock that moves only when a rollout runs, each costing its share of a
-    # ply, so `_search`'s own guard can be compared with `_search_run` without
-    # timing anything.
+    # A clock that moves only when a rollout runs — a root rollout costing its share
+    # of `COST_ROOT_PLIES`, every later one its share of a ply — so `_search`'s own
+    # guard can be compared with `_search_run` without timing anything.
     from types import SimpleNamespace
     state = _state(nodes=24, players=3)
     pid = 2
-    state.players[pid].ai_params.aux = 12
+    state.players[pid].ai_params.aux = 2
+    horizon = kn._horizon(state)
     base = kn._plan(state, pid, None)
     cands = len(list(kn._candidates(state, pid, None, base)))
     assert cands == kn.SEARCH_WIDTH + len(kn.EXTERNAL_CANDIDATES)
-    real_rollout, real_expand = kn._rollout, kn._expand
-    for ply in (7.0, 40.0, 70.0, 149.0, 400.0):
-        clock, expands = [0.0], [0]
+    real_rollout, real_advance = kn._rollout, kn._advance
+    for ply in (7.0, 40.0, 70.0, 130.0, 149.0, 400.0):
+        clock, calls, plies = [0.0], [0], [0]
 
-        def rollout(*a, _ply=ply, _clock=clock):
-            _clock[0] += _ply / cands ** 2 / 1000
+        def rollout(*a, _ply=ply, _clock=clock, _calls=calls):
+            share = kn.COST_ROOT_PLIES if _calls[0] < cands else 1.0
+            _calls[0] += 1
+            _clock[0] += _ply * share / cands / 1000
             return real_rollout(*a)
 
-        def expand(*a, _n=expands):
+        def advance(*a, _n=plies):
             _n[0] += 1
-            return real_expand(*a)
+            return real_advance(*a)
 
         monkeypatch.setattr(kn, "_rollout", rollout)
-        monkeypatch.setattr(kn, "_expand", expand)
+        monkeypatch.setattr(kn, "_advance", advance)
         monkeypatch.setattr(kn, "time", SimpleNamespace(perf_counter=lambda _c=clock: _c[0]))
         kn.decide(state, pid)
-        assert 2 + expands[0] == kn._search_run(ply, 12)[0], ply
+        assert 1 + plies[0] == kn._search_run(ply, horizon)[0], ply
 
 
 def test_the_ply_that_crosses_the_budget_still_runs(kn):
     assert kn._search_run(1.0, 12)[0] == 12
-    assert kn._search_run(400.0, 12)[0] == 3    # the root fits, so one ply more runs
-    assert kn._search_run(1e6, 12)[0] == 2      # the root alone overruns: nothing more
-    assert kn._search_run(1e6, 2) == (2, 1e6 * kn._root_share())
-    assert kn._search_run(5.0, 1) == (1, 0.0)
+    assert kn._search_run(100.0, 12)[0] == 2    # the root fits, so one ply more runs
+    assert kn._search_run(1e6, 12)[0] == 1      # the root alone overruns: nothing more
+    assert kn._search_run(1e6, 1) == (1, 1e6 * kn.COST_ROOT_PLIES)
+    assert kn._search_run(5.0, 0) == (0, 0.0)
 
 
 def test_a_ply_costs_more_on_bigger_maps_with_more_seats_and_slower_ships(kn):
@@ -687,6 +719,7 @@ def _knower_setup(depth, **kw):
 
 
 def test_knower_never_warns_without_a_search(kn):
+    # Off and Predict run no search, whatever the map.
     for depth in (0, 1):
         s = _knower_setup(depth, nodes=120, players=6, ship_ly_per_turn=1.0)
         assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
@@ -697,27 +730,68 @@ def test_the_default_map_never_warns_even_at_the_top_of_the_slider(kn):
     assert kn.setup_warning(s, list(range(2, s.players + 1))) == []
 
 
-def test_the_largest_map_warns_and_says_how_deep_it_will_really_look(kn):
-    s = _knower_setup(12, nodes=120, players=6)
+def test_the_largest_map_warns_and_says_how_far_it_will_really_look(kn):
+    s = _knower_setup(2, nodes=120, players=6, ship_ly_per_turn=1.0)
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
-    reach = kn._search_run(kn.ply_ms(120, 6, s.ship_ly_per_turn), 12)[0]
-    assert reach < kn.WARN_USEFUL_DEPTH
-    assert any(f"about {reach} turns ahead, not 12" in line for line in lines)
-    assert any("5 Knower seats" in line for line in lines)
+    longest = kn._longest_lane(s)
+    plies = min(kn.HORIZON_MAX, longest + kn.LANE_CUSHION)
+    reach = kn._search_run(kn.ply_ms(120, 6, s.ship_ly_per_turn), plies)[0]
+    assert reach < longest
+    assert any(f"about {reach} turns ahead, short of its {longest}-turn lanes" in line
+               for line in lines)
+    assert any("5 Knower seats on Search" in line for line in lines)
     assert "Systems (Basic tab)" in lines[-1]
+
+
+def test_a_search_that_covers_its_lanes_does_not_warn(kn, monkeypatch):
+    """Losing some of the cushion is not worth interrupting Start for; only a search
+    cut short of its own lanes, or a slow turn, is."""
+    s = _knower_setup(2, nodes=40, players=2, ship_ly_per_turn=6.0)
+    assert kn.setup_warning(s, [2]) == []
+    monkeypatch.setattr(kn, "_longest_lane", lambda settings: 40)   # lanes no search could reach
+    assert kn.setup_warning(s, [2])
+
+
+def test_with_speed_growth_the_warning_says_when_the_clipping_ends(kn):
+    """Every figure a warning quotes is turn one's, the slowest the game gets; with
+    growth on it says so, and names the turn the search first sees past its lanes."""
+    import math
+    from starconquest import config
+    s = _knower_setup(2, nodes=24, players=2, ship_ly_per_turn=1.0)
+    assert not any("ships speed up" in line.lower() for line in kn.setup_warning(s, [2]))
+
+    s.ship_speed_growth_pct = 2.0
+    clear = kn._sees_lanes_from(s, 24)
+    assert clear is not None and clear > 0
+    assert any(f"from about turn {clear} it looks past its lanes" in line
+               for line in kn.setup_warning(s, [2]))
+
+    # ...and that turn is the first one the guarded search really does reach them.
+    from starconquest.settings import lane_lengths
+    longest_ly = max(lane_lengths(s))
+
+    def reaches(turn):
+        speed = min(config.SHIP_SPEED_MAX, 1.0 * 1.02 ** turn)
+        longest = math.ceil(longest_ly / speed)
+        plies = min(kn.HORIZON_MAX, longest + kn.LANE_CUSHION)
+        return kn._search_run(kn.ply_ms(24, 2, speed), plies)[0] >= longest
+
+    assert reaches(clear) and not reaches(clear - 1)
 
 
 def test_the_menu_hears_knowers_warning(kn):
     from starconquest.settings import setup_warnings
-    s = _knower_setup(12, nodes=120, players=6)
+    s = _knower_setup(2, nodes=120, players=6, ship_ly_per_turn=1.0)
+    assert setup_warnings(s)
     assert setup_warnings(s) == kn.setup_warning(s, [2, 3, 4, 5, 6])
     s.ai_strategy[1:6] = ["thinker"] * 5
     assert setup_warnings(s) == []
 
 
-def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn):
+def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     from types import SimpleNamespace
-    s = _knower_setup(12, nodes=18, players=6, ship_ly_per_turn=1.0)
+    monkeypatch.setattr(kn, "_longest_lane", lambda settings: 4)
+    s = _knower_setup(2, nodes=18, players=6, ship_ly_per_turn=1.0)
     assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
     s.custom_map = SimpleNamespace(nodes=[None] * 120)
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])

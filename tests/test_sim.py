@@ -326,11 +326,10 @@ def test_balance_knobs_from_the_setup_reach_the_generated_map():
 
 
 def test_aux_reaches_the_replayed_seat_and_changes_how_it_plays():
-    # models/knower.py reads aux as search depth, and the leaderboard replays it
-    # at 12 (bot_replay.REPLAY_AUX) because that is its own slider's top end and
-    # the setting its measurements favour. If aux stopped reaching the seat the
-    # board would quietly be showing the depth-1 bot instead, which is a
-    # materially weaker player — so assert the two actually differ.
+    # models/knower.py reads aux as its Oracle mode, and the leaderboard replays it
+    # on Search (bot_replay.REPLAY_AUX), the top of its own slider. If aux stopped
+    # reaching the seat the board would quietly be showing the Predict bot
+    # instead, which is a materially weaker player — so assert the two differ.
     ai.load_models()
     cfg = _setup()
     default = sim.play_settings(cfg, 11, "knower")

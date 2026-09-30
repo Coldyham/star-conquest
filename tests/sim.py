@@ -348,8 +348,8 @@ def play_settings(
 
     ``aux`` is the one exception, and the only knob a caller may set: it is the
     bot-defined knob (``AiParams.aux``), so "this bot at its best" is a statement
-    only the caller can make — ``models/knower.py`` reads it as search depth and
-    is a substantially stronger player above the 1.0 default. ``None`` keeps that
+    only the caller can make — ``models/knower.py`` reads it as its Oracle mode
+    and is a substantially stronger player on Search than at the 1.0 default. ``None`` keeps that
     default. Every other field stays untuned deliberately: they belong to the
     built-in heuristic's own tuning, not to a bot's identity.
 

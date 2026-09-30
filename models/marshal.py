@@ -120,6 +120,16 @@ What it changes, in descending order of measured value:
     speed, bit-identical at 12. Capping Phase 3's priced strike as well reads
     33% — see "Denying the swap" in `docs/bot-design.md`.
 
+  * **It feeds what it has just taken, on a board of short lanes.** Phase 4
+    used to flow the rear's surplus to whichever front was nearest; a front
+    short of the largest rival stack beside it now gets it first, and a front
+    with leftover budget tops up a short neighbour (``FEED``, ``FEED_FRONT``).
+    That is what the people who beat marshal on the leaderboard do, and it is
+    worth 54.0% (z = +4.04, REPRODUCED) where the median lane is two turns or
+    less. On longer lanes it measured null against marshal and drew more
+    against knower, so ``FEED_MAX_TURNS`` switches it off there. See "What the
+    board's human wins say" in `docs/bot-design.md`.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
 no module state at all; never add any, because knower calls this function dozens
@@ -209,6 +219,14 @@ RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
                                  # siege too, when its horizon is at least this
                                  # many turns; 0 = never (neutrals only). See
                                  # "Phase 3b re-flooding" in docs/bot-design.md
+FEED = 1.0                      # Phase 4: rear surplus flows only to frontier
+                                 # systems short of this fraction of their
+                                 # largest rival neighbour, while any are; 0 = off
+FEED_FRONT = True               # ...and a frontier system's own leftover tops up
+                                 # a short neighbour, up to its shortfall
+FEED_MAX_TURNS = 2              # ...only on a board whose median lane is at most
+                                 # this many turns; 0 = on any board. See "Feed
+                                 # what was just taken" in docs/bot-design.md
 
 
 # --------------------------------------------------------------------------- #
@@ -551,6 +569,47 @@ def _required(state, pid, target, dist: int) -> int:
         defence = _after_clash(defence, _attacker_pileup(by_turn[turn]))
     need = max(defence + 1, math.ceil(defence * _enemy_margin()))
     return _through_pileup(need, alongside)
+
+
+def _shortfalls(state, pid, fronts, sends) -> dict[int, int]:
+    """Frontier systems short of ``FEED`` times their largest rival neighbour,
+    counting this turn's sends in and out and our fleets already inbound.
+
+    A garrison sized to the stack beside it is what keeps a capture: a system
+    just taken from a rival usually borders the garrison that fled it, and
+    whatever is left on it after the strike moves on is what that garrison
+    counts. Neutral neighbours never strike, so a front facing only neutrals is
+    never short.
+    """
+    sysmap = state.systems
+    out_of: dict[int, int] = defaultdict(int)
+    into: dict[int, int] = defaultdict(int)
+    for (src, dst), n in sends.items():
+        out_of[src] += n
+        into[dst] += n
+    short: dict[int, int] = {}
+    for sid in fronts:
+        s = sysmap[sid]
+        threat = max((sysmap[n].ships for n in s.neighbors
+                      if sysmap[n].owner_id not in (pid, 0)), default=0)
+        if threat <= 0:
+            continue
+        have = (s.ships - out_of[sid] + into[sid]
+                + _incoming(state, sid, pid, hostile=False))
+        need = math.ceil(FEED * threat) - have
+        if need > 0:
+            short[sid] = need
+    return short
+
+
+def _short_lanes(state) -> bool:
+    """Whether the board's median lane is within ``FEED_MAX_TURNS`` — re-timed
+    for the current turn, so ship-speed growth can switch it on mid-match."""
+    if FEED_MAX_TURNS <= 0:
+        return True
+    turns = sorted(state.travel_turns(a, b) or 1
+                   for a, b in (tuple(key) for key in state.lanes))
+    return turns[len(turns) // 2] <= FEED_MAX_TURNS
 
 
 def _pileup_survivors(ours: int, rivals: list[int]) -> int:
@@ -1024,7 +1083,30 @@ def decide(state, pid):
         # flight and the surplus lands on the enemy a turn or two later.
         live_frontier -= giving_up
         flow_owned -= giving_up
-    parent = _flow_to_front(state, flow_owned, live_frontier, pid, max_prod)
+    seeds = live_frontier
+    if FEED > 0 and _short_lanes(state):
+        # A front that cannot hold against the stack beside it is where the
+        # surplus goes first: that is how a capture is kept rather than taken
+        # back a few turns later. See `_shortfalls`.
+        short = _shortfalls(state, pid, live_frontier, sends)
+        if FEED_FRONT:
+            # A front with leftover budget tops up a short neighbour first:
+            # it is one hop away, and the rear's surplus is several.
+            for sid in sorted(live_frontier):
+                if sid in short:
+                    continue
+                for n in sorted((n for n in sysmap[sid].neighbors if n in short),
+                                key=lambda n: (-short[n], n)):
+                    send = min(budget.get(sid, 0), short[n])
+                    if send <= 0:
+                        continue
+                    sends[(sid, n)] += send
+                    budget[sid] -= send
+                    short[n] -= send
+            short = {sid: need for sid, need in short.items() if need > 0}
+        if short:
+            seeds = set(short)
+    parent = _flow_to_front(state, flow_owned, seeds, pid, max_prod)
     for sid in sorted(owned):
         if sid in live_frontier:
             continue  # the front's leftover stays home as the standing reserve

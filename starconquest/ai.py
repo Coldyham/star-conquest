@@ -104,7 +104,8 @@ def available_strategies() -> list[str]:
 # The one bot-defined knob, `AiParams.aux`: a strategy declares what it means by
 # exporting ``AUX_LABEL`` (optionally ``AUX_RANGE = (lo, hi, step)`` and
 # ``AUX_INT``); the menu shows the slider under that label, and hides it for any
-# strategy that declares nothing.
+# strategy that declares nothing. An integer knob may also name its stops with
+# ``AUX_NAMES`` (`aux_names`), which the menu shows in place of the number.
 AuxSpec = tuple[str, float, float, float, bool]  # label, lo, hi, step, is_int
 AUX_RANGE_DEFAULT = (0.0, 8.0, 1.0)
 
@@ -128,6 +129,39 @@ def aux_spec(name: str) -> AuxSpec | None:
     if hi <= lo or step <= 0:
         lo, hi, step = AUX_RANGE_DEFAULT
     return label.strip(), lo, hi, step, bool(getattr(module, "AUX_INT", False))
+
+
+def aux_names(name: str) -> tuple[str, ...] | None:
+    """What each stop of strategy ``name``'s ``aux`` slider is called, or None.
+
+    Only an integer knob stepping by one can have named stops, and only when there
+    is exactly one name per stop — ``AUX_NAMES[i]`` is ``lo + i``. Anything else is
+    ignored rather than raising, like the rest of the declaration: a bad tuple
+    costs the bot its names, and the menu falls back to the number.
+    """
+    spec = aux_spec(name)
+    if spec is None:
+        return None
+    _label, lo, hi, step, is_int = spec
+    fn = STRATEGIES.get(name)
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    names = getattr(module, "AUX_NAMES", None)
+    if not is_int or step != 1 or not isinstance(names, (tuple, list)):
+        return None
+    names = tuple(names)
+    if len(names) != int(hi - lo) + 1 or not all(isinstance(n, str) and n.strip() for n in names):
+        return None
+    return tuple(n.strip() for n in names)
+
+
+def aux_stop_name(name: str, aux: float) -> str | None:
+    """The name of the stop ``aux`` sits on for strategy ``name``, or None when its
+    knob names no stops. Clamped into range, as the slider itself would be."""
+    names = aux_names(name)
+    if names is None:
+        return None
+    lo = aux_spec(name)[1]
+    return names[max(0, min(len(names) - 1, round(aux - lo)))]
 
 
 def setup_warning(name: str, settings, seats: list[int]) -> list[str]:

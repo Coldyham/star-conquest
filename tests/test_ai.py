@@ -172,6 +172,35 @@ def test_aux_spec_reads_label_range_and_int():
         _drop_aux_bot("aux_bot_test", modname)
 
 
+def test_aux_names_name_each_stop_of_an_integer_knob():
+    modname = _register_aux_bot("aux_named_test", AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1),
+                                AUX_INT=True, AUX_NAMES=("Off", " Predict ", "Search"))
+    try:
+        assert ai.aux_names("aux_named_test") == ("Off", "Predict", "Search")
+        assert ai.aux_stop_name("aux_named_test", 0) == "Off"
+        assert ai.aux_stop_name("aux_named_test", 1.0) == "Predict"
+        assert ai.aux_stop_name("aux_named_test", 9) == "Search"     # clamped, as the slider is
+    finally:
+        _drop_aux_bot("aux_named_test", modname)
+
+
+def test_aux_names_are_ignored_unless_they_fit_the_slider():
+    """A bad tuple costs the bot its names and nothing else: the number shows."""
+    good = dict(AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1), AUX_INT=True)
+    for extra in ({"AUX_NAMES": ("Off", "On")},                    # one short
+                  {"AUX_NAMES": ("Off", "", "Search")},             # a blank stop
+                  {"AUX_NAMES": "OffPredictSearch"},                # not a sequence
+                  {"AUX_NAMES": ("a", "b", "c"), "AUX_INT": False},  # a float knob
+                  {"AUX_NAMES": ("a", "b", "c"), "AUX_RANGE": (0, 1, 0.5)}):
+        modname = _register_aux_bot("aux_badnames_test", **{**good, **extra})
+        try:
+            assert ai.aux_names("aux_badnames_test") is None, extra
+            assert ai.aux_stop_name("aux_badnames_test", 1) is None
+        finally:
+            _drop_aux_bot("aux_badnames_test", modname)
+    assert ai.aux_names("heuristic") is None
+
+
 def test_aux_spec_defaults_and_tolerates_junk():
     """A hand-written model must only ever cost itself the slider's range."""
     modname = _register_aux_bot("aux_plain_test", AUX_LABEL="Aggression")

@@ -829,6 +829,33 @@ def _register_aux_bot(name, **attrs):
     return modname
 
 
+def test_ai_tab_aux_slider_shows_a_named_stop_instead_of_its_number(monkeypatch):
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    modname = _register_aux_bot("aux_names_menu_test", AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1),
+                                AUX_INT=True, AUX_NAMES=("Off", "Predict", "Search"))
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1] = "aux_names_menu_test"
+        settings.ai[1].aux = 2
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        # the slider draws its label, then its value, back to back
+        assert drawn[drawn.index("Oracle") + 1] == "Search", "a named stop should replace the number"
+    finally:
+        ai.STRATEGIES.pop("aux_names_menu_test", None)
+        sys.modules.pop(modname, None)
+        pygame.quit()
+
+
 def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
     screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
     ms.tab = "ai"

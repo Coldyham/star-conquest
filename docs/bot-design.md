@@ -228,32 +228,93 @@ than thinker (80%-20%), so the two are not interchangeable.
 
 Don't re-add either without a measurement.
 
-### The depth search: why it branches every ply and cuts per opening
+### The depth search: branch the root, play the rest on
 
-An earlier version deviated for one ply and then played the tuned default for
-the rest. That prices a candidate as "what if I did this now and then went back
-to normal", so it cannot represent "rush now, consolidate next turn" at all, and
-a posture is exactly the kind of thing worth holding for three turns or not
-adopting. Hence branching at every ply.
+Every candidate opening is rolled out on the root board, then each line is played
+on by the blind default plan for the rest of the depth (`_advance`), and the lines
+are compared where they end. One rollout per candidate per ply, so cost is linear
+in the candidate count. Until 2026-09 the search branched every line across every
+candidate at *every* ply and cut back per opening (`_prune`); that version, and why
+it went, is below.
 
-**The cut is per opening, not pooled** (`_prune`). The default's line branches
-as widely as anyone else's, so a single pooled beam fills with continuations of
-whichever opening leads on material right now: measured, 94% of survivors
-descended from the default and a borrowed opening never survived a single cut,
-which made the whole tree a costly way to re-derive depth 1.
+**Why deeper branching did nothing.** The per-ply cut ranked children on a one-ply
+`_evaluate`, and `_material` counts ships in transit at full value, so a launch that
+will fail scores like one that will land until the turn it arrives. Children of one
+node therefore mostly tied, and ties go to the default. Instrumented at depth 12
+against thinker on 24-node maps, one game per cell, the default child won 97-100%
+of the nodes below the root. Rerunning every search on the same positions with the
+deeper plies replaced by the default alone changed the root pick in:
 
-`SEARCH_BEAM` stays 1. Wider measured no better and costs linearly. An
-opening's score is the max over its surviving lines, and a max over more noisy
-rollouts is biased upward by sampling, unevenly across openings; the comparison
-the search needs is between openings, not within one.
+    1 ly/turn   0 of 250 decisions (0%)
+    3 ly/turn   18 of 203 (8.9%)
+    6 ly/turn   8 of 104 (7.7%), 4 seats 10 of 82 (12.2%)
+    18 ly/turn  12 of 40 (30%)      <- 1-2 turn lanes land inside one ply
 
-The remaining ceilings are the evaluation and the roster. `_evaluate` reads
-material off the final board, so within one opening `_prune` can still drop a
-line that gives ground early to win later; an eval integrated over the path
-would fix that. The roster is the dominant cost term, so a fifth candidate has
-to beat `candidates**2`: the cheap direction is a *better* four, not more.
+while that branching was ~75% of the search's cost. Picking *which* plies to branch
+cannot fix a myopic cut, and the cheap signals do not find the plies that mattered
+anyway: "a system changed hands last turn" fired at 11-44% of nodes but caught only
+33-69% of those where a non-default child won (1% of the score gap at 1 ly), and
+"a fleet arrives" / "an enemy launched" fired at 73-98%.
+
+**Head-to-head, depth 12, guards lifted, 2 seats, 24-node random maps, both
+seatings of seeds 1-20 (1 ly: seeds 1-10, 1-20 for E vs A, at a 1200-turn cap — 600
+for B, C and D against A — with a capped game scored to whoever leads on
+`_evaluate`).** A is the old search; B branches the root only with
+the old two borrowed candidates; E is B plus marshal and claudebot, i.e. what ships:
+
+    E vs A     18 ly 72.5% (n=40)   6 ly 53.8% (n=80)   1 ly 60.0% (n=40)
+               pooled 60%, z ~ 2.6
+    B vs A     18 ly 52.5%          6 ly 50.0%          1 ly 55.6%   (n=40/40/20)
+
+    vs marshal, paired        A      B      E
+               18 ly         62%    65%    57%    E-A  -5.0 +/- 9.4
+                6 ly         50%    45%    75%    E-A +25.0 +/- 6.0 (n=80)
+                1 ly         15%    20%    45%    E-A +30.0 +/- 10.5 (n=20)
+
+So root-only branching alone (B) is even with A at a quarter of the cost, and the
+headroom it frees, spent on more *openings*, is what beat A. Spending it on more
+*turns* instead did not: rolling every line on with the default until the fleets it
+launched had landed (all lines to the same turn, capped at 30 more) lost to A
+head-to-head whether stacked on B (40%, 40%, 47% at 18/6/1 ly) or on A itself
+(52.5%, 40%, 40%), although it did well against marshal. The rollout models a
+non-oracle rival with its real `decide` but an oracle or a human with `_blind`, so a
+longer rollout is faithful against the former and compounds a fiction against the
+latter — the same reason depth past 5 was noise (below).
+
+**Most of E's marshal result is marshal.** F, E without marshal as a candidate,
+scores 45% against marshal at 6 ly — F-E -32.5 +/- 9.0, F-A -7.5 +/- 8.3 — and 30%
+at 1 ly (F-E -15.0 +/- 8.2). Borrowing a predictable rival's own planner is worth a
+lot *against that rival*: its plan is priced by a rollout that simulates the rival
+exactly. Against A (an oracle, so not borrowable) the added candidates are worth
+roughly the 8 points between B and E. That is why the ladder moves only at the top:
+
+    6 ly/turn, 40 games a pair (80 for A/E/marshal), row's score vs column
+                A     E   marshal claudebot thinker rusherplus heuristic  mean
+    E          54%    -     75%     100%     100%     100%      100%      88%
+    A           -    46%    50%     100%     100%     100%      100%      83%
+    marshal    50%   25%     -      100%      98%     100%      100%      79%
+    thinker     0%    0%     2%      90%       -      100%       95%      48%
+    claudebot   0%    0%     0%       -       10%      92%       85%      31%
+    heuristic   0%    0%     0%      15%       5%      85%        -       18%
+    rusherplus  0%    0%     0%       8%       0%       -        15%       4%
+
+Every other seat is already 100% for both, so the ranking below knower is unchanged.
+At 40-80 games a cell, treat anything within ~10 points as unresolved.
 
 ### Borrowed candidates (`EXTERNAL_CANDIDATES`)
+
+Four now: rusherplus, heuristic, marshal, claudebot (see the search above for what
+the last two bought). How often each wins E's search, over every decision of the
+games above (the land-grab included, so the default share is inflated — see below):
+
+    6 ly    default 54%  rusherplus 12%  marshal 11%  timid 9%  heuristic 8%  claudebot 5%
+    18 ly   default 80%  timid 6%  marshal 5%  rusherplus 5%  heuristic 3%  claudebot 2%
+    1 ly    default 85%  rusherplus 6%  heuristic 4%  marshal 3%  claudebot 1%  timid 1%
+
+Neither marshal nor claudebot reads a clock, and `_external_plan` gives each a
+private clone and rng (claudebot tie-breaks through `state.rng`), so both keep the
+search iteration-bounded. Everything below was measured on the old
+branch-every-ply search with the first two candidates only.
 
 The single largest measured win in the search. At depth 12 against thinker:
 
@@ -288,9 +349,57 @@ which expresses "commit everything" far better than a margin tweak to knower's
 own phases. Dropping them paid for the whole depth increase and more. They are
 still listed in `POSTURE_VARIANTS`, outside the width.
 
-### How much depth is worth
+### How far to look: the longest lane, plus a cushion
 
-Against thinker, both seatings, 24-node maps (n = decided games):
+The Oracle knob was a search depth, 0-12, until 2026-09-30. The root-only search's
+depth curve showed that no fixed depth is right: a depth pays only once the
+horizon covers the lanes, and then stops paying. Against marshal, depth 12 guards
+lifted, 24-node 2-seat random maps, both seatings, knower's score (a game capped at
+600 turns — 1200 at 1 ly — scored to whoever leads on `_evaluate`):
+
+    depth              1     2     3     5     8    12    20
+    6 ly  (n=80)      36%   38%   40%   66%   74%   75%   65%
+    18 ly (n=40)      72%   85%   80%   78%   72%   65%   80%
+    1 ly  (n=20)      20%    -    15%   20%    -    45%   55%
+
+    6 ly head-to-head vs depth 12:  1 19%, 2 29%, 3 34%, 5 55%, 8 47.5%, 20 51%
+
+Lanes on that map run 2-5 turns at 6 ly/turn, 1-2 at 18 and 10-26 at 1. At 6 ly
+nothing pays until depth 5 and 8-12 is a plateau; at 18 ly depth is flat to
+harmful (against the pre-`FEED` marshal, depth 12 read 25 points below depth 1,
+z = -3.2; against the current one the gap is 7.5 and within noise); at 1 ly
+nothing pays until the horizon approaches the lanes, and 20 was still rising.
+The mechanism is the one the root-only search was built on: ships in transit
+count at full value, so a horizon short of a lane cannot tell a good launch from a
+bad one, while one far past it spends its extra turns compounding the blind
+rollout's model of our own play.
+
+So Search sets its horizon from the map: the longest lane in *current* travel
+turns plus `LANE_CUSHION` (`_horizon`, re-read every decide, since
+`SHIP_SPEED_GROWTH_PCT` shortens lanes as the game goes on). Against a fixed 12 on
+the same seeds, paired, knower's score against marshal (6 ly: seeds 1-80, n=160,
+except +0 at n=80):
+
+    cushion       +0          +2          +3          +4          +5
+    18 ly     +15.0 ± 6.7 +12.5 ± 8.2 +15.0 ± 6.7 +15.0 ± 7.6  +7.5 ± 7.5
+     6 ly      -7.5 ± 5.6  -5.0 ± 3.5  -2.5 ± 3.5  -5.0 ± 3.5  +2.5 ± 3.8
+     1 ly     +15.0 ±13.1 +40.0 ±11.2 +30.0 ±12.8 +35.0 ±13.1 +25.0 ± 9.9
+    pooled     +2.9 ± 4.1  +1.0 ± 3.1  +2.9 ± 3.0  +0.6 ± 3.1  +5.7 ± 3.2
+
+Every cushion beats a fixed 12 where the lanes are short or long and matches it
+at the default speed, where +5 is about the old horizon anyway (lanes of 4-6
+turns). Between +2 and +5 the differences are noise — not even monotonic — so the
+cushion is +5, the best pooled and the only one at or above 12 at 6 ly. A shared
+gain at 1 ly needs the guard lifted (below); inside `SEARCH_BUDGET_S` a slow-ship
+search is clipped long before its horizon.
+
+That left three settings that behave differently — Off, Predict (the one-turn
+oracle) and Search — so the slider is those three named stops (`AUX_NAMES`). Any
+stored value above 2 is read as Search, which is what every depth past 1 meant, so
+no setup or link changed its digest.
+
+**The previous depth curve** (branch-every-ply search). Against thinker, both
+seatings, 24-node maps (n = decided games):
 
     depth  1    90.4%   n=114     6 timeouts
     depth  5    96.6%   n=119     1
@@ -319,11 +428,13 @@ Against claudebot there is little headroom: 96.2% at depth 1, 98.8% (79-1) at
 
 ### Cost per decide, and where the search guard trips
 
-Measured 2026-09-29, when maps grew to 120 systems. Every seat knower, one
-game per cell driven at depth 1, each live seat's decide timed every 20 turns
-at depth 1 and depth 12 with both guards lifted (`BUDGET_SCALE` inf), so these
-are the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores,
-4 threads), native CPython, load average under 1.8 throughout:
+Two measurements, chained, because they were taken on different machines.
+
+**The old search, 2026-09-29, when maps grew to 120 systems.** Every seat knower,
+one game per cell driven at depth 1, each live seat's decide timed every 20 turns
+at depth 1 and depth 12 with both guards lifted (`BUDGET_SCALE` inf), so these are
+the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores, 4
+threads), native CPython, load average under 1.8 throughout:
 
     systems seats ly/turn   ply p75   depth-12 median / max   depth-1 max
        24     2      6        12         122 /   142            2
@@ -344,58 +455,83 @@ are the search's real, untruncated costs. Thread CPU ms on an i5-6300U (2 cores,
 
 (A ply is `(depth-12 - depth-1) / 11` for one decide; the p75 is over every
 decide in the game. The full 24-cell grid, 2/6 seats x 1/6/18 ly x
-24/40/80/120 systems, is the fit's input.)
+24/40/80/120 systems, was the fit's input: `17.5 ms x (systems/40)^1.0 x
+(seats/2)^0.42 x (ly/6)^-0.41`, within +/-25% on most cells.)
+
+**The root-only search, 2026-09-30, as a ratio to the old one.** The same 24 cells,
+every seat knower at depth 1, seed 1, sampled every 25 turns to turn 250, each
+live seat timed with the old search and the new one *on the same position*, both
+unguarded: a ply is `(depth-12 - depth-2) / 10`, the root is depth 2. A different,
+faster container, so only ratios are carried over, never its milliseconds:
+
+    new ply / old ply, p75 per cell    0.34 - 0.51, median 0.37
+    fit                                0.414 x (systems/40)^+0.03 x (seats/2)^-0.14 x (ly/6)^+0.01
+    new root / new ply                 median 1.09 (0.97 - 1.24)
+    old root / old ply                 median 0.24 (the old model's 1/4)
+
+The last line is the check on the method: it recovers the old model's root share
+to within a point. Folding the fit into the i5 figures gives `ply_ms` =
+`7.2 ms x (systems/40)^1.0 x (seats/2)^0.28 x (ly/6)^-0.41` (map size and ship
+speed barely move the ratio, so their exponents stand; more seats lowers it, since
+a rollout's rival decides are the part that did not shrink), and
+`COST_ROOT_PLIES` = 1.1: the root rolls each opening out once, like a ply, and also
+builds every candidate's plan.
 
 What it shows:
 
-- **Depth 1 is free at any size.** 28 ms is the worst decide in the grid, so
+- **Depth 1 is free at any size.** 28 ms was the worst decide in the old grid, so
   `ORACLE_BUDGET_S` (50 ms) never fires and a depth-1 seat never needs a warning.
-- **At depth >= 2 the guard is a real limit, not a catastrophe guard, from 40
-  systems up.** 40 nodes / 6 seats at depth 12 already needs ~200 ms against the
-  150 ms `SEARCH_BUDGET_S`. The cost table knower carried (57 ms there, 69 ms at
-  the tail, "better than 2x headroom") no longer holds; the search has grown
-  since. On 120 systems a depth-12 decide needs 0.4-0.9 s typically and up to
-  3.5 s.
-- **Cost is linear in map size, and slow ships are the tail.** The p75 ply fits
-  `17.5 ms x (systems/40)^1.0 x (seats/2)^0.42 x (ly/6)^-0.41` (`ply_ms`),
-  within +/-25% on most cells and a factor of 1.85 on the worst — one game per
-  cell, and a slow game varies turn to turn. At 1 ly/turn fleets stay in flight
-  for many turns, so every rollout has more to simulate; the p75 is 2-3x the
-  median there, against ~1.2x at 18 ly/turn.
+- **A ply is ~0.4x what it was, so the guard trips far later.** At the default
+  6 ly/turn a Search horizon (4-6 lanes plus 5) fits `SEARCH_BUDGET_S` (150 ms)
+  on most maps; slow ships are the tail twice over, since their lanes are longer
+  *and* each ply costs more.
+- **Cost is linear in map size, and slow ships are the tail.** At 1 ly/turn
+  fleets stay in flight for many turns, so every rollout has more to simulate.
 
 With the guard on, a clipped decide stops after the ply that crosses 150 ms.
-`_search_run` models that (the root rolls each of the four candidates out once,
-a quarter of a ply; the guard is checked before each ply after it), pinned
-against the real `_search` by a fake-clock test. Checked against guarded runs,
-the p75 prediction sits at the low end of the depth actually reached:
-
-    setup (systems/seats/ly, depth)   predicted   reached, median (range)
-    120 / 6 / 6,  d12                     4          4  (4-9)
-    120 / 2 / 1,  d8                      4          8  (4-8)
-     80 / 6 / 6,  d12                     5          5  (5-11)
-     40 / 6 / 6,  d12                     8          9  (8-12)
-     24 / 2 / 6,  d12                    12         12  (7-12)
+`_search_run` models that (the root is `COST_ROOT_PLIES` of a ply; the guard is
+checked before each ply after it), pinned against the real `_search` by a
+fake-clock test. The guarded runs that validated the old model's reach against
+real ones have not been repeated for the new one.
 
 **The menu warns only where it matters** (`setup_warning`): when the guard
-would cut a search short of `WARN_USEFUL_DEPTH` (5, where the depth curve above
-flattens into noise), or a turn's knower thinking summed over its seats passes
-`WARN_TURN_MS` (1 s). A 12 that plays as a 7 costs nothing anyone can measure,
-so clipping alone is not worth interrupting Start for. In practice nothing up
-to 40 systems warns; from 60 systems with 6 seats, or 80 with fewer, slow ships
-warn; at 120 systems with 6 seats, the default speed warns too. Depth 1, the
-default, never does.
+would stop a Search seat short of the setup's longest lane (read off the same lane
+survey the Advanced tab reports), or a turn's Search thinking summed over its seats
+passes `WARN_TURN_MS` (1 s). Losing some of the cushion costs little; stopping short
+of the lanes means the search cannot price the launches it makes. One Search seat,
+longest lane / plies reached, W where it warns:
+
+    nodes   2p/1ly  2p/3ly  2p/6ly  2p/18ly    6p/1ly  6p/3ly  6p/6ly  6p/18ly
+      12    33/34   11/16    6/11    2/7      W 33/25  11/16    6/11    2/7
+      24  W 26/17    9/14    5/10    2/7      W 26/13   9/14    5/10    2/7
+      40  W 19/10    7/12    4/9     2/7      W 19/8    7/12    4/9     2/7
+      80  W 20/5     7/8     4/9     2/7      W 20/4  W 7/6     4/8     2/7
+     120  W 21/4   W 7/6     4/7     2/7      W 21/3  W 7/4     4/6     2/7
+
+So it is a slow-ship warning now: almost every map at 1 ly/turn, the largest at
+3, never at the default speed or faster. Off and Predict never warn.
+
+Every figure it quotes is turn one's. With `SHIP_SPEED_GROWTH_PCT` on that is the
+slowest the game gets — lanes shorten and plies cheapen as ships speed up, and
+`_horizon` follows them every decide — so a clipped warning then adds the turn
+from which the guarded search first reaches past the longest lane
+(`_sees_lanes_from`, which re-runs the same `_search_run` at each turn's speed off
+the setup's own knobs, since `config` still holds the last game's). At 24 systems
+and 1 ly/turn that is about turn 31 at 1%/turn and turn 16 at 2%/turn.
 
 **The browser is not modelled.** Every figure here is native CPython; the
 pygbag build is slower by an unmeasured factor, so there the guard clips
 harder and a turn stalls longer than the warning says (its text says as much).
 Measure that before tightening the thresholds on the web build.
 
-**Don't measure this on a loaded machine.** A first pass of this grid ran three
-jobs at once beside other work, at load average 16 on 4 threads. Thread CPU time
-excludes being descheduled but not sharing a core, its cache and its clock with
-a busy neighbour, and every cell read ~1.9x high (the same seed's 120/6/1 p75
+**Don't measure this on a loaded machine.** A first pass of the old grid ran
+three jobs at once beside other work, at load average 16 on 4 threads. Thread CPU
+time excludes being descheduled but not sharing a core, its cache and its clock
+with a busy neighbour, and every cell read ~1.9x high (the same seed's 120/6/1 p75
 ply: 299 ms loaded, 159 ms quiet). The warning fitted to it fired on 40-system
-maps. Run one job at a time and record `os.getloadavg()` beside the numbers.
+maps. Run one job at a time and record `os.getloadavg()` beside the numbers. The
+ratio grid ran three at a time, which is safe for a ratio only because both
+searches were timed back to back on the same position under the same load.
 
 ## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
 
@@ -405,18 +541,20 @@ posted map (`tools/bot_replay.py`; the infrastructure is in
 roster fall out of that, and both were measured.
 
 **Which version of a bot goes on the board.** Its best one, not its menu default.
-`REPLAY_AUX` names the exceptions and today holds one: `knower` at search depth
-12. That is the top of knower's own slider (`SEARCH_DEPTH_MAX`) and the setting
-its own measurements favour — "ahead in every measurement taken and behind in
-none". It is not a small difference. On a 16-node map, same seed, same opponents:
+`REPLAY_AUX` names the exceptions and today holds one: `knower` on Oracle: Search
+(it was search depth 12 until the knob became three named stops; see "How far to
+look" above). That is the top of knower's own slider (`SEARCH_DEPTH_MAX`). It is
+not a small difference. On a 16-node map, same seed, same opponents, at the old
+depth 12:
 
     knower @ 1 (default)     336 turns, 346 ships lost
     knower @ 12             121 turns, 137 ships lost
 
 There is no point putting a deliberately hobbled version of the best bot on a
 board whose whole purpose is to give a human score something to be measured
-against. The cost is wall clock: depth 12 is roughly 100x depth 1, taking a
-40-node six-seat game from well under a second to tens of seconds. The worker's
+against. The cost is wall clock: depth 12 was roughly 100x depth 1, taking a
+40-node six-seat game from well under a second to tens of seconds (both figures
+from the branch-every-ply search; a root-only ply costs ~0.4x). The worker's
 `--limit` and deadline exist for that, and it banks each result as it goes.
 
 **Why the offline runner gets a bigger time budget, not a shallower search.**
@@ -2295,6 +2433,207 @@ turn or two of one system's production, and the turns it spends waiting are
 turns the whole garrison is out of the game. A capture that opens during the wait
 is rare, because the step-forward branch has already looked for one on the turn
 the system was doomed.
+
+### What the board's human wins say (2026-09-30)
+
+The leaderboard holds human wins on maps the bot column could not win, and
+those are always posted scores, so their replays are public (`public_replays`,
+readable with the anon key in `leaderboard/js/config.mjs` — no secret needed).
+42 of them are still reproducible under the current rules. Each was rebuilt with
+`replay.reconstruct` and set against marshal in seat 1 on the same setup via
+`sim.play_settings`, then measured identically on both sides. Marshal lost 22 of
+those setups and won 20; the 20 are the control.
+
+Read it for what it is. In most of the 22, **marshal is also the opponent**
+(seat 2, three-player 11-node maps and 7-node duels), so this is how a person
+beats marshal, set against marshal's own mirror on that seed — which is partly a
+coin flip. The maps are few, often replayed several times, and a person gets
+retries.
+
+    seat 1, the 22 setups marshal lost            human    marshal
+    median length (turns)                            57       167   (3 hit 600)
+    systems owned at turn 40                        51%       29%
+    income share at turns 20 / 40 / 60         43/67/88  34/34/26
+    systems lost per game                           3.5        25
+    attack landings that failed                      7%       20%
+    launched ships that were own-to-own transfers   64%       42%
+
+**Captures stick.** Call a rival capture *safe* when the ships that landed,
+plus our garrisons next to it, outnumber what can strike back — the adjacent
+rival stacks, rival fleets inbound, and the garrison that just fled. 76% of the
+person's are safe and 87% of those are still theirs ten turns on. Marshal's are
+safe about half the time (51% in seat 1, 54% as the opponent) and kept 58%/46%;
+its unsafe ones flip back 82% of the time. Nearly every system *any* bot loses
+is one it had just evacuated (86-95%), so marshal against marshal is a loop —
+evacuate, the other side takes it empty, the evacuee takes it back — at about
+25 systems lost per seat per game, against the person's 4.
+
+**Where the loop comes from** — every marshal launch tagged by the branch that
+issued it, mirror duels at 24 nodes / 6 ly-per-turn, 60 seeds (a strike carrying
+surplus is tagged by its Phase 3b pour):
+
+    branch                        rival captures/seat/game   kept 10 turns
+    Phase 3b pour                         43.8                   52%
+    _evacuate (a) step forward            19.6                   18%
+    Phase 3 fresh strike                   4.3                   25%
+    _evacuate (c) cornered sortie          3.7                   11%
+    Phase 3 follow-up wave                 1.8                   46%
+
+#### Built, measured, deleted: a hold test on the capture
+
+`_holds(target, force, kept)` asked whether a capture survives the counter in
+both outcomes: the garrison stands (keep the survivors, face the largest rival
+stack next door) or flees (keep the whole force, face a neighbour plus the
+returning garrison), with our adjacent garrisons counted in at `HOLD_SUPPORT`.
+Board facts only. Duels against stock marshal, `tools/sweep.py`, 200 seeds, four
+cells (random 18/24/30 nodes at 6 ly/turn, 24 at 12), each seed both seatings:
+
+    arm                                              pooled     verdict
+    Phase 3 fresh rival strikes, weight 1.0           49.1%     null
+      ...weight 0.75 / 0.5                       49.2 / 49.3%   null
+      ...weight 1.0, no support counted               41.9%     REPRODUCED worse
+    _evacuate step-forward, weight 1.0                46.7%     REPRODUCED worse
+      ...weight 0.5                                   48.9%     null
+    both at 1.0                                       45.9%     REPRODUCED worse
+    step-forward, also counting the force that        42.2%     REPRODUCED worse
+      takes the system being left, weight 1.0
+      ...weight 0.5                                   46.4%     REPRODUCED worse
+
+Free-for-all rotations (the variant, stock marshal and fillers, 60 seeds, share
+of the wins the two marshals took between them) agree: 46-56% for the Phase 3
+gate, 47-51% for the step-forward gate, and 42-48% once it counts the force
+behind it (11 nodes 3p, 18 nodes 3p, 21 nodes 4p with thinker, 31 nodes 5p with
+thinker and knower). The same variant on the 22 lost human setups won 2 against
+stock's 1.
+
+Monotone in how hard the loop is suppressed — 48.9, 46.7, 46.4, 42.2 — and for
+the strongest arm worse in every 6 ly/turn cell (38.9-41.3%), null only at 12
+ly/turn (47.7%), where most lanes are a single turn and the counter lands before
+any of this can matter. No cell to gate it into.
+
+The mechanism works and the result does not follow it. The step-forward gate
+halved that branch's captures (19.6 to 10.7); counting the force behind it
+brought all rival captures from about 73 to 19 per seat per game, and the ones
+still made held longer (60% for a Phase 3b pour). Win rate went the other way.
+A capture that is lost again in three turns is not wasted: it is a doomed
+garrison spent taking a system the rival then has to spend a turn and a fleet
+retaking, rather than a garrison that retreats and waits. The person keeps what
+they take by feeding it afterwards, not by declining to take it — which is
+what the next subsection builds.
+
+#### Shipped: feed what was just taken (`FEED`, `FEED_FRONT`, `FEED_MAX_TURNS = 2`)
+
+The person's forwarding rules run on about 90% of turns and 64% of the ships
+they launch go own-to-own; their frontier garrisons sit near parity with the
+largest rival stack next door (median ratio 1.0, marshal 0.87), and fewer of
+them are out-stacked (45% against 57-67%). Phase 4 seeded `_flow_to_front` on
+every live frontier system, and a frontier system's leftover stayed home.
+
+`_shortfalls` lists the live frontier systems whose garrison — after this turn's
+sends and counting our fleets inbound — is under `FEED` times their largest
+rival neighbour. While any are, Phase 4 seeds the rear's flow on those alone,
+and with `FEED_FRONT` a frontier system's leftover budget first tops up a short
+neighbour, never past its shortfall. Not a `FRONTIER_GUARD` change: nothing is
+held back that was being spent before, only where the surplus goes. In the
+mirror at 24 nodes / 6 ly-per-turn it cut rival captures from about 73 to 41
+per seat per game without making them stick much better (a Phase 3b pour kept
+56% against 52%) — what it buys is not visible in that table.
+
+Duels against stock marshal, `tools/sweep.py`:
+
+    arm (200 seeds, the four cells above)             pooled     verdict
+    FEED 1.0, rear flow only                           50.7%     null
+    FEED 1.0 + FEED_FRONT                              52.3%     null (z = 1.68)
+    FEED 0.75 + FEED_FRONT                             50.8%     null
+    FEED 1.0 + FEED_FRONT + Phase 3 hold test          52.3%     null (z = 1.72)
+    FEED 1.0 + Phase 3 hold test                       50.3%     null
+    FEED 1.0 + FEED_FRONT + step-forward hold 0.5      51.4%     null
+    FEED 1.0 + FEED_FRONT + both hold tests            49.6%     null
+
+    replicated on 400 fresh seeds, plus random 18 nodes at 12 ly/turn
+    FEED 1.0 + FEED_FRONT                              52.9%     REPRODUCED (z = 3.46)
+    FEED 1.0 + FEED_FRONT + Phase 3 hold test          51.3%     null
+
+    FEED 1.0 + FEED_FRONT, by cell      median lane    rate
+      random 18 / 6 ly                       3.5       51.1%
+      random 24 / 6 ly                       3         50.6%
+      random 30 / 6 ly                       3         52.5%
+      random 24 / 12 ly                      2         53.8%   better
+      random 18 / 12 ly                      2         56.2%   better
+      random 18 / 9 ly                       2.5       56.9%   better   (300 fresh seeds)
+      random 21 / 8.5 ly                     2         52.0%            (300 fresh seeds)
+      random 30 / 12 ly                      2         53.5%            (300 fresh seeds)
+      random 24 / 18 ly                      1         56.3%   better   (300 fresh seeds)
+      symmetric 18 / 12 ly                   2         57.5%   better   (53% timeouts)
+
+At or above 50% in every cell, and significant wherever the median lane is 2.5
+turns or less. The hold test above adds nothing on top of it. Feeding does rescue
+the hold test — both gates together go from 45.9% to 49.6% — but only back to
+null, so it was deleted rather than shipped alongside.
+
+Against knower at depth 0 (200 seeds): 87.0% of decided games against stock
+marshal's 86.2%, with fewer losses (91 against 103), but at 24 nodes / 6
+ly-per-turn it doubles the timeouts (72 against 36), so it takes fewer boards
+outright — 72% of games against 80%. At 18 nodes / 12 ly-per-turn it is level or
+better on every count. Free-for-alls (60 seeds, share of the two marshals' wins)
+read 48-54% at 6 ly/turn and 48-56% at 12 ly/turn, pooled 53.0% (z = 1.47) at
+12. On the 42 human setups it won 23 against stock's 20 (7 of the 22 stock lost,
+across five distinct setups at 3-18 ly/turn) — too few maps, and knower's clock
+moves stock between runs by two or three wins.
+
+`FEED_MAX_TURNS = 2` gates it to boards whose median lane (re-timed each turn)
+is at most two turns, where every measure agrees: 54.0% on the 300 fresh seeds
+above (REPRODUCED), identical to ungated wherever the median is 2 or less, but
+52.7% against 56.9% at the 2.5-turn boundary, and 22 against 23 on the human
+setups. The gate buys back only the knower stalemates at 6 ly/turn — a
+timeout is a board the bot column records as not taken — at the price of the
+6 ly/turn gain against marshal itself, which the fresh seeds below show was not
+there.
+
+Two more gates, against the ungated and two-turn versions on 300 fresh seeds.
+`FEED_MAX_TURNS = 3`, and `FEED_LOCAL`, which compares the lane a feed travels
+along with the lanes a counter would come along: a front's top-up, or a rear
+system's whole route to the short system, must arrive within `FEED_LOCAL` times
+that system's fastest rival lane, or the rear system flows to the nearest front
+as before.
+
+    vs stock marshal           pooled   18/6   24/6   30/6   18/9   24/12
+    ungated                     51.6%   48.2   50.9   51.5   52.9   54.3
+    FEED_MAX_TURNS 2            51.1%   50.0   50.0   50.0   51.3   54.3
+    FEED_MAX_TURNS 3            51.7%   48.7   50.9   51.5   52.9   54.3
+    FEED_LOCAL 1.0              52.1%   50.2   52.9   52.0   52.6   52.5   REPRODUCED
+    FEED_LOCAL 2.0              51.9%   49.8   51.9   52.3   51.9   53.2
+
+    vs knower depth 0, share of all games won (stock marshal 78.5%)
+    ungated 75.5%   FEED_MAX_TURNS 3 75.5%   FEED_LOCAL 1.0 76.6%   2.0 75.5%
+
+On fresh seeds the 6 ly/turn cells are null for the ungated version (the 52.9%
+above was carried by the fast cells). A three-turn cap gates nothing, since
+those boards' median lane *is* three. `FEED_LOCAL 1.0` does what it says — best
+at 6 ly/turn against marshal, fewer knower stalemates than ungated — but is
+still below stock against knower there and two points short at 12 ly/turn, so
+it trades one regime for the other. The two-turn cap is the only arm that costs
+nothing anywhere: off where feeding is null against marshal and slightly
+negative against knower, on where it clearly wins.
+
+Shipped with the two-turn cap: `FEED = 1.0`, `FEED_FRONT = True`,
+`FEED_MAX_TURNS = 2`. `FEED_LOCAL` was deleted rather than kept at zero. The
+constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
+
+#### Not yet measured: no lone trickles into a rival
+
+40% of marshal's failed attack landings are one or two ships landing alone
+(the person's: 33% of a much smaller number). Of 340 failures in the 42
+setups, 162 met a garrison that grew after launch, 92 a reinforcement landing
+the same turn, 57 were launched at or under the garrison they could see (a
+stagger's far wave whose nearer wave never followed) and 26 were pile-ups. The
+candidate: a Phase 3b top-up on a rival target leaves only if it lands on the
+same turn as a wave already inbound, so the siege's own production stops
+arriving one hull at a time after the main strike has resolved. Gating *every*
+rival re-flood measured 45.1% at `DEFENDER_ADVANTAGE 1.5` (see "Phase 3b
+re-flooding" above), because the trickle was supplying the jitter cushion
+`_enemy_margin` leaves out; if it reads the same way there, gate it off at high
+advantage rather than drop it, since that setting is rarely played.
 
 ## Break-even margins (`combat.edge_attacking`/`edge_defending`) and the roster back-port
 

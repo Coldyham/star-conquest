@@ -127,7 +127,7 @@ AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more ex
 
 AI_AUX = 1.0                # generic per-seat knob, meaning defined by the strategy
 #   Ignored by the built-in heuristic. 1.0 is the neutral "untuned" value, so a bot
-#   can treat it as absent; `models/knower.py` reads it as its search depth. See
+#   can treat it as absent; `models/knower.py` reads it as its Oracle mode. See
 #   models/README.md.
 
 # --------------------------------------------------------------------------- #

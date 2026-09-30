@@ -1135,7 +1135,7 @@ strict builder and **asserts** on a recipe with blockers:
 Format version 1 recorded the *human's* orders alone and rebuilt everything
 else by re-running the AI against the same seeded `rng`. It was small, and it
 was only ever as reliable as the least reproducible bot in the game.
-`models/knower.py` truncates its tree search on a wall-clock budget
+`models/knower.py` truncates its search on a wall-clock budget
 (`SEARCH_BUDGET_S`), so on a busy frame it plans one thing and on the replay's
 tight headless loop another — and from that turn on the "reconstruction" is a
 different match. It shows up as history not matching the game you played and a
@@ -1598,7 +1598,7 @@ That exception is `aux`, the one bot-defined knob. Every other field belongs to
 the built-in heuristic's own tuning and says nothing about a drop-in's identity,
 but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
 statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
-makes it, and today it holds one entry: `knower` at search depth 12. Opponent
+makes it, and today it holds one entry: `knower` on Oracle: Search. Opponent
 seats keep both the strategy and the params the setup gave them — those *are* the
 map's difficulty, and changing them would answer a different question.
 
