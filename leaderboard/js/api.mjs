@@ -59,6 +59,18 @@ export function select(query) {
 }
 
 /**
+ * One page of a list query: `size` rows starting at `offset`, plus whether
+ * anything lies past them. It asks for one row more than it keeps, so "is there
+ * more?" costs no second request and no count(*). The query must order on a
+ * unique key, since offset paging over a tied order can repeat or skip rows at
+ * a page boundary.
+ */
+export async function selectPage(query, { offset = 0, size }) {
+  const rows = await select(`${query}&limit=${size + 1}&offset=${offset}`);
+  return { rows: rows.slice(0, size), more: rows.length > size };
+}
+
+/**
  * POST one row (or an array of rows — PostgREST accepts either as the JSON
  * body unchanged). `returning` asks for the inserted row(s) back (needed for
  * ids). `onConflict` + `ignoreDuplicates` compile to `ON CONFLICT ... DO
