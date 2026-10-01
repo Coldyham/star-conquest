@@ -29,7 +29,11 @@ find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || 
 # the board on the same site, it was one more stop on every trip back to the game.
 # (--can_close stays at its default on purpose: its "leave site?" prompt is what
 # warns before a single-player match in progress is navigated away from.)
-( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --ume_block 0 --width 2560 --height 1440 main.py )
+# --icon hands pygbag our favicon: it looks for one in the stage dir, finds none
+# and downloads its own, which the game page then links. The copy to the site
+# root below used to cover that, until the game moved to /game/.
+( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --ume_block 0 --width 2560 --height 1440 \
+    --icon "$ROOT/tools/pwa/favicon.png" main.py )
 
 # The game is served at /game/; the site root is a small router page
 # (tools/pwa/root.html) that sends visitors to the leaderboard at /board/ and

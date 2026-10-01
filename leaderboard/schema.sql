@@ -988,6 +988,16 @@ grant select, insert, delete on public.game_logs to service_role;
 -- needs no grant of its own here any more: nothing under this key reads it
 -- directly since replay.mjs switched to the union.
 grant select on public.public_watchable_replays to service_role;
+-- ...and the security_invoker views that union reaches. Owner rights stop at the
+-- first view that sets security_invoker: Postgres checks what *that* view reads
+-- against the role running the query, however deep in the chain it sits. So
+-- public_replays (owner rights) can read game_embargoes, but game_embargoes then
+-- reads campaign_games as service_role, which therefore needs SELECT on it, and
+-- every Watch link failed with "permission denied for view campaign_games" from
+-- the day the embargo join went in until this grant. game_embargoes itself is
+-- listed too, against the day public_replays turns security_invoker.
+-- test_schema_grants walks that chain.
+grant select on public.game_embargoes, public.campaign_games to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Play-by-post: pbp_matches, pbp_orders
