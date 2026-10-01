@@ -103,6 +103,57 @@ def test_the_schema_grants_everything_the_worker_reads_and_writes():
         " only for the worker, which is why nothing on the site would show it.")
 
 
+
+def _views() -> dict[str, tuple[bool, set[str]]]:
+    """``{view: (security_invoker, {relation it reads, …})}``, out of schema.sql."""
+    out = {}
+    for name, invoker, body in re.findall(
+            r"^create or replace view public\.(\w+)\s*(with \(security_invoker = true\))?"
+            r"\s*as\b(.*?);\s*$", SCHEMA.read_text(), re.MULTILINE | re.DOTALL):
+        out[name] = (bool(invoker), set(re.findall(r"public\.(\w+)\b(?!\s*\()", body)) - {name})
+    return out
+
+
+def _invoker_reads(start: set[str]) -> set[str]:
+    """Every relation a ``security_invoker`` view reads, on any view chain out of
+    ``start``. Postgres checks those against the role running the query, however
+    deep the view sits: an owner-rights view above it lends out only its own
+    direct reads. So the caller needs a grant on each of them as well."""
+    views, needed, seen, todo = _views(), set(), set(), list(start)
+    while todo:
+        rel = todo.pop()
+        if rel in seen or rel not in views:
+            continue
+        seen.add(rel)
+        invoker, reads = views[rel]
+        if invoker:
+            needed |= reads
+        todo.extend(reads)
+    return needed
+
+
+@pytest.mark.parametrize("role", ["service_role", "anon"])
+def test_a_role_can_read_what_its_invoker_views_read(role):
+    """`public_watchable_replays` -> `public_replays` -> `game_embargoes` ->
+    `campaign_games`: the last hop is checked as the caller, and service_role had
+    no grant on it, so every Watch link answered "lookup failed" while the board
+    (whose anon key had the grant) looked fine."""
+    granted = _granted(role)
+    if role == "service_role":
+        start = {rel for rel, priv in _python_uses() | _function_uses() if priv == "select"}
+    else:
+        start = {rel for rel, privs in granted.items() if "select" in privs}
+    missing = sorted(rel for rel in _invoker_reads(start)
+                     if "select" not in granted.get(rel, set()))
+    assert not missing, f"schema.sql does not grant {role} select on: {', '.join(missing)}"
+
+
+def test_the_view_scrape_sees_the_chain():
+    views = _views()
+    assert views["game_embargoes"] == (True, {"games", "campaign_games"})
+    assert views["public_replays"][0] is False
+    assert "campaign_games" in _invoker_reads({"public_watchable_replays"})
+
 def test_the_scrape_actually_found_the_callers():
     """A regex that silently matches nothing would make the test above vacuous."""
     uses = _python_uses() | _function_uses()
