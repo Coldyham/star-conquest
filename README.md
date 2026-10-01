@@ -86,11 +86,12 @@ starconquest/
   render.py      # drawing (pygame)
   input.py       # event handling (pygame)
   menu.py        # pre-game setup screen (pygame)
+  main.py        # the pygame loop: menu/game scene wiring (pygame)
   viewstate.py   # transient in-game UI state
   paths.py       # where writable data lives (repo root, or app-private on Android)
   uifont.py      # bundled-font loader (falls back to a system monospace)
   assets/        # bundled DejaVu Sans Mono TTF (+ licence)
-main.py          # entry point + menu/game scene loop
+main.py          # launcher shim (pygbag needs it at the root); the loop is starconquest/main.py
 tests/           # pytest suite + sim.py headless AI-vs-AI harness
 ```
 

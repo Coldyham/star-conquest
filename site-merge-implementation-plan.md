@@ -92,7 +92,7 @@ Before touching the lobby, read `leaderboard/js/pbp.mjs` and `docs/pbp-design.md
   - `openLink` always uses the full `#pbp=<id>:<token>` link. If there's no entry, there's no Open button.
 - **Delete:**
   - `sc_pbp_mine`, `MINE_KEY`, `parseMine`, `mergeFragment`, the prune, and the hash-strip in `main()`
-  - `pbp.lobby_fragment`, `pbp.bare_match`, the bare-match branch around `main.py:1254`, and `PBP_NOT_HELD_MSG`
+  - `pbp.lobby_fragment`, `pbp.bare_match`, the bare-match branch around `starconquest/main.py:1254`, and `PBP_NOT_HELD_MSG`
   - The fragment in `menu.py:1973`: `browse_matches` now just opens `leaderboard_url(LEADERBOARD_LOBBY_PATH)`.
 - **One name.** The storage key stays `sc_pbp_name`, since the game's store already holds it. `me.mjs` `myName()`/`rememberName()` switch from `sc_leaderboard_name` to `sc_pbp_name`, so the posting name, the lobby claim name and the game's pbp prompt are one value.
   - The board's old `sc_leaderboard_name` lives on the old origin and is lost anyway, which the brief accepts.

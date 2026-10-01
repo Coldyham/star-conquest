@@ -82,7 +82,10 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   match to JSON and replays it back through the headless engine — see Persistence
   & replay below.)
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  `mapmaker`, and `main`.
+  `mapmaker`, and `main`. `main` is `starconquest/main.py`, like every other
+  module; the root `main.py` is only a launcher shim, kept there because
+  `tools/build_web.sh` hands pygbag a `main.py` at the top of its stage dir.
+  Tests import it as `from starconquest import main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`**. Derived display stats (threat, inbound,
     per-player production rate) are computed with local helpers rather than
