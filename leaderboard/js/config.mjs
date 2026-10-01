@@ -48,3 +48,9 @@ export const CURRENT_RULES_VERSION = 2;
 // neutral; pinned by `tests/test_leaderboard_sync.py`.
 export const PLAYER_NAMES = ["Neutral", "Azure", "Crimson", "Verdant", "Amber", "Violet", "Gold"];
 export const PLAYER_COLORS = ["#7a808c", "#56aaff", "#f05a5a", "#5fd282", "#f0aa46", "#be82f0", "#f0e66e"];
+
+// Mirror `starconquest.config.FOG_ON_SIGHT`/`FOG_ON_SCOUT`: the ranges the
+// Basic tab's "Fog of war" checkbox applies, which setup.mjs names plain "Fog".
+// Pinned by `tests/test_leaderboard_sync.py`.
+export const FOG_ON_SIGHT = 1;
+export const FOG_ON_SCOUT = 3;

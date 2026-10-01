@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { configLabel, configTitle, tweaks } from "../js/setup.mjs";
+import { configLabel, configTitle, fogLabel, hasFog, tweaks } from "../js/setup.mjs";
 
 test("no settings, or an empty object, is Default", () => {
   assert.equal(configLabel({ mode: "random", players: 3, nodes: 18, seed: 42 }), "Default");
@@ -21,9 +21,31 @@ test("one or two tweaks are spelled out in full", () => {
 
 test("more than two tweaks collapse to a count", () => {
   assert.equal(
-    configLabel({ defender_advantage: 1.5, combat_jitter: 0.25, fog_sight: 3 }),
+    configLabel({ defender_advantage: 1.5, combat_jitter: 0.25, ship_ly_per_turn: 9 }),
     "3 tweaks",
   );
+});
+
+test("fog is one entry, always named first and never counted into the collapse", () => {
+  assert.equal(configLabel({ fog_sight: 1, fog_scout: 3 }), "Fog");
+  assert.equal(configLabel({ fog_sight: 1, fog_scout: 3, defender_advantage: 1.5 }), "Fog · Def adv 1.5");
+  assert.equal(
+    configLabel({ fog_sight: 1, fog_scout: 3, defender_advantage: 1.5, combat_jitter: 0.25, ship_ly_per_turn: 9 }),
+    "Fog · 3 tweaks",
+  );
+});
+
+test("fog off the Basic tab's preset spells out its ranges", () => {
+  assert.equal(fogLabel({ fog_sight: 2, fog_scout: 5 }), "Fog 2/5");
+  assert.equal(fogLabel({ fog_scout: 5 }), "Fog All/5");
+  // Whole-number floats arrive as either form; compared by value.
+  assert.equal(fogLabel({ fog_sight: 1.0, fog_scout: 3.0 }), "Fog");
+});
+
+test("fog is on exactly when a range is stored, since the default is off", () => {
+  assert.equal(hasFog({ fog_scout: 5 }), true);
+  assert.equal(hasFog({ defender_advantage: 1.5 }), false);
+  assert.equal(hasFog(null), false);
 });
 
 test("a boolean knob reads as on/off, not true/false", () => {
@@ -60,8 +82,8 @@ test("an unrecognised knob still renders, under its own key", () => {
 });
 
 test("tweaks() is sorted by key, so identical setups read identically", () => {
-  const t = tweaks({ fog_sight: 3, defender_advantage: 1.5 });
-  assert.deepEqual(t.map((x) => x.key), ["defender_advantage", "fog_sight"]);
+  const t = tweaks({ ship_ly_per_turn: 9, defender_advantage: 1.5, fog_sight: 3 });
+  assert.deepEqual(t.map((x) => x.key), ["defender_advantage", "fog", "ship_ly_per_turn"]);
 });
 
 test("configTitle prefers a submitted name over the derived label", () => {

@@ -15,12 +15,26 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 
 | | |
 |---|---|
-| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
+| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+
+The main list's search, sort and filters live in the URL, so every view is a
+link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
+`tests/listing.test.mjs`): search over a setup's name, its tags, the leader's name or
+a seed; sort by recent activity, most scores, most players or newest map (most maps,
+grouped); filter by player count, map mode and fog, and — per map only — to
+**contested** maps (two or more players with a counted score, exactly the maps a
+crown is held on), maps a **bot leads**, and maps **unplayed by me** (the remembered
+name's own maps, excluded by key). `game_summary`'s `contenders`, `bot_leads` and
+`fog` columns exist for these, since PostgREST can filter on a column but not on a
+comparison between two; `tests/test_board_filters_sql.py` checks them. Fog is never
+hidden inside "N tweaks": an unnamed setup's label leads with it ("Fog · 3 tweaks"),
+and a named one carries a **Fog** badge. With a remembered name, a card also shows
+your own best there ("You: 25").
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the

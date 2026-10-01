@@ -43,7 +43,7 @@ import pygame
 
 from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
-from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
+from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
                        Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
                        randomise_knobs, random_seed, setup_warnings)
@@ -1384,9 +1384,9 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     dir is pygbag's in-memory virtual filesystem, which doesn't survive a reload,
     so a file saved there would silently vanish. Get Link (a URL token in the
     address bar plus ``localStorage``) is the persistence path that actually
-    works there; Recently played opens the board's "by config" listing
-    (``home.mjs``'s ``?group=config``) — where a setup worth returning to already
-    lives, once somebody has posted a score under it.
+    works there; Recently played opens the board's main list (``home.mjs``),
+    every map somebody has posted a score on, newest first — a setup worth
+    returning to is a card (or one "By config" press) away there.
 
     The field takes whatever width the buttons leave (no "File" label: the name
     field had less room than the default name needs, and Save/Load say plainly
@@ -2047,7 +2047,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         else:
             set_status(ms, "Couldn't open the lobby", False)
     elif hit == "browse_configs":
-        url = webstore.leaderboard_url(LEADERBOARD_CONFIGS_PATH)
+        url = webstore.leaderboard_url(LEADERBOARD_RECENT_PATH)
         if not url:
             set_status(ms, "No leaderboard is configured", False)
         elif webstore.open_url(url):

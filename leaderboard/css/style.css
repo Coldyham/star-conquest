@@ -344,6 +344,41 @@ h1::after {
 .badge.campaign { border-color: var(--green); color: var(--green); }
 .badge.campaign:hover { background: #0a2412; }
 
+/* Played under fog of war — a link to every fog map. Dim-blue, the colour of
+ * the game's own fogged systems, so it reads apart from the config's name. */
+.badge.fog { border-color: #8fa0d8; color: #8fa0d8; }
+.badge.fog:hover { background: #10152c; }
+
+/* This browser's player has a score here (their best, from me.mjs's name). */
+.badge.mine { border-color: var(--green); color: var(--green); cursor: help; }
+.badge.mine:hover { background: #0a2412; }
+
+/* -- the main list's search, sort and filters (js/home.mjs's controls) ------ */
+.list-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.list-controls .search-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.list-controls .search-row input { flex: 1 1 12rem; width: auto; }
+.list-controls .picks,
+.list-controls .toggles { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; }
+.list-controls .pick,
+.list-controls .toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-family: var(--pixel);
+  font-size: 0.65rem;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+.list-controls .pick select { width: auto; padding: 0.4rem 0.5rem; font-size: 0.9rem; }
+.list-controls .toggle { cursor: pointer; }
+.list-controls .toggle input { accent-color: var(--cyan); margin: 0; }
+
 /* -- the main list's filter bar and a filtered config's header ------------- */
 .filters {
   display: flex;

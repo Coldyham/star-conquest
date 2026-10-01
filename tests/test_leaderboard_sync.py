@@ -55,6 +55,13 @@ def test_seat_names_and_colours_match_the_game():
     assert _js_string_list(CONFIG_MJS, "PLAYER_COLORS") == colours
 
 
+def test_fog_preset_matches_the_basic_tab():
+    """The board names a setup plain "Fog" when its ranges are the Basic tab's
+    checkbox preset, and spells out the ranges otherwise."""
+    assert _js_constant("FOG_ON_SIGHT") == config.FOG_ON_SIGHT
+    assert _js_constant("FOG_ON_SCOUT") == config.FOG_ON_SCOUT
+
+
 def _js_string_constant(path: Path, name: str) -> str:
     match = re.search(rf'^export const {name} = "([^"]*)";', path.read_text(), re.MULTILINE)
     assert match is not None, f"{name} not found in {path}"

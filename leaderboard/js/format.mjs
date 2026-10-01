@@ -4,7 +4,7 @@
 // usernames and Challenge.by are free text typed by strangers, so they must never
 // be parsed as markup.
 
-import { configTitle } from "./setup.mjs";
+import { configTitle, fogLabel, hasFog } from "./setup.mjs";
 import { compareScores } from "./standings.mjs";
 
 /** el("a", {href, class}, ["text", node]) -> HTMLElement */
@@ -174,6 +174,22 @@ export function userHref(names) {
  */
 export function configBadge(game) {
   return el("a", { class: "badge", href: `index.html?config=${encodeURIComponent(game.config_key)}`, text: configTitle(game) });
+}
+
+/**
+ * "Fog" on a setup played under fog of war whose badge doesn't already say so
+ * — the one tweak that changes what kind of game a map is, so a posted name
+ * must not hide it. An unnamed config's own label leads with it already
+ * (setup.mjs's configLabel), so it gets no second one. Links to the list
+ * filtered to fog maps (`?fog=on`, listing.mjs), on the grouped view when
+ * `group` is "config".
+ */
+export function fogBadge(game, group = "game") {
+  if (!hasFog(game.settings_json) || !(game.config_name || "").trim()) return null;
+  const href = group === "config" ? "index.html?group=config&fog=on" : "index.html?fog=on";
+  const label = fogLabel(game.settings_json);
+  const title = label === "Fog" ? "Fog of war" : `Fog of war, sight/scout range ${label.slice(4)}`;
+  return el("a", { class: "badge fog", href, title, text: "Fog" });
 }
 
 /**
