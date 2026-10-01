@@ -377,3 +377,197 @@ counterfactual by construction, which is why `fork` mints a new `match_id`. Both
 rewinds re-stamp `rules_version`: the kept prefix has just been replayed under
 today's rules to find that turn, so the log would be describing itself as older
 than it is.
+
+## The game and the board are one site
+
+- **The game and the board are one site.** The root `netlify.toml` builds the
+  game, and `tools/build_web.sh` stages the board's pages into `web/board/`
+  from an explicit allow-list. The game itself is at `/game/`; the root is
+  `tools/pwa/root.html`, a router that opens the board for a visitor and
+  forwards a fragment (every challenge, replay and seat link the game ever
+  shared is the root plus one) or an installed app's launch to `/game/`. The
+  manifest, icons and service worker stay at the root, so old installs keep
+  their scope and manifest `id`. The functions are bundled from
+  `leaderboard/netlify/functions/` and answer at root `/api/`. On a
+  `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
+  and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
+  context, including a deploy preview, talks to itself with no URL edited by
+  hand. Endpoints are still built at *call* time from `LEADERBOARD_*_PATH`,
+  never stored as whole URLs. `paths.LEADERBOARD_ORIGIN` is the route for
+  everything else (desktop, Android, localhost, a custom domain). Blanking it
+  disables every leaderboard feature, which is what `render` tests, since
+  resolving costs a DOM read it must not do once a frame. One origin means one
+  localStorage: the lobby reads `sc_pbp_seats` and the posting name is
+  `sc_pbp_name` (`test_leaderboard_sync` pins both keys). The site now holds
+  `SUPABASE_SECRET_KEY` (unscoped on the free plan, so the build command
+  unsets it first), and its sensitive-variable policy must stay on
+  "Require approval" (the root `netlify.toml` header explains the fork-preview
+  reasoning). The board's old host is a redirect shell (`legacy-board/`). It
+  *proxies* `/api/`, because installed builds POST there and urllib won't
+  follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
+  fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
+
+## Crowns, the weekly campaign and embargoes
+
+- **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
+  by contested maps whose record they hold (`crown_holders`) and counts, per
+  Monday-to-Monday UTC week, scores that strictly beat somebody else's record
+  (`crown_steals`); a tie never steals, the earliest holder keeps it, as
+  `game_summary` credits. Both read `counted_scores`, the one place the rule
+  lives: every score but a `mismatch` replay counts, since the game uploads a
+  log once with no retry and an offline or hand-pasted score could otherwise
+  never count. Nothing is stored, so moderation recomputes them for free.
+  `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
+  against a real Postgres when `SC_TEST_PG` is set.
+- **The weekly campaign stores its map and derives its state.**
+  `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
+  writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
+  out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
+  (sometimes its symmetric variant, plus one or two "?" nodes rolled with
+  `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
+  nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
+  pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
+  matches it to its game by seed plus jsonb *equality* — never
+  `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
+  browser posts, and so misses nearly every node. `campaign_scores` sits on
+  that view, and so do the green campaign badge on a map's page and index row
+  and the link back to `campaign.html?node=`. Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
+  week's hand-played counted scores in posting order — a home goes to the
+  first win from a player without one and can't be taken; a field node falls
+  to a win posted while holding a neighbour, and a held one only to a strictly
+  better score. The Advanced slider ranges live in `settings` (`ADV_*`) for
+  this reason; `menu` aliases them.
+- **A map can be registered with no score at all, and can carry a one-time
+  reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
+  Star Conquest link, not just a challenge one — `token-decode.mjs`'s
+  `decodeToken` returns `challenge: null` for a plain settings-share link (or
+  one carrying `Challenge`'s own `turns <= 0` sentinel) rather than rejecting
+  it, and the site takes that as a setup to add rather than a score to post.
+  That is what lets a setup be shared and played before anyone — its own
+  author included — has a result on it to disclose. `games.embargo_until`
+  rides along on that same insert, optionally, and only there: `games` is
+  append-only like everything else on this board, so an embargo can only
+  ever be decided the one moment a map's row does not yet exist, never
+  retrofitted onto one already on the board.
+  - **It gates the replay and the detail behind it, never the fact that a
+    lead exists.** `public_replays` filters out a match whose map is still
+    embargoed — the DB-level half, real for every caller, not just the
+    site's own UI — and `game.mjs`'s `renderEmbargoed` is the other half: it
+    never requests the per-score list at all while a map is embargoed, only
+    `game_summary`'s own aggregate (`best_turns`/`best_user_name`/
+    `best_holders`/`score_count`), so there is nothing for the page or its
+    network tab to hand out beyond who is ahead and by how many turns. Lost,
+    hand and submission time stay off the page entirely, along with every
+    other score — a stricter cut would leave nothing to chase, which
+    defeats a deadline built to be raced against. `home.mjs`'s card makes
+    the same cut on the list. Scores and rankings themselves are otherwise
+    unaffected by an embargo — they post and rank normally throughout,
+    since there is no account system here to tell a submitter's own later
+    read apart from anyone else's, so the only boundary that can be
+    enforced for everyone alike, the setter included, is on *how* a score
+    was made rather than on whether one exists.
+  - **A campaign node is embargoed until its week ends, and that is derived,
+    never stored.** `game_embargoes` (schema.sql) is the embargo in force:
+    the later of `games.embargo_until` and the end of any live campaign week
+    the map is a node of (matched through `campaign_games`). `public_replays`
+    and `game_summary.embargo_until` both read it, so every page that honours
+    an embargo honours this one with no JS of its own. It cannot be stamped on
+    the row instead: a node's seed is fresh, so its `games` row is created
+    mid-week by whoever posts first, and `games` is append-only after that.
+
+## The bot column: the rules in full
+
+- **The leaderboard's bot column is computed offline, never served.**
+  `tools/bot_replay.py` replays every `models/` bot through the human's seat on
+  each posted map and caches the answer in `bot_scores`; a scheduled GitHub
+  Action (`.github/workflows/bot-replay.yml`) is the whole backend, since the
+  result is a pure function of the setup, the seed and the code. It drives
+  `tests/sim.play_settings`, which goes through `settings.build_state` rather
+  than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
+  only funnel that pushes them into `config`. The replayed seat gets default
+  `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
+  `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` on
+  Oracle: Search) and the value in force is stored on the row; opponents keep
+  theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
+  `is_human`, sets the strategy and params; plain `engine.end_turn(state,
+  decide=decide)` then drives every seat, the replayed one included, just as
+  `sim.play`'s own ladder/swap tournaments do). That is the same
+  full-information footing every other bot-vs-bot measurement in this codebase
+  already stands on: an oracle opponent resolves it through `ai.STRATEGIES`
+  and simulates it exactly (`knower._model_for`), the way it would any other
+  fielded bot, rather than guessing blind at a seat that was never actually a
+  person. **The app agrees by construction, not by coincidence**: a match that
+  *starts* in autoplay has no human seat at all (`settings.build_state` clears
+  the flag `mapgen` stamps on pid 1), so an all-bot game has no preferred seat
+  in either place and the in-app demo plays the identical game the column
+  computes — pinned by
+  `test_an_autoplay_demo_plays_the_same_game_the_bot_column_does`, which reads
+  77 turns apart on its setup without it. `_hand_over` is still what does it
+  in the harness, because a posted *human* setup carries `autoplay: False` and
+  so has nothing for that stamp to fire on. Leaving the flag set once looked
+  necessary — a token can only ever say "seat 1 is a bot" as `autoplay: true`,
+  never as an actual flag, so a live, token-driven Watch link could only ever
+  reconstruct the *handicapped* version. That is fixed from both ends now: the
+  row is backed by a stored replay, and a token-driven reconstruction clears
+  the flag too. `play_from` uses the same handover, and `engine_rev`
+  hashes `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is
+  played marks every cached row stale; `replay_rev` must not, since a stored
+  log's replay consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
+  (`ai.set_budget_scale`, opt-in via a model's `BUDGET_SCALE`): those are sized
+  so the browser tab never freezes, and tripping one is the only thing that
+  makes such a bot's output depend on the clock — so a batch run that can never
+  trip one is *more* reproducible, not less. `won`, never
+  `turns`, says whether a bot took the board, and a loss is listed but never
+  ranked (`standings.botOrder`). `bot_scores` is the one table with no public
+  insert path: the worker's secret key is its only writer.
+- **A winning replay is stored on the row, and the Watch link plays that back
+  rather than re-deciding the match live.** That is what let the handover (previous section)
+  go back to full information without reopening the original mismatch: a token
+  can hand the browser a setup and ask it to re-decide from turn one, and that
+  re-decision depends on exactly which commit is deployed where — the same
+  class of risk regardless of which way the seat is flagged. `sim.play_settings`'s
+  `log` parameter fills in a `replay.GameLog` turn by turn as the run happens
+  (off the `TurnRecord` every `end_turn` call returns, the same shape
+  `main.resolve_turn` records from); `tools/bot_replay.py` builds one for
+  every replay and keeps its encoded form only on a win
+  (`bot_scores.match_id`/`rules_version`/`log`), the same rule a human's own
+  posted score follows. `replay.reconstruct` applies recorded orders and dice
+  verbatim and asks no seat to decide anything, so it cannot drift from the
+  row it backs — and, load-bearing for the handover above, is completely
+  unaffected by what any seat was flagged during the run that produced it.
+  `standings.botWatchKind(row)` picks the link: `#log=<match_id>` (exactly a
+  human score's own mechanism) for a current replay, an outdated-replay
+  disclosure for one stamped under rules this build has moved past, or the
+  old reconstruct-it-live method (`token-encode.botWatchSetup`) as a fallback
+  for a row with no stored replay at all — a loss, or one computed before
+  this existed. `game_logs`'s human consent boundary (a posted score) is
+  untouched; a bot's own log needs none of it, since `bot_scores` is already
+  fully public, so it lives directly on that row rather than in `game_logs` —
+  `public_watchable_replays` (`leaderboard/schema.sql`) is the `union all` of
+  `public_replays` with a winning bot's own log that `netlify/functions/replay.mjs` actually reads,
+  keeping that function's one-query, no-branching shape for either kind.
+
+## A replay is never shown as if it still reproduced the game
+
+- **A replay is never shown as if it still reproduced the game once the engine
+  has moved past it.** `GameLog.is_current` (`rules_version == engine.
+  RULES_VERSION`) is the same check on both sides of the wire, and both were
+  silent about it until this was added — `main.open_replay`/`resume_game` would
+  happily reconstruct an outdated log through today's engine and show whatever
+  that produced, with nothing to say it might not be the game that was actually
+  played. `replay.latest_log` and `tools/position_suite.local_logs` decline such
+  a log the same way they already decline a version-1 one; `main.open_replay`
+  returns `None` for one too (a dedicated status line, `WATCH_OUTDATED_MSG`,
+  tells it apart from a genuinely unreadable blob). The board's half is
+  `game_logs.rules_version` — one more claim stored alongside the blob, same as
+  `finished`/`won`/`hand` (`share.row_for` sends it, `log.mjs` defaults a
+  missing one to `1`, the only version there ever was before this column
+  existed) — compared against `leaderboard/js/config.mjs`'s
+  `CURRENT_RULES_VERSION` in `game.mjs`'s `watchableIds`, so an outdated replay
+  simply has no *Watch* link rather than one that lies. That JS constant has no
+  build step to keep it honest, only a hand bump alongside `RULES_VERSION` and
+  `tests/test_leaderboard_sync.py` pinning the two together. This is a cheaper
+  half-measure chosen over storing full board snapshots (which would let a
+  replay outlive *any* future rules change, at the cost of the size and
+  bot-independence properties `replay.py`'s module doc argues for) — worth
+  revisiting if snapshotting ever happens, but not before.

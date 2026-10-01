@@ -442,3 +442,234 @@ drops to the small font when the normal one would overrun the panel (every
 catalogue name fits at that size), `_rows_named` reflows a row containing one,
 and the send popup — too narrow for two names plus a garrison — measures its
 title and falls back to `Sys 4 -> 9` when the names don't fit.
+
+## In-lane battles: the rule in full
+
+**In-lane battles** (`config.IN_LANE_BATTLES`, off by default, on the menu's
+Combat tab) are the one thing that breaks "fleets on lanes never interact". Two
+*enemy* fleets fight only on the turn their paths touch or cross — sharing a lane
+is not enough — and they fight **pairwise, in crossing order**, so a strong fleet
+running a defended lane picks its opponents off one at a time and carries its
+losses into each next fight. Nothing is pooled and nothing is moved: a winner is
+thinned in place and keeps its own heading, speed and arrival turn, so a fleet is
+only ever drawn where it really is. `engine._lane_span` measures both fleets from
+one end of the lane and mirrors `Fleet.progress` (what `render` draws), so a fight
+happens exactly where the triangles are seen to touch. Siting the phase *after*
+`_advance_fleets` but *before* `_resolve_arrivals` is what lets a single-turn hop
+still be intercepted — it is on the board, at `turns_remaining == 0`, for exactly
+one lane-battle check. `combat.resolve_lane_clash` passes no `defender_owner`:
+nobody holds open space, so `DEFENDER_ADVANTAGE` applies to neither side and an
+exact tie annihilates rather than breaking to a defender — but the jitter, which
+belongs to the dice rather than the ground, still applies.
+
+## Pile-up resolution (`combat.resolve_arrival`)
+
+`combat.resolve_arrival` takes an optional `on_step` list purely so a multi-owner
+pile-up can be shown step by step — those intermediate values are locals and
+unknowable from outside. Every side is pooled per owner (a reinforcement from the
+defender's own side joins the garrison's bucket, which is exactly why it can
+defend the fight it arrives for); attackers then fold **pairwise, strongest-first
+among themselves**, and whoever survives that faces the defender **last**,
+regardless of the defender's own size — the defender is not just another side in
+the size-ranked queue, it holds the ground, which is what `defender_owner=old_owner`
+prices on every step it actually participates in. Nothing else in `combat` changed
+for this.
+
+## Replay and history: the rules in one place
+
+A match is **never snapshotted** — it is recorded as its *inputs*: `Settings`,
+the concrete `seed`, and per turn **every seat's orders plus the combat draws**
+(`engine.TurnRecord`, logged by `replay.GameLog`, auto-saved after every turn to a
+gitignored, repo-anchored `games/` dir, mirroring `ai.MODELS_DIR` and
+`menu._SAVE_DIR`). `replay.reconstruct(log, on_turn=…)` feeds each turn back
+through `engine.end_turn(state, script=…)` to rebuild the **exact** state at any
+turn — applying the orders verbatim and dealing the recorded dice to combat, so
+**no seat is ever asked to decide again**. `main.resume_game` uses this to offer
+resuming the last unfinished match from the menu, and restores that turn's
+standing auto-forward rules (`"rules"`, `Ui.auto_forward`) with it.
+
+**A replay must never depend on a bot repeating itself** — that is format
+version 2, and why the orders and the dice are both in the log (version 1 stored
+the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
+into a *different match*, silently). The corollary is load-bearing now that
+replays are kept: **retuning, rewriting or deleting a `models/` bot cannot move a
+single stored game**, so no per-model "replay floor" is needed and none should be
+added (`test_a_replay_does_not_consult_a_bot_even_a_deleted_one` pins it, and
+`bot_replay.replay_rev` is `engine_rev` minus `ai` and `models/` for the same
+reason). What *can* move one is the engine itself — phase order, how a fight
+resolves, how a map is drawn from a seed — which is what `engine.RULES_VERSION`
+is for: bumped by hand with such a change, stamped on every log, and read by the
+verifier to report `outdated` (unverifiable) rather than `mismatch` (wrong). Version-1 logs can't be replayed faithfully
+and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
+autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
+delegates to, and the leaderboard's verifier recomputes). A log also carries a
+`match_id`, minted per match from `settings.fresh_rng` and likewise not part of
+what makes a replay reproduce: it is how a posted score names its replay
+(`GameLog.encoded` is the wire form — the token's own deflate+base64url). A
+rewind (`truncate`) keeps that id; a fork mints a new one.
+
+**History mode** is a shell-only review scene (`Ui.history`, gated so it never
+enters the pure core). On entry `main.build_history` runs one `reconstruct` whose
+`on_turn` callback deep-copies each turn's board and folds fog (via
+`_accumulate_fog`) into a per-turn snapshot, so the bottom-bar scrubber seeks by
+plain list-indexing. Fog stays a `Ui`-layer concern: mid-game a past turn shows
+fog *as it was then*, while a finished game is fully revealed. **Rewind** resumes
+live play from the viewed turn — mid-game it truncates the same log file
+(`GameLog.truncate`, confirmed first, since it discards later turns); on a
+finished game it forks a new file (`GameLog.fork`) so the completed record stays
+intact.
+
+## An all-bot game has no human seat
+
+- **An all-bot game has no human seat, and the seat is claimed by *playing*,
+  not by pressing a button.** `settings.build_state` clears the `is_human`
+  `mapgen` stamps on pid 1 whenever `Settings.autoplay` is set, so a match
+  begun as a demo has no preferred seat — otherwise seat 1 is the one seat
+  every oracle guesses blind at while simulating all the others exactly, which
+  is both a handicap no other bot carries and why the app and the offline bot
+  column used to play the same setup differently. `engine.end_turn`'s
+  `claim_seat` is the way back: `main.resolve_turn` passes it on the first turn
+  *ended under manual control*, never on the Take control press itself, so Take
+  control doubles as a pause on a demo nobody means to play. It is a turn phase
+  rather than a shell-side edit because it has to replay — a scripted turn asks
+  no seat to decide, so `replay.reconstruct` re-applies it from the per-turn
+  `"ai"` flag already in the log, at the same turn, and runs it *first* so that
+  turn's own predictions already see the corrected flag. Deriving it from those
+  flags rather than storing a claim of its own is what makes a rewind land
+  right for free: `truncate` drops the flags with the turns, so rewinding past
+  every hand-played turn returns the match to an all-bot game, while rewinding
+  to any turn after one keeps the seat claimed.
+  - **`resolve_turn` must not compute `human_orders` for an unclaimed seat.**
+    `_collect_orders` skips a seat only when `is_human`, so passing orders in
+    *and* leaving the seat unflagged runs its strategy twice — spare draws from
+    `state.rng` that desync every oracle's stream tracking. Pass `None` and let
+    the engine's own loop decide it, exactly as `sim.play`'s tournaments do.
+  - **Resuming, rewinding or watching always lands paused** (`main.resume_game`
+    builds its `Ui` with autoplay off regardless of what the log was doing).
+    You go back to a turn to *look* at it, and a board that starts moving again
+    before it can be read is the thing history exists to prevent. It costs
+    nothing now that the claim is separate: waiting decides nothing, so who
+    plays on is handed back with the clock stopped.
+
+## Whole-number floats don't survive the browser
+
+- **Whole-number floats don't survive the browser, so never compare setups as
+  text across writers.** Python writes `0.0`, `1.0`, `18.0`; the leaderboard's
+  JavaScript has one number type, so everything it writes (`games.settings_json`,
+  a token it re-encodes, `pbp_*` rows) says `0`, `1`, `18`. Postgres jsonb keeps
+  whichever text it was sent, so a Python-written row and a browser-written one
+  can hold the same setup and differ as text — and `json.dumps`, `md5(…::text)`
+  (`sc_config_key`) or `JSON.stringify` then call them different. This has
+  bitten four times: the int `aux` a decode keeps, integer hand-map coordinates,
+  `verify_scores._aux_widened`, and `campaign_games`, whose node settings come
+  from `tools/campaign.py` (every campaign node sat unclaimable until the match
+  moved to jsonb `=`). The rules:
+  - **Compare by value, or after `Settings.from_dict`.** `from_dict` coerces every
+    field back to its type, `aux` alone excepted (`_ai_from_dict`), so two
+    decoded setups agree however they travelled — pinned by
+    `test_a_browser_round_trip_moves_the_challenge_key_only_through_aux`, which
+    fails if a new field escapes the coercion. In SQL, jsonb `=` compares numbers
+    by value; a digest of the text does not.
+  - **`sc_config_key` and `setupIdentity` are text identities, safe only among
+    browser-written rows** — every `games` row is. A Python-written setup (a
+    worker's, a log's) is matched to them by value, never by those.
+  - **`aux` is the one digest leak left.** A board-made link (*Play this map* on
+    an unscored map, *Play a new seed*, the campaign's *Play*, a legacy bot
+    *Watch*) reaches the game as ints, so a customised seat's default `1.0`
+    becomes `1` and `challenge_key` moves. `submit.findTwin` rehomes the score
+    onto the right row and `_aux_widened` covers the verifier; what is left is a
+    personal best filed under two keys.
+
+## Past a standard board the box grows
+
+Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
+light relaxation + a Euclidean MST for connectivity, which is planar so edges
+don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
+(one base sector rotated N times about a shared contested centre for a perfectly
+fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
+both. Note `symmetric` rounds the node count up to a whole number per sector and
+adds the shared centre, so it can return **more than it was asked for** (41 at 40
+nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+
+**Past a standard board the box grows; below it nothing moves.** `config.world_side(n)`
+is exactly `WORLD_SIZE` up to `config.STANDARD_MAX_NODES` (40, the old cap) and grows
+with `sqrt(n)` past it, up to `config.MAX_NODES` (120), so a big map keeps a full
+standard board's spacing and lane lengths instead of just getting denser. Every
+seed a map could be shared on before lays out identically, so `RULES_VERSION` did
+not move, and `nodes` was already a `Settings` field, so no digest moved either.
+Only the box scales: lane clearance and the extra-edge cap stay in `WORLD_SIZE`
+units, since spacing is what is being preserved. The map creator stays at a
+standard board (its canvas is sized for one): it refuses a 41st system and adopts
+a generated map at `min(nodes, STANDARD_MAX_NODES)`. The menu's Advanced tab
+reports the setup's lane spread in turns (`settings.lane_lengths`/`lane_turns`),
+surveyed in `menu.pump` — never `draw` — keyed by `settings.lane_survey_key`
+(which leaves ship speed out, so that slider just re-times the cached lengths),
+held off mid-drag, and restoring `config` after it generates.
+
+## Settings, challenge links and keys: the rules in full
+
+- **All balance/aesthetic constants live in `config.py`.** Do not hardcode a
+  magic number elsewhere — add a named constant there. Every module reads
+  `config.X` *live* at call time (nothing is cached at import), so the Advanced
+  menu tunes copies on a `Settings`, and `settings._apply_globals` (called by
+  `build_state` just before generation) is the single writer that pushes them
+  back into `config`.
+
+- **`settings.Settings` is the pure, serializable pre-game config** (players,
+  map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
+  interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
+  is the one funnel from menu/CLI to a `GameState`. `to_dict`/`from_dict` back
+  both the JSON file Save/Load (menu footer, gitignored `saves/`) and a
+  `to_token`/`from_token` pair that encodes a whole config into a URL fragment
+  (mirrored to `localStorage` under `paths.WEB_SHARED_SETTINGS_KEY` so an
+  installed PWA, which launches from a fixed `start_url`, still sees it).
+  `from_token`/`from_dict` are deliberately tolerant (clamp, default, pad), so a
+  stale or hand-edited token still loads to a playable config. Never prune a
+  non-heuristic seat's `ai_params` when writing a token: it is a documented
+  readable field for drop-in bots (`models/README.md`).
+- **Challenge links carry a score to beat.** `settings.Challenge`
+  (`turns`, `lost`, `hand`, `by`, `key`) is an optional field on `Settings`, so it
+  rides all of the above with no new plumbing; `build_state` ignores it. Score is
+  turns-to-win, ties broken on fewest ships lost (`Player.ships_lost`, written in
+  `combat.resolve_arrival`). A challenge token travels by clipboard only
+  (`webstore.copy_link`) — never the address bar or `localStorage`, unlike a
+  settings link (`webstore.share_token`). Editing a challenge's setup asks first
+  (`menu._draw_unchallenge`); `Settings.without_challenge()` is what persists a
+  "change it anyway".
+
+- **Adding a field to `Settings` invalidates every key already shared.**
+  `challenge_key()` hashes the full setup dict, so a new field moves the digest
+  of every map that ever existed and links from before it read as edited.
+  `settings._LEGACY_KEY_DROPS` lists per schema change what that version
+  lacked; `challenge_keys()` re-hashes without each and `Challenge.matches`
+  (and `webstore.best`) accept any of them. Append an entry whenever a field
+  joins `Settings` — `test_challenge_key_is_stable` pins the default digest and
+  fails until you do. Only `challenge_keys()[0]` is ever *written*. The
+  leaderboard folds by lookup instead (`KEY_ALIASES` in
+  `leaderboard/js/token-decode.mjs`, `leaderboard/fold-game-key.sql`), since JS
+  cannot recompute the Python digest — plus, for the splits nobody has reported
+  yet, `submit.findTwin`, which posts onto whichever game row already stores
+  this exact setup (`setupIdentity`, matched against `settings_json`) rather
+  than opening a second page under the new digest. A split settles on the
+  *newest* key — `findTwin` and `fold-game-key.sql` both move that way, and
+  `game.mjs` forwards a link to a folded-away key through `aliasFor`. For the same reason, the
+  leaderboard's same-setup-different-seed grouping (`sc_config_key` in
+  `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
+  rather than added as a field here — that would move `challenge_key()` for
+  every map instead of only the config grouping.
+
+## Star names: the rule in full
+
+- **Star names (`starnames.py`) are flavour on top of that, never a key.**
+  `System.name` is a cosmetic IAU star name (`System.label` is `"Vega (7)"`,
+  `System.short` the name alone); mapgen's `_name_systems` stamps one per system
+  **last**, after every roll that shapes the map, so a seed still lays out the
+  board it always did and a replay recreates the names from `state.rng` with
+  nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
+  `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
+  `render._draw_node_names` places labels collision-first and drops what doesn't
+  fit (see "Star names" above) — including the fixed slot above every system that a
+  playback writes its numbers into (`render._mark_slot`), reserved whether or not
+  one is showing, so a name sits below its system or nowhere rather than
+  flickering out the moment a `+1` or a fight's cost appears. Ids stay on the
+  mechanical readouts — the queued list, `tests/sim` logs, tokens.

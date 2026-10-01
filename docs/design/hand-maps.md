@@ -281,3 +281,192 @@ strict builder and **asserts** on a recipe with blockers:
   to the menu to change a setting, so `commit` still writes it; the gate belongs
   at Start. This hole predated the blank default — deleting every system and
   leaving would reach the same assert — it just stopped being obscure.
+
+## The rules in one place
+
+A board has a **third source**: a recipe drawn by hand. `custommap.CustomMap` is
+the serializable form — systems with concrete positions, production, garrisons and
+owners, plus lanes as index pairs — and it rides on `Settings.custom_map`, which is
+the whole trick: save/load, share and challenge links, resume, replay, the
+leaderboard and the offline bot column all carry it with no new plumbing.
+`mapgen.generate_custom` builds the board; `settings.build_state` branches to it.
+
+- **A hand map is not a `mode`.** `GameState.mode` is stamped `"custom"` (its one
+  non-test reader is `botio.setup`), but `"custom"` must **never** join
+  `settings.MODES`: `leaderboard/schema.sql` is `check (mode in
+  ('random','symmetric'))`, so a token carrying it would be refused by the
+  database on submit. The setup keeps the mode it had; the recipe overrides it.
+- **Every stored value is concrete, so the seed no longer shapes the layout** —
+  it drives combat dice and star names only. That is why the menu keeps its Seed
+  row, and why the Economy sliders move into the creator's sidebar: garrisons are
+  rolled *at the moment a system is placed*, so placement is the only point at
+  which they still bite. Nothing stored is a sentinel.
+- **A hand map lives in a wider box than a generated one.** `config.WORLD_SIZE`
+  is square and `mapgen._place_nodes` rolls inside it, so every generated board is
+  square; a recipe stores concrete coordinates and never goes through
+  `_play_bounds`, so it doesn't have to be. `config.CUSTOM_WORLD_W` x
+  `WORLD_SIZE` is the hand-map box — `custommap.MapNode.clamped` enforces it and
+  `mapmaker._build_view` is the camera over exactly it, so the canvas *is* the
+  region a system may occupy. Widening `WORLD_SIZE` itself instead would re-roll
+  every seed: a `RULES_VERSION` bump, and every stored replay and posted score
+  unverifiable. `mapmaker._generated` **centres** what it adopts, since a square
+  map in a wider canvas would otherwise open hugging the left; a translation only,
+  because scaling to fill the width would stretch every lane and quote travel
+  times the seed never gave.
+- **The editor opens on a blank canvas, and that costs two guards.**
+  `mapgen.generate_custom` asserts on a recipe with blockers, so a map that cannot
+  build must never reach it. `mapmaker.commit` writes `custom_map = None` for an
+  *empty* recipe (not a half-built map — it carries nothing, and writing it pins
+  the menu into "Edit map" over a setup that cannot start), and `menu._start` — the
+  one funnel all three `"start"` returns go through — refuses a hand map with
+  blockers and says the first one. A genuinely half-built map is still committed:
+  it must survive a trip to the menu to change a setting, so the gate is at Start,
+  not at commit.
+- **One tolerant gate, one strict builder.** `CustomMap.from_dict` is total and
+  never raises — it pads short rows, clamps out-of-range numbers and drops junk
+  lanes — and returns `None` for anything that cannot describe a playable map.
+  `generate_custom` asserts. Repair only what is local and bounded: auto-linking a
+  disconnected graph would invent structure the author never drew and present it
+  as theirs, so that is a rejection. A rejection is never silent even though
+  nothing is raised — `challenge_key()` stops matching the sender's stamp, so the
+  menu's existing "this setup has been edited" banner fires with nothing added.
+- **`normalised()` must stay idempotent, and `to_dict` emits it.** `challenge_key`
+  hashes what `to_dict` writes, so a form the reader would normalise differently
+  makes a sender's own link read as edited the moment it is opened — the trap
+  `_ai_from_dict` documents for an int `aux`. Coordinates are **integers** for the
+  same family of reasons: `verify_scores.same_setup` hashes a browser-written
+  side (where `100.0` is `100`) against the game's own JSON, and `_aux_widened`
+  already papers over that for one field. Don't make it two.
+- **Node identity is positional**, so deleting node *i* shifts every later lane
+  index. `CustomMap.without_node` is the single implementation; don't open-code it.
+- **`mapmaker` draws on the real surface, not `menu`'s fixed canvas.**
+  `menu._to_canvas_event` rounds pointer coords through a float scale, and stacking
+  that on `WorldView.to_world` gives two lossy inversions in series — at
+  `config.ZOOM_MAX` a system would not land where you tapped. It shares *primitives*
+  with `render` (`widgets`, `config.node_radius`/`player_color`/`text_on`) rather
+  than drawing functions, which are threaded through fog, film and order state the
+  editor has none of.
+- **Its working model is the recipe, never a live `GameState`.** `Lane.length_ly`
+  and `travel_turns` are stored fields, cached again in `adjacency` and shipped to
+  bots as `base_turns`, so moving a node in a live state means recomputing all
+  three — miss one and the board lies. With positions plus index pairs the lanes
+  follow for free and undo is a copy of plain data.
+- **The validator has one implementation with three callers.** `problems()` gates
+  Play, renders live in the sidebar, *and* is what a drag's or a new lane's
+  legality is filtered from — never a second copy of the geometry that could
+  drift from what Play enforces.
+- **A crossing lane is a *warning*; a lane under a system is a blocker.** The
+  engine, the AI and every bot are indifferent to planarity, so two lanes crossing
+  in open space only looks busier — but a lane hidden beneath a third system
+  misrepresents the graph. The creator's **Planar** toggle (default on) is what
+  keeps the common path clean, by refusing to *draw* a crossing; it is editor-time
+  only, so turning it off leaves a map that still plays and still shares. Making
+  crossing a blocker instead would mean a map you can draw is a map you cannot
+  play, which is what the toggle exists to avoid.
+- **Lane drawing is two gestures through one `_add_lane`.** A tap arms the source
+  and the next press commits; a drag past `DRAG_THRESHOLD` commits on release. One
+  armed source (`Editor.lane_src`) serves both, so they cannot produce different
+  work. Systems are picked *before* lanes — a lane's endpoint sits inside its
+  system's tap reach, and "start a lane here" has to win there — and a repeat press
+  on overlapping lanes cycles, the same shape `input._pick_lane` uses.
+- **Shift-click chains, in the Systems tool only.** Held down, a click both places
+  (or links) and keeps building from what it just touched — the anchor is always
+  `Editor.sel_node`, and `_arm_move` already makes whatever was just placed or
+  clicked the new one, so a run of shift-clicks chains and a shift-click off to
+  the side branches from wherever you're pointing. `mapmaker._lane_candidate` is
+  the validation half split out of `_add_lane`, so a placement that also links
+  validates the new lane against the recipe with the new node already in it and
+  takes one undo snapshot for both halves rather than two; a refused link never
+  refuses the placement, it only leaves the status saying which half failed. Off
+  while Auto-lanes' re-run toggle is on (below) — the network it rebuilds would
+  overwrite the very lane a chained click just drew.
+- **Left-drag pans in the Lanes tool but not the Systems tool.** In Systems a
+  press on empty space always means "place", so there is no free left gesture, and
+  making it conditional on legality would give one press two meanings — the trap
+  route mode's tap documents. Right-drag and the on-map cluster pan in both.
+  `pan_button` records *which* button armed the pan (Lanes' left-drag sets it to
+  1), and both branches that can arm one write it — the right-button press
+  restates 3, not just leaves whatever the last pan left behind, or one left-drag
+  pan in Lanes leaves every later right-drag pan, in any tool, dead for the rest
+  of the session.
+- **An empty-space press deselects, in Lanes and Owners.** Neither tool has any
+  other press that can clear `Editor.sel_node` — Owners paints or arms a box on a
+  miss, Lanes disarms `lane_src`/`sel_lane` on one — so without this the ring (and
+  the sidebar block that follows it) would sit on the map for the rest of the
+  session once carried in from Systems. Systems is deliberately exempt: a press on
+  empty space there always means "place", and placing selects the new system, so
+  the ring is never stale there anyway.
+- **Adding `custom_map` cost a `_LEGACY_KEY_DROPS` entry** and moved the default
+  digest to `38c8b7ba470f6f4c`; all three previous digests are recovered in order.
+  `tools/bot_replay._OUTCOME_MODULES` gained `custommap` — miss that and a change
+  to the recipe parser leaves every cached `bot_scores` row falsely fresh.
+  `tools/setup_sweep` refuses a hand-authored setup outright: its whole method is
+  reseeding, and no seed re-rolls a hand map.
+- **The three tools share one scene and never discard each other's work.**
+  Systems places and edits; Lanes draws and picks; Owners paints seats. The
+  viewport rect must **not** depend on the tool (`_palette_h` is measured but
+  fixed), or switching tools moves the map under the cursor. `ed.rects` is one
+  namespace cleared every frame, so a control that isn't drawn is inert by
+  construction — but two controls sharing a key means the later-drawn one wins,
+  silently.
+- **Auto-lanes can re-run itself, on a placement or a deletion only.**
+  `Editor.auto_relane` (a preference like `planar` — `_adopt` leaves both alone)
+  re-runs `mapmaker._relane` — `_auto_lanes` without the confirm or its own undo
+  snapshot — folded into that edit's single undo step. A drag is deliberately
+  exempt: it's continuous, and relaning mid-drag would fight the rubber band a
+  system follows while an illegal spot is still being tried. Hand-drawn lanes stay
+  legal while it's on; they simply last until the next system is added or
+  removed, and the Lanes tool is never locked. Turning it on doesn't relane on the
+  spot — that would be a destructive rewrite with no confirm — it only takes hold
+  from the next change.
+- **The seat palette offers `n + 1` seats, floored at 2.** That makes the common
+  path gap-free by construction. It does not *prevent* a gap (paint seat 3, then
+  clear seat 2), so that case gets a blocker and a one-press **Renumber seats**
+  rather than a silent compaction — renumbering changes a seat's colour without
+  being asked, and the colour is part of what an author intended.
+  `mapmaker._seat_entries` is that list, with two readers: the Owners palette band
+  and the selected system's owner row in the sidebar (a row of swatches, not a
+  stepper — a seat is a colour, so it is pointed at). They must not disagree about
+  which seats exist, or one offers a seat the other calls a gap. Both rows are one
+  control (`mapmaker._pick_seat`): a swatch arms the seat a map tap paints *and*
+  stamps it on the selected system, the same way the production palette's `pal_*`
+  already retypes a selected system rather than looking inert
+  (`_retype_selection`). Neither row has a toggle-to-neutral second meaning:
+  pressing the seat a system already holds arms the pick and stops there — Neutral
+  is its own swatch in both rows, so that stays the map tap's job, where there is
+  nothing else to press.
+- **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
+  version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
+  common "give this one a real garrison" case isn't a two-tool round trip.
+- **The Owners tool's *Auto* is `mapgen.peripheral_starts`, not a second copy of
+  it.** That function was lifted out of `mapgen._peripheral_starts` to take a
+  `{id: pos}` map and an rng, so the editor can seat a recipe that is not a board
+  — the wrapper keeps the same ids, the same order and the same single rng draw,
+  so a seed still lays out the board it always did. It replaces rather than
+  merges (one start per angular sector is the whole property) and demotes a
+  system it unseats back to an ordinary roll, but only one carrying the exact
+  homeworld stamp. Its seat count is `Editor.auto_seats`, **not**
+  `settings.players`: with a recipe set, `commit` derives `players` from
+  `recipe.seats()`, so placing the homeworlds *is* how the seat count is chosen —
+  and `None` there means "as many as the map already has", which is what keeps
+  the readout honest and why `_adopt` resets it.
+- **Box-paint copies route mode's two-flag arming** (`box_press` on the press,
+  `box_active` only past the threshold, so a tap that never moves paints nothing)
+  and **clips the box to the viewport first** — `to_screen` projects every system,
+  including ones panned out under the sidebar, and only the drawing is clipped.
+  A box paints as one group: if every system in it already holds the pick it
+  clears them all, otherwise it paints them all, so a box never half-toggles.
+- **The menu hides what a hand map decides, by not drawing it.** Basic's Players,
+  Systems and Map type become read-only derived values (Players is chosen in the
+  creator instead, by *Auto* above or by painting); Advanced's Map and Economy
+  groups become a note, since those knobs now live in the creator and only bite
+  there. `menu._set_players`/`_set_nodes` are additionally *interlocked* while a
+  recipe is set — a nudge from any other path would desync them from it until the
+  next `from_dict` reconciled them back, moving the digest in between. Seed stays:
+  it still drives combat dice and star names. Dropping the recipe (the *x* beside
+  *Edit map*) is behind a confirm, answered inside `_dispatch` rather than ahead
+  of it, so the clear still falls through to the un-challenge check every other
+  edit trips.
+- **Star names are deliberately absent from a recipe.** `mapgen._name_systems`
+  stamps them from `state.rng` last and serializes nothing, so they are recreated
+  for free from the seed; the editor shows ids (`#7`).

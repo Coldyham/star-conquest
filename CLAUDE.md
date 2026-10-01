@@ -6,17 +6,18 @@ Star Conquest is a minimalist turn-based strategy game: a graph star map where
 systems are nodes and spacelanes are edges, one ship type, take every system to
 win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 
-Design rationale, history, and edge-case detail behind the rules below live in
-`docs/design/`, one file per area, keyed by headings that match this file's.
-Start at [`docs/README.md`](docs/README.md), which says which file holds which
-section and lists every idea that was built or proposed and then decided
-against. **Check that list before proposing a mechanism, a bot tactic or a
-re-tune**, and read the relevant design file when you're actually touching that
-code, not as background reading. The files: `core`, `shell`, `turnfilm`,
+This file states the rules. The reasons, measurements and rejected alternatives
+behind them live in `docs/design/`, one file per area, under headings that match
+this file's. Start at [`docs/README.md`](docs/README.md), which says which file
+holds which section and lists every idea that was built or proposed and then
+decided against. **Check that list before proposing a mechanism, a bot tactic or
+a re-tune**, and read the relevant design file when you're actually touching
+that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing` and `marshal-flow`;
 `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
-topic and update the index when one grows past that.
+topic and update the index when one grows past that. Keep this file to rules and
+pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
 is the wire protocol for non-Python bots, and
 [`docs/bot-brief.md`](docs/bot-brief.md) is a self-contained brief a player
@@ -73,378 +74,129 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`.
-  This is what lets
-  `tests/sim.py` and most of the suite run with no display. Do not add a pygame import
-  to any of these (`tests/test_settings.py::test_no_core_module_imports_pygame`
-  parses for it). (`custommap` is the hand-authored map recipe and its validator —
-  see Hand-authored maps below. `pbp` is play-by-post: one seat of a shared match,
-  held by a person at their own pace — see Play-by-post below. `fog` is presentation-only visibility — pure hop-distance queries the
-  shell reads each turn; the engine and AI never consult it. `turnfilm` is the mirror:
-  presentation-only playback the *engine writes into* and never reads back — see
-  Animated end of turn below. `replay` serializes a
-  match to JSON and replays it back through the headless engine — see Persistence
-  & replay below.)
+  `pbp`, `matchnames`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
+  writes into and never reads back) are presentation-only: the engine and AI
+  never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, and `main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
-    never imports `engine` or `ai`**. Derived display stats (threat, inbound,
-    per-player production rate) are computed with local helpers rather than
-    reaching into `ai`. Its layout is measured rather than hardcoded — see the
-    scaling convention under Key conventions. It stores nothing time-varying: the
-    selected forward rule's chevron conveyor reads the wall clock in `_flow_phase`,
-    and the turn playback reads `Ui.film`/`Ui.film_ms` (an immutable film plus a
-    clock `main` advances from the loop's own `dt`), so a frame stays a pure
-    function of `GameState` + `Ui` + time — and a test drives a film frame by
-    setting a field rather than monkeypatching a clock.
-  - `input.py` mutates **only** `Ui` (and queues human `Order`s); it never
-    touches the simulation. It returns a high-level action string
-    (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`, `"toggle_history"`,
-    `"rewind"`, `"restart"`, `"menu"`, `"quit"`) or `None`, and `main.py` decides
-    what to do with it.
-  - `menu.py` is a self-contained pre-game scene with the same draw/mutate split:
-    `draw` only reads `Settings`, `handle_event` mutates `MenuState`/`Settings`
-    and returns `"start"`/`"quit"`/`None`. `main.py` runs a two-scene
-    (`"menu"` ⇄ `"game"`) state machine and builds the `GameState` on `"start"`.
-    `menu.pump` is the second half of the mutate side: a per-frame poll `main.py`
-    calls while the menu is up, for text that never reaches the SDL event queue
-    (see `softkeyboard` below).
-  - `softkeyboard.py` is a browser-only bridge, not a pygame module: on a touch
-    browser it focuses a hidden DOM `<input>` so the mobile on-screen keyboard
-    actually appears (SDL's `start_text_input` has nothing to focus there) and
-    reports back what was typed. Everything is guarded — off the web build, on a
-    desktop browser, or if any DOM call fails, every function is a no-op and the
-    menu keeps its plain SDL text path.
-  - `webstore.py` is the other browser bridge, same style: the address bar and a
-    small key/value store (shared-settings tokens, personal bests). See the
-    challenge-link notes under Key conventions.
-  - `share.py` is the one bridge that talks to a network, and the one that is
-    not browser-only: it posts a finished match's replay to the leaderboard's
-    `/api/log` (same-origin on the web) so a
-    posted score can be checked against the game that produced it. Same
-    defensive style — guarded everywhere, silent on failure,
-    fire-and-forget on both backends (a `fetch` whose promise
-    is never read on the web, a daemon thread off it) so it can never stall the
-    frame. Pure of pygame, and it sends **only** when the player presses *Post to
-    leaderboard* or the player has ticked *Share replays*. Its other half
-    *fetches* a replay to watch (`fetch_log` -> a `Download` the loop polls once a
-    frame, never awaited), which is the one thing here that reads a response. See
-    "Checked scores" under Key conventions.
+    never imports `engine` or `ai`** (derived stats like threat are local
+    helpers). It stores nothing time-varying: a frame is a pure function of
+    `GameState` + `Ui` + time (`_flow_phase` reads the clock; playback reads
+    `Ui.film`/`Ui.film_ms`), so a test drives a film frame by setting a field.
+  - `input.py` mutates **only** `Ui` (and queues human `Order`s), and returns an
+    action string (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`,
+    `"toggle_history"`, `"rewind"`, `"restart"`, `"menu"`, `"quit"`) or `None`
+    for `main.py` to act on.
+  - `menu.py` has the same split: `draw` only reads `Settings`, `handle_event`
+    mutates `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`;
+    `menu.pump` is a per-frame poll for text that never reaches the SDL queue.
+    `main.py` runs a `"menu"` ⇄ `"game"` state machine.
+  - **Browser bridges** — `softkeyboard` (focuses a hidden DOM input so a touch
+    keyboard appears), `webstore` (address bar, clipboard, key/value store; a
+    JSON file under `data_dir()` off the web) and `share` (the one that talks to
+    a network: posts replays, fetches one to watch as a polled `Download`). All
+    pure of pygame, guarded everywhere, silent on failure, never blocking a
+    frame. `share` sends **only** on *Post to leaderboard* or with *Share
+    replays* ticked. Detail: `docs/design/shell.md`, "Browser bridges".
 
 ### Turn resolution (engine.py)
 
-Turns resolve **simultaneously**: `end_turn` collects every player's orders
-against the *same* unchanged start-of-turn state, then applies them together, so
-there is no turn-order advantage. The phase order inside `end_turn` is
-deliberate and combat/production correctness depends on it: AI decisions →
-advance fleets → lane battles (opt-in; see below) → production (**before**
-combat, so a hull that finishes this turn is in the garrison for the fight and
-defends the system it was built at; the flip side is that a system captured this
-turn accrues from next turn, since capture resets its progress) →
-arrivals+combat (fleets arriving at a node are grouped and resolved together,
-launch-order independent) → win check → `turn += 1`. Nothing in the roster
-prices that pending hull, so a bot sizing an attack off `target.ships` alone can
-meet one more ship than it counted — `prod_progress`/`production` say when.
+Turns resolve **simultaneously**: `end_turn` collects every seat's orders against
+the *same* start-of-turn state, then applies them together. The phase order is
+load-bearing: AI decisions → advance fleets → lane battles (opt-in) →
+production (**before** combat, so a hull finished this turn defends the system
+it was built at; a system captured this turn accrues from next turn) →
+arrivals+combat (grouped per node, launch-order independent) → win check →
+`turn += 1`. Nothing in the roster prices that pending hull, so a bot sizing an
+attack off `target.ships` alone can meet one more ship than it counted —
+`prod_progress`/`production` say when.
 
-**In-lane battles** (`config.IN_LANE_BATTLES`, off by default, on the menu's
-Combat tab) are the one thing that breaks "fleets on lanes never interact". Two
-*enemy* fleets fight only on the turn their paths touch or cross — sharing a lane
-is not enough — and they fight **pairwise, in crossing order**, so a strong fleet
-running a defended lane picks its opponents off one at a time and carries its
-losses into each next fight. Nothing is pooled and nothing is moved: a winner is
-thinned in place and keeps its own heading, speed and arrival turn, so a fleet is
-only ever drawn where it really is. `engine._lane_span` measures both fleets from
-one end of the lane and mirrors `Fleet.progress` (what `render` draws), so a fight
-happens exactly where the triangles are seen to touch. Siting the phase *after*
-`_advance_fleets` but *before* `_resolve_arrivals` is what lets a single-turn hop
-still be intercepted — it is on the board, at `turns_remaining == 0`, for exactly
-one lane-battle check. `combat.resolve_lane_clash` passes no `defender_owner`:
-nobody holds open space, so `DEFENDER_ADVANTAGE` applies to neither side and an
-exact tie annihilates rather than breaking to a defender — but the jitter, which
-belongs to the dice rather than the ground, still applies.
-
-**The engine never imports the AI.** The decision function is injected as the
-`decide` parameter to `end_turn`; `main.py` and `tests/sim.py` pass `ai.decide`,
-a per-seat dispatcher that routes each seat to its named strategy
-(`ai.STRATEGIES`, keyed by `Player.ai_strategy`; `ai.decide` falls back to the
-built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
-crashes). Keep this inversion — it is why the core has no AI dependency, and it is
-the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
-
-**Drop-in custom AIs.** `ai.load_models()` imports every `*.py` in the
-`models/` dir (repo-anchored `ai.MODELS_DIR`, mirroring `menu._SAVE_DIR`) and
-`register`s each file's `decide` under its stem; a file that fails to import or
-lacks `decide` is skipped. `main.py` calls it at startup and on game start;
-`ai.available_strategies()` feeds the menu's per-seat Strategy dropdown. `menu.py`
-is the one shell module that imports `ai` (for discovery) — fine, since `ai` is
-pure core (no pygame); the render/input prohibition on importing `ai` still holds.
-(It reaches into core once more for the same reason: `pbp.configured()`, which
-decides whether there is a board to open a shared match on. Also pure core, and
-also not something `render` or `input` may copy.)
-`models/` is committed (not gitignored) precisely so `tools/build_web.sh` can
-stage it alongside `starconquest/` and ship the same bots to the browser/PWA
-build — new bots go in via commit/PR, not local drop-in only.
-
-**Bots that aren't Python are subprocesses, and they compete without shipping.**
-`botio.py` is the wire format (`hello` once, `turn_payload` per decision,
-`orders_from` back) and `tests/botproc.py` the transport; a bot is a
-`bots/<name>.bot.json` manifest naming a command, and `docs/bot-api.md` is the
-protocol. Four rules hold it together:
-- **`botio` is pure core and owns no process.** No `subprocess` import in the
-  package, and none in the ordinary suite either — `tests/sim` imports
-  `botproc` lazily, inside `--external`.
-- **`bots/` lives outside `models/`, and that is load-bearing.**
-  `build_web.sh` stages `models/`, and the web build is CPython on WASM: it
-  cannot fork at all. So external bots run in `tests/sim` and (once decided)
-  `tools/bot_replay`, never in the app or the browser, and the in-app Strategy
-  dropdown stays Python. Registration is opt-in (`sim --external`) rather than
-  automatic, unlike `ai.load_models()`, because `bot_replay`'s roster is
-  `ai.available_strategies()`.
-- **The bot's randomness is derived, never drawn.** `botio.decide_seed(seed,
-  turn, pid)` hands a seat its own stream, so an external bot cannot shift the
-  engine's dice and every other seat's battles roll as they did without it. It
-  is the one sanctioned exception to "all randomness flows through `state.rng`",
-  and it keeps what that rule protects: a seed still reproduces every fight.
-- **A degraded seat is not a result.** A timeout holds for one turn; a dead bot
-  or `botproc.FORFEIT_TIMEOUTS` timeouts falls the seat back to `heuristic` and
-  records it (`degraded_runs`, printed by `sim`). The app's silent fallback for
-  an unknown strategy name is right there and wrong in a tournament, where a run
-  containing a fallback seat must never be scored or posted.
-
-`apply_order` deducts ships from the source at launch, so a fleet is "off the
-board" in transit (fleets on lanes never interact); order-issuing has no bearing
-on outcomes.
+- `apply_order` deducts ships at launch, so a fleet in transit is off the board
+  and order-issuing has no bearing on outcomes.
+- **In-lane battles** (`config.IN_LANE_BATTLES`, off by default) are the one
+  exception to "fleets on lanes never interact": enemy fleets fight only when
+  their paths touch or cross, **pairwise in crossing order**, and a winner is
+  only thinned in place. No `DEFENDER_ADVANTAGE` in open space
+  (`combat.resolve_lane_clash` passes no `defender_owner`). Detail and reasons:
+  `docs/design/core.md`.
+- **A pile-up** pools each side per owner (a defender's reinforcement joins the
+  garrison), folds attackers **pairwise, strongest-first among themselves**, and
+  the survivor faces the defender **last**. `resolve_arrival`'s optional
+  `on_step` exists only so the film can show those steps.
+- **The engine never imports the AI.** `decide` is injected into `end_turn`;
+  `main.py` and `tests/sim.py` pass `ai.decide`, which routes each seat by
+  `Player.ai_strategy` through `ai.STRATEGIES` and falls back to `"heuristic"`
+  for an unknown name. The seam for user AIs is `ai.register(name, fn)`.
+- **Drop-in custom AIs.** `ai.load_models()` registers each `models/*.py`'s
+  `decide` under its stem (skipping files that fail); `ai.available_strategies()`
+  feeds the menu. `menu.py` is the one shell module that imports `ai` (and calls
+  `pbp.configured()`) — never copy that into `render` or `input`. `models/` is
+  committed so `tools/build_web.sh` ships the bots to the web build.
+- **Non-Python bots are subprocesses** (`botio.py` the pure wire format,
+  `tests/botproc.py` the transport, `bots/<name>.bot.json` manifests,
+  `docs/bot-api.md` the protocol). `botio` owns no process; `bots/` stays
+  outside `models/` because the WASM build cannot fork, so they run only in
+  `tests/sim --external` and `tools/bot_replay`. Their randomness is derived
+  (`botio.decide_seed`), never drawn. A seat degraded to `heuristic` (dead, or
+  `botproc.FORFEIT_TIMEOUTS`) is recorded in `degraded_runs` and must never be
+  scored or posted. Detail: `docs/design/bots.md`, "External bots".
 
 ### Animated end of turn (turnfilm.py)
 
-On by default, and a **local display preference** (`webstore.animate_turns`,
-`paths.WEB_ANIMATE_TURNS_KEY`) rather than a `Settings` field — how a turn is
-*drawn* cannot move a result, and a new `Settings` field would move
-`challenge_key()` for every map that ever existed. Runs after a human End Turn, in
-play mode, and under autoplay — a bot's turn is exactly as worth watching as a
-human's, which matters for a leaderboard bot score's Watch link, an autoplay
-game start to finish; only fast-forward, whose whole point is to skip, is
-excluded (the gate is in `main.resolve_turn`, read once a turn — never in
-`render`, where a store read costs a DOM call every frame). History playback
-animates too; scrubbing stays an instant seek.
+The film is a **playback of a finished turn** onto a deep copy: `end_turn` still
+resolves atomically, nothing is recorded, `RULES_VERSION` never moves. On by
+default as a **local preference** (`webstore.animate_turns`), never a
+`Settings` field. Runs on a hand End Turn, play and autoplay; never under fast
+forward. The full rule list is `docs/design/turnfilm.md`, "The rules in one
+place"; the ones easiest to break:
 
-**Switching the preference off drops only the glide, not the marks.**
-`main.resolve_turn`'s `marking` (fast-forward excluded, nothing else) is
-strictly wider than its `filming` (`marking and webstore.animate_turns()`): a fight's
-cost and a finished hull are cheap to report and worth seeing on their own, so they
-are archived (`Ui.archive_marks`) even on a turn with no glide to carry them —
-all at once, in place of the beat-by-beat reveal a running film would have given
-them, then left to dissolve on the same clock (`Ui.age_fading_marks`) either way.
-`main._next_history_film` mirrors this for history playback. Neither path builds a
-`turnfilm.Film` to do it: `archive_marks` reads the raw event list directly, so
-there is no beat grouping to skip.
-
-**It animates the past, not the present.** `end_turn` still resolves the turn
-immediately and atomically, so the live `GameState` is always the fully-resolved
-board; the film is a *playback of a finished turn* onto a deep copy, held as a
-main-loop local and drawn through the same `render.draw(screen, view_state, ui)`
-swap history mode uses. Nothing is observable mid-flight and skipping is therefore
-always safe (any press but Play/Pause; `Ui.stop_film`) — pausing freezes it in
-place instead (`Ui.film_paused`), so a paused review keeps showing what the turn
-did rather than reverting to the plain board a skip leaves behind. `RULES_VERSION`
-does not move for any of it, and nothing is recorded — a film is derived per turn
-and discarded, so the log format is untouched.
-
-Rules that hold it together:
-- **Events carry results, not rules.** `engine.end_turn(on_event=…)` reports
-  outcomes (`Advanced` carries each fleet's *new* `turns_remaining`, `Landed` the
-  node's new owner/ships), so `turnfilm.Reel` assigns and never re-simulates: it
-  draws no dice and does no arithmetic, which is what makes drift impossible.
-  `Reel` is strict — an unknown id is a `KeyError`, not a silent glitch.
-- **The order is the engine's, never one written down in `turnfilm`.** `film()`
-  groups *consecutive* events of one class into a beat, so moving `_production`
-  ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
-- **Only movement spends time; every other beat is an instant with a *lead*.**
-  The move beat (`config.FILM_MOVE_MS`) is the whole of a non-lingering film, and
-  every other kind's constant is how far ahead of *what follows* it fires,
-  borrowed from the stretch it lands in rather than added to the film — clamped to
-  the room actually there, so nothing is ever pulled back past the stretch it
-  borrows from or past the beat ahead of it. `config.FILM_PRODUCE_MS` (200) is
-  therefore spent mid-glide and costs the turn nothing: production runs *before*
-  arrivals (see Turn resolution) and a hull finished this turn is in the garrison
-  for the fight right after it, so the `+1` has to register as having contributed
-  rather than landing on the same instant as the fight it fed.
-  `config.FILM_LAUNCH_MS` is 0 and opens a turn, so it has nothing behind it to
-  borrow anyway; `config.FILM_COMBAT_MS` **must stay 0**, since a fight cannot be
-  shown before the fleets that fought it have arrived. Fights land on the film's
-  closing instant, which is the frame the next turn's glide starts on — chained
-  back to back (live play and history playback alike), the fleets never stop, and
-  the burst carries across the join on its own clock (below). A turn with no movement to borrow from
-  is all instants and does not play at all (`Film.plays`), so a quiet production
-  tick still resolves instantly instead of costing a pause.
-  Combat is the one beat with a second speed: `film(events, linger=True)` gives it
-  `FILM_LINGER_COMBAT_MS` of real dwell — time *added*, fights shown one node
-  after another — plus a trailing `FILM_LINGER_HOLD_MS`. That is for a turn ended
-  **by hand** and nothing else: `main.resolve_turn` passes `linger=not ui.playing`
-  and `main._next_history_film` never lingers, so a *run* of turns — live play or
-  history playback — glides continuously rather than stop-starting for every
-  fight.
-- **A fleet's approach stops at the rim; it never reaches the centre.**
-  `render._fleet_at` is the one function that decides where a fleet is drawn (lane
-  track included), and it clamps an arriving fleet — `turns_remaining <= 0` —
-  to `node_radius + config.FILM_ARRIVAL_GAP` short of its destination over the last
-  few pixels of the glide. Subtracting that gap only once the fleet has *landed*
-  instead jumps the triangle backwards by a whole radius on the move beat's last
-  frame, which is the one place a playback ever moves a fleet the wrong way.
-- **A mark outlives the film that made it, fading on its own clock.**
-  `Ui.fading_fights`/`fading_hulls` hold every still-showing fight or finished
-  hull as plain data (`viewstate.FadingFight`/`FadingHull`), independent of
-  `film`/`film_ms` — populated by `Ui.archive_marks(board, events)` from
-  whatever `Reel.run_to` just applied (which is why `run_to`/`run` return that
-  list rather than nothing), and aged every frame by `Ui.age_fading_marks(dt)`
-  regardless of whether a playback is currently running. A mark is fully visible
-  for `config.FILM_FLASH_MS`, then fades over `config.FILM_FADE_MS`
-  (`render._mark_fade`, `_faded` blending its colour toward `config.COLOR_BG`)
-  — both counted from when it fired, never from any film's own length, which is
-  what lets it keep dissolving on top of whatever the *next* turn's glide is
-  already doing instead of being cut off the moment `film` is replaced.
-  Visibility (`Ui.sees`) is checked once, at archive time, not on every frame a
-  mark is drawn — a fight you saw happen keeps fading regardless of what fog
-  does afterward. A "jump" rather than a step (entering/leaving history,
-  scrubbing, rewinding) calls `Ui.clear_fading_marks()`, since a mark belongs to
-  a specific point in a specific playback and jumping away from it makes it
-  stale rather than merely old. A second mark at one system supersedes the first:
-  turns chain straight into each other, so the previous turn's is often still
-  fading when this one fires, and two bursts with two numbers on one node read as
-  a garbled figure rather than as two events.
-- **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
-  `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
-  with, so a clash flashes exactly where the triangles are seen to touch — at the
-  crossing fraction `engine._lane_crossings` already solves for. **Do not widen
-  that function's sort tuple:** ties break on `(when, a, b)` — order of launch —
-  and that decides which fight is dealt the turn's dice first, so letting the
-  crossing *position* into the comparison would move stored replays with nothing
-  prompting a `RULES_VERSION` bump. Hence the explicit `key=`.
-- **The map layer sees both turns' fog; nothing gets swapped.** `Ui.film_visible`
-  holds what was visible when the played-back turn began and `Ui.sees` unions it
-  onto `visible`, which every map-layer read goes through (nodes, fleets, bursts).
-  `visible` itself is never overwritten, so a film has nothing to put back and a
-  system you can no longer see cannot leak past one. The HUD reads `visible`
-  directly: it describes the position you are handed, not the one being drawn.
-- **Whatever a film defers, `main.land_film` pays.** The camera snap that reveals
-  the board on the deciding turn waits for the playback (`Ui.deferred_view_snap`),
-  and `land_film` is the one place the clock running out and a press skipping both
-  pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
-  Anything else a playback holds back belongs there too, never at a call site.
-- **Play/Pause freezes a film; the camera controls ignore it; Autoplay / Take
-  control fires straight through it; every other press still skips it.**
-  `input._toggles_play` exempts that one control (the P key, or its footer
-  button) from the blanket "any press skips" rule, `input._moves_camera` exempts
-  the camera cluster (Reset view, the on-map zoom `−`/`+`, the R key) outright —
-  where you are looking changes nothing about the turn being played back — and
-  `input._toggles_autoplay` exempts the Autoplay / Take control button (the A
-  key) for a sharper reason: under autoplay Play/Pause is hidden (the turn
-  advance isn't gated on `ui.playing` there — see the footer's own comment), so
-  Take control is the *only* way to stop it, and films chain with no gap between
-  them, so it has to work on the very press that lands on a running one. Nothing
-  needs freezing for it: the showing film plays out unchanged, and control is
-  back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh
-  at that point. Under any of the three, a press that only skips leaves the
-  cluster looking dead. The wheel needs no entry: it is not one of the press
-  types the rule names.
-  `main.apply_toggle_play`
-  is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
-  set only when *pausing an already-running* playthrough (`was_playing` going
-  in) rather than whenever a film merely happens to be up — a manually-triggered
-  film runs with `Ui.playing` False throughout, so toggling play *on* while it
-  plays must leave it alone rather than freezing it on the first frame.
-- **A run of turns chains one animated turn straight into the next, and never
-  lingers.** Live play, autoplay and history playback are the same behaviour from
-  three sources, and all three take the same path: the moment a film lands the
-  loop starts the next turn — `main._next_history_film` in history, `resolve_turn`
-  in live play and in autoplay (each on the same terms its own pacing branch below
-  it would have resolved on: `PLAY_MS` for the former, `AUTOPLAY_MS` for the
-  latter) — before that pacing gets a chance to run. It now only ever fires for a
-  turn with nothing to animate, or with the preference off. `linger` (above) is
-  what tells the two apart: `not (ui.playing or ui.autoplay)`, so a turn ended by
-  hand alone gets the pause, and a run of turns — of either kind — glides through
-  instead. Nothing is lost either way — a mark's visibility no longer depends on
-  `film` still being current (above), so lingering only changes how long `film`
-  itself holds the board.
-  **A join carries the last film's overrun, and one frame's step is capped.** A
-  film lands on the first frame past its end, so the step nearly always overruns
-  it; `main._carry_into` pays that into the chained film (clamped to its own
-  length) instead of dropping it, or every join stalls the fleets for the rest of
-  a frame. And `config.MAX_FRAME_MS` caps what one frame may hand the loop: the
-  frame that lands a film is also the one that resolves the next turn — every
-  seat's `decide` plus the log rewrite, hundreds of ms with a search bot on the
-  board — and `clock.tick` gives that whole stretch to the frame after, which
-  uncapped teleports the fresh glide rather than advancing it. History playback
-  resolves nothing, which is exactly why autoplay looked choppier than a playback
-  of the same turns.
-  **Every reel goes through `main._primed`**, which runs it to `0.0` (archiving
-  whatever marks that makes) before it is handed back. A chained reel is built
-  *inside* the per-frame update, past the point where a running film is stepped,
-  so it is drawn once before any `run_to` reaches it: un-advanced, that frame
-  draws a continuing fleet a whole turn's worth of progress behind where it just
-  was. Priming only the path that visibly needed it leaves the trap set for the
-  next caller — which is exactly what live-play chaining then walked into.
-- **The correctness test is the history path.** One `reconstruct` pass yields both
-  a board per turn and that turn's events, so applying turn *i*'s film to a copy of
-  board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at
-  volume via `sim.check_film` behind `python -m tests.sim --film`). A missing or
-  misapplied event would otherwise surface only as the board snapping on the last
-  frame.
-
-`combat.resolve_arrival` takes an optional `on_step` list purely so a multi-owner
-pile-up can be shown step by step — those intermediate values are locals and
-unknowable from outside. Every side is pooled per owner (a reinforcement from the
-defender's own side joins the garrison's bucket, which is exactly why it can
-defend the fight it arrives for); attackers then fold **pairwise, strongest-first
-among themselves**, and whoever survives that faces the defender **last**,
-regardless of the defender's own size — the defender is not just another side in
-the size-ranked queue, it holds the ground, which is what `defender_owner=old_owner`
-prices on every step it actually participates in. Nothing else in `combat` changed
-for this.
+- **Events carry results, not rules** (`engine.end_turn(on_event=…)`).
+  `turnfilm.Reel` assigns and never re-simulates or draws dice; an unknown id is
+  a `KeyError`. `film()` groups *consecutive* events into beats, so the order is
+  always the engine's.
+- **Only movement spends time** (`FILM_MOVE_MS`); every other beat is an instant
+  with a *lead*. `FILM_COMBAT_MS` **must stay 0**. Only a turn ended by hand
+  lingers (`linger=not (ui.playing or ui.autoplay)`); runs of turns chain with no
+  gap (`_next_history_film`, `resolve_turn`), carrying the overrun
+  (`_carry_into`) under `config.MAX_FRAME_MS`, and every reel goes through
+  `main._primed`.
+- **Marks outlive their film** (`Ui.fading_fights`/`fading_hulls`,
+  `archive_marks`, `age_fading_marks`, timed by `FILM_FLASH_MS`/`FILM_FADE_MS`).
+  With the preference off, marks are still archived (`marking` is wider than
+  `filming`). A jump (history, scrub, rewind) calls `clear_fading_marks`.
+- **Do not widen `_lane_crossings`' sort tuple**: ties break on `(when, a, b)`,
+  which decides who gets the turn's dice first — widening it moves stored
+  replays with nothing to prompt a `RULES_VERSION` bump. Sub-turn position is
+  one formula, `Fleet.progress_at`; `render._fleet_at` clamps an arriving fleet
+  at the rim.
+- **Fog is a union** (`Ui.film_visible` + `visible` via `Ui.sees`); `visible` is
+  never overwritten. Deferred work is paid in `main.land_film` only.
+- **Any press skips a film except** Play/Pause (freezes it, `Ui.film_paused`,
+  only when pausing a running play-through), the camera cluster, and Autoplay /
+  Take control.
+- **The correctness test is the history path**: turn *i*'s film applied to board
+  *i-1* must land on board *i* (`tests/test_turnfilm.py`, `tests.sim --film`).
 
 ### Persistence, replay & history (replay.py)
 
-A match is **never snapshotted** — it is recorded as its *inputs*: `Settings`,
-the concrete `seed`, and per turn **every seat's orders plus the combat draws**
-(`engine.TurnRecord`, logged by `replay.GameLog`, auto-saved after every turn to a
-gitignored, repo-anchored `games/` dir, mirroring `ai.MODELS_DIR` and
-`menu._SAVE_DIR`). `replay.reconstruct(log, on_turn=…)` feeds each turn back
-through `engine.end_turn(state, script=…)` to rebuild the **exact** state at any
-turn — applying the orders verbatim and dealing the recorded dice to combat, so
-**no seat is ever asked to decide again**. `main.resume_game` uses this to offer
-resuming the last unfinished match from the menu, and restores that turn's
-standing auto-forward rules (`"rules"`, `Ui.auto_forward`) with it.
-
-**A replay must never depend on a bot repeating itself** — that is format
-version 2, and why the orders and the dice are both in the log (version 1 stored
-the human's orders alone and re-ran the AI; a bot on a wall-clock budget replayed
-into a *different match*, silently). The corollary is load-bearing now that
-replays are kept: **retuning, rewriting or deleting a `models/` bot cannot move a
-single stored game**, so no per-model "replay floor" is needed and none should be
-added (`test_a_replay_does_not_consult_a_bot_even_a_deleted_one` pins it, and
-`bot_replay.replay_rev` is `engine_rev` minus `ai` and `models/` for the same
-reason). What *can* move one is the engine itself — phase order, how a fight
-resolves, how a map is drawn from a seed — which is what `engine.RULES_VERSION`
-is for: bumped by hand with such a change, stamped on every log, and read by the
-verifier to report `outdated` (unverifiable) rather than `mismatch` (wrong). Version-1 logs can't be replayed faithfully
-and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
-autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
-delegates to, and the leaderboard's verifier recomputes). A log also carries a
-`match_id`, minted per match from `settings.fresh_rng` and likewise not part of
-what makes a replay reproduce: it is how a posted score names its replay
-(`GameLog.encoded` is the wire form — the token's own deflate+base64url). A
-rewind (`truncate`) keeps that id; a fork mints a new one.
-
-**History mode** is a shell-only review scene (`Ui.history`, gated so it never
-enters the pure core). On entry `main.build_history` runs one `reconstruct` whose
-`on_turn` callback deep-copies each turn's board and folds fog (via
-`_accumulate_fog`) into a per-turn snapshot, so the bottom-bar scrubber seeks by
-plain list-indexing. Fog stays a `Ui`-layer concern: mid-game a past turn shows
-fog *as it was then*, while a finished game is fully revealed. **Rewind** resumes
-live play from the viewed turn — mid-game it truncates the same log file
-(`GameLog.truncate`, confirmed first, since it discards later turns); on a
-finished game it forks a new file (`GameLog.fork`) so the completed record stays
-intact.
+A match is **never snapshotted**: `replay.GameLog` records `Settings`, the
+concrete seed, and per turn **every seat's orders plus the combat draws**
+(`engine.TurnRecord`), auto-saved to the gitignored `games/` dir.
+`replay.reconstruct` feeds them back through `end_turn(script=…)`, so **no seat
+is ever asked to decide again** — retuning, rewriting or deleting a bot cannot
+move a stored game, and no per-model replay floor should be added. What can move
+one is the engine: bump `engine.RULES_VERSION` by hand with any change to phase
+order, fight resolution or map generation from a seed (and
+`leaderboard/js/config.mjs`'s `CURRENT_RULES_VERSION` with it;
+`test_leaderboard_sync` pins the pair). Version-1 logs and outdated logs
+(`GameLog.is_current`) are declined rather than replayed as if they reproduced.
+A log also carries the per-turn `"ai"` flag (for `hand_turns` and the seat claim),
+`"rules"` (forwarding rules) and `match_id` (from `settings.fresh_rng`; `truncate`
+keeps it, `fork` mints a new one). History mode is shell-only (`Ui.history`,
+`main.build_history`); rewind truncates mid-game and forks a finished game.
+Reasons and alternatives: `docs/design/core.md`.
 
 ### Play-by-post (pbp.py)
 
@@ -500,880 +252,217 @@ already resolve simultaneously. The rationale for each rule is in
 
 ### Key conventions
 
-- **All balance/aesthetic constants live in `config.py`.** Do not hardcode a
-  magic number elsewhere — add a named constant there. Every module reads
-  `config.X` *live* at call time (nothing is cached at import), so the Advanced
-  menu tunes copies on a `Settings`, and `settings._apply_globals` (called by
-  `build_state` just before generation) is the single writer that pushes them
-  back into `config`.
-- **Nothing that holds text gets a fixed pixel size.** The measured-layout kit
-  lives in `widgets.py` and is shared by every scene that draws on the real
-  surface: a button's width comes from its measured label (`widgets.btn_w`, and
-  `widgets.btn` draws + returns the hit-rect), a stacked text row's pitch from
-  the font's own line height (`widgets.row_h`), a modal's stack is measured then
-  centred (`widgets.draw_modal`), and help prose is reflowed to the panel it sits
-  in (`widgets.wrap`). One-off layout literals still go through `config.s()`.
-  `render` binds these to its own `_`-prefixed module globals rather than calling
-  them qualified, and that is load-bearing: the body resolves them as bare names
-  at call time, which is what lets a test swap one out (`render._text = spy`) and
-  see the drawing code use it, and what keeps `render._FONTS` the same dict a
-  test clears. **`menu` deliberately does not use the kit** — it lays out on a
-  fixed 1440x960 canvas and letterbox-blits it, so its fonts must be *unscaled*
-  (`config.FONT_SIZE*` would scale twice) and it keeps its own `_fonts`/`_text`/
-  `_button`.
-  **The scale is, however, fixed for the run:** `config.apply_ui_scale` is called
-  exactly once, inline at boot (`main.py`, after `set_mode`), floored at the
-  design baseline — so shrinking the window past the baseline does not shrink the
-  UI. A resize rewrites `config.SCREEN_W/H` and rebuilds the `WorldView`, so
-  measured layout reflows, but the font size does not move. Cache off a font size
-  anyway only if it is keyed on `config.ui_scale` (`widgets.fonts`,
-  `menu._modal_fonts` both are) — the boot-time call happens before the first
-  frame, but a cache built at import time would still be wrong.
-- **`config.touch_ui` is the input modality**, set beside the scale in
-  `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
-  browser). On a touch build the shell drops every keyboard-only string — the
-  `(Esc)`/`(R)` suffixes on button labels (`render._key_hint`,
-  `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
-  panel's help text and the win overlay, the menu's `Enter: start game` footer —
-  and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`).
-- **`settings.Settings` is the pure, serializable pre-game config** (players,
-  map, seed, global knobs, per-seat AI); `menu.MenuState` holds transient menu
-  interaction state (analogous to `Ui`). `settings.build_state(settings, seed)`
-  is the one funnel from menu/CLI to a `GameState`. `to_dict`/`from_dict` back
-  both the JSON file Save/Load (menu footer, gitignored `saves/`) and a
-  `to_token`/`from_token` pair that encodes a whole config into a URL fragment
-  (mirrored to `localStorage` under `paths.WEB_SHARED_SETTINGS_KEY` so an
-  installed PWA, which launches from a fixed `start_url`, still sees it).
-  `from_token`/`from_dict` are deliberately tolerant (clamp, default, pad), so a
-  stale or hand-edited token still loads to a playable config. Never prune a
-  non-heuristic seat's `ai_params` when writing a token: it is a documented
-  readable field for drop-in bots (`models/README.md`).
-- **Challenge links carry a score to beat.** `settings.Challenge`
-  (`turns`, `lost`, `hand`, `by`, `key`) is an optional field on `Settings`, so it
-  rides all of the above with no new plumbing; `build_state` ignores it. Score is
-  turns-to-win, ties broken on fewest ships lost (`Player.ships_lost`, written in
-  `combat.resolve_arrival`). A challenge token travels by clipboard only
-  (`webstore.copy_link`) — never the address bar or `localStorage`, unlike a
-  settings link (`webstore.share_token`). Editing a challenge's setup asks first
-  (`menu._draw_unchallenge`); `Settings.without_challenge()` is what persists a
-  "change it anyway".
-  - **The leaderboard's bot column is computed offline, never served.**
-    `tools/bot_replay.py` replays every `models/` bot through the human's seat on
-    each posted map and caches the answer in `bot_scores`; a scheduled GitHub
-    Action (`.github/workflows/bot-replay.yml`) is the whole backend, since the
-    result is a pure function of the setup, the seed and the code. It drives
-    `tests/sim.play_settings`, which goes through `settings.build_state` rather
-    than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
-    only funnel that pushes them into `config`. The replayed seat gets default
-    `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
-    `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` on
-    Oracle: Search) and the value in force is stored on the row; opponents keep
-    theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
-    `is_human`, sets the strategy and params; plain `engine.end_turn(state,
-    decide=decide)` then drives every seat, the replayed one included, just as
-    `sim.play`'s own ladder/swap tournaments do). That is the same
-    full-information footing every other bot-vs-bot measurement in this codebase
-    already stands on: an oracle opponent resolves it through `ai.STRATEGIES`
-    and simulates it exactly (`knower._model_for`), the way it would any other
-    fielded bot, rather than guessing blind at a seat that was never actually a
-    person. **The app agrees by construction, not by coincidence**: a match that
-    *starts* in autoplay has no human seat at all (`settings.build_state` clears
-    the flag `mapgen` stamps on pid 1), so an all-bot game has no preferred seat
-    in either place and the in-app demo plays the identical game the column
-    computes — pinned by
-    `test_an_autoplay_demo_plays_the_same_game_the_bot_column_does`, which reads
-    77 turns apart on its setup without it. `_hand_over` is still what does it
-    in the harness, because a posted *human* setup carries `autoplay: False` and
-    so has nothing for that stamp to fire on. Leaving the flag set once looked
-    necessary — a token can only ever say "seat 1 is a bot" as `autoplay: true`,
-    never as an actual flag, so a live, token-driven Watch link could only ever
-    reconstruct the *handicapped* version. That is fixed from both ends now: the
-    row is backed by a stored replay, and a token-driven reconstruction clears
-    the flag too. `play_from` uses the same handover, and `engine_rev`
-    hashes `tests/sim.py` (`_OUTCOME_HARNESS`) so changing how a replay is
-    played marks every cached row stale; `replay_rev` must not, since a stored
-    log's replay consults no seat at all. It also lifts the bots' own per-decide wall-clock guards 100x
-    (`ai.set_budget_scale`, opt-in via a model's `BUDGET_SCALE`): those are sized
-    so the browser tab never freezes, and tripping one is the only thing that
-    makes such a bot's output depend on the clock — so a batch run that can never
-    trip one is *more* reproducible, not less. `won`, never
-    `turns`, says whether a bot took the board, and a loss is listed but never
-    ranked (`standings.botOrder`). `bot_scores` is the one table with no public
-    insert path: the worker's secret key is its only writer.
-  - **A winning replay is stored on the row, and the Watch link plays that back
-    rather than re-deciding the match live.** That is what let the handover above
-    go back to full information without reopening the original mismatch: a token
-    can hand the browser a setup and ask it to re-decide from turn one, and that
-    re-decision depends on exactly which commit is deployed where — the same
-    class of risk regardless of which way the seat is flagged. `sim.play_settings`'s
-    `log` parameter fills in a `replay.GameLog` turn by turn as the run happens
-    (off the `TurnRecord` every `end_turn` call returns, the same shape
-    `main.resolve_turn` records from); `tools/bot_replay.py` builds one for
-    every replay and keeps its encoded form only on a win
-    (`bot_scores.match_id`/`rules_version`/`log`), the same rule a human's own
-    posted score follows. `replay.reconstruct` applies recorded orders and dice
-    verbatim and asks no seat to decide anything, so it cannot drift from the
-    row it backs — and, load-bearing for the handover above, is completely
-    unaffected by what any seat was flagged during the run that produced it.
-    `standings.botWatchKind(row)` picks the link: `#log=<match_id>` (exactly a
-    human score's own mechanism) for a current replay, an outdated-replay
-    disclosure for one stamped under rules this build has moved past, or the
-    old reconstruct-it-live method (`token-encode.botWatchSetup`) as a fallback
-    for a row with no stored replay at all — a loss, or one computed before
-    this existed. `game_logs`'s human consent boundary (a posted score) is
-    untouched; a bot's own log needs none of it, since `bot_scores` is already
-    fully public, so it lives directly on that row rather than in `game_logs` —
-    `public_watchable_replays` (`leaderboard/schema.sql`) is the `union all` of
-    `public_replays` with a winning bot's own log that `netlify/functions/replay.mjs` actually reads,
-    keeping that function's one-query, no-branching shape for either kind.
-  - **The game uploads replays, and the worker checks scores against them.**
-    `Challenge.log` carries `GameLog.match_id` into the link, `share.post_log`
-    sends the log itself, and `tools/verify_scores.py` (the same scheduled worker
-    as the bot column) replays it and records `verified` / `mismatch` /
-    `unreadable` / `missing` in `score_checks`. The id rides on `Challenge` rather
-    than `Settings` precisely because `challenge_keys()` drops that field before
-    hashing — see the next bullet for what a `Settings` field would have cost.
-    Four rules hold this together:
-    - **Two things send, both consented to.** Pressing *Post to leaderboard*
-      uploads that match. With *Share replays* ticked (`webstore.share_games`, a
-      local preference — never a `Settings` field, which would travel in every
-      link and move every setup digest), a game also checkpoints every
-      `share.CHECKPOINT_TURNS` turns and again when it ends, which is what keeps
-      the *lost and abandoned* games — the ones no score can carry. Nothing else
-      sends, and a pure autoplay demo (`hand_turns == 0`) never does: it is
-      reproducible from its seed, so it is bytes without information.
-    - **`game_logs` is the one table the public can neither read nor write.** RLS
-      on, no policies, no anon grants. Writes go through the site's
-      own `leaderboard/netlify/functions/log.mjs` under the secret key, which is what
-      makes a size and rate limit enforceable — a replay is 5-14 KiB, so an open
-      insert path is a storage bill rather than a few junk rows. Reads are the
-      worker's alone, so uploading a game does not publish it.
-    - **A row carries no identity** — a match id, a setup key and the moves.
-      Grouping one person's games would need a durable client id, which is a
-      tracking identifier by any other name.
-    - **Posting a score publishes that replay, and only that replay.**
-      `public_replays` is `game_logs` restricted to the matches a posted score
-      points at — the one view here deliberately *not* `security_invoker`, since
-      lending out a subset of a table nobody may read takes owner rights. A
-      launch URL of `#log=<match id>` makes the game fetch it and open history
-      review on it (`main.replay_request` -> `open_replay` -> `open_history`,
-      which the H key shares), so the board's *Watch* link is a link back into
-      the game rather than a second engine in JS. A watched match is marked
-      (`Ui.watched`), because it ends on the same win overlay ours do:
-      `Ui.can_post` is the single predicate behind both sharing buttons, the
-      personal best and the checkpoint upload, so nobody's replay is one press
-      from being posted as your score. Rewinding out of one and playing on forks
-      a match that *is* yours — see `docs/design/leaderboard.md` for why that stays open.
-    - **The verifier binds the log to the setup** (`same_setup`), or an easy
-      map's replay would back a hard map's score. It proves the *game*, never
-      that a human played it — that is what `hand` discloses, recomputed from the
-      log rather than trusted. Key the log by `GameLog.setup_key()`, never the
-      live `Settings`: `main` resolves "roll a fresh seed" at game start and never
-      writes it back.
-  - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
-    by contested maps whose record they hold (`crown_holders`) and counts, per
-    Monday-to-Monday UTC week, scores that strictly beat somebody else's record
-    (`crown_steals`); a tie never steals, the earliest holder keeps it, as
-    `game_summary` credits. Both read `counted_scores`, the one place the rule
-    lives: every score but a `mismatch` replay counts, since the game uploads a
-    log once with no retry and an offline or hand-pasted score could otherwise
-    never count. Nothing is stored, so moderation recomputes them for free.
-    `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
-    against a real Postgres when `SC_TEST_PG` is set.
-  - **The weekly campaign stores its map and derives its state.**
-    `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
-    writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
-    out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
-    (sometimes its symmetric variant, plus one or two "?" nodes rolled with
-    `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
-    nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
-    pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
-    matches it to its game by seed plus jsonb *equality* — never
-    `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
-    browser posts, and so misses nearly every node. `campaign_scores` sits on
-    that view, and so do the green campaign badge on a map's page and index row
-    and the link back to `campaign.html?node=`. Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
-    week's hand-played counted scores in posting order — a home goes to the
-    first win from a player without one and can't be taken; a field node falls
-    to a win posted while holding a neighbour, and a held one only to a strictly
-    better score. The Advanced slider ranges live in `settings` (`ADV_*`) for
-    this reason; `menu` aliases them.
-  - **A map can be registered with no score at all, and can carry a one-time
-    reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
-    Star Conquest link, not just a challenge one — `token-decode.mjs`'s
-    `decodeToken` returns `challenge: null` for a plain settings-share link (or
-    one carrying `Challenge`'s own `turns <= 0` sentinel) rather than rejecting
-    it, and the site takes that as a setup to add rather than a score to post.
-    That is what lets a setup be shared and played before anyone — its own
-    author included — has a result on it to disclose. `games.embargo_until`
-    rides along on that same insert, optionally, and only there: `games` is
-    append-only like everything else on this board, so an embargo can only
-    ever be decided the one moment a map's row does not yet exist, never
-    retrofitted onto one already on the board.
-    - **It gates the replay and the detail behind it, never the fact that a
-      lead exists.** `public_replays` filters out a match whose map is still
-      embargoed — the DB-level half, real for every caller, not just the
-      site's own UI — and `game.mjs`'s `renderEmbargoed` is the other half: it
-      never requests the per-score list at all while a map is embargoed, only
-      `game_summary`'s own aggregate (`best_turns`/`best_user_name`/
-      `best_holders`/`score_count`), so there is nothing for the page or its
-      network tab to hand out beyond who is ahead and by how many turns. Lost,
-      hand and submission time stay off the page entirely, along with every
-      other score — a stricter cut would leave nothing to chase, which
-      defeats a deadline built to be raced against. `home.mjs`'s card makes
-      the same cut on the list. Scores and rankings themselves are otherwise
-      unaffected by an embargo — they post and rank normally throughout,
-      since there is no account system here to tell a submitter's own later
-      read apart from anyone else's, so the only boundary that can be
-      enforced for everyone alike, the setter included, is on *how* a score
-      was made rather than on whether one exists.
-    - **A campaign node is embargoed until its week ends, and that is derived,
-      never stored.** `game_embargoes` (schema.sql) is the embargo in force:
-      the later of `games.embargo_until` and the end of any live campaign week
-      the map is a node of (matched through `campaign_games`). `public_replays`
-      and `game_summary.embargo_until` both read it, so every page that honours
-      an embargo honours this one with no JS of its own. It cannot be stamped on
-      the row instead: a node's seed is fresh, so its `games` row is created
-      mid-week by whoever posts first, and `games` is append-only after that.
-  - **A replay is never shown as if it still reproduced the game once the engine
-    has moved past it.** `GameLog.is_current` (`rules_version == engine.
-    RULES_VERSION`) is the same check on both sides of the wire, and both were
-    silent about it until this was added — `main.open_replay`/`resume_game` would
-    happily reconstruct an outdated log through today's engine and show whatever
-    that produced, with nothing to say it might not be the game that was actually
-    played. `replay.latest_log` and `tools/position_suite.local_logs` decline such
-    a log the same way they already decline a version-1 one; `main.open_replay`
-    returns `None` for one too (a dedicated status line, `WATCH_OUTDATED_MSG`,
-    tells it apart from a genuinely unreadable blob). The board's half is
-    `game_logs.rules_version` — one more claim stored alongside the blob, same as
-    `finished`/`won`/`hand` (`share.row_for` sends it, `log.mjs` defaults a
-    missing one to `1`, the only version there ever was before this column
-    existed) — compared against `leaderboard/js/config.mjs`'s
-    `CURRENT_RULES_VERSION` in `game.mjs`'s `watchableIds`, so an outdated replay
-    simply has no *Watch* link rather than one that lies. That JS constant has no
-    build step to keep it honest, only a hand bump alongside `RULES_VERSION` and
-    `tests/test_leaderboard_sync.py` pinning the two together. This is a cheaper
-    half-measure chosen over storing full board snapshots (which would let a
-    replay outlive *any* future rules change, at the cost of the size and
-    bot-independence properties `replay.py`'s module doc argues for) — worth
-    revisiting if snapshotting ever happens, but not before.
-  - **Adding a field to `Settings` invalidates every key already shared.**
-    `challenge_key()` hashes the full setup dict, so a new field moves the digest
-    of every map that ever existed and links from before it read as edited.
-    `settings._LEGACY_KEY_DROPS` lists per schema change what that version
-    lacked; `challenge_keys()` re-hashes without each and `Challenge.matches`
-    (and `webstore.best`) accept any of them. Append an entry whenever a field
-    joins `Settings` — `test_challenge_key_is_stable` pins the default digest and
-    fails until you do. Only `challenge_keys()[0]` is ever *written*. The
-    leaderboard folds by lookup instead (`KEY_ALIASES` in
-    `leaderboard/js/token-decode.mjs`, `leaderboard/fold-game-key.sql`), since JS
-    cannot recompute the Python digest — plus, for the splits nobody has reported
-    yet, `submit.findTwin`, which posts onto whichever game row already stores
-    this exact setup (`setupIdentity`, matched against `settings_json`) rather
-    than opening a second page under the new digest. A split settles on the
-    *newest* key — `findTwin` and `fold-game-key.sql` both move that way, and
-    `game.mjs` forwards a link to a folded-away key through `aliasFor`. For the same reason, the
-    leaderboard's same-setup-different-seed grouping (`sc_config_key` in
-    `leaderboard/schema.sql`) is computed in SQL from stored `settings_json`
-    rather than added as a field here — that would move `challenge_key()` for
-    every map instead of only the config grouping.
-- **Whole-number floats don't survive the browser, so never compare setups as
-  text across writers.** Python writes `0.0`, `1.0`, `18.0`; the leaderboard's
-  JavaScript has one number type, so everything it writes (`games.settings_json`,
-  a token it re-encodes, `pbp_*` rows) says `0`, `1`, `18`. Postgres jsonb keeps
-  whichever text it was sent, so a Python-written row and a browser-written one
-  can hold the same setup and differ as text — and `json.dumps`, `md5(…::text)`
-  (`sc_config_key`) or `JSON.stringify` then call them different. This has
-  bitten four times: the int `aux` a decode keeps, integer hand-map coordinates,
-  `verify_scores._aux_widened`, and `campaign_games`, whose node settings come
-  from `tools/campaign.py` (every campaign node sat unclaimable until the match
-  moved to jsonb `=`). The rules:
-  - **Compare by value, or after `Settings.from_dict`.** `from_dict` coerces every
-    field back to its type, `aux` alone excepted (`_ai_from_dict`), so two
-    decoded setups agree however they travelled — pinned by
-    `test_a_browser_round_trip_moves_the_challenge_key_only_through_aux`, which
-    fails if a new field escapes the coercion. In SQL, jsonb `=` compares numbers
-    by value; a digest of the text does not.
-  - **`sc_config_key` and `setupIdentity` are text identities, safe only among
-    browser-written rows** — every `games` row is. A Python-written setup (a
-    worker's, a log's) is matched to them by value, never by those.
-  - **`aux` is the one digest leak left.** A board-made link (*Play this map* on
-    an unscored map, *Play a new seed*, the campaign's *Play*, a legacy bot
-    *Watch*) reaches the game as ints, so a customised seat's default `1.0`
-    becomes `1` and `challenge_key` moves. `submit.findTwin` rehomes the score
-    onto the right row and `_aux_widened` covers the verifier; what is left is a
-    personal best filed under two keys.
-- **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
-  paths in `main`/`menu`, and `upload`, which is the one that also runs off the
-  web): `get`/`set` are `localStorage` on the web and
-  a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and
-  no-ops off it: `link_url`, `set_url_fragment`, `copy_to_clipboard` and
-  `url_token` are the primitives, and `sync_settings` / `share_token` /
-  `copy_link` the compositions callers use. Same defensive style as
-  `softkeyboard`: local `import platform`, every DOM call guarded, storage
-  failure never load-bearing.
-- **Quitting is a desktop concept; the web has nothing to exit to.** Every
-  confirmed quit goes through `main.leave_app()`: off the web it returns True
-  and the loop ends, while on the web it asks the browser to close the window
-  (`webstore.close_window`) and returns False, falling back to the setup menu
-  with `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop
-  (`pygame.quit()`) directly on the web build.
-- **The map viewport has two margins, both floored at `config.node_clearance()`.**
-  `config.map_fit_padding()` sizes the zoom-1 fit and `config.map_pan_padding()`
-  is what the pan clamp keeps past the outermost system once zoomed in —
-  `geometry.WorldView` takes them as `padding` and `pan_padding`.
-- **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
-  into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
-  the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
-  seats can play to different profiles; the menu's AI tab edits them per seat.
-  `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
-  list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
-  `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
-  - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`,
-    the last entry in the menu's Strategy dropdown) is not a key into
-    `ai.STRATEGIES` at all — `settings.resolve_strategy` replaces it with a real
-    bot inside `build_state`, so nothing downstream ever sees the placeholder.
-    That is why it is resolved here rather than by a `models/` dispatcher bot:
-    `knower._model_for` asks a module `is_oracle_seat(player)` and a dispatcher
-    could not answer, having no seed on a `Player` — resolving one layer earlier
-    keeps every oracle, `botio`'s seat reveal and the leaderboard's bot column
-    looking at the bot that is really deciding, and so keeps the whole roster
-    eligible. The pick is **derived, never drawn** (`random.Random(f"{seed}:
-    strategy:{pid}")`, the rule `botio.decide_seed` follows): leaving a seat to
-    chance must not shift `state.rng`, or the same seed would fight the same map
-    differently depending on how many seats were left to it. A seed therefore
-    reproduces the opponents as surely as it reproduces the map, which is what
-    lets a challenge link on one be raced fairly. The pool is
-    `ai.available_strategies()` read at build time, so a drop-in model joins it;
-    that cannot move a stored game, since `replay.reconstruct` applies recorded
-    orders and dice and asks no seat to decide. `Settings` keeps `"random"`, so
-    a shared link stays a mystery to its recipient and the leaderboard's
-    opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
-    the bot that played — the setup's rule, not its outcome. Disclosing the
-    resolved names would go on `Challenge` (excluded from `challenge_key`), not
-    on `Settings`, which would move every digest ever shared. The win overlay
-    *does* reveal it (`render._winner_label`, "Verdant (Knower) wins!") — the
-    payoff, and free, since there is no turn left to play with the knowledge. It
-    reads `Player.ai_strategy` directly, so it needs no `ai` import and names the
-    resolved bot rather than the placeholder; neutral and any human seat (a
-    claimed one included) are excluded, since nothing decided for them.
-  - Those fields are readable for *every* seat — see `models/knower.py` for
-    what that makes possible. Any such bot must keep three rules: never call
-    `ai.load_models()` from inside a model (it re-`exec_module`s every file,
-    including yours, unguarded); read `ai.STRATEGIES` *lazily* inside `decide`,
-    since files load in sorted order and the registry is incomplete at your
-    import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
-    asserts both of the latter).
-  - **Attack margins are measured against the *effective* garrison.**
-    `ai._frontier_order` multiplies a target's ships by
-    `config.DEFENDER_ADVANTAGE` before applying `expand_margin`/`attack_margin`,
-    because that is what a fleet actually has to out-fight
-    (`combat._apply_advantage`). Against the raw count the AI stops expanding
-    entirely at a high setting. Identity at the 1.0 default — see `docs/design/bots.md`
-    for why the knob's top end still turtles regardless.
-  - **A bot prices a fight with `combat.edge_attacking()` /
-    `edge_defending()`, never a constant.** They are the break-even multiples —
-    what a fleet must beat the garrison by, and what a garrison must beat the
-    incoming force by, to win the *worst* roll — read live off
-    `config.COMBAT_JITTER` and `config.DEFENDER_ADVANTAGE`, both of which are
-    menu sliders. They move in opposite directions, since the advantage belongs
-    to whoever holds the system. Most `models/` bots' margins are pads/absolutes
-    over those, with the edge's jitter half floored at each bot's `TUNED_SWING`
-    (the swing it was fitted at), so a knob can only ever *raise* a margin above
-    its measured figure — nothing in the roster moves at the 0.10/1.0 defaults.
-    Clearing an edge is not a promise of capture: ties break to the defender and
-    matched forces annihilate to neutral, hence the `target.ships + 1` floors.
-    - **The exception, and it is a measured one: `marshal._enemy_margin` carries
-      the advantage half of the edge and *none* of the jitter half.** 86.7% of
-      out-matched garrisons evacuate rather than fight (only claudebot stands),
-      so a premium against the dice is paid on a fight that mostly never
-      happens; dropping it is the largest single gain measured on any bot in the
-      roster. The advantage half is kept because it prices the ground rather
-      than the dice and applies in full whenever a garrison *does* stand —
-      dropping that too reads z = -12.35 at `DEFENDER_ADVANTAGE 1.5`. Marshal's
-      *defence* margin still prices the jitter in full, which is the asymmetry:
-      our own garrison cannot decline the engagement. See "Garrisons run away"
-      in `docs/design/marshal-pricing.md` before copying either half into another bot.
-  - **The game and the board are one site.** The root `netlify.toml` builds the
-    game, and `tools/build_web.sh` stages the board's pages into `web/board/`
-    from an explicit allow-list. The game itself is at `/game/`; the root is
-    `tools/pwa/root.html`, a router that opens the board for a visitor and
-    forwards a fragment (every challenge, replay and seat link the game ever
-    shared is the root plus one) or an installed app's launch to `/game/`. The
-    manifest, icons and service worker stay at the root, so old installs keep
-    their scope and manifest `id`. The functions are bundled from
-    `leaderboard/netlify/functions/` and answer at root `/api/`. On a
-    `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
-    and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
-    context, including a deploy preview, talks to itself with no URL edited by
-    hand. Endpoints are still built at *call* time from `LEADERBOARD_*_PATH`,
-    never stored as whole URLs. `paths.LEADERBOARD_ORIGIN` is the route for
-    everything else (desktop, Android, localhost, a custom domain). Blanking it
-    disables every leaderboard feature, which is what `render` tests, since
-    resolving costs a DOM read it must not do once a frame. One origin means one
-    localStorage: the lobby reads `sc_pbp_seats` and the posting name is
-    `sc_pbp_name` (`test_leaderboard_sync` pins both keys). The site now holds
-    `SUPABASE_SECRET_KEY` (unscoped on the free plan, so the build command
-    unsets it first), and its sensitive-variable policy must stay on
-    "Require approval" (the root `netlify.toml` header explains the fork-preview
-    reasoning). The board's old host is a redirect shell (`legacy-board/`). It
-    *proxies* `/api/`, because installed builds POST there and urllib won't
-    follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
-    fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
-  - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
-    (only the AI tab's aux slider writes it); each strategy assigns its own
-    meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,
-    so a bot's default behaviour must be what it does at 1.0 — a stale token or
-    save with no `aux` key deserialises to it. Add per-bot knobs here rather than
-    growing `AiParams` one field per strategy. A strategy names its knob with
-    module-level `AUX_LABEL` (+ optional `AUX_RANGE`, `AUX_INT`, and `AUX_NAMES`
-    naming each stop of a step-1 int knob), read by `ai.aux_spec`/`ai.aux_names`;
-    `menu._ai_specs` appends that slider to `_AI_PARAMS` for the edited seat, so a
-    strategy declaring nothing (the built-in heuristic, `thinker`, …) shows no aux
-    slider at all. `models/knower.py` labels it *Oracle*, stops Off / Predict /
-    Search, and clamps a stored value above 2 (its old 0-12 depths) to Search —
-    narrowing a knob by clamping on read, never by rewriting what was stored, is
-    what keeps every old link's digest. `bot_replay.aux_note` sends a named stop
-    to the board as "Label: Stop", which `format.mjs`'s `botProfile` prints
-    without a number. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
-    preserves that — `aux` is the one field whose int/float form survives a
-    decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
-    it and every link carrying an int aux reads as edited the moment it opens.
-    The board cannot hold the distinction (its rows are browser-written — see
-    "Whole-number floats" below), so `verify_scores.same_setup` widens both sides
-    through `_aux_widened` before hashing — drop that and every posted score with
-    an aux reads as a different map.
-  - **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
-    prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
-    which callers prefer over the flag (`knower.is_oracle_seat` is "not Off", so
-    its Off seats are predicted for real, and trusted, instead of approximated).
-  - **A bot can warn about a setup before it starts.** A module-level
-    `setup_warning(settings, seats) -> list[str]` (read by `ai.setup_warning`,
-    collected per strategy by `settings.setup_warnings`) raises the menu's
-    "This setup may play slowly" confirm on Start, and on the play-by-post
-    roster's Confirm — not the first press, since which seats are bots is only
-    known once the roster is. `models/knower.py`'s is fitted from measured
-    per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut a
-    Search seat's horizon (the setup's longest lane plus `LANE_CUSHION`, off the
-    same lane survey the Advanced tab reports) short of its own longest lane, or
-    a turn's knower thinking passes `WARN_TURN_MS`. It prices turn one, so with
-    ship-speed growth on it also names the turn the clipping ends
-    (`_sees_lanes_from`); see "Cost per decide" in `docs/design/knower.md`.
-  - **A seat commands its own ships and nothing else.** `apply_order` only
-    checks the *declared* owner holds the source, so `_collect_orders` filters
-    every seat's orders (including the human's, under autoplay) through
-    `engine._own_orders`. Without it any drop-in bot could launch a rival's
-    fleet, or the human's.
-  - **An all-bot game has no human seat, and the seat is claimed by *playing*,
-    not by pressing a button.** `settings.build_state` clears the `is_human`
-    `mapgen` stamps on pid 1 whenever `Settings.autoplay` is set, so a match
-    begun as a demo has no preferred seat — otherwise seat 1 is the one seat
-    every oracle guesses blind at while simulating all the others exactly, which
-    is both a handicap no other bot carries and why the app and the offline bot
-    column used to play the same setup differently. `engine.end_turn`'s
-    `claim_seat` is the way back: `main.resolve_turn` passes it on the first turn
-    *ended under manual control*, never on the Take control press itself, so Take
-    control doubles as a pause on a demo nobody means to play. It is a turn phase
-    rather than a shell-side edit because it has to replay — a scripted turn asks
-    no seat to decide, so `replay.reconstruct` re-applies it from the per-turn
-    `"ai"` flag already in the log, at the same turn, and runs it *first* so that
-    turn's own predictions already see the corrected flag. Deriving it from those
-    flags rather than storing a claim of its own is what makes a rewind land
-    right for free: `truncate` drops the flags with the turns, so rewinding past
-    every hand-played turn returns the match to an all-bot game, while rewinding
-    to any turn after one keeps the seat claimed.
-    - **`resolve_turn` must not compute `human_orders` for an unclaimed seat.**
-      `_collect_orders` skips a seat only when `is_human`, so passing orders in
-      *and* leaving the seat unflagged runs its strategy twice — spare draws from
-      `state.rng` that desync every oracle's stream tracking. Pass `None` and let
-      the engine's own loop decide it, exactly as `sim.play`'s tournaments do.
-    - **Resuming, rewinding or watching always lands paused** (`main.resume_game`
-      builds its `Ui` with autoplay off regardless of what the log was doing).
-      You go back to a turn to *look* at it, and a board that starts moving again
-      before it can be read is the thing history exists to prevent. It costs
-      nothing now that the claim is separate: waiting decides nothing, so who
-      plays on is handed back with the clock stopped.
-- **All randomness flows through `state.rng`** (a seeded `random.Random`). A
-  seed fully reproduces a map *and* every battle. Never call the global `random`
-  module in core code, and keep new map-gen / combat code deterministic given
-  the seed (`test_mapgen.py` asserts this). The *unreproducible* rolls go
-  through `settings.random_seed()` / `settings.fresh_rng()`, which mix the
-  clock and a per-call counter into a throwaway RNG rather than using the
-  global `random` (the web build boots from a fixed interpreter image, so
-  `random`'s auto-seeding can hand out the same "random" seeds on every load).
-- **Travel time is a query, not a stored value.** `Lane.travel_turns` (and
-  `adjacency`) hold the mapgen-time figure; with `config.SHIP_SPEED_GROWTH_PCT`
-  on, ships compound faster each turn, so always ask `state.travel_turns(a, b)` — it
-  re-times through `config.travel_turns_at` for the *current* turn. Growth bites
-  at launch only: a fleet in transit keeps its `turns_total`.
-- **A fleet's lane track is stored, never ranked.** `Fleet.lane_slot` is which
-  parallel line of the lane a fleet flies on (0 is the centre, then -1, +1, …),
-  handed out at launch by `model.free_lane_slot` and held until the fleet leaves
-  the board; `render` multiplies it by a spread and draws. Do not go back to
-  deriving it from a fleet's rank among whoever is on the lane — that is what made
-  every fleet in transit step sideways whenever a lane-mate launched *or* arrived.
-  It is the one cosmetic field on a core dataclass, it is deliberately not on the
-  wire to external bots (`botio`), and nothing in the rules reads it. Because it is
-  stored, `turnfilm.Launched` must carry it: a film that invented its own tracks
-  would pop every fleet sideways as it ended, which is why `lane_slot` is in the
-  board digest both film oracles compare.
+**Determinism and identity**
+
+- **All randomness flows through `state.rng`.** A seed reproduces a map *and*
+  every battle; never call the global `random` in core code (`test_mapgen.py`
+  asserts determinism). Unreproducible rolls go through
+  `settings.random_seed()`/`settings.fresh_rng()` (the web build's fixed
+  interpreter image makes global `random` repeat across loads). The sanctioned
+  exceptions derive a stream rather than draw one: `botio.decide_seed`, the
+  random-seat pick, `pbp.reseed`.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
-  use a canonical order-independent `frozenset` key (`model.lane_key`). Neutral
-  is a real player with `id == 0`.
-- **Star names (`starnames.py`) are flavour on top of that, never a key.**
-  `System.name` is a cosmetic IAU star name (`System.label` is `"Vega (7)"`,
-  `System.short` the name alone); mapgen's `_name_systems` stamps one per system
-  **last**, after every roll that shapes the map, so a seed still lays out the
-  board it always did and a replay recreates the names from `state.rng` with
-  nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
-  `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
-  `render._draw_node_names` places labels collision-first and drops what doesn't
-  fit (see `docs/design/core.md`) — including the fixed slot above every system that a
-  playback writes its numbers into (`render._mark_slot`), reserved whether or not
-  one is showing, so a name sits below its system or nowhere rather than
-  flickering out the moment a `+1` or a fight's cost appears. Ids stay on the
-  mechanical readouts — the queued list, `tests/sim` logs, tokens.
-- **The menu's Combat tab teaches the square law from the real code.**
-  `combat.preview_fight` sits beside `resolve_fight` and shares its
-  `_apply_advantage`/`_resolve_effective`/`_survivors` helpers, so the page
-  cannot drift from the fight it predicts (pinned by a zero-jitter equivalence
-  test). It takes `jitter`/`advantage` as **parameters and reads no `config`** —
-  those only reach `config` at game start via `settings._apply_globals`, so
-  reading them would preview the previous game's balance — and it **draws no
-  rng**, keeping `menu.draw` a pure read. `best`/`worst` are the corners of the
-  jitter square, not samples, so they really do bound the outcome.
-  - **The demo sliders are the one group that writes `MenuState`, not
-    `Settings`** — the third `kind` in `_SLIDER_SPECS`, routed in
-    `_apply_slider`. A scratch calculation has no business in a save file or a
-    share token, and on a challenge link it would raise the un-challenge modal.
-    `_ADV_COMBAT` moved tab but *not* namespace: still `adv_`-keyed, still
-    writing `Settings`, just drawn beside the demo it governs.
-  - **This one page hand-breaks its prose instead of reflowing it.** The rule
-    above exists because the *font* scales; the menu canvas is fixed, so a
-    runtime wrap would instead make the page's height depend on its text and
-    silently overflow the panel. `test_tab_content_stays_inside_the_panel`
-    guards every tab's rects against that 560x496 box.
-- **The send popup is the *only* ship-count editor.** Composing a new send opens
-  it (`Ui.begin_send`), and so does reopening an already-queued order or
-  standing rule — `Ui.edit_order` / `Ui.edit_forward` put the popup back into
-  `CHOOSING` aimed at that subject. `Ui.editing_existing` records that the
-  subject *predates* the popup, and drives the bottom button (Cancel vs
-  "Delete order"/"Delete rule") and `_close_send`'s unwind to `IDLE` on edit.
-  - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
-    popup reads the source's garrison and destination unguarded, and aiming it
-    at a system we no longer hold would let the Send tab queue an order out of
-    enemy territory. Dormancy only lasts the turn — `Ui.prune_forward`
-    (`main.resolve_turn`) deletes a rule whose source was taken, so it can never
-    come silently back to life on recapture.
-  - **The count slider must be claimed before the popup's drag fallthrough** —
-    `slider_rect` is hit-tested first, and `dragging_slider` checked ahead of
-    `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`
-    (an empty source, the touch default) and a zeroed rect (popup closed
-    mid-drag).
-- **The side panel's queued list is capped and scrolled, not truncated.** It
-  takes at most half the panel, and what doesn't fit is reached with
-  `ui.order_scroll` (▲/▼ buttons, or the wheel while over the panel). Each
-  drawn row carries **its own index** into `pending` (`ui.order_hitboxes` is
-  `(index, row, delete)`) — a positional mapping would silently delete the
-  wrong order once only a window of the list is on screen.
-- **Losing makes the human a spectator, not a blind one.** `fog.observe`
-  returns empty for a landless player, so `main._accumulate_fog` reveals the
-  whole board (dropping frozen `player_intel`) once
-  `GameState.is_defeated(human_id)` — fixing history mode and a resumed game
-  for free since both fold fog through that one helper. Its companion is
-  **fast forward** (`Ui.can_fast_forward`, `main.step_delay`, the F key /
-  footer button): `main.FAST_FORWARD_MS` replaces the autoplay/play delay so
-  the rest of a lost match resolves a turn per frame. Offered only while
-  spectating.
-- **`viewstate.Ui` holds all transient interaction state**, including human-only
-  quality-of-life features (e.g. `auto_forward` standing rules) that must stay
-  out of the pure `GameState`. `main.resolve_turn` expands such UI state into
-  `Order`s at end-of-turn.
+  use `model.lane_key` (a `frozenset`). Neutral is a real player, `id == 0`.
+  Star names (`System.name`, `starnames.py`, generated from
+  `tools/iau-star-names.csv` by `tools/gen_starnames.py` — regenerate, don't
+  hand-edit) are flavour, stamped **last** by `mapgen._name_systems` so seeds
+  don't move, and never a key; mechanical readouts stay on ids.
+- **Travel time is a query.** Always ask `state.travel_turns(a, b)`, never
+  `Lane.travel_turns`: with `config.SHIP_SPEED_GROWTH_PCT` on, ships speed up
+  each turn. Growth bites at launch only.
+- **A fleet's lane track is stored, never ranked** (`Fleet.lane_slot`, from
+  `model.free_lane_slot`, carried by `turnfilm.Launched`, in the film board
+  digest, not on the bot wire).
+- **A seat commands its own ships and nothing else**: `_collect_orders` filters
+  every seat through `engine._own_orders`.
+
+**Settings, links and keys**
+
+- **All balance/aesthetic constants live in `config.py`**, read *live* at call
+  time. The Advanced menu tunes copies on a `Settings`; `settings._apply_globals`
+  (called by `build_state`) is the single writer back into `config`.
+- **`settings.Settings` is the pure, serializable pre-game config**;
+  `menu.MenuState` is transient menu state. `settings.build_state(settings,
+  seed)` is the one funnel to a `GameState`. `to_dict`/`from_dict` back Save/Load
+  (`saves/`) and `to_token`/`from_token` (a URL fragment, mirrored to
+  `localStorage` under `paths.WEB_SHARED_SETTINGS_KEY` for installed PWAs). The
+  readers are deliberately tolerant. Never prune a non-heuristic seat's
+  `ai_params` from a token (`models/README.md` documents it as readable).
+- **Adding a field to `Settings` moves `challenge_key()` for every map ever
+  shared.** Append a `settings._LEGACY_KEY_DROPS` entry whenever one joins
+  (`test_challenge_key_is_stable` fails until you do); only
+  `challenge_keys()[0]` is written. Local preferences (`animate_turns`,
+  `share_games`) and per-score metadata (`Challenge`, which `challenge_keys()`
+  drops) exist to avoid this. The leaderboard folds splits by lookup
+  (`KEY_ALIASES`, `fold-game-key.sql`, `submit.findTwin`; the newest key wins).
+  Detail: `docs/design/core.md`, "Keys outlive the schema that made them".
+- **Whole-number floats don't survive the browser**: Python writes `1.0`, the
+  board's JS writes `1`. Never compare setups as text across writers — compare
+  by value (jsonb `=`) or after `Settings.from_dict`. `sc_config_key` and
+  `setupIdentity` are text identities, safe only among browser-written rows.
+  `aux` is the one field whose int/float form survives a decode
+  (`_ai_from_dict`); `verify_scores._aux_widened` covers the verifier. Detail:
+  `docs/design/core.md`.
+- **Challenge links carry a score to beat** (`settings.Challenge`: `turns`,
+  `lost`, `hand`, `by`, `key`, `log`; `build_state` ignores it). Turns-to-win,
+  ties on fewest ships lost. Clipboard only (`webstore.copy_link`), never the
+  address bar or `localStorage`. Editing a challenge's setup asks first
+  (`menu._draw_unchallenge`, `Settings.without_challenge()`).
+
+**The leaderboard** (reasons: `docs/design/leaderboard.md`; the site itself:
+`leaderboard/README.md`)
+
+- **The bot column is computed offline, never served.** `tools/bot_replay.py`
+  (scheduled by `.github/workflows/bot-replay.yml`) replays every `models/` bot
+  through the human's seat via `tests/sim.play_settings`, which goes through
+  `build_state` so tuned knobs apply. The seat is handed over outright
+  (`sim._hand_over` clears `is_human`), gets default `AiParams` except
+  `bot_replay.REPLAY_AUX`'s `aux`, and runs with wall-clock guards lifted 100x
+  (`ai.set_budget_scale`, a model's `BUDGET_SCALE`). `engine_rev` hashes the
+  outcome modules, `models/` and `tests/sim.py`; `replay_rev` excludes `ai`,
+  `models/` and the harness. `won`, never `turns`, decides a result. A win
+  stores its log on the row, and the Watch link plays that back
+  (`standings.botWatchKind`). `bot_scores` has no public insert path.
+- **The game uploads replays and the worker checks scores against them.**
+  `share.post_log` sends; `tools/verify_scores.py` records `verified` /
+  `mismatch` / `unreadable` / `missing` (and `outdated`) in `score_checks`,
+  binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
+  never the live `Settings`). Only two things send: *Post to leaderboard*, and
+  checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
+  never does. `game_logs` is unreadable and unwritable by the public (writes via
+  `netlify/functions/log.mjs`), rows carry no identity, and `public_replays`
+  exposes only matches a posted score points at. `Ui.can_post` gates every
+  sharing action, so a watched replay (`Ui.watched`) can't be posted as yours.
+- **Crowns, the weekly campaign and embargoes derive their state from
+  `counted_scores` and stored maps; nothing about who holds what is stored.**
+  `campaign_games` matches by jsonb equality, never `sc_config_key`. Detail:
+  `docs/design/leaderboard.md` and `leaderboard/README.md`.
+- **The game and the board are one site.** The root `netlify.toml` builds both;
+  the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
+  `tools/pwa/root.html` routes the root. Endpoints are built at call time from
+  `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
+  every leaderboard feature. The sensitive-variable policy must stay on
+  "Require approval". `legacy-board/` proxies `/api/`. `tools/pwa/sw.js` never
+  touches `/api/` (`tests/test_web_build.py`). Detail:
+  `docs/design/leaderboard.md`.
+
+**The AI** (reasons: `docs/design/bots.md` and the per-bot files)
+
+- **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` and
+  `ai_params` (`model.AiParams`, defaults mirroring `config.AI_*`); `Settings`
+  mirrors both per seat (indexed by seat-1) and `build_state` stamps them.
+- **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`)
+  is resolved inside `build_state` by `settings.resolve_strategy`, never by a
+  dispatcher bot. The pick is derived (`random.Random(f"{seed}:strategy:{pid}")`)
+  from `ai.available_strategies()`. `Settings` keeps `"random"`; the win overlay
+  (`render._winner_label`) reveals the bot. Detail: `docs/design/core.md`.
+- **A bot that reads other seats** (see `models/knower.py`) must never call
+  `ai.load_models()`, must read `ai.STRATEGIES` lazily inside `decide`, and must
+  draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
+  advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
+  callers prefer.
+- **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
+  never a constant**, with the jitter half floored at its `TUNED_SWING`, and
+  floors its ask at `target.ships + 1`. Margins compare against the *effective*
+  garrison (`ai._frontier_order` multiplies by `DEFENDER_ADVANTAGE`).
+  `marshal._enemy_margin` deliberately carries the advantage half and none of
+  the jitter half — read `docs/design/marshal-pricing.md`, "Garrisons run away",
+  before copying either half.
+- **`AiParams.aux` is the one bot-defined knob.** The core never interprets it;
+  `1.0` is "untuned". A strategy declares `AUX_LABEL` (+ `AUX_RANGE`, `AUX_INT`,
+  `AUX_NAMES`; read by `ai.aux_spec`/`ai.aux_names`). Narrow a knob by clamping
+  on read, never by rewriting what was stored. Add per-bot knobs here, not as
+  new `AiParams` fields. Detail: `docs/design/bots.md`.
+- **A bot can warn about a setup** with `setup_warning(settings, seats)`
+  (`ai.setup_warning`, `settings.setup_warnings`), raised on Start and on the
+  play-by-post roster's Confirm. knower's is fitted in
+  `docs/design/knower.md`, "Cost per decide".
+- **An all-bot game has no human seat.** `build_state` clears the `is_human`
+  `mapgen` stamps on pid 1 when `Settings.autoplay` is set. The seat is claimed
+  by the first turn *ended* under manual control (`end_turn`'s `claim_seat`,
+  re-applied by `reconstruct` from the `"ai"` flags), not by pressing Take
+  control. `resolve_turn` must pass `human_orders=None` for an unclaimed seat, or
+  its strategy runs twice. Resuming, rewinding or watching always lands paused.
+  Detail: `docs/design/core.md`.
+- **`tests/sim.py` is a demo harness, a test fixture and the tournament host**
+  (`check_invariants`, `--ladder`, `--swap`, `--external`, `play_settings`,
+  `play_from`). After changing `ai.py` or travel/combat balance, run a
+  `--trials` batch and watch the timeout rate. **Sweep node count and ship
+  speed, not just the defaults**: a margin keyed off travel time is live in one
+  regime of three. Detail: `docs/design/bots.md`.
+
+**Shell**
+
+- **Nothing that holds text gets a fixed pixel size.** Use the `widgets.py` kit
+  (`btn_w`, `btn`, `row_h`, `draw_modal`, `wrap`) and `config.s()`. `render`
+  binds the kit to `_`-prefixed module globals so tests can swap them — keep
+  that. `menu` deliberately does not use the kit: it lays out on a fixed
+  1440x960 canvas with unscaled fonts. `config.apply_ui_scale` runs once at boot;
+  key any font cache on `config.ui_scale`.
+- **`config.touch_ui` is the input modality.** On touch, drop keyboard-only
+  strings (`render._key_hint` and friends) and floor tappable controls at
+  `config.TOUCH_MIN_TARGET`.
+- **Quitting goes through `main.leave_app()`.** On the web it asks the browser
+  to close and falls back to the menu with `main.CANT_CLOSE_MSG`; never end the
+  loop directly there.
+- **The map viewport has two margins**, `config.map_fit_padding()` and
+  `config.map_pan_padding()`, both floored at `config.node_clearance()`.
+- **`viewstate.Ui` holds all transient interaction state**, including
+  human-only conveniences like `auto_forward` rules; `main.resolve_turn` expands
+  them into `Order`s.
+- **The send popup is the only ship-count editor** (`Ui.begin_send`,
+  `edit_order`, `edit_forward`; `Ui.editing_existing`). A dormant rule never
+  opens it (`Ui.rule_is_live`; `prune_forward` deletes rules whose source was
+  taken). Its slider is hit-tested before the panel drag.
+- **The queued list is capped and scrolled** (`ui.order_scroll`), and each row
+  carries its own index into `pending` (`ui.order_hitboxes`).
+- **Losing makes the human a spectator**: the whole board is revealed once
+  `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
+- **The Combat tab teaches the square law from the real code**:
+  `combat.preview_fight` shares `resolve_fight`'s helpers, takes
+  `jitter`/`advantage` as parameters (never `config`) and draws no rng. Its demo
+  sliders write `MenuState`, not `Settings`. Its prose is hand-broken, and
+  `test_tab_content_stays_inside_the_panel` guards the 560x496 panel.
 - **Route mode (`viewstate.ROUTING`) is the one control that doesn't commit as
-  you go.** It builds a *proposal* — `route_sel` (plus `route_dest` in chain
-  mode), recomputed by `Ui.recompute_route` into `route_plan` — which
-  `confirm_route` writes into `auto_forward` in one go.
-  `input._handle_route_event` takes the whole event stream (placed after the
-  game-over branch), and render swaps the footer strip and the End Turn button,
-  so nothing from live play stays clickable under an open plan.
-  - **Two sub-modes, one plan** (`Ui.route_rally`, the footer's Mode button and
-    Tab). Both seed the same `model.flow_field` search (the one
-    `ai._flow_to_frontier` also delegates to) over our own territory and share
-    `_add_hop`, `_detect_route_cycles` and the confirm, so they differ *only* in
-    the seeding: **chain** seeds the one destination and `_plan_chain` walks each
-    selected system's path to it; **rally** seeds every pick at once and
-    `_plan_rally` takes the returned field whole, so every owned system it
-    reaches forwards toward its nearest rally point. Both measure "nearest" in
-    **travel turns**, not hops (`flow_field(by_turns=True)` / `flow_costs`) — the
-    same `state.travel_turns` rule the rest of the game follows. The AI keeps the
-    unweighted default, which is why the flag exists rather than a changed
-    default. Rally splits a genuine tie toward whichever point is drawing less,
-    measured in ships/turn (`1 / production`, as `fog.player_totals` reports),
-    assigning nearest-first so each node's real destination is already known.
-    `Ui.auto_rally` (rally's Auto-route button, `T`) picks every
-    `threatened_systems` — the shell's own local copy of the AI's threat maths,
-    per the render/input rule against importing `ai`. Every hop of every path gets
-    a rule, not just the selected systems. Owned-only is *forced*, not chosen: a
-    rule can only live on a system we hold, so a path through enemy space cannot
-    be expressed. The **sinks** are exempt (`flow_field` seeds need not be in
-    `allowed`), which is what lets either sub-mode be aimed at an enemy front.
-    The sub-mode is a preference, so `reset_route` leaves it alone while clearing
-    everything else; `set_route_rally` drops the proposal, since `route_sel`
-    means sources in one and sinks in the other.
-  - **A drag boxes a group; a tap always aims** (`Ui.route_tap`, chain mode).
-    Aiming is never destructive — the destination stays in `route_sel` and is
-    merely skipped as a source (`Ui.route_sources`), so re-aiming hands it
-    straight back. Removing is the *second* tap on whatever you are already
-    pointing at. Never give a tap a second primary meaning conditional on the
-    system: that is what made aiming at one of your own picks silently drop it.
-    A rally tap is a plain membership toggle, which is one meaning rather than
-    two, and frees drag for panning.
-- **`tests/sim.py` is both a demo harness and a test fixture.** Because it drives
-  the pure core headlessly, the suite uses it to assert games actually terminate
-  and never corrupt state (`check_invariants`). After changing `ai.py` or
-  travel/combat balance, run a `--trials` batch and watch the timeout rate.
-  `--film` adds the turn-playback oracle to every turn of every game (see Animated
-  end of turn).
-  It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
-  is a free-for-all (whole roster in one game, rotated through every seat via
-  the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
-  every pair, both seatings, plus a head-to-head grid). `--external` adds the
-  `bots/` subprocess bots to either (see the external-bot rules above). Both default their
-  roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
-  arguments. `play_settings` is the third entry point — one bot through the
-  human's seat on a stored `Settings`, going through `settings.build_state` so a
-  posted setup's tuned knobs actually apply. It is what the leaderboard's bot
-  column is made of (`tools/bot_replay.py`, under Key conventions).
-  - **`play_from` is the fourth, and the only one that starts anywhere but the
-    opening.** It branches a recorded match at turn N (`reconstruct` on a
-    *truncated copy* — never the caller's log) and hands the seat to a bot, so a
-    stored game yields a position every few turns instead of one number. The
-    baseline comes free: we know what the person who was there then took.
-    `sim.positions` picks the turns and `tools/position_suite.py` drives it over
-    a corpus. Read its three numbers separately — *faster* is the only paired
-    comparison, *recovered* (games the person lost, which no score can carry) has
-    no baseline at all, and both are a direction rather than a verdict, since the
-    sample is whatever games happen to exist. See `docs/design/bots.md`.
-  - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
-    fixed up to a standard board, so a lane's length in light-years rises as the
-    node count falls (past `config.STANDARD_MAX_NODES` the box grows instead, and
-    lanes hold at a full standard board's spread), and
-    `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
-    lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
-    a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
-    that space and unreachable in the rest, so a batch at the default 6 ly/turn
-    measures one regime out of three and a knob can look like dead code purely
-    because of where it was measured. See `docs/design/bots.md`.
+  you go**: a proposal (`route_sel`, `route_plan`) confirmed in one go. Chain and
+  rally share `model.flow_field(by_turns=True)`; paths are owned-only except the
+  sinks; a tap always aims and never removes on first press. Detail:
+  `docs/design/shell.md`.
 
-Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
-light relaxation + a Euclidean MST for connectivity, which is planar so edges
-don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
-(one base sector rotated N times about a shared contested centre for a perfectly
-fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
-both. Note `symmetric` rounds the node count up to a whole number per sector and
-adds the shared centre, so it can return **more than it was asked for** (41 at 40
-nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+### Map generation (mapgen.py)
 
-**Past a standard board the box grows; below it nothing moves.** `config.world_side(n)`
-is exactly `WORLD_SIZE` up to `config.STANDARD_MAX_NODES` (40, the old cap) and grows
-with `sqrt(n)` past it, up to `config.MAX_NODES` (120), so a big map keeps a full
-standard board's spacing and lane lengths instead of just getting denser. Every
-seed a map could be shared on before lays out identically, so `RULES_VERSION` did
-not move, and `nodes` was already a `Settings` field, so no digest moved either.
-Only the box scales: lane clearance and the extra-edge cap stay in `WORLD_SIZE`
-units, since spacing is what is being preserved. The map creator stays at a
-standard board (its canvas is sized for one): it refuses a 41st system and adopts
-a generated map at `min(nodes, STANDARD_MAX_NODES)`. The menu's Advanced tab
-reports the setup's lane spread in turns (`settings.lane_lengths`/`lane_turns`),
-surveyed in `menu.pump` — never `draw` — keyed by `settings.lane_survey_key`
-(which leaves ship speed out, so that slider just re-times the cached lengths),
-held off mid-drag, and restoring `config` after it generates.
+Two modes: `random` (jittered grid, relaxation, a planar Euclidean MST plus a few
+crossing-rejected extra edges) and `symmetric` (one sector rotated about a
+shared centre). Both must stay connected and planar-ish (`test_mapgen.py`).
+`symmetric` can return **more nodes than asked** (41 at 40), hence
+`config.CUSTOM_MAX_NODES`. Past `config.STANDARD_MAX_NODES` (40) the box grows
+(`config.world_side`); below it nothing moves. The Advanced tab's lane survey
+runs in `menu.pump`, never `draw`. Detail: `docs/design/core.md`.
 
 ### Hand-authored maps (custommap.py, mapmaker.py)
 
-A board has a **third source**: a recipe drawn by hand. `custommap.CustomMap` is
-the serializable form — systems with concrete positions, production, garrisons and
-owners, plus lanes as index pairs — and it rides on `Settings.custom_map`, which is
-the whole trick: save/load, share and challenge links, resume, replay, the
-leaderboard and the offline bot column all carry it with no new plumbing.
-`mapgen.generate_custom` builds the board; `settings.build_state` branches to it.
+A board has a third source: `custommap.CustomMap`, a recipe of concrete systems
+and index-pair lanes riding on `Settings.custom_map`, built by
+`mapgen.generate_custom`. The full rule list is `docs/design/hand-maps.md`, "The
+rules in one place"; the ones easiest to break:
 
-- **A hand map is not a `mode`.** `GameState.mode` is stamped `"custom"` (its one
-  non-test reader is `botio.setup`), but `"custom"` must **never** join
-  `settings.MODES`: `leaderboard/schema.sql` is `check (mode in
-  ('random','symmetric'))`, so a token carrying it would be refused by the
-  database on submit. The setup keeps the mode it had; the recipe overrides it.
-- **Every stored value is concrete, so the seed no longer shapes the layout** —
-  it drives combat dice and star names only. That is why the menu keeps its Seed
-  row, and why the Economy sliders move into the creator's sidebar: garrisons are
-  rolled *at the moment a system is placed*, so placement is the only point at
-  which they still bite. Nothing stored is a sentinel.
-- **A hand map lives in a wider box than a generated one.** `config.WORLD_SIZE`
-  is square and `mapgen._place_nodes` rolls inside it, so every generated board is
-  square; a recipe stores concrete coordinates and never goes through
-  `_play_bounds`, so it doesn't have to be. `config.CUSTOM_WORLD_W` x
-  `WORLD_SIZE` is the hand-map box — `custommap.MapNode.clamped` enforces it and
-  `mapmaker._build_view` is the camera over exactly it, so the canvas *is* the
-  region a system may occupy. Widening `WORLD_SIZE` itself instead would re-roll
-  every seed: a `RULES_VERSION` bump, and every stored replay and posted score
-  unverifiable. `mapmaker._generated` **centres** what it adopts, since a square
-  map in a wider canvas would otherwise open hugging the left; a translation only,
-  because scaling to fill the width would stretch every lane and quote travel
-  times the seed never gave.
-- **The editor opens on a blank canvas, and that costs two guards.**
-  `mapgen.generate_custom` asserts on a recipe with blockers, so a map that cannot
-  build must never reach it. `mapmaker.commit` writes `custom_map = None` for an
-  *empty* recipe (not a half-built map — it carries nothing, and writing it pins
-  the menu into "Edit map" over a setup that cannot start), and `menu._start` — the
-  one funnel all three `"start"` returns go through — refuses a hand map with
-  blockers and says the first one. A genuinely half-built map is still committed:
-  it must survive a trip to the menu to change a setting, so the gate is at Start,
-  not at commit.
-- **One tolerant gate, one strict builder.** `CustomMap.from_dict` is total and
-  never raises — it pads short rows, clamps out-of-range numbers and drops junk
-  lanes — and returns `None` for anything that cannot describe a playable map.
-  `generate_custom` asserts. Repair only what is local and bounded: auto-linking a
-  disconnected graph would invent structure the author never drew and present it
-  as theirs, so that is a rejection. A rejection is never silent even though
-  nothing is raised — `challenge_key()` stops matching the sender's stamp, so the
-  menu's existing "this setup has been edited" banner fires with nothing added.
-- **`normalised()` must stay idempotent, and `to_dict` emits it.** `challenge_key`
-  hashes what `to_dict` writes, so a form the reader would normalise differently
-  makes a sender's own link read as edited the moment it is opened — the trap
-  `_ai_from_dict` documents for an int `aux`. Coordinates are **integers** for the
-  same family of reasons: `verify_scores.same_setup` hashes a browser-written
-  side (where `100.0` is `100`) against the game's own JSON, and `_aux_widened`
-  already papers over that for one field. Don't make it two.
-- **Node identity is positional**, so deleting node *i* shifts every later lane
-  index. `CustomMap.without_node` is the single implementation; don't open-code it.
-- **`mapmaker` draws on the real surface, not `menu`'s fixed canvas.**
-  `menu._to_canvas_event` rounds pointer coords through a float scale, and stacking
-  that on `WorldView.to_world` gives two lossy inversions in series — at
-  `config.ZOOM_MAX` a system would not land where you tapped. It shares *primitives*
-  with `render` (`widgets`, `config.node_radius`/`player_color`/`text_on`) rather
-  than drawing functions, which are threaded through fog, film and order state the
-  editor has none of.
-- **Its working model is the recipe, never a live `GameState`.** `Lane.length_ly`
-  and `travel_turns` are stored fields, cached again in `adjacency` and shipped to
-  bots as `base_turns`, so moving a node in a live state means recomputing all
-  three — miss one and the board lies. With positions plus index pairs the lanes
-  follow for free and undo is a copy of plain data.
-- **The validator has one implementation with three callers.** `problems()` gates
-  Play, renders live in the sidebar, *and* is what a drag's or a new lane's
-  legality is filtered from — never a second copy of the geometry that could
-  drift from what Play enforces.
-- **A crossing lane is a *warning*; a lane under a system is a blocker.** The
-  engine, the AI and every bot are indifferent to planarity, so two lanes crossing
-  in open space only looks busier — but a lane hidden beneath a third system
-  misrepresents the graph. The creator's **Planar** toggle (default on) is what
-  keeps the common path clean, by refusing to *draw* a crossing; it is editor-time
-  only, so turning it off leaves a map that still plays and still shares. Making
-  crossing a blocker instead would mean a map you can draw is a map you cannot
-  play, which is what the toggle exists to avoid.
-- **Lane drawing is two gestures through one `_add_lane`.** A tap arms the source
-  and the next press commits; a drag past `DRAG_THRESHOLD` commits on release. One
-  armed source (`Editor.lane_src`) serves both, so they cannot produce different
-  work. Systems are picked *before* lanes — a lane's endpoint sits inside its
-  system's tap reach, and "start a lane here" has to win there — and a repeat press
-  on overlapping lanes cycles, the same shape `input._pick_lane` uses.
-- **Shift-click chains, in the Systems tool only.** Held down, a click both places
-  (or links) and keeps building from what it just touched — the anchor is always
-  `Editor.sel_node`, and `_arm_move` already makes whatever was just placed or
-  clicked the new one, so a run of shift-clicks chains and a shift-click off to
-  the side branches from wherever you're pointing. `mapmaker._lane_candidate` is
-  the validation half split out of `_add_lane`, so a placement that also links
-  validates the new lane against the recipe with the new node already in it and
-  takes one undo snapshot for both halves rather than two; a refused link never
-  refuses the placement, it only leaves the status saying which half failed. Off
-  while Auto-lanes' re-run toggle is on (below) — the network it rebuilds would
-  overwrite the very lane a chained click just drew.
-- **Left-drag pans in the Lanes tool but not the Systems tool.** In Systems a
-  press on empty space always means "place", so there is no free left gesture, and
-  making it conditional on legality would give one press two meanings — the trap
-  route mode's tap documents. Right-drag and the on-map cluster pan in both.
-  `pan_button` records *which* button armed the pan (Lanes' left-drag sets it to
-  1), and both branches that can arm one write it — the right-button press
-  restates 3, not just leaves whatever the last pan left behind, or one left-drag
-  pan in Lanes leaves every later right-drag pan, in any tool, dead for the rest
-  of the session.
-- **An empty-space press deselects, in Lanes and Owners.** Neither tool has any
-  other press that can clear `Editor.sel_node` — Owners paints or arms a box on a
-  miss, Lanes disarms `lane_src`/`sel_lane` on one — so without this the ring (and
-  the sidebar block that follows it) would sit on the map for the rest of the
-  session once carried in from Systems. Systems is deliberately exempt: a press on
-  empty space there always means "place", and placing selects the new system, so
-  the ring is never stale there anyway.
-- **Adding `custom_map` cost a `_LEGACY_KEY_DROPS` entry** and moved the default
-  digest to `38c8b7ba470f6f4c`; all three previous digests are recovered in order.
-  `tools/bot_replay._OUTCOME_MODULES` gained `custommap` — miss that and a change
-  to the recipe parser leaves every cached `bot_scores` row falsely fresh.
-  `tools/setup_sweep` refuses a hand-authored setup outright: its whole method is
-  reseeding, and no seed re-rolls a hand map.
-- **The three tools share one scene and never discard each other's work.**
-  Systems places and edits; Lanes draws and picks; Owners paints seats. The
-  viewport rect must **not** depend on the tool (`_palette_h` is measured but
-  fixed), or switching tools moves the map under the cursor. `ed.rects` is one
-  namespace cleared every frame, so a control that isn't drawn is inert by
-  construction — but two controls sharing a key means the later-drawn one wins,
-  silently.
-- **Auto-lanes can re-run itself, on a placement or a deletion only.**
-  `Editor.auto_relane` (a preference like `planar` — `_adopt` leaves both alone)
-  re-runs `mapmaker._relane` — `_auto_lanes` without the confirm or its own undo
-  snapshot — folded into that edit's single undo step. A drag is deliberately
-  exempt: it's continuous, and relaning mid-drag would fight the rubber band a
-  system follows while an illegal spot is still being tried. Hand-drawn lanes stay
-  legal while it's on; they simply last until the next system is added or
-  removed, and the Lanes tool is never locked. Turning it on doesn't relane on the
-  spot — that would be a destructive rewrite with no confirm — it only takes hold
-  from the next change.
-- **The seat palette offers `n + 1` seats, floored at 2.** That makes the common
-  path gap-free by construction. It does not *prevent* a gap (paint seat 3, then
-  clear seat 2), so that case gets a blocker and a one-press **Renumber seats**
-  rather than a silent compaction — renumbering changes a seat's colour without
-  being asked, and the colour is part of what an author intended.
-  `mapmaker._seat_entries` is that list, with two readers: the Owners palette band
-  and the selected system's owner row in the sidebar (a row of swatches, not a
-  stepper — a seat is a colour, so it is pointed at). They must not disagree about
-  which seats exist, or one offers a seat the other calls a gap. Both rows are one
-  control (`mapmaker._pick_seat`): a swatch arms the seat a map tap paints *and*
-  stamps it on the selected system, the same way the production palette's `pal_*`
-  already retypes a selected system rather than looking inert
-  (`_retype_selection`). Neither row has a toggle-to-neutral second meaning:
-  pressing the seat a system already holds arms the pick and stops there — Neutral
-  is its own swatch in both rows, so that stays the map tap's job, where there is
-  nothing else to press.
-- **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
-  version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
-  common "give this one a real garrison" case isn't a two-tool round trip.
-- **The Owners tool's *Auto* is `mapgen.peripheral_starts`, not a second copy of
-  it.** That function was lifted out of `mapgen._peripheral_starts` to take a
-  `{id: pos}` map and an rng, so the editor can seat a recipe that is not a board
-  — the wrapper keeps the same ids, the same order and the same single rng draw,
-  so a seed still lays out the board it always did. It replaces rather than
-  merges (one start per angular sector is the whole property) and demotes a
-  system it unseats back to an ordinary roll, but only one carrying the exact
-  homeworld stamp. Its seat count is `Editor.auto_seats`, **not**
-  `settings.players`: with a recipe set, `commit` derives `players` from
-  `recipe.seats()`, so placing the homeworlds *is* how the seat count is chosen —
-  and `None` there means "as many as the map already has", which is what keeps
-  the readout honest and why `_adopt` resets it.
-- **Box-paint copies route mode's two-flag arming** (`box_press` on the press,
-  `box_active` only past the threshold, so a tap that never moves paints nothing)
-  and **clips the box to the viewport first** — `to_screen` projects every system,
-  including ones panned out under the sidebar, and only the drawing is clipped.
-  A box paints as one group: if every system in it already holds the pick it
-  clears them all, otherwise it paints them all, so a box never half-toggles.
-- **The menu hides what a hand map decides, by not drawing it.** Basic's Players,
-  Systems and Map type become read-only derived values (Players is chosen in the
-  creator instead, by *Auto* above or by painting); Advanced's Map and Economy
-  groups become a note, since those knobs now live in the creator and only bite
-  there. `menu._set_players`/`_set_nodes` are additionally *interlocked* while a
-  recipe is set — a nudge from any other path would desync them from it until the
-  next `from_dict` reconciled them back, moving the digest in between. Seed stays:
-  it still drives combat dice and star names. Dropping the recipe (the *x* beside
-  *Edit map*) is behind a confirm, answered inside `_dispatch` rather than ahead
-  of it, so the clear still falls through to the un-challenge check every other
-  edit trips.
-- **Star names are deliberately absent from a recipe.** `mapgen._name_systems`
-  stamps them from `state.rng` last and serializes nothing, so they are recreated
-  for free from the seed; the editor shows ids (`#7`).
+- **`"custom"` must never join `settings.MODES`** (the schema's `check` would
+  refuse the token). The setup keeps its mode; the recipe overrides it.
+- **Every stored value is concrete**; the seed drives only dice and star names.
+  Hand maps live in the wider `config.CUSTOM_WORLD_W` box — never widen
+  `WORLD_SIZE`.
+- **One tolerant gate, one strict builder**: `CustomMap.from_dict` never raises;
+  `generate_custom` asserts, so `menu._start` refuses a map with blockers and
+  `mapmaker.commit` writes `None` for an empty recipe.
+- **`normalised()` must stay idempotent, coordinates are integers**, and
+  deletion goes through `CustomMap.without_node` only.
+- **The editor's model is the recipe, never a live `GameState`**, and
+  `mapmaker` draws on the real surface, not `menu`'s canvas.
+- **`problems()` is the one validator** (Play gate, sidebar, drag and lane
+  legality). A crossing lane warns; a lane under a system blocks.
+- **The three tools share one scene**: the viewport must not depend on the tool,
+  and `ed.rects` keys must not collide. A press never gets a second meaning
+  conditional on what it lands on.
+- **`custom_map` has its `_LEGACY_KEY_DROPS` entry**, and
+  `tools/bot_replay._OUTCOME_MODULES` includes `custommap`.
+  `tools/setup_sweep` refuses hand maps.

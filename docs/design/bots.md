@@ -638,3 +638,185 @@ rusherwire/heuristic/marshal: marshal 67%, heuristic 21%, rusherwire 12%, with
 rusherwire taking 38% off heuristic head to head and 0% off marshal — which is
 roughly where `rusherplus` itself sits, and the point is that the wire changed
 nothing about where it sits.
+
+## External bots: the four rules
+
+**Bots that aren't Python are subprocesses, and they compete without shipping.**
+`botio.py` is the wire format (`hello` once, `turn_payload` per decision,
+`orders_from` back) and `tests/botproc.py` the transport; a bot is a
+`bots/<name>.bot.json` manifest naming a command, and `docs/bot-api.md` is the
+protocol. Four rules hold it together:
+- **`botio` is pure core and owns no process.** No `subprocess` import in the
+  package, and none in the ordinary suite either — `tests/sim` imports
+  `botproc` lazily, inside `--external`.
+- **`bots/` lives outside `models/`, and that is load-bearing.**
+  `build_web.sh` stages `models/`, and the web build is CPython on WASM: it
+  cannot fork at all. So external bots run in `tests/sim` and (once decided)
+  `tools/bot_replay`, never in the app or the browser, and the in-app Strategy
+  dropdown stays Python. Registration is opt-in (`sim --external`) rather than
+  automatic, unlike `ai.load_models()`, because `bot_replay`'s roster is
+  `ai.available_strategies()`.
+- **The bot's randomness is derived, never drawn.** `botio.decide_seed(seed,
+  turn, pid)` hands a seat its own stream, so an external bot cannot shift the
+  engine's dice and every other seat's battles roll as they did without it. It
+  is the one sanctioned exception to "all randomness flows through `state.rng`",
+  and it keeps what that rule protects: a seed still reproduces every fight.
+- **A degraded seat is not a result.** A timeout holds for one turn; a dead bot
+  or `botproc.FORFEIT_TIMEOUTS` timeouts falls the seat back to `heuristic` and
+  records it (`degraded_runs`, printed by `sim`). The app's silent fallback for
+  an unknown strategy name is right there and wrong in a tournament, where a run
+  containing a fallback seat must never be scored or posted.
+
+## `AiParams.aux`, the one bot-defined knob
+
+- **`AiParams.aux` is the one bot-defined knob.** The core never interprets it
+  (only the AI tab's aux slider writes it); each strategy assigns its own
+  meaning. `config.AI_AUX` is `1.0` and that is the documented "untuned" value,
+  so a bot's default behaviour must be what it does at 1.0 — a stale token or
+  save with no `aux` key deserialises to it. Add per-bot knobs here rather than
+  growing `AiParams` one field per strategy. A strategy names its knob with
+  module-level `AUX_LABEL` (+ optional `AUX_RANGE`, `AUX_INT`, and `AUX_NAMES`
+  naming each stop of a step-1 int knob), read by `ai.aux_spec`/`ai.aux_names`;
+  `menu._ai_specs` appends that slider to `_AI_PARAMS` for the edited seat, so a
+  strategy declaring nothing (the built-in heuristic, `thinker`, …) shows no aux
+  slider at all. `models/knower.py` labels it *Oracle*, stops Off / Predict /
+  Search, and clamps a stored value above 2 (its old 0-12 depths) to Search —
+  narrowing a knob by clamping on read, never by rewriting what was stored, is
+  what keeps every old link's digest. `bot_replay.aux_note` sends a named stop
+  to the board as "Label: Stop", which `format.mjs`'s `botProfile` prints
+  without a number. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
+  preserves that — `aux` is the one field whose int/float form survives a
+  decode, since `challenge_key` hashes the JSON and `12` is not `12.0`. Widen
+  it and every link carrying an int aux reads as edited the moment it opens.
+  The board cannot hold the distinction (its rows are browser-written — see
+  "Whole-number floats" in [`core.md`](core.md)), so `verify_scores.same_setup` widens both sides
+  through `_aux_widened` before hashing — drop that and every posted score with
+  an aux reads as a different map.
+
+## The `tests/sim` harness
+
+- **`tests/sim.py` is both a demo harness and a test fixture.** Because it drives
+  the pure core headlessly, the suite uses it to assert games actually terminate
+  and never corrupt state (`check_invariants`). After changing `ai.py` or
+  travel/combat balance, run a `--trials` batch and watch the timeout rate.
+  `--film` adds the turn-playback oracle to every turn of every game (see Animated
+  end of turn).
+  It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
+  is a free-for-all (whole roster in one game, rotated through every seat via
+  the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
+  every pair, both seatings, plus a head-to-head grid). `--external` adds the
+  `bots/` subprocess bots to either (see "External bots: the four rules" above). Both default their
+  roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
+  arguments. `play_settings` is the third entry point — one bot through the
+  human's seat on a stored `Settings`, going through `settings.build_state` so a
+  posted setup's tuned knobs actually apply. It is what the leaderboard's bot
+  column is made of (`tools/bot_replay.py`; see "Replaying a bot for the leaderboard" above).
+  - **`play_from` is the fourth, and the only one that starts anywhere but the
+    opening.** It branches a recorded match at turn N (`reconstruct` on a
+    *truncated copy* — never the caller's log) and hands the seat to a bot, so a
+    stored game yields a position every few turns instead of one number. The
+    baseline comes free: we know what the person who was there then took.
+    `sim.positions` picks the turns and `tools/position_suite.py` drives it over
+    a corpus. Read its three numbers separately — *faster* is the only paired
+    comparison, *recovered* (games the person lost, which no score can carry) has
+    no baseline at all, and both are a direction rather than a verdict, since the
+    sample is whatever games happen to exist. See `docs/design/bots.md`.
+  - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
+    fixed up to a standard board, so a lane's length in light-years rises as the
+    node count falls (past `config.STANDARD_MAX_NODES` the box grows instead, and
+    lanes hold at a full standard board's spread), and
+    `config.SHIP_LY_PER_TURN` (menu slider, 1-30) rescales every lane on top —
+    lanes run 14-36 turns at 12 nodes and 1 ly/turn, and nearly all of them are
+    a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
+    that space and unreachable in the rest, so a batch at the default 6 ly/turn
+    measures one regime out of three and a knob can look like dead code purely
+    because of where it was measured. See `docs/design/bots.md`.
+
+## Per-seat AI and pricing a fight: the rules in full
+
+**The engine never imports the AI.** The decision function is injected as the
+`decide` parameter to `end_turn`; `main.py` and `tests/sim.py` pass `ai.decide`,
+a per-seat dispatcher that routes each seat to its named strategy
+(`ai.STRATEGIES`, keyed by `Player.ai_strategy`; `ai.decide` falls back to the
+built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
+crashes). Keep this inversion — it is why the core has no AI dependency, and it is
+the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
+
+- **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
+  into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
+  the `config.AI_*` constants). `ai.compute_orders` reads the seat's params, so
+  seats can play to different profiles; the menu's AI tab edits them per seat.
+  `Settings` mirrors both per-seat lists (`ai: list[AiParams]`, `ai_strategy:
+  list[str]`, indexed by seat-1), and `build_state` stamps each non-neutral
+  `Player` with its `seat_strategy(...)` and a copy of its `seat_params(...)`.
+  - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`,
+    the last entry in the menu's Strategy dropdown) is not a key into
+    `ai.STRATEGIES` at all — `settings.resolve_strategy` replaces it with a real
+    bot inside `build_state`, so nothing downstream ever sees the placeholder.
+    That is why it is resolved here rather than by a `models/` dispatcher bot:
+    `knower._model_for` asks a module `is_oracle_seat(player)` and a dispatcher
+    could not answer, having no seed on a `Player` — resolving one layer earlier
+    keeps every oracle, `botio`'s seat reveal and the leaderboard's bot column
+    looking at the bot that is really deciding, and so keeps the whole roster
+    eligible. The pick is **derived, never drawn** (`random.Random(f"{seed}:
+    strategy:{pid}")`, the rule `botio.decide_seed` follows): leaving a seat to
+    chance must not shift `state.rng`, or the same seed would fight the same map
+    differently depending on how many seats were left to it. A seed therefore
+    reproduces the opponents as surely as it reproduces the map, which is what
+    lets a challenge link on one be raced fairly. The pool is
+    `ai.available_strategies()` read at build time, so a drop-in model joins it;
+    that cannot move a stored game, since `replay.reconstruct` applies recorded
+    orders and dice and asks no seat to decide. `Settings` keeps `"random"`, so
+    a shared link stays a mystery to its recipient and the leaderboard's
+    opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
+    the bot that played — the setup's rule, not its outcome. Disclosing the
+    resolved names would go on `Challenge` (excluded from `challenge_key`), not
+    on `Settings`, which would move every digest ever shared. The win overlay
+    *does* reveal it (`render._winner_label`, "Verdant (Knower) wins!") — the
+    payoff, and free, since there is no turn left to play with the knowledge. It
+    reads `Player.ai_strategy` directly, so it needs no `ai` import and names the
+    resolved bot rather than the placeholder; neutral and any human seat (a
+    claimed one included) are excluded, since nothing decided for them.
+  - Those fields are readable for *every* seat — see `models/knower.py` for
+    what that makes possible. Any such bot must keep three rules: never call
+    `ai.load_models()` from inside a model (it re-`exec_module`s every file,
+    including yours, unguarded); read `ai.STRATEGIES` *lazily* inside `decide`,
+    since files load in sorted order and the registry is incomplete at your
+    import time; and draw **nothing** from `state.rng` (`tests/test_knower.py`
+    asserts both of the latter).
+  - **Attack margins are measured against the *effective* garrison.**
+    `ai._frontier_order` multiplies a target's ships by
+    `config.DEFENDER_ADVANTAGE` before applying `expand_margin`/`attack_margin`,
+    because that is what a fleet actually has to out-fight
+    (`combat._apply_advantage`). Against the raw count the AI stops expanding
+    entirely at a high setting. Identity at the 1.0 default — see "Defender advantage and the AI" above
+    for why the knob's top end still turtles regardless.
+  - **A bot prices a fight with `combat.edge_attacking()` /
+    `edge_defending()`, never a constant.** They are the break-even multiples —
+    what a fleet must beat the garrison by, and what a garrison must beat the
+    incoming force by, to win the *worst* roll — read live off
+    `config.COMBAT_JITTER` and `config.DEFENDER_ADVANTAGE`, both of which are
+    menu sliders. They move in opposite directions, since the advantage belongs
+    to whoever holds the system. Most `models/` bots' margins are pads/absolutes
+    over those, with the edge's jitter half floored at each bot's `TUNED_SWING`
+    (the swing it was fitted at), so a knob can only ever *raise* a margin above
+    its measured figure — nothing in the roster moves at the 0.10/1.0 defaults.
+    Clearing an edge is not a promise of capture: ties break to the defender and
+    matched forces annihilate to neutral, hence the `target.ships + 1` floors.
+
+- **A predicting bot advertises itself** with `IS_ORACLE = True` and, when
+  prediction is per-seat rather than per-module, `is_oracle_seat(player)` —
+  which callers prefer over the flag (`knower.is_oracle_seat` is "not Off", so
+  its Off seats are predicted for real, and trusted, instead of approximated).
+- **A bot can warn about a setup before it starts.** A module-level
+  `setup_warning(settings, seats) -> list[str]` (read by `ai.setup_warning`,
+  collected per strategy by `settings.setup_warnings`) raises the menu's
+  "This setup may play slowly" confirm on Start, and on the play-by-post
+  roster's Confirm — not the first press, since which seats are bots is only
+  known once the roster is. `models/knower.py`'s is fitted from measured
+  per-ply cost (`ply_ms`) and fires only when `SEARCH_BUDGET_S` would cut a
+  Search seat's horizon (the setup's longest lane plus `LANE_CUSHION`, off the
+  same lane survey the Advanced tab reports) short of its own longest lane, or
+  a turn's knower thinking passes `WARN_TURN_MS`. It prices turn one, so with
+  ship-speed growth on it also names the turn the clipping ends
+  (`_sees_lanes_from`); see "Cost per decide" in [`knower.md`](knower.md).

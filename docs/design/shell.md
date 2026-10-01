@@ -316,3 +316,183 @@ A hand-made rule has always had this property, but the player made *one*, on
 purpose. Hence `_draw_forward_rules` tinting any rule aimed at a system we don't
 hold — it is a real move as well as a real accident, so it is flagged rather than
 prevented.
+
+## Measured layout and `config.touch_ui`: the rules in full
+
+- **Nothing that holds text gets a fixed pixel size.** The measured-layout kit
+  lives in `widgets.py` and is shared by every scene that draws on the real
+  surface: a button's width comes from its measured label (`widgets.btn_w`, and
+  `widgets.btn` draws + returns the hit-rect), a stacked text row's pitch from
+  the font's own line height (`widgets.row_h`), a modal's stack is measured then
+  centred (`widgets.draw_modal`), and help prose is reflowed to the panel it sits
+  in (`widgets.wrap`). One-off layout literals still go through `config.s()`.
+  `render` binds these to its own `_`-prefixed module globals rather than calling
+  them qualified, and that is load-bearing: the body resolves them as bare names
+  at call time, which is what lets a test swap one out (`render._text = spy`) and
+  see the drawing code use it, and what keeps `render._FONTS` the same dict a
+  test clears. **`menu` deliberately does not use the kit** — it lays out on a
+  fixed 1440x960 canvas and letterbox-blits it, so its fonts must be *unscaled*
+  (`config.FONT_SIZE*` would scale twice) and it keeps its own `_fonts`/`_text`/
+  `_button`.
+  **The scale is, however, fixed for the run:** `config.apply_ui_scale` is called
+  exactly once, inline at boot (`main.py`, after `set_mode`), floored at the
+  design baseline — so shrinking the window past the baseline does not shrink the
+  UI. A resize rewrites `config.SCREEN_W/H` and rebuilds the `WorldView`, so
+  measured layout reflows, but the font size does not move. Cache off a font size
+  anyway only if it is keyed on `config.ui_scale` (`widgets.fonts`,
+  `menu._modal_fonts` both are) — the boot-time call happens before the first
+  frame, but a cache built at import time would still be wrong.
+- **`config.touch_ui` is the input modality**, set beside the scale in
+  `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
+  browser). On a touch build the shell drops every keyboard-only string — the
+  `(Esc)`/`(R)` suffixes on button labels (`render._key_hint`,
+  `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
+  panel's help text and the win overlay, the menu's `Enter: start game` footer —
+  and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`).
+
+## Browser bridges (`softkeyboard`, `webstore`, `share`)
+
+- `softkeyboard.py` is a browser-only bridge, not a pygame module: on a touch
+  browser it focuses a hidden DOM `<input>` so the mobile on-screen keyboard
+  actually appears (SDL's `start_text_input` has nothing to focus there) and
+  reports back what was typed. Everything is guarded — off the web build, on a
+  desktop browser, or if any DOM call fails, every function is a no-op and the
+  menu keeps its plain SDL text path.
+- `webstore.py` is the other browser bridge, same style: the address bar and a
+  small key/value store (shared-settings tokens, personal bests). See the
+  challenge-link notes in `CLAUDE.md`, Key conventions.
+- `share.py` is the one bridge that talks to a network, and the one that is
+  not browser-only: it posts a finished match's replay to the leaderboard's
+  `/api/log` (same-origin on the web) so a
+  posted score can be checked against the game that produced it. Same
+  defensive style — guarded everywhere, silent on failure,
+  fire-and-forget on both backends (a `fetch` whose promise
+  is never read on the web, a daemon thread off it) so it can never stall the
+  frame. Pure of pygame, and it sends **only** when the player presses *Post to
+  leaderboard* or the player has ticked *Share replays*. Its other half
+  *fetches* a replay to watch (`fetch_log` -> a `Download` the loop polls once a
+  frame, never awaited), which is the one thing here that reads a response. See
+  "Checked scores" in [`leaderboard.md`](leaderboard.md).
+
+- **`webstore` is the third browser bridge** (with `softkeyboard`, the web-only
+  paths in `main`/`menu`, and `upload`, which is the one that also runs off the
+  web): `get`/`set` are `localStorage` on the web and
+  a JSON file under `data_dir()` elsewhere. The rest is genuinely web-only and
+  no-ops off it: `link_url`, `set_url_fragment`, `copy_to_clipboard` and
+  `url_token` are the primitives, and `sync_settings` / `share_token` /
+  `copy_link` the compositions callers use. Same defensive style as
+  `softkeyboard`: local `import platform`, every DOM call guarded, storage
+  failure never load-bearing.
+- **Quitting is a desktop concept; the web has nothing to exit to.** Every
+  confirmed quit goes through `main.leave_app()`: off the web it returns True
+  and the loop ends, while on the web it asks the browser to close the window
+  (`webstore.close_window`) and returns False, falling back to the setup menu
+  with `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop
+  (`pygame.quit()`) directly on the web build.
+
+## Send popup, queued list and spectating: the rules in full
+
+- **The send popup is the *only* ship-count editor.** Composing a new send opens
+  it (`Ui.begin_send`), and so does reopening an already-queued order or
+  standing rule — `Ui.edit_order` / `Ui.edit_forward` put the popup back into
+  `CHOOSING` aimed at that subject. `Ui.editing_existing` records that the
+  subject *predates* the popup, and drives the bottom button (Cancel vs
+  "Delete order"/"Delete rule") and `_close_send`'s unwind to `IDLE` on edit.
+  - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
+    popup reads the source's garrison and destination unguarded, and aiming it
+    at a system we no longer hold would let the Send tab queue an order out of
+    enemy territory. Dormancy only lasts the turn — `Ui.prune_forward`
+    (`main.resolve_turn`) deletes a rule whose source was taken, so it can never
+    come silently back to life on recapture.
+  - **The count slider must be claimed before the popup's drag fallthrough** —
+    `slider_rect` is hit-tested first, and `dragging_slider` checked ahead of
+    `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`
+    (an empty source, the touch default) and a zeroed rect (popup closed
+    mid-drag).
+- **The side panel's queued list is capped and scrolled, not truncated.** It
+  takes at most half the panel, and what doesn't fit is reached with
+  `ui.order_scroll` (▲/▼ buttons, or the wheel while over the panel). Each
+  drawn row carries **its own index** into `pending` (`ui.order_hitboxes` is
+  `(index, row, delete)`) — a positional mapping would silently delete the
+  wrong order once only a window of the list is on screen.
+- **Losing makes the human a spectator, not a blind one.** `fog.observe`
+  returns empty for a landless player, so `main._accumulate_fog` reveals the
+  whole board (dropping frozen `player_intel`) once
+  `GameState.is_defeated(human_id)` — fixing history mode and a resumed game
+  for free since both fold fog through that one helper. Its companion is
+  **fast forward** (`Ui.can_fast_forward`, `main.step_delay`, the F key /
+  footer button): `main.FAST_FORWARD_MS` replaces the autoplay/play delay so
+  the rest of a lost match resolves a turn per frame. Offered only while
+  spectating.
+
+## Map viewport margins: the rule
+
+- **The map viewport has two margins, both floored at `config.node_clearance()`.**
+  `config.map_fit_padding()` sizes the zoom-1 fit and `config.map_pan_padding()`
+  is what the pan clamp keeps past the outermost system once zoomed in —
+  `geometry.WorldView` takes them as `padding` and `pan_padding`.
+
+## Combat tab: the rules in full
+
+- **The menu's Combat tab teaches the square law from the real code.**
+  `combat.preview_fight` sits beside `resolve_fight` and shares its
+  `_apply_advantage`/`_resolve_effective`/`_survivors` helpers, so the page
+  cannot drift from the fight it predicts (pinned by a zero-jitter equivalence
+  test). It takes `jitter`/`advantage` as **parameters and reads no `config`** —
+  those only reach `config` at game start via `settings._apply_globals`, so
+  reading them would preview the previous game's balance — and it **draws no
+  rng**, keeping `menu.draw` a pure read. `best`/`worst` are the corners of the
+  jitter square, not samples, so they really do bound the outcome.
+  - **The demo sliders are the one group that writes `MenuState`, not
+    `Settings`** — the third `kind` in `_SLIDER_SPECS`, routed in
+    `_apply_slider`. A scratch calculation has no business in a save file or a
+    share token, and on a challenge link it would raise the un-challenge modal.
+    `_ADV_COMBAT` moved tab but *not* namespace: still `adv_`-keyed, still
+    writing `Settings`, just drawn beside the demo it governs.
+  - **This one page hand-breaks its prose instead of reflowing it.** The measured-layout rule
+    ("Measured layout" above) exists because the *font* scales; the menu canvas is fixed, so a
+    runtime wrap would instead make the page's height depend on its text and
+    silently overflow the panel. `test_tab_content_stays_inside_the_panel`
+    guards every tab's rects against that 560x496 box.
+
+## Route mode: the rules in full
+
+- **Route mode (`viewstate.ROUTING`) is the one control that doesn't commit as
+  you go.** It builds a *proposal* — `route_sel` (plus `route_dest` in chain
+  mode), recomputed by `Ui.recompute_route` into `route_plan` — which
+  `confirm_route` writes into `auto_forward` in one go.
+  `input._handle_route_event` takes the whole event stream (placed after the
+  game-over branch), and render swaps the footer strip and the End Turn button,
+  so nothing from live play stays clickable under an open plan.
+  - **Two sub-modes, one plan** (`Ui.route_rally`, the footer's Mode button and
+    Tab). Both seed the same `model.flow_field` search (the one
+    `ai._flow_to_frontier` also delegates to) over our own territory and share
+    `_add_hop`, `_detect_route_cycles` and the confirm, so they differ *only* in
+    the seeding: **chain** seeds the one destination and `_plan_chain` walks each
+    selected system's path to it; **rally** seeds every pick at once and
+    `_plan_rally` takes the returned field whole, so every owned system it
+    reaches forwards toward its nearest rally point. Both measure "nearest" in
+    **travel turns**, not hops (`flow_field(by_turns=True)` / `flow_costs`) — the
+    same `state.travel_turns` rule the rest of the game follows. The AI keeps the
+    unweighted default, which is why the flag exists rather than a changed
+    default. Rally splits a genuine tie toward whichever point is drawing less,
+    measured in ships/turn (`1 / production`, as `fog.player_totals` reports),
+    assigning nearest-first so each node's real destination is already known.
+    `Ui.auto_rally` (rally's Auto-route button, `T`) picks every
+    `threatened_systems` — the shell's own local copy of the AI's threat maths,
+    per the render/input rule against importing `ai`. Every hop of every path gets
+    a rule, not just the selected systems. Owned-only is *forced*, not chosen: a
+    rule can only live on a system we hold, so a path through enemy space cannot
+    be expressed. The **sinks** are exempt (`flow_field` seeds need not be in
+    `allowed`), which is what lets either sub-mode be aimed at an enemy front.
+    The sub-mode is a preference, so `reset_route` leaves it alone while clearing
+    everything else; `set_route_rally` drops the proposal, since `route_sel`
+    means sources in one and sinks in the other.
+  - **A drag boxes a group; a tap always aims** (`Ui.route_tap`, chain mode).
+    Aiming is never destructive — the destination stays in `route_sel` and is
+    merely skipped as a source (`Ui.route_sources`), so re-aiming hands it
+    straight back. Removing is the *second* tap on whatever you are already
+    pointing at. Never give a tap a second primary meaning conditional on the
+    system: that is what made aiming at one of your own picks silently drop it.
+    A rally tap is a plain membership toggle, which is one meaning rather than
+    two, and frees drag for panning.

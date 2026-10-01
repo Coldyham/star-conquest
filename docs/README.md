@@ -65,6 +65,7 @@ implemented, and the brief is kept for its reasoning.
   - *`match_id`.*
 - **Star names.** Generated at build time; named last so seeds don't move. Labels are placed collision-first, with a reserved slot for marks.
 
+- **Rules in full** (detail kept out of `CLAUDE.md`): in-lane battles; pile-up resolution; replay and history; an all-bot game has no human seat; whole-number floats don't survive the browser; past a standard board the box grows; settings, challenge links and keys; star names.
 ### design/shell.md
 - **Text sizing** and **`config.touch_ui`.** Measured layout. The send popup is the one place the tap floor gives way.
 - **Map viewport margins.** The `node_clearance` floor, and clamping against the fit-padded span.
@@ -74,8 +75,9 @@ implemented, and the brief is kept for its reasoning.
 - **Route mode.** A proposal plus a confirm. Owned-only paths are forced. A plan can't contradict itself, but it can loop with existing rules.
   - *Two sub-modes.* Chain and rally share `flow_field`. Distance is travel turns, not hops. One Mode button. Ties balance by ships/turn. Auto-route. A tap always aims (two rejected shapes). `keep` handling.
 
+- **Rules in full** (detail kept out of `CLAUDE.md`): measured layout and `touch_ui`; browser bridges (`softkeyboard`, `webstore`, `share`, quitting); send popup, queued list and spectating; viewport margins; the Combat tab; route mode.
 ### design/turnfilm.md
-One section, **Animated end of turn**, organised by bold lead sentences. In
+**Animated end of turn** is the reasoning, organised by bold lead sentences. In
 order: why it exists (legibility); it plays back the past; events carry results;
 why it is its own module; the crossing sort key; the launch tick; leads rather
 than dwells; production as a mark; combat's two speeds (`linger`); marks outlive
@@ -86,15 +88,18 @@ press skips"; the loss label; the shared mark slot; one mark per system;
 scrubber timing; no in-game toggle; the rim clamp; stored lane tracks; a burst
 only for a fight; what is deliberately not animated.
 
+- **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/hand-maps.md
 - **Hand-authored maps**, with subsections: the recipe on `Settings` (and its `_LEGACY_KEY_DROPS` cost); a recipe rather than a `GameState` as the editor's model; the geometric rules as hard blocks (mapgen's own figures); `CUSTOM_MAX_NODES` versus `MAX_NODES`; Auto-lanes replaces rather than merges; a crossing warns while a graze blocks; two gestures, one commit path; no deselect gesture in Systems; the seat rows as one control; auto-relane skips a drag; seats gap-free without forced renumbering; what the menu hides; the wider box; opening on a blank canvas.
 
+- **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
   - *Through `build_state`*; *what the replayed seat is tuned to* (`REPLAY_AUX`); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup.
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 
+- **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **Traps**.
 
@@ -109,6 +114,7 @@ only for a fight; what is deliberately not animated.
 - **The in-app bot maker: built, measured, not merged.** Branch `bot-maker`, PR #20.
 - **Bots that aren't Python.** Why the wire protocol is shaped as it is.
 
+- **Rules in full** (detail kept out of `CLAUDE.md`): external bots' four rules; `AiParams.aux`; the `tests/sim` harness; per-seat AI and pricing a fight.
 ### design/knower.md
 - **Simultaneous resolution.** Why an oracle is possible at all.
 - **What the oracle buys, and where.** A turn of warning, worth more the faster ships are. Depth 0 is not thinker.

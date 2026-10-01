@@ -519,3 +519,179 @@ And `Player.ships_lost` rides on the closing event as a whole-table snapshot rat
 than per-engagement deltas, which is what keeps `_record_losses` and the rest of
 `combat` out of this entirely — the loss labels are derived from the fold instead,
 which is why they cost `combat` nothing.
+
+## The rules in one place
+
+On by default, and a **local display preference** (`webstore.animate_turns`,
+`paths.WEB_ANIMATE_TURNS_KEY`) rather than a `Settings` field — how a turn is
+*drawn* cannot move a result, and a new `Settings` field would move
+`challenge_key()` for every map that ever existed. Runs after a human End Turn, in
+play mode, and under autoplay — a bot's turn is exactly as worth watching as a
+human's, which matters for a leaderboard bot score's Watch link, an autoplay
+game start to finish; only fast-forward, whose whole point is to skip, is
+excluded (the gate is in `main.resolve_turn`, read once a turn — never in
+`render`, where a store read costs a DOM call every frame). History playback
+animates too; scrubbing stays an instant seek.
+
+**Switching the preference off drops only the glide, not the marks.**
+`main.resolve_turn`'s `marking` (fast-forward excluded, nothing else) is
+strictly wider than its `filming` (`marking and webstore.animate_turns()`): a fight's
+cost and a finished hull are cheap to report and worth seeing on their own, so they
+are archived (`Ui.archive_marks`) even on a turn with no glide to carry them —
+all at once, in place of the beat-by-beat reveal a running film would have given
+them, then left to dissolve on the same clock (`Ui.age_fading_marks`) either way.
+`main._next_history_film` mirrors this for history playback. Neither path builds a
+`turnfilm.Film` to do it: `archive_marks` reads the raw event list directly, so
+there is no beat grouping to skip.
+
+**It animates the past, not the present.** `end_turn` still resolves the turn
+immediately and atomically, so the live `GameState` is always the fully-resolved
+board; the film is a *playback of a finished turn* onto a deep copy, held as a
+main-loop local and drawn through the same `render.draw(screen, view_state, ui)`
+swap history mode uses. Nothing is observable mid-flight and skipping is therefore
+always safe (any press but Play/Pause; `Ui.stop_film`) — pausing freezes it in
+place instead (`Ui.film_paused`), so a paused review keeps showing what the turn
+did rather than reverting to the plain board a skip leaves behind. `RULES_VERSION`
+does not move for any of it, and nothing is recorded — a film is derived per turn
+and discarded, so the log format is untouched.
+
+Rules that hold it together:
+- **Events carry results, not rules.** `engine.end_turn(on_event=…)` reports
+  outcomes (`Advanced` carries each fleet's *new* `turns_remaining`, `Landed` the
+  node's new owner/ships), so `turnfilm.Reel` assigns and never re-simulates: it
+  draws no dice and does no arithmetic, which is what makes drift impossible.
+  `Reel` is strict — an unknown id is a `KeyError`, not a silent glitch.
+- **The order is the engine's, never one written down in `turnfilm`.** `film()`
+  groups *consecutive* events of one class into a beat, so moving `_production`
+  ahead of `_resolve_arrivals` reorders the playback with nothing here to change.
+- **Only movement spends time; every other beat is an instant with a *lead*.**
+  The move beat (`config.FILM_MOVE_MS`) is the whole of a non-lingering film, and
+  every other kind's constant is how far ahead of *what follows* it fires,
+  borrowed from the stretch it lands in rather than added to the film — clamped to
+  the room actually there, so nothing is ever pulled back past the stretch it
+  borrows from or past the beat ahead of it. `config.FILM_PRODUCE_MS` (200) is
+  therefore spent mid-glide and costs the turn nothing: production runs *before*
+  arrivals (see `CLAUDE.md`, Turn resolution) and a hull finished this turn is in the garrison
+  for the fight right after it, so the `+1` has to register as having contributed
+  rather than landing on the same instant as the fight it fed.
+  `config.FILM_LAUNCH_MS` is 0 and opens a turn, so it has nothing behind it to
+  borrow anyway; `config.FILM_COMBAT_MS` **must stay 0**, since a fight cannot be
+  shown before the fleets that fought it have arrived. Fights land on the film's
+  closing instant, which is the frame the next turn's glide starts on — chained
+  back to back (live play and history playback alike), the fleets never stop, and
+  the burst carries across the join on its own clock (below). A turn with no movement to borrow from
+  is all instants and does not play at all (`Film.plays`), so a quiet production
+  tick still resolves instantly instead of costing a pause.
+  Combat is the one beat with a second speed: `film(events, linger=True)` gives it
+  `FILM_LINGER_COMBAT_MS` of real dwell — time *added*, fights shown one node
+  after another — plus a trailing `FILM_LINGER_HOLD_MS`. That is for a turn ended
+  **by hand** and nothing else: `main.resolve_turn` passes `linger=not ui.playing`
+  and `main._next_history_film` never lingers, so a *run* of turns — live play or
+  history playback — glides continuously rather than stop-starting for every
+  fight.
+- **A fleet's approach stops at the rim; it never reaches the centre.**
+  `render._fleet_at` is the one function that decides where a fleet is drawn (lane
+  track included), and it clamps an arriving fleet — `turns_remaining <= 0` —
+  to `node_radius + config.FILM_ARRIVAL_GAP` short of its destination over the last
+  few pixels of the glide. Subtracting that gap only once the fleet has *landed*
+  instead jumps the triangle backwards by a whole radius on the move beat's last
+  frame, which is the one place a playback ever moves a fleet the wrong way.
+- **A mark outlives the film that made it, fading on its own clock.**
+  `Ui.fading_fights`/`fading_hulls` hold every still-showing fight or finished
+  hull as plain data (`viewstate.FadingFight`/`FadingHull`), independent of
+  `film`/`film_ms` — populated by `Ui.archive_marks(board, events)` from
+  whatever `Reel.run_to` just applied (which is why `run_to`/`run` return that
+  list rather than nothing), and aged every frame by `Ui.age_fading_marks(dt)`
+  regardless of whether a playback is currently running. A mark is fully visible
+  for `config.FILM_FLASH_MS`, then fades over `config.FILM_FADE_MS`
+  (`render._mark_fade`, `_faded` blending its colour toward `config.COLOR_BG`)
+  — both counted from when it fired, never from any film's own length, which is
+  what lets it keep dissolving on top of whatever the *next* turn's glide is
+  already doing instead of being cut off the moment `film` is replaced.
+  Visibility (`Ui.sees`) is checked once, at archive time, not on every frame a
+  mark is drawn — a fight you saw happen keeps fading regardless of what fog
+  does afterward. A "jump" rather than a step (entering/leaving history,
+  scrubbing, rewinding) calls `Ui.clear_fading_marks()`, since a mark belongs to
+  a specific point in a specific playback and jumping away from it makes it
+  stale rather than merely old. A second mark at one system supersedes the first:
+  turns chain straight into each other, so the previous turn's is often still
+  fading when this one fires, and two bursts with two numbers on one node read as
+  a garbled figure rather than as two events.
+- **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
+  `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
+  with, so a clash flashes exactly where the triangles are seen to touch — at the
+  crossing fraction `engine._lane_crossings` already solves for. **Do not widen
+  that function's sort tuple:** ties break on `(when, a, b)` — order of launch —
+  and that decides which fight is dealt the turn's dice first, so letting the
+  crossing *position* into the comparison would move stored replays with nothing
+  prompting a `RULES_VERSION` bump. Hence the explicit `key=`.
+- **The map layer sees both turns' fog; nothing gets swapped.** `Ui.film_visible`
+  holds what was visible when the played-back turn began and `Ui.sees` unions it
+  onto `visible`, which every map-layer read goes through (nodes, fleets, bursts).
+  `visible` itself is never overwritten, so a film has nothing to put back and a
+  system you can no longer see cannot leak past one. The HUD reads `visible`
+  directly: it describes the position you are handed, not the one being drawn.
+- **Whatever a film defers, `main.land_film` pays.** The camera snap that reveals
+  the board on the deciding turn waits for the playback (`Ui.deferred_view_snap`),
+  and `land_film` is the one place the clock running out and a press skipping both
+  pass through — which is why `Ui.stop_film` deliberately leaves the debt alone.
+  Anything else a playback holds back belongs there too, never at a call site.
+- **Play/Pause freezes a film; the camera controls ignore it; Autoplay / Take
+  control fires straight through it; every other press still skips it.**
+  `input._toggles_play` exempts that one control (the P key, or its footer
+  button) from the blanket "any press skips" rule, `input._moves_camera` exempts
+  the camera cluster (Reset view, the on-map zoom `−`/`+`, the R key) outright —
+  where you are looking changes nothing about the turn being played back — and
+  `input._toggles_autoplay` exempts the Autoplay / Take control button (the A
+  key) for a sharper reason: under autoplay Play/Pause is hidden (the turn
+  advance isn't gated on `ui.playing` there — see the footer's own comment), so
+  Take control is the *only* way to stop it, and films chain with no gap between
+  them, so it has to work on the very press that lands on a running one. Nothing
+  needs freezing for it: the showing film plays out unchanged, and control is
+  back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh
+  at that point. Under any of the three, a press that only skips leaves the
+  cluster looking dead. The wheel needs no entry: it is not one of the press
+  types the rule names.
+  `main.apply_toggle_play`
+  is what actually holds it: `Ui.film_paused` freezes the per-frame advance,
+  set only when *pausing an already-running* playthrough (`was_playing` going
+  in) rather than whenever a film merely happens to be up — a manually-triggered
+  film runs with `Ui.playing` False throughout, so toggling play *on* while it
+  plays must leave it alone rather than freezing it on the first frame.
+- **A run of turns chains one animated turn straight into the next, and never
+  lingers.** Live play, autoplay and history playback are the same behaviour from
+  three sources, and all three take the same path: the moment a film lands the
+  loop starts the next turn — `main._next_history_film` in history, `resolve_turn`
+  in live play and in autoplay (each on the same terms its own pacing branch below
+  it would have resolved on: `PLAY_MS` for the former, `AUTOPLAY_MS` for the
+  latter) — before that pacing gets a chance to run. It now only ever fires for a
+  turn with nothing to animate, or with the preference off. `linger` (above) is
+  what tells the two apart: `not (ui.playing or ui.autoplay)`, so a turn ended by
+  hand alone gets the pause, and a run of turns — of either kind — glides through
+  instead. Nothing is lost either way — a mark's visibility no longer depends on
+  `film` still being current (above), so lingering only changes how long `film`
+  itself holds the board.
+  **A join carries the last film's overrun, and one frame's step is capped.** A
+  film lands on the first frame past its end, so the step nearly always overruns
+  it; `main._carry_into` pays that into the chained film (clamped to its own
+  length) instead of dropping it, or every join stalls the fleets for the rest of
+  a frame. And `config.MAX_FRAME_MS` caps what one frame may hand the loop: the
+  frame that lands a film is also the one that resolves the next turn — every
+  seat's `decide` plus the log rewrite, hundreds of ms with a search bot on the
+  board — and `clock.tick` gives that whole stretch to the frame after, which
+  uncapped teleports the fresh glide rather than advancing it. History playback
+  resolves nothing, which is exactly why autoplay looked choppier than a playback
+  of the same turns.
+  **Every reel goes through `main._primed`**, which runs it to `0.0` (archiving
+  whatever marks that makes) before it is handed back. A chained reel is built
+  *inside* the per-frame update, past the point where a running film is stepped,
+  so it is drawn once before any `run_to` reaches it: un-advanced, that frame
+  draws a continuing fleet a whole turn's worth of progress behind where it just
+  was. Priming only the path that visibly needed it leaves the trap set for the
+  next caller — which is exactly what live-play chaining then walked into.
+- **The correctness test is the history path.** One `reconstruct` pass yields both
+  a board per turn and that turn's events, so applying turn *i*'s film to a copy of
+  board *i-1* must land exactly on board *i* (`tests/test_turnfilm.py`, and at
+  volume via `sim.check_film` behind `python -m tests.sim --film`). A missing or
+  misapplied event would otherwise surface only as the board snapping on the last
+  frame.
