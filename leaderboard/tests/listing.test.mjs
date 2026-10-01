@@ -17,7 +17,7 @@ test("the default view is the plain index, and round-trips to itself", () => {
 
 test("every filter round-trips through the URL", () => {
   const qs = "bot=marshal&group=config&q=blitz&sort=maps&players=3&mode=symmetric&fog=on" +
-    "&contested=1&botlead=1&unplayed=1";
+    "&contested=1&botlead=1&unplayed=1&campaign=1";
   assert.equal(urlFor(parse(qs)), `index.html?${qs}`);
 });
 
@@ -93,4 +93,14 @@ test("a search matches name, tag and leader, and a bare number the seed too", ()
   assert.equal(decodeURIComponent(searchClause("42", "config")),
     '&or=(config_name.ilike."*42*",config_tags.cs.{"42"})');
   assert.equal(searchClause("", "game"), "");
+});
+
+test("campaign narrows to this week's nodes, and to nothing in a week with none", () => {
+  const { query } = listQuery(parse("campaign=1"), { nodes: ["n1", "n2"] });
+  assert.ok(decodeURIComponent(query).includes('&game_key=in.("n1","n2")'));
+  assert.ok(listQuery(parse("campaign=1")).query.includes("&game_key=is.null"));
+  assert.ok(!listQuery(parse("group=config&campaign=1"), { nodes: ["n1"] }).query.includes("game_key"));
+  // Both key filters at once are ANDed, which PostgREST allows on one column.
+  const both = listQuery(parse("campaign=1&unplayed=1"), { nodes: ["n1"], played: ["n2"] }).query;
+  assert.equal(both.match(/&game_key=/g).length, 2);
 });

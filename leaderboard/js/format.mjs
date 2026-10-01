@@ -46,6 +46,15 @@ export function mapSummary(game) {
 }
 
 /**
+ * "Random · 3 players · 18 systems" — mapSummary() without the seed, for a
+ * config card: every map in the group shares these (sc_config_key keys on the
+ * whole setup but its seed).
+ */
+export function setupSummary(config) {
+  return mapSummary(config).split(" · ").slice(0, 3).join(" · ");
+}
+
+/**
  * "25 turns · 2 lost · 12 by hand" — the same figures the game shows, from
  * Challenge.summary: turns is the score, fewest lost breaks a tie, and the
  * by-hand count is only worth stating when some turns were autoplayed.

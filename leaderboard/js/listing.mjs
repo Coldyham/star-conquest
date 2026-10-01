@@ -81,6 +81,7 @@ export function filtersFromParams(params) {
     contested: params.get("contested") === "1",
     botlead: params.get("botlead") === "1",
     unplayed: params.get("unplayed") === "1",
+    campaign: params.get("campaign") === "1",
   };
   const sort = params.get("sort");
   if (SORTS[viewKind(filters)].some((s) => s.value === sort)) filters.sort = sort;
@@ -101,6 +102,7 @@ export function urlFor(filters) {
   if (filters.contested) params.set("contested", "1");
   if (filters.botlead) params.set("botlead", "1");
   if (filters.unplayed) params.set("unplayed", "1");
+  if (filters.campaign) params.set("campaign", "1");
   const qs = params.toString();
   return qs ? `index.html?${qs}` : "index.html";
 }
@@ -108,7 +110,7 @@ export function urlFor(filters) {
 /** True when anything narrows the list (a sort or the grouping does not). */
 export function isFiltered(filters) {
   return Boolean(filters.config || filters.bot || filters.q || filters.players || filters.mode ||
-    filters.fog || filters.contested || filters.botlead || filters.unplayed);
+    filters.fog || filters.contested || filters.botlead || filters.unplayed || filters.campaign);
 }
 
 /**
@@ -138,20 +140,24 @@ export function searchClause(q, kind) {
   return `&or=${encodeURIComponent(`(${terms.join(",")})`)}`;
 }
 
+const quoted = (keys) => keys.map((key) => encodeURIComponent(`"${key}"`)).join(",");
+
 /** `not.in.("a","b")` over a player's own maps, capped at MAX_EXCLUDED. */
 function notIn(keys) {
-  const list = keys.slice(0, MAX_EXCLUDED).map((key) => encodeURIComponent(`"${key}"`));
-  return `not.in.(${list.join(",")})`;
+  return `not.in.(${quoted(keys.slice(0, MAX_EXCLUDED))})`;
 }
 
 /**
  * The list query for a view: `{kind, query}`, where kind is "game" or
  * "config". `played` is the game_keys this browser's player has a score on,
- * newest first — only read when `filters.unplayed` is set. The per-map-only
- * filters (contested, bot leads, unplayed, players' best) are dropped on the
- * grouped view: a config has no single record to be contested or led.
+ * newest first — only read when `filters.unplayed` is set. `nodes` is this
+ * week's campaign maps' game_keys (a handful), read when `filters.campaign`
+ * is; a week with none on the board matches nothing rather than everything.
+ * The per-map-only filters (contested, bot leads, unplayed, campaign) are
+ * dropped on the grouped view: a config has no single record to be contested
+ * or led, and is never itself a campaign node.
  */
-export function listQuery(filters, { played = [] } = {}) {
+export function listQuery(filters, { played = [], nodes = [] } = {}) {
   const kind = viewKind(filters);
   const sort = SORTS[kind].find((s) => s.value === filters.sort) || SORTS[kind][0];
   let query = kind === "config"
@@ -166,6 +172,7 @@ export function listQuery(filters, { played = [] } = {}) {
     if (filters.contested) query += "&contenders=gte.2";
     if (filters.botlead) query += "&bot_leads=is.true";
     if (filters.unplayed && played.length) query += `&game_key=${notIn(played)}`;
+    if (filters.campaign) query += nodes.length ? `&game_key=in.(${quoted(nodes)})` : "&game_key=is.null";
   }
   query += searchClause(filters.q, kind);
   query += `&order=${sort.order}`;

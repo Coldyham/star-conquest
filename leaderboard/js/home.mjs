@@ -5,7 +5,7 @@ import { weekParam, weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botLeadBadge, campaignBadge, clear, configBadge, el, embargoBadge, embargoNote, fogBadge,
-  leaderCredit, mapSummary, relativeTime, showError,
+  leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
   filtersFromParams, isFiltered, listQuery, MODES, PLAYER_COUNTS, SORTS, urlFor, viewKind,
@@ -127,6 +127,7 @@ function controls(filters) {
       toggle("contested", "Contested", filters.contested,
         "Maps two or more players have a counted score on — the ones a crown can be held on"),
       toggle("botlead", "Bot leads", filters.botlead, "Maps where no human score beats the best bot yet"),
+      toggle("campaign", "Campaign", filters.campaign, "This week's campaign maps that have a score on the board"),
     ];
     if (myName()) {
       toggles.push(toggle("unplayed", "Unplayed by me", filters.unplayed,
@@ -353,16 +354,22 @@ function row(game, campaigns, mine) {
  * above for where that belongs instead. */
 function configRow(config) {
   const detail = [
-    `${config.nodes} ${config.nodes === 1 ? "system" : "systems"}`,
-    `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}`,
     `${config.score_count} ${config.score_count === 1 ? "score" : "scores"}`,
     relativeTime(config.last_activity),
   ].join(" · ");
 
+  // Laid out like a game card (row() above): the setup line, the name where a
+  // game card names its leader, the counts, and a headline figure — here the
+  // number of maps, since a config has no single score to headline.
   const body = el("a", { class: "card-body", href: `index.html?config=${encodeURIComponent(config.config_key)}` }, [
     el("div", { class: "card-main" }, [
-      el("div", { class: "setup", text: configTitle(config) }),
+      el("div", { class: "setup", text: setupSummary(config) }),
+      el("div", { class: "credit config-name", text: configTitle(config) }),
       el("div", { class: "card-meta", text: detail }),
+    ]),
+    el("div", { class: "card-score" }, [
+      el("strong", { text: `${config.game_count}` }),
+      el("span", { class: "card-score-label", text: config.game_count === 1 ? "map" : "maps" }),
     ]),
   ]);
 
@@ -381,12 +388,16 @@ async function load() {
   const filters = filtersFromParams(new URLSearchParams(location.search));
   try {
     // Your own maps are only on the critical path when they shape the query.
+    // Your own maps and the week's campaign nodes are only on the critical
+    // path when they shape the query.
     const pending = myMaps();
+    const marks = campaignMarks();
     const played = filters.unplayed ? [...(await pending).keys()] : [];
-    const list = listQuery(filters, { played });
+    const nodes = filters.campaign ? [...(await marks).keys()] : [];
+    const list = listQuery(filters, { played, nodes });
     const { kind } = list;
     const [{ rows: fetched, more }, campaigns, mine] = await Promise.all([
-      selectPage(list.query, { size: PAGE_SIZE }), campaignMarks(), pending,
+      selectPage(list.query, { size: PAGE_SIZE }), marks, pending,
     ]);
     // listQuery excludes only the first MAX_EXCLUDED of a player's maps by key;
     // anything past that is dropped here as it arrives.
