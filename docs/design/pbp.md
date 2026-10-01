@@ -3,8 +3,9 @@
 Rationale and edge cases behind play-by-post (`pbp.py`, the `pbp_*` tables and
 `leaderboard/netlify/functions/pbp.mjs`): one seat of a shared match, held by a
 person at their own pace. `CLAUDE.md` states *what* each rule is; this file is
-*why*. Its companions are [`system-design.md`](system-design.md) for the core
-and shell, and [`bot-design.md`](bot-design.md) for the AI roster.
+*why*. Its companions are [`core.md`](core.md) and [`shell.md`](shell.md) for the
+core and shell, and [`bots.md`](bots.md) for the AI roster. Index:
+[`../README.md`](../README.md).
 
 ## Context
 

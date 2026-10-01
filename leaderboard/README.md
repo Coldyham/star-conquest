@@ -190,7 +190,7 @@ maps of unequal difficulty — so this one carries the setup alone.
 
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
-for a single existing map (see `docs/system-design.md`, "Keys outlive the schema
+for a single existing map (see `docs/design/core.md`, "Keys outlive the schema
 that made them"). The trade is the opposite fragility: **naming a config freezes
 it to `sc_config_key`'s current definition and to the game's current pruning
 rules.** Change either — the function's body, or a `config.DEFAULT_*` balance
@@ -236,7 +236,7 @@ setup, the seed and the code, so it only ever needs computing once and there is
 nothing to serve live: [`tools/bot_replay.py`](../tools/bot_replay.py) runs on a
 schedule in GitHub Actions and caches its answers in `public.bot_scores`. See
 [`.github/workflows/bot-replay.yml`](../.github/workflows/bot-replay.yml) for the
-job and `docs/system-design.md` ("Bot replays") for why it is a batch job rather
+job and `docs/design/leaderboard.md` ("Bot replays") for why it is a batch job rather
 than the small service this file used to ask for.
 
 The worker also lifts the bots' own per-decide wall-clock guards 100x. Those
@@ -702,7 +702,7 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
   played with, so a genuine rules change quietly retires every replay it
   touches instead of preserving them. Storing a full board snapshot per turn
   would survive any future rules change instead of just being caught by one;
-  set aside for now (see "Checked scores" in `docs/system-design.md`) rather
+  set aside for now (see "Checked scores" in `docs/design/leaderboard.md`) rather
   than ruled out.
 
 ## Not built yet

@@ -1,6 +1,6 @@
 # Does the roster's ranking change on the setup people actually play, versus
 # config.py's defaults? — tools/setup_sweep.py. See "Lane length across the
-# parameter space" and "Positions from real games" in docs/bot-design.md.
+# parameter space" and "Positions from real games" in docs/design/bots.md.
 #
 # No secret needed: like config_census.py (which it calls to find the
 # most-played setup), it reads only the board's public tables through the

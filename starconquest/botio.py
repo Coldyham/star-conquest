@@ -3,7 +3,7 @@
 Pure core (no pygame, and deliberately no ``subprocess``): this module only
 *shapes* the messages. Spawning a bot and talking to it is the transport's job
 (``tests/botproc.py``), which keeps the schema testable with no child process
-anywhere near it. ``docs/bot-api.md`` is the protocol; ``docs/bot-design.md``
+anywhere near it. ``docs/bot-api.md`` is the protocol; ``docs/design/bots.md``
 under "Bots that aren't Python" is why each field is here.
 
 Two messages, and the split between them is what a bot can and cannot expect to
@@ -75,7 +75,7 @@ def setup(state: GameState) -> dict[str, Any]:
     ``Settings`` reaches the wire with no second edit here.
 
     Sent in full rather than curated because ``nodes`` and ``ship_ly_per_turn``
-    together move lane length over an order of magnitude (see bot-design, "Lane
+    together move lane length over an order of magnitude (see docs/design/bots.md, "Lane
     length across the parameter space"), and a posted leaderboard map carries
     tuned knobs: a bot that cannot see which regime it is in cannot price
     anything. ``challenge``/``autoplay`` are excluded — presentation and

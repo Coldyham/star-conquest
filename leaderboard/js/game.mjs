@@ -327,7 +327,7 @@ async function replayVersions(scores) {
  * before the reveal.
  *
  * The bots table is unaffected and fetched the same as always: a bot's game
- * is a pure function of the setup and the code (docs/bot-design.md), already
+ * is a pure function of the setup and the code (docs/design/leaderboard.md), already
  * fully public via `bot_scores`, so there is no *person's* strategy in it to
  * protect. Its verdict is built off the same aggregate rather than a fetched
  * score row — `{turns, lost}` is all `humanVsBots`/`bestBot` ever read.

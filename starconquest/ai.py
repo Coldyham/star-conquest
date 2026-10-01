@@ -84,7 +84,7 @@ def decide(state: GameState, pid: int) -> list[Order]:
     return strategy(state, pid)
 
 
-# The measured full-roster ladder (docs/bot-design.md "Full roster ladder"),
+# The measured full-roster ladder (docs/design/marshal.md "Full roster ladder"),
 # strongest to weakest. knower leads despite tests/sim.py --ladder finding
 # marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.

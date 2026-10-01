@@ -111,7 +111,7 @@ CUSTOM_MAX_NODES = STANDARD_MAX_NODES + MAX_PLAYERS
 # --------------------------------------------------------------------------- #
 COMBAT_JITTER = 0.10        # +/- 10% random swing applied to each side's strength
 DEFENDER_ADVANTAGE = 1.0    # multiplier on the defender's effective strength (1.0 == none)
-DEFENDER_ADVANTAGE_MAX = 1.5  # slider ceiling: past here conquest stalemates (see bot-design)
+DEFENDER_ADVANTAGE_MAX = 1.5  # slider ceiling: past here conquest stalemates (see docs/design/bots.md)
 COMBAT_PREVIEW_MAX = 50     # menu Combat page: ceiling on its two demo sliders
 IN_LANE_BATTLES = False     # opposing fleets sharing a lane fight in transit
 

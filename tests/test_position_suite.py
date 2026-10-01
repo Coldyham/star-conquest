@@ -1,6 +1,6 @@
 """Handing a bot a position out of somebody else's game.
 
-The measurement this makes possible is the one `docs/bot-design.md` could not
+The measurement this makes possible is the one `docs/design/bots.md` could not
 take before: every figure there is a bot against another bot, so the roster is
 only ever judged on positions bots create. These exercise the mechanics of
 branching a recorded match — the position rebuilt must be the one that was
