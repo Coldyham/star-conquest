@@ -176,7 +176,7 @@ def test_copy_link_reports_failure_when_the_clipboard_is_refused(monkeypatch):
 
 def test_quitting_ends_the_loop_off_the_web():
     """Off the browser a confirmed quit really does exit."""
-    import main
+    from starconquest import main
 
     assert main.leave_app() is True
 
@@ -186,7 +186,7 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
     on a dead black canvas that only a force-close escapes. So a web quit asks the
     browser to close the window and reports that we're still running, letting main
     fall back to the setup menu instead of tearing the display down."""
-    import main
+    from starconquest import main
 
     tried = []
     monkeypatch.setattr(main.paths, "is_web", lambda: True)

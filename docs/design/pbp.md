@@ -100,7 +100,7 @@ load-bearing:
 
   **The generalisation is sequence-identical, verified empirically.** The human
   is always pid 1 — `mapgen._make_players` stamps `is_human=(pid == 1)`
-  (`mapgen.py:395`), `main.py:96` is the only `Ui` construction site and passes
+  (`mapgen.py:395`), `starconquest/main.py:96` is the only `Ui` construction site and passes
   `human_id=1`, and `replay.HUMAN_SEAT` mirrors it. So today's "human first, then
   AI seats in `sorted(state.players)`" and a plain "**all non-neutral seats in
   ascending pid**" emit the same sequence. Checked across players 2-6 × both map
@@ -132,7 +132,7 @@ load-bearing:
   `challenge_keys()` drops `challenge` before hashing.
 - **`tests/test_schema_grants.py`** scrapes `schema.sql` grants against callers
   and fails on a new relation without matching grants.
-- Films/reels hold the board while running (`main.py:1150-1156`); a networked
+- Films/reels hold the board while running (`starconquest/main.py:1150-1156`); a networked
   resolution must serialize against that, not race it.
 
 ## What it reuses

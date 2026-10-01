@@ -359,7 +359,7 @@ def decide(state, pid):
                 _DEPTH -= 1
         return _plan(state, pid, orc)
     except Exception as exc:              # noqa: BLE001
-        # Nothing upstream catches a bot (engine.py:101, main.py:300 both call it
+        # Nothing upstream catches a bot (engine.py:101, starconquest/main.py:300 both call it
         # bare), so a crash here would take the whole game down.
         LAST_ERROR = exc
         try:

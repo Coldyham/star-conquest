@@ -356,7 +356,7 @@ def test_knower_works_as_the_autoplayed_human_seat(kn):
     """`main.resolve_turn` drives the human seat via `ai.decide` before `end_turn`.
 
     That is the one path where knower runs for a seat the engine will *skip*
-    (main.py:298-304), and it runs before every AI seat rather than in pid order.
+    (starconquest/main.py:298-304), and it runs before every AI seat rather than in pid order.
     Since knower draws nothing from `state.rng`, the later seats are still exactly
     where it predicted them.
     """

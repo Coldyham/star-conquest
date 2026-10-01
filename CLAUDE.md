@@ -79,7 +79,10 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  `mapmaker`, and `main`.
+  `mapmaker`, and `main`. `main` is `starconquest/main.py`, like every other
+  module; the root `main.py` is only a launcher shim, kept there because
+  `tools/build_web.sh` hands pygbag a `main.py` at the top of its stage dir.
+  Tests import it as `from starconquest import main`.
   - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
     never imports `engine` or `ai`** (derived stats like threat are local
     helpers). It stores nothing time-varying: a frame is a pure function of
