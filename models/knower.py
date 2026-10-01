@@ -65,7 +65,7 @@ the root only, and four things keep that sound:
     would pick a continuation cannot see a launch land (ships in transit count at
     full value), so the default won 97-100% of deeper nodes and branching them
     changed no root pick at 1 ly/turn. Spending that work on more *openings*
-    instead is what measured stronger — see docs/bot-design.md.
+    instead is what measured stronger — see docs/design/knower.md.
   * **Candidates come from a threaded ``Posture``, not patched globals.** Patching
     would be process-wide and corrupt the ``_blind`` self-model and every other
     knower seat in the game.
@@ -91,7 +91,7 @@ where the guard trips, is ``estimated_decide_ms`` and ``setup_warning`` below.
 
 Measurements behind every choice here — what the oracle wins, the depth curve, the
 borrowed candidates, what was built and removed, the cost tables — are in
-docs/bot-design.md under "`models/knower.py` and simultaneous resolution".
+docs/design/knower.md.
 """
 
 from __future__ import annotations
@@ -271,7 +271,7 @@ POSTURE_VARIANTS = (
     {"frontier_guard": 0.6, "reserve_floor": 2},                    # timid
     # --- below here is outside `SEARCH_WIDTH` and not currently searched --------- #
     # Every ply costs one rollout per candidate, so a candidate has to earn its slot
-    # in picks; see docs/bot-design.md, "Borrowed candidates".
+    # in picks; see docs/design/knower.md, "Borrowed candidates".
     {"frontier_guard": 0.0, "enemy_near": 1.15, "enemy_far": 1.5},  # all-in
     {"beyond_decay": 0.8},                                          # push for depth
     {"enemy_near": 1.6, "enemy_far": 2.2},                          # only sure strikes
@@ -539,7 +539,7 @@ def _horizon(state) -> int:
 def ply_ms(nodes: int, seats: int, ship_ly: float) -> float:
     """CPU ms one search ply (every opening's line played on by one turn)
     typically costs — a bad-but-ordinary turn, the 75th percentile over a game —
-    on native CPython. Fitted to the grid in docs/bot-design.md, "Cost per
+    on native CPython. Fitted to the grid in docs/design/knower.md, "Cost per
     decide"; the browser build is slower."""
     return (COST_PLY_MS
             * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
@@ -857,7 +857,7 @@ def _search(state, pid, orc, turns: int, deadline):
     value), so the default continuation won 97-100% of deeper nodes; replacing every
     deeper branch with the default changed 0% of root picks at 1 ly/turn and 8-12% at
     6, while that branching was ~75% of the search's cost. The same work spent on more
-    openings (`EXTERNAL_CANDIDATES`) is what measured stronger. See docs/bot-design.md,
+    openings (`EXTERNAL_CANDIDATES`) is what measured stronger. See docs/design/knower.md,
     "The depth search".
 
     Candidate 0 is the tuned default and lines stay in candidate order, so ties are

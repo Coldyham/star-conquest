@@ -7,12 +7,16 @@ systems are nodes and spacelanes are edges, one ship type, take every system to
 win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 
 Design rationale, history, and edge-case detail behind the rules below live in
-two companion files, keyed by matching headings — read them when you're actually
-touching that code, not as background reading.
-[`docs/system-design.md`](docs/system-design.md) covers the core and the shell;
-[`docs/bot-design.md`](docs/bot-design.md) covers the `models/` roster, the
-margins bots price fights with, and the measurements behind every AI constant;
-[`docs/pbp-design.md`](docs/pbp-design.md) covers play-by-post.
+`docs/design/`, one file per area, keyed by headings that match this file's.
+Start at [`docs/README.md`](docs/README.md), which says which file holds which
+section and lists every idea that was built or proposed and then decided
+against. **Check that list before proposing a mechanism, a bot tactic or a
+re-tune**, and read the relevant design file when you're actually touching that
+code, not as background reading. The files: `core`, `shell`, `turnfilm`,
+`hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
+as a whole, then `knower`, `marshal`, `marshal-pricing` and `marshal-flow`;
+`pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
+topic and update the index when one grows past that.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
 is the wire protocol for non-Python bots, and
 [`docs/bot-brief.md`](docs/bot-brief.md) is a self-contained brief a player
@@ -446,7 +450,7 @@ intact.
 
 A per-seat URL onto a shared match, played asynchronously. It fits because turns
 already resolve simultaneously. The rationale for each rule is in
-[`docs/pbp-design.md`](docs/pbp-design.md), under the same headings.
+[`docs/design/pbp.md`](docs/design/pbp.md), under the same headings.
 
 - **Thin server; clients resolve.** `leaderboard/netlify/functions/pbp.mjs` and
   the `pbp_*` tables store orders and the log. They never hold a board or run an
@@ -659,7 +663,7 @@ already resolve simultaneously. The rationale for each rule is in
       `Ui.can_post` is the single predicate behind both sharing buttons, the
       personal best and the checkpoint upload, so nobody's replay is one press
       from being posted as your score. Rewinding out of one and playing on forks
-      a match that *is* yours — see system-design for why that stays open.
+      a match that *is* yours — see `docs/design/leaderboard.md` for why that stays open.
     - **The verifier binds the log to the setup** (`same_setup`), or an easy
       map's replay would back a hard map's score. It proves the *game*, never
       that a human played it — that is what `hand` discloses, recomputed from the
@@ -865,7 +869,7 @@ already resolve simultaneously. The rationale for each rule is in
     `config.DEFENDER_ADVANTAGE` before applying `expand_margin`/`attack_margin`,
     because that is what a fleet actually has to out-fight
     (`combat._apply_advantage`). Against the raw count the AI stops expanding
-    entirely at a high setting. Identity at the 1.0 default — see bot-design
+    entirely at a high setting. Identity at the 1.0 default — see `docs/design/bots.md`
     for why the knob's top end still turtles regardless.
   - **A bot prices a fight with `combat.edge_attacking()` /
     `edge_defending()`, never a constant.** They are the break-even multiples —
@@ -889,7 +893,7 @@ already resolve simultaneously. The rationale for each rule is in
       dropping that too reads z = -12.35 at `DEFENDER_ADVANTAGE 1.5`. Marshal's
       *defence* margin still prices the jitter in full, which is the asymmetry:
       our own garrison cannot decline the engagement. See "Garrisons run away"
-      in bot-design before copying either half into another bot.
+      in `docs/design/marshal-pricing.md` before copying either half into another bot.
   - **The game and the board are one site.** The root `netlify.toml` builds the
     game, and `tools/build_web.sh` stages the board's pages into `web/board/`
     from an explicit allow-list. The game itself is at `/game/`; the root is
@@ -954,7 +958,7 @@ already resolve simultaneously. The rationale for each rule is in
     same lane survey the Advanced tab reports) short of its own longest lane, or
     a turn's knower thinking passes `WARN_TURN_MS`. It prices turn one, so with
     ship-speed growth on it also names the turn the clipping ends
-    (`_sees_lanes_from`); see "Cost per decide" in bot-design.
+    (`_sees_lanes_from`); see "Cost per decide" in `docs/design/knower.md`.
   - **A seat commands its own ships and nothing else.** `apply_order` only
     checks the *declared* owner holds the source, so `_collect_orders` filters
     every seat's orders (including the human's, under autoplay) through
@@ -1024,7 +1028,7 @@ already resolve simultaneously. The rationale for each rule is in
   nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
   `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
   `render._draw_node_names` places labels collision-first and drops what doesn't
-  fit (see system-design) — including the fixed slot above every system that a
+  fit (see `docs/design/core.md`) — including the fixed slot above every system that a
   playback writes its numbers into (`render._mark_slot`), reserved whether or not
   one is showing, so a name sits below its system or nowhere rather than
   flickering out the moment a `+1` or a fight's cost appears. Ids stay on the
@@ -1149,7 +1153,7 @@ already resolve simultaneously. The rationale for each rule is in
     a corpus. Read its three numbers separately — *faster* is the only paired
     comparison, *recovered* (games the person lost, which no score can carry) has
     no baseline at all, and both are a direction rather than a verdict, since the
-    sample is whatever games happen to exist. See bot-design.
+    sample is whatever games happen to exist. See `docs/design/bots.md`.
   - **Sweep the speed and node knobs, not just their defaults.** `WORLD_SIZE` is
     fixed up to a standard board, so a lane's length in light-years rises as the
     node count falls (past `config.STANDARD_MAX_NODES` the box grows instead, and
@@ -1159,7 +1163,7 @@ already resolve simultaneously. The rationale for each rule is in
     a single turn from 18 ly/turn up. Any margin keyed off travel distance is therefore live in part of
     that space and unreachable in the rest, so a batch at the default 6 ly/turn
     measures one regime out of three and a knob can look like dead code purely
-    because of where it was measured. See bot-design.
+    because of where it was measured. See `docs/design/bots.md`.
 
 Map generation (`mapgen.py`) has two modes: `random` (jittered-grid placement +
 light relaxation + a Euclidean MST for connectivity, which is planar so edges

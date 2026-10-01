@@ -192,7 +192,7 @@ def test_margins_are_built_on_the_shared_edges(ma):
 
     # The *enemy* margin deliberately does not: it carries the advantage half of
     # the edge and none of the jitter half, because a beatable garrison usually
-    # evacuates rather than fighting. See `_enemy_margin` and bot-design.
+    # evacuates rather than fighting. See `_enemy_margin` and docs/design/marshal-pricing.md.
     config.DEFENDER_ADVANTAGE = 1.4
     assert ma._enemy_margin() == pytest.approx(1.4)
 
@@ -271,7 +271,7 @@ def test_a_contested_neutral_is_deliberately_left_static(ma):
     Measured, not overlooked: the price is a *gate*, and Phase 3b sends far more
     than it. Under-pricing a contested neutral opens the gate and the surplus
     usually wins the race, where honest pricing cedes the node — see "Racing a
-    third player for the same system" in `docs/bot-design.md`.
+    third player for the same system" in `docs/design/marshal-pricing.md`.
     """
     lanes = [(1, 2, 2), (2, 3, 1)]
     quiet = _board({1: (2, 40, 3), 2: (0, 4, 3), 3: (3, 20, 4)}, lanes)
@@ -783,7 +783,7 @@ def test_a_retreat_never_goes_into_a_system_being_abandoned(ma):
 
 # --------------------------------------------------------------------------- #
 # A non-oracle successor to marshal: FLOW_AVOIDS_ABANDONED, RELIEF_AWARE,
-# FAST_GUARD_WEIGHT — see docs/bot-design.md
+# FAST_GUARD_WEIGHT — see docs/design/marshal-flow.md
 # --------------------------------------------------------------------------- #
 def _flow_case_state():
     """R (rear, 20) -> D (frontier, doomed, unsaveable) and R -> F (calm front).

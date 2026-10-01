@@ -118,7 +118,7 @@ What it changes, in descending order of measured value:
     stepping in (``DENY_SWAP``), and only across a lane of at least
     ``DENY_SWAP_MIN_TURNS``: 57% at 3 ly/turn, an honest null at the default
     speed, bit-identical at 12. Capping Phase 3's priced strike as well reads
-    33% — see "Denying the swap" in `docs/bot-design.md`.
+    33% — see "Denying the swap" in `docs/design/marshal-flow.md`.
 
   * **It feeds what it has just taken, on a board of short lanes.** Phase 4
     used to flow the rear's surplus to whichever front was nearest; a front
@@ -128,7 +128,7 @@ What it changes, in descending order of measured value:
     worth 54.0% (z = +4.04, REPRODUCED) where the median lane is two turns or
     less. On longer lanes it measured null against marshal and drew more
     against knower, so ``FEED_MAX_TURNS`` switches it off there. See "What the
-    board's human wins say" in `docs/bot-design.md`.
+    board's human wins say" in `docs/design/marshal-flow.md`.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
@@ -136,8 +136,8 @@ no module state at all; never add any, because knower calls this function dozens
 of times per real turn on fictional boards (``_predict_seat``, ``_rollout_decide``)
 and would poison it.
 
-**Everything measured about this bot lives in `docs/bot-design.md` under
-"``models/marshal.py`` and what the measurements deleted"**: where it stands
+**Everything measured about this bot lives in `docs/design/marshal.md`,
+`marshal-pricing.md` and `marshal-flow.md`** (the first says which holds what): where it stands
 against the roster, the guard and margin sweeps, why the attack margin no longer
 carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
 a fight that mostly never happens), the ideas that were built, measured and then
@@ -175,7 +175,7 @@ from starconquest.model import Order
 # advantage and nothing else, because a garrison that can be beaten evacuates
 # rather than fighting 86.7% of the time. See `_enemy_margin`.
 # `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
-# sweep" in `docs/bot-design.md` for what it was measured at, and note that its
+# sweep" in `docs/design/marshal.md` for what it was measured at, and note that its
 # gain is a default-ship-speed result.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
@@ -201,7 +201,7 @@ CONSOLIDATE = True              # Phase 2: the doomed relieve each other
 AVOID_ABANDONED = True          # ...and never retreat into one that is still doomed
 RETREAT_NEAREST = True          # ...and retreat by travel time, not garrison size
 
-# --- see "A non-oracle successor to marshal" in docs/bot-design.md ---------- #
+# --- see "A non-oracle successor to marshal" in docs/design/marshal-flow.md - #
 FLOW_AVOIDS_ABANDONED = True    # Phase 4: don't flow surplus into a system
                                  # Phase 2 is giving up this same turn
 RELIEF_AWARE = 0.5              # _required: price a rival target against a
@@ -218,7 +218,7 @@ DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
 RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
                                  # siege too, when its horizon is at least this
                                  # many turns; 0 = never (neutrals only). See
-                                 # "Phase 3b re-flooding" in docs/bot-design.md
+                                 # "Phase 3b re-flooding" in docs/design/marshal-flow.md
 FEED = 1.0                      # Phase 4: rear surplus flows only to frontier
                                  # systems short of this fraction of their
                                  # largest rival neighbour, while any are; 0 = off
@@ -226,7 +226,7 @@ FEED_FRONT = True               # ...and a frontier system's own leftover tops u
                                  # a short neighbour, up to its shortfall
 FEED_MAX_TURNS = 2              # ...only on a board whose median lane is at most
                                  # this many turns; 0 = on any board. See "Feed
-                                 # what was just taken" in docs/bot-design.md
+                                 # what was just taken" in docs/design/marshal-flow.md
 
 
 # --------------------------------------------------------------------------- #
@@ -271,7 +271,7 @@ def _enemy_margin() -> float:
 
     This deletes `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD`, all three of them
     measured figures — see "Garrisons run away, so the jitter premium buys almost
-    nothing" in `docs/bot-design.md` for the ten cells behind that, and note that
+    nothing" in `docs/design/marshal-pricing.md` for the ten cells behind that, and note that
     the ramp's own regime (3 ly/turn, where `ENEMY_FAR` was the only live term) is
     where removing it gains the *most*, at 63.1%.
     """
@@ -326,7 +326,7 @@ def _richness(state, pid, system, max_prod: int) -> float:
     a preference only binds when the budget forces a choice — 10.4% of the time.
     Inverting this sort entirely costs about two points, which caps what anything
     routed through it can be worth. See "Rushing the enemy" in
-    `docs/bot-design.md`, and note the cap applies to the *sort*: `_wedge` is
+    `docs/design/marshal-pricing.md`, and note the cap applies to the *sort*: `_wedge` is
     worth 12-14 points through this same function because it also steers
     `_front_pull` and the `_flow_to_front` seeding.
     """
@@ -483,7 +483,7 @@ def _relief_capacity(state, target, warning: int) -> int:
     regardless of whether it is itself threatened elsewhere: reading that
     would mean re-deriving a rival's own defensive arithmetic, which the
     non-oracle rule excludes. See ``RELIEF_AWARE`` and "A non-oracle successor
-    to marshal" in `docs/bot-design.md`.
+    to marshal" in `docs/design/marshal-flow.md`.
     """
     if warning <= 0:
         return 0
@@ -531,7 +531,7 @@ def _required(state, pid, target, dist: int) -> int:
     freshly-emptied node on the same turn, which ``decide()`` cannot see for
     either side since every seat is priced against one shared, unmutated
     start-of-turn state. Repricing the strict remainder measures null. See
-    "Racing a third player for the same system" in `docs/bot-design.md`, which
+    "Racing a third player for the same system" in `docs/design/marshal-pricing.md`, which
     also records why a pessimistic remnant estimate hides the converse
     opportunity entirely.
 
@@ -542,7 +542,7 @@ def _required(state, pid, target, dist: int) -> int:
     reads only board facts (whose neighbouring systems are calm, how far they
     are), never a rival's decision rule, so this stays inside the same
     non-oracle contract as everything else here. Weighted by ``RELIEF_AWARE``;
-    see "A non-oracle successor to marshal" in `docs/bot-design.md`.
+    see "A non-oracle successor to marshal" in `docs/design/marshal-flow.md`.
 
     Third-party blocs follow the engine's pile-up rule. One landing *before* us
     fights the garrison alone, so it is folded into ``defence``, per turn
@@ -552,7 +552,7 @@ def _required(state, pid, target, dist: int) -> int:
     ``_through_pileup`` prices the strike that still arrives with enough.
     Shipped for correctness at a measured null, since it changes about one price
     in a thousand. See "The attack side of the pile-up" in
-    `docs/bot-design.md`.
+    `docs/design/marshal-pricing.md`.
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
@@ -703,7 +703,7 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool
     #     garrison size alone — so a whole garrison could be posted down a
     #     six-turn lane to the biggest stack we own while a refuge one turn away
     #     went unused. Worth more than the pooling below (52.0%, z = +3.34); see
-    #     "Two doomed neighbours" in `docs/bot-design.md`.
+    #     "Two doomed neighbours" in `docs/design/marshal-pricing.md`.
     friends = [n for n in s.neighbors
                if sysmap[n].owner_id == pid and n not in abandoned]
     if friends:

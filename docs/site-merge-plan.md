@@ -178,7 +178,7 @@ shipping once.
 
 ## References
 
-- `docs/pbp-design.md`, "Public matches and the lobby": why the current
+- `docs/design/pbp.md`, "Public matches and the lobby": why the current
   two-origin "yours" design is shaped as it is.
 - `netlify.toml` (root) header: the no-secrets rule and the fork-preview reasoning.
 - `leaderboard/netlify.toml`, `leaderboard/README.md`: the board site's own setup.

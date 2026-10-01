@@ -7,7 +7,7 @@
     uv run python tools/position_suite.py --supabase           # the shared corpus
     uv run python tools/position_suite.py --csv out.csv        # every row, for later
 
-Every bot measurement in ``docs/bot-design.md`` is a bot against another bot, and
+Every bot measurement in ``docs/design/bots.md`` is a bot against another bot, and
 that is a real limit rather than a stylistic one: a roster playing itself only
 ever visits positions bots create. A stored replay is a position a *person*
 built — a different shape, with different mistakes in it — and it comes with a
@@ -34,7 +34,7 @@ Where the games come from:
 
 Read the output as a *direction*, never as a verdict. The sample is however many
 games happen to exist, drawn from whoever played them, on whatever setups they
-chose — see "Sweep the speed and node knobs" in bot-design for why a measurement
+chose — see "Lane length across the parameter space" in docs/design/bots.md for why a measurement
 taken in one corner of the parameter space says nothing about the others. What
 this is good for is finding where a bot is worse than a person, which is a
 hypothesis worth a proper paired sweep afterwards.

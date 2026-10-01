@@ -53,7 +53,7 @@ cells, at both speeds and both node counts. `attack_margin` and
     reserve_fraction 0.15                      929-417  1346  69.0%  [66.5, 71.4]  13.96
     reserve_floor 1 (or 0)                     781-516  1297  60.2%  [57.5, 62.8]   7.36
 
-**The pair is superadditive**, the same shape bot-design records for
+**The pair is superadditive**, the same shape docs/design/marshal.md records for
 `FRONTIER_GUARD` + `ENEMY_NEAR`: 71.3% and 60.2% alone, 82.5% together. The
 fraction is on a plateau from 0.15 down to 0.05 (69.0/71.3/71.9), so the
 operative quantity is "well below 0.25", not any particular value.
@@ -93,14 +93,14 @@ It is a large enough effect to assume the harness first. Three things moved me:
   the leaderboard scores on, and it was not part of any objective here.
 * **The repo already contains the same finding, on a different bot, by a
   different route.** `models/marshal.py` sets `RESERVE_FLOOR = 0`, and
-  bot-design records raising it to 1 or 2 as catastrophic (34.8%/25.0%/6.9% at
+  docs/design/marshal.md records raising it to 1 or 2 as catastrophic (34.8%/25.0%/6.9% at
   18/24/40 nodes). Marshal was tuned to this conclusion independently. The
   built-in heuristic simply never received that treatment.
 
 ## Caveats, stated plainly
 
 * **This is self-play only.** Every number above is against a copy of the stock
-  heuristic. bot-design records a case where a knob gained 5 points in self-play
+  heuristic. docs/design/marshal.md records a case where a knob gained 5 points in self-play
   and *lost 7* against thinker — the signature of tuning to a copy of yourself.
   The cross-opponent check against claudebot (the one roster bot that leaves the
   heuristic measurable headroom: 23.3%, where thinker is 2.9% and marshal 0.0%)

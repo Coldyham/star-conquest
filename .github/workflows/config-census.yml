@@ -2,7 +2,7 @@
 # public tables. No secret needed: `games`/`scores` carry a public read policy
 # and config_census reads the publishable key straight out of
 # leaderboard/js/config.mjs. See "Positions from real games" in
-# docs/bot-design.md for why this matters (a margin fitted at config.py's
+# docs/design/bots.md for why this matters (a margin fitted at config.py's
 # defaults may be fitted for a regime nobody actually plays).
 #
 # Split out of a single human-score-report.yml so this, position-suite.yml

@@ -83,7 +83,7 @@ Work goes on a new branch `site-merge` cut from `play-by-post`, so it includes d
 - `href` is set from `GAME_URL` in JS, the same way the pages already build game links. The brand link stays pointed at the board's own index.
 
 ## db910fa "yours" rework (the brief's table)
-Before touching the lobby, read `leaderboard/js/pbp.mjs` and `docs/pbp-design.md` "Public matches and the lobby".
+Before touching the lobby, read `leaderboard/js/pbp.mjs` and `docs/design/pbp.md` "Public matches and the lobby".
 
 - **Lobby reads the game's seat store.** Export `SEATS_KEY = "sc_pbp_seats"`. `readSeats()` parses `{id: {seat, token}}`, the plain JSON string `pbp.remember` writes (`starconquest/pbp.py:161`), and tolerates junk like `parseMine` does.
   - "Yours" = the valid ids in it, newest 50 (`MAX_IDS`), sent to `?action=list&ids=`.
@@ -115,9 +115,9 @@ Before touching the lobby, read `leaderboard/js/pbp.mjs` and `docs/pbp-design.md
   - Rewrite "The game and the board find each other by hostname" to say same-origin, with the old host as a shim.
   - Update the Play-by-post "yours" bullet: drop `#mine=`/`lobby_fragment`/`bare_match`.
   - Update the `share.py` wording.
-- `docs/pbp-design.md` "Public matches and the lobby".
+- `docs/design/pbp.md` "Public matches and the lobby".
 - `leaderboard/README.md`: Setup step 4, step 6, "Finding each other" and Local development (serve `web/` and open `/board/`).
-- `docs/system-design.md` where it covers sibling hosts.
+- `docs/design/` (core, leaderboard) where it covers sibling hosts.
 - `docs/site-merge-plan.md`: mark done, or delete.
 - Memory `netlify-deploy-quota.md`: update once shipped.
 

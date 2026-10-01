@@ -6,7 +6,7 @@
     uv run python tools/config_census.py --csv out.csv   # a row per game, for later
 
 Every bot in ``models/`` is fitted at whatever knobs the person fitting it
-happened to pick, and "Sweep the speed and node knobs" in ``docs/bot-design.md``
+happened to pick, and "Lane length across the parameter space" in ``docs/design/bots.md``
 is the standing warning about what that costs: ``WORLD_SIZE`` is fixed, so a
 lane's length in light-years rises as the node count falls, and
 ``config.SHIP_LY_PER_TURN`` rescales every lane on top. A margin keyed off travel
