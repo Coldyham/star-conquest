@@ -8,7 +8,8 @@ import {
   leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
-  filtersFromParams, isFiltered, listQuery, MODES, PLAYER_COUNTS, SORTS, urlFor, viewKind,
+  filtersFromParams, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, urlFor,
+  viewKind,
 } from "./listing.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -68,7 +69,43 @@ function groupToggle(filters) {
     href: urlFor({ ...filters, group: value }),
     text: label,
   });
-  return el("div", { class: "sorts" }, [linkFor("game", "By game"), linkFor("config", "By config")]);
+  const children = [linkFor("game", "By game"), linkFor("config", "By config")];
+  if (filters.group === "config") children.push(randomSetupButton(filters));
+  return el("div", { class: "sorts" }, children);
+}
+
+/**
+ * "Random setup": one existing config picked at random from those the current
+ * filters allow, opened in the game on a freshly rolled seed — the door
+ * newSeedLink() is on one config's page, with the config left to chance, the
+ * way tools/campaign.py fills a campaign node. Absent with no GAME_URL.
+ */
+function randomSetupButton(filters) {
+  if (!GAME_URL) return null;
+  const button = el("button", {
+    class: "btn play", type: "button", text: "Random setup",
+    title: isFiltered(filters)
+      ? "Open the game on a random setup matching these filters, on a fresh map"
+      : "Open the game on a random setup from the board, on a fresh map",
+  });
+  const status = el("span", { class: "name-status" });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "";
+    try {
+      const pick = pickRandom(await select(randomPoolQuery(filters)));
+      if (!pick) {
+        status.textContent = "No setups match these filters.";
+        button.disabled = false;
+        return;
+      }
+      location.assign(`${GAME_URL}#${await encodeToken(newSeedSetup(pick.settings_json), deflate)}`);
+    } catch (err) {
+      status.textContent = err.message;
+      button.disabled = false;
+    }
+  });
+  return el("div", { class: "random-setup" }, [button, status]);
 }
 
 function picker(name, label, value, options) {

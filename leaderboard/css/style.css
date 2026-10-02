@@ -446,7 +446,11 @@ h1::after {
 .show-more .name-status { color: var(--bad); text-transform: none; }
 
 /* -- a map's ranking toggle -------------------------------------------------- */
-.sorts { display: flex; gap: 0.6rem; margin-bottom: 1.25rem; }
+.sorts { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.25rem; }
+/* The grouped view's "Random setup", pushed to the row's far end. */
+.random-setup { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; }
+.random-setup .play { margin-top: 0; }
+.random-setup .name-status { color: var(--bad); text-transform: none; }
 
 /* -- one map's high-score table -------------------------------------------- */
 .scores {

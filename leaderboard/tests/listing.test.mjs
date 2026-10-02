@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  cleanQuery, filtersFromParams, isFiltered, listQuery, MAX_EXCLUDED, searchClause, urlFor,
+  cleanQuery, filtersFromParams, isFiltered, listQuery, MAX_EXCLUDED, pickRandom, RANDOM_POOL,
+  randomPoolQuery, searchClause, urlFor,
 } from "../js/listing.mjs";
 
 const parse = (qs) => filtersFromParams(new URLSearchParams(qs));
@@ -103,4 +104,23 @@ test("campaign narrows to this week's nodes, and to nothing in a week with none"
   // Both key filters at once are ANDed, which PostgREST allows on one column.
   const both = listQuery(parse("campaign=1&unplayed=1"), { nodes: ["n1"], played: ["n2"] }).query;
   assert.equal(both.match(/&game_key=/g).length, 2);
+});
+
+test("a random setup draws from the grouped view's configs, hand-drawn maps excluded", () => {
+  const query = randomPoolQuery(parse("group=config&fog=on&players=2&sort=maps&contested=1"));
+  assert.ok(query.startsWith("config_summary?select=config_key,settings_json&"));
+  for (const part of ["&fog=is.true", "&players=eq.2", "&settings_json->custom_map=is.null", `&limit=${RANDOM_POOL}`]) {
+    assert.ok(query.includes(part), part);
+  }
+  assert.ok(!query.includes("contenders"));
+  // A config filter would make the pool that one config; the button ignores it.
+  assert.ok(!randomPoolQuery(parse("config=abc")).includes("config_key=eq"));
+});
+
+test("a random pick is uniform over the pool and null from an empty one", () => {
+  const rows = ["a", "b", "c", "d"];
+  assert.equal(pickRandom(rows, () => 0), "a");
+  assert.equal(pickRandom(rows, () => 0.5), "c");
+  assert.equal(pickRandom(rows, () => 0.9999), "d");
+  assert.equal(pickRandom([], () => 0.5), null);
 });

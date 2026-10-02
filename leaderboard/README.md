@@ -37,6 +37,9 @@ and a named one carries a **Fog** badge. With a remembered name, a card also sho
 your own best there ("You: 25"). A config card is laid out like a game card: its
 setup line (mode, players, systems), its name in the config badge's magenta, and
 its map count as the headline figure.
+The grouped view's **Random setup** button picks one of the configs those filters
+allow, uniformly and never a hand-drawn map (the pool `tools/campaign.py` fills a
+campaign node from), and opens it in the game on a freshly rolled seed.
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the

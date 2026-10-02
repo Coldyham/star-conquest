@@ -178,3 +178,25 @@ export function listQuery(filters, { played = [], nodes = [] } = {}) {
   query += `&order=${sort.order}`;
   return { kind, query };
 }
+
+// How many configs a random pick draws from. Far more setups than the board
+// has today; past it the pick is among the most recently active.
+export const RANDOM_POOL = 1000;
+
+/**
+ * The configs "Random setup" picks among: every config the grouped view would
+ * list under these filters, minus hand-drawn maps — the same pool
+ * tools/campaign.py's `families` draws a node from, since a fresh seed on a
+ * hand-drawn map changes only its star names and dice.
+ */
+export function randomPoolQuery(filters) {
+  const { query } = listQuery({ ...filters, config: "", group: "config", sort: "recent" });
+  return query.replace("config_summary?select=*", "config_summary?select=config_key,settings_json") +
+    `&settings_json->custom_map=is.null&limit=${RANDOM_POOL}`;
+}
+
+/** One row, uniformly — or null from an empty pool. `random` is injectable for tests. */
+export function pickRandom(rows, random = Math.random) {
+  if (!rows.length) return null;
+  return rows[Math.min(rows.length - 1, Math.floor(random() * rows.length))];
+}
