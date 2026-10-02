@@ -1,4 +1,4 @@
-import { configured, eq, insert, select, selectPage, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, eq, inList, insert, select, selectPage, UNIQUE_VIOLATION } from "./api.mjs";
 import { campaignMark } from "./campaign.mjs";
 import { GAME_URL } from "./config.mjs";
 import { weekParam, weekStart } from "./crowns.mjs";
@@ -32,9 +32,10 @@ const PAGE_SIZE = 50;
  * moves its map to the top and pushes everything below it down one row.
  * Offsets count rows fetched, not rows drawn, which keeps the paging lined up
  * with the server. A failed page leaves the list alone and lets you retry.
- * `keep` drops a row the server couldn't (see unplayedBy).
+ * `keep` drops a row the server couldn't (see myMaps), and `prepare` fetches
+ * whatever the new cards need before they are drawn (see addMyBests).
  */
-function showMore(list, { kind, query }, render, offset, keep) {
+function showMore(list, { kind, query }, render, offset, { keep, prepare }) {
   const keyOf = (r) => r[kind === "config" ? "config_key" : "game_key"];
   const seen = new Set(list.map(keyOf));
   const button = el("button", { class: "mini", type: "button", text: "Show more" });
@@ -48,6 +49,7 @@ function showMore(list, { kind, query }, render, offset, keep) {
       const page = await selectPage(query, { offset, size: PAGE_SIZE });
       offset += page.rows.length;
       const fresh = page.rows.filter((r) => !seen.has(keyOf(r)) && seen.add(keyOf(r)) && keep(r));
+      await prepare(fresh);
       wrap.before(...fresh.map(render));
       if (page.more) button.disabled = false;
       else wrap.remove();
@@ -196,25 +198,38 @@ function filterBar(filters) {
 }
 
 /**
- * Every map this browser's player has a score on, keyed by game_key, with
- * their best result there — newest map first, so `listQuery`'s capped
- * `not.in` excludes the ones most likely to be on the first page. Empty with
- * no remembered name, and quiet on failure: a card without the marker is
- * still the card.
+ * Every map this browser's player has a score on, for "Unplayed by me" —
+ * newest score first, so `listQuery`'s capped `not.in` excludes the ones most
+ * likely to be on the first page. Empty with no remembered name, and quiet on
+ * failure.
  */
 async function myMaps() {
   const name = myName();
-  if (!name) return new Map();
+  if (!name) return new Set();
   const rows = await select(
-    `scores?select=game_key,turns,lost,users!inner(name_key)` +
+    `scores?select=game_key,users!inner(name_key)` +
       `&users.name_key=${eq(name.toLowerCase())}&order=submitted_at.desc&limit=2000`,
   ).catch(() => []);
-  const best = new Map();
-  for (const r of rows) {
-    const held = best.get(r.game_key);
-    if (!held || compareScores(r, held) < 0) best.set(r.game_key, { turns: r.turns, lost: r.lost });
+  return new Set(rows.map((r) => r.game_key));
+}
+
+/**
+ * This browser's player's best on each of `rows`' maps, merged into `into` for
+ * the "You: 25" badge — asked a page at a time, for the cards about to be
+ * drawn, rather than for every map they have ever played. Quiet on failure: a
+ * card without the marker is still the card.
+ */
+async function addMyBests(into, rows) {
+  const name = myName();
+  if (!name || !rows.length) return;
+  const scores = await select(
+    `scores?select=game_key,turns,lost,users!inner(name_key)` +
+      `&users.name_key=${eq(name.toLowerCase())}&game_key=${inList(rows.map((r) => r.game_key))}`,
+  ).catch(() => []);
+  for (const r of scores) {
+    const held = into.get(r.game_key);
+    if (!held || compareScores(r, held) < 0) into.set(r.game_key, { turns: r.turns, lost: r.lost });
   }
-  return best;
 }
 
 /** "You: 25" on a map this browser's player has a score on. */
@@ -424,22 +439,26 @@ async function load() {
   }
   const filters = filtersFromParams(new URLSearchParams(location.search));
   try {
-    // Your own maps are only on the critical path when they shape the query.
     // Your own maps and the week's campaign nodes are only on the critical
     // path when they shape the query.
-    const pending = myMaps();
     const marks = campaignMarks();
-    const played = filters.unplayed ? [...(await pending).keys()] : [];
+    const played = filters.unplayed ? await myMaps() : new Set();
     const nodes = filters.campaign ? [...(await marks).keys()] : [];
-    const list = listQuery(filters, { played, nodes });
+    const list = listQuery(filters, { played: [...played], nodes });
     const { kind } = list;
-    const [{ rows: fetched, more }, campaigns, mine] = await Promise.all([
-      selectPage(list.query, { size: PAGE_SIZE }), marks, pending,
+    const [{ rows: fetched, more }, campaigns] = await Promise.all([
+      selectPage(list.query, { size: PAGE_SIZE }), marks,
     ]);
     // listQuery excludes only the first MAX_EXCLUDED of a player's maps by key;
     // anything past that is dropped here as it arrives.
-    const keep = (r) => !(kind === "game" && filters.unplayed && mine.has(r.game_key));
+    const keep = (r) => !(kind === "game" && filters.unplayed && played.has(r.game_key));
     const rows = fetched.filter(keep);
+    // Under "Unplayed by me" every card is one you have no score on.
+    const mine = new Map();
+    const prepare = kind === "game" && !filters.unplayed
+      ? (page) => addMyBests(mine, page)
+      : async () => {};
+    await prepare(rows);
     target.classList.remove("loading");
 
     clear(groupTarget);
@@ -465,7 +484,7 @@ async function load() {
       return;
     }
     clear(target).append(...rows.map(render));
-    if (more) target.append(showMore(fetched, list, render, fetched.length, keep));
+    if (more) target.append(showMore(fetched, list, render, fetched.length, { keep, prepare }));
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

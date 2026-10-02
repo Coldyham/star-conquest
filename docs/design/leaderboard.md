@@ -545,6 +545,14 @@ The game and the board are one site, so the game can ask before it plays.
 - **The top bar label is text `main` writes** (`main.campaign_tick` into
   `Ui.campaign_label`). `campaign` imports `pbp`, which imports `engine`, and
   `render` must never pull that in, even indirectly.
+- **The board says it before the game does.** game.html on a live node shows
+  the campaign page's own lines above "Play this map" (`attemptLines`, shared
+  with campaign.html's node panel), so a player arriving from the board already
+  knows whether a win would be a move. It is a note, not a confirm: a modal on
+  the board would ask a second time for one game, since the game confirms on
+  Start, and the link has no way to say the player already answered.
+  `weekQueries` is the one copy of the two reads a week is folded from, for the
+  two pages and the endpoint.
 
 ## Campaign fleets (proposed, not built)
 

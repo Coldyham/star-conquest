@@ -144,6 +144,55 @@ export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
   return { ...out, why: state.homes.has(key) ? "not-adjacent" : "no-home" };
 }
 
+// attemptStatus's reasons a win wouldn't take the node, or wouldn't need to.
+const NOT_A_MOVE = {
+  "no-name": "Post a score once and this page will know which nodes are yours to attempt.",
+  "own-home": "Your home. Homes can't be taken, so it's yours for the week.",
+  own: "Yours. Bettering your score here raises the bar.",
+  "home-taken": "Claimed — homes can't be taken.",
+  "has-home": "You already have a home this week.",
+  "not-adjacent": "Not next to anything you hold yet.",
+  "no-home": "Win a home first — that's how you join.",
+};
+
+const timeOfDay = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * attemptStatus in the board's words: one or two `{tone, text}` lines, tone
+ * "can", "cannot" or "timer". campaign.html's node panel and game.html's note
+ * on a live node both show these, so the two pages never word a rule
+ * differently. `clock` writes graceUntil as a time of day.
+ */
+export function attemptLines(status, { now = Date.now(), clock = timeOfDay } = {}) {
+  if (status.can) {
+    const beat = status.beat ? ` Beat ${status.beat.turns} turns · ${status.beat.lost} lost to take it.` : "";
+    const lines = [{ tone: "can", text: `You can make this move.${beat}` }];
+    if (status.why === "grace") {
+      lines.push({
+        tone: "timer",
+        text: "You've lost the node next to this one, but a win here still counts if you post it " +
+          `within ${waitLabel(status.graceUntil, now)} (by ${clock(status.graceUntil)}).`,
+      });
+    }
+    return lines;
+  }
+  const own = status.why === "own" || status.why === "own-home";
+  return [{ tone: own ? "can" : "cannot", text: NOT_A_MOVE[status.why] }];
+}
+
+/**
+ * The two reads a week is folded from, `day` being its "YYYY-MM-DD": the graph,
+ * and the moves in the order fold replays them. One copy for campaign.html,
+ * game.html and netlify/functions/campaign.mjs.
+ */
+export function weekQueries(day) {
+  return {
+    graph: `campaigns?select=week_start,graph&week_start=eq.${day}`,
+    scores: "campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at" +
+      `&week_start=eq.${day}&order=submitted_at.asc,score_id.asc`,
+  };
+}
+
 /** "34 min", "1 h 05 min": how long until `then`, rounded up to the minute. */
 export function waitLabel(then, now = Date.now()) {
   const minutes = Math.max(1, Math.ceil((then - now) / 60000));

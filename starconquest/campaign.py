@@ -8,10 +8,10 @@ them. It asks the site (``/api/campaign``, which runs that same code) what a
 win here would do for this player right now, then shows the answer: a confirm
 before Start (``menu``) and a reminder in the top bar (``render``).
 
-The one timer, the grace after losing a neighbour, arrives as an absolute time on the *server's* clock, alongside the
-server's own ``now``, and is counted down here from the moment the answer
-landed (``time.monotonic``), so a phone with its clock set wrong still counts
-the right number of minutes.
+The one timer, the grace after losing a neighbour, arrives as an absolute time
+on the *server's* clock, alongside the server's own ``now``, and is counted
+down here from the moment the answer landed (``time.monotonic``), so a phone
+with its clock set wrong still counts the right number of minutes.
 
 Nothing here is load-bearing, in the same way as ``share``: off the web, or
 with the board unreachable, there is simply no status, and the game plays
@@ -25,6 +25,7 @@ Pure core: no pygame.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import time
@@ -198,6 +199,11 @@ class Watcher:
     game (with the one being played). A changed setup drops the old status at
     once, so a confirm is never raised from the previous setup's answer; it is
     looked up once it has settled, then refreshed every ``REFRESH_S``.
+
+    A frame costs a field-by-field comparison with the setup last seen, nothing
+    more: the token (deflated and base64'd) is only rebuilt when that differs,
+    and ``enabled`` is asked once, since neither the platform nor the board's
+    origin changes while the page is open.
     """
 
     def __init__(self) -> None:
@@ -206,15 +212,22 @@ class Watcher:
         self._request: pbp.Request | None = None
         self._changed = 0.0
         self._asked: float | None = None
+        self._enabled: bool | None = None
+        self._seen: Settings | None = None
 
     def pump(self, settings: Settings, now: float | None = None) -> None:
-        if not enabled():
+        if self._enabled is None:
+            self._enabled = enabled()
+        if not self._enabled:
             return
         now = time.monotonic() if now is None else now
-        token = lookup_token(settings)
-        if token != self._token:
-            self._token, self.status, self._request = token, None, None
-            self._changed, self._asked = now, None
+        if settings != self._seen:
+            # A copy, because the menu edits its Settings in place.
+            self._seen = copy.deepcopy(settings)
+            token = lookup_token(settings)
+            if token != self._token:
+                self._token, self.status, self._request = token, None, None
+                self._changed, self._asked = now, None
         if self._request is not None:
             state, body = self._request.poll()
             if state == pbp.PENDING:
@@ -226,9 +239,9 @@ class Watcher:
                 self.status = None     # not a node (any more): nothing to show
             # Any other failure keeps the last answer rather than flickering it.
             return
-        if token is None:
+        if self._token is None:
             return
         due = (now - self._changed >= SETTLE_S) if self._asked is None else (now - self._asked >= REFRESH_S)
         if due:
             self._asked = now
-            self._request = fetch(token, webstore.pbp_name())
+            self._request = fetch(self._token, webstore.pbp_name())

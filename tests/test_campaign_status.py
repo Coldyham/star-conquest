@@ -171,6 +171,24 @@ def test_a_changed_setup_drops_the_old_answer_at_once(monkeypatch):
     assert len(sent) == 1                   # and an unseeded setup isn't asked about
 
 
+def test_an_unchanged_setup_is_not_re_encoded_but_an_edit_in_place_is_seen(monkeypatch):
+    watch, sent = _watching(monkeypatch)
+    encoded = []
+    real = campaign.lookup_token
+    monkeypatch.setattr(campaign, "lookup_token", lambda s: encoded.append(s.seed) or real(s))
+    settings = Settings(seed=42)
+    for i in range(5):
+        watch.pump(settings, now=i * 0.1)
+    assert encoded == [42]
+    watch.pump(settings, now=campaign.SETTLE_S)
+    sent[0].answer = (pbp.OK, answer(why="not-adjacent", can=False))
+    watch.pump(settings, now=campaign.SETTLE_S + 0.1)
+    assert watch.status is not None
+    settings.seed = 43                      # the menu edits its Settings in place
+    watch.pump(settings, now=campaign.SETTLE_S + 0.2)
+    assert encoded == [42, 43] and watch.status is None
+
+
 def test_off_the_web_nothing_is_asked(monkeypatch):
     monkeypatch.setattr(campaign.pbp, "request", lambda *a: (_ for _ in ()).throw(AssertionError))
     watch = campaign.Watcher()

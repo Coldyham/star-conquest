@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  attemptStatus, campaignMark, canAttempt, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
+  attemptLines, attemptStatus, campaignMark, canAttempt, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
+  weekQueries,
 } from "../js/campaign.mjs";
 
 // Homes 10 and 11 hang off field nodes 0 and 2; the field is a line 0 - 1 - 2.
@@ -164,5 +165,31 @@ test("a map's campaign badge points at its node, in its own week", () => {
   });
   assert.deepEqual(campaignMark({ week_start: "2026-09-21", node_id: 3, kind: "field" }, monday), {
     current: false, label: "Past campaign · Node 3", href: "campaign.html?week=2026-09-21&node=3",
+  });
+});
+
+test("every reason reads as one line, and a grace adds its countdown", () => {
+  const status = (why, more = {}) => ({ can: false, why, graceUntil: null, beat: null, ...more });
+  for (const why of ["no-name", "own-home", "own", "home-taken", "has-home", "not-adjacent", "no-home"]) {
+    const lines = attemptLines(status(why));
+    assert.equal(lines.length, 1, why);
+    assert.ok(lines[0].text, why);
+    assert.equal(lines[0].tone, why === "own" || why === "own-home" ? "can" : "cannot", why);
+  }
+  const beat = { turns: 25, lost: 2, name: "bo" };
+  assert.deepEqual(attemptLines({ can: true, why: "adjacent", graceUntil: null, beat }),
+    [{ tone: "can", text: "You can make this move. Beat 25 turns · 2 lost to take it." }]);
+  const now = T0;
+  const lines = attemptLines({ can: true, why: "grace", graceUntil: now + 12 * MIN, beat: null },
+    { now, clock: () => "10:42" });
+  assert.deepEqual(lines.map((l) => l.tone), ["can", "timer"]);
+  assert.match(lines[1].text, /within 12 min \(by 10:42\)/);
+});
+
+test("a week is read as its graph and its moves in fold's order", () => {
+  assert.deepEqual(weekQueries("2026-09-28"), {
+    graph: "campaigns?select=week_start,graph&week_start=eq.2026-09-28",
+    scores: "campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at" +
+      "&week_start=eq.2026-09-28&order=submitted_at.asc,score_id.asc",
   });
 });

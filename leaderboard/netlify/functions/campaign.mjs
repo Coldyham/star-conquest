@@ -26,7 +26,7 @@
 
 import { inflateSync } from "node:zlib";
 
-import { attemptStatus, fold } from "../../js/campaign.mjs";
+import { attemptStatus, fold, weekQueries } from "../../js/campaign.mjs";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../../js/config.mjs";
 import { weekParam, weekStart } from "../../js/crowns.mjs";
 import { decodeToken, setupIdentity } from "../../js/token-decode.mjs";
@@ -95,14 +95,13 @@ export default async function handler(request) {
   const now = Date.now();
   const day = weekParam(weekStart(new Date(now)));
   try {
-    const rows = await read(`campaigns?select=week_start,graph&week_start=eq.${day}`);
+    const reads = weekQueries(day);
+    const rows = await read(reads.graph);
     if (!rows.length) return reply(404, { error: "no campaign" });
     const graph = rows[0].graph;
     const node = nodeFor(graph, decoded.setup);
     if (!node) return reply(404, { error: "not a node" });
-    const scores = await read(
-      `campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at` +
-      `&week_start=eq.${day}&order=submitted_at.asc,score_id.asc`);
+    const scores = await read(reads.scores);
     return reply(200, answer(graph, scores, node, name, now));
   } catch (err) {
     console.error("campaign lookup failed", err.message);

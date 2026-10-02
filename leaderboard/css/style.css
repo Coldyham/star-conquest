@@ -556,6 +556,20 @@ h1::after {
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
 .map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+/* game.html on a live campaign node: the campaign panel's lines (js/campaign.mjs's
+ * attemptLines), above Play this map, edged in the Campaign badge's green. */
+.campaign-note {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-left: 4px solid var(--green);
+  background: rgba(10, 36, 18, 0.45);
+  overflow-wrap: anywhere;
+}
+.campaign-note p { margin: 0.3rem 0; }
+.campaign-note .campaign-note-title {
+  font-family: var(--pixel); font-size: 0.65rem; color: var(--green); text-transform: uppercase;
+}
 .map-actions .btn { margin-top: 0; }
 
 /* -- the bot replays ------------------------------------------------------ */
@@ -983,8 +997,8 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   color: var(--gold); text-transform: uppercase;
 }
 .campaign-detail p { margin: 0.35rem 0; }
-.campaign-detail .can { color: var(--green); }
-.campaign-detail .cannot { color: var(--dim); }
-.campaign-detail .timer { color: var(--gold); }
+.campaign-detail .can, .campaign-note .can { color: var(--green); }
+.campaign-detail .cannot, .campaign-note .cannot { color: var(--dim); }
+.campaign-detail .timer, .campaign-note .timer { color: var(--gold); }
 .campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
 .campaign-detail .btn + .btn { margin-left: 0.5rem; }

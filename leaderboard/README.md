@@ -682,7 +682,9 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **The game says so too.** On the web build, a setup that is one of this
   week's nodes is looked up (`/api/campaign`, by the name this browser last
   posted under). Start asks first if a win wouldn't be a move, or would only be
-  one inside the grace, and the top bar keeps a countdown while you play.
+  one inside the grace, and the top bar keeps a countdown while you play. A
+  live node's own page (`game.html`) shows the same status as the campaign
+  page above its "Play this map" button.
 - A score counts if it had at least one turn played by hand and its replay
   wasn't found to be a `mismatch`. Anything else is just an ordinary score.
 - The week runs its full length; most field nodes held at the close wins.

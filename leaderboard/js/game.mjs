@@ -1,5 +1,5 @@
 import { configured, eq, select } from "./api.mjs";
-import { campaignMark } from "./campaign.mjs";
+import { attemptLines, attemptStatus, campaignMark, fold, weekQueries } from "./campaign.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
@@ -7,7 +7,7 @@ import {
   botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, el, fogBadge,
   embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
-import { mountMyScores } from "./me.mjs";
+import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
@@ -236,14 +236,40 @@ async function renderBots(rows, best, gameSettings) {
 
 /**
  * The ways on from this map: back into the game, and — while the map is a node
- * on this week's campaign — back to that node, to see what is open next.
+ * on this week's campaign — back to that node, to see what is open next, with
+ * `note` (campaignNote) saying first whether a win here would be a move.
  */
-function mapActions(link, campaign) {
+function mapActions(link, campaign, note) {
   const back = campaign && campaign.current
     ? el("a", { class: "btn", href: campaign.href, text: "Campaign map" })
     : null;
   const buttons = [link, back].filter(Boolean);
-  return buttons.length ? [el("div", { class: "map-actions" }, buttons)] : [];
+  return [note, buttons.length ? el("div", { class: "map-actions" }, buttons) : null].filter(Boolean);
+}
+
+/**
+ * Where this browser's player stands on the live campaign node this map is, in
+ * the campaign page's own lines (attemptLines), so "Play this map" says whether
+ * a win would be a move before the game is opened. `entry` is the map's
+ * campaign_games row. Null off a live node, with no remembered name, or on any
+ * failure: the Campaign badge still says it is a node.
+ */
+async function campaignNote(entry, campaign) {
+  const name = myName();
+  if (!campaign || !campaign.current || !name) return null;
+  try {
+    const reads = weekQueries(entry.week_start);
+    const [weeks, posted] = await Promise.all([select(reads.graph), select(reads.scores)]);
+    if (!weeks.length) return null;
+    const graph = weeks[0].graph;
+    const status = attemptStatus(graph, fold(graph, posted), entry.node_id, name);
+    return el("div", { class: "campaign-note" }, [
+      el("p", { class: "campaign-note-title", text: campaign.label }),
+      ...attemptLines(status).map(({ tone, text }) => el("p", { class: tone, text })),
+    ]);
+  } catch {
+    return null;
+  }
 }
 
 /** A link back into the game, carrying the leader's score as the target to beat. */
@@ -337,7 +363,7 @@ async function replayVersions(scores) {
  * very lost/hand/by fields this view is holding back, sitting right there in
  * the page's own HTML whether or not they're ever rendered as text.
  */
-async function renderEmbargoed(game, embargoText, bots, campaign) {
+async function renderEmbargoed(game, embargoText, bots, campaign, note) {
   subtitle.textContent = [
     game.score_count
       ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
@@ -356,7 +382,7 @@ async function renderEmbargoed(game, embargoText, bots, campaign) {
     : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
   const link = await freshPlayLink(game);
-  clear(target).append(lede, ...mapActions(link, campaign));
+  clear(target).append(lede, ...mapActions(link, campaign, await note));
 
   const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
@@ -420,13 +446,14 @@ async function load() {
     }
     const game = games[0];
     const campaign = nodes.length ? campaignMark(nodes[0], weekStart(new Date())) : null;
+    const note = campaignNote(nodes[0], campaign);
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(
       ...[configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean), ...botChips(game));
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {
-      await renderEmbargoed(game, embargo, bots, campaign);
+      await renderEmbargoed(game, embargo, bots, campaign, note);
       return;
     }
 
@@ -453,7 +480,7 @@ async function load() {
     const replays = await replayVersions(scores);
     clear(target).append(
       el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays))),
-      ...mapActions(link, campaign),
+      ...mapActions(link, campaign, await note),
     );
 
     // After the human table, and off the same fetch: the bots are context for
