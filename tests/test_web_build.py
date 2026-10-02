@@ -170,3 +170,10 @@ def test_the_board_links_to_the_game_under_game():
         assert 'href="../">' not in page.read_text()
     from tools import admin
     assert admin.GAME_URL == "https://star-conquest.netlify.app/game/"
+
+
+def test_the_launcher_imports_pygame_for_pygbag():
+    """pygbag installs the pygame-ce wheel only for imports it finds in the
+    top-level main.py; the shim importing only the package boots to black."""
+    launcher = (ROOT / "main.py").read_text()
+    assert re.search(r"^import pygame\b", launcher, re.MULTILINE)
