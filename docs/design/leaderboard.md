@@ -475,6 +475,145 @@ than it is.
     the row instead: a node's seed is fresh, so its `games` row is created
     mid-week by whoever posts first, and `games` is append-only after that.
 
+## Campaign fleets (proposed, not built)
+
+A proposal for giving the campaign meta-map real-time lanes and fleets, written
+up so it can be argued over and playtested before any of it is built. Nothing
+here is in the code. The rules in force are in "Crowns, the weekly campaign and
+embargoes" in this file.
+
+### The problem
+
+`fold` (`js/campaign.mjs`) asks one question of a win on a field node: did this
+player hold a neighbour *at the moment the score was posted*?
+
+```js
+if (![...links.get(nodeId)].some((other) => holds(key, other))) continue;
+```
+
+A score that fails is dropped with no trace. It is never banked against a later
+neighbour, and `campaign.test.mjs` pins that ("a field node is taken only from
+next to something you hold"). Three things follow:
+
+- **A neighbour stolen mid-game voids the game.** You start a node while you
+  hold its neighbour, someone beats your score on that neighbour before you
+  post, and your win counts for nothing. Nothing you could have seen warned you.
+- **No warning of an attack.** A holder learns their node has gone only when
+  the score that took it is already posted.
+- **The week can be swept at the start.** Nothing paces a run of captures but
+  how fast you can play, so one keen player starting at Monday 00:00 UTC can
+  take a chain of nodes before anyone else has opened the page.
+
+### The model: a launch is a move, and a move is a row
+
+Each player has a fleet, which is a claim in transit along one lane of the
+meta-map.
+
+- **A new append-only table**, `campaign_launches (week_start, from_node,
+  to_node, user_id, launched_at default now())`. The server stamps
+  `launched_at` and the client can never set it. Like `scores`, a row is a
+  claim, not a fact: **any row is accepted, and `fold` ignores invalid ones.**
+  That keeps "who holds what is never stored" true. The standing is still a
+  replay, now of launches plus scores, so moderation still recomputes it for
+  free.
+- **A launch is valid** when, at `launched_at`, the player holds `from_node`,
+  the two nodes share a lane, and the player has no other fleet in flight or
+  in its window. One fleet per player is the main brake on a sweep.
+- **Arrival** is `launched_at + hours` for that lane, and it opens a window of
+  `WINDOW_HOURS`. A counted, hand-played win on `to_node` posted inside the
+  window is a move. **Losing `from_node` after launch does not cancel it**, so
+  the claim is locked at launch, and that fixes the stolen-neighbour case. You
+  start a game knowing whether it can count.
+- **A window that closes with no win just ends**, and the player may launch
+  again. Recall and retreat are left out. They would add a rule without
+  adding a choice anybody needs.
+- **Homes stay as they are.** No fleet is needed to claim an empty home. A home
+  is where a player's first launch starts, and it still can't be taken, so it
+  is still the way back for anyone who loses the field.
+
+What a fleet does *not* change: the bar to take a node. An empty node falls to
+any qualifying win, and a held one only to a strictly better score
+(`compareScores`, so a tie defends).
+
+### Collisions fall out of the existing rules
+
+Fold launches, arrivals, window closes and scores as one timeline, in time
+order. When two players' windows overlap on one node, the first counted win in
+either window takes it if it is empty. After that, a win in the other window
+must strictly beat the new holder. In effect the best score wins, and the
+earlier one wins a tie. That is the same thing that happens today when two
+neighbours race for a node, so no new rule is needed.
+
+### What the warning is, honestly
+
+The campaign page would show every fleet in flight, with its source, target
+and ETA. A holder's answer is the one the rules already give: better your own
+score on the node to raise the bar an attacker must clear.
+
+It warns of a *claim window*, not of play. An attacker can play the node's map
+whenever they like, before launching or during the flight, and post when the
+window opens. The embargo is what stops them copying the holder's replay, so
+the warning hands over no information beyond the target and the time.
+
+### Lane length
+
+Hours per lane come from the node coordinates `tools/campaign.py` already
+writes (`x`, `y`, in mapgen world units), scaled by `HOURS_PER_UNIT`. Store
+them in the graph rather than having the page recompute them, so rounding is
+decided once. Lanes become `[a, b, hours]`. `neighbours()` destructures only
+the first two, so it reads the new form unchanged. Bump `GRAPH_VERSION` to 2,
+and keep folding version-1 weeks under the current rules so past weeks don't
+change.
+
+The knobs to playtest are `HOURS_PER_UNIT`, `WINDOW_HOURS` and fleets per
+player. Back of the envelope: with one fleet and a mean lane time of T hours, a
+player makes at most about 168 / T moves a week. At T = 12 that is 14 moves on a
+12-to-40 node field, few enough that latecomers still arrive to a contested
+map. Measure the real distribution of lane lengths on a few generated weeks
+before choosing the scale. Homes sit `HOME_OFFSET` out, which is longer than many
+field lanes, so they may want their own fixed time.
+
+### The open problem: identity
+
+Names are not identities ("Known limitations, accepted on purpose" in
+`leaderboard/README.md`), and today that is nearly harmless: a score forged in
+your name can only help you. A forged *launch* does real damage. It spends your
+one fleet and sends it where you didn't want it to go, and the window it opens
+blocks your next launch.
+
+A candidate, not a decision: a per-week campaign token, minted on your first
+home claim, kept in browser storage the way the game keeps `sc_pbp_seats`, and
+stored hashed on the server. Launches would go through a Netlify function that
+checks it, holding the only write key the way `pbp.mjs` and `log.mjs` do. The
+cost is that it would be the board's first per-person credential, with the
+device-bound trade play-by-post already makes: a lost token is a lost fleet
+until the week ends, unless `tools/admin.py` learns to reissue it.
+
+### What building it would touch
+
+For a later plan, not this one: `schema.sql` (the table, its RLS and grants, a
+view for the page to read), a new function in `netlify/functions/`, `fold`
+(the merged timeline, behind a version-2 branch) and `canAttempt` in
+`js/campaign.mjs`, the campaign page (a launch control, fleets in flight),
+`tools/campaign.py` (lane hours, `GRAPH_VERSION`), and tests in
+`leaderboard/tests/campaign.test.mjs` and `tests/test_campaign.py`.
+
+### Decided against: a play-by-post duel on a collision
+
+When two fleets meet at one node, the obvious game answer is to make them
+fight: open a play-by-post match between the two players and give the node to
+its winner. Set aside, for three reasons:
+
+- **It is a different game.** A node is a challenge against bots on one fixed
+  map. A match between two people is another setup on another board, so its
+  result says nothing about the node.
+- **Somebody may never turn up.** A duel needs both players. The best-score rule
+  needs neither to wait on the other.
+- **It drags play-by-post's deadline machinery into the campaign**, where a
+  week-long clock is already running.
+
+The best-score rule settles a collision with what already exists.
+
 ## The bot column: the rules in full
 
 - **The leaderboard's bot column is computed offline, never served.**
