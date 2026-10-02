@@ -107,6 +107,7 @@ LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened w
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
+LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`campaign`)
 # The board's main list (`leaderboard/js/home.mjs`): every map somebody has
 # posted a score on, newest activity first — what the menu's "Recently played"
 # button says it opens. Its "By config" toggle is one press away from there.

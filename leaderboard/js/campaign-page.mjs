@@ -1,7 +1,7 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { parseWeek, weekAfter, weekBefore, weekParam, weekStart } from "./crowns.mjs";
-import { canAttempt, fold, nodeRadius, playerHue } from "./campaign.mjs";
+import { attemptStatus, canAttempt, fold, nodeRadius, playerHue, waitLabel } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
@@ -30,6 +30,7 @@ let state = null;
 let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
 let selected = params.has("node") ? Number(params.get("node")) : null;
 
+const clockLabel = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const dayLabel = (date) =>
   date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
 const weekHref = (start) =>
@@ -72,7 +73,7 @@ function drawMap() {
     const r = nodeRadius(node.systems);
     const classes = ["node", node.kind];
     if (!holder) classes.push("neutral");
-    if (current && canAttempt(graph, state, node.id, me)) classes.push("open");
+    if (current && canAttempt(graph, state, node.id, me, Date.now())) classes.push("open");
     if (selected === node.id) classes.push("selected");
     const label = node.mystery ? "?" : String(node.systems);
     const who = holder ? `held by ${holder.name}` : "unclaimed";
@@ -96,21 +97,31 @@ function drawMap() {
   }, [...lanes, ...nodes]));
 }
 
-/** Why `me` can or can't move on the selected node, in one line. */
-function attemptNote(node, holder) {
-  if (!current) return null;
-  if (!me) return el("p", { class: "cannot", text: "Post a score once and this page will know which nodes are yours to attempt." });
-  if (canAttempt(graph, state, node.id, me)) {
-    const beat = holder ? ` Beat ${holder.turns} turns · ${holder.lost} lost to take it.` : "";
-    return el("p", { class: "can", text: `You can make this move.${beat}` });
+/** Why `me` can or can't move on the selected node, and when, in a line or two. */
+function attemptNote(node) {
+  if (!current) return [];
+  if (!me) return [el("p", { class: "cannot", text: "Post a score once and this page will know which nodes are yours to attempt." })];
+  const now = Date.now();
+  const status = attemptStatus(graph, state, node.id, me, now);
+  const lines = [];
+  if (status.can) {
+    const beat = status.beat ? ` Beat ${status.beat.turns} turns · ${status.beat.lost} lost to take it.` : "";
+    lines.push(el("p", { class: "can", text: `You can make this move.${beat}` }));
+    if (status.why === "grace") {
+      lines.push(el("p", { class: "timer", text: `You've lost the node next to this one, but a win here still counts if you post it within ${waitLabel(status.graceUntil, now)} (by ${clockLabel(status.graceUntil)}).` }));
+    }
+    return lines;
   }
-  if (holder && holder.key === me.toLowerCase()) return el("p", { class: "can", text: node.kind === "home"
-    ? "Your home. Homes can't be taken, so it's yours for the week."
-    : "Yours. Bettering your score here raises the bar." });
-  if (node.kind === "home") return el("p", { class: "cannot", text: holder ? "Claimed — homes can't be taken." : "You already have a home this week." });
-  return el("p", { class: "cannot", text: state.homes.has(me.toLowerCase())
-    ? "Not next to anything you hold yet."
-    : "Win a home first — that's how you join." });
+  const text = {
+    "own-home": "Your home. Homes can't be taken, so it's yours for the week.",
+    own: "Yours. Bettering your score here raises the bar.",
+    "home-taken": "Claimed — homes can't be taken.",
+    "has-home": "You already have a home this week.",
+    "not-adjacent": "Not next to anything you hold yet.",
+    "no-home": "Win a home first — that's how you join.",
+  }[status.why];
+  lines.push(el("p", { class: status.why === "own" || status.why === "own-home" ? "can" : "cannot", text }));
+  return lines;
 }
 
 async function drawDetail() {
@@ -138,7 +149,8 @@ async function drawDetail() {
       ? ["Held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
         ` — ${holder.turns} turns · ${holder.lost} lost`]
       : [node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."]),
-    ...[attemptNote(node, holder), play, scores].filter(Boolean),
+    ...attemptNote(node),
+    ...[play, scores].filter(Boolean),
   );
 }
 
@@ -170,10 +182,20 @@ function drawFeed() {
 
 function drawStatus() {
   if (!current) { statusLine.textContent = "Final standings for that week."; return; }
-  const left = Math.max(0, weekAfter(week).getTime() - now.getTime());
+  const nowMs = Date.now();
+  const left = Math.max(0, weekAfter(week).getTime() - nowMs);
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
   statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.`;
+}
+
+/** Redrawn once a minute on the live week, so a grace countdown moves without a reload. */
+function redraw() {
+  drawStatus();
+  drawMap();
+  drawDetail();
+  drawStandings();
+  drawFeed();
 }
 
 async function load() {
@@ -186,7 +208,7 @@ async function load() {
   }
   try {
     const day = weekParam(week);
-    const [rows, scores, games] = await Promise.all([
+    const [rows, posted, games] = await Promise.all([
       select(`campaigns?select=week_start,graph&week_start=${eq(day)}`),
       select(`campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at` +
         `&week_start=${eq(day)}&order=submitted_at.asc,score_id.asc`),
@@ -200,13 +222,10 @@ async function load() {
       return;
     }
     graph = rows[0].graph;
-    state = fold(graph, scores);
+    state = fold(graph, posted);
     boards = new Map(games.map((row) => [row.node_id, row.game_key]));
-    drawStatus();
-    drawMap();
-    drawDetail();
-    drawStandings();
-    drawFeed();
+    redraw();
+    if (current) setInterval(redraw, 60000);
   } catch (err) {
     mapBox.classList.remove("loading");
     showError(mapBox, err.message);

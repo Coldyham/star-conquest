@@ -705,6 +705,16 @@ def call(action: str, payload: dict | None = None, **params) -> Request | None:
     for key, value in params.items():
         url += f"&{key}={value}"
     body = json.dumps(payload) if payload is not None else None
+    return request(url, body)
+
+
+def request(url: str, body: str | None = None) -> Request | None:
+    """Start a call to any of the site's endpoints: a GET, or a POST of ``body``.
+
+    The transport behind ``call``, public because it is the one non-blocking,
+    mailbox-per-call request the game has, and ``campaign`` needs the same
+    thing for a different endpoint rather than a third copy of it.
+    """
     return _call_web(url, body) if is_web() else _call_desktop(url, body)
 
 

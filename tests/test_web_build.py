@@ -79,11 +79,20 @@ def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
     assert "--can_close" not in call
 
 
+
+def test_the_game_page_gets_our_favicon_not_pygbags():
+    """Without `--icon`, pygbag downloads its own default into /game/favicon.png,
+    and the game page links that one rather than the site root's."""
+    call = BUILD[BUILD.index("pygbag --build"):].split(")", 1)[0]
+    assert '--icon "$ROOT/tools/pwa/favicon.png"' in call
+    assert (ROOT / "tools" / "pwa" / "favicon.png").exists()
+
 def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
     for path, name in ((paths.LEADERBOARD_LOG_PATH, "log.mjs"),
                        (paths.LEADERBOARD_REPLAY_PATH, "replay.mjs"),
-                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs")):
+                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs"),
+                       (paths.LEADERBOARD_CAMPAIGN_PATH, "campaign.mjs")):
         assert f'export const config = {{ path: "{path}" }};' in (functions / name).read_text()
 
 

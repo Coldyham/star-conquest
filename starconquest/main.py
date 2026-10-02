@@ -19,6 +19,7 @@ import pygame
 
 from starconquest import (
     ai,
+    campaign,
     config,
     engine,
     fog,
@@ -174,6 +175,22 @@ def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
     seed = resolve_seed(settings)
     state, ui, log = start_game(settings, seed, settings.autoplay)
     return state, ui, log, seed
+
+
+def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
+    """Keep the top bar's campaign reminder current for the game being played.
+
+    The menu's own watcher is reused, so a setup it already looked up shows at
+    once, and the lookup is refreshed every `campaign.REFRESH_S` while the
+    game runs: a neighbour lost mid-game starts its grace countdown here
+    without a reload. Nothing is shown for a watched replay or a play-by-post
+    match, neither of which can be posted as a campaign move.
+    """
+    if ui.watched or ui.in_pbp:
+        ui.campaign_label = None
+        return
+    watch.pump(settings)
+    ui.campaign_label = campaign.label(watch.status)
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -1825,6 +1842,7 @@ async def main() -> None:
 
         if scene == "game":
             assert state is not None and ui is not None and log is not None
+            campaign_tick(ui, settings, menu_state.campaign_watch)
             # A mark keeps fading whether or not a playback is currently running
             # (that's the whole point — see `Ui.age_fading_marks`), so this runs
             # unconditionally, every frame, regardless of what `reel` is doing.

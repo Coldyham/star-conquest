@@ -517,8 +517,11 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log`, `/api/replay` and `/api/pbp` on
-   its own origin (`paths.LEADERBOARD_*_PATH`).
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
+   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
+   (`campaign.mjs`) needs no key: it reads the same public campaign rows
+   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
+   them.
 
 ## Finding each other
 
@@ -673,6 +676,13 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **Field nodes** fall to a win posted while you hold a neighbour; somebody
   else's only to a strictly better score (a tie defends). Bettering your own
   score on a node raises the bar for attackers.
+- **Half an hour's grace.** A win also counts if you held a neighbour at any
+  point in the 30 minutes before posting it, so a neighbour taken from you
+  while you were playing doesn't void the game.
+- **The game says so too.** On the web build, a setup that is one of this
+  week's nodes is looked up (`/api/campaign`, by the name this browser last
+  posted under). Start asks first if a win wouldn't be a move, or would only be
+  one inside the grace, and the top bar keeps a countdown while you play.
 - A score counts if it had at least one turn played by hand and its replay
   wasn't found to be a `mismatch`. Anything else is just an ordinary score.
 - The week runs its full length; most field nodes held at the close wins.

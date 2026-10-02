@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, combat, config, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -310,6 +310,13 @@ class MenuState:
     slow_lines: list[str] = field(default_factory=list)
     slow_action: str | None = None
     slow_ack: tuple[str, ...] | None = None
+    # The same modal also asks before playing a weekly-campaign node where a win
+    # wouldn't be a move, or would only be one against a clock (`campaign.confirm`).
+    # Its title then names the node instead of the slow-setup heading.
+    slow_title: str = ""
+    # Looks up whether the setup on the menu is a campaign node (web only).
+    # Pumped from `pump`, and by `main` while that setup is being played.
+    campaign_watch: campaign.Watcher = field(default_factory=campaign.Watcher)
     # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
     # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
     # never by `draw`, which only shows it while the key still matches.
@@ -600,7 +607,7 @@ def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
     go, back = _slow_labels()
     _draw_menu_modal(
         surface, ms, w, h,
-        [("This setup may play slowly", f["normal"], config.COLOR_TEXT)]
+        [(ms.slow_title or "This setup may play slowly", f["normal"], config.COLOR_TEXT)]
         + [(line, f["small"], _WARN if i == 0 else config.COLOR_TEXT_DIM)
            for i, line in enumerate(ms.slow_lines)],
         ("slow_go", go, _BTN_FILL, _WARN),
@@ -1760,6 +1767,7 @@ def pump(ms: MenuState, settings: Settings) -> None:
     slider mid-drag changes on every motion and generating a large board on each
     one would stall the drag: the survey waits for the release."""
     _survey_lanes(ms, settings)
+    ms.campaign_watch.pump(settings)
     field_name = _editing_field(ms)
     if field_name is None:
         return
@@ -2168,9 +2176,16 @@ def _unless_slow(ms: MenuState, settings: Settings, action: str,
     setup; any change that moves its text asks afresh.
     """
     lines = setup_warnings(settings, people)
+    title = ""
+    asked = campaign.confirm(ms.campaign_watch.status) if action == "start" else None
+    if asked is not None:
+        # One modal for both: the campaign's lines first, under the node's name.
+        title, campaign_lines = asked
+        lines = campaign_lines + lines
     if not lines or tuple(lines) == ms.slow_ack:
         return action
     ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
+    ms.slow_title = title
     return None
 
 
