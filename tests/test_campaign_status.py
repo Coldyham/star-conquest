@@ -77,6 +77,16 @@ def test_the_top_bar_label_says_what_a_win_here_would_do():
     assert campaign.label(grace, t + 13 * 60) == "Node 3: grace over"
 
 
+def test_the_top_bar_label_carries_the_score_to_beat_on_a_held_node():
+    t = 100.0
+    held = {"turns": 30, "lost": 2, "name": "bo"}
+    assert campaign.label(status(beat=held), t) == "Node 3: beat bo's 30t / 2 lost"
+    assert campaign.label(status(beat={**held, "name": ""}), t) == "Node 3: beat 30t / 2 lost"
+    grace = status(why="grace", graceUntil=NOW + 12 * MIN, beat=held)
+    assert campaign.label(grace, t) == "Node 3: post within 12 min, beat 30t / 2 lost"
+    assert campaign.label(grace, t + 13 * 60) == "Node 3: grace over"
+
+
 def test_start_is_confirmed_only_when_a_win_wouldnt_count_or_is_on_the_clock():
     t = 100.0
     assert campaign.confirm(None) is None

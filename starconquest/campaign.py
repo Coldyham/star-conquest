@@ -166,7 +166,16 @@ def label(status: Status | None, now: float | None = None) -> str | None:
         return f"{name}: not a move"
     if status.why == "grace":
         grace = _live(status, status.grace_until, now)
-        return f"{name}: post within {minutes(grace)}" if grace is not None else f"{name}: grace over"
+        if grace is None:
+            return f"{name}: grace over"
+        if status.beat is not None:
+            turns, lost, _holder = status.beat
+            return f"{name}: post within {minutes(grace)}, beat {turns}t / {lost} lost"
+        return f"{name}: post within {minutes(grace)}"
+    if status.beat is not None:
+        turns, lost, holder = status.beat
+        who = f"{holder}'s " if holder else ""
+        return f"{name}: beat {who}{turns}t / {lost} lost"
     return f"{name}: open"
 
 
