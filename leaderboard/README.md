@@ -654,6 +654,15 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **Field nodes** fall to a win posted while you hold a neighbour; somebody
   else's only to a strictly better score (a tie defends). Bettering your own
   score on a node raises the bar for attackers.
+- **Half an hour's grace.** A win also counts if you held a neighbour at any
+  point in the 30 minutes before posting it, so a neighbour taken from you
+  while you were playing doesn't void the game.
+- **One move an hour.** Each move (a home claimed, a node taken) makes your
+  next one wait an hour. A win posted during the wait is *queued*: it plays
+  when the hour is up, against whoever holds the node then, and several queued
+  wins play one an hour in posting order. Bettering your own node is not a move
+  and never waits. A queued win that would play after the week closes never
+  does. The page lists every queued win, so a holder sees one coming.
 - A score counts if it had at least one turn played by hand and its replay
   wasn't found to be a `mismatch`. Anything else is just an ordinary score.
 - The week runs its full length; most field nodes held at the close wins.

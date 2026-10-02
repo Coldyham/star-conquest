@@ -434,8 +434,10 @@ than it is.
   and the link back to `campaign.html?node=`. Who holds what is never stored: `js/campaign.mjs`'s `fold` replays the
   week's hand-played counted scores in posting order — a home goes to the
   first win from a player without one and can't be taken; a field node falls
-  to a win posted while holding a neighbour, and a held one only to a strictly
-  better score. The Advanced slider ranges live in `settings` (`ADV_*`) for
+  to a win posted while holding a neighbour (or within `GRACE_MS` of losing
+  one), and a held one only to a strictly better score. Each move starts a
+  `COOLDOWN_MS` wait, and a win posted during it is queued and played when it
+  ends; see "Grace and cooldown" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
   this reason; `menu` aliases them.
 - **A map can be registered with no score at all, and can carry a one-time
   reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
@@ -475,12 +477,56 @@ than it is.
     the row instead: a node's seed is fresh, so its `games` row is created
     mid-week by whoever posts first, and `games` is append-only after that.
 
+## Grace and cooldown
+
+Two timers in `js/campaign.mjs`, both derived like everything else in the
+campaign: `fold` takes a `now` and replays the scores against it, so a queued
+win "lands" on the next page load, or the page's once-a-minute redraw, with
+nothing stored.
+
+- **`GRACE_MS` (30 minutes).** A field win counts if the player held a
+  neighbour at any moment from 30 minutes before posting until it plays.
+  `fold` keeps `lostAt` per player and node to answer that. It fixes the case
+  that made the rule feel unfair: you start a node beside one you hold,
+  somebody takes that neighbour mid-game, and your win counted for nothing.
+  Thirty minutes is about one game. It only needs to cover the game in
+  progress when the neighbour went, not a long campaign of play from memory.
+- **`COOLDOWN_MS` (one hour).** Every move starts a wait before that player's
+  next one. Without it, nothing paced a sweep except playing speed, so a
+  player starting at Monday 00:00 UTC could chain several nodes before anyone
+  else had opened the page. A win posted during the wait is **queued, not
+  dropped**, so no game is wasted: it plays when the wait ends, against the
+  board as it is then, so the holder may have raised the bar or lost the node
+  in the meantime. Queued wins play one per hour in posting order, since each
+  one that lands starts a fresh wait. Bettering your own node is a defence, not
+  a move, so it never waits. Homes are exempt because anyone waiting already
+  has one.
+- **The grace is anchored at posting, not at play.** A queued win was posted
+  while its player could still claim the node, and the queue is the rule's
+  doing, not theirs. The window runs from `posted - GRACE_MS` to the moment it
+  plays.
+- **Nothing plays after the week closes** (`weekEnd`). A win still queued at
+  the close never resolves, the same way a win posted after it was never in
+  `campaign_scores`.
+- **A queued win is a warning.** The page lists the queue, so a holder can see
+  an attack waiting and better their own score before it plays. That is a
+  small, free version of what the fleet proposal below wanted from
+  inbound fleets.
+- **`attemptStatus`** is the one place that says what a player may do on a
+  node at `now` (`why`, `graceUntil`, `readyAt`, `beat`). The page and the
+  game both read it, so they can't disagree about a timer.
+
 ## Campaign fleets (proposed, not built)
 
 A proposal for giving the campaign meta-map real-time lanes and fleets, written
 up so it can be argued over and playtested before any of it is built. Nothing
 here is in the code. The rules in force are in "Crowns, the weekly campaign and
 embargoes" in this file.
+
+Since this was written, "Grace and cooldown" in this file has dealt more
+cheaply with the stolen neighbour and the Monday sweep, and the visible queue
+gives part of the warning. Whatever is left for fleets has to justify a stored
+table and a per-person credential on what remains.
 
 ### The problem
 

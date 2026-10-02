@@ -942,5 +942,6 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail p { margin: 0.35rem 0; }
 .campaign-detail .can { color: var(--green); }
 .campaign-detail .cannot { color: var(--dim); }
+.campaign-detail .timer { color: var(--gold); }
 .campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
 .campaign-detail .btn + .btn { margin-left: 0.5rem; }

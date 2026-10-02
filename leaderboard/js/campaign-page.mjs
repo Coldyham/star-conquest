@@ -1,7 +1,7 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { parseWeek, weekAfter, weekBefore, weekParam, weekStart } from "./crowns.mjs";
-import { canAttempt, fold, nodeRadius, playerHue } from "./campaign.mjs";
+import { attemptStatus, canAttempt, fold, keyOf, nodeRadius, playerHue, waitLabel } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
@@ -17,6 +17,7 @@ const mapBox = document.getElementById("map");
 const detailBox = document.getElementById("detail");
 const standingsBox = document.getElementById("standings");
 const feedBox = document.getElementById("feed");
+const queueBox = document.getElementById("queue");
 
 const params = new URLSearchParams(location.search);
 const now = new Date();
@@ -26,10 +27,12 @@ const current = week.getTime() === thisWeek.getTime();
 const me = myName();
 
 let graph = null;
+let scores = [];
 let state = null;
 let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
 let selected = params.has("node") ? Number(params.get("node")) : null;
 
+const clockLabel = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const dayLabel = (date) =>
   date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
 const weekHref = (start) =>
@@ -72,7 +75,7 @@ function drawMap() {
     const r = nodeRadius(node.systems);
     const classes = ["node", node.kind];
     if (!holder) classes.push("neutral");
-    if (current && canAttempt(graph, state, node.id, me)) classes.push("open");
+    if (current && canAttempt(graph, state, node.id, me, Date.now())) classes.push("open");
     if (selected === node.id) classes.push("selected");
     const label = node.mystery ? "?" : String(node.systems);
     const who = holder ? `held by ${holder.name}` : "unclaimed";
@@ -96,21 +99,36 @@ function drawMap() {
   }, [...lanes, ...nodes]));
 }
 
-/** Why `me` can or can't move on the selected node, in one line. */
-function attemptNote(node, holder) {
-  if (!current) return null;
-  if (!me) return el("p", { class: "cannot", text: "Post a score once and this page will know which nodes are yours to attempt." });
-  if (canAttempt(graph, state, node.id, me)) {
-    const beat = holder ? ` Beat ${holder.turns} turns · ${holder.lost} lost to take it.` : "";
-    return el("p", { class: "can", text: `You can make this move.${beat}` });
+/** Why `me` can or can't move on the selected node, and when, in a line or two. */
+function attemptNote(node) {
+  if (!current) return [];
+  if (!me) return [el("p", { class: "cannot", text: "Post a score once and this page will know which nodes are yours to attempt." })];
+  const now = Date.now();
+  const status = attemptStatus(graph, state, node.id, me, now);
+  const lines = [];
+  if (status.can) {
+    const beat = status.beat ? ` Beat ${status.beat.turns} turns · ${status.beat.lost} lost to take it.` : "";
+    lines.push(el("p", { class: "can", text: `You can make this move.${beat}` }));
+    if (status.why === "grace") {
+      lines.push(el("p", { class: "timer", text: `You've lost the node next to this one, but a win here still counts if you post it within ${waitLabel(status.graceUntil, now)} (by ${clockLabel(status.graceUntil)}).` }));
+    }
+    if (status.readyAt) {
+      lines.push(el("p", { class: "timer", text: `You moved less than an hour ago. Post a win now and it's queued, then played at ${clockLabel(status.readyAt)} (in ${waitLabel(status.readyAt, now)}), against whoever holds the node then.` }));
+    }
+    return lines;
   }
-  if (holder && holder.key === me.toLowerCase()) return el("p", { class: "can", text: node.kind === "home"
-    ? "Your home. Homes can't be taken, so it's yours for the week."
-    : "Yours. Bettering your score here raises the bar." });
-  if (node.kind === "home") return el("p", { class: "cannot", text: holder ? "Claimed — homes can't be taken." : "You already have a home this week." });
-  return el("p", { class: "cannot", text: state.homes.has(me.toLowerCase())
-    ? "Not next to anything you hold yet."
-    : "Win a home first — that's how you join." });
+  const text = {
+    "own-home": "Your home. Homes can't be taken, so it's yours for the week.",
+    own: "Yours. Bettering your score here raises the bar, and never waits on your cooldown.",
+    "home-taken": "Claimed — homes can't be taken.",
+    "has-home": "You already have a home this week.",
+    "not-adjacent": "Not next to anything you hold yet.",
+    "no-home": "Win a home first — that's how you join.",
+  }[status.why];
+  const mine = state.queued.filter((q) => q.key === keyOf(me) && q.nodeId === node.id);
+  if (mine.length) lines.push(el("p", { class: "timer", text: `Your win here is queued, to be played at ${clockLabel(mine[0].at)}.` }));
+  lines.push(el("p", { class: status.why === "own" || status.why === "own-home" ? "can" : "cannot", text }));
+  return lines;
 }
 
 async function drawDetail() {
@@ -138,7 +156,8 @@ async function drawDetail() {
       ? ["Held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
         ` — ${holder.turns} turns · ${holder.lost} lost`]
       : [node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."]),
-    ...[attemptNote(node, holder), play, scores].filter(Boolean),
+    ...attemptNote(node),
+    ...[play, scores].filter(Boolean),
   );
 }
 
@@ -163,17 +182,44 @@ function drawFeed() {
         ? [` took node ${move.nodeId} from `, el("a", { href: userHref([move.from]), text: move.from })]
         : ` claimed ${graph.nodes.find((n) => n.id === move.nodeId)?.kind === "home" ? "home" : "node"} ${move.nodeId}`,
       `, ${move.turns} turns `,
+      move.at !== move.posted ? `(queued from ${clockLabel(move.posted)}) ` : "",
       el("span", { class: "when", text: relativeTime(new Date(move.at).toISOString()) }),
     ].flat())))
     : el("p", { class: "empty", text: current ? "No moves yet this week." : "Nobody moved that week." }));
 }
 
+function drawQueue() {
+  clear(queueBox).append(state.queued.length
+    ? el("ol", { class: "steals" }, state.queued.map((move) => el("li", { class: "steal" }, [
+      el("a", { href: userHref([move.name]), text: move.name }),
+      ` on node ${move.nodeId}, ${move.turns} turns · ${move.lost} lost, plays at ${clockLabel(move.at)} `,
+      el("span", { class: "when", text: `(in ${waitLabel(move.at)})` }),
+    ])))
+    : el("p", { class: "empty", text: current ? "Nothing waiting." : "Nothing was left waiting." }));
+}
+
 function drawStatus() {
   if (!current) { statusLine.textContent = "Final standings for that week."; return; }
-  const left = Math.max(0, weekAfter(week).getTime() - now.getTime());
+  const nowMs = Date.now();
+  const left = Math.max(0, weekAfter(week).getTime() - nowMs);
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
-  statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.`;
+  const ready = me ? state.readyAt.get(keyOf(me)) : null;
+  const wait = ready && ready > nowMs
+    ? ` Your next move can land at ${clockLabel(ready)} (in ${waitLabel(ready, nowMs)}); a win posted before then is queued, not lost.`
+    : "";
+  statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.${wait}`;
+}
+
+/** Re-fold against the clock, so queued moves land and timers count down without a reload. */
+function redraw() {
+  state = fold(graph, scores, Date.now());
+  drawStatus();
+  drawMap();
+  drawDetail();
+  drawStandings();
+  drawQueue();
+  drawFeed();
 }
 
 async function load() {
@@ -186,7 +232,7 @@ async function load() {
   }
   try {
     const day = weekParam(week);
-    const [rows, scores, games] = await Promise.all([
+    const [rows, posted, games] = await Promise.all([
       select(`campaigns?select=week_start,graph&week_start=${eq(day)}`),
       select(`campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at` +
         `&week_start=${eq(day)}&order=submitted_at.asc,score_id.asc`),
@@ -200,13 +246,10 @@ async function load() {
       return;
     }
     graph = rows[0].graph;
-    state = fold(graph, scores);
+    scores = posted;
     boards = new Map(games.map((row) => [row.node_id, row.game_key]));
-    drawStatus();
-    drawMap();
-    drawDetail();
-    drawStandings();
-    drawFeed();
+    redraw();
+    if (current) setInterval(redraw, 60000);
   } catch (err) {
     mapBox.classList.remove("loading");
     showError(mapBox, err.message);
