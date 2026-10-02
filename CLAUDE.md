@@ -230,6 +230,10 @@ already resolve simultaneously. The rationale for each rule is in
   digest is a tripwire against drift, not an anti-cheat mechanism. The live
   turn's orders are released all at once, only when every seat is in
   (`visibleOrders`).
+- **A poll is a brief while nothing settled can change.** `&have=<turn>` gets
+  the live turn without the log or orders (`briefState`), merged into the last
+  whole read by `pbp.with_brief`, which refuses any other turn. An idle tab polls
+  less (`main.pbp_idle_floor`). Detail: `docs/design/pbp.md`, "What a poll costs".
 - **Nothing resolves a play-by-post turn on a clock.** End Turn submits
   (`main.pbp_send`), and play and autoplay are unavailable. A settled turn still
   goes through `main.resolve_turn`, passing the record as `script`.

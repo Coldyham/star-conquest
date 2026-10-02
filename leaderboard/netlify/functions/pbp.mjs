@@ -16,6 +16,8 @@
  * Seven actions, chosen by `?action=`:
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
+ *                  With `&have=<turn>` from a client already on that turn, and
+ *                  while it is still waiting on somebody, only the live turn.
  *   list    (GET)  the public matches, for the lobby page (`pbp.html`): each
  *                  one's setup, status, who is outstanding, and which seats are
  *                  open. With `&ids=a,b,…`, those matches instead, public or
@@ -78,6 +80,9 @@ export function allowedOrigin(origin) {
 
 // `replay._MATCH_ID_RE`, and the alphabet `GameLog.encoded` produces.
 const MATCH_ID = /^[0-9a-f]{16}$/;
+const TURN = /^\d{1,6}$/;
+// Every `pbp_matches` column a brief read needs: all but `log` and the setup.
+const BRIEF_COLUMNS = "match_id,seats,turn,finished,turn_opened_at,deadline_hours,title,names,winner";
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 // A seat token as `mintToken` produces it: 32 hex characters, 128 bits.
 const TOKEN = /^[0-9a-f]{32}$/;
@@ -484,6 +489,12 @@ async function handleState(call, query, origin) {
   const matchId = query.get("match") || "";
   if (!MATCH_ID.test(matchId)) return reply(400, { error: "bad match" }, origin);
 
+  const have = query.get("have");
+  if (have !== null && TURN.test(have)) {
+    const brief = await briefState(call, matchId, Number(have));
+    if (brief) return reply(200, brief, origin);
+  }
+
   const rows = await call(`/pbp_matches?select=*&match_id=eq.${matchId}`);
   if (rows === null) return reply(502, { error: "store refused" }, origin);
   if (!rows.length) return reply(404, { error: "no such match" }, origin);
@@ -529,6 +540,47 @@ async function handleState(call, query, origin) {
     // simultaneous. Complete-or-nothing is what makes both true at once.
     turns: visibleOrders(orders, match.turn, waiting),
   }, origin);
+}
+
+/**
+ * The live turn alone, for a client whose board already stands on `have` — or
+ * null when only the whole state will do.
+ *
+ * This is what a poll costs while a turn is open, so it reads neither the log
+ * nor any order's contents: nothing settled can change until the turn resolves,
+ * and the client keeps those from its last whole read (`pbp.with_brief`). Null
+ * once the match has moved past `have` (the client needs the log that moved it)
+ * and once every seat is in (it needs the live orders to resolve), which leaves
+ * the client a single round trip either way. Only the two latest turns' rows are
+ * read, because `lapsedAction` asks no more of the history than whether the
+ * turn before was missed.
+ */
+async function briefState(call, matchId, have) {
+  const rows = await call(`/pbp_matches?select=${BRIEF_COLUMNS}&match_id=eq.${matchId}`);
+  if (!rows?.length || rows[0].turn !== have) return null;
+  const match = rows[0];
+
+  const recent = await call(
+    `/pbp_orders?select=turn,seat,source&match_id=eq.${matchId}&turn=in.(${have - 1},${have})`);
+  if (recent === null) return null;
+  const roster = match.seats.seats ?? match.seats;
+  const submitted = recent.filter((row) => row.turn === have).map((row) => row.seat);
+  const waiting = outstanding(roster, submitted);
+  if (!waiting.length) return null;
+  return {
+    brief: true,
+    match_id: match.match_id,
+    seats: roster,
+    turn: match.turn,
+    finished: match.finished,
+    turn_opened_at: match.turn_opened_at,
+    deadline_hours: match.deadline_hours,
+    title: match.title ?? "",
+    names: match.names ?? {},
+    winner: match.winner ?? null,
+    submitted,
+    lapsed: lapsedSeats(match, recent, waiting),
+  };
 }
 
 /** Open a match, and mint one token per seated player. */

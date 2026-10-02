@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import engine, replay, webstore
 from .model import GameState, Order
@@ -359,6 +359,38 @@ def match_from_dict(data: dict) -> Match | None:
         log=str(data.get("log", "") or ""),
         finished=bool(data.get("finished", False)),
         rules_version=int(data.get("rules_version", 1) or 1),
+        deadline_hours=data.get("deadline_hours"),
+        turn_opened_at=str(data.get("turn_opened_at", "") or ""),
+        title=str(data.get("title", "") or ""),
+        names=_names_from(data.get("names")),
+    )
+
+
+def with_brief(match: Match, data: dict) -> Match | None:
+    """``match`` brought up to date by a brief read. None if ``data`` isn't one for it.
+
+    A brief (``?action=state&have=<turn>``) carries only what can change while a
+    turn is open, and the endpoint sends one only while the live turn is still
+    waiting on somebody, so everything it leaves out — the setup, the log, the
+    settled turns' orders — is exactly what ``match`` already holds, provided
+    ``match`` was read at the same turn. Anything else is refused rather than
+    merged, because a ``Match`` pairing one turn's log with another turn's number
+    is a board nobody had.
+    """
+    if not isinstance(data, dict) or data.get("brief") is not True:
+        return None
+    if data.get("match_id") != match.match_id or data.get("turn") != match.turn:
+        return None
+    seats = [int(s) for s in data.get("seats") or [] if isinstance(s, int)]
+    if not seats:
+        return None
+    return replace(
+        match,
+        seats=sorted(seats),
+        submitted=sorted(int(s) for s in data.get("submitted") or []),
+        turns=[row for row in match.turns if row.get("turn", match.turn) < match.turn],
+        lapsed=_lapsed_from(data.get("lapsed")),
+        finished=bool(data.get("finished", False)),
         deadline_hours=data.get("deadline_hours"),
         turn_opened_at=str(data.get("turn_opened_at", "") or ""),
         title=str(data.get("title", "") or ""),
@@ -880,11 +912,17 @@ def seat_from(body: dict, match_id: str, token: str) -> Seat | None:
     return seat if seat.valid() else None
 
 
-def fetch_state(match_id: str) -> Request | None:
-    """Ask for a match's current state."""
+def fetch_state(match_id: str, have: int | None = None) -> Request | None:
+    """Ask for a match's current state.
+
+    ``have`` is the turn a whole read we still hold was taken at, and lets the
+    endpoint answer with a brief (``with_brief``) while that turn is still open.
+    """
     if not replay._MATCH_ID_RE.match(match_id):
         return None
-    return call("state", match=match_id)
+    if have is None:
+        return call("state", match=match_id)
+    return call("state", match=match_id, have=have)
 
 
 def submit(seat: Seat, turn: int, orders: list[Order],
