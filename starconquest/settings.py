@@ -148,9 +148,10 @@ _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 # entry below. Worth knowing before adding a per-bot knob here rather than
 # through `AiParams.aux`, which every seat dict already carries.
 _LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
-    ("custom_map",),
-    ("custom_map", "in_lane_battles"),
-    ("custom_map", "in_lane_battles", "defender_advantage"),
+    ("layout",),
+    ("layout", "custom_map"),
+    ("layout", "custom_map", "in_lane_battles"),
+    ("layout", "custom_map", "in_lane_battles", "defender_advantage"),
 )
 
 
@@ -213,6 +214,11 @@ class Settings:
     """A game configuration. ``seed is None`` means "roll a fresh seed at start"."""
 
     mode: str = "random"
+    # How a symmetric map's sectors are joined (`mapgen.SYMMETRIC_LAYOUTS`).
+    # Inert on any other map: `layout_inert` says when, and then the setup's
+    # digest and shared link read it as the default, so a random map keeps one
+    # key whatever this was last left at.
+    layout: str = mapgen.SYMMETRIC_LAYOUTS[0]
     players: int = config.DEFAULT_PLAYERS
     nodes: int = config.DEFAULT_NODES
     seed: int | None = None
@@ -273,11 +279,17 @@ class Settings:
         """
         return cls(
             mode=args.mode,
+            layout=getattr(args, "layout", mapgen.SYMMETRIC_LAYOUTS[0]),
             players=args.players,
             nodes=args.nodes,
             seed=args.seed,
             autoplay=args.autoplay,
         )
+
+    def layout_inert(self) -> bool:
+        """True when ``layout`` cannot shape the map: it is not a symmetric one,
+        or a hand-drawn recipe replaces whatever would have been generated."""
+        return self.mode != "symmetric" or self.custom_map is not None
 
     def min_nodes(self) -> int:
         """Fewest systems this player count allows (mapgen enforces the same floor)."""
@@ -326,6 +338,8 @@ class Settings:
 
         if out.mode not in MODES:
             out.mode = "random"
+        if out.layout not in mapgen.SYMMETRIC_LAYOUTS:
+            out.layout = mapgen.SYMMETRIC_LAYOUTS[0]
         out.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, out.players))
         out.nodes = max(out.min_nodes(), min(config.MAX_NODES, out.nodes))
         # Not cosmetic like the other knobs' ranges: above this the map cannot be
@@ -392,6 +406,8 @@ class Settings:
         out = {k: full[k] for k in _TOKEN_ALWAYS}
         for f in fields(self):
             if f.name in _TOKEN_ALWAYS or f.name in _STRUCTURED:
+                continue
+            if f.name == "layout" and self.layout_inert():
                 continue
             if full[f.name] != getattr(blank, f.name):
                 out[f.name] = full[f.name]
@@ -476,6 +492,8 @@ class Settings:
         data = self.to_dict()
         for skip in ("challenge", "autoplay"):
             data.pop(skip, None)
+        if self.layout_inert():
+            data["layout"] = mapgen.SYMMETRIC_LAYOUTS[0]
         # A seat beyond `players` is inert, and `token_dict` truncates `ai`/
         # `ai_strategy` there — so it never travels in a shared link, and a
         # decode always pads it back with fresh defaults. Blank it here the same
@@ -729,7 +747,7 @@ def build_state(settings: Settings, seed: int) -> GameState:
     if settings.custom_map is not None:
         state = mapgen.generate_custom(seed, settings.custom_map)
     else:
-        state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
+        state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players, settings.layout)
     for player in state.players.values():
         if not player.is_neutral:
             player.ai_strategy = resolve_strategy(settings.seat_strategy(player.id), seed, player.id)
@@ -742,7 +760,7 @@ def build_state(settings: Settings, seed: int) -> GameState:
 # --------------------------------------------------------------------------- #
 # Lane survey: what a setup does to travel time, for the menu's readout
 # --------------------------------------------------------------------------- #
-_LANE_SHAPERS = ("mode", "players", "nodes", "seed", "node_jitter", "relax_min_sep_frac",
+_LANE_SHAPERS = ("mode", "layout", "players", "nodes", "seed", "node_jitter", "relax_min_sep_frac",
                  "lloyd_passes", "extra_edge_fraction", "max_edge_length_frac")
 
 
@@ -775,7 +793,8 @@ def lane_lengths(settings: Settings) -> list[float]:
             states = [mapgen.generate_custom(0, settings.custom_map)]
         else:
             seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
-            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players)
+            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players,
+                                    settings.layout)
                       for s in seeds]
     finally:
         for const, value in saved:

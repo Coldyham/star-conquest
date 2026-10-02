@@ -591,6 +591,49 @@ both. Note `symmetric` rounds the node count up to a whole number per sector and
 adds the shared centre, so it can return **more than it was asked for** (41 at 40
 nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
 
+**A symmetric map's layout says what joins its sectors.** The original board ran
+every sector into one shared hub and nothing else, so every symmetric game was
+the same shape: a race for the middle, with no border between neighbours.
+`Settings.layout` picks one of `mapgen.SYMMETRIC_LAYOUTS`:
+
+- `hub` — the original: each sector's innermost system links to one centre.
+- `ring` — no centre; each sector links to both neighbours across its seams, so
+  play is about borders, and a seat has two fronts and no shared prize.
+- `wheel` — the hub and the ring together: more routes, and the centre can be
+  bypassed.
+- `core` — one contested system on every seam, near the middle, linked to the
+  two sectors either side of it and to its neighbouring core systems. Each prize
+  is shared by exactly two seats rather than all of them.
+
+The rules that keep it fair and keep old games replaying:
+
+- **`hub` is pinned.** A stored symmetric game replays by regenerating its map,
+  and `RULES_VERSION` did not move when layouts joined, because `hub` draws
+  exactly what it always drew (`test_the_hub_layout_is_the_board_it_always_was`,
+  fingerprinted against the pre-layout generator). Every layout makes the same
+  sector draws in the same order; the only difference upstream of the sectors is
+  the per-sector count (`round((nodes - shared) / players)`, shared being 1, 0 or
+  N) and, for `core`, a wider inner radius (below).
+- **Added lanes are chosen once and rotated, and draw nothing.** `_seam_link`
+  picks the shortest sector-0 → sector-1 pair that crosses nothing and grazes
+  nothing (a homeworld only when no clean pair avoids one, which happens at two
+  systems per sector), and `_spoke_source` picks each seam's spoke to its core
+  system the same way, never from the homeworld. Rotation carries crossings with
+  it, so a lane clean on one seam is clean on all of them.
+  `test_every_layout_turns_onto_itself` checks the result maps onto itself.
+- **`core` opens the middle up.** Core systems sit on the seams at
+  `max(0.6 * r_inner, gap / (2 sin(pi/N)))` with `gap = 2.5 * node_clearance()`,
+  so they stay a gap apart at six seats, and the sectors' inner radius moves out
+  to a gap behind them. At the old radius, six-seat core maps put systems on top
+  of each other in every seed.
+- **`layout` is inert off a generated symmetric map** (`Settings.layout_inert`:
+  a random map, or any hand map). Then `challenge_keys` hashes it as `hub` and
+  `token_dict` leaves it out, so a random map's key does not depend on what the
+  layout stepper was last left at. It joined `_LEGACY_KEY_DROPS`, so every
+  pre-layout link still matches. The menu's Basic tab gained a ninth row for it
+  (`_ROW_H` 58 → 52, the most that fits the 496px panel), shown as a read-only
+  note where it is inert rather than hidden, so rows below it do not jump.
+
 **Past a standard board the box grows; below it nothing moves.** `config.world_side(n)`
 is exactly `WORLD_SIZE` up to `config.STANDARD_MAX_NODES` (40, the old cap) and grows
 with `sqrt(n)` past it, up to `config.MAX_NODES` (120), so a big map keeps a full
