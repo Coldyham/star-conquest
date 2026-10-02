@@ -331,8 +331,8 @@ class Ui:
     pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: tuple[int, int] | None = None
     challenge_by: str = ""
-    # The weekly campaign's reminder for this setup, e.g. "Node 3: queued for
-    # 34 min", or None when it isn't a campaign node (or nobody could ask).
+    # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
+    # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
     # moves; `render` only draws it, beside the challenge target.
     campaign_label: str | None = None

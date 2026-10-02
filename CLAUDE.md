@@ -339,9 +339,9 @@ already resolve simultaneously. The rationale for each rule is in
 - **Crowns, the weekly campaign and embargoes derive their state from
   `counted_scores` and stored maps; nothing about who holds what is stored.**
   `campaign_games` matches by jsonb equality, never `sc_config_key`. The
-  campaign's timers (`GRACE_MS`, `COOLDOWN_MS`, queued wins) are replayed
-  against a `now` passed to `fold`, never stored, and `attemptStatus` is the one
-  answer to "may I move here" for the page and the game alike: the game asks
+  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored, and
+  `attemptStatus` is the one answer to "may I move here" for the page and the
+  game alike: the game asks
   `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)
   and only counts down the server times it is given (`starconquest/campaign.py`),
   never reimplementing a rule. Detail:

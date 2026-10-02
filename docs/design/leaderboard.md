@@ -435,9 +435,8 @@ than it is.
   week's hand-played counted scores in posting order — a home goes to the
   first win from a player without one and can't be taken; a field node falls
   to a win posted while holding a neighbour (or within `GRACE_MS` of losing
-  one), and a held one only to a strictly better score. Each move starts a
-  `COOLDOWN_MS` wait, and a win posted during it is queued and played when it
-  ends; see "Grace and cooldown" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
+  one), and a held one only to a strictly better score; see "The grace
+  period" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
   this reason; `menu` aliases them.
 - **A map can be registered with no score at all, and can carry a one-time
   reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any
@@ -477,44 +476,44 @@ than it is.
     the row instead: a node's seed is fresh, so its `games` row is created
     mid-week by whoever posts first, and `games` is append-only after that.
 
-## Grace and cooldown
+## The grace period
 
-Two timers in `js/campaign.mjs`, both derived like everything else in the
-campaign: `fold` takes a `now` and replays the scores against it, so a queued
-win "lands" on the next page load, or the page's once-a-minute redraw, with
-nothing stored.
+One timer in `js/campaign.mjs`, derived like everything else in the
+campaign: `fold` records when each player lost each node (`lostAt`), and
+nothing is stored.
 
 - **`GRACE_MS` (30 minutes).** A field win counts if the player held a
-  neighbour at any moment from 30 minutes before posting until it plays.
-  `fold` keeps `lostAt` per player and node to answer that. It fixes the case
-  that made the rule feel unfair: you start a node beside one you hold,
+  neighbour at any moment in the 30 minutes before posting it. It fixes the
+  case that made the rule feel unfair: you start a node beside one you hold,
   somebody takes that neighbour mid-game, and your win counted for nothing.
   Thirty minutes is about one game. It only needs to cover the game in
   progress when the neighbour went, not a long campaign of play from memory.
-- **`COOLDOWN_MS` (one hour).** Every move starts a wait before that player's
-  next one. Without it, nothing paced a sweep except playing speed, so a
-  player starting at Monday 00:00 UTC could chain several nodes before anyone
-  else had opened the page. A win posted during the wait is **queued, not
-  dropped**, so no game is wasted: it plays when the wait ends, against the
-  board as it is then, so the holder may have raised the bar or lost the node
-  in the meantime. Queued wins play one per hour in posting order, since each
-  one that lands starts a fresh wait. Bettering your own node is a defence, not
-  a move, so it never waits. Homes are exempt because anyone waiting already
-  has one.
-- **The grace is anchored at posting, not at play.** A queued win was posted
-  while its player could still claim the node, and the queue is the rule's
-  doing, not theirs. The window runs from `posted - GRACE_MS` to the moment it
-  plays.
-- **Nothing plays after the week closes** (`weekEnd`). A win still queued at
-  the close never resolves, the same way a win posted after it was never in
-  `campaign_scores`.
-- **A queued win is a warning.** The page lists the queue, so a holder can see
-  an attack waiting and better their own score before it plays. That is a
-  small, free version of what the fleet proposal below wanted from
-  inbound fleets.
+- **The edge minute counts on both sides.** `fold` accepts a win posted
+  exactly `GRACE_MS` after the loss, and `attemptStatus` says yes at that
+  minute too, so the page never says no to a win that would count.
 - **`attemptStatus`** is the one place that says what a player may do on a
-  node at `now` (`why`, `graceUntil`, `readyAt`, `beat`). The page and the
-  game both read it, so they can't disagree about a timer.
+  node at `now` (`why`, `graceUntil`, `beat`). The page and the game both read
+  it, so they can't disagree about a timer.
+
+### Decided against: a cooldown between moves
+
+Built and then removed, the same week. Each move started an hour's wait
+before that player's next one, and a win posted during the wait was queued
+and played when the hour was up. The aim was to slow a player sweeping the map
+from Monday 00:00 UTC, and the queue meant no game was wasted.
+
+It went because two timers together read as nonsense. A player inside their
+grace with their cooldown still running was told "post within 12 minutes" and
+"it plays in 40". That was consistent, since the grace was judged at posting
+and the queue was the rule's doing, but nobody would read it that way. A
+player who can't claim for 40 minutes should not look like they can take
+the node at all. The remedies were a second rule (judge the grace when the
+queued win plays) or more wording, and both made the campaign harder to
+explain than the sweep made it unfair.
+
+What paces a sweep now is only how long a game takes, roughly two nodes an
+hour per player. If that ever turns out to be a real problem, look for a brake
+that is *one* clock, not a second one beside the grace.
 
 ### In the game
 
@@ -523,7 +522,7 @@ The game and the board are one site, so the game can ask before it plays.
 - **The game never holds the rules.** `netlify/functions/campaign.mjs` takes
   the setup's settings token and the player's name, finds this week's node by
   value (`setupIdentity`, as `campaign_games` matches by jsonb equality), and
-  returns `attemptStatus` plus any win already queued there. A Python port of
+  returns `attemptStatus` and the holder. A Python port of
   `fold` would be a second copy to drift, with nothing like
   `test_leaderboard_sync` able to pin a rule set. The function reads the public
   rows with the publishable key, so it holds no secret.
@@ -541,7 +540,7 @@ The game and the board are one site, so the game can ask before it plays.
 - **One modal, not two.** The confirm reuses the slow-setup modal
   (`menu._unless_slow`) with the node as its title, and puts the campaign's
   lines ahead of any bot warning. It asks only when a win wouldn't be a move,
-  or would be one only against a clock (`campaign.confirm`). An open node, your
+  or would be one only inside the grace (`campaign.confirm`). An open node, your
   own node, or a player with no name yet starts straight away.
 - **The top bar label is text `main` writes** (`main.campaign_tick` into
   `Ui.campaign_label`). `campaign` imports `pbp`, which imports `engine`, and
@@ -554,10 +553,11 @@ up so it can be argued over and playtested before any of it is built. Nothing
 here is in the code. The rules in force are in "Crowns, the weekly campaign and
 embargoes" in this file.
 
-Since this was written, "Grace and cooldown" in this file has dealt more
-cheaply with the stolen neighbour and the Monday sweep, and the visible queue
-gives part of the warning. Whatever is left for fleets has to justify a stored
-table and a per-person credential on what remains.
+Since this was written, "The grace period" in this file has dealt more
+cheaply with the stolen neighbour. A cooldown for the Monday sweep was tried
+and dropped (same section, "Decided against: a cooldown between moves"), so
+fleets' remaining case is the sweep and the warning, and they still have to
+justify a stored table and a per-person credential.
 
 ### The problem
 

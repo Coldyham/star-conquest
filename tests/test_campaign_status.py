@@ -28,12 +28,9 @@ NOW = 1_800_000_000_000.0   # the server's clock, ms
 
 def answer(why="adjacent", can=True, kind="field", node=3, **status) -> str:
     """A body the way netlify/functions/campaign.mjs writes one."""
-    queued = status.pop("queued_at", None)
-    body = {"week_start": "2026-09-28", "week_end": NOW + 3 * 24 * 60 * MIN, "now": NOW,
+    body = {"week_start": "2026-09-28", "now": NOW,
             "node": {"id": node, "kind": kind}, "holder": None,
-            "status": {"can": can, "why": why, "graceUntil": None, "readyAt": None,
-                       "beat": None, **status},
-            "queued_at": queued}
+            "status": {"can": can, "why": why, "graceUntil": None, "beat": None, **status}}
     return json.dumps(body)
 
 
@@ -44,10 +41,10 @@ def status(received=100.0, **kw) -> campaign.Status:
 
 
 def test_parse_reads_the_answer_and_refuses_anything_else():
-    s = status(why="grace", graceUntil=NOW + 12 * MIN, readyAt=NOW + 40 * MIN,
+    s = status(why="grace", graceUntil=NOW + 12 * MIN,
                beat={"turns": 30, "lost": 2, "name": "bo"})
     assert (s.node_id, s.kind, s.why, s.can) == (3, "field", "grace", True)
-    assert s.grace_until == NOW + 12 * MIN and s.ready_at == NOW + 40 * MIN
+    assert s.grace_until == NOW + 12 * MIN
     assert s.beat == (30, 2, "bo")
     assert s.name == "Node 3"
     assert status(kind="home", node=11).name == "Home 11"
@@ -56,9 +53,9 @@ def test_parse_reads_the_answer_and_refuses_anything_else():
 
 
 def test_timers_count_down_on_our_clock_from_when_the_answer_landed():
-    s = status(received=100.0, readyAt=NOW + 30 * MIN)
-    assert s.left_ms(s.ready_at, now=100.0) == 30 * MIN
-    assert s.left_ms(s.ready_at, now=100.0 + 10 * 60) == 20 * MIN
+    s = status(received=100.0, why="grace", graceUntil=NOW + 30 * MIN)
+    assert s.left_ms(s.grace_until, now=100.0) == 30 * MIN
+    assert s.left_ms(s.grace_until, now=100.0 + 10 * 60) == 20 * MIN
     assert s.left_ms(None, now=100.0) is None
     assert campaign.minutes(20 * MIN) == "20 min"
     assert campaign.minutes(20 * MIN - 1) == "20 min"     # rounded up
@@ -69,22 +66,18 @@ def test_the_top_bar_label_says_what_a_win_here_would_do():
     t = 100.0
     assert campaign.label(None) is None
     assert campaign.label(status(), t) == "Node 3: open"
+    assert campaign.label(status(why="home-open", kind="home", node=11), t) == "Home 11: open"
     assert campaign.label(status(why="own", can=False), t) == "Node 3: yours"
     assert campaign.label(status(why="no-name", can=False), t) == "Campaign node 3"
     assert campaign.label(status(why="not-adjacent", can=False), t) == "Node 3: not a move"
-    assert campaign.label(status(readyAt=NOW + 34 * MIN), t) == "Node 3: queued for 34 min"
-    assert campaign.label(status(why="grace", graceUntil=NOW + 12 * MIN), t) == "Node 3: post within 12 min"
-    both = status(why="grace", graceUntil=NOW + 12 * MIN, readyAt=NOW + 40 * MIN)
-    assert campaign.label(both, t) == "Node 3: post within 12 min, queued for 40 min"
+    grace = status(why="grace", graceUntil=NOW + 12 * MIN)
+    assert campaign.label(grace, t) == "Node 3: post within 12 min"
+    assert campaign.label(grace, t + 5 * 60) == "Node 3: post within 7 min"
     # Twelve minutes on, the grace has run out here even before a refresh says so.
-    assert campaign.label(both, t + 13 * 60) == "Node 3: grace over"
-    queued = status(why="adjacent", queued_at=NOW + 20 * MIN)
-    assert campaign.label(queued, t) == "Node 3: your win plays in 20 min"
-    # ...and once the cooldown is over, the plain state shows again.
-    assert campaign.label(status(readyAt=NOW + 5 * MIN), t + 6 * 60) == "Node 3: open"
+    assert campaign.label(grace, t + 13 * 60) == "Node 3: grace over"
 
 
-def test_start_is_confirmed_only_when_a_win_wouldnt_count_or_is_on_a_clock():
+def test_start_is_confirmed_only_when_a_win_wouldnt_count_or_is_on_the_clock():
     t = 100.0
     assert campaign.confirm(None) is None
     for quiet in (status(), status(why="own", can=False), status(why="own-home", can=False),
@@ -102,8 +95,6 @@ def test_start_is_confirmed_only_when_a_win_wouldnt_count_or_is_on_a_clock():
                                        beat={"turns": 30, "lost": 2, "name": "bo"}), t)
     assert lines[0] == "Post a win within 12 min or it won't be a move."
     assert lines[-1] == "Held by bo: beat 30 turns, 2 lost."
-    _, lines = campaign.confirm(status(readyAt=NOW + 34 * MIN), t)
-    assert lines[0] == "A win posted in the next 34 min is queued, not lost."
     # A grace that has already run out locally is "not a move".
     _, lines = campaign.confirm(status(why="grace", graceUntil=NOW + MIN), t + 120)
     assert lines[0] == "A win here won't be a campaign move."
@@ -149,7 +140,7 @@ def test_the_watcher_asks_once_the_setup_settles_then_refreshes(monkeypatch):
     assert sent[0].url.startswith("https://site/api/campaign?token=")
     assert sent[0].url.endswith("&name=ann")
 
-    sent[0].answer = (pbp.OK, answer(readyAt=NOW + 30 * MIN))
+    sent[0].answer = (pbp.OK, answer(why="grace", graceUntil=NOW + 30 * MIN))
     watch.pump(settings, now=1.0)
     assert watch.status is not None and watch.status.received == 1.0
     watch.pump(settings, now=1.0 + campaign.REFRESH_S - 1)
@@ -229,9 +220,9 @@ def test_a_campaign_confirm_and_a_slow_warning_share_one_modal(monkeypatch):
                         lambda settings, people=None: ["Knower would search 3 turns deep, not 12"])
     screen, ms, settings = _menu()
     try:
-        ms.campaign_watch.status = status(readyAt=NOW + 30 * MIN, received=time.monotonic())
+        ms.campaign_watch.status = status(why="grace", graceUntil=NOW + 30 * MIN, received=time.monotonic())
         assert _click(screen, ms, settings, "start") is None
-        assert ms.slow_lines[0].startswith("A win posted in the next")
+        assert ms.slow_lines[0].startswith("Post a win within")
         assert ms.slow_lines[-1].startswith("Knower")
         # The slow warning alone keeps its own heading.
         ms.confirm_slow = False
@@ -252,7 +243,7 @@ def test_the_top_bar_shows_the_label_beside_the_challenge_target():
         ui.visible = ui.seen = set(state.systems)
         w = screen.get_width()
         assert render._draw_campaign_label(screen, ui, w, w) == w      # nothing to show
-        ui.campaign_label = "Node 3: queued for 34 min"
+        ui.campaign_label = "Node 3: post within 12 min"
         alone = render._draw_campaign_label(screen, ui, w, w)
         assert alone < w - config.HUD_PAD
         ui.challenge_target = (40, 3)
@@ -267,10 +258,10 @@ def test_main_writes_the_label_each_frame_but_never_for_a_watched_replay(monkeyp
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
     ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
     watch = campaign.Watcher()
-    watch.status = status(readyAt=NOW + 30 * MIN, received=time.monotonic())
+    watch.status = status(why="grace", graceUntil=NOW + 30 * MIN, received=time.monotonic())
     monkeypatch.setattr(campaign, "enabled", lambda: False)   # pump is a no-op
     main.campaign_tick(ui, Settings(seed=42), watch)
-    assert ui.campaign_label == "Node 3: queued for 30 min"
+    assert ui.campaign_label == "Node 3: post within 30 min"
     ui.watched = True
     main.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label is None

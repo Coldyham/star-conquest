@@ -660,12 +660,10 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **Half an hour's grace.** A win also counts if you held a neighbour at any
   point in the 30 minutes before posting it, so a neighbour taken from you
   while you were playing doesn't void the game.
-- **One move an hour.** Each move (a home claimed, a node taken) makes your
-  next one wait an hour. A win posted during the wait is *queued*: it plays
-  when the hour is up, against whoever holds the node then, and several queued
-  wins play one an hour in posting order. Bettering your own node is not a move
-  and never waits. A queued win that would play after the week closes never
-  does. The page lists every queued win, so a holder sees one coming.
+- **The game says so too.** On the web build, a setup that is one of this
+  week's nodes is looked up (`/api/campaign`, by the name this browser last
+  posted under). Start asks first if a win wouldn't be a move, or would only be
+  one inside the grace, and the top bar keeps a countdown while you play.
 - A score counts if it had at least one turn played by hand and its replay
   wasn't found to be a `mismatch`. Anything else is just an ordinary score.
 - The week runs its full length; most field nodes held at the close wins.

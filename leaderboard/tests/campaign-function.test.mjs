@@ -41,19 +41,16 @@ test("a setup is matched to its node by value, the way campaign_games matches", 
     { mode: "random", players: 3, nodes: 18, seed: 5, jitter: 1 }).id, 4);
 });
 
-test("the answer is attemptStatus, plus the holder and any win already queued", () => {
+test("the answer is attemptStatus, plus the holder", () => {
   const scores = [at(0, "ann", 10, 40), at(20, "ann", 0, 30)];
   const reply = answer(graph, scores, graph.nodes[1], "Ann", T0 + 30 * MIN);
   assert.equal(reply.node.id, 1);
   assert.equal(reply.holder, null);
   assert.equal(reply.now, T0 + 30 * MIN);
-  assert.equal(reply.week_end, T0 + 7 * 24 * 60 * MIN);
-  // ann's win on 0 is still waiting out the hour from her home claim, so she
-  // holds nothing next to 1 yet.
-  assert.equal(reply.status.why, "not-adjacent");
-  const onZero = answer(graph, scores, graph.nodes[0], "ann", T0 + 30 * MIN);
-  assert.equal(onZero.queued_at, T0 + 60 * MIN);
-  assert.equal(onZero.status.readyAt, T0 + 60 * MIN);
+  assert.equal(reply.status.why, "adjacent");
+  const onZero = answer(graph, scores, graph.nodes[0], "bo", T0 + 30 * MIN);
+  assert.deepEqual(onZero.holder, { name: "ann", turns: 30, lost: 0 });
+  assert.equal(onZero.status.why, "no-home");
   assert.equal(answer(graph, scores, graph.nodes[0], "", T0).status.why, "no-name");
 });
 

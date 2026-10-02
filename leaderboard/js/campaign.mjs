@@ -15,12 +15,6 @@
 //   unheld node falls to any such win; a held one only to a strictly better
 //   result (fewer turns, then fewer lost), so a tie defends. The holder
 //   bettering their own score raises the bar.
-// - Every move (a home claimed, a node taken) starts a COOLDOWN_MS wait before
-//   that player's next one. A win posted during it is *queued*, not dropped: it
-//   is played as a move the moment the wait ends, against the board as it is
-//   then, and each queued win waits its turn in posting order. Bettering your
-//   own node is not a move and never waits. That paces the player who starts
-//   at Monday 00:00 without wasting anything they play.
 // - Anything else is still an ordinary leaderboard score. It just isn't a move.
 //
 // No DOM and no fetch, so tests/ and the game's endpoint
@@ -31,9 +25,6 @@ import { compareScores } from "./standings.mjs";
 
 /** How long after losing a neighbour a win beside it still counts. */
 export const GRACE_MS = 30 * 60 * 1000;
-/** How long each move makes a player wait before their next one. */
-export const COOLDOWN_MS = 60 * 60 * 1000;
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const keyOf = (name) => String(name || "").trim().toLowerCase();
 
@@ -47,12 +38,6 @@ export function neighbours(graph) {
   return out;
 }
 
-/** When the week closes, in ms: nothing resolves at or after it. */
-export function weekEnd(graph) {
-  const start = Date.parse(`${graph.week_start}T00:00:00Z`);
-  return Number.isNaN(start) ? Infinity : start + WEEK_MS;
-}
-
 /** Scores in the order they happened: posting time, then id for a dead heat. */
 function inOrder(scores) {
   return [...scores].sort((a, b) =>
@@ -60,121 +45,63 @@ function inOrder(scores) {
 }
 
 /**
- * Replay a week up to `now` (default: all of it).
+ * Replay a week.
  *
  * @returns {holders: Map<nodeId, {key, name, turns, lost, since}>,
- *           homes: Map<playerKey, nodeId>,
- *           captures: [{nodeId, taker, from, turns, at, posted}],
- *           queued: [{nodeId, key, name, turns, lost, posted, at}],
- *           readyAt: Map<playerKey, ms>, lostAt: Map<"key|nodeId", ms>,
- *           standings: [{key, name, fields, home}]}
- *
- * `queued` is every win still waiting out its player's cooldown at `now`, with
- * the moment it will be played (`at`); one that would play after the week
- * closes never does, and is not listed.
+ *           homes: Map<playerKey, nodeId>, captures: [{nodeId, taker, from, turns, at}],
+ *           lostAt: Map<"key|nodeId", ms>, standings: [{key, name, fields, home}]}
  */
-export function fold(graph, scores, now = Infinity) {
+export function fold(graph, scores) {
   const kind = new Map(graph.nodes.map((node) => [node.id, node.kind]));
   const links = neighbours(graph);
-  const close = weekEnd(graph);
-  const horizon = Math.min(now, close - 1);
   const holders = new Map();
   const homes = new Map();
   const names = new Map();
   const fields = new Map();     // playerKey -> field nodes held
   const reached = new Map();    // playerKey -> when they reached that count
-  const readyAt = new Map();    // playerKey -> when their next move may land
   const lostAt = new Map();     // "playerKey|nodeId" -> when they last lost it
-  const waiting = new Map();    // playerKey -> [score entries], posting order
   const captures = [];
 
-  const holds = (key, nodeId) => holders.get(nodeId)?.key === key;
+  // Held it now, or lost it no earlier than `since`.
   const heldSince = (key, nodeId, since) =>
-    holds(key, nodeId) || (lostAt.get(`${key}|${nodeId}`) ?? -Infinity) >= since;
+    holders.get(nodeId)?.key === key || (lostAt.get(`${key}|${nodeId}`) ?? -Infinity) >= since;
   const bump = (key, by, at) => {
     fields.set(key, (fields.get(key) || 0) + by);
     if (by > 0) reached.set(key, at);
   };
 
-  // One field move, at `at`, by a win posted at `entry.posted`.
-  const take = (entry, at) => {
-    const { nodeId, key } = entry;
+  for (const score of inOrder(scores)) {
+    const nodeId = score.node_id;
+    if (!kind.has(nodeId)) continue;
+    const key = keyOf(score.user_name);
+    names.set(key, score.user_name);
+    const at = Date.parse(score.submitted_at);
+    const entry = { key, name: score.user_name, turns: score.turns, lost: score.lost, since: at };
     const held = holders.get(nodeId);
+
+    if (kind.get(nodeId) === "home") {
+      if (held || homes.has(key)) continue;
+      holders.set(nodeId, entry);
+      homes.set(key, nodeId);
+      captures.push({ nodeId, taker: score.user_name, from: null, turns: score.turns, at });
+      continue;
+    }
+
     if (held && held.key === key) {
       // Bettering your own result is the only way to raise the bar attackers face.
-      if (compareScores(entry, held) < 0) holders.set(nodeId, { ...held, name: entry.name, turns: entry.turns, lost: entry.lost });
-      return;
+      if (compareScores(score, held) < 0) holders.set(nodeId, { ...entry, since: held.since });
+      continue;
     }
-    const since = entry.posted - GRACE_MS;
-    if (![...links.get(nodeId)].some((other) => heldSince(key, other, since))) return;
-    if (held && compareScores(entry, held) >= 0) return;
-    holders.set(nodeId, { key, name: entry.name, turns: entry.turns, lost: entry.lost, since: at });
+    if (![...links.get(nodeId)].some((other) => heldSince(key, other, at - GRACE_MS))) continue;
+    if (held && compareScores(score, held) >= 0) continue;
+    holders.set(nodeId, entry);
     bump(key, 1, at);
     if (held) {
       bump(held.key, -1, at);
       lostAt.set(`${held.key}|${nodeId}`, at);
     }
-    readyAt.set(key, at + COOLDOWN_MS);
-    captures.push({ nodeId, taker: entry.name, from: held ? held.name : null, turns: entry.turns, at, posted: entry.posted });
-  };
-
-  // Play every queued win whose wait is over by `until`, earliest first.
-  const drain = (until) => {
-    for (;;) {
-      let next = null;
-      for (const [key, queue] of waiting) {
-        if (!queue.length) continue;
-        const at = readyAt.get(key) ?? -Infinity;
-        if (at > until) continue;
-        if (!next || at < next.at || (at === next.at && queue[0].order < next.queue[0].order)) next = { key, queue, at };
-      }
-      if (!next) return;
-      take(next.queue.shift(), next.at);
-    }
-  };
-
-  let order = 0;
-  for (const score of inOrder(scores)) {
-    const nodeId = score.node_id;
-    if (!kind.has(nodeId)) continue;
-    const posted = Date.parse(score.submitted_at);
-    if (posted > horizon) break;
-    drain(posted);
-    const key = keyOf(score.user_name);
-    names.set(key, score.user_name);
-    const entry = { nodeId, key, name: score.user_name, turns: score.turns, lost: score.lost, posted, order: order++ };
-
-    if (kind.get(nodeId) === "home") {
-      // Cooldowns never touch a home: anyone waiting on one already has theirs.
-      if (holders.get(nodeId) || homes.has(key)) continue;
-      holders.set(nodeId, { key, name: entry.name, turns: entry.turns, lost: entry.lost, since: posted });
-      homes.set(key, nodeId);
-      readyAt.set(key, posted + COOLDOWN_MS);
-      captures.push({ nodeId, taker: entry.name, from: null, turns: entry.turns, at: posted, posted });
-      continue;
-    }
-    const queue = waiting.get(key) || [];
-    if (!holds(key, nodeId) && (queue.length || (readyAt.get(key) ?? -Infinity) > posted)) {
-      queue.push(entry);
-      waiting.set(key, queue);
-      continue;
-    }
-    take(entry, posted);
+    captures.push({ nodeId, taker: score.user_name, from: held ? held.name : null, turns: score.turns, at });
   }
-  drain(horizon);
-
-  const queued = [];
-  for (const [key, queue] of waiting) {
-    // Only the first entry's time is certain: a later one plays at the same
-    // moment if the one ahead of it fails, or a cooldown later if it lands.
-    // Listed at the soonest it could play.
-    const at = readyAt.get(key) ?? -Infinity;
-    if (at >= close) continue;
-    for (const entry of queue) {
-      queued.push({ nodeId: entry.nodeId, key, name: entry.name, turns: entry.turns, lost: entry.lost, posted: entry.posted, at });
-    }
-  }
-  queued.sort((a, b) => a.at - b.at || a.posted - b.posted);
 
   const players = new Set([...homes.keys(), ...[...fields].filter(([, n]) => n > 0).map(([k]) => k)]);
   const standings = [...players]
@@ -182,21 +109,20 @@ export function fold(graph, scores, now = Infinity) {
     .sort((a, b) =>
       b.fields - a.fields || (reached.get(a.key) || 0) - (reached.get(b.key) || 0) ||
       a.name.localeCompare(b.name));
-  return { holders, homes, captures, queued, readyAt, lostAt, standings };
+  return { holders, homes, captures, lostAt, standings };
 }
 
 /**
  * Where `name` stands on `nodeId` at `now`, for the page and the game alike.
  *
- * `can` says whether a win posted now would be a move (possibly a queued one).
+ * `can` says whether a win posted now would be a move.
  * `why` is one of "no-name", "home-open", "home-taken", "has-home", "own-home",
  * "own", "adjacent", "grace", "no-home", "not-adjacent". `graceUntil` is when a
- * "grace" claim lapses; `readyAt` is set when a win posted now would be queued
- * until then; `beat` is the score to beat on somebody else's node.
+ * "grace" claim lapses; `beat` is the score to beat on somebody else's node.
  */
 export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
   const key = keyOf(name);
-  const out = { can: false, why: "no-name", graceUntil: null, readyAt: null, beat: null };
+  const out = { can: false, why: "no-name", graceUntil: null, beat: null };
   if (!key) return out;
   const node = graph.nodes.find((n) => n.id === nodeId);
   if (!node) return { ...out, why: "not-adjacent" };
@@ -209,14 +135,12 @@ export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
   }
   if (held && held.key === key) return { ...out, why: "own" };
   const beat = held ? { turns: held.turns, lost: held.lost, name: held.name } : null;
-  const ready = state.readyAt.get(key) ?? -Infinity;
-  const readyAt = ready > now ? ready : null;
   const others = [...neighbours(graph).get(nodeId)];
   if (others.some((other) => state.holders.get(other)?.key === key)) {
-    return { ...out, can: true, why: "adjacent", readyAt, beat };
+    return { ...out, can: true, why: "adjacent", beat };
   }
   const lapse = Math.max(...others.map((other) => state.lostAt.get(`${key}|${other}`) ?? -Infinity)) + GRACE_MS;
-  if (lapse > now) return { ...out, can: true, why: "grace", graceUntil: lapse, readyAt, beat };
+  if (lapse >= now) return { ...out, can: true, why: "grace", graceUntil: lapse, beat };
   return { ...out, why: state.homes.has(key) ? "not-adjacent" : "no-home" };
 }
 
@@ -231,7 +155,7 @@ export function waitLabel(then, now = Date.now()) {
  * Could `name` make a move on `nodeId` right now? A home, only while it is
  * empty and they have none; a field node, only while they hold a neighbour or
  * lost one within GRACE_MS (and for somebody else's, only by beating the score
- * `holders` shows). A win during a cooldown still counts, later.
+ * `holders` shows).
  */
 export function canAttempt(graph, state, nodeId, name, now = Date.now()) {
   return attemptStatus(graph, state, nodeId, name, now).can;

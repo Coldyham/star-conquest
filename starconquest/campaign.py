@@ -2,14 +2,13 @@
 
 The weekly campaign (``leaderboard/campaign.html``) is a meta-map of
 challenges, and a win on a node is a campaign move only under its rules: next
-to a node you hold (or held within half an hour), at most one move an hour,
-with a win posted during the wait queued until it ends. Those rules live in
+to a node you hold, or held within the last half hour. Those rules live in
 one place, ``leaderboard/js/campaign.mjs``, and this module never repeats
 them. It asks the site (``/api/campaign``, which runs that same code) what a
 win here would do for this player right now, then shows the answer: a confirm
-before Start (``menu``) and a countdown in the top bar (``render``).
+before Start (``menu``) and a reminder in the top bar (``render``).
 
-Every timer arrives as an absolute time on the *server's* clock, alongside the
+The one timer, the grace after losing a neighbour, arrives as an absolute time on the *server's* clock, alongside the
 server's own ``now``, and is counted down here from the moment the answer
 landed (``time.monotonic``), so a phone with its clock set wrong still counts
 the right number of minutes.
@@ -55,8 +54,6 @@ class Status:
     server_now: float              # the server's clock when it answered, ms
     received: float                # time.monotonic() when the answer landed
     grace_until: float | None = None   # server ms: post by then, or it isn't a move
-    ready_at: float | None = None      # server ms: a win posted before then is queued
-    queued_at: float | None = None     # server ms: your win here, already queued, plays then
     beat: tuple[int, int, str] | None = None   # (turns, lost, holder) to beat
 
     @property
@@ -94,8 +91,6 @@ def parse(text: str, received: float) -> Status | None:
             server_now=float(body["now"]),
             received=received,
             grace_until=ms(status.get("graceUntil")),
-            ready_at=ms(status.get("readyAt")),
-            queued_at=ms(body.get("queued_at")),
             beat=(int(beat["turns"]), int(beat["lost"]), str(beat.get("name", "")))
             if isinstance(beat, dict) else None,
         )
@@ -142,22 +137,15 @@ def confirm(status: Status | None, now: float | None = None) -> tuple[str, list[
             reason,
             "It still posts as an ordinary score.",
         ]
-    lines: list[str] = []
+    if status.why != "grace":
+        return None
     grace = _live(status, status.grace_until, now)
-    ready = _live(status, status.ready_at, now)
-    if grace is not None:
-        lines += [f"Post a win within {minutes(grace)} or it won't be a move.",
-                  "You've lost the node next to this one, and a win beside it",
-                  "only counts for half an hour after."]
-    elif status.why == "grace":
+    if grace is None:
         return title, ["A win here won't be a campaign move.",
                        "The half hour after losing the node next to it is up."]
-    if ready is not None:
-        lines += [f"A win posted in the next {minutes(ready)} is queued, not lost.",
-                  "You moved less than an hour ago. It plays when the hour is up,",
-                  "against whoever holds the node then."]
-    if not lines:
-        return None
+    lines = [f"Post a win within {minutes(grace)} or it won't be a move.",
+             "You've lost the node next to this one, and a win beside it",
+             "only counts for half an hour after."]
     if status.beat is not None:
         turns, lost, holder = status.beat
         lines.append(f"Held by {holder}: beat {turns} turns, {lost} lost.")
@@ -169,27 +157,16 @@ def label(status: Status | None, now: float | None = None) -> str | None:
     if status is None:
         return None
     name = status.name
-    queued = _live(status, status.queued_at, now)
-    if queued is not None:
-        return f"{name}: your win plays in {minutes(queued)}"
     if status.why in ("own", "own-home"):
         return f"{name}: yours"
     if status.why == "no-name":
         return f"Campaign {name.lower()}"
     if not status.can:
         return f"{name}: not a move"
-    grace = _live(status, status.grace_until, now)
-    if status.why == "grace" and grace is None:
-        return f"{name}: grace over"
-    parts = [name]
-    if grace is not None:
-        parts.append(f"post within {minutes(grace)}")
-    ready = _live(status, status.ready_at, now)
-    if ready is not None:
-        parts.append(f"queued for {minutes(ready)}")
-    if len(parts) == 1:
-        parts.append("open")
-    return ": ".join([parts[0], ", ".join(parts[1:])])
+    if status.why == "grace":
+        grace = _live(status, status.grace_until, now)
+        return f"{name}: post within {minutes(grace)}" if grace is not None else f"{name}: grace over"
+    return f"{name}: open"
 
 
 def enabled() -> bool:

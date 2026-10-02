@@ -1420,7 +1420,7 @@ def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
 
 
 def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
-    """The weekly campaign's reminder ("Node 3: queued for 34 min"), just left of
+    """The weekly campaign's reminder ("Node 3: post within 12 min"), just left of
     the challenge target, in gold like the campaign page's timers. `main` writes
     the text once a frame, so the countdown moves without this module reading
     any clock or knowing the rules.

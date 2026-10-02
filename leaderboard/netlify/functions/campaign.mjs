@@ -26,7 +26,7 @@
 
 import { inflateSync } from "node:zlib";
 
-import { attemptStatus, fold, keyOf, weekEnd } from "../../js/campaign.mjs";
+import { attemptStatus, fold } from "../../js/campaign.mjs";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../../js/config.mjs";
 import { weekParam, weekStart } from "../../js/crowns.mjs";
 import { decodeToken, setupIdentity } from "../../js/token-decode.mjs";
@@ -58,18 +58,14 @@ export function nodeFor(graph, setup) {
 
 /** The reply for `name` on `node` at `now`: pure, so tests can call it. */
 export function answer(graph, scores, node, name, now) {
-  const state = fold(graph, scores, now);
+  const state = fold(graph, scores);
   const held = state.holders.get(node.id);
-  const key = keyOf(name);
-  const queued = key ? state.queued.find((q) => q.key === key && q.nodeId === node.id) : null;
   return {
     week_start: graph.week_start,
-    week_end: weekEnd(graph),
     now,
     node: { id: node.id, kind: node.kind },
     holder: held ? { name: held.name, turns: held.turns, lost: held.lost } : null,
     status: attemptStatus(graph, state, node.id, name, now),
-    queued_at: queued ? queued.at : null,
   };
 }
 

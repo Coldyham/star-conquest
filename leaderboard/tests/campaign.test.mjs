@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  attemptStatus, campaignMark, canAttempt, COOLDOWN_MS, fold, GRACE_MS, nodeRadius, playerHue,
+  attemptStatus, campaignMark, canAttempt, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
 } from "../js/campaign.mjs";
 
 // Homes 10 and 11 hang off field nodes 0 and 2; the field is a line 0 - 1 - 2.
@@ -18,8 +18,8 @@ const graph = {
   lanes: [[0, 1], [1, 2], [10, 0], [11, 2]],
 };
 
-// Two hours apart: past every cooldown and grace period, so the tests of the
-// basic rules read on their own. The timing tests below post at given minutes.
+// Two hours apart: past every grace period, so the tests of the basic rules
+// read on their own. The timing tests below post at given minutes.
 const STEP = 2 * 60 * 60 * 1000;
 let clock = 0;
 const win = (name, node, turns, lost = 0) => ({
@@ -107,51 +107,10 @@ const at = (m, name, node, turns, lost = 0) => ({
 });
 const MIN = 60000;
 
-test("the timers are an hour and half an hour", () => {
-  assert.equal(COOLDOWN_MS, 60 * MIN);
+test("the grace is half an hour", () => {
   assert.equal(GRACE_MS, 30 * MIN);
-});
-
-test("a win during a cooldown is queued, then played when the hour is up", () => {
-  const scores = [at(0, "ann", 10, 40), at(10, "ann", 0, 30)];
-  const early = fold(graph, scores, T0 + 30 * MIN);
-  assert.equal(holder(early, 0), null);
-  assert.deepEqual(early.queued.map((q) => [q.nodeId, q.at]), [[0, T0 + 60 * MIN]]);
-  assert.equal(early.readyAt.get("ann"), T0 + 60 * MIN);
-
-  const later = fold(graph, scores, T0 + 61 * MIN);
-  assert.equal(holder(later, 0), "ann");
-  assert.equal(later.queued.length, 0);
-  const move = later.captures.find((c) => c.nodeId === 0);
-  assert.equal(move.at, T0 + 60 * MIN);       // played when the wait ended...
-  assert.equal(move.posted, T0 + 10 * MIN);   // ...for a win posted earlier
-  assert.equal(later.readyAt.get("ann"), T0 + 120 * MIN);
-});
-
-test("queued wins play one per hour, in posting order", () => {
-  const scores = [at(0, "ann", 10, 40), at(5, "ann", 0, 30), at(6, "ann", 1, 30)];
-  const state = fold(graph, scores);
-  assert.deepEqual(state.captures.map((c) => [c.nodeId, (c.at - T0) / MIN]), [[10, 0], [0, 60], [1, 120]]);
-});
-
-test("a queued win meets the board as it is when it plays", () => {
-  // bo takes node 0 first, at minute 20; ann's queued 30-turn win on it then
-  // has to beat bo's 25, and doesn't.
-  const scores = [
-    at(0, "ann", 10, 40), at(10, "ann", 0, 30),
-    at(1, "bo", 11, 40), at(2, "bo", 2, 30), at(70, "bo", 1, 30), at(140, "bo", 0, 25),
-  ];
-  const state = fold(graph, scores);
-  assert.equal(holder(state, 0), "bo");
-  // ann's played at minute 60, before bo got there; bo then beat it at 140.
-  assert.deepEqual(state.captures.filter((c) => c.nodeId === 0).map((c) => c.taker), ["ann", "bo"]);
-});
-
-test("bettering your own node never waits", () => {
-  const scores = [at(0, "ann", 10, 40), at(70, "ann", 0, 30), at(80, "ann", 0, 20)];
-  const state = fold(graph, scores, T0 + 81 * MIN);
-  assert.equal(state.holders.get(0).turns, 20);
-  assert.equal(state.queued.length, 0);
+  assert.equal(waitLabel(T0 + 12 * MIN, T0), "12 min");
+  assert.equal(waitLabel(T0 + 65 * MIN, T0), "1 h 05 min");
 });
 
 test("a neighbour lost while you play still counts for half an hour", () => {
@@ -162,53 +121,35 @@ test("a neighbour lost while you play still counts for half an hour", () => {
   ];
   const inTime = fold(graph, [...base, at(225, "ann", 1, 25)]);
   assert.equal(holder(inTime, 1), "ann");
-  const late = fold(graph, [...base, at(235, "ann", 1, 25)]);
+  assert.equal(holder(fold(graph, [...base, at(230, "ann", 1, 25)]), 1), "ann");   // the edge counts
+  const late = fold(graph, [...base, at(231, "ann", 1, 25)]);
   assert.equal(holder(late, 1), "bo");
 
   const status = attemptStatus(graph, fold(graph, base), 1, "ann", T0 + 210 * MIN);
   assert.equal(status.why, "grace");
   assert.equal(status.graceUntil, T0 + 230 * MIN);
   assert.deepEqual(status.beat, { turns: 30, lost: 0, name: "bo" });
+  // The page agrees with fold on the last minute: a win posted at 230 counts.
+  assert.ok(canAttempt(graph, fold(graph, base), 1, "ann", T0 + 230 * MIN));
   assert.ok(!canAttempt(graph, fold(graph, base), 1, "ann", T0 + 231 * MIN));
 });
 
-test("a queued win keeps the grace it was posted with", () => {
-  // ann takes 0 at minute 200, so she waits until 260. bo takes 0 from her at
-  // 205. ann's win on 1, posted at 210, plays at 260: 55 minutes after the
-  // loss, but it is judged from when she posted it, so it counts.
-  const base = [
-    at(0, "ann", 10, 40), at(200, "ann", 0, 30),
-    at(0, "bo", 11, 40), at(60, "bo", 2, 30), at(120, "bo", 1, 30), at(205, "bo", 0, 20),
-  ];
-  const queued = fold(graph, [...base, at(210, "ann", 1, 20)]);
-  assert.equal(holder(queued, 1), "ann");
-  assert.equal(queued.captures.at(-1).at, T0 + 260 * MIN);
-  // Posted 35 minutes after the loss, it doesn't.
-  assert.equal(holder(fold(graph, [...base, at(240, "ann", 1, 20)]), 1), "bo");
+test("moves come as fast as they are posted", () => {
+  const state = fold(graph, [at(0, "ann", 10, 40), at(5, "ann", 0, 30), at(6, "ann", 1, 30)]);
+  assert.deepEqual(state.captures.map((c) => c.nodeId), [10, 0, 1]);
 });
 
-test("what you may attempt, and when it would land", () => {
+test("what you may attempt", () => {
   const state = fold(graph, [at(0, "ann", 10, 40)]);
   const now = T0 + 20 * MIN;
   assert.deepEqual(attemptStatus(graph, state, 0, "ann", now),
-    { can: true, why: "adjacent", graceUntil: null, readyAt: T0 + 60 * MIN, beat: null });
-  assert.equal(attemptStatus(graph, state, 0, "ann", T0 + 61 * MIN).readyAt, null);
+    { can: true, why: "adjacent", graceUntil: null, beat: null });
   assert.equal(attemptStatus(graph, state, 10, "ann", now).why, "own-home");
   assert.equal(attemptStatus(graph, state, 11, "ann", now).why, "has-home");
   assert.equal(attemptStatus(graph, state, 11, "bo", now).why, "home-open");
   assert.equal(attemptStatus(graph, state, 0, "bo", now).why, "no-home");
   assert.equal(attemptStatus(graph, state, 1, "ann", now).why, "not-adjacent");
   assert.equal(attemptStatus(graph, state, 0, "", now).why, "no-name");
-});
-
-test("nothing plays after the week closes", () => {
-  const week = { ...graph, week_start: "2026-09-28" };
-  const close = T0 + 7 * 24 * 60 * MIN;
-  const lastMinute = (close - T0) / MIN - 10;
-  const scores = [at(lastMinute - 20, "ann", 10, 40), at(lastMinute, "ann", 0, 30)];
-  const state = fold(week, scores);
-  assert.equal(holder(state, 0), null);
-  assert.equal(state.queued.length, 0);
 });
 
 test("bigger maps draw bigger, and one name is one colour", () => {

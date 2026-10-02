@@ -1,7 +1,7 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { parseWeek, weekAfter, weekBefore, weekParam, weekStart } from "./crowns.mjs";
-import { attemptStatus, canAttempt, fold, keyOf, nodeRadius, playerHue, waitLabel } from "./campaign.mjs";
+import { attemptStatus, canAttempt, fold, nodeRadius, playerHue, waitLabel } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
@@ -17,7 +17,6 @@ const mapBox = document.getElementById("map");
 const detailBox = document.getElementById("detail");
 const standingsBox = document.getElementById("standings");
 const feedBox = document.getElementById("feed");
-const queueBox = document.getElementById("queue");
 
 const params = new URLSearchParams(location.search);
 const now = new Date();
@@ -27,7 +26,6 @@ const current = week.getTime() === thisWeek.getTime();
 const me = myName();
 
 let graph = null;
-let scores = [];
 let state = null;
 let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
 let selected = params.has("node") ? Number(params.get("node")) : null;
@@ -112,21 +110,16 @@ function attemptNote(node) {
     if (status.why === "grace") {
       lines.push(el("p", { class: "timer", text: `You've lost the node next to this one, but a win here still counts if you post it within ${waitLabel(status.graceUntil, now)} (by ${clockLabel(status.graceUntil)}).` }));
     }
-    if (status.readyAt) {
-      lines.push(el("p", { class: "timer", text: `You moved less than an hour ago. Post a win now and it's queued, then played at ${clockLabel(status.readyAt)} (in ${waitLabel(status.readyAt, now)}), against whoever holds the node then.` }));
-    }
     return lines;
   }
   const text = {
     "own-home": "Your home. Homes can't be taken, so it's yours for the week.",
-    own: "Yours. Bettering your score here raises the bar, and never waits on your cooldown.",
+    own: "Yours. Bettering your score here raises the bar.",
     "home-taken": "Claimed — homes can't be taken.",
     "has-home": "You already have a home this week.",
     "not-adjacent": "Not next to anything you hold yet.",
     "no-home": "Win a home first — that's how you join.",
   }[status.why];
-  const mine = state.queued.filter((q) => q.key === keyOf(me) && q.nodeId === node.id);
-  if (mine.length) lines.push(el("p", { class: "timer", text: `Your win here is queued, to be played at ${clockLabel(mine[0].at)}.` }));
   lines.push(el("p", { class: status.why === "own" || status.why === "own-home" ? "can" : "cannot", text }));
   return lines;
 }
@@ -182,20 +175,9 @@ function drawFeed() {
         ? [` took node ${move.nodeId} from `, el("a", { href: userHref([move.from]), text: move.from })]
         : ` claimed ${graph.nodes.find((n) => n.id === move.nodeId)?.kind === "home" ? "home" : "node"} ${move.nodeId}`,
       `, ${move.turns} turns `,
-      move.at !== move.posted ? `(queued from ${clockLabel(move.posted)}) ` : "",
       el("span", { class: "when", text: relativeTime(new Date(move.at).toISOString()) }),
     ].flat())))
     : el("p", { class: "empty", text: current ? "No moves yet this week." : "Nobody moved that week." }));
-}
-
-function drawQueue() {
-  clear(queueBox).append(state.queued.length
-    ? el("ol", { class: "steals" }, state.queued.map((move) => el("li", { class: "steal" }, [
-      el("a", { href: userHref([move.name]), text: move.name }),
-      ` on node ${move.nodeId}, ${move.turns} turns · ${move.lost} lost, plays at ${clockLabel(move.at)} `,
-      el("span", { class: "when", text: `(in ${waitLabel(move.at)})` }),
-    ])))
-    : el("p", { class: "empty", text: current ? "Nothing waiting." : "Nothing was left waiting." }));
 }
 
 function drawStatus() {
@@ -204,21 +186,15 @@ function drawStatus() {
   const left = Math.max(0, weekAfter(week).getTime() - nowMs);
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
-  const ready = me ? state.readyAt.get(keyOf(me)) : null;
-  const wait = ready && ready > nowMs
-    ? ` Your next move can land at ${clockLabel(ready)} (in ${waitLabel(ready, nowMs)}); a win posted before then is queued, not lost.`
-    : "";
-  statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.${wait}`;
+  statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.`;
 }
 
-/** Re-fold against the clock, so queued moves land and timers count down without a reload. */
+/** Redrawn once a minute on the live week, so a grace countdown moves without a reload. */
 function redraw() {
-  state = fold(graph, scores, Date.now());
   drawStatus();
   drawMap();
   drawDetail();
   drawStandings();
-  drawQueue();
   drawFeed();
 }
 
@@ -246,7 +222,7 @@ async function load() {
       return;
     }
     graph = rows[0].graph;
-    scores = posted;
+    state = fold(graph, posted);
     boards = new Map(games.map((row) => [row.node_id, row.game_key]));
     redraw();
     if (current) setInterval(redraw, 60000);
