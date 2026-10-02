@@ -2,13 +2,13 @@
 
 The weekly campaign (``leaderboard/campaign.html``) is a meta-map of
 challenges, and a win on a node is a campaign move only under its rules: next
-to a node you hold, or held within the last half hour. Those rules live in
+to a node you hold, or to (or on) one held within the last half hour. Those rules live in
 one place, ``leaderboard/js/campaign.mjs``, and this module never repeats
 them. It asks the site (``/api/campaign``, which runs that same code) what a
 win here would do for this player right now, then shows the answer: a confirm
 before Start (``menu``) and a reminder in the top bar (``render``).
 
-The one timer, the grace after losing a neighbour, arrives as an absolute time
+The one timer, the grace after losing this node or a neighbour, arrives as an absolute time
 on the *server's* clock, alongside the server's own ``now``, and is counted
 down here from the moment the answer landed (``time.monotonic``), so a phone
 with its clock set wrong still counts the right number of minutes.
@@ -143,9 +143,9 @@ def confirm(status: Status | None, now: float | None = None) -> tuple[str, list[
     grace = _live(status, status.grace_until, now)
     if grace is None:
         return title, ["A win here won't be a campaign move.",
-                       "The half hour after losing the node next to it is up."]
+                       "The half hour after losing it or the node next to it is up."]
     lines = [f"Post a win within {minutes(grace)} or it won't be a move.",
-             "You've lost the node next to this one, and a win beside it",
+             "You've lost this node or the one next to it, and a win here",
              "only counts for half an hour after."]
     if status.beat is not None:
         turns, lost, holder = status.beat

@@ -135,6 +135,36 @@ test("a neighbour lost while you play still counts for half an hour", () => {
   assert.ok(!canAttempt(graph, fold(graph, base), 1, "ann", T0 + 231 * MIN));
 });
 
+test("a node you lose while you play it still counts for half an hour", () => {
+  // Node 2 touches both 0 and 1, so bo can take ann's whole field from it:
+  //
+  //   10 - 0 - 1
+  //         \ /
+  //    11 -- 2
+  const tri = {
+    nodes: [
+      { id: 0, kind: "field" }, { id: 1, kind: "field" }, { id: 2, kind: "field" },
+      { id: 10, kind: "home" }, { id: 11, kind: "home" },
+    ],
+    lanes: [[10, 0], [0, 1], [11, 2], [2, 0], [2, 1]],
+  };
+  // ann holds 0 and 1 and is replaying 1 to raise her bar; bo takes 0 at
+  // minute 200, then 1 itself at minute 210, leaving ann nothing next to it.
+  const base = [
+    at(0, "ann", 10, 40), at(70, "ann", 0, 30), at(140, "ann", 1, 30),
+    at(1, "bo", 11, 40), at(71, "bo", 2, 30), at(200, "bo", 0, 20), at(210, "bo", 1, 20),
+  ];
+  assert.equal(holder(fold(tri, base), 1), "bo");
+  assert.equal(holder(fold(tri, [...base, at(240, "ann", 1, 15)]), 1), "ann");   // the edge counts
+  assert.equal(holder(fold(tri, [...base, at(241, "ann", 1, 15)]), 1), "bo");
+
+  // Losing 0 at 200 alone would have lapsed at 230; losing 1 itself runs to 240.
+  const status = attemptStatus(tri, fold(tri, base), 1, "ann", T0 + 235 * MIN);
+  assert.equal(status.why, "grace");
+  assert.equal(status.graceUntil, T0 + 240 * MIN);
+  assert.ok(!canAttempt(tri, fold(tri, base), 1, "ann", T0 + 241 * MIN));
+});
+
 test("moves come as fast as they are posted", () => {
   const state = fold(graph, [at(0, "ann", 10, 40), at(5, "ann", 0, 30), at(6, "ann", 1, 30)]);
   assert.deepEqual(state.captures.map((c) => c.nodeId), [10, 0, 1]);

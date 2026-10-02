@@ -435,7 +435,7 @@ than it is.
   week's hand-played counted scores in posting order — a home goes to the
   first win from a player without one and can't be taken; a field node falls
   to a win posted while holding a neighbour (or within `GRACE_MS` of losing
-  one), and a held one only to a strictly better score; see "The grace
+  one, or the node itself), and a held one only to a strictly better score; see "The grace
   period" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
   this reason; `menu` aliases them.
 - **A map can be registered with no score at all, and can carry a one-time
@@ -482,10 +482,17 @@ One timer in `js/campaign.mjs`, derived like everything else in the
 campaign: `fold` records when each player lost each node (`lostAt`), and
 nothing is stored.
 
-- **`GRACE_MS` (30 minutes).** A field win counts if the player held a
-  neighbour at any moment in the 30 minutes before posting it. It fixes the
-  case that made the rule feel unfair: you start a node beside one you hold,
-  somebody takes that neighbour mid-game, and your win counted for nothing.
+- **`GRACE_MS` (30 minutes).** A field win counts if the player held the
+  node or a neighbour at any moment in the 30 minutes before posting it. It
+  fixes the case that made the rule feel unfair: you start a node beside one
+  you hold, somebody takes that neighbour mid-game, and your win counted for
+  nothing.
+- **The node itself counts too.** The principle is that a game started while
+  you had access to a node should count, and holding the node is access just
+  as holding a neighbour is. So a holder replaying their own node to raise the
+  bar, who loses it mid-game and has no neighbour left, can still take it back
+  inside the grace. `fold` cannot see when a game started, only when access
+  was lost, so the grace from that loss stands in for it.
   Thirty minutes is about one game. It only needs to cover the game in
   progress when the neighbour went, not a long campaign of play from memory.
 - **The edge minute counts on both sides.** `fold` accepts a win posted

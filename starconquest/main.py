@@ -182,7 +182,7 @@ def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
 
     The menu's own watcher is reused, so a setup it already looked up shows at
     once, and the lookup is refreshed every `campaign.REFRESH_S` while the
-    game runs: a neighbour lost mid-game starts its grace countdown here
+    game runs: a node lost mid-game starts its grace countdown here
     without a reload. Nothing is shown for a watched replay or a play-by-post
     match, neither of which can be posted as a campaign move.
     """

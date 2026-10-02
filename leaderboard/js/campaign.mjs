@@ -10,8 +10,9 @@
 //   It is theirs for the week and can never be taken, which is what keeps a
 //   seat open to newcomers and a way back for anyone who loses the field.
 // - A *field* node is taken by a win posted while the player holds one of its
-//   neighbours (their home included), or held one up to GRACE_MS before posting,
-//   so a neighbour stolen while you were playing doesn't void the game. An
+//   neighbours (their home included), or held that node or a neighbour up to
+//   GRACE_MS before posting, so a node stolen while you were playing on or
+//   beside it doesn't void the game. An
 //   unheld node falls to any such win; a held one only to a strictly better
 //   result (fewer turns, then fewer lost), so a tie defends. The holder
 //   bettering their own score raises the bar.
@@ -23,7 +24,7 @@
 import { weekParam } from "./crowns.mjs";
 import { compareScores } from "./standings.mjs";
 
-/** How long after losing a neighbour a win beside it still counts. */
+/** How long after losing a node a win on it or beside it still counts. */
 export const GRACE_MS = 30 * 60 * 1000;
 
 export const keyOf = (name) => String(name || "").trim().toLowerCase();
@@ -92,7 +93,9 @@ export function fold(graph, scores) {
       if (compareScores(score, held) < 0) holders.set(nodeId, { ...entry, since: held.since });
       continue;
     }
-    if (![...links.get(nodeId)].some((other) => heldSince(key, other, at - GRACE_MS))) continue;
+    // Access is holding the node or a neighbour; the node itself only matters
+    // within the grace, since a holder never reaches this line.
+    if (![nodeId, ...links.get(nodeId)].some((other) => heldSince(key, other, at - GRACE_MS))) continue;
     if (held && compareScores(score, held) >= 0) continue;
     holders.set(nodeId, entry);
     bump(key, 1, at);
@@ -139,7 +142,8 @@ export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
   if (others.some((other) => state.holders.get(other)?.key === key)) {
     return { ...out, can: true, why: "adjacent", beat };
   }
-  const lapse = Math.max(...others.map((other) => state.lostAt.get(`${key}|${other}`) ?? -Infinity)) + GRACE_MS;
+  const lapse = Math.max(...[nodeId, ...others].map((other) =>
+    state.lostAt.get(`${key}|${other}`) ?? -Infinity)) + GRACE_MS;
   if (lapse >= now) return { ...out, can: true, why: "grace", graceUntil: lapse, beat };
   return { ...out, why: state.homes.has(key) ? "not-adjacent" : "no-home" };
 }
@@ -170,7 +174,7 @@ export function attemptLines(status, { now = Date.now(), clock = timeOfDay } = {
     if (status.why === "grace") {
       lines.push({
         tone: "timer",
-        text: "You've lost the node next to this one, but a win here still counts if you post it " +
+        text: "You've lost this node or the one next to it, but a win here still counts if you post it " +
           `within ${waitLabel(status.graceUntil, now)} (by ${clock(status.graceUntil)}).`,
       });
     }
@@ -203,7 +207,7 @@ export function waitLabel(then, now = Date.now()) {
 /**
  * Could `name` make a move on `nodeId` right now? A home, only while it is
  * empty and they have none; a field node, only while they hold a neighbour or
- * lost one within GRACE_MS (and for somebody else's, only by beating the score
+ * lost it or a neighbour within GRACE_MS (and for somebody else's, only by beating the score
  * `holders` shows).
  */
 export function canAttempt(graph, state, nodeId, name, now = Date.now()) {
