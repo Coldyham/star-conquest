@@ -107,6 +107,7 @@ LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened w
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
+LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`campaign`)
 # The board's "by config" listing (`leaderboard/js/home.mjs`'s `?group=config`):
 # every setup somebody has posted a score under, grouped and named. Not specific
 # to the setup on the menu right now — there is no way to name an arbitrary,

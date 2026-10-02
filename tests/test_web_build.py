@@ -91,7 +91,8 @@ def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
     for path, name in ((paths.LEADERBOARD_LOG_PATH, "log.mjs"),
                        (paths.LEADERBOARD_REPLAY_PATH, "replay.mjs"),
-                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs")):
+                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs"),
+                       (paths.LEADERBOARD_CAMPAIGN_PATH, "campaign.mjs")):
         assert f'export const config = {{ path: "{path}" }};' in (functions / name).read_text()
 
 

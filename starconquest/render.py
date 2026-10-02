@@ -1142,7 +1142,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
-    scoreboard_right = _draw_challenge_target(surface, ui, w)
+    scoreboard_right = _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w))
     _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
     # bottom bar
@@ -1416,6 +1416,23 @@ def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
     text = f"Beat {who}{turns}t / {lost} lost"
     label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
                   midright=(w - config.HUD_PAD, config.HUD_TOP_H // 2))
+    return label.left - config.HUD_PAD
+
+
+def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
+    """The weekly campaign's reminder ("Node 3: queued for 34 min"), just left of
+    the challenge target, in gold like the campaign page's timers. `main` writes
+    the text once a frame, so the countdown moves without this module reading
+    any clock or knowing the rules.
+
+    Returns the x the scoreboard must stay clear of, the same handoff
+    `_draw_challenge_target` makes.
+    """
+    if not ui.campaign_label:
+        return right
+    edge = w - config.HUD_PAD if right >= w else right
+    label = _text(surface, _fonts()["small"], ui.campaign_label, config.COLOR_CAMPAIGN,
+                  midright=(edge, config.HUD_TOP_H // 2))
     return label.left - config.HUD_PAD
 
 

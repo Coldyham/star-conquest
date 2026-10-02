@@ -498,8 +498,11 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log`, `/api/replay` and `/api/pbp` on
-   its own origin (`paths.LEADERBOARD_*_PATH`).
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
+   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
+   (`campaign.mjs`) needs no key: it reads the same public campaign rows
+   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
+   them.
 
 ## Finding each other
 

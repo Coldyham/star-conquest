@@ -516,6 +516,37 @@ nothing stored.
   node at `now` (`why`, `graceUntil`, `readyAt`, `beat`). The page and the
   game both read it, so they can't disagree about a timer.
 
+### In the game
+
+The game and the board are one site, so the game can ask before it plays.
+
+- **The game never holds the rules.** `netlify/functions/campaign.mjs` takes
+  the setup's settings token and the player's name, finds this week's node by
+  value (`setupIdentity`, as `campaign_games` matches by jsonb equality), and
+  returns `attemptStatus` plus any win already queued there. A Python port of
+  `fold` would be a second copy to drift, with nothing like
+  `test_leaderboard_sync` able to pin a rule set. The function reads the public
+  rows with the publishable key, so it holds no secret.
+- **Times are the server's, counted on ours.** The answer carries the server's
+  `now`, and `campaign.Status.left_ms` counts down from when it landed with
+  `time.monotonic`. A device with its clock set wrong still shows the right
+  minutes.
+- **Web only, and never in the way.** The name is the board's own
+  (`sc_pbp_name`, shared by origin), which a desktop build doesn't have. A
+  lookup waits `SETTLE_S` after the last setup change, refreshes every
+  `REFRESH_S` (so a neighbour lost mid-game starts its countdown), and a
+  changed setup drops the old answer at once so Start never confirms from
+  another map's answer. A Start pressed before the answer lands just starts,
+  because a confirm is a courtesy, not a gate.
+- **One modal, not two.** The confirm reuses the slow-setup modal
+  (`menu._unless_slow`) with the node as its title, and puts the campaign's
+  lines ahead of any bot warning. It asks only when a win wouldn't be a move,
+  or would be one only against a clock (`campaign.confirm`). An open node, your
+  own node, or a player with no name yet starts straight away.
+- **The top bar label is text `main` writes** (`main.campaign_tick` into
+  `Ui.campaign_label`). `campaign` imports `pbp`, which imports `engine`, and
+  `render` must never pull that in, even indirectly.
+
 ## Campaign fleets (proposed, not built)
 
 A proposal for giving the campaign meta-map real-time lanes and fleets, written

@@ -74,7 +74,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  `pbp`, `matchnames`, `campaign`. `tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
@@ -341,7 +341,10 @@ already resolve simultaneously. The rationale for each rule is in
   `campaign_games` matches by jsonb equality, never `sc_config_key`. The
   campaign's timers (`GRACE_MS`, `COOLDOWN_MS`, queued wins) are replayed
   against a `now` passed to `fold`, never stored, and `attemptStatus` is the one
-  answer to "may I move here" for the page and the game alike. Detail:
+  answer to "may I move here" for the page and the game alike: the game asks
+  `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)
+  and only counts down the server times it is given (`starconquest/campaign.py`),
+  never reimplementing a rule. Detail:
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and

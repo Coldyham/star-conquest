@@ -98,7 +98,7 @@ only for a fight; what is deliberately not animated.
   - *Through `build_state`*; *what the replayed seat is tuned to* (`REPLAY_AUX`); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup.
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
-- **Grace and cooldown.** Half an hour's grace after losing a neighbour, one move an hour, wins posted during the wait queued rather than dropped. Both timers derived from `now` in `fold`.
+- **Grace and cooldown.** Half an hour's grace after losing a neighbour, one move an hour, wins posted during the wait queued rather than dropped. Both timers derived from `now` in `fold`. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
