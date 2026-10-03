@@ -56,7 +56,56 @@ so treat it as history rather than a current ranking.
 Depth 0 is thinker-*strength*, not thinker: `RESERVE_FLOOR` is 0 against
 thinker's 1, `_richness` peeks a hop further (`BEYOND_DECAY`), and tie-breaks
 are deterministic where thinker's draw from `state.rng`. It measures stronger
-than thinker (80%-20%), so the two are not interchangeable.
+than thinker (73-77% on the current code; an earlier, unrecorded run read
+80%-20%), so the two are not interchangeable. All three settings against both
+neighbours are under the next heading.
+
+## Each Oracle setting against thinker and marshal
+
+knower at Off / Predict / Search (`aux` 0/1/2) head to head with thinker and
+marshal, two seats, both seatings per seed, everything else default
+(2026-10, at `cf3408b`). There is no CLI for a per-seat `aux` in `tests.sim`,
+so a scratch driver stamped the seats with `sim._hand_over` and ran the
+`sim.play` loop; seeds 1-30 of the first cell reproduce the roster ladder's
+knower cells (Predict) in [`marshal.md`](marshal.md) to the game, 51-4 and
+24-30. Win rate is knower's, over finished games; ± is a 95% interval:
+
+    random, 18 nodes, 6 ly/turn, seeds 1-100 (200 games a cell)
+                  vs thinker              vs marshal            s/game
+      Off         73% ±7 (125-47)  28 TO  14% ±5 (25-158)  17 TO   0.07
+      Predict     85% ±5 (156-28)  16 TO  38% ±7 (72-119)   9 TO   0.15
+      Search      99% ±2 (196-3)    1 TO  81% ±5 (162-37)   1 TO   3.5
+
+    symmetric (hub), 18 nodes, 6 ly/turn, seeds 1-50 (100 games a cell)
+      Off        100% (26-0)       74 TO   3% (1-34)       65 TO   0.13
+      Predict    100% (59-0)       41 TO  30% ±15 (11-26)  63 TO   0.31
+      Search     100% (100-0)       0 TO  88% ±7 (74-10)   16 TO   4.0
+
+    random, 24 nodes, 3 ly/turn, --max-turns 1500, seeds 1-50 (100 a cell)
+      Off         77% ±9 (61-18)   21 TO   6% ±5 (5-76)    19 TO   0.27
+      Predict     84% ±8 (67-13)   20 TO  22% ±9 (19-69)   12 TO   0.68
+      Search     100% (100-0)       0 TO  62% ±10 (61-38)   1 TO  14
+
+What it says:
+
+- **Each setting is a full tier.** On the random maps Off beats thinker about
+  three games in four and loses to marshal about six in seven. Predict loses
+  to marshal in every cell. Search is the only setting that beats marshal, and
+  it does so in all three cells.
+- **The roster ladder's 93% for knower over thinker was a lucky 30 seeds.**
+  Over 100 seeds Predict reads 85%, and its 44% against marshal reads 38%. The
+  ladder's knower is Predict (default `AiParams`), so the ladder ranks the
+  default setting, not the bot at its best; `bot_replay` already runs it at
+  Search (`REPLAY_AUX`).
+- **Search ends games.** Off and Predict time out a lot against thinker on
+  the symmetric map (74 and 41 of 100). Search times out once against thinker
+  in all 400 of its games across the three cells. On the symmetric map the
+  timeout counts are half the result, since the win rates there rest on a few
+  dozen finished games.
+- **Cost.** Search costs 13-23x Predict per game (whole-game seconds, four
+  games in parallel on a 4-core box, so read the ratio, not the absolute).
+  [Cost per decide](#cost-per-decide-and-where-the-search-guard-trips) is the
+  per-turn measurement.
 
 ## Built, measured, removed
 

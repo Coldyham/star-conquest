@@ -121,6 +121,7 @@ only for a fight; what is deliberately not animated.
 ### design/knower.md
 - **Simultaneous resolution.** Why an oracle is possible at all.
 - **What the oracle buys, and where.** A turn of warning, worth more the faster ships are. Depth 0 is not thinker.
+- **Each Oracle setting against thinker and marshal.** Off / Predict / Search head to head in three cells. Only Search beats marshal; the ladder's 93% over thinker was a lucky 30 seeds.
 - **Built, measured, removed.** Two ideas.
 - **The depth search: branch the root, play the rest on.** Why branching deeper did nothing, and why more openings beat more turns. Most of the result against marshal comes from borrowing marshal.
 - **Borrowed candidates (`EXTERNAL_CANDIDATES`).** Candidate win shares, contested decisions only, and why `SEARCH_WIDTH` is 2.

@@ -185,6 +185,10 @@ cell is 5 turns, and the table moved by one game (258/249 and 57% with
       heuristic     0%      0%      4%     22%       —     68%
       rusherplus    0%      2%      0%     15%     32%       —
 
+knower here is at its default, Predict. For all three Oracle settings against
+marshal and thinker over more seeds, see [`knower.md`](knower.md), "Each
+Oracle setting against thinker and marshal".
+
 The same ladder in two other cells, since this one cannot see anything keyed on
 long lanes. Both 30 seeds and 900 games; the second at `--max-turns 1500`:
 
