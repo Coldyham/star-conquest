@@ -159,6 +159,14 @@ def check(origin: str, seats: int, turns: int) -> int:
             break
         if match.lapsed:
             raise Failed(f"a turn opened moments ago reads as lapsed: {match.lapsed}")
+        # Nobody is in yet, so a client level with this turn is answered briefly,
+        # and what it merges to must be the whole read it stands in for.
+        brief = await_call(pbp.fetch_state(match_id, match.turn), "a brief read")
+        merged = pbp.with_brief(match, brief)
+        if merged is None or (merged.submitted, merged.lapsed, merged.seats) != (
+                match.submitted, match.lapsed, match.seats):
+            raise Failed(f"turn {match.turn}: the brief {brief!r} does not agree "
+                         f"with the whole read")
 
         for seat_id, seat in sorted(seated.items()):
             if match.has_submitted(seat_id):
@@ -177,6 +185,9 @@ def check(origin: str, seats: int, turns: int) -> int:
         if not match.ready:
             raise Failed(f"turn {match.turn}: every seat submitted but the turn "
                          f"is still waiting on {match.waiting}")
+        if await_call(pbp.fetch_state(match_id, match.turn), "a level read").get("brief"):
+            raise Failed(f"turn {match.turn}: a complete turn was answered with a "
+                         f"brief, which carries none of the orders to resolve it")
 
         # Two clients resolving the same turn is the design's central claim, so
         # it is checked rather than assumed: both compute it, both report, and

@@ -114,6 +114,18 @@ create index if not exists scores_match_id_idx
   on public.scores (match_id) where match_id <> '';
 
 -- ---------------------------------------------------------------------------
+-- scores.campaign_start: `Challenge.campaign` out of the token, what the weekly
+-- campaign said about this node for this player when the game was *started*
+-- (an attemptStatus reason, e.g. 'adjacent'). It decides one thing: whether the
+-- campaign's grace covers the score (js/campaign.mjs, startedWithAccess). A
+-- claim like `hand`, and safe as one: a forged stamp gets no more grace than a
+-- blank, which is what every score before this column, every desktop game and
+-- every hand-written link carries.
+-- ---------------------------------------------------------------------------
+alter table public.scores add column if not exists campaign_start text not null default ''
+  check (campaign_start ~ '^[a-z-]{0,20}$');
+
+-- ---------------------------------------------------------------------------
 -- game_logs: the replay behind a score — settings, seed, and every turn's orders
 -- and combat draws, deflated and base64url'd by `replay.GameLog.encoded`. Posted
 -- by the game itself when the player presses "Post to leaderboard", which is the
@@ -613,6 +625,26 @@ from (
 group by config_key, tag;
 
 -- ---------------------------------------------------------------------------
+-- counted_scores: the one place the crowns' eligibility rule lives: every posted score
+-- counts unless the worker replayed its log and found it wrong (`mismatch`). An
+-- unchecked, missing or outdated replay still counts, because the game uploads a
+-- log once, with no retry, so a score posted offline or pasted as a hand-made
+-- link can never become `verified` -- and shutting those out would shut out
+-- whole ways of playing. Nothing is stored: deleting a score (tools/admin.py)
+-- recomputes game_summary's `contenders` and the crown views for free.
+-- ---------------------------------------------------------------------------
+create or replace view public.counted_scores
+  with (security_invoker = true) as
+select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
+  -- New columns go last: `create or replace view` can add one, never reorder.
+  s.hand,
+  s.campaign_start
+from public.scores s
+join public.users u on u.id = s.user_id
+left join public.score_checks c on c.score_id = s.id
+where c.verdict is distinct from 'mismatch';
+
+-- ---------------------------------------------------------------------------
 -- game_summary: the homepage in one select — every game with its current best
 -- score and last activity. security_invoker makes it evaluate RLS as the caller
 -- rather than the owner, so a future tightened policy can't be bypassed here.
@@ -652,7 +684,19 @@ select
   -- The embargo in force, not just the stored one: game_embargoes folds in a
   -- live campaign week, so a campaign node reads as embargoed on every page
   -- that already honours `games.embargo_until`.
-  e.embargo_until
+  e.embargo_until,
+  -- The home page's filters, computed here because PostgREST can filter on a
+  -- column but not on a comparison between two of them.
+  -- contenders: distinct players with a counted score (counted_scores below),
+  -- so `contenders >= 2` is exactly the set crown_holders has a row for.
+  coalesce(field.contenders, 0) as contenders,
+  -- bot_leads: a winning bot exists and no human score beats it — a tie still
+  -- reads as the bot's, the same verdict as format.mjs's botLeadBadge.
+  (bot.turns is not null
+    and (best.turns is null or (bot.turns, bot.lost) <= (best.turns, best.lost))) as bot_leads,
+  -- fog: settings_json is pruned to non-defaults and the default is fog off,
+  -- so either range being present at all means fog is on (setup.mjs's hasFog).
+  (g.settings_json ?| array['fog_sight', 'fog_scout']) as fog
 from public.games g
 join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
@@ -690,7 +734,12 @@ left join lateral (
     order by uses desc, tag asc
     limit 6
   ) t
-) tagc on true;
+) tagc on true
+left join lateral (
+  select count(distinct cs.user_id)::integer as contenders
+  from public.counted_scores cs
+  where cs.game_key = g.game_key
+) field on true;
 
 -- ---------------------------------------------------------------------------
 -- config_summary: one row per config_key, for the main list's "by config"
@@ -734,7 +783,10 @@ select
   coalesce(tagc.tags, '{}'::text[]) as config_tags,
   agg.game_count,
   agg.score_count,
-  agg.last_activity
+  agg.last_activity,
+  -- New columns go last. fog is part of sc_config_key, so every game in the
+  -- group shares it; see game_summary.fog.
+  (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog
 from agg
 join rep on rep.config_key = agg.config_key
 left join public.configs cfg on cfg.config_key = agg.config_key
@@ -755,24 +807,8 @@ left join lateral (
 -- one person has played -- not volume, which a count of wins or of maps would
 -- pay out for grinding easy setups.
 --
--- counted_scores is the one place the eligibility rule lives: every posted score
--- counts unless the worker replayed its log and found it wrong (`mismatch`). An
--- unchecked, missing or outdated replay still counts, because the game uploads a
--- log once, with no retry, so a score posted offline or pasted as a hand-made
--- link can never become `verified` -- and shutting those out would shut out
--- whole ways of playing. Nothing is stored: deleting a score (tools/admin.py)
--- recomputes both views below for free.
--- ---------------------------------------------------------------------------
-create or replace view public.counted_scores
-  with (security_invoker = true) as
-select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
-  -- New columns go last: `create or replace view` can add one, never reorder.
-  s.hand
-from public.scores s
-join public.users u on u.id = s.user_id
-left join public.score_checks c on c.score_id = s.id
-where c.verdict is distinct from 'mismatch';
-
+-- counted_scores, the eligibility rule, is defined above game_summary, which
+-- reads it for the home page's `contenders`.
 -- ---------------------------------------------------------------------------
 -- crown_holders: one row per *contested* map (counted scores from two or more
 -- distinct players), naming whoever holds its record. The record is chosen the
@@ -844,7 +880,9 @@ select
   cs.user_name,
   cs.turns,
   cs.lost,
-  cs.submitted_at
+  cs.submitted_at,
+  -- What the campaign said when the game began, for fold's grace.
+  cs.campaign_start
 from public.campaign_games cg
 join public.counted_scores cs on cs.game_key = cg.game_key
 where cs.hand > 0

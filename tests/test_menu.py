@@ -68,10 +68,11 @@ def test_web_file_row_is_get_link_and_recently_played():
         pygame.quit()
 
 
-def test_browse_configs_opens_the_leaderboards_config_listing(monkeypatch):
-    """Clicking 'Recently played' opens the board's ?group=config view — the same
-    listing a Save/Load row could never have offered on the web, where a saved
-    file silently vanishes on reload."""
+def test_recently_played_opens_the_leaderboards_main_list(monkeypatch):
+    """Clicking 'Recently played' opens the board's main list, newest activity
+    first, not its "By config" grouping — the button names that list. A Save/Load
+    row could never have offered it on the web, where a saved file silently
+    vanishes on reload."""
     opened = []
     monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
     screen, ms, settings = _setup()
@@ -79,7 +80,7 @@ def test_browse_configs_opens_the_leaderboards_config_listing(monkeypatch):
     menu.is_web = lambda: True
     try:
         assert _click_key(screen, ms, settings, "browse_configs") is None
-        assert opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_CONFIGS_PATH)]
+        assert opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_RECENT_PATH)]
     finally:
         menu.is_web = real_is_web
         pygame.quit()

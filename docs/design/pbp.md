@@ -412,6 +412,40 @@ The `public` column defaults to false. A one-off, commented-out
 the column, so there is something to test against. Nothing needs switching off
 before a deploy.
 
+## What a poll costs
+
+The poll is the play-by-post traffic that grows: 720 reads an hour per open
+tab, against a Netlify free tier that pauses the whole site (game, board and
+`/api/`) once the month's 300 credits are spent, and a Supabase free tier with
+5 GB of egress. A whole `?action=state` read selects the log and every order
+row, so it costs the most data at the point in a match where nothing is
+changing. Two measures cut it without making a watched match any less live.
+
+**A level client reads a brief.** `main` sends `&have=<turn>` when the board
+stands on the turn of the last whole read it holds (`pbp_last`), and not when
+it is stale. While that turn is still waiting on somebody, `briefState` answers
+from the match row without `log` or the setup, plus the `turn, seat, source` of
+the two latest turns. Two turns is enough because `lapsedAction` only asks
+whether the turn before was missed. It answers the whole read once the match
+has moved past `have` or the turn is complete, so the client always needs a
+single round trip. `pbp.with_brief` merges a brief into the last whole read. The
+merge is sound because nothing settled changes until the turn resolves, and
+resolving moves the turn number, which the merge refuses to cross. An old
+client sends no `have` and an old endpoint ignores it, so either can deploy
+first.
+
+**An untouched tab reads less often.** `pbp_idle_floor` stops a read going out
+sooner than a tenth of the time since the last input, capped at a minute.
+Below fifty seconds of quiet that floor is under the 5 s cadence, so anyone
+using the board sees no change, and their first input drops it to nothing,
+which sends an overdue read on that frame. It is a floor under `pbp_wait`
+rather than a replacement for it, so throttling and failure backoff still
+apply. A hidden browser tab already reads nothing, because pygbag's loop rides
+`requestAnimationFrame`.
+
+*Decided against: a slower steady cadence.* Turns take hours, but a match
+being watched should step the moment the last seat is in.
+
 ## Traps
 
 * **Nothing may resolve a play-by-post turn on a clock of its own.** That is the

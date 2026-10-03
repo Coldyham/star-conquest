@@ -190,6 +190,13 @@ class Challenge:
     # drops `challenge` before hashing, so unlike a new `Settings` field this moves
     # no setup digest and needs no `_LEGACY_KEY_DROPS` entry.
     log: str = ""
+    # What the weekly campaign said about this node for this player when the
+    # match was started (an attemptStatus reason, `campaign.Status.why`), so the
+    # board can tell a game begun with access to the node from one begun after
+    # losing it: only the first is covered by the grace. Blank when nobody
+    # asked (not a node, off the web, offline), which the board takes on trust.
+    # Free for the same reason as `log`.
+    campaign: str = ""
 
     def summary(self) -> str:
         """One line: the target, as shown on the menu banner and win overlay."""

@@ -212,6 +212,53 @@ test("the live turn's orders are withheld until every seat is in", async () => {
   assert.equal(body.turns.length, 2, "...and released the moment the turn is complete");
 });
 
+const brief = (have, match = MATCH) => call("state", { match, have }, "GET");
+
+test("a client level with an open turn reads a brief: the whole read minus the heavy half",
+  async () => {
+    const tokens = await opened();
+    await call("submit", { match_id: MATCH, token: tokens[1], turn: 0,
+                           orders: [{ src: 1, dst: 2, ships: 3 }] });
+    const [status, body] = await brief(0);
+    assert.equal(status, 200, JSON.stringify(body));
+    assert.equal(body.brief, true);
+    for (const heavy of ["log", "turns", "settings_json", "seed"]) {
+      assert.ok(!(heavy in body), `a brief carried ${heavy}`);
+    }
+    const [, whole] = await state();
+    for (const [key, value] of Object.entries(body)) {
+      if (key !== "brief") assert.deepEqual(value, whole[key], `brief and whole read disagree on ${key}`);
+    }
+    assert.ok(!JSON.stringify(body).includes("tokens"), "the stored hashes reached a brief");
+  });
+
+test("a brief is never the answer once the client needs the log or the live orders", async () => {
+  const tokens = await opened();
+  let [, body] = await brief(3);
+  assert.ok(!body.brief && "log" in body, "a client on another turn gets the whole match");
+
+  for (const seat of [1, 2]) {
+    await call("submit", { match_id: MATCH, token: tokens[seat], turn: 0, orders: [] });
+  }
+  [, body] = await brief(0);
+  assert.ok(!body.brief, "a complete turn is one the client is about to resolve");
+  assert.equal(body.turns.length, 2);
+});
+
+test("a brief reads a second consecutive miss off the turn before", async () => {
+  const tokens = await opened();
+  await call("submit", { match_id: MATCH, token: tokens[1], turn: 0, orders: [] });
+  elapse();
+  await call("lapse", { match_id: MATCH, token: tokens[1], turn: 0, seats: { 2: [] } });
+  await call("resolve", { match_id: MATCH, token: tokens[1], turn: 0,
+                          log: "abc", board_digest: "d" });
+  await call("submit", { match_id: MATCH, token: tokens[1], turn: 1, orders: [] });
+  elapse();
+  const [, body] = await brief(1);
+  assert.equal(body.brief, true);
+  assert.deepEqual(body.lapsed, { 2: "bot" }, "the two-turn window still sees the first miss");
+});
+
 test("a turn resolves once, and the second client is told it already moved", async () => {
   const tokens = await opened();
   for (const seat of [1, 2]) {

@@ -66,6 +66,8 @@ export function aliasFor(key) {
 /** Everything after the '#', since people paste a whole URL, not a bare token. */
 /** `replay._MATCH_ID_RE` — 16 hex digits, the shape the game mints. */
 const MATCH_ID = /^[0-9a-f]{16}$/;
+/** An attemptStatus reason, the shape `Challenge.campaign` carries. */
+const STAMP = /^[a-z-]{1,20}$/;
 
 export function fragmentOf(input) {
   const text = String(input).trim();
@@ -79,7 +81,7 @@ export function fragmentOf(input) {
  *
  * @param input    the pasted URL or token
  * @param inflate  (Uint8Array) => Uint8Array | Promise<Uint8Array>, zlib-wrapped
- * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by, log} | null, gameKey, setup, token}
+ * @returns {mode, players, nodes, seed, challenge: {turns, lost, hand, by, log, campaign} | null, gameKey, setup, token}
  * @throws Error  'malformed token'
  */
 export async function decodeToken(input, inflate) {
@@ -131,6 +133,11 @@ export async function decodeToken(input, inflate) {
       // so a blank is ordinary — it means unverified, not invalid. Shape-checked
       // rather than trusted: it is written to a column the verifier keys on.
       log: MATCH_ID.test(raw.log) ? raw.log : "",
+      // Challenge.campaign: what the campaign said about this node when the
+      // game was started (an attemptStatus reason), which decides whether the
+      // grace covers it (campaign.mjs, startedWithAccess). Blank for anything
+      // but a campaign game the web build looked up, and a claim like `hand`.
+      campaign: typeof raw.campaign === "string" && STAMP.test(raw.campaign) ? raw.campaign : "",
     } : null,
     gameKey: await gameKeyFor(dict),
     setup: setupOf(dict),

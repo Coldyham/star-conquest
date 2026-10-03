@@ -506,6 +506,45 @@ def test_whether_we_submitted_is_the_endpoints_answer_and_never_ours():
     assert not ui.pbp_submitted
 
 
+def _brief(match: pbp.Match, **over) -> dict:
+    """What `?action=state&have=<turn>` hands back about ``match``'s live turn."""
+    body = {"brief": True, "match_id": match.match_id, "seats": list(match.seats),
+            "turn": match.turn, "submitted": [], "lapsed": {}, "finished": False,
+            "deadline_hours": 48, "turn_opened_at": "2026-09-22T12:00:00+00:00",
+            "title": "", "names": {}, "winner": None}
+    body.update(over)
+    return body
+
+
+def test_a_brief_updates_the_live_turn_and_keeps_everything_settled():
+    """The merged match is the whole read the endpoint would have sent: it still
+    opens onto the same board, and only the live turn's fields have moved."""
+    rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
+    match = pbp.match_from_dict(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
+    merged = pbp.with_brief(match, _brief(match, submitted=[2], lapsed={"1": "hold"},
+                                          title="Rematch", names={"2": "Ada"}))
+    assert merged is not None
+    assert merged.submitted == [2] and merged.waiting == [1]
+    assert merged.lapsed == {1: "hold"}
+    assert merged.title == "Rematch" and merged.names == {2: "Ada"}
+    assert (merged.log, merged.turns, merged.seed) == (match.log, match.turns, match.seed)
+    opened = app.open_match(merged, _seat(1), Settings())
+    assert opened is not None and opened[0].turn == 1
+
+
+@pytest.mark.parametrize("over", [{"turn": 1}, {"match_id": "ffeeddccbbaa9988"},
+                                  {"brief": False}, {"seats": []}])
+def test_a_brief_for_some_other_read_is_refused_rather_than_merged(over):
+    """A log from one turn under another turn's number is a board nobody had."""
+    match = pbp.match_from_dict(_payload())
+    assert pbp.with_brief(match, _brief(match, **over)) is None
+
+
+def test_a_brief_answers_to_the_board_and_never_opens_one():
+    """With no whole read to merge into, a brief is no match at all."""
+    assert pbp.match_from_dict(_brief(pbp.match_from_dict(_payload()))) is None
+
+
 def test_a_resolved_turn_hands_the_board_straight_back():
     _, state, ui, _ = _opened()
     ui.pbp_submitted, ui.pbp_waiting, ui.pbp_msg = True, (2,), "waiting"
@@ -1003,3 +1042,24 @@ def test_a_failed_read_is_retried_quickly_then_backs_off():
     assert delays[1:] == sorted(delays[1:])
     assert delays[5] > app.PBP_POLL_MS
     assert delays[-1] == app.PBP_RETRY_MAX_MS
+
+
+def test_an_untouched_tab_reads_less_often_and_a_busy_one_never_does():
+    """Under a minute of quiet the floor stays below the steady cadence, so a
+    player at the board sees no difference; past that the wait grows with the
+    lull, up to the cap."""
+    assert app.pbp_idle_floor(0) == 0
+    assert app.pbp_idle_floor(45_000) < app.PBP_POLL_MS
+    floors = [app.pbp_idle_floor(m * 60_000) for m in range(1, 30)]
+    assert floors == sorted(floors) and floors[0] > app.PBP_POLL_MS
+    assert floors[-1] == app.PBP_IDLE_MAX_MS
+
+
+def test_a_read_says_which_turn_it_holds_only_when_asked_to(monkeypatch):
+    sent = []
+    monkeypatch.setattr(pbp, "endpoint", lambda action: f"https://x/api/pbp?action={action}")
+    monkeypatch.setattr(pbp, "request", lambda url, body=None: sent.append(url))
+    pbp.fetch_state(MATCH)
+    pbp.fetch_state(MATCH, 4)
+    assert sent == [f"https://x/api/pbp?action=state&match={MATCH}",
+                    f"https://x/api/pbp?action=state&match={MATCH}&have=4"]

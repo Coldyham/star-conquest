@@ -15,12 +15,31 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 
 | | |
 |---|---|
-| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
+| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+
+The main list's search, sort and filters live in the URL, so every view is a
+link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
+`tests/listing.test.mjs`): search over a setup's name, its tags, the leader's name or
+a seed; sort by recent activity, most scores, most players or newest map (most maps,
+grouped); filter by player count, map mode and fog, and — per map only — to
+**contested** maps (two or more players with a counted score, exactly the maps a
+crown is held on), maps a **bot leads**, this week's **campaign** nodes, and maps **unplayed by me** (the remembered
+name's own maps, excluded by key). `game_summary`'s `contenders`, `bot_leads` and
+`fog` columns exist for these, since PostgREST can filter on a column but not on a
+comparison between two; `tests/test_board_filters_sql.py` checks them. Fog is never
+hidden inside "N tweaks": an unnamed setup's label leads with it ("Fog · 3 tweaks"),
+and a named one carries a **Fog** badge. With a remembered name, a card also shows
+your own best there ("You: 25"). A config card is laid out like a game card: its
+setup line (mode, players, systems), its name in the config badge's magenta, and
+its map count as the headline figure.
+The grouped view's **Random setup** button picks one of the configs those filters
+allow, uniformly and never a hand-drawn map (the pool `tools/campaign.py` fills a
+campaign node from), and opens it in the game on a freshly rolled seed.
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the
@@ -498,8 +517,11 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log`, `/api/replay` and `/api/pbp` on
-   its own origin (`paths.LEADERBOARD_*_PATH`).
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
+   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
+   (`campaign.mjs`) needs no key: it reads the same public campaign rows
+   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
+   them.
 
 ## Finding each other
 
@@ -654,6 +676,18 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **Field nodes** fall to a win posted while you hold a neighbour; somebody
   else's only to a strictly better score (a tie defends). Bettering your own
   score on a node raises the bar for attackers.
+- **Half an hour's grace.** A win also counts if you held the node or a
+  neighbour at any point in the 30 minutes before posting it, so a node taken
+  from you while you were playing on or beside it doesn't void the game. Only
+  a game you started before losing it is covered: the game stamps what the
+  campaign said at Start onto the score (`scores.campaign_start`), and a blank
+  stamp (older scores, the desktop build, a hand-written link) is trusted.
+- **The game says so too.** On the web build, a setup that is one of this
+  week's nodes is looked up (`/api/campaign`, by the name this browser last
+  posted under). Start asks first if a win wouldn't be a move, or would only be
+  one inside the grace, and the top bar keeps a countdown while you play. A
+  live node's own page (`game.html`) shows the same status as the campaign
+  page above its "Play this map" button.
 - A score counts if it had at least one turn played by hand and its replay
   wasn't found to be a `mismatch`. Anything else is just an ordinary score.
 - The week runs its full length; most field nodes held at the close wins.

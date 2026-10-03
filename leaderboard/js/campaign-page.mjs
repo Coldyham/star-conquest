@@ -1,7 +1,7 @@
 import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { parseWeek, weekAfter, weekBefore, weekParam, weekStart } from "./crowns.mjs";
-import { canAttempt, fold, nodeRadius, playerHue } from "./campaign.mjs";
+import { attemptLines, attemptStatus, canAttempt, fold, nodeRadius, playerHue, weekQueries } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
@@ -22,12 +22,14 @@ const params = new URLSearchParams(location.search);
 const now = new Date();
 const thisWeek = weekStart(now);
 const week = parseWeek(params.get("week"), now);
-const current = week.getTime() === thisWeek.getTime();
+// Only ever turns false, when the live week closes with the page open (tick).
+let current = week.getTime() === thisWeek.getTime();
 const me = myName();
 
 let graph = null;
 let state = null;
 let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
+let ticker = null;
 let selected = params.has("node") ? Number(params.get("node")) : null;
 
 const dayLabel = (date) =>
@@ -72,7 +74,7 @@ function drawMap() {
     const r = nodeRadius(node.systems);
     const classes = ["node", node.kind];
     if (!holder) classes.push("neutral");
-    if (current && canAttempt(graph, state, node.id, me)) classes.push("open");
+    if (current && canAttempt(graph, state, node.id, me, Date.now())) classes.push("open");
     if (selected === node.id) classes.push("selected");
     const label = node.mystery ? "?" : String(node.systems);
     const who = holder ? `held by ${holder.name}` : "unclaimed";
@@ -96,21 +98,12 @@ function drawMap() {
   }, [...lanes, ...nodes]));
 }
 
-/** Why `me` can or can't move on the selected node, in one line. */
-function attemptNote(node, holder) {
-  if (!current) return null;
-  if (!me) return el("p", { class: "cannot", text: "Post a score once and this page will know which nodes are yours to attempt." });
-  if (canAttempt(graph, state, node.id, me)) {
-    const beat = holder ? ` Beat ${holder.turns} turns · ${holder.lost} lost to take it.` : "";
-    return el("p", { class: "can", text: `You can make this move.${beat}` });
-  }
-  if (holder && holder.key === me.toLowerCase()) return el("p", { class: "can", text: node.kind === "home"
-    ? "Your home. Homes can't be taken, so it's yours for the week."
-    : "Yours. Bettering your score here raises the bar." });
-  if (node.kind === "home") return el("p", { class: "cannot", text: holder ? "Claimed — homes can't be taken." : "You already have a home this week." });
-  return el("p", { class: "cannot", text: state.homes.has(me.toLowerCase())
-    ? "Not next to anything you hold yet."
-    : "Win a home first — that's how you join." });
+/** Why `me` can or can't move on the selected node, and when, in a line or two. */
+function attemptNote(node) {
+  if (!current) return [];
+  const now = Date.now();
+  return attemptLines(attemptStatus(graph, state, node.id, me, now), { now })
+    .map(({ tone, text }) => el("p", { class: tone, text }));
 }
 
 async function drawDetail() {
@@ -138,7 +131,8 @@ async function drawDetail() {
       ? ["Held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
         ` — ${holder.turns} turns · ${holder.lost} lost`]
       : [node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."]),
-    ...[attemptNote(node, holder), play, scores].filter(Boolean),
+    ...attemptNote(node),
+    ...[play, scores].filter(Boolean),
   );
 }
 
@@ -170,26 +164,45 @@ function drawFeed() {
 
 function drawStatus() {
   if (!current) { statusLine.textContent = "Final standings for that week."; return; }
-  const left = Math.max(0, weekAfter(week).getTime() - now.getTime());
+  const nowMs = Date.now();
+  const left = Math.max(0, weekAfter(week).getTime() - nowMs);
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
   statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.`;
 }
 
-async function load() {
-  mountNav();
-  mountMyScores();
-  drawWeeks();
-  if (!configured()) {
-    showError(mapBox, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
+function redraw() {
+  drawStatus();
+  drawMap();
+  drawDetail();
+  drawStandings();
+  drawFeed();
+}
+
+/**
+ * Once a minute on the live week, so a grace countdown moves without a reload.
+ * When the week closes with the page open, the page becomes that week's final
+ * standings, read afresh so the last moves before the close are in them.
+ */
+function tick() {
+  if (Date.now() < weekAfter(week).getTime()) {
+    redraw();
     return;
   }
+  current = false;
+  clearInterval(ticker);
+  drawWeeks();
+  fetchWeek();
+}
+
+/** Read the week's map and moves, and draw them. */
+async function fetchWeek() {
   try {
     const day = weekParam(week);
-    const [rows, scores, games] = await Promise.all([
-      select(`campaigns?select=week_start,graph&week_start=${eq(day)}`),
-      select(`campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at` +
-        `&week_start=${eq(day)}&order=submitted_at.asc,score_id.asc`),
+    const reads = weekQueries(day);
+    const [rows, posted, games] = await Promise.all([
+      select(reads.graph),
+      select(reads.scores),
       select(`campaign_games?select=node_id,game_key&week_start=${eq(day)}`).catch(() => []),
     ]);
     if (!rows.length) {
@@ -200,17 +213,25 @@ async function load() {
       return;
     }
     graph = rows[0].graph;
-    state = fold(graph, scores);
+    state = fold(graph, posted);
     boards = new Map(games.map((row) => [row.node_id, row.game_key]));
-    drawStatus();
-    drawMap();
-    drawDetail();
-    drawStandings();
-    drawFeed();
+    redraw();
   } catch (err) {
     mapBox.classList.remove("loading");
     showError(mapBox, err.message);
   }
+}
+
+async function load() {
+  mountNav();
+  mountMyScores();
+  drawWeeks();
+  if (!configured()) {
+    showError(mapBox, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
+    return;
+  }
+  await fetchWeek();
+  if (current && graph) ticker = setInterval(tick, 60000);
 }
 
 load();

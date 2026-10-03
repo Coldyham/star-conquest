@@ -91,12 +91,13 @@ def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
     for path, name in ((paths.LEADERBOARD_LOG_PATH, "log.mjs"),
                        (paths.LEADERBOARD_REPLAY_PATH, "replay.mjs"),
-                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs")):
+                       (paths.LEADERBOARD_PBP_PATH, "pbp.mjs"),
+                       (paths.LEADERBOARD_CAMPAIGN_PATH, "campaign.mjs")):
         assert f'export const config = {{ path: "{path}" }};' in (functions / name).read_text()
 
 
 def test_the_games_board_links_point_under_board():
-    for path in (paths.LEADERBOARD_SUBMIT_PATH, paths.LEADERBOARD_CONFIGS_PATH,
+    for path in (paths.LEADERBOARD_SUBMIT_PATH, paths.LEADERBOARD_RECENT_PATH,
                  paths.LEADERBOARD_LOBBY_PATH):
         page = path.split("?")[0]
         assert page.startswith("/board/")
@@ -169,3 +170,10 @@ def test_the_board_links_to_the_game_under_game():
         assert 'href="../">' not in page.read_text()
     from tools import admin
     assert admin.GAME_URL == "https://star-conquest.netlify.app/game/"
+
+
+def test_the_launcher_imports_pygame_for_pygbag():
+    """pygbag installs the pygame-ce wheel only for imports it finds in the
+    top-level main.py; the shim importing only the package boots to black."""
+    launcher = (ROOT / "main.py").read_text()
+    assert re.search(r"^import pygame\b", launcher, re.MULTILINE)

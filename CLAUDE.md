@@ -74,7 +74,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  `pbp`, `matchnames`, `campaign`. `tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
@@ -230,6 +230,10 @@ already resolve simultaneously. The rationale for each rule is in
   digest is a tripwire against drift, not an anti-cheat mechanism. The live
   turn's orders are released all at once, only when every seat is in
   (`visibleOrders`).
+- **A poll is a brief while nothing settled can change.** `&have=<turn>` gets
+  the live turn without the log or orders (`briefState`), merged into the last
+  whole read by `pbp.with_brief`, which refuses any other turn. An idle tab polls
+  less (`main.pbp_idle_floor`). Detail: `docs/design/pbp.md`, "What a poll costs".
 - **Nothing resolves a play-by-post turn on a clock.** End Turn submits
   (`main.pbp_send`), and play and autoplay are unavailable. A settled turn still
   goes through `main.resolve_turn`, passing the record as `script`.
@@ -338,7 +342,16 @@ already resolve simultaneously. The rationale for each rule is in
   sharing action, so a watched replay (`Ui.watched`) can't be posted as yours.
 - **Crowns, the weekly campaign and embargoes derive their state from
   `counted_scores` and stored maps; nothing about who holds what is stored.**
-  `campaign_games` matches by jsonb equality, never `sc_config_key`. Detail:
+  `campaign_games` matches by jsonb equality, never `sc_config_key`. The
+  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored; it
+  covers only a game started with access, which the game stamps at Start
+  (`Challenge.campaign` → `scores.campaign_start`, a claim that can only narrow
+  the grace, so a blank is trusted). And
+  `attemptStatus` is the one answer to "may I move here" for the page and the
+  game alike: the game asks
+  `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)
+  and only counts down the server times it is given (`starconquest/campaign.py`),
+  never reimplementing a rule. Detail:
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and

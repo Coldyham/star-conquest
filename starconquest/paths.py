@@ -107,16 +107,18 @@ LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened w
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
-# The board's "by config" listing (`leaderboard/js/home.mjs`'s `?group=config`):
-# every setup somebody has posted a score under, grouped and named. Not specific
-# to the setup on the menu right now — there is no way to name an arbitrary,
-# possibly never-played setup's own config page without either shipping the
-# Supabase project straight into the game or reimplementing `sc_config_key`'s
-# Postgres-specific hashing a second time (schema.sql spells out why that hash
-# is deliberately computed nowhere but there). This is the same link the web
-# menu's file row used to spend on a Save/Load row that never actually
-# persisted anything in the browser (see `menu._file_control`).
-LEADERBOARD_CONFIGS_PATH = "/board/index.html?group=config"
+LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`campaign`)
+# The board's main list (`leaderboard/js/home.mjs`): every map somebody has
+# posted a score on, newest activity first — what the menu's "Recently played"
+# button says it opens. Its "By config" toggle is one press away from there.
+# Not specific to the setup on the menu right now — there is no way to name an
+# arbitrary, possibly never-played setup's own config page without either
+# shipping the Supabase project straight into the game or reimplementing
+# `sc_config_key`'s Postgres-specific hashing a second time (schema.sql spells
+# out why that hash is deliberately computed nowhere but there). This is the
+# same link the web menu's file row used to spend on a Save/Load row that never
+# actually persisted anything in the browser (see `menu._file_control`).
+LEADERBOARD_RECENT_PATH = "/board/index.html"
 # The play-by-post lobby. It reads `WEB_PBP_SEATS_KEY` itself, being on the
 # same origin, so the game hands it nothing.
 LEADERBOARD_LOBBY_PATH = "/board/pbp.html"

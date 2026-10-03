@@ -19,6 +19,7 @@ import pygame
 
 from starconquest import (
     ai,
+    campaign,
     config,
     engine,
     fog,
@@ -176,6 +177,31 @@ def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
     return state, ui, log, seed
 
 
+def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
+    """Keep the top bar's campaign reminder current for the game being played.
+
+    The menu's own watcher is reused, so a setup it already looked up shows at
+    once, and the lookup is refreshed every `campaign.REFRESH_S` while the
+    game runs: a node lost mid-game starts its grace countdown here
+    without a reload. Nothing is shown for a watched replay or a play-by-post
+    match, neither of which can be posted as a campaign move.
+    """
+    if ui.watched or ui.in_pbp:
+        ui.campaign_label = None
+        return
+    watch.pump(settings, start=ui.campaign_start)
+    ui.campaign_label = campaign.label(watch.status)
+
+
+def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
+    """Record what the campaign said about this setup as a match begins (Start,
+    or a Retry or fork that plays it again from now), for the grace. A rewind
+    within a match keeps the stamp it began with; a resumed save has none, and
+    neither has a match forked out of a watched replay, since nothing looked
+    its setup up while it was being watched (`campaign_tick`)."""
+    ui.campaign_start = campaign.stamp(watch.status)
+
+
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
     """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
@@ -283,6 +309,7 @@ def challenge_settings(settings: Settings, state: GameState, ui: Ui,
         hand=hand_turns(log),
         key=shared.challenge_key(),
         log=log.match_id,
+        campaign=ui.campaign_start,
     )
     return shared
 
@@ -421,10 +448,10 @@ def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] 
 # --------------------------------------------------------------------------- #
 # Play-by-post
 # --------------------------------------------------------------------------- #
-# How often a client asks the endpoint what a shared match is doing. A turn here
-# takes hours, so five seconds is generous by a wide margin. That is 720 reads
-# an hour per open tab, which is what the endpoint's separate read budget
+# How often a client asks the endpoint what a shared match is doing. That is 720
+# reads an hour per open tab, which is what the endpoint's separate read budget
 # (`MAX_READS_PER_WINDOW` in `pbp.mjs`) is sized around; writes have their own.
+# Most of them are briefs (`pbp.with_brief`), which carry no log.
 PBP_POLL_MS = 5000
 # A read that failed is retried sooner than that, then later and later: a blip
 # (a cold function, a dropped reply) is over by the next try, while an endpoint
@@ -472,6 +499,23 @@ PBP_ENDPOINT_MSGS = {
     "store refused": "The match server had a problem — trying again",
 }
 PBP_REFUSAL_MSG = "The match refused that: {}"
+
+
+# A tab nobody has touched reads less often: never sooner than a tenth of the
+# time since the last input, up to a minute. Below fifty seconds that floor is
+# under `PBP_POLL_MS`, so somebody using the board sees the ordinary cadence, and
+# their first input after a lull drops the floor at once and lets an overdue
+# read go out on that frame.
+PBP_IDLE_SHARE = 10
+PBP_IDLE_MAX_MS = 60_000
+PBP_ACTIVITY_EVENTS = frozenset((
+    pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEWHEEL, pygame.KEYDOWN,
+    pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.WINDOWFOCUSGAINED))
+
+
+def pbp_idle_floor(idle_ms: int) -> int:
+    """The soonest the next read may go, ``idle_ms`` after the last input."""
+    return min(idle_ms // PBP_IDLE_SHARE, PBP_IDLE_MAX_MS)
 
 
 def pbp_poll_delay(failures: int) -> int:
@@ -1256,6 +1300,8 @@ async def main() -> None:
     pbp_read_line = ""            # the line the last failed read put up, if any
     pbp_resolving = False         # whether `pbp_write` is our own resolved turn
     pbp_stale = False             # our resolve was refused: rebuild on the next read
+    pbp_last: pbp.Match | None = None   # the latest read, which a brief merges into
+    pbp_idle = 0                  # ms since the last input, which stretches the wait
     # Every other seat's link, from a match *we* just created — handed to `Ui`
     # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
     # opens on the very first frame of the match rather than a status line that
@@ -1312,6 +1358,7 @@ async def main() -> None:
         # a frame, and handing that whole stretch to the film it just started
         # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
+        pbp_idle += dt
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:
@@ -1425,8 +1472,13 @@ async def main() -> None:
             if status != pbp.PENDING:
                 pbp_poll = None
                 pbp_accum = 0
-                match = (pbp.match_from_dict(pbp.parse_body(body) or {})
-                         if status == pbp.OK else None)
+                match = None
+                if status == pbp.OK:
+                    read = pbp.parse_body(body) or {}
+                    match = (pbp.with_brief(pbp_last, read)
+                             if pbp_last is not None and read.get("brief")
+                             else pbp.match_from_dict(read))
+                    pbp_last = match or pbp_last
                 opening = state is None or ui is None or not ui.in_pbp
                 pbp_failures = pbp_failures + 1 if match is None else 0
                 pbp_wait = pbp_poll_delay(pbp_failures)
@@ -1537,13 +1589,19 @@ async def main() -> None:
             pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
             pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
             pbp_resolving = pbp_stale = False
+            pbp_last = None
         elif (ui is not None and pbp_seat is not None and pbp_poll is None
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
             pbp_accum += dt
-            if pbp_accum >= pbp_wait:
+            if pbp_accum >= max(pbp_wait, pbp_idle_floor(pbp_idle)):
                 pbp_accum = 0
-                pbp_poll = pbp.fetch_state(ui.pbp_match)
+                # A brief is only asked for when the board stands where our last
+                # read did; a board ahead of it (our own resolve) or a stale one
+                # needs the whole match.
+                have = (pbp_last.turn if pbp_last is not None and not pbp_stale
+                        and pbp_last.turn == state.turn else None)
+                pbp_poll = pbp.fetch_state(ui.pbp_match, have)
 
         # Reflow to fill the window whenever its size changes.
         screen = pygame.display.get_surface()
@@ -1555,6 +1613,8 @@ async def main() -> None:
             if editor is not None:
                 mapmaker.reflow(editor)
         for event in pygame.event.get():
+            if event.type in PBP_ACTIVITY_EVENTS:
+                pbp_idle = 0
             # Web only, once: the first tap/click/key this session sees is the
             # earliest point simulation code can observe that the player has
             # actually landed on the page (touch arrives as MOUSEBUTTONDOWN — see
@@ -1615,7 +1675,9 @@ async def main() -> None:
                         confirm_rewind = False
                 if do_rewind:
                     assert log is not None and ui is not None   # confirm_rewind ⇒ in-game
+                    stamped = ui.campaign_start   # the same match, so the same start
                     state, ui = apply_rewind(log, settings, ui.history_turn)
+                    ui.campaign_start = stamped
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     confirm_rewind = False
                     auto_accum = 0
@@ -1668,6 +1730,7 @@ async def main() -> None:
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
                     state, ui, log, current_seed = _begin_game(settings)
+                    stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
                 elif action == "play_by_post":
@@ -1777,7 +1840,10 @@ async def main() -> None:
                 except OSError:
                     pass
                 current_seed = log.seed
+                was_watched = ui.watched
                 state, ui = resume_game(log, settings)
+                if not was_watched:
+                    stamp_campaign(ui, menu_state.campaign_watch)
                 history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":
@@ -1819,7 +1885,10 @@ async def main() -> None:
                     except OSError:
                         pass
                     current_seed = log.seed
+                    was_watched = ui.watched
                     state, ui = resume_game(log, settings)
+                    if not was_watched:
+                        stamp_campaign(ui, menu_state.campaign_watch)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
                 else:
@@ -1827,6 +1896,7 @@ async def main() -> None:
 
         if scene == "game":
             assert state is not None and ui is not None and log is not None
+            campaign_tick(ui, settings, menu_state.campaign_watch)
             # A mark keeps fading whether or not a playback is currently running
             # (that's the whole point — see `Ui.age_fading_marks`), so this runs
             # unconditionally, every frame, regardless of what `reel` is doing.

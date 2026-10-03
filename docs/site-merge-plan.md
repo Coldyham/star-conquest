@@ -94,7 +94,7 @@ shipping once.
   (`allowedOrigin`, `GAME_SITE`). `replay.mjs` allows `*`. Desktop sends no
   Origin at all.
 - Page paths the game opens: `paths.LEADERBOARD_SUBMIT_PATH` (`/submit`),
-  `LEADERBOARD_CONFIGS_PATH`, `LEADERBOARD_LOBBY_PATH`. These are root-relative
+  `LEADERBOARD_RECENT_PATH`, `LEADERBOARD_LOBBY_PATH`. These are root-relative
   today and gain a prefix if the board moves under a subpath.
 - About 25 tracked files mention these names. Run
   `git grep -E "netlify\.app|sibling_host|LEADERBOARD_ORIGIN|leaderboard_origin|siblingGame|GAME_URL|allowedOrigin|GAME_SITE|LEADERBOARD_TAG"`

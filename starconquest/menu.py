@@ -41,9 +41,9 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, combat, config, mapgen, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, mapgen, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
-from .paths import LEADERBOARD_CONFIGS_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
+from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
                        Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
                        randomise_knobs, random_seed, setup_warnings)
@@ -310,6 +310,13 @@ class MenuState:
     slow_lines: list[str] = field(default_factory=list)
     slow_action: str | None = None
     slow_ack: tuple[str, ...] | None = None
+    # The same modal also asks before playing a weekly-campaign node where a win
+    # wouldn't be a move, or would only be one against a clock (`campaign.confirm`).
+    # Its title then names the node instead of the slow-setup heading.
+    slow_title: str = ""
+    # Looks up whether the setup on the menu is a campaign node (web only).
+    # Pumped from `pump`, and by `main` while that setup is being played.
+    campaign_watch: campaign.Watcher = field(default_factory=campaign.Watcher)
     # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
     # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
     # never by `draw`, which only shows it while the key still matches.
@@ -600,7 +607,7 @@ def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
     go, back = _slow_labels()
     _draw_menu_modal(
         surface, ms, w, h,
-        [("This setup may play slowly", f["normal"], config.COLOR_TEXT)]
+        [(ms.slow_title or "This setup may play slowly", f["normal"], config.COLOR_TEXT)]
         + [(line, f["small"], _WARN if i == 0 else config.COLOR_TEXT_DIM)
            for i, line in enumerate(ms.slow_lines)],
         ("slow_go", go, _BTN_FILL, _WARN),
@@ -1410,9 +1417,9 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     dir is pygbag's in-memory virtual filesystem, which doesn't survive a reload,
     so a file saved there would silently vanish. Get Link (a URL token in the
     address bar plus ``localStorage``) is the persistence path that actually
-    works there; Recently played opens the board's "by config" listing
-    (``home.mjs``'s ``?group=config``) — where a setup worth returning to already
-    lives, once somebody has posted a score under it.
+    works there; Recently played opens the board's main list (``home.mjs``),
+    every map somebody has posted a score on, newest first — a setup worth
+    returning to is a card (or one "By config" press) away there.
 
     The field takes whatever width the buttons leave (no "File" label: the name
     field had less room than the default name needs, and Save/Load say plainly
@@ -1786,6 +1793,7 @@ def pump(ms: MenuState, settings: Settings) -> None:
     slider mid-drag changes on every motion and generating a large board on each
     one would stall the drag: the survey waits for the release."""
     _survey_lanes(ms, settings)
+    ms.campaign_watch.pump(settings)
     field_name = _editing_field(ms)
     if field_name is None:
         return
@@ -2077,7 +2085,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         else:
             set_status(ms, "Couldn't open the lobby", False)
     elif hit == "browse_configs":
-        url = webstore.leaderboard_url(LEADERBOARD_CONFIGS_PATH)
+        url = webstore.leaderboard_url(LEADERBOARD_RECENT_PATH)
         if not url:
             set_status(ms, "No leaderboard is configured", False)
         elif webstore.open_url(url):
@@ -2198,9 +2206,16 @@ def _unless_slow(ms: MenuState, settings: Settings, action: str,
     setup; any change that moves its text asks afresh.
     """
     lines = setup_warnings(settings, people)
+    title = ""
+    asked = campaign.confirm(ms.campaign_watch.status) if action == "start" else None
+    if asked is not None:
+        # One modal for both: the campaign's lines first, under the node's name.
+        title, campaign_lines = asked
+        lines = campaign_lines + lines
     if not lines or tuple(lines) == ms.slow_ack:
         return action
     ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
+    ms.slow_title = title
     return None
 
 
