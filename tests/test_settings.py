@@ -842,6 +842,31 @@ def test_setup_warnings_counts_seat_one_only_when_no_person_holds_it():
     assert asked == [[2, 3], [1, 2, 3], [2]]
 
 
+def test_setup_warnings_tells_each_hook_who_the_people_are():
+    import sys
+    from starconquest import ai
+    from starconquest.settings import setup_warnings
+    told: list = []
+    modname = "sc_model_warn_p"
+    module = type(ai)(modname)
+    module.setup_warning = lambda settings, seats, people=(): (told.append(people), [])[1]
+    fn = lambda state, pid: []
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register("warn_p", fn)
+    try:
+        s = Settings(players=3)
+        s.ai_strategy[1:3] = ["warn_p", "warn_p"]
+        setup_warnings(s)
+        setup_warnings(s, people={3, 1})
+        s.autoplay = True
+        setup_warnings(s)
+    finally:
+        ai.STRATEGIES.pop("warn_p", None)
+        sys.modules.pop(modname, None)
+    assert told == [[1], [1, 3], []]
+
+
 def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
     from starconquest.settings import resolve_strategy, setup_warnings
     asked: list = []

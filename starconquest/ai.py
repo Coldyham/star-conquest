@@ -14,6 +14,7 @@ All tie-breaks go through ``state.rng`` so multiple AIs don't play identically.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import math
 import sys
 from collections.abc import Callable
@@ -88,9 +89,11 @@ def decide(state: GameState, pid: int) -> list[Order]:
 # strongest to weakest. knower leads despite tests/sim.py --ladder finding
 # marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
-# aux=12), not its default seat. A strategy missing from this list — a fresh
-# drop-in with no measured ladder placement — sorts alphabetically after it.
-LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
+# aux=12), not its default seat. actuary tops that same ladder at the defaults
+# but loses to knower at Search (37%), so it sits second (docs/design/actuary.md).
+# A strategy missing from this list — a fresh drop-in with no measured ladder
+# placement — sorts alphabetically after it.
+LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
 
 
 def available_strategies() -> list[str]:
@@ -164,7 +167,8 @@ def aux_stop_name(name: str, aux: float) -> str | None:
     return names[max(0, min(len(names) - 1, round(aux - lo)))]
 
 
-def setup_warning(name: str, settings, seats: list[int]) -> list[str]:
+def setup_warning(name: str, settings, seats: list[int],
+                  people: list[int] | tuple[int, ...] = ()) -> list[str]:
     """Lines strategy ``name`` wants shown before a match on ``settings`` starts
     with it playing ``seats`` — typically "this setup is too big for me to play
     well or quickly". Empty when it has nothing to say.
@@ -172,7 +176,9 @@ def setup_warning(name: str, settings, seats: list[int]) -> list[str]:
     Declarative like `aux_spec`: a model opts in with a module-level
     ``setup_warning(settings, seats) -> list[str]``. Tolerant the same way — a
     hook that is missing, raises or returns junk says nothing rather than
-    keeping the match from starting.
+    keeping the match from starting. A hook that also declares a ``people``
+    parameter is told which seats a person holds, so it can tell the bots it
+    will face from the people (every other seat up to ``settings.players``).
     """
     fn = STRATEGIES.get(name)
     module = sys.modules.get(getattr(fn, "__module__", "") or "")
@@ -180,12 +186,39 @@ def setup_warning(name: str, settings, seats: list[int]) -> list[str]:
     if not callable(hook):
         return []
     try:
-        lines = hook(settings, list(seats))
+        if "people" in inspect.signature(hook).parameters:
+            lines = hook(settings, list(seats), people=sorted(people))
+        else:
+            lines = hook(settings, list(seats))
     except Exception:  # noqa: BLE001 — a model's opinion must never block Start
         return []
     if not isinstance(lines, (list, tuple)):
         return []
     return [line for line in lines if isinstance(line, str) and line.strip()]
+
+
+def decide_ms(name: str, settings, seat: int) -> float:
+    """Typical CPU ms of one ``decide`` by strategy ``name`` playing ``seat`` on
+    ``settings`` (native CPython, a bad-but-ordinary turn), or 0.0 when it does
+    not say.
+
+    For a bot whose cost lands on someone else: an oracle that runs this one's
+    `decide` while it thinks (knower runs every rival bot on each turn it looks
+    ahead) prices its own turn with it. A model opts in with a module-level
+    ``decide_ms(settings, seat) -> float``; one that answers in microseconds has
+    nothing to declare. Tolerant like the other hooks: missing, raising or junk
+    reads as 0.0.
+    """
+    fn = STRATEGIES.get(name)
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    hook = getattr(module, "decide_ms", None)
+    if not callable(hook):
+        return 0.0
+    try:
+        ms = float(hook(settings, seat))
+    except Exception:  # noqa: BLE001 — a model's estimate must never block Start
+        return 0.0
+    return ms if math.isfinite(ms) and ms > 0 else 0.0
 
 
 def set_budget_scale(scale: float) -> list[str]:

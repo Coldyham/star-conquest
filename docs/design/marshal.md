@@ -165,41 +165,49 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 900 games, 64 timed out and are excluded from the
+nodes, default settings — 1260 games, 80 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
-docstring, the next time marshal or the roster's pricing changes. Re-run with
-`DENY_SWAP` and `RIVAL_REFLOOD_MIN_TURNS` shipped ("Denying the swap" and
-"Phase 3b re-flooding" in [`marshal-flow.md`](marshal-flow.md)). The gate is inert here, since no lane on this
-cell is 5 turns, and the table moved by one game (258/249 and 57% with
-`DENY_SWAP` alone):
+docstring, the next time marshal or the roster's pricing changes. Re-run
+2026-10 with actuary added ([`actuary.md`](actuary.md)); every cell between the
+six older bots is the same as the run before it, since nothing else changed and
+the ladder is deterministic:
 
-    marshal 257 (31%), knower 250 (30%), thinker 160 (19%),
-    claudebot 91 (11%), heuristic 50 (6%), rusherplus 28 (3%)
+    actuary 308 (26%), marshal 276 (23%), knower 265 (22%), thinker 162 (14%),
+    claudebot 91 (8%), heuristic 50 (4%), rusherplus 28 (2%)
 
     head-to-head (row's win rate vs column)
-                knower  marsha  thinke  claude  heuris  rusher
-      knower         —     44%     93%     96%    100%    100%
-      marshal      56%       —     94%    100%    100%     98%
-      thinker       7%      6%       —     94%     96%    100%
-      claudebot     4%      0%      6%       —     78%     85%
-      heuristic     0%      0%      4%     22%       —     68%
-      rusherplus    0%      2%      0%     15%     32%       —
+                actuar  knower  marsha  thinke  claude  heuris  rusher
+      actuary        —     73%     67%     96%    100%    100%    100%
+      knower       27%       —     44%     93%     96%    100%    100%
+      marshal      33%     56%       —     94%    100%    100%     98%
+      thinker       4%      7%      6%       —     94%     96%    100%
+      claudebot     0%      4%      0%      6%       —     78%     85%
+      heuristic     0%      0%      0%      4%     22%       —     68%
+      rusherplus    0%      0%      2%      0%     15%     32%       —
+
+knower here is at its default, Predict. With `--aux knower=0` (Off) the same
+ladder reads actuary 321, marshal 291, knower 209, thinker 172, actuary beating
+knower-0 98%. For all three Oracle settings against marshal and thinker over
+more seeds, see [`knower.md`](knower.md), "Each Oracle setting against thinker
+and marshal".
 
 The same ladder in two other cells, since this one cannot see anything keyed on
-long lanes. Both 30 seeds and 900 games; the second at `--max-turns 1500`:
+long lanes. 30 seeds each; the symmetric one re-run with actuary (1260 games),
+the slow one not yet (`tests.sim` has no ship-speed flag; actuary's
+head-to-heads there are in `actuary.md`, and marshal beats it 68%):
 
-    symmetric, 18 nodes, 6 ly/turn     189 timeouts
-    marshal 221 (31%), knower 211 (30%), thinker 119 (17%),
-    claudebot 99 (14%), heuristic 41 (6%), rusherplus 20 (3%)
-    marshal vs knower 75%
+    symmetric, 18 nodes, 6 ly/turn     269 timeouts
+    actuary 247 (25%), marshal 237 (24%), knower 227 (23%), thinker 120 (12%),
+    claudebot 99 (10%), heuristic 41 (4%), rusherplus 20 (2%)
+    marshal vs knower 75%, actuary vs marshal 47%, actuary vs knower 64%
 
-    random, 24 nodes, 3 ly/turn        96 timeouts
+    random, 24 nodes, 3 ly/turn        96 timeouts, 900 games, before actuary
     marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
     claudebot 84 (10%), heuristic 64 (8%), rusherplus 5 (1%)
     marshal vs knower 76%
 
-Same order in all three, but marshal leads knower by a much wider margin in
-both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
+Among the six older bots the order is the same in all three, but marshal leads
+knower by a much wider margin in both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
 Head to head it is 60 games a pair less timeouts, so read it as a direction.
 
 The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the

@@ -14,8 +14,8 @@ decided against. **Check that list before proposing a mechanism, a bot tactic or
 a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
-as a whole, then `knower`, `marshal`, `marshal-pricing` and `marshal-flow`;
-`pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
+as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow` and
+`actuary`; `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -43,6 +43,8 @@ uv run python -m tests.sim --film --trials 200   # ...also checking every turn's
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
+uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a
+                                                 # bot's aux knob (here Oracle: Search)
 
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot:
                                                 # legal orders, read-only, reproducible
@@ -391,8 +393,11 @@ already resolve simultaneously. The rationale for each rule is in
   new `AiParams` fields. Detail: `docs/design/bots.md`.
 - **A bot can warn about a setup** with `setup_warning(settings, seats)`
   (`ai.setup_warning`, `settings.setup_warnings`), raised on Start and on the
-  play-by-post roster's Confirm. knower's is fitted in
-  `docs/design/knower.md`, "Cost per decide".
+  play-by-post roster's Confirm; a hook that declares `people` is also told
+  which seats a person holds. knower's is fitted in
+  `docs/design/knower.md`, "Cost per decide", and counts every rival bot that
+  declares `decide_ms(settings, seat)` (`ai.decide_ms`; actuary does), since a
+  Search seat runs each one on every turn of every line it rolls out.
 - **An all-bot game has no human seat.** `build_state` clears the `is_human`
   `mapgen` stamps on pid 1 when `Settings.autoplay` is set. The seat is claimed
   by the first turn *ended* under manual control (`end_turn`'s `claim_seat`,

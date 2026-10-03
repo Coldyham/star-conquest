@@ -697,7 +697,7 @@ def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[s
         by_strategy.setdefault(name, []).append(seat)
     lines: list[str] = []
     for name, seats in by_strategy.items():
-        lines.extend(ai.setup_warning(name, settings, seats))
+        lines.extend(ai.setup_warning(name, settings, seats, people=sorted(people)))
     return lines
 
 

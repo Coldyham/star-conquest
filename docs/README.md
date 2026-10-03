@@ -43,6 +43,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
+| [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
@@ -121,11 +122,19 @@ only for a fight; what is deliberately not animated.
 ### design/knower.md
 - **Simultaneous resolution.** Why an oracle is possible at all.
 - **What the oracle buys, and where.** A turn of warning, worth more the faster ships are. Depth 0 is not thinker.
+- **Each Oracle setting against thinker and marshal.** Off / Predict / Search head to head in three cells. Only Search beats marshal; the ladder's 93% over thinker was a lucky 30 seeds.
 - **Built, measured, removed.** Two ideas.
 - **The depth search: branch the root, play the rest on.** Why branching deeper did nothing, and why more openings beat more turns. Most of the result against marshal comes from borrowing marshal.
 - **Borrowed candidates (`EXTERNAL_CANDIDATES`).** Candidate win shares, contested decisions only, and why `SEARCH_WIDTH` is 2.
 - **How far to look.** The horizon is the longest lane plus `LANE_CUSHION`, which replaced a fixed depth, so Oracle is now Off / Predict / Search. Also the old depth curve.
-- **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`. The browser is unmeasured; never measure on a loaded machine.
+- **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`, which also counts rival bots that declare `decide_ms`. The browser is unmeasured; never measure on a loaded machine.
+
+### design/actuary.md
+- **The ledger and the greedy.** A timeline per system, fights priced so only the verdict is worst-case, one value in ships, risk as an expected loss, greedy commits. It is not an oracle.
+- **Cost, and the caches that make it affordable.** Version-stamped caches and the `_idle` prune, both checked exact. 1.6-3.9 ms a decide, and what that does to a knower Search seat.
+- **Where actuary stands.** Four map cells, free-for-all, the combat sliders. Weak at 24 nodes 3 ly/turn and at jitter 0.3.
+- **As one of knower's borrowed candidates (measured, not shipped).** 10.4% of contested picks, distinct from the default 91% of the time.
+- **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
 
 ### design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
@@ -190,6 +199,11 @@ the measured result was indistinguishable from the baseline.
 - Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
 - A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`: deleted. *What the board's human wins say.*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
+
+### actuary ([`design/actuary.md`](design/actuary.md))
+- Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
+- Pricing threats at the worst roll: hoarded garrisons; worse in both cells measured. *Same section.*
+- Shipping it as a knower `EXTERNAL_CANDIDATES` entry: not done (cost on every Search root, effect on knower unmeasured), not rejected. *As one of knower's borrowed candidates.*
 
 ### The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
