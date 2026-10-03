@@ -9,8 +9,9 @@ moves.
   * **A forecast, not a snapshot.** Each system gets a timeline: owner and garrison
     for every turn up to a horizon, from the fleets already flying, production
     and the engine's own fold order at a pile-up. Fights in it are priced
-    pessimistically through `combat.edge_attacking`/`edge_defending`, so a launch
-    only counts as a capture if it wins the worst roll. Lanes never interact, so
+    through `combat.edge_attacking`/`edge_defending`: a launch only counts as a
+    capture if it wins the worst roll, and then keeps what the nominal roll
+    would leave it. Lanes never interact, so
     a system's timeline depends only on what lands there: a candidate launch
     re-projects its source and destination and nothing else.
   * **One ledger.** At the horizon every ship we hold is worth one ship (a little
@@ -18,7 +19,7 @@ moves.
     `TAIL_TURNS` turns of its income, and a rival's are worth the same against
     us. Income before the horizon is already in the garrisons it built. A rival's
     garrison next door is a risk to each system we hold: the shortfall against
-    the worst it could land, priced as a share of what that system is worth.
+    everything it could land, priced as a share of what that system is worth.
   * **Greedy on the margin.** Candidates are single launches (all the spare
     ships, half, or exactly enough to change who holds the destination) and
     same-arrival coalitions on a target no single source can take. The one that
@@ -45,10 +46,9 @@ TUNED_SWING = 1.1 / 0.9     # the +/-10% swing the margins were fitted at: a flo
 HORIZON_PAD = 3             # turns projected past the longest lane on the board
 HORIZON_MAX = 40            # an iteration bound for a pathological hand map
 TAIL_TURNS = 24.0           # a held system is worth this many turns of its income
-FRONT_BONUS = 0.25          # a ship standing on a front is worth 1 + this...
+FRONT_BONUS = 0.5           # a ship standing on a front is worth 1 + this...
 FRONT_DECAY = 0.5           # ...falling by this factor per turn of travel back
 RISK_WEIGHT = 0.6           # share of a system's worth lost to a full shortfall
-RISK_AT_WORST = False       # price a threat at the worst roll (else the nominal one)
 REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relieve
                             # a system we strike, if they can land in time
 MIN_GAIN = 0.05             # a candidate must move the ledger by at least this
@@ -327,6 +327,9 @@ class _Ledger:
     def _risk(self, sid, lines=None):
         """Expected loss at ``sid`` to the worst a single rival could land there:
         the shortfall, as a share of what the system is worth, times RISK_WEIGHT.
+        Priced at the nominal roll with the advantage ours: a threat is ships that
+        *could* come, and demanding the worst roll against all of them at once
+        hoards every garrison when the jitter is wide.
         ``lines`` overrides some timelines (a launch being priced)."""
         lines = lines or {}
         owners, ships = lines.get(sid) or self.lines[sid]
@@ -350,7 +353,7 @@ class _Ledger:
             for t in range(1, H + 1):
                 if owners[t] != pid or reach[t] <= 0:
                     continue
-                need = reach[t] * (self.swing if RISK_AT_WORST else 1.0) / self.advantage
+                need = reach[t] / self.advantage
                 if need > ships[t]:
                     worst = max(worst, (need - ships[t]) / need)
         if worst <= 0.0:
