@@ -672,7 +672,7 @@ def setup_warning(settings, seats, people=()) -> list[str]:
         return []
     need = _secs(estimated_decide_ms(nodes, settings.players, settings.ship_ly_per_turn, plies,
                                      rival_ms))
-    lines = [f"Knower searching {plies} turns ahead on {nodes} systems needs ~{need} a turn"]
+    lines = [f"Knower searching {plies} turns ahead on {nodes} systems would need ~{need} a turn"]
     if rivals:
         who = ", ".join(name.capitalize() if count == 1 else f"{count} {name.capitalize()} seats"
                         for name, (count, _) in sorted(rivals.items()))
@@ -692,8 +692,8 @@ def setup_warning(settings, seats, people=()) -> list[str]:
         who = "1 Knower seat" if len(searchers) == 1 else f"{len(searchers)} Knower seats"
         lines.append(f"{who} on Search: about {_secs(turn_ms)} per turn to resolve, "
                      "longer in a browser")
-    smaller = "a smaller map" if drawn else "Systems (Basic tab)"
-    lines.append(f"Set Oracle to Predict (AI tab), or use {smaller} or faster ships, "
+    smaller = "use a smaller map" if drawn else "reduce System count"
+    lines.append(f'Set Knower\'s Oracle to "Predict", {smaller} or increase ship speed '
                  "to avoid this")
     if rivals and _search_run(ply - _lines() * rival_ms, plies)[0] > reach:
         names = " or ".join(name.capitalize() for name in sorted(rivals))

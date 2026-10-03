@@ -740,7 +740,9 @@ def test_the_largest_map_warns_and_says_how_far_it_will_really_look(kn):
     assert any(f"about {reach} turns ahead, short of its {longest}-turn lanes" in line
                for line in lines)
     assert any("5 Knower seats on Search" in line for line in lines)
-    assert "Systems (Basic tab)" in lines[-1]
+    assert lines[0].startswith("Knower searching ") and " would need ~" in lines[0]
+    assert lines[-1] == ('Set Knower\'s Oracle to "Predict", reduce System count '
+                         "or increase ship speed to avoid this")
 
 
 def test_a_search_that_covers_its_lanes_does_not_warn(kn, monkeypatch):
@@ -851,4 +853,4 @@ def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     s.custom_map = SimpleNamespace(nodes=[None] * 120)
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
     assert "on 120 systems" in lines[0]
-    assert "a smaller map" in lines[-1]
+    assert "use a smaller map" in lines[-1]
