@@ -136,7 +136,18 @@ def _from_family(family: Family, rng: random.Random,
             and family.plays.get("symmetric", 0) < SYMMETRIC_SHARE * random_plays
             and rng.random() < SYMMETRIC_CHANCE):
         settings.mode = "symmetric"
+    if settings.mode == "symmetric" and "layout" not in family.setup:
+        # Nobody chose how this config's sectors meet (a random config turned
+        # symmetric, or the default hub), so roll it; a layout people do play
+        # is its own family and keeps its own.
+        settings.layout = _symmetric_layout(rng)
     return _node_setup(settings, _fresh_seed(rng, taken, settings.mode))
+
+
+def _symmetric_layout(rng: random.Random) -> str:
+    """How a symmetric node's sectors meet, any of ``mapgen.SYMMETRIC_LAYOUTS``
+    alike, so the week shows them all rather than only the default hub."""
+    return rng.choice(mapgen.SYMMETRIC_LAYOUTS)
 
 
 def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int]:
@@ -147,6 +158,8 @@ def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int
     settings.players = rng.randint(config.MIN_PLAYERS, config.MAX_PLAYERS)
     settings.nodes = rng.randint(settings.min_nodes(), MYSTERY_MAX_NODES)
     settings.mode = rng.choice(("random", "symmetric"))
+    if settings.mode == "symmetric":
+        settings.layout = _symmetric_layout(rng)
     settings.ai_strategy = [RANDOM_STRATEGY] * config.MAX_PLAYERS
     return _node_setup(settings, _fresh_seed(rng, taken, settings.mode))
 

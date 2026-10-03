@@ -665,7 +665,8 @@ better score.
 
 A new map every Monday 00:00 UTC. Each node is a fresh challenge: an unplayed
 seed on a config somebody has already played (so it is known to be playable),
-sometimes its symmetric variant, and one or two "?" nodes with randomised
+sometimes its symmetric variant (hub, ring, wheel or core, rolled unless the
+config already names one), and one or two "?" nodes with randomised
 settings. Hand-drawn maps are left out, since their seed changes only the star
 names and the dice. A node's circle is sized, and labelled, by its systems.
 
