@@ -227,6 +227,11 @@ FEED_FRONT = True               # ...and a frontier system's own leftover tops u
 FEED_MAX_TURNS = 2              # ...only on a board whose median lane is at most
                                  # this many turns; 0 = on any board. See "Feed
                                  # what was just taken" in docs/design/marshal-flow.md
+FALLING_GUARD = 0               # a rival neighbour our fleets already take this
+                                 # turn is no threat: 0 = off, 1 = drop it from
+                                 # the guard, 2 = ...only once it is the last
+                                 # non-owned neighbour left
+FALLING_FLOW = False            # ...and stop counting it as a front for Phase 4
 
 
 # --------------------------------------------------------------------------- #
@@ -384,7 +389,24 @@ def _production_by(s, turns: int) -> int:
     return (s.prod_progress + turns) // s.production
 
 
-def _max_adjacent_enemy(state, pid, sysobj) -> float:
+def _falling(state, pid) -> frozenset[int]:
+    """Rival systems our fleets already on the lane take this turn.
+
+    Priced as Phase 3 would price a strike landing now: the fleets inbound by
+    the end of this turn must clear ``_required`` at a one-turn horizon. A
+    strike that lands this turn is past anything the garrison's owner can see
+    and answer, except by launching out of it — which is exactly what a guard
+    beside it was held against.
+    """
+    targets = {f.dest_id for f in state.fleets
+               if f.owner_id == pid and f.turns_remaining <= 1}
+    return frozenset(
+        sid for sid in targets
+        if state.systems[sid].owner_id not in (pid, 0)
+        and _inbound(state, sid, pid, 1) >= _required(state, pid, state.systems[sid], 1))
+
+
+def _max_adjacent_enemy(state, pid, sysobj, falling=frozenset()) -> float:
     """Largest garrison next door belonging to a real rival. Neutrals never attack.
 
     A rival reachable in exactly one turn is weighted by ``FAST_GUARD_WEIGHT``:
@@ -395,7 +417,7 @@ def _max_adjacent_enemy(state, pid, sysobj) -> float:
     best = 0.0
     for n in sysobj.neighbors:
         o = state.systems[n]
-        if o.owner_id != pid and o.owner_id != 0:
+        if o.owner_id != pid and o.owner_id != 0 and n not in falling:
             weight = 1.0
             if FAST_GUARD_WEIGHT != 1.0 and (state.travel_turns(sysobj.id, n) or 99) == 1:
                 weight = FAST_GUARD_WEIGHT
@@ -571,7 +593,7 @@ def _required(state, pid, target, dist: int) -> int:
     return _through_pileup(need, alongside)
 
 
-def _shortfalls(state, pid, fronts, sends) -> dict[int, int]:
+def _shortfalls(state, pid, fronts, sends, falling=frozenset()) -> dict[int, int]:
     """Frontier systems short of ``FEED`` times their largest rival neighbour,
     counting this turn's sends in and out and our fleets already inbound.
 
@@ -591,7 +613,8 @@ def _shortfalls(state, pid, fronts, sends) -> dict[int, int]:
     for sid in fronts:
         s = sysmap[sid]
         threat = max((sysmap[n].ships for n in s.neighbors
-                      if sysmap[n].owner_id not in (pid, 0)), default=0)
+                      if sysmap[n].owner_id not in (pid, 0)
+                      and n not in falling), default=0)
         if threat <= 0:
             continue
         have = (s.ships - out_of[sid] + into[sid]
@@ -855,11 +878,16 @@ def decide(state, pid):
     sends: dict[tuple[int, int], int] = defaultdict(int)
 
     # --- Phase 0: base budgets — spendable ships after each system's guard --- #
+    falling = _falling(state, pid) if FALLING_GUARD else frozenset()
     budget: dict[int, int] = {}
     for sid in owned:
         s = sysmap[sid]
         if sid in frontier and FRONTIER_GUARD > 0:
-            guard = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(state, pid, s))
+            ignore = falling
+            if FALLING_GUARD == 2 and not all(
+                    n in falling for n in s.neighbors if sysmap[n].owner_id != pid):
+                ignore = frozenset()
+            guard = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(state, pid, s, ignore))
             budget[sid] = max(0, s.ships - max(RESERVE_FLOOR, guard))
         else:
             budget[sid] = max(0, s.ships - RESERVE_FLOOR)
@@ -1071,8 +1099,9 @@ def decide(state, pid):
     # (see Phase 3) is a dead end, not a front: nothing there can reinforce, so
     # there is nothing left to hold a standing reserve against, and its surplus
     # is free to leapfrog onward exactly like a rear system's.
+    gone = settled | falling if FALLING_FLOW else settled
     live_frontier = {sid for sid in frontier
-                     if any(sysmap[n].owner_id != pid and n not in settled
+                     if any(sysmap[n].owner_id != pid and n not in gone
                             for n in sysmap[sid].neighbors)}
     flow_owned = set(owned)
     if FLOW_AVOIDS_ABANDONED and giving_up:
@@ -1088,7 +1117,8 @@ def decide(state, pid):
         # A front that cannot hold against the stack beside it is where the
         # surplus goes first: that is how a capture is kept rather than taken
         # back a few turns later. See `_shortfalls`.
-        short = _shortfalls(state, pid, live_frontier, sends)
+        short = _shortfalls(state, pid, live_frontier, sends,
+                            falling if FALLING_FLOW else frozenset())
         if FEED_FRONT:
             # A front with leftover budget tops up a short neighbour first:
             # it is one hop away, and the rear's surplus is several.
