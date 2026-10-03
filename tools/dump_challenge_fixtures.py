@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,6 +45,7 @@ def expect_for(settings: Settings) -> dict:
             "hand": challenge.hand,
             "by": challenge.by,
             "log": challenge.log,
+            "campaign": challenge.campaign,
         },
         "gameKey": challenge.key,
     }
@@ -104,13 +106,35 @@ def main() -> None:
     cases.append({"name": "with-log", "token": logged.to_token(),
                   "expect": expect_for(logged)})
 
+    # A campaign game, stamped at Start with what the board said then
+    # (Challenge.campaign), which decides whether the grace covers it.
+    campaigned = stamped(Settings(nodes=18, seed=909), turns=28, lost=3, hand=28,
+                         by="Campaigner", campaign="adjacent")
+    cases.append({"name": "with-campaign", "token": campaigned.to_token(),
+                  "expect": expect_for(campaigned)})
+    # A token from before the field: no "campaign" key at all decodes to a blank,
+    # which the board's grace takes on trust.
+    precampaign = stamped(Settings(nodes=18, seed=910), turns=29, lost=4, hand=29, by="Earlier")
+    old = precampaign.token_dict()
+    del old["challenge"]["campaign"]
+    raw = json.dumps(old, separators=(",", ":")).encode("utf-8")
+    cases.append({"name": "pre-campaign",
+                  "token": base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("="),
+                  "expect": expect_for(precampaign)})
+    # A stamp that isn't a reason's shape never reaches the column.
+    odd = stamped(Settings(nodes=18, seed=911), turns=30, lost=5, hand=30, by="",
+                  campaign="Adjacent; drop")
+    cases.append({"name": "bad-campaign", "token": odd.to_token(),
+                  "expect": {**expect_for(odd), "challenge": {**expect_for(odd)["challenge"], "campaign": ""}}})
+
     # A malformed id must not reach the database column the verifier keys on.
     forged = Settings(seed=55)
     forged.challenge = Challenge(turns=12, lost=1, hand=12, by="", log="'; drop table--")
     forged.challenge.key = forged.challenge_key()
     cases.append({"name": "bad-log-id", "token": forged.to_token(),
                   "expect": {**expect_for(forged), "challenge":
-                             {"turns": 12, "lost": 1, "hand": 12, "by": "", "log": ""}}})
+                             {"turns": 12, "lost": 1, "hand": 12, "by": "", "log": "",
+                              "campaign": ""}}})
 
     # A hand-authored map riding in the token. The decoder reads only the four
     # identity fields and the score, and `canonicalize` recurses arrays and

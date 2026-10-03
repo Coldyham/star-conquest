@@ -336,6 +336,10 @@ class Ui:
     # Written by `main` once a frame from `campaign.label`, so the countdown
     # moves; `render` only draws it, beside the challenge target.
     campaign_label: str | None = None
+    # The campaign's answer for this setup when this match was started
+    # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.
+    # Blank for a match nobody looked up, or one resumed from a save.
+    campaign_start: str = ""
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when

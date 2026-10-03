@@ -480,21 +480,57 @@ than it is.
 
 One timer in `js/campaign.mjs`, derived like everything else in the
 campaign: `fold` records when each player lost each node (`lostAt`), and
-nothing is stored.
+nothing about who holds what is stored. The principle: **a game started while
+you had access to a node should count**, as long as you post it soon after
+losing that access.
 
 - **`GRACE_MS` (30 minutes).** A field win counts if the player held the
   node or a neighbour at any moment in the 30 minutes before posting it. It
   fixes the case that made the rule feel unfair: you start a node beside one
   you hold, somebody takes that neighbour mid-game, and your win counted for
-  nothing.
-- **The node itself counts too.** The principle is that a game started while
-  you had access to a node should count, and holding the node is access just
-  as holding a neighbour is. So a holder replaying their own node to raise the
-  bar, who loses it mid-game and has no neighbour left, can still take it back
-  inside the grace. `fold` cannot see when a game started, only when access
-  was lost, so the grace from that loss stands in for it.
-  Thirty minutes is about one game. It only needs to cover the game in
-  progress when the neighbour went, not a long campaign of play from memory.
+  nothing. Thirty minutes is about one game. It only needs to cover the game
+  in progress when the neighbour went, not a long campaign of play from
+  memory.
+- **The node itself counts too.** Holding the node is access just as holding
+  a neighbour is. So a holder replaying their own node to raise the bar, who
+  loses it mid-game and has no neighbour left, can still take it back inside
+  the grace.
+- **Only for a game started with access.** The grace runs from the loss, but
+  a game *started* after the loss isn't the case it exists for, so it gets
+  none. `fold` can't see when a game started, so the game says: at Start it
+  stamps the answer `/api/campaign` gave (`campaign.stamp`,
+  `Ui.campaign_start`), which rides on the score as `Challenge.campaign` and
+  is stored in `scores.campaign_start`. `startedWithAccess` decides what a
+  stamp means: `grace`, `late-start`, `not-adjacent` and `no-home` were no
+  access; `adjacent` and `own` were access. Starting inside a grace is not
+  access, or a restart five minutes after the loss would carry it.
+- **A stamp is a claim, and safe as one.** The grace still runs from the loss,
+  so a stamp can only narrow it: a forged one gets exactly the rule without
+  stamps, never a later move. That is why it needs no signature, and why a
+  blank or unknown stamp is taken on trust: every score from before the column,
+  every desktop game (no lookup), a lookup that hadn't answered by Start, a
+  resumed save, and a hand-written link. Trusting those also keeps past weeks
+  folding the way they did.
+- **Which game is asking.** `attemptStatus` takes the game's stamp
+  (`start`), or `starting` for a game about to begin. Either one without access
+  turns `grace` into `late-start`, not a move. The menu asks with
+  `starting=1`; the game under way asks with its stamp; the page asks with
+  neither, since it can't know about a game in progress, and its grace line
+  says a game already started still counts and one started now won't.
+- **Rewinds keep the stamp; a new start takes a new one.** A mid-game rewind
+  is the same match (`apply_rewind` keeps `campaign_start`). A Retry, or
+  playing on from a finished game's history, is a match begun now and is
+  stamped from the current lookup. A match forked out of a watched replay gets
+  a blank, since nothing looked its setup up while it was watched.
+
+### Decided against: an "able to capture" flag on its own
+
+Before the grace, the idea was to bake "could capture this node" into the link
+when the game was started, and let the board honour it. It was dropped because
+a link can be kept: start a game while next to a node, keep the link, and post
+a win days after losing the neighbour. On its own a flag is a standing permit.
+Combined with the grace (above) it can only narrow a clock that is already
+running, which is what made it safe to add.
 - **The edge minute counts on both sides.** `fold` accepts a win posted
   exactly `GRACE_MS` after the loss, and `attemptStatus` says yes at that
   minute too, so the page never says no to a win that would count.
@@ -540,14 +576,16 @@ The game and the board are one site, so the game can ask before it plays.
 - **Web only, and never in the way.** The name is the board's own
   (`sc_pbp_name`, shared by origin), which a desktop build doesn't have. A
   lookup waits `SETTLE_S` after the last setup change, refreshes every
-  `REFRESH_S` (so a neighbour lost mid-game starts its countdown), and a
+  `REFRESH_S` (so a neighbour lost mid-game starts its countdown), asks again
+  at once when the game it asks for changes (`Watcher.pump`'s `start`), and a
   changed setup drops the old answer at once so Start never confirms from
   another map's answer. A Start pressed before the answer lands just starts,
   because a confirm is a courtesy, not a gate.
 - **One modal, not two.** The confirm reuses the slow-setup modal
   (`menu._unless_slow`) with the node as its title, and puts the campaign's
-  lines ahead of any bot warning. It asks only when a win wouldn't be a move,
-  or would be one only inside the grace (`campaign.confirm`). An open node, your
+  lines ahead of any bot warning. It asks only when a win wouldn't be a move
+  (a node lost before Start now reads `late-start`), or would be one only
+  inside the grace (`campaign.confirm`). An open node, your
   own node, or a player with no name yet starts straight away.
 - **The top bar label is text `main` writes** (`main.campaign_tick` into
   `Ui.campaign_label`). `campaign` imports `pbp`, which imports `engine`, and

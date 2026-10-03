@@ -114,6 +114,18 @@ create index if not exists scores_match_id_idx
   on public.scores (match_id) where match_id <> '';
 
 -- ---------------------------------------------------------------------------
+-- scores.campaign_start: `Challenge.campaign` out of the token, what the weekly
+-- campaign said about this node for this player when the game was *started*
+-- (an attemptStatus reason, e.g. 'adjacent'). It decides one thing: whether the
+-- campaign's grace covers the score (js/campaign.mjs, startedWithAccess). A
+-- claim like `hand`, and safe as one: a forged stamp gets no more grace than a
+-- blank, which is what every score before this column, every desktop game and
+-- every hand-written link carries.
+-- ---------------------------------------------------------------------------
+alter table public.scores add column if not exists campaign_start text not null default ''
+  check (campaign_start ~ '^[a-z-]{0,20}$');
+
+-- ---------------------------------------------------------------------------
 -- game_logs: the replay behind a score — settings, seed, and every turn's orders
 -- and combat draws, deflated and base64url'd by `replay.GameLog.encoded`. Posted
 -- by the game itself when the player presses "Post to leaderboard", which is the
@@ -625,7 +637,8 @@ create or replace view public.counted_scores
   with (security_invoker = true) as
 select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
   -- New columns go last: `create or replace view` can add one, never reorder.
-  s.hand
+  s.hand,
+  s.campaign_start
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
@@ -867,7 +880,9 @@ select
   cs.user_name,
   cs.turns,
   cs.lost,
-  cs.submitted_at
+  cs.submitted_at,
+  -- What the campaign said when the game began, for fold's grace.
+  cs.campaign_start
 from public.campaign_games cg
 join public.counted_scores cs on cs.game_key = cg.game_key
 where cs.hand > 0
