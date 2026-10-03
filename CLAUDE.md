@@ -43,6 +43,8 @@ uv run python -m tests.sim --film --trials 200   # ...also checking every turn's
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
+uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a
+                                                 # bot's aux knob (here Oracle: Search)
 
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot:
                                                 # legal orders, read-only, reproducible

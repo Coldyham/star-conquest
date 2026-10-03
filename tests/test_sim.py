@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 import time
 from collections import Counter
 from dataclasses import replace
+
+import pytest
 
 from starconquest import ai, engine, replay
 from starconquest import settings as settings_mod
@@ -65,6 +68,53 @@ def test_ladder_credits_the_winning_strategy():
     wins, draws, timeouts = sim._tally(games, roster)
     assert sum(wins.values()) + draws + timeouts == len(games)
     assert wins["heuristic"] > wins["_test_passive"]
+
+
+def test_aux_reaches_only_the_named_strategy_s_seats():
+    """--aux stamps every seat a strategy holds and leaves the rest default."""
+    ai.load_models()
+    seen: dict[str, list[float]] = {}
+
+    def spy(state, pid):
+        p = state.players[pid]
+        seen.setdefault(p.ai_strategy, []).append(p.ai_params.aux)
+        return []
+
+    ai.register("_test_spy", spy)
+    ai.register("_test_spy2", spy)
+    try:
+        sim.play(3, nodes=12, players=3, max_turns=2,
+                 strategies=["_test_spy", "_test_spy2", "_test_spy"], aux={"_test_spy": 2.0})
+    finally:
+        ai.STRATEGIES.pop("_test_spy", None)
+        ai.STRATEGIES.pop("_test_spy2", None)
+    assert set(seen["_test_spy"]) == {2.0}
+    assert set(seen["_test_spy2"]) == {AiParams().aux}
+
+
+def test_aux_changes_a_ladder_game_and_default_aux_does_not():
+    ai.load_models()
+    roster = ["knower", "thinker"]
+
+    def run(aux):
+        return [(g.result.winner, g.result.turns)
+                for g in sim.run_ladder(range(1, 3), "random", 12, roster, 300, aux=aux)]
+
+    plain = run(None)
+    assert run({"knower": 1.0}) == plain
+    assert run({"knower": 2.0}) != plain
+
+
+def test_parse_aux_refuses_what_would_silently_do_nothing(capsys):
+    ap = argparse.ArgumentParser()
+    ai.load_models()
+    assert sim._parse_aux(ap, ["knower=2"], ["knower", "thinker"]) == {"knower": 2.0}
+    assert "Oracle: Search" in capsys.readouterr().out
+    for bad, roster in ((["knower"], ["knower"]), (["knower=x"], ["knower"]),
+                        (["knower=nan"], ["knower"]), (["knower=2"], ["thinker"]),
+                        (["knower=0", "knower=1"], ["knower"])):
+        with pytest.raises(SystemExit):
+            sim._parse_aux(ap, bad, roster)
 
 
 def test_avg_turns_excludes_timeouts():

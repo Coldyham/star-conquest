@@ -64,11 +64,18 @@ neighbours are under the next heading.
 
 knower at Off / Predict / Search (`aux` 0/1/2) head to head with thinker and
 marshal, two seats, both seatings per seed, everything else default
-(2026-10, at `cf3408b`). There is no CLI for a per-seat `aux` in `tests.sim`,
-so a scratch driver stamped the seats with `sim._hand_over` and ran the
-`sim.play` loop; seeds 1-30 of the first cell reproduce the roster ladder's
-knower cells (Predict) in [`marshal.md`](marshal.md) to the game, 51-4 and
-24-30. Win rate is knower's, over finished games; ± is a 95% interval:
+(2026-10, at `cf3408b`). Each knower row is one `--aux` ladder, which also
+plays thinker against marshal; the three cells, at `--aux knower=0`, `1` and `2`:
+
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 100
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 50 --mode symmetric
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 50 --nodes 24 --max-turns 1500  # with config.SHIP_LY_PER_TURN = 3
+
+The ladder's per-pair grid shows rates only; the counts below came from a
+driver that stamped seats the same way and logged each game. Seeds 1-30 of the
+first cell reproduce the roster ladder's knower cells (Predict) in
+[`marshal.md`](marshal.md) to the game, 51-4 and 24-30. Win rate is knower's,
+over finished games; ± is a 95% interval:
 
     random, 18 nodes, 6 ly/turn, seeds 1-100 (200 games a cell)
                   vs thinker              vs marshal            s/game
