@@ -254,11 +254,10 @@ never reserved, so a later, poorer target could spend it and the pincer silently
 failed to materialise — and once Phase 3b existed, 3b could eat its own second
 wave. Reserving it is what makes a staggered strike a plan rather than a hope.
 
-## Two more ideas measured and deleted
+## More ideas measured and deleted
 
-Both built against the configuration above and removed rather than kept on the
-strength of the idea. With the chokepoint and pocket-sealing results above, that
-is four.
+Each built against the configuration of its day and removed rather than kept on
+the strength of the idea.
 
 **Reinforceability-scaled guards.** Relax a frontier guard wherever a neighbour
 could genuinely relieve the system inside its warning window — a fleet down an
@@ -279,6 +278,35 @@ sizes. The square law barely punishes overkill on a weak garrison, so total
 survivors are the same either way (24 against 25 on the traced board) and only
 their distribution moves. *Taking* all three was never at stake — Phase 3
 launches at every affordable target before 3b touches the remainder.
+
+**Dropping the guard against a system already falling (2026-10).** A frontier
+system's guard is sized against the largest rival garrison next door, so when
+our fleets landing this turn are sure to take that neighbour, the guard looks
+spent: next turn the system is no longer a front, and its ships could leave a
+turn sooner. Built three ways behind flags: (1) ignore such a neighbour when
+sizing the guard; (2) the same, and stop counting the system as a front in
+Phase 4 so the freed ships flow forward; (3) as (2), but only once the falling
+neighbour is the system's last non-owned one. "Sure to take" was priced exactly
+as Phase 3 prices a strike: fleets landing this turn at or above `_required` at
+a one-turn horizon. It fires on 27% of decides at 24 nodes / 6 ly-per-turn
+(13% at 12) and frees about one guard ship per decide.
+
+    tools/sweep.py-style mirrored duels vs stock marshal, 1000 seeds,
+    random 18/6, 24/6, 30/6, 18/9, 24/12 (10000 games an arm)
+    null (flags off)                        50.0%   exactly, every cell
+    (1) guard only                          49.5%   z = -0.87
+    (2) guard + flow                        49.1%   z = -1.72
+    (3) last neighbour only, + flow         48.4%   z = -3.04   (47.3% at 24/12)
+
+Timeouts rose with every arm (920 → 1018/1059/1095). The prediction is not
+the problem: 99.8% of the systems flagged were taken that turn (98.2% at 12
+ly/turn). What it overlooks is that the front does not end with the capture.
+A system just taken from a rival usually borders the garrison that fled it
+(`_shortfalls`; "Garrisons run away" in `marshal-pricing.md`), and 13.7% of these captures were retaken
+within four turns at 6 ly/turn, 38.9% at 12. The guard is exactly the reserve
+that holds or retakes them, which is also why `FEED` pays. Not run against
+knower, whose oracle would only add the same-turn snipe into the vacated
+system on top of a loss already measured against marshal. Deleted.
 
 ## `FRONTIER_GUARD`: how it came to be 0.40, documented as 0.3
 
