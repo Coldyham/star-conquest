@@ -126,3 +126,21 @@ def test_the_layout_ignores_whatever_knobs_a_previous_build_left_in_config():
         assert _graph(seed=11) == first
     finally:
         config.NODE_JITTER = before
+
+
+def test_a_symmetric_node_rolls_how_its_sectors_meet():
+    from starconquest import mapgen
+    seen = set()
+    for seed in range(40):
+        for node in _graph(seed=seed)["nodes"]:
+            setup = node["settings"]
+            if setup.get("mode") == "symmetric":
+                seen.add(setup.get("layout", mapgen.SYMMETRIC_LAYOUTS[0]))
+    assert seen == set(mapgen.SYMMETRIC_LAYOUTS)
+
+
+def test_a_layout_people_play_is_kept():
+    ring = [_game("r", 5, mode="symmetric", layout="ring")]
+    nodes = [n for n in _graph(games=ring)["nodes"] if n["kind"] == "home"]
+    for node in nodes:   # homes are never "?" nodes, so every one is that family
+        assert node["settings"]["layout"] == "ring"
