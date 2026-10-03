@@ -93,15 +93,15 @@ assistant, which then interviews you and writes the bot.
 | New map / back to the menu | `N` / `M` |
 
 When the game ends: `T` retries the same map, `C` copies a challenge link, `L`
-posts to the leaderboard, and `H` reviews the whole game.
+enters it on the leaderboard, and `H` reviews the whole game.
 
 Your queued fleets show as arrows and standing rules as chevrons along their
 lanes. A system's number is the ships you can still send this turn. The top bar
 scores each player by systems, ships and production. Each End Turn plays back as
 a short animation, which any key or click skips.
 
-On a phone, tap a system then a neighbour (or drag), pinch or drag to move the
-map, and use the on-screen buttons in place of the keys.
+On a phone, tap a system then a neighbour (or drag), drag empty space to pan,
+use the on-map −/+ to zoom, and use the on-screen buttons in place of the keys.
 
 ## Sharing, the leaderboard and play-by-post
 
@@ -110,7 +110,7 @@ you press a sharing button, or tick **Share replays**.
 
 - **Challenge links.** Win a game, press **Challenge a friend**, and the link
   carries the map plus your score to beat: turns to win, with ties going to
-  fewest ships lost. **Post to leaderboard** puts it on the board, where every
+  fewest ships lost. **Enter on leaderboard** posts it to the board, where every
   map gets its own high-score table. A plain **Get Link** shares a setup with no
   score attached.
 - **Checked scores.** A posted score uploads its replay. An offline job
