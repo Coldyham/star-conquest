@@ -424,7 +424,8 @@ than it is.
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
   out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
   (sometimes its symmetric variant, plus one or two "?" nodes rolled with
-  `settings.randomise_knobs`), and a ring of homes, one lane each off the edge
+  `settings.randomise_knobs`; a symmetric node whose config names no `layout`
+  rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
   pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
   matches it to its game by seed plus jsonb *equality* — never
