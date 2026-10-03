@@ -40,8 +40,11 @@ tuned galaxy can be reused.
 ### Custom AIs
 
 Drop a Python file defining `decide(state, pid) -> list[Order]` into the
-gitignored `models/` folder and it becomes a strategy you can assign to any seat
-from the AI tab's dropdown (the built-in `heuristic` is the default). See
+`models/` folder and it becomes a strategy you can assign to any seat from the AI
+tab's dropdown (the built-in `heuristic` is the default). The folder is committed,
+not gitignored: it holds the bundled bots (`knower`, `marshal`, `thinker` and
+others), ships with the web build, and every bot in it is ranked on the
+leaderboard's bot column. See
 [`models/README.md`](models/README.md) for the authoring contract, the read-only
 `GameState` API a bot can use, and a copy-paste example.
 
