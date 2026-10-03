@@ -676,9 +676,12 @@ names and the dice. A node's circle is sized, and labelled, by its systems.
 - **Field nodes** fall to a win posted while you hold a neighbour; somebody
   else's only to a strictly better score (a tie defends). Bettering your own
   score on a node raises the bar for attackers.
-- **Half an hour's grace.** A win also counts if you held a neighbour at any
-  point in the 30 minutes before posting it, so a neighbour taken from you
-  while you were playing doesn't void the game.
+- **Half an hour's grace.** A win also counts if you held the node or a
+  neighbour at any point in the 30 minutes before posting it, so a node taken
+  from you while you were playing on or beside it doesn't void the game. Only
+  a game you started before losing it is covered: the game stamps what the
+  campaign said at Start onto the score (`scores.campaign_start`), and a blank
+  stamp (older scores, the desktop build, a hand-written link) is trusted.
 - **The game says so too.** On the web build, a setup that is one of this
   week's nodes is looked up (`/api/campaign`, by the name this browser last
   posted under). Start asks first if a win wouldn't be a move, or would only be

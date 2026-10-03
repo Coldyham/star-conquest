@@ -1,7 +1,9 @@
 /**
- * GET /api/campaign?token=<settings token>&name=<player> — is the setup the
- * game is about to play one of this week's campaign nodes, and what would a
- * win there do for `name` right now?
+ * GET /api/campaign?token=<settings token>&name=<player>[&starting=1|&start=<stamp>]
+ * — is the setup the game is about to play one of this week's campaign nodes,
+ * and what would a win there do for `name` right now? `starting=1` asks for a
+ * game about to begin (the menu), `start` for one under way that was stamped
+ * with that answer at Start; both only matter to the grace (`attemptStatus`).
  *
  * The game asks this so it can confirm before Start and keep a countdown in
  * its top bar (`starconquest/campaign.py`). The answer is computed by the
@@ -56,8 +58,11 @@ export function nodeFor(graph, setup) {
   return graph.nodes.find((node) => setupIdentity(node.settings) === want) || null;
 }
 
-/** The reply for `name` on `node` at `now`: pure, so tests can call it. */
-export function answer(graph, scores, node, name, now) {
+/**
+ * The reply for `name` on `node` at `now`: pure, so tests can call it. `game`
+ * says which game is asking (attemptStatus's `start`/`starting`).
+ */
+export function answer(graph, scores, node, name, now, game = {}) {
   const state = fold(graph, scores);
   const held = state.holders.get(node.id);
   return {
@@ -65,7 +70,7 @@ export function answer(graph, scores, node, name, now) {
     now,
     node: { id: node.id, kind: node.kind },
     holder: held ? { name: held.name, turns: held.turns, lost: held.lost } : null,
-    status: attemptStatus(graph, state, node.id, name, now),
+    status: attemptStatus(graph, state, node.id, name, now, game),
   };
 }
 
@@ -84,6 +89,10 @@ export default async function handler(request) {
   const params = new URL(request.url).searchParams;
   const token = params.get("token") || "";
   const name = (params.get("name") || "").trim().slice(0, MAX_NAME);
+  // The game in progress's stamp (`start`), or a game about to begin
+  // (`starting=1`); the page sends neither.
+  const start = /^[a-z-]{1,20}$/.test(params.get("start") ?? "") ? params.get("start") : "";
+  const game = { start, starting: params.get("starting") === "1" };
   if (!token || token.length > MAX_TOKEN) return reply(400, { error: "bad token" });
   let decoded;
   try {
@@ -102,7 +111,7 @@ export default async function handler(request) {
     const node = nodeFor(graph, decoded.setup);
     if (!node) return reply(404, { error: "not a node" });
     const scores = await read(reads.scores);
-    return reply(200, answer(graph, scores, node, name, now));
+    return reply(200, answer(graph, scores, node, name, now, game));
   } catch (err) {
     console.error("campaign lookup failed", err.message);
     return reply(502, { error: "lookup failed" });

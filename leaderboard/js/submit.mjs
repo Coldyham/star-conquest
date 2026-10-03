@@ -368,6 +368,8 @@ form.addEventListener("submit", async (event) => {
       // The game posts the log straight to game_logs, so this side never sees it
       // — only the id, and the two can arrive in either order.
       match_id: decoded.challenge.log,
+      // The campaign's answer when this game was started, for its grace.
+      campaign_start: decoded.challenge.campaign,
       raw_token: decoded.token,
     }, { returning: true });
     rememberName(nameField.value);

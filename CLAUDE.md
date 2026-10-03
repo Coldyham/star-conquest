@@ -343,7 +343,10 @@ already resolve simultaneously. The rationale for each rule is in
 - **Crowns, the weekly campaign and embargoes derive their state from
   `counted_scores` and stored maps; nothing about who holds what is stored.**
   `campaign_games` matches by jsonb equality, never `sc_config_key`. The
-  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored, and
+  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored; it
+  covers only a game started with access, which the game stamps at Start
+  (`Challenge.campaign` → `scores.campaign_start`, a claim that can only narrow
+  the grace, so a blank is trusted). And
   `attemptStatus` is the one answer to "may I move here" for the page and the
   game alike: the game asks
   `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)

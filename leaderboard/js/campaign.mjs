@@ -10,8 +10,12 @@
 //   It is theirs for the week and can never be taken, which is what keeps a
 //   seat open to newcomers and a way back for anyone who loses the field.
 // - A *field* node is taken by a win posted while the player holds one of its
-//   neighbours (their home included), or held one up to GRACE_MS before posting,
-//   so a neighbour stolen while you were playing doesn't void the game. An
+//   neighbours (their home included), or held that node or a neighbour up to
+//   GRACE_MS before posting, so a node stolen while you were playing on or
+//   beside it doesn't void the game. The grace only covers a game started
+//   while the player still had that access: the game stamps attemptStatus's
+//   answer at Start on the score (`campaign_start`), and a game started
+//   without access gets none (`startedWithAccess`). An
 //   unheld node falls to any such win; a held one only to a strictly better
 //   result (fewer turns, then fewer lost), so a tie defends. The holder
 //   bettering their own score raises the bar.
@@ -23,8 +27,22 @@
 import { weekParam } from "./crowns.mjs";
 import { compareScores } from "./standings.mjs";
 
-/** How long after losing a neighbour a win beside it still counts. */
+/** How long after losing a node a win on it or beside it still counts. */
 export const GRACE_MS = 30 * 60 * 1000;
+
+/**
+ * attemptStatus answers that, stamped on a score at Start, mean the game was
+ * begun with no access to the node, so the grace can't carry it. Anything else
+ * keeps the grace: "adjacent" and "own" were access, and a blank (no lookup:
+ * an older score, the desktop build, a hand-written link) or an unknown value
+ * is taken on trust. That costs nothing, since the grace still runs from the
+ * moment access was lost: a forged stamp gets no more than the rule without
+ * one. Starting inside a grace is not access, or a restart would carry it.
+ */
+const NO_ACCESS_AT_START = new Set(["grace", "late-start", "not-adjacent", "no-home"]);
+
+/** Was the game behind `score` started with access to its node, as far as we know? */
+export const startedWithAccess = (score) => !NO_ACCESS_AT_START.has(score.campaign_start);
 
 export const keyOf = (name) => String(name || "").trim().toLowerCase();
 
@@ -92,7 +110,11 @@ export function fold(graph, scores) {
       if (compareScores(score, held) < 0) holders.set(nodeId, { ...entry, since: held.since });
       continue;
     }
-    if (![...links.get(nodeId)].some((other) => heldSince(key, other, at - GRACE_MS))) continue;
+    // Access is holding the node or a neighbour; the node itself only matters
+    // within the grace, since a holder never reaches this line. A game started
+    // without access counts only with access now.
+    const since = startedWithAccess(score) ? at - GRACE_MS : Infinity;
+    if (![nodeId, ...links.get(nodeId)].some((other) => heldSince(key, other, since))) continue;
     if (held && compareScores(score, held) >= 0) continue;
     holders.set(nodeId, entry);
     bump(key, 1, at);
@@ -117,10 +139,18 @@ export function fold(graph, scores) {
  *
  * `can` says whether a win posted now would be a move.
  * `why` is one of "no-name", "home-open", "home-taken", "has-home", "own-home",
- * "own", "adjacent", "grace", "no-home", "not-adjacent". `graceUntil` is when a
- * "grace" claim lapses; `beat` is the score to beat on somebody else's node.
+ * "own", "adjacent", "grace", "late-start", "no-home", "not-adjacent".
+ * `graceUntil` is when a "grace" claim lapses; `beat` is the score to beat on
+ * somebody else's node.
+ *
+ * Which game is asking decides the grace. `start` is the stamp of a game
+ * already under way (its attemptStatus answer at Start); `starting` asks for a
+ * game about to begin, which would be stamped with this very answer. Either
+ * one without access turns "grace" into "late-start". Neither (the page, which
+ * can't know about a game in progress) gives the grace on trust, as fold does
+ * for an unstamped score.
  */
-export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
+export function attemptStatus(graph, state, nodeId, name, now = Date.now(), { start = "", starting = false } = {}) {
   const key = keyOf(name);
   const out = { can: false, why: "no-name", graceUntil: null, beat: null };
   if (!key) return out;
@@ -139,8 +169,12 @@ export function attemptStatus(graph, state, nodeId, name, now = Date.now()) {
   if (others.some((other) => state.holders.get(other)?.key === key)) {
     return { ...out, can: true, why: "adjacent", beat };
   }
-  const lapse = Math.max(...others.map((other) => state.lostAt.get(`${key}|${other}`) ?? -Infinity)) + GRACE_MS;
-  if (lapse >= now) return { ...out, can: true, why: "grace", graceUntil: lapse, beat };
+  const lapse = Math.max(...[nodeId, ...others].map((other) =>
+    state.lostAt.get(`${key}|${other}`) ?? -Infinity)) + GRACE_MS;
+  if (lapse >= now) {
+    if (starting || NO_ACCESS_AT_START.has(start)) return { ...out, why: "late-start", graceUntil: lapse, beat };
+    return { ...out, can: true, why: "grace", graceUntil: lapse, beat };
+  }
   return { ...out, why: state.homes.has(key) ? "not-adjacent" : "no-home" };
 }
 
@@ -152,6 +186,7 @@ const NOT_A_MOVE = {
   "home-taken": "Claimed — homes can't be taken.",
   "has-home": "You already have a home this week.",
   "not-adjacent": "Not next to anything you hold yet.",
+  "late-start": "You've lost your way in here, and the grace only covers a game started before that.",
   "no-home": "Win a home first — that's how you join.",
 };
 
@@ -170,8 +205,9 @@ export function attemptLines(status, { now = Date.now(), clock = timeOfDay } = {
     if (status.why === "grace") {
       lines.push({
         tone: "timer",
-        text: "You've lost the node next to this one, but a win here still counts if you post it " +
-          `within ${waitLabel(status.graceUntil, now)} (by ${clock(status.graceUntil)}).`,
+        text: "You've lost this node or the one next to it. A game you'd already started here " +
+          `still counts if you post the win within ${waitLabel(status.graceUntil, now)} ` +
+          `(by ${clock(status.graceUntil)}); one started now won't.`,
       });
     }
     return lines;
@@ -188,7 +224,7 @@ export function attemptLines(status, { now = Date.now(), clock = timeOfDay } = {
 export function weekQueries(day) {
   return {
     graph: `campaigns?select=week_start,graph&week_start=eq.${day}`,
-    scores: "campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at" +
+    scores: "campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at,campaign_start" +
       `&week_start=eq.${day}&order=submitted_at.asc,score_id.asc`,
   };
 }
@@ -203,11 +239,11 @@ export function waitLabel(then, now = Date.now()) {
 /**
  * Could `name` make a move on `nodeId` right now? A home, only while it is
  * empty and they have none; a field node, only while they hold a neighbour or
- * lost one within GRACE_MS (and for somebody else's, only by beating the score
- * `holders` shows).
+ * lost it or a neighbour within GRACE_MS (and for somebody else's, only by
+ * beating the score `holders` shows). `game` is attemptStatus's last argument.
  */
-export function canAttempt(graph, state, nodeId, name, now = Date.now()) {
-  return attemptStatus(graph, state, nodeId, name, now).can;
+export function canAttempt(graph, state, nodeId, name, now = Date.now(), game = {}) {
+  return attemptStatus(graph, state, nodeId, name, now, game).can;
 }
 
 /**

@@ -182,15 +182,24 @@ def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
 
     The menu's own watcher is reused, so a setup it already looked up shows at
     once, and the lookup is refreshed every `campaign.REFRESH_S` while the
-    game runs: a neighbour lost mid-game starts its grace countdown here
+    game runs: a node lost mid-game starts its grace countdown here
     without a reload. Nothing is shown for a watched replay or a play-by-post
     match, neither of which can be posted as a campaign move.
     """
     if ui.watched or ui.in_pbp:
         ui.campaign_label = None
         return
-    watch.pump(settings)
+    watch.pump(settings, start=ui.campaign_start)
     ui.campaign_label = campaign.label(watch.status)
+
+
+def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
+    """Record what the campaign said about this setup as a match begins (Start,
+    or a Retry or fork that plays it again from now), for the grace. A rewind
+    within a match keeps the stamp it began with; a resumed save has none, and
+    neither has a match forked out of a watched replay, since nothing looked
+    its setup up while it was being watched (`campaign_tick`)."""
+    ui.campaign_start = campaign.stamp(watch.status)
 
 
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
@@ -300,6 +309,7 @@ def challenge_settings(settings: Settings, state: GameState, ui: Ui,
         hand=hand_turns(log),
         key=shared.challenge_key(),
         log=log.match_id,
+        campaign=ui.campaign_start,
     )
     return shared
 
@@ -1663,7 +1673,9 @@ async def main() -> None:
                         confirm_rewind = False
                 if do_rewind:
                     assert log is not None and ui is not None   # confirm_rewind ⇒ in-game
+                    stamped = ui.campaign_start   # the same match, so the same start
                     state, ui = apply_rewind(log, settings, ui.history_turn)
+                    ui.campaign_start = stamped
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     confirm_rewind = False
                     auto_accum = 0
@@ -1716,6 +1728,7 @@ async def main() -> None:
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
                     state, ui, log, current_seed = _begin_game(settings)
+                    stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
                 elif action == "play_by_post":
@@ -1825,7 +1838,10 @@ async def main() -> None:
                 except OSError:
                     pass
                 current_seed = log.seed
+                was_watched = ui.watched
                 state, ui = resume_game(log, settings)
+                if not was_watched:
+                    stamp_campaign(ui, menu_state.campaign_watch)
                 history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":
@@ -1867,7 +1883,10 @@ async def main() -> None:
                     except OSError:
                         pass
                     current_seed = log.seed
+                    was_watched = ui.watched
                     state, ui = resume_game(log, settings)
+                    if not was_watched:
+                        stamp_campaign(ui, menu_state.campaign_watch)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
                 else:

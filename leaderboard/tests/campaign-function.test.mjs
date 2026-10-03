@@ -104,3 +104,33 @@ test("a token the Python game minted decodes to its node", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("the game says which game is asking, and only the grace hears it", async () => {
+  // ann lost node 0 to bo a minute ago, so node 1 is hers only inside the grace.
+  const day = weekParam(weekStart(new Date()));
+  const now = Date.now();
+  const iso = (ago) => new Date(now - ago * MIN).toISOString();
+  const week = { ...graph, week_start: day, lanes: [[0, 1], [10, 0], [11, 0]],
+    nodes: [...graph.nodes, { id: 11, kind: "home", settings: { mode: "random", players: 2, nodes: 12, seed: 11 } }] };
+  const scores = [
+    { node_id: 10, score_id: 1, user_name: "ann", turns: 40, lost: 0, submitted_at: iso(90) },
+    { node_id: 0, score_id: 2, user_name: "ann", turns: 30, lost: 0, submitted_at: iso(80) },
+    { node_id: 11, score_id: 3, user_name: "bo", turns: 40, lost: 0, submitted_at: iso(70) },
+    { node_id: 0, score_id: 4, user_name: "bo", turns: 20, lost: 0, submitted_at: iso(1) },
+  ];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response(JSON.stringify(
+    String(url).includes("/campaigns?") ? [{ week_start: day, graph: week }] : scores), { status: 200 });
+  const token = tokenOf(graph.nodes[1].settings);
+  const why = async (more) =>
+    (await (await handler(new Request(`https://x/api/campaign?token=${token}&name=ann${more}`))).json()).status.why;
+  try {
+    assert.equal(await why(""), "grace");
+    assert.equal(await why("&start=adjacent"), "grace");
+    assert.equal(await why("&starting=1"), "late-start");
+    assert.equal(await why("&start=not-adjacent"), "late-start");
+    assert.equal(await why("&start=NOT%20A%20STAMP"), "grace");   // unreadable: on trust
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
