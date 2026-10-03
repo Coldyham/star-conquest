@@ -131,7 +131,7 @@ only for a fight; what is deliberately not animated.
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
 - **Where marshal stands.** **The current full roster ladder; update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
 - **A stagger's nearer wave is reserved.**
-- **Two more ideas measured and deleted.**
+- **More ideas measured and deleted.**
 - **`FRONTIER_GUARD`.** How it came to be 0.40 while documented as 0.3; now 0.55.
 - **The 2026-09 tuning sweep.** What was adopted (partly superseded since), the regime-bound `ENEMY_FAR`, cross-opponent checks, negative results, the empty-interior statistic, and the two methodological notes.
 
@@ -170,7 +170,7 @@ the measured result was indistinguishable from the baseline.
 - Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*
 - Chokepoint value (betweenness): loses at every weight. Pocket-sealing: a constant offset. *Same section.*
 - `FRONTIER_GUARD = 0` (ablated alone): wrong, because of its interaction with Phase 3b. *Same section.*
-- Reinforceability-scaled guards: 46%. Splitting a breakthrough's surplus: null. *Two more ideas measured and deleted.*
+- Reinforceability-scaled guards: 46%. Splitting a breakthrough's surplus: null. Dropping the guard against a neighbour our fleets take this turn: 48.4-49.5%, since a capture is often retaken and the guard is what holds it. *More ideas measured and deleted.*
 - A flat garrison floor (`RESERVE_FLOOR` 1 or 2): catastrophic. Opening the wedge gate at 3 players: a wash. Raising `RIVAL_WEDGE`: on its plateau. Propagating threat through neutral buffers: 26.7% in slow cells. *The 2026-09 tuning sweep.*
 - `ENEMY_NEAR`/`ENEMY_FAR`/`NEAR_PAD` and the distance ramp: removed later (see *Garrisons run away*).
 
