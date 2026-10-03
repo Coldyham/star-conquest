@@ -29,6 +29,7 @@ const KNOB_LABELS = {
   neutral_produces: "Neutral prod",
   fog_sight: "Fog sight",
   fog_scout: "Fog scout",
+  layout: "Layout",
 };
 
 // Fields settings_json may carry that aren't a "tweak": the match's identity
