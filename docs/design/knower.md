@@ -250,6 +250,10 @@ which expresses "commit everything" far better than a margin tweak to knower's
 own phases. Dropping them paid for the whole depth increase and more. They are
 still listed in `POSTURE_VARIANTS`, outside the width.
 
+actuary was measured as a fifth candidate (10.4% of contested picks, its move
+distinct from the default 91% of the time) but is not in the list; see
+[`actuary.md`](actuary.md), "As one of knower's borrowed candidates".
+
 ## How far to look: the longest lane, plus a cushion
 
 The Oracle knob was a search depth, 0-12, until 2026-09-30. The root-only search's

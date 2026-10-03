@@ -88,9 +88,11 @@ def decide(state: GameState, pid: int) -> list[Order]:
 # strongest to weakest. knower leads despite tests/sim.py --ladder finding
 # marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
-# aux=12), not its default seat. A strategy missing from this list — a fresh
-# drop-in with no measured ladder placement — sorts alphabetically after it.
-LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
+# aux=12), not its default seat. actuary tops that same ladder at the defaults
+# but loses to knower at Search (37%), so it sits second (docs/design/actuary.md).
+# A strategy missing from this list — a fresh drop-in with no measured ladder
+# placement — sorts alphabetically after it.
+LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
 
 
 def available_strategies() -> list[str]:

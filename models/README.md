@@ -263,8 +263,10 @@ For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orde
 The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
 arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 (scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
-commits its surplus instead of parking it), `knower.py` (the oracle — it runs every
-rival's own `decide` before the engine asks for it).
+commits its surplus instead of parking it), `actuary.py` (no phases: it projects
+every system's future, values the board in ships and greedily commits whichever
+launch raises that value most), `knower.py` (the oracle — it runs every rival's
+own `decide` before the engine asks for it).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
 leaves the seat's bot to the match seed, and `settings.build_state` resolves it to
