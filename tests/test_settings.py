@@ -323,7 +323,7 @@ def test_challenge_key_is_stable():
     entry below it lacked its fields too) and updating the literal here, so links
     already in circulation keep resolving to the setup they describe.
     """
-    assert Settings().challenge_key() == "38c8b7ba470f6f4c"
+    assert Settings().challenge_key() == "d97dee091d86d379"
 
 
 def test_challenge_keys_lead_with_the_canonical_one():
@@ -342,6 +342,8 @@ def _moved(field: str):
     """
     if field == "custom_map":
         return _tiny_map()
+    if field == "layout":
+        return "ring"
     return getattr(Settings(), field) + 0.2
 
 
@@ -710,10 +712,12 @@ def test_a_broken_recipe_lands_at_none_and_the_setup_still_builds():
     assert build_state(out, 3) is not None
 
 
-def test_a_custom_setup_offers_exactly_one_challenge_key():
-    """`custom_map` appears in every `_LEGACY_KEY_DROPS` entry, so no older
-    version could have described such a map — correctly, since none could."""
-    assert len(_with_map().challenge_keys()) == 1
+def test_a_custom_setup_offers_only_the_keys_of_versions_that_had_hand_maps():
+    """A version whose `_LEGACY_KEY_DROPS` entry names `custom_map` could not
+    have described a hand map, so only the versions since it joined (the current
+    one, and those whose entries leave it out) offer a key for one."""
+    since = sum(1 for drops in _LEGACY_KEY_DROPS if "custom_map" not in drops)
+    assert len(_with_map().challenge_keys()) == 1 + since
 
 
 def test_copy_from_deep_copies_the_recipe():
@@ -848,3 +852,48 @@ def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
         s.seed = 17
         assert resolve_strategy(RANDOM_STRATEGY, 17, 2) == "warn_c"
         assert setup_warnings(s) == ["warn_c [2]"]
+
+
+# --------------------------------------------------------------------------- #
+# Symmetric layout
+# --------------------------------------------------------------------------- #
+def test_a_hub_setup_still_matches_a_key_stamped_before_layouts():
+    """`38c8...` is the default setup's key before `layout` joined: an old link
+    to a symmetric (hub) map must still read as unedited."""
+    assert "38c8b7ba470f6f4c" in Settings().challenge_keys()
+    s = Settings(mode="symmetric")
+    older = s.to_dict()
+    for skip in ("challenge", "autoplay", "layout"):
+        older.pop(skip)
+    assert _hash_setup(older) in s.challenge_keys()
+
+
+def test_a_layout_moves_a_symmetric_setups_key_and_link():
+    hub = Settings(mode="symmetric", seed=3)
+    ring = Settings(mode="symmetric", seed=3, layout="ring")
+    assert hub.challenge_key() != ring.challenge_key()
+    assert "layout" not in hub.token_dict()
+    assert ring.token_dict()["layout"] == "ring"
+    assert Settings.from_token(ring.to_token()).layout == "ring"
+
+
+def test_a_layout_is_inert_where_it_cannot_shape_the_map():
+    """Left over from a symmetric setup, it must not split a random map's key or
+    ride in its link, nor a hand-drawn map's."""
+    for mode, recipe in (("random", None), ("symmetric", _tiny_map())):
+        plain = Settings(mode=mode, seed=3, custom_map=recipe)
+        stale = Settings(mode=mode, seed=3, custom_map=recipe, layout="core")
+        assert stale.layout_inert()
+        assert stale.challenge_keys() == plain.challenge_keys()
+        assert stale.token_dict() == plain.token_dict()
+
+
+def test_an_unknown_layout_loads_as_the_hub():
+    assert Settings.from_dict({"mode": "symmetric", "layout": "spiral"}).layout == "hub"
+    assert Settings.from_dict({"mode": "symmetric", "layout": 7}).layout == "hub"
+
+
+def test_the_layout_reaches_the_board():
+    ring = build_state(Settings(mode="symmetric", players=3, nodes=18, layout="ring"), 5)
+    hub = build_state(Settings(mode="symmetric", players=3, nodes=18), 5)
+    assert set(ring.lanes) != set(hub.lanes)

@@ -5,7 +5,10 @@ minimum spanning tree for guaranteed connectivity (Euclidean MSTs are planar, so
 its edges never cross), then a few extra short edges added with crossing
 rejection to create loops without clutter.
 
-SYMMETRIC mode is added at a later milestone.
+SYMMETRIC mode: one base sector generated once and rotated N times about the
+centre, so every seat faces an identical position. How the sectors are joined is
+the *layout* (``SYMMETRIC_LAYOUTS``): through one shared hub, around a ring of
+seam lanes, both, or through a core of contested systems on the seams.
 
 All randomness flows through ``state.rng`` so a seed fully reproduces a map.
 """
@@ -18,11 +21,23 @@ from typing import TYPE_CHECKING
 
 from . import config
 from .geometry import Point, bounds_of, dist, point_segment_dist, segments_intersect
-from .model import GameState, Player, System
+from .model import GameState, Player, System, lane_key
 from .starnames import pick as pick_names
 
 if TYPE_CHECKING:  # import-cycle-free: custommap imports config/geometry/model only
     from .custommap import CustomMap
+
+
+# How a symmetric map's sectors are joined, first the default. "hub" is the
+# original board and must keep drawing exactly what it always drew: a stored
+# symmetric game replays by regenerating its map, and `RULES_VERSION` did not
+# move when the others joined.
+#   hub   - every sector's innermost system links to one shared centre
+#   ring  - no centre; each sector links to both neighbours across its seams
+#   wheel - the hub and the ring together
+#   core  - a contested system on every seam, near the middle, shared by the two
+#           sectors either side of it, and the core systems ringed together
+SYMMETRIC_LAYOUTS = ("hub", "ring", "wheel", "core")
 
 
 # --------------------------------------------------------------------------- #
@@ -33,9 +48,11 @@ def generate(
     mode: str = "random",
     num_nodes: int = config.DEFAULT_NODES,
     num_players: int = config.DEFAULT_PLAYERS,
+    layout: str = SYMMETRIC_LAYOUTS[0],
 ) -> GameState:
+    """``layout`` only shapes a symmetric map; a random one ignores it."""
     if mode == "symmetric":
-        return generate_symmetric(seed, num_nodes, num_players)
+        return generate_symmetric(seed, num_nodes, num_players, layout)
     return generate_random(seed, num_nodes, num_players)
 
 
@@ -100,23 +117,46 @@ def generate_symmetric(
     seed: int,
     num_nodes: int = config.DEFAULT_NODES,
     num_players: int = config.DEFAULT_PLAYERS,
+    layout: str = SYMMETRIC_LAYOUTS[0],
 ) -> GameState:
     """Rotationally symmetric map: one base sector rotated N times about the centre.
 
     Nodes, edges, production and garrisons are generated once in a single angular
     sector and then rotated by ``k * 2*pi/N`` for each player, so every player
-    faces a topologically and numerically identical position. A shared central
-    node ties the sectors together and is the contested prize.
+    faces a topologically and numerically identical position. ``layout`` (one of
+    ``SYMMETRIC_LAYOUTS``) decides what ties the sectors together; every lane it
+    adds is itself rotated, so the symmetry holds whichever is chosen.
+
+    Ids: sector ``k`` holds ``k*per_player .. (k+1)*per_player - 1`` (its
+    homeworld first), and any shared systems follow — the hub, or core ``k`` on
+    the seam at angle ``k * 2*pi/N``. Every layout draws from ``state.rng`` in
+    the same order and only for the sectors, so a seed's sectors differ between
+    layouts only where the per-sector node count does.
     """
+    if layout not in SYMMETRIC_LAYOUTS:
+        layout = SYMMETRIC_LAYOUTS[0]
+    hub = layout in ("hub", "wheel")
+    ring = layout in ("ring", "wheel")
+    core = layout == "core"
+
     state = GameState.new(seed, mode="symmetric")
     num_players = max(2, num_players)
-    per_player = max(2, round((num_nodes - 1) / num_players))
+    shared = 1 if hub else num_players if core else 0
+    per_player = max(2, round((num_nodes - shared) / num_players))
 
     side = config.world_side(num_nodes)
     cx = cy = side / 2.0
     r_outer = side / 2.0 - config.WORLD_MARGIN
     r_inner = 0.28 * r_outer
     sector = 2.0 * math.pi / num_players
+    if core:
+        # Core systems sit on the seams, inside the sectors, and must neither
+        # crowd each other (their spacing shrinks with the seat count) nor the
+        # sectors' innermost systems: so the core opens up and the sectors
+        # move out behind it, a full gap clear of it.
+        gap = 2.5 * config.node_clearance()
+        r_core = max(0.6 * r_inner, gap / (2.0 * math.sin(math.pi / num_players)))
+        r_inner = max(r_inner, r_core + gap)
 
     # --- base sector seeds (index 0 is the homeworld) -------------------- #
     base = _base_sector_seeds(state, per_player, sector, r_inner, r_outer, cx, cy)
@@ -127,7 +167,7 @@ def generate_symmetric(
     base_prod, base_ships = _base_sector_values(state, per_player)
 
     _make_players(state, num_players)
-    center_id = num_players * per_player
+    first_shared = num_players * per_player
 
     # --- replicate nodes by rotation ------------------------------------- #
     for k in range(num_players):
@@ -144,14 +184,21 @@ def generate_symmetric(
                 production=base_prod[idx],
             )
 
-    # contested central system
-    state.systems[center_id] = System(
-        id=center_id,
-        pos=(cx, cy),
-        owner_id=0,
-        production=min(config.PRODUCTION_WEIGHTS),  # richest
-        ships=config.GARRISON_BASE + round(config.GARRISON_K / min(config.PRODUCTION_WEIGHTS)) + 2,
-    )
+    # contested shared systems: the richest production, a stiff garrison
+    prize_prod = min(config.PRODUCTION_WEIGHTS)
+    prize_ships = config.GARRISON_BASE + round(config.GARRISON_K / prize_prod) + 2
+    if hub:
+        state.systems[first_shared] = System(
+            id=first_shared, pos=(cx, cy), owner_id=0, production=prize_prod, ships=prize_ships,
+        )
+    if core:
+        # On the seams, inside the sectors' inner radius, so a spoke from a
+        # sector's innermost system runs inwards past nothing of its own.
+        for k in range(num_players):
+            nid = first_shared + k
+            pos = _rotate((cx + r_core, cy), cx, cy, k * sector)
+            state.systems[nid] = System(id=nid, pos=pos, owner_id=0,
+                                        production=prize_prod, ships=prize_ships)
 
     # --- replicate edges by rotation ------------------------------------- #
     base_edges = _planar_edges(base_positions)
@@ -159,12 +206,79 @@ def generate_symmetric(
         base_off = k * per_player
         for i, j in base_edges:
             _add_lane_between(state, base_off + i, base_off + j)
-        _add_lane_between(state, base_off + innermost, center_id)  # seam to centre
+        if hub:
+            _add_lane_between(state, base_off + innermost, first_shared)  # seam to centre
+    if core:
+        # sector k sits between the seams at k*sector and (k+1)*sector
+        low = _spoke_source(state, per_player, first_shared)
+        high = _spoke_source(state, per_player, first_shared + 1)
+        for k in range(num_players):
+            base_off = k * per_player
+            _add_lane_between(state, base_off + low, first_shared + k)
+            _add_lane_between(state, base_off + high, first_shared + (k + 1) % num_players)
+        for k in range(num_players):
+            a, b = first_shared + k, first_shared + (k + 1) % num_players
+            if _lane_absent(state, a, b):  # two seats: one chord, not two
+                _add_lane_between(state, a, b)
+    if ring:
+        a, b = _seam_link(state, per_player)
+        for k in range(num_players):
+            src = k * per_player + a
+            dst = ((k + 1) % num_players) * per_player + b
+            if _lane_absent(state, src, dst):
+                _add_lane_between(state, src, dst)
 
     state.rebuild_topology()
     _name_systems(state)
     assert is_connected(state), "symmetric map is not connected"
     return state
+
+
+def _lane_absent(state: GameState, a: int, b: int) -> bool:
+    return lane_key(a, b) not in state.lanes
+
+
+def _spoke_source(state: GameState, per_player: int, target: int) -> int:
+    """The sector-0 system that links to shared system ``target``: the nearest
+    whose lane crosses nothing laid so far and runs under no other system, else
+    simply the nearest. Never the homeworld while the sector has another system,
+    so no seat starts one hop from the prize. Like ``_seam_link`` it is chosen on
+    sector 0 and rotated, and draws nothing."""
+    positions = [state.systems[i].pos for i in range(len(state.systems))]
+    laid = [(lane.a, lane.b) for lane in state.lanes.values()]
+    order = sorted(range(1, per_player), key=lambda i: dist(positions[i], positions[target]))
+    for i in order:
+        if not _crosses_any(positions, laid, i, target) and not _grazes_other_node(positions, i, target):
+            return i
+    return order[0]
+
+
+def _seam_link(state: GameState, per_player: int) -> tuple[int, int]:
+    """The base-sector pair ``(a, b)`` that joins sector ``k``'s system ``a`` to
+    sector ``k+1``'s system ``b`` across the seam between them.
+
+    The shortest such lane that crosses nothing already laid and runs under no
+    other system, else simply the shortest. A homeworld is an end only when no
+    clean lane avoids one (a sector of two systems), so a seat rarely starts next
+    door to a rival. Chosen once, on the seam between sectors 0
+    and 1, against every lane laid so far: rotation carries crossings with it, so
+    the pair that is clean there is clean on every seam. Draws nothing.
+    """
+    positions = [state.systems[i].pos for i in range(len(state.systems))]
+    laid = [(lane.a, lane.b) for lane in state.lanes.values()]
+    pairs = sorted(
+        (a == 0 or b == 0, dist(positions[a], positions[per_player + b]), a, b)
+        for a in range(per_player)
+        for b in range(per_player)
+        if a or b  # never two homeworlds
+    )
+    for _home, _d, a, b in pairs:
+        if _crosses_any(positions, laid, a, per_player + b):
+            continue
+        if _grazes_other_node(positions, a, per_player + b):
+            continue
+        return a, b
+    return pairs[0][2], pairs[0][3]
 
 
 def _name_systems(state: GameState) -> None:

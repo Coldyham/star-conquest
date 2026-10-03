@@ -450,6 +450,13 @@ already resolve simultaneously. The rationale for each rule is in
 Two modes: `random` (jittered grid, relaxation, a planar Euclidean MST plus a few
 crossing-rejected extra edges) and `symmetric` (one sector rotated about a
 shared centre). Both must stay connected and planar-ish (`test_mapgen.py`).
+A symmetric map's `Settings.layout` (`mapgen.SYMMETRIC_LAYOUTS`: `hub`, `ring`,
+`wheel`, `core`) says what joins the sectors. **`hub` must keep drawing exactly
+the board it always did** (`test_symmetric.py` pins it; a change is a
+`RULES_VERSION` bump), every added lane is chosen on sector 0 and rotated, and
+nothing past the sectors draws from `state.rng`. `layout` is inert off a
+generated symmetric map (`Settings.layout_inert`), and is then read as `hub` by
+the key and pruned from the link.
 `symmetric` can return **more nodes than asked** (41 at 40), hence
 `config.CUSTOM_MAX_NODES`. Past `config.STANDARD_MAX_NODES` (40) the box grows
 (`config.world_side`); below it nothing moves. The Advanced tab's lane survey
