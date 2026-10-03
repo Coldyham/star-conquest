@@ -127,7 +127,7 @@ only for a fight; what is deliberately not animated.
 - **The depth search: branch the root, play the rest on.** Why branching deeper did nothing, and why more openings beat more turns. Most of the result against marshal comes from borrowing marshal.
 - **Borrowed candidates (`EXTERNAL_CANDIDATES`).** Candidate win shares, contested decisions only, and why `SEARCH_WIDTH` is 2.
 - **How far to look.** The horizon is the longest lane plus `LANE_CUSHION`, which replaced a fixed depth, so Oracle is now Off / Predict / Search. Also the old depth curve.
-- **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`. The browser is unmeasured; never measure on a loaded machine.
+- **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`, which also counts rival bots that declare `decide_ms`. The browser is unmeasured; never measure on a loaded machine.
 
 ### design/actuary.md
 - **The ledger and the greedy.** A timeline per system, fights priced so only the verdict is worst-case, one value in ships, risk as an expected loss, greedy commits. It is not an oracle.

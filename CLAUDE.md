@@ -393,8 +393,11 @@ already resolve simultaneously. The rationale for each rule is in
   new `AiParams` fields. Detail: `docs/design/bots.md`.
 - **A bot can warn about a setup** with `setup_warning(settings, seats)`
   (`ai.setup_warning`, `settings.setup_warnings`), raised on Start and on the
-  play-by-post roster's Confirm. knower's is fitted in
-  `docs/design/knower.md`, "Cost per decide".
+  play-by-post roster's Confirm; a hook that declares `people` is also told
+  which seats a person holds. knower's is fitted in
+  `docs/design/knower.md`, "Cost per decide", and counts every rival bot that
+  declares `decide_ms(settings, seat)` (`ai.decide_ms`; actuary does), since a
+  Search seat runs each one on every turn of every line it rolls out.
 - **An all-bot game has no human seat.** `build_state` clears the `is_human`
   `mapgen` stamps on pid 1 when `Settings.autoplay` is set. The seat is claimed
   by the first turn *ended* under manual control (`end_turn`'s `claim_seat`,

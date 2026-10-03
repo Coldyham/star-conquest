@@ -85,7 +85,23 @@ def setup_warning(settings, seats) -> list[str]:
 so the lines can count the whole cost. When it returns anything, Start (and the
 play-by-post confirm) shows a "This setup may play slowly" modal with those
 lines and a *Play anyway* button. A hook that raises or returns junk is ignored.
-`models/knower.py` is the worked example.
+`models/knower.py` is the worked example. Add a `people=()` parameter and you
+are also told which seats a person holds; every other seat is a bot.
+
+### Optional: say what a decide costs
+
+If your bot takes milliseconds rather than microseconds, say so:
+
+```python
+def decide_ms(settings, seat) -> float:
+    """Typical CPU ms of one decide on this setup (native Python)."""
+```
+
+An oracle that runs your `decide` while it thinks pays for it many times over:
+knower on Search runs every rival bot on each turn of each line it looks ahead,
+and its setup warning counts what you declare here (`ai.decide_ms`). Leave it
+out if you answer in microseconds; a missing or broken hook counts as free.
+`models/actuary.py` is the worked example.
 
 ## What you can read off `state`
 

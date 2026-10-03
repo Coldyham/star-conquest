@@ -252,6 +252,16 @@ def test_takes_a_neutral_it_can_take(ac):
     assert any(dst == 2 for _, dst, _ in _orders(ac, state))
 
 
+def test_declares_what_a_decide_costs(ac):
+    """knower prices a Search against rival bots with this (`ai.decide_ms`)."""
+    from types import SimpleNamespace
+    from starconquest.settings import Settings
+    small, big = Settings(nodes=18), Settings(nodes=120)
+    assert 0 < ai.decide_ms("actuary", small, 2) < ai.decide_ms("actuary", big, 2)
+    small.custom_map = SimpleNamespace(nodes=[None] * 120)       # a hand map's own count
+    assert ai.decide_ms("actuary", small, 2) == ai.decide_ms("actuary", big, 2)
+
+
 def test_beats_the_heuristic(ac):
     r = sim.play(2, nodes=18, players=2, strategies=["actuary", "heuristic"], max_turns=300)
     assert r.winner == 1

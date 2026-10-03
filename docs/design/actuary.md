@@ -84,9 +84,13 @@ Per decide, native CPython, load average ~2 (2026-10):
 That is two to three orders of magnitude above the phase bots (microseconds).
 It matters to knower: a Search seat runs every non-oracle rival's `decide` on
 each rolled turn of each line, so against actuary its 150 ms `SEARCH_BUDGET_S`
-can trip in a browser game and the search stops shallower. Unmeasured in the
-browser. Offline runs (`bot_replay`, `tests.sim` with guards lifted) are
-unaffected. The oracle's single call per turn is well inside its 50 ms.
+trips sooner and the search stops shallower. actuary declares its cost
+(`decide_ms`: 75th-percentile ms = `5.0 * (nodes / 40) ** 0.55`, fitted to a grid
+of 18-120 systems, 3-18 ly/turn and 2-5 seats at load 0.05, where seats and ship
+speed barely moved it), and knower's setup warning counts it; see "Cost per
+decide" in [`knower.md`](knower.md). Offline runs (`bot_replay`, `tests.sim`
+with guards lifted) are unaffected. The oracle's single call per turn is well
+inside its 50 ms.
 
 ## Where actuary stands
 

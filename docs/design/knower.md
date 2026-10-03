@@ -416,6 +416,20 @@ longest lane / plies reached, W where it warns:
 So it is a slow-ship warning now: almost every map at 1 ly/turn, the largest at
 3, never at the default speed or faster. Off and Predict never warn.
 
+**Rival bots that think are counted too.** `ply_ms` was fitted against
+opponents that answer in microseconds, so it holds nothing for one that takes
+milliseconds. A Search seat runs every rival bot's `decide` on each rolled turn
+of each line (`_rollout_decide`), and the forecast runs it once more, so a rival
+costing `r` ms adds `_lines() * r` to every ply and `r` to the root (`_rivals`,
+read off `ai.decide_ms`, which a model declares). People, oracles and other
+knower seats are modelled with `_blind`, already inside `ply_ms`, and are not
+counted. With two actuary seats on 40 systems (6 ly/turn) the warning now
+fires and says the search reaches about 2 of its 4-turn lanes; with marshal in
+the same seats it stays silent. Checked against a timed game (guards lifted,
+40 systems, 3 seats, horizon 8, load 0.3): knower's decide p75 512 ms against
+the model's ~560 ms, and actuary's calls inside its rollouts p75 4.4 ms against
+its declared 5.0.
+
 Every figure it quotes is turn one's. With `SHIP_SPEED_GROWTH_PCT` on that is the
 slowest the game gets — lanes shorten and plies cheapen as ships speed up, and
 `_horizon` follows them every decide — so a clipped warning then adds the turn

@@ -788,6 +788,61 @@ def test_the_menu_hears_knowers_warning(kn):
     assert setup_warnings(s) == []
 
 
+def _rival_setup(rival, nodes=40, players=4):
+    """A person in seat 1, one knower on Search in seat 2, ``rival`` elsewhere."""
+    from starconquest.model import AiParams
+    from starconquest.settings import Settings
+    s = Settings(nodes=nodes, players=players, ship_ly_per_turn=6.0)
+    s.ai_strategy = ["heuristic", "knower"] + [rival] * (len(s.ai_strategy) - 2)
+    s.ai = [AiParams(aux=2.0 if i == 1 else 1.0) for i in range(len(s.ai))]
+    return s
+
+
+def test_a_rival_bot_that_thinks_is_paid_for_on_every_line(kn):
+    """`ply_ms` was fitted against bots that answer in microseconds. A rival that
+    declares a cost (`ai.decide_ms`) is run on every rolled turn of every line,
+    so the same setup that is fine against marshal is cut short against it."""
+    assert "actuary" in ai.load_models()
+    quick = _rival_setup("marshal")
+    assert kn.setup_warning(quick, [2], people=[1]) == []
+    slow = _rival_setup("actuary")
+    lines = kn.setup_warning(slow, [2], people=[1])
+    rival_ms = 2 * ai.decide_ms("actuary", slow, 3)
+    assert any(f"It replays 2 Actuary seats on every turn it looks ahead, adding "
+               f"~{kn._secs(kn._lines() * rival_ms)} to each" in line for line in lines)
+    assert any("short of its" in line for line in lines)
+    assert lines[-1] == "A faster bot in place of Actuary (AI tab) also helps"
+
+
+def test_only_the_bots_a_search_will_run_are_counted(kn):
+    assert "actuary" in ai.load_models()
+    s = _rival_setup("marshal")
+    s.ai_strategy[0] = "actuary"                       # seat 1, but a person holds it
+    assert kn._rivals(s, {2}, {1}) == {}
+    assert set(kn._rivals(s, {2}, set())) == {"actuary"}   # ...unless nobody does
+    s.ai_strategy[2] = "knower"                        # another knower: proxied, cheap
+    s.ai_strategy[3] = "thinker"                       # declares no cost
+    assert kn._rivals(s, {2}, {1}) == {}
+
+
+def test_a_random_rival_is_counted_once_its_seed_is_fixed(kn):
+    from starconquest.settings import RANDOM_STRATEGY, resolve_strategy
+    assert "actuary" in ai.load_models()
+    s = _rival_setup("marshal", players=3)
+    s.ai_strategy[2] = RANDOM_STRATEGY
+    assert kn._rivals(s, {2}, {1}) == {}
+    seed = next(n for n in range(500) if resolve_strategy(RANDOM_STRATEGY, n, 3) == "actuary")
+    s.seed = seed
+    assert set(kn._rivals(s, {2}, {1})) == {"actuary"}
+
+
+def test_the_menu_counts_rival_bots_for_knower(kn):
+    from starconquest.settings import setup_warnings
+    assert "actuary" in ai.load_models()
+    assert setup_warnings(_rival_setup("marshal")) == []
+    assert setup_warnings(_rival_setup("actuary"))
+
+
 def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setattr(kn, "_longest_lane", lambda settings: 4)

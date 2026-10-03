@@ -54,11 +54,28 @@ REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relie
 MIN_GAIN = 0.05             # a candidate must move the ledger by at least this
 MAX_COMMITS = 64            # an iteration bound on the greedy
 
+# What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython,
+# fitted to a grid of 18-120 systems, 3-18 ly/turn and 2-5 seats (see "Cost, and
+# the caches that make it affordable" in docs/design/actuary.md). Seats and ship
+# speed barely move it, so only the system count is in the fit.
+COST_REF_NODES = 40
+COST_DECIDE_MS = 5.0
+COST_NODES_EXP = 0.55
+
 
 def decide(state, pid):
     if not any(s.owner_id == pid for s in state.systems.values()):
         return []
     return _Ledger(state, pid).plan()
+
+
+def decide_ms(settings, seat) -> float:
+    """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
+    rival bot's decide on every turn it looks ahead, so this is what lets its
+    menu warning count us."""
+    drawn = getattr(settings, "custom_map", None)
+    nodes = len(drawn.nodes) if drawn is not None else settings.nodes
+    return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
 
 
 class _Ledger:

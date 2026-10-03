@@ -151,6 +151,49 @@ def test_a_broken_setup_warning_never_blocks_a_start():
             _drop_aux_bot(name, modname)
 
 
+def test_setup_warning_tells_a_hook_who_the_people_are_only_if_it_asks():
+    seen = []
+
+    def asks(settings, seats, people=()):
+        seen.append(people)
+        return []
+
+    modname = _register_aux_bot("warn_people", setup_warning=asks)
+    try:
+        ai.setup_warning("warn_people", None, [2], people={3, 1})
+        ai.setup_warning("warn_people", None, [2])
+        assert seen == [[1, 3], []]
+    finally:
+        _drop_aux_bot("warn_people", modname)
+    # ...and a hook written before `people` existed is called exactly as before.
+    modname = _register_aux_bot("warn_old", setup_warning=lambda s, q: ["old"])
+    try:
+        assert ai.setup_warning("warn_old", None, [2], people=[1]) == ["old"]
+    finally:
+        _drop_aux_bot("warn_old", modname)
+
+
+def test_decide_ms_reads_the_hook_and_says_nothing_otherwise():
+    modname = _register_aux_bot("cost_test", decide_ms=lambda settings, seat: 4.5 + seat)
+    try:
+        assert ai.decide_ms("cost_test", None, 2) == 6.5
+    finally:
+        _drop_aux_bot("cost_test", modname)
+    assert ai.decide_ms("heuristic", None, 2) == 0.0
+    assert ai.decide_ms("no_such_strategy", None, 2) == 0.0
+
+    def boom(settings, seat):
+        raise RuntimeError("bug in a drop-in")
+
+    for i, hook in enumerate((boom, lambda s, q: "slow", lambda s, q: -3.0,
+                              lambda s, q: float("nan"), lambda s, q: float("inf"))):
+        modname = _register_aux_bot(f"cost_junk{i}", decide_ms=hook)
+        try:
+            assert ai.decide_ms(f"cost_junk{i}", None, 2) == 0.0
+        finally:
+            _drop_aux_bot(f"cost_junk{i}", modname)
+
+
 def test_aux_spec_is_none_without_a_declaration():
     """The heuristic, an unknown name, and a bot that ignores `aux` all opt out."""
     assert ai.aux_spec("heuristic") is None

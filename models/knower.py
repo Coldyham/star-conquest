@@ -547,26 +547,67 @@ def ply_ms(nodes: int, seats: int, ship_ly: float) -> float:
             * (max(1.0, ship_ly) / 6) ** COST_SPEED_EXP)
 
 
-def _search_run(ply: float, plies: int) -> tuple[int, float]:
+def _search_run(ply: float, plies: int, root_extra: float = 0.0) -> tuple[int, float]:
     """(plies reached, ms spent) by a ``plies``-deep search whose ply costs ``ply``,
     mirroring `_search`: the root rolls each candidate out once and builds its
-    plan, `COST_ROOT_PLIES` of a ply, and ``SEARCH_BUDGET_S`` is checked before
-    each ply after it, so the ply that crosses the budget still runs."""
+    plan, `COST_ROOT_PLIES` of a ply plus ``root_extra`` (the forecast's calls
+    to rival bots), and ``SEARCH_BUDGET_S`` is checked before each ply after
+    it, so the ply that crosses the budget still runs."""
     if plies <= 0:
         return 0, 0.0
-    spent, reached = ply * COST_ROOT_PLIES, 1
+    spent, reached = ply * COST_ROOT_PLIES + root_extra, 1
     while reached < plies and spent <= SEARCH_BUDGET_S * 1000:
         spent += ply
         reached += 1
     return reached, spent
 
 
-def estimated_decide_ms(nodes: int, seats: int, ship_ly: float, plies: int) -> float:
+def estimated_decide_ms(nodes: int, seats: int, ship_ly: float, plies: int,
+                        rival_ms: float = 0.0) -> float:
     """Typical CPU ms of one Search decide ``plies`` deep with no guard to stop it.
-    Off and Predict run no search, and cost a few ms at any size the menu allows."""
+    Off and Predict run no search, and cost a few ms at any size the menu allows.
+    ``rival_ms`` is one call to every rival bot that declares a cost (`_rivals`)."""
     if plies <= 0:
         return 0.0
-    return ply_ms(nodes, seats, ship_ly) * (plies - 1 + COST_ROOT_PLIES)
+    ply = ply_ms(nodes, seats, ship_ly) + _lines() * rival_ms
+    return ply * (plies - 1 + COST_ROOT_PLIES) + rival_ms
+
+
+def _lines() -> int:
+    """Lines a Search rolls out: one per candidate opening (`_candidates`)."""
+    return SEARCH_WIDTH + len(EXTERNAL_CANDIDATES)
+
+
+def _rivals(settings, seats, people) -> dict[str, tuple[int, float]]:
+    """The rival bots a Search seat on this setup will run, and what they cost:
+    ``{name: (seats, ms of one call summed over them)}``, from `ai.decide_ms`.
+
+    `ply_ms` was fitted against bots that answer in microseconds, so it holds
+    nothing for a rival that thinks. Every rolled turn of every line runs each
+    rival bot's `decide` (`_rollout_decide`), and the forecast runs it once more,
+    so a slow rival is paid for `_lines()` times a ply. Not counted: a person
+    (modelled with `_blind`), an oracle or another knower seat (proxied with
+    `_blind` too, which `ply_ms` already holds), a bot that declares no cost, and
+    a ``random`` seat whose seed is not fixed yet, since nobody knows its bot.
+    """
+    from starconquest.settings import RANDOM_STRATEGY, resolve_strategy   # core; import on use
+    out: dict[str, tuple[int, float]] = {}
+    for seat in range(1, settings.players + 1):
+        if seat in seats or seat in people:
+            continue
+        name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY:
+            if settings.seed is None:
+                continue
+            name = resolve_strategy(name, settings.seed, seat)
+        fn = ai.STRATEGIES.get(name)
+        if fn is None or fn is decide or _is_oracle(fn):
+            continue
+        ms = ai.decide_ms(name, settings, seat)
+        if ms > 0:
+            count, total = out.get(name, (0, 0.0))
+            out[name] = (count + 1, total + ms)
+    return out
 
 
 def _longest_lane(settings) -> int:
@@ -579,7 +620,7 @@ def _longest_lane(settings) -> int:
     return spread[2] if spread else 1
 
 
-def _sees_lanes_from(settings, nodes: int) -> int | None:
+def _sees_lanes_from(settings, nodes: int, rival_ms: float = 0.0) -> int | None:
     """With ship-speed growth on, the first turn a Search seat's guarded search
     reaches past the setup's longest lane, or None if it never does before speed
     tops out. The turn-one figures above are the slowest the game gets; this is
@@ -598,15 +639,17 @@ def _sees_lanes_from(settings, nodes: int) -> int | None:
         speed = min(config.SHIP_SPEED_MAX, base * rate ** turn)
         longest = max(1, math.ceil(longest_ly / speed))
         plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
-        if _search_run(ply_ms(nodes, settings.players, speed), plies)[0] >= longest:
+        ply = ply_ms(nodes, settings.players, speed) + _lines() * rival_ms
+        if _search_run(ply, plies, rival_ms)[0] >= longest:
             return turn
     return None
 
 
-def setup_warning(settings, seats) -> list[str]:
+def setup_warning(settings, seats, people=()) -> list[str]:
     """The menu's warning (`ai.setup_warning`): lines when a Search seat on this
     setup would be cut off before its own launches land, or would stall a turn
-    too long.
+    too long. ``people`` are the seats a person holds; every other seat is a bot
+    whose own thinking a Search seat pays for (`_rivals`).
 
     Clipping alone is not worth a warning. Past the lanes, extra horizon is the
     cushion, and losing some of it costs little; short of the longest lane the
@@ -619,20 +662,29 @@ def setup_warning(settings, seats) -> list[str]:
     nodes = len(settings.custom_map.nodes) if drawn else settings.nodes
     longest = _longest_lane(settings)
     plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
-    ply = ply_ms(nodes, settings.players, settings.ship_ly_per_turn)
-    reach, one = _search_run(ply, plies)
+    rivals = _rivals(settings, set(seats), set(people))
+    rival_ms = sum(ms for _, ms in rivals.values())
+    ply = ply_ms(nodes, settings.players, settings.ship_ly_per_turn) + _lines() * rival_ms
+    reach, one = _search_run(ply, plies, rival_ms)
     turn_ms = one * len(searchers)
     clipped = reach < longest
     if not clipped and turn_ms < WARN_TURN_MS:
         return []
-    need = _secs(estimated_decide_ms(nodes, settings.players, settings.ship_ly_per_turn, plies))
+    need = _secs(estimated_decide_ms(nodes, settings.players, settings.ship_ly_per_turn, plies,
+                                     rival_ms))
     lines = [f"Knower searching {plies} turns ahead on {nodes} systems needs ~{need} a turn"]
+    if rivals:
+        who = ", ".join(name.capitalize() if count == 1 else f"{count} {name.capitalize()} seats"
+                        for name, (count, _) in sorted(rivals.items()))
+        lines.append(f"It replays {who} on every turn it looks ahead, "
+                     f"adding ~{_secs(_lines() * rival_ms)} to each")
     if clipped:
         lines.append(f"It stops thinking at {_secs(SEARCH_BUDGET_S * 1000)}, so it will "
-                     f"look about {reach} turns ahead, short of its {longest}-turn lanes")
+                     f"look about {reach} turn{'' if reach == 1 else 's'} ahead, "
+                     f"short of its {longest}-turn lanes")
         if settings.ship_speed_growth_pct > 0:
             # Every figure above is turn one's, the slowest the game gets.
-            clear = _sees_lanes_from(settings, nodes)
+            clear = _sees_lanes_from(settings, nodes, rival_ms)
             lines.append("That is at the start: ships speed up, and from about turn "
                          f"{clear} it looks past its lanes" if clear is not None else
                          "Ships speed up, but not enough for it to see past its lanes")
@@ -643,6 +695,9 @@ def setup_warning(settings, seats) -> list[str]:
     smaller = "a smaller map" if drawn else "Systems (Basic tab)"
     lines.append(f"Set Oracle to Predict (AI tab), or use {smaller} or faster ships, "
                  "to avoid this")
+    if rivals and _search_run(ply - _lines() * rival_ms, plies)[0] > reach:
+        names = " or ".join(name.capitalize() for name in sorted(rivals))
+        lines.append(f"A faster bot in place of {names} (AI tab) also helps")
     return lines
 
 
