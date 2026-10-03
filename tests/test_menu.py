@@ -14,7 +14,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
-from starconquest import ai, combat, config, menu
+from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
 from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings
 
@@ -132,6 +132,26 @@ def test_node_stepper_clamps():
         for _ in range(100):
             _click_key(screen, ms, settings, "nodes_dec")
         assert settings.nodes == settings.min_nodes()
+    finally:
+        pygame.quit()
+
+
+def test_the_layout_stepper_cycles_and_only_offers_itself_on_a_symmetric_map():
+    screen, ms, settings = _setup()
+    try:
+        menu.draw(screen, ms, settings)
+        assert "layout_inc" not in ms.rects            # random: nothing to shape
+        _click_key(screen, ms, settings, "mode_symmetric")
+        seen = [settings.layout]
+        for _ in range(len(mapgen.SYMMETRIC_LAYOUTS)):
+            _click_key(screen, ms, settings, "layout_inc")
+            seen.append(settings.layout)
+        assert seen == [*mapgen.SYMMETRIC_LAYOUTS, mapgen.SYMMETRIC_LAYOUTS[0]]
+        _click_key(screen, ms, settings, "layout_dec")
+        assert settings.layout == mapgen.SYMMETRIC_LAYOUTS[-1]
+        assert menu._tab_changed("basic", settings)
+        _click_key(screen, ms, settings, "mode_random")  # left over, and inert
+        assert not menu._tab_changed("basic", settings)
     finally:
         pygame.quit()
 

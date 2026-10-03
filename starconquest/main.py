@@ -1188,6 +1188,8 @@ async def main() -> None:
     ap = argparse.ArgumentParser(description="Star Conquest")
     ap.add_argument("--seed", type=int, default=None, help="map seed (random if omitted)")
     ap.add_argument("--mode", choices=["random", "symmetric"], default="random")
+    ap.add_argument("--layout", choices=mapgen.SYMMETRIC_LAYOUTS, default=mapgen.SYMMETRIC_LAYOUTS[0],
+                    help="how a symmetric map's sectors are joined (ignored on a random map)")
     ap.add_argument("--players", type=int, default=config.DEFAULT_PLAYERS)
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")

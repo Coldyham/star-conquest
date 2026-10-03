@@ -15,13 +15,16 @@ edges**. One ship type. Take every system to win.
   board, then all orders execute together — no turn-order advantage.
 - **Maps** are procedurally generated, either **random** (planar, evenly spread,
   peripheral starts so no seat is boxed in) or **symmetric** (rotationally
-  identical sectors for a perfectly fair start).
+  identical sectors for a perfectly fair start), whose sectors meet through a
+  shared **hub**, around a **ring** of borders, both (**wheel**), or through a
+  **core** of prizes each shared by two neighbours.
 
 ## Run it
 
 ```sh
 uv run python main.py                          # opens the setup menu
 uv run python main.py --players 4 --mode symmetric   # CLI args pre-fill the menu
+uv run python main.py --mode symmetric --layout ring # ...sectors joined by borders, no hub
 uv run python main.py --seed 42 --nodes 24     # pre-fill a reproducible map
 uv run python main.py --no-menu --autoplay     # skip the menu; AI plays every seat
 ```

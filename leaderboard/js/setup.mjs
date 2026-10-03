@@ -29,6 +29,7 @@ const KNOB_LABELS = {
   combat_jitter: "Combat jitter",
   defender_advantage: "Def adv",
   neutral_produces: "Neutral prod",
+  layout: "Layout",
 };
 
 // The two fog ranges read as one entry, "Fog": the Basic tab's checkbox is a

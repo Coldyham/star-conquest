@@ -290,8 +290,9 @@ def play(
     strategies: list[str] | None = None,
     bot_timeout: float = 0.0,
     film: bool = False,
+    layout: str = mapgen.SYMMETRIC_LAYOUTS[0],
 ) -> SimResult:
-    state = mapgen.generate(seed, mode, nodes, players)
+    state = mapgen.generate(seed, mode, nodes, players, layout)
     # AI-vs-AI: drive every slot with the AI, including the human's seat.
     for p in state.players.values():
         p.is_human = False
@@ -495,23 +496,26 @@ def positions(log: replay.GameLog, every: int, skip_last: int = 0) -> list[int]:
 
 
 def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0,
-               film=False) -> list[SimResult]:
+               film=False, layout=mapgen.SYMMETRIC_LAYOUTS[0]) -> list[SimResult]:
     return [play(s, mode, nodes, players, max_turns, strategies=strategies,
-                 bot_timeout=bot_timeout, film=film) for s in seeds]
+                 bot_timeout=bot_timeout, film=film, layout=layout) for s in seeds]
 
 
-def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0) -> list[SwapGame]:
+def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0,
+             layout=mapgen.SYMMETRIC_LAYOUTS[0]) -> list[SwapGame]:
     """Play every rotation of the roster on each seed (same map, seats rotated)."""
     n = len(strategies)
     games: list[SwapGame] = []
     for seed in seeds:
         for assignment in _rotations(strategies):
-            r = play(seed, mode, nodes, n, max_turns, strategies=assignment, bot_timeout=bot_timeout)
+            r = play(seed, mode, nodes, n, max_turns, strategies=assignment, bot_timeout=bot_timeout,
+                     layout=layout)
             games.append(SwapGame(r, assignment))
     return games
 
 
-def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0) -> list[SwapGame]:
+def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0,
+               layout=mapgen.SYMMETRIC_LAYOUTS[0]) -> list[SwapGame]:
     """Pairwise round-robin: every unordered pair, both seatings, on every seed.
 
     Two players per game, so a win means "beat *that* bot" rather than "survived
@@ -523,7 +527,8 @@ def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0) -> list[S
     for seed in seeds:
         for a, b in itertools.combinations(roster, 2):
             for assignment in ([a, b], [b, a]):
-                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout)
+                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout,
+                         layout=layout)
                 games.append(SwapGame(r, assignment))
     return games
 
@@ -678,6 +683,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Headless AI-vs-AI simulation harness")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--mode", choices=["random", "symmetric"], default="random")
+    ap.add_argument("--layout", choices=mapgen.SYMMETRIC_LAYOUTS, default=mapgen.SYMMETRIC_LAYOUTS[0],
+                    help="how a symmetric map's sectors are joined (ignored on a random map)")
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--players", type=int, default=None, help=f"seat count (defaults to the number of --ai names, else {config.DEFAULT_PLAYERS})")
     ap.add_argument(
@@ -722,10 +729,12 @@ def main() -> None:
             ap.error(f"{flag} sets the seat count itself; omit --players (it is forced to {seats})")
         seeds = range(args.seed, args.seed + args.trials)
         if args.ladder:
-            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
+            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,
+                               args.layout)
             _summarise_ladder(games, strategies, args.trials)
         else:
-            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
+            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,
+                             args.layout)
             _summarise_swap(games, strategies, args.trials)
         return
 
@@ -738,10 +747,12 @@ def main() -> None:
 
     if args.trials > 1:
         seeds = range(args.seed, args.seed + args.trials)
-        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout, args.film)
+        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout, args.film,
+                             args.layout)
         _summarise(results, strategies)
     else:
-        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout, args.film)
+        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout, args.film,
+                 args.layout)
         if r.winner == 0:
             winner = "draw"
         elif r.winner is None:
