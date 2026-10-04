@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from starconquest import config, engine, matchnames, paths
+from starconquest import ai, config, engine, matchnames, paths
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_MJS = ROOT / "leaderboard" / "js" / "config.mjs"
@@ -46,6 +46,14 @@ def test_match_names_use_the_same_words_on_both_sides():
     assert _js_string_list(js, "NOUNS") == list(matchnames.NOUNS)
     assert len(set(matchnames.ADJECTIVES)) == len(matchnames.ADJECTIVES) == 256
     assert len(set(matchnames.NOUNS)) == len(matchnames.NOUNS) == 256
+
+
+def test_the_board_ranks_bots_in_the_games_ladder_order():
+    """`standings.botOrder` lists a map's losing bot replays in ladder order and
+    sorts any name it doesn't know alphabetically after the rest, so a bot added
+    to the game's `LADDER_ORDER` but not the board's sinks to the bottom there."""
+    js = ROOT / "leaderboard" / "js" / "standings.mjs"
+    assert _js_string_list(js, "LADDER_ORDER") == ai.LADDER_ORDER
 
 
 def test_seat_names_and_colours_match_the_game():

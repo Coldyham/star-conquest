@@ -158,7 +158,7 @@ export function tally(rows, roster) {
  * the Python repo, mirrored here since JS can't import it), strongest to
  * weakest. Keep in sync with `starconquest/ai.py`'s `LADDER_ORDER`.
  */
-export const LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
+export const LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
 
 /** Ladder order first, any bot missing from it (a fresh drop-in) alphabetical after. */
 function byLadderOrder(a, b) {
