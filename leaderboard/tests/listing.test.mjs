@@ -5,7 +5,7 @@ import test from "node:test";
 
 import {
   cleanQuery, filtersFromParams, isFiltered, listQuery, MAX_EXCLUDED, pickRandom, RANDOM_POOL,
-  randomPoolQuery, searchClause, urlFor,
+  randomPoolQuery, searchClause, SORTS, urlFor,
 } from "../js/listing.mjs";
 
 const parse = (qs) => filtersFromParams(new URLSearchParams(qs));
@@ -17,13 +17,13 @@ test("the default view is the plain index, and round-trips to itself", () => {
 });
 
 test("every filter round-trips through the URL", () => {
-  const qs = "bot=marshal&group=config&q=blitz&sort=maps&players=3&mode=symmetric&fog=on" +
+  const qs = "bot=marshal&group=config&q=blitz&sort=maps&dir=asc&players=3&mode=symmetric&fog=on" +
     "&contested=1&botlead=1&unplayed=1&campaign=1";
   assert.equal(urlFor(parse(qs)), `index.html?${qs}`);
 });
 
 test("unknown values are dropped rather than sent to the database", () => {
-  const filters = parse("players=9&mode=hex&fog=maybe&sort=bogus&contested=yes");
+  const filters = parse("players=9&mode=hex&fog=maybe&sort=bogus&dir=up&contested=yes");
   assert.equal(urlFor(filters), "index.html");
 });
 
@@ -35,7 +35,7 @@ test("a sort that belongs to the other view falls back to recent", () => {
 });
 
 test("a sort or the grouping alone is not a filter", () => {
-  assert.equal(isFiltered(parse("sort=scores&group=config")), false);
+  assert.equal(isFiltered(parse("sort=scores&dir=asc&group=config")), false);
   assert.equal(isFiltered(parse("fog=off")), true);
 });
 
@@ -58,7 +58,7 @@ test("the grouped view keeps the filters a config has and drops the per-map ones
   for (const absent of ["contenders", "bot_leads", "game_key=not", "score_count=gt"]) {
     assert.ok(!query.includes(absent), absent);
   }
-  assert.ok(query.endsWith("&order=game_count.desc,last_activity.desc.nullslast,config_key"));
+  assert.ok(query.endsWith("&order=game_count.desc.nullslast,last_activity.desc.nullslast,config_key"));
 });
 
 test("unplayed excludes the player's maps by key, capped, and is inert with none", () => {
@@ -71,12 +71,38 @@ test("unplayed excludes the player's maps by key, capped, and is inert with none
 });
 
 test("every order ends on the view's own key, so paging never repeats a row", () => {
-  for (const sort of ["recent", "scores", "players", "new"]) {
-    assert.ok(listQuery(parse(`sort=${sort}`)).query.endsWith(",game_key"), sort);
+  for (const dir of ["", "&dir=asc", "&dir=desc"]) {
+    for (const { value } of SORTS.game) {
+      assert.ok(listQuery(parse(`sort=${value}${dir}`)).query.endsWith(",game_key"), value);
+    }
+    for (const { value } of SORTS.config) {
+      assert.ok(listQuery(parse(`group=config&sort=${value}${dir}`)).query.endsWith(",config_key"), value);
+    }
   }
-  for (const sort of ["recent", "scores", "maps"]) {
-    assert.ok(listQuery(parse(`group=config&sort=${sort}`)).query.endsWith(",config_key"), sort);
-  }
+});
+
+test("systems and best turns sort on their own columns, turns fewest first", () => {
+  const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
+  assert.equal(order("sort=systems"), "nodes.desc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("sort=turns"), "best_turns.asc.nullslast,last_activity.desc.nullslast,game_key");
+  // The grouped view has no single best, so it sorts on the average of each map's.
+  assert.equal(order("group=config&sort=turns"),
+    "avg_best_turns.asc.nullslast,last_activity.desc.nullslast,config_key");
+  assert.equal(order("group=config&sort=systems"),
+    "nodes.desc.nullslast,last_activity.desc.nullslast,config_key");
+});
+
+test("dir flips only the sorted column, and its default stays out of the URL", () => {
+  const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
+  assert.equal(order("dir=asc"), "last_activity.asc.nullslast,game_key");
+  assert.equal(order("sort=turns&dir=desc"), "best_turns.desc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("sort=scores&dir=asc"), "score_count.asc.nullslast,last_activity.desc.nullslast,game_key");
+  // Asking for the sort's own direction is the plain link.
+  assert.equal(urlFor(parse("sort=turns&dir=asc")), "index.html?sort=turns");
+  assert.equal(urlFor(parse("dir=desc")), "index.html");
+  assert.equal(urlFor(parse("sort=turns&dir=desc")), "index.html?sort=turns&dir=desc");
+  // Switching view to one without the sort falls back to recent, the way it reads.
+  assert.equal(urlFor(parse("sort=maps&dir=asc")), "index.html");
 });
 
 test("a search loses PostgREST's own syntax but keeps letters in any script", () => {
@@ -107,7 +133,7 @@ test("campaign narrows to this week's nodes, and to nothing in a week with none"
 });
 
 test("a random setup draws from the grouped view's configs, hand-drawn maps excluded", () => {
-  const query = randomPoolQuery(parse("group=config&fog=on&players=2&sort=maps&contested=1"));
+  const query = randomPoolQuery(parse("group=config&fog=on&players=2&sort=maps&dir=asc&contested=1"));
   assert.ok(query.startsWith("config_summary?select=config_key,settings_json&"));
   for (const part of ["&fog=is.true", "&players=eq.2", "&settings_json->custom_map=is.null", `&limit=${RANDOM_POOL}`]) {
     assert.ok(query.includes(part), part);
