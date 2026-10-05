@@ -335,6 +335,7 @@ h1::after {
  * result, it doesn't filter anything. */
 .badge.bot-lead { border-color: var(--cyan); color: var(--cyan); cursor: help; }
 .badge.bot-lead:hover { background: #08232a; }
+.badge.bot-lead.tied { border-style: dashed; }
 
 /* This map's replays are still embargoed (games.embargo_until) — gold for
  * "wait", the same tone .play already uses for the door back into the game.

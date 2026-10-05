@@ -26,10 +26,11 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
 `tests/listing.test.mjs`): search over a setup's name, its tags, the leader's name or
-a seed; sort by recent activity, most scores, most players or newest map (most maps,
-grouped); filter by player count, map mode and fog, and — per map only — to
+a seed; sort by recent activity, scores, players, systems, best turns or when the map
+was added (maps, and the average of each map's best turns, grouped), either way round
+(`?dir=`, left out of the link when it's the sort's own direction); filter by player count, map mode and fog, and — per map only — to
 **contested** maps (two or more players with a counted score, exactly the maps a
-crown is held on), maps a **bot leads**, this week's **campaign** nodes, and maps **unplayed by me** (the remembered
+crown is held on), maps a **bot** is **unbeaten** on (leading or tied), this week's **campaign** nodes, and maps **unplayed by me** (the remembered
 name's own maps, excluded by key). `game_summary`'s `contenders`, `bot_leads` and
 `fog` columns exist for these, since PostgREST can filter on a column but not on a
 comparison between two; `tests/test_board_filters_sql.py` checks them. Fog is never
@@ -286,9 +287,9 @@ lasting 600 turns is not a better result than dying on turn 40. `js/standings.mj
 (`botOrder`, `bestBot`, `humanVsBots`) holds that logic, and
 `tests/standings.test.mjs` pins it.
 
-The main list carries the same verdict as a glance-able "Bot leads" badge on any
-map's card, rather than making a visitor open the map to find out nobody has
-beaten it yet. `game_summary`'s `bot_turns`/`bot_lost`/`bot_name` (schema.sql, a
+The main list carries the same verdict as a glance-able badge on any map's card —
+"Bot leads", or "Bot tied" when the board's best exactly matches it — rather than
+making a visitor open the map to find out nobody has beaten it yet. `game_summary`'s `bot_turns`/`bot_lost`/`bot_name` (schema.sql, a
 lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.

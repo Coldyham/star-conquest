@@ -85,3 +85,10 @@ def test_fog_is_on_when_either_range_is_stored(board):
         "duel": "f", "fog": "t", "pair": "f", "scout": "t", "solo": "f"}
     configs = _psql("select fog::text from config_summary order by fog", board)
     assert configs.splitlines() == ["false", "true", "true"]
+
+
+def test_a_config_sorts_on_its_maps_average_best(board):
+    """config_summary.avg_best_turns averages each map's own best (solo 28,
+    pair 20, duel 25), not every score posted on the setup."""
+    rows = _psql("select avg_best_turns from config_summary order by avg_best_turns", board)
+    assert rows.splitlines() == ["24.3", "30.0", "30.0"]
