@@ -27,6 +27,13 @@ moves.
     candidate pays. Defence, evacuation, strikes and logistics are not written
     anywhere; they are what the margin chooses.
 
+The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Opening*) picks how the seat
+plays until it first borders a rival. *Planned*, the default, treats the
+land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival,
+and scores a dozen expansion plans by the ships and income they would hold when a
+rival could first strike. It plays the first turn of the best plan, and the
+ledger takes over at contact. *Greedy* is the ledger from the first turn.
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
 Measurements behind the constants: docs/design/actuary.md.
@@ -35,6 +42,7 @@ Measurements behind the constants: docs/design/actuary.md.
 from __future__ import annotations
 
 import heapq
+import itertools
 import math
 
 from starconquest import combat, config
@@ -62,11 +70,41 @@ COST_REF_NODES = 40
 COST_DECIDE_MS = 5.0
 COST_NODES_EXP = 0.55
 
+# --- the opening ------------------------------------------------------------ #
+GREEDY, PLANNED = 0, 1          # the Opening knob's stops; anything unreadable is PLANNED
+OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
+OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
+OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
+OPENING_ORDERS = ("value", "near", "cheap")
+OPENING_SENDS = ("lean", "mass")
+OPENING_SKIPS = (True, False)
+
+# What the AI tab's generic aux slider is called when this bot holds the seat (read
+# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Planned.
+AUX_LABEL = "Opening"
+AUX_RANGE = (GREEDY, PLANNED, 1)
+AUX_INT = True
+AUX_NAMES = ("Greedy", "Planned")
+
 
 def decide(state, pid):
     if not any(s.owner_id == pid for s in state.systems.values()):
         return []
+    if _opening_of(state.players[pid]) == PLANNED:
+        orders = opening(state, pid)
+        if orders is not None:
+            return orders
     return _Ledger(state, pid).plan()
+
+
+def _opening_of(player) -> int:
+    """This seat's Opening stop. Anything at or past Planned is Planned, and
+    anything unreadable is the default, so a hand-edited token cannot take the
+    bot down."""
+    try:
+        return PLANNED if float(player.ai_params.aux) >= PLANNED else GREEDY
+    except Exception:                     # noqa: BLE001
+        return PLANNED
 
 
 def decide_ms(settings, seat) -> float:
@@ -518,3 +556,226 @@ def _with(arrivals, t, owner, ships):
     slot[owner] = slot.get(owner, 0) + ships
     out[t] = slot
     return out
+
+
+# --------------------------------------------------------------------------- #
+# The planned opening (Opening: Planned)
+# --------------------------------------------------------------------------- #
+def opening(state, pid):
+    """This turn's orders under the planned opening while the seat borders no
+    rival, else ``None`` (and the ledger plays). Measurements behind it:
+    "The planned opening" in docs/design/actuary.md."""
+    plan = _Opening(state, pid)
+    if plan.over():
+        return None
+    return plan.orders()
+
+
+class _Opening:
+    """The land-grab as a one-player puzzle. The region is the neutrals strictly
+    nearer us than any rival, in lane turns. The clock is the earliest turn a
+    rival's ships could land on our side, times `OPENING_CLOCK_SCALE`. Each
+    policy is scored by ships held at the clock plus the income rate there,
+    weighted by `OPENING_INCOME_CLOCKS` clocks of it."""
+
+    def __init__(self, state, pid):
+        self.state, self.pid = state, pid
+        sysmap = state.systems
+        self.rivals = {p.id for p in state.players.values()
+                       if not p.is_neutral and p.id != pid and p.alive}
+        self.owned = sorted(sid for sid, s in sysmap.items() if s.owner_id == pid)
+        self.attack = combat.edge_attacking(TUNED_SWING)
+        self.advantage = math.sqrt(self.attack / combat.edge_defending(TUNED_SWING))
+        self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
+                       for a in sysmap}
+        self.ours = self._dijkstra({sid: 0 for sid in self.owned})
+        self.theirs = self._dijkstra(
+            {sid: 0 for sid, s in sysmap.items() if s.owner_id in self.rivals})
+        self.region = {sid for sid, s in sysmap.items() if s.owner_id == 0
+                       and self.ours.get(sid, math.inf) < self.theirs.get(sid, math.inf)}
+        self.clock = self._clock()
+        self.weight = OPENING_INCOME_CLOCKS * self.clock
+
+    def _dijkstra(self, starts):
+        dist = dict(starts)
+        heap = [(t, sid) for sid, t in starts.items()]
+        heapq.heapify(heap)
+        while heap:
+            t, sid = heapq.heappop(heap)
+            if t > dist[sid]:
+                continue
+            for nbr, turns in self.travel[sid].items():
+                if t + turns < dist.get(nbr, math.inf):
+                    dist[nbr] = t + turns
+                    heapq.heappush(heap, (t + turns, nbr))
+        return dist
+
+    def _clock(self):
+        """The earliest turn a rival's ships could land on a system on our side."""
+        best = min((max(self.ours.get(a, math.inf), self.theirs.get(a, math.inf))
+                    for a in set(self.owned) | self.region), default=math.inf)
+        if math.isinf(best):
+            return OPENING_CLOCK_MAX
+        return max(1, min(OPENING_CLOCK_MAX, round(OPENING_CLOCK_SCALE * best)))
+
+    def over(self):
+        """Bordering a live rival, a rival fleet heading for us, or nothing left
+        in the region."""
+        sysmap = self.state.systems
+        for sid in self.owned:
+            if any(sysmap[n].owner_id in self.rivals for n in self.travel[sid]):
+                return True
+        if any(f.owner_id in self.rivals and f.dest_id in self.owned for f in self.state.fleets):
+            return True
+        return not self.region
+
+    def orders(self):
+        best, best_score = [], -math.inf
+        for policy in itertools.product(OPENING_ORDERS, OPENING_SENDS, OPENING_SKIPS):
+            sim = _OpeningSim(self, policy)
+            score = sim.run()
+            if score > best_score:
+                best, best_score = sim.first, score
+        return best
+
+    def need(self, garrison):
+        """Ships that take ``garrison`` at the worst roll; at least one more."""
+        return max(math.floor(garrison) + 1, math.floor(self.attack * garrison) + 1)
+
+    def survivors(self, ships, garrison):
+        enemy = garrison * self.advantage
+        return math.sqrt(max(0.0, ships * ships - enemy * enemy))
+
+
+class _OpeningSim:
+    """Our side of the map played forward under one policy, nobody else moving.
+    Ships and production are continuous; captures are at the nominal roll, while
+    a launch is sized for the worst one.
+
+    A policy is (which neutral first: most valuable, nearest or cheapest; send just
+    enough or everything; skip a capture that does not pay, or not). A system with
+    nothing to take sends its ships one hop towards the nearest of ours that has."""
+
+    def __init__(self, plan, policy):
+        self.plan = plan
+        self.order, self.send, self.skip = policy
+        sysmap = plan.state.systems
+        self.ships = {sid: float(sysmap[sid].ships) for sid in plan.owned}
+        self.garrison = {sid: float(sysmap[sid].ships) for sid in plan.region}
+        self.income = {sid: (1.0 / s.production if s.production > 0 else 0.0)
+                       for sid, s in sysmap.items()}
+        self.fleets = [(f.turns_remaining, f.dest_id, float(f.ships))
+                       for f in plan.state.fleets if f.owner_id == plan.pid]
+        self.first: list[Order] = []
+        self.t = 0
+        self._feed_to = None
+
+    def run(self):
+        while self.t < self.plan.clock:
+            self._decide()
+            self._advance()
+        held = sum(self.ships.values()) + sum(s for _, _, s in self.fleets)
+        rate = sum(self.income[sid] for sid in self.ships)
+        return held + self.plan.weight * rate
+
+    def _launch(self, src, dst, ships):
+        if ships <= 0:
+            return
+        self.ships[src] -= ships
+        self.fleets.append((self.plan.travel[src][dst], dst, float(ships)))
+        if self.t == 0:
+            self.first.append(Order(self.plan.pid, src, dst, int(ships)))
+
+    def _pending(self, dst):
+        return sum(s for _, d, s in self.fleets if d == dst)
+
+    def _decide(self):
+        travel = self.plan.travel
+        feed = self._feed()
+        for src in sorted(self.ships):
+            avail = math.floor(self.ships[src])
+            targets = [n for n in travel[src] if n in self.garrison]
+            if not targets:
+                nxt = feed.get(src)
+                if nxt is not None and avail > 0:
+                    self._launch(src, nxt, avail)
+                continue
+            for dst in self._rank(src, targets):
+                if avail <= 0:
+                    break
+                need = self.plan.need(self.garrison[dst]) - self._pending(dst)
+                if need <= 0:
+                    continue
+                if need > avail:
+                    if self.send == "mass":
+                        break
+                    continue
+                if self.skip and self._worth(src, dst, need) <= 0:
+                    continue
+                ships = avail if self.send == "mass" else math.ceil(need)
+                self._launch(src, dst, ships)
+                avail -= ships
+
+    def _worth(self, src, dst, ships):
+        land = self.t + self.plan.travel[src][dst]
+        lost = ships - self.plan.survivors(ships, self.garrison[dst])
+        income = self.income[dst]
+        return income * max(0, self.plan.clock - land) + self.plan.weight * income - lost
+
+    def _rank(self, src, targets):
+        travel = self.plan.travel[src]
+        if self.order == "near":
+            key = lambda n: (travel[n], -self.income[n], n)
+        elif self.order == "cheap":
+            key = lambda n: (self.garrison[n], travel[n], n)
+        else:
+            key = lambda n: (-self._worth(src, n, self.plan.need(self.garrison[n])), n)
+        return sorted(targets, key=key)
+
+    def _feed(self):
+        """For each of our systems with nothing to take, its next hop towards the
+        nearest of ours that has. Rebuilt only when what we own changes."""
+        key = (frozenset(self.ships), frozenset(self.garrison))
+        if self._feed_to is not None and self._feed_to[0] == key:
+            return self._feed_to[1]
+        travel = self.plan.travel
+        front = [sid for sid in self.ships if any(n in self.garrison for n in travel[sid])]
+        dist = {sid: 0 for sid in front}
+        hop: dict[int, int] = {}
+        heap = [(0, sid) for sid in sorted(front)]
+        heapq.heapify(heap)
+        while heap:
+            t, sid = heapq.heappop(heap)
+            if t > dist[sid]:
+                continue
+            for nbr, turns in travel[sid].items():
+                if nbr in self.ships and t + turns < dist.get(nbr, math.inf):
+                    dist[nbr] = t + turns
+                    hop[nbr] = sid
+                    heapq.heappush(heap, (t + turns, nbr))
+        self._feed_to = (key, hop)
+        return hop
+
+    def _advance(self):
+        for sid in self.ships:
+            self.ships[sid] += self.income[sid]
+        landed, flying = {}, []
+        for turns, dst, ships in self.fleets:
+            if turns <= 1:
+                landed[dst] = landed.get(dst, 0.0) + ships
+            else:
+                flying.append((turns - 1, dst, ships))
+        self.fleets = flying
+        for dst, ships in sorted(landed.items()):
+            if dst in self.ships:
+                self.ships[dst] += ships
+            elif dst in self.garrison:
+                left = self.plan.survivors(ships, self.garrison[dst])
+                if left > 0:
+                    del self.garrison[dst]
+                    self.ships[dst] = left
+                else:
+                    held = self.garrison[dst] * self.plan.advantage
+                    self.garrison[dst] = math.sqrt(max(0.0, held * held - ships * ships)) \
+                        / self.plan.advantage
+        self.t += 1

@@ -60,6 +60,9 @@ the section holding the evidence.
 - **Measure candidate shares on contested decisions only.** During the land-grab
   every candidate ties, so the default wins by construction. See
   [`knower.md`](knower.md), "Borrowed candidates (`EXTERNAL_CANDIDATES`)".
+- **To ask whether a bot plays differently, measure its distance from every
+  bot, by phase.** A candidate share compares it with knower's default alone,
+  and only on contested positions. See "How differently two bots play" below.
 - **Time a bot on a quiet machine and record the load average.** A loaded
   machine read every cell ~1.9x high. The browser build has never been timed.
   See [`knower.md`](knower.md), "Cost per decide, and where the search guard
@@ -79,6 +82,60 @@ the section holding the evidence.
   production-before-combat…".
 - **Bot-vs-bot play only visits positions bots create.** Real games add
   positions people built. See "Positions from real games" below.
+
+## How differently two bots play (`tools/bot_distance.py`)
+
+The first check that actuary plays differently was to make it one of knower's
+borrowed candidates and count how often the search picked it
+([`actuary.md`](actuary.md), "As one of knower's borrowed candidates"). That
+answers a narrower question than it seems to. It compares the new bot with
+knower's default only, so a bot could differ from knower and still copy marshal.
+Any one-ship difference in a turn's orders counts as different. A candidate
+listed last loses every tie. The share mixes "is it different" with "does
+knower's rollout score it well", and the rollout runs an oracle rival as if it
+were blind. It also measures nothing during the opening, where every candidate
+ties.
+
+`tools/bot_distance.py` asks every bot for its orders on the same positions,
+seat by seat. The positions come from roster self-play by default, or from
+recorded games with `--local`/`--supabase`. No game is played on them, and three
+measures come back:
+
+- **distance**: where each garrison ship goes this turn (held at home counts as
+  a move), as a share of the seat's garrison, then half the L1 gap between two
+  bots. 0 means the same orders to the ship, 1 means no ship goes the same way.
+- **kappa**: each owned system's biggest send, classed as hold, own, neutral or
+  rival. Agreement between two bots, corrected for chance (Cohen's kappa).
+- **fingerprint**: share of the garrison launched, where it went, orders per
+  position, how often an order empties its source, and decide cost.
+
+Positions are split into **contested** (the seat holds a system next to a live
+rival's) and **opening**, and each bot's nearest neighbour is reported in both.
+Bots run at the leaderboard profile (`REPLAY_AUX`, guards lifted). `--null` asks
+each bot twice; every current bot is at exactly 0 from itself.
+
+First reading, 21 two-seat self-play games, 18 nodes, 6 ly/turn, every 5 turns
+(612 contested and 316 opening positions; knower at Search):
+
+    nearest neighbour      contested        opening
+      knower             marshal  0.31   marshal  0.17
+      actuary            marshal  0.37   marshal  0.19
+      marshal            thinker  0.23   knower   0.17
+      thinker            claudebot 0.11  claudebot 0.03
+      claudebot          thinker  0.11   thinker  0.03
+      heuristic          claudebot 0.20  claudebot 0.18
+      rusherplus         knower   0.43   claudebot 0.25
+
+    kappa against actuary, contested: knower 0.18, marshal 0.26,
+    thinker 0.24, claudebot 0.20, heuristic 0.10, rusherplus 0.21
+
+Contested, actuary agrees with no other bot on a system's move kind much beyond
+chance. That confirms the candidate-share reading with every bot rather than
+one. thinker and claudebot are close to the same bot, and in the opening they
+are within 0.03. In the opening, knower, marshal and actuary are within 0.17-0.19
+of each other: the roster's land-grab is one land-grab. actuary's planned
+opening ([`actuary.md`](actuary.md), "The planned opening") was built for that
+gap.
 
 ## Lane length across the parameter space
 
