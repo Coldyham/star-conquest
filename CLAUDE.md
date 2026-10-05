@@ -359,7 +359,8 @@ already resolve simultaneously. The rationale for each rule is in
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
-  `tools/pwa/root.html` routes the root. Endpoints are built at call time from
+  `tools/pwa/root.html` routes the root. It is also the installed app's
+  `start_url`, reopening the half last open (`sc_app_last`). Endpoints are built at call time from
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. The sensitive-variable policy must stay on
   "Require approval". `legacy-board/` proxies `/api/`. `tools/pwa/sw.js` never

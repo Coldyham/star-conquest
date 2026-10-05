@@ -385,9 +385,18 @@ than it is.
   from an explicit allow-list. The game itself is at `/game/`; the root is
   `tools/pwa/root.html`, a router that opens the board for a visitor and
   forwards a fragment (every challenge, replay and seat link the game ever
-  shared is the root plus one) or an installed app's launch to `/game/`. The
-  manifest, icons and service worker stay at the root, so old installs keep
-  their scope and manifest `id`. The functions are bundled from
+  shared is the root plus one) to `/game/`. The manifest, icons and service
+  worker stay at the root, so old installs keep their scope and manifest `id`.
+  The app is installable from either half: every board page links the
+  manifest, and `js/nav.mjs` registers the worker. Its `start_url` is the
+  router, which reopens whichever half the installed app was last on
+  (`sc_app_last`, written only in standalone/fullscreen display, by `nav.mjs`
+  and by the game page's `tools/pwa/inject.py` head), and the game if nothing
+  is recorded. So an install from before this keeps opening the game until it
+  visits the board. A fixed launch target either way would be wrong for
+  someone: the board is a fine front page, but a player who installed to play
+  wants the game. A per-device toggle would be one more control to find, for a
+  choice the last-visited half already makes. The functions are bundled from
   `leaderboard/netlify/functions/` and answer at root `/api/`. On a
   `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
   and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
