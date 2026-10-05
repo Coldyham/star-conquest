@@ -1,6 +1,13 @@
 # convoy design notes
 
-`models/convoy.py` plans the turn as routing over time. Every ship we will have
+**Built, measured, not shipped.** The bot is not in `models/`; its code is in
+git at commit `7153065` (`git show 7153065:models/convoy.py`), and every
+measurement below was made on that code. It played between thinker and marshal
+and was distinct from the roster only in the opening, and its opening did not
+help another bot either, so it was not added to the roster (see "Its opening in
+front of another bot").
+
+convoy plans the turn as routing over time. Every ship we will have
 (garrisons now, hulls our systems will build, our fleets landing on our systems)
 is a supply at a system and a turn. Every objective (a strike, a defence, a
 guard) asks for N ships on one system by one turn. Objectives are committed

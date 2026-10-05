@@ -44,7 +44,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
 | [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed; the planned opening (Opening: Planned) |
-| [`design/convoy.md`](design/convoy.md) | convoy: supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
+| [`design/convoy.md`](design/convoy.md) | convoy (built, measured, not shipped; code at `7153065`): supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
@@ -225,6 +225,7 @@ the measured result was indistinguishable from the baseline.
 - `STRIKE_PAD` 1.5 and 2.0: worse, 2.0 catastrophic. A doomed garrison staying to fight: 38%. *Same section.*
 - Filling short frontier guards from the interior, staging ships at the last system before the target, spending existing ships before future hulls: all null, deleted. *Same section.*
 - Defence at the nominal roll: a lean (54.8%, z ~1.5), not adopted; worth re-running. *Same section.*
+- Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
 - Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
 
 ### The roster ([`design/bots.md`](design/bots.md))
