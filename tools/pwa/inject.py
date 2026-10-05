@@ -24,7 +24,9 @@ from pathlib import Path
 # for both iOS and Android, so we only add what's missing. The <style> overrides
 # use !important so they win over pygbag's base rules and the inline body colour
 # JS sets during boot; the SW registration is what tips the page over the PWA
-# installability bar (and enables offline play).
+# installability bar (and enables offline play). Inside the installed app the
+# page also notes that the game was the last half open (sc_app_last), which the
+# root router reads at the next launch.
 # The page is served at /game/, but the manifest, icons and service worker sit at
 # the site root (see tools/build_web.sh), hence the absolute paths.
 HEAD_BLOCK = """
@@ -62,6 +64,12 @@ HEAD_BLOCK = """
         }
     </style>
     <script>
+        try {
+            if (navigator.standalone === true || matchMedia(
+                    "(display-mode: standalone), (display-mode: fullscreen)").matches) {
+                localStorage.setItem("sc_app_last", "game");
+            }
+        } catch (e) {}
         if ("serviceWorker" in navigator) {
             window.addEventListener("load", function () {
                 navigator.serviceWorker.register("/sw.js").catch(function (e) {
