@@ -22,6 +22,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`account.html`](account.html) | sign in with Google and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
+| [`privacy.html`](privacy.html) | the privacy notice: what the site and Supabase Auth store, why, and how to have it removed. Update it with any change to what is collected, sign-in included |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
