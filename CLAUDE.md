@@ -53,7 +53,7 @@ uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, comput
 uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
 uv run python tools/admin.py matches            # moderation: delete scores/maps/
-                                                # matches, rename, drop tags, reissue
+                                                # matches/campaigns, rename, drop tags, reissue
                                                 # or reopen a seat (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)

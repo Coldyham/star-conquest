@@ -57,6 +57,7 @@ SYMMETRIC_SHARE = 0.2         # a config whose symmetric plays are under this sh
 SYMMETRIC_CHANCE = 0.25       # ...of its random ones may appear symmetric instead
 HOME_OFFSET = 110.0           # world units a home sits outside its edge node
 MYSTERY_MAX_NODES = config.STANDARD_MAX_NODES
+FAMILY_MAX_NODES = config.STANDARD_MAX_NODES   # a config past this is never a node
 SEED_TRIES = 50
 
 
@@ -90,12 +91,16 @@ class Family:
 
 def families(games: list[dict], before: dt.date) -> list[Family]:
     """Every config family with a map registered before ``before``, hand-drawn
-    maps excluded (their seed changes only the star names and the dice)."""
+    maps excluded (their seed changes only the star names and the dice), and so
+    is any config past ``FAMILY_MAX_NODES`` systems: a big map is a long sitting,
+    and one played once as a test would otherwise turn up week after week."""
     cutoff = dt.datetime.combine(before, dt.time(), dt.timezone.utc)
     out: dict[str, Family] = {}
     for row in games:
         setup = row.get("settings_json") or {}
         if setup.get("custom_map"):
+            continue
+        if int(setup.get("nodes", config.DEFAULT_NODES)) > FAMILY_MAX_NODES:
             continue
         seen = dt.datetime.fromisoformat(str(row["first_seen_at"]).replace("Z", "+00:00"))
         if seen >= cutoff:
