@@ -232,22 +232,28 @@ export function leaderCredit(game) {
 }
 
 /**
- * "Bot leads" — the marker a list card carries when nobody has beaten this
- * map's best bot yet. `game.mjs`'s botVerdict spells the same "behind"/"tied"
- * verdict out as a sentence on the map's own page; a list card only has room
- * for a chip, and game_summary's bot_turns/bot_lost/bot_name (schema.sql) carry
- * exactly what's needed to compute it without a second query. Null once a
- * human score beats it, or when no bot has ever taken the map (bot_name null).
+ * "Bot leads" / "Bot tied" — the marker a list card carries when nobody has
+ * beaten this map's best bot yet, worded for whether the board's best trails
+ * it or exactly matches it. `game.mjs`'s botVerdict spells the same
+ * "behind"/"tied" verdict out as a sentence on the map's own page; a list card
+ * only has room for a chip, and game_summary's bot_turns/bot_lost/bot_name
+ * (schema.sql) carry exactly what's needed to compute it without a second
+ * query. Null once a human score beats it, or when no bot has ever taken the
+ * map (bot_name null). Both are what the "Bot unbeaten" filter (`bot_leads`)
+ * lists.
  */
 export function botLeadBadge(game) {
   if (!game.bot_name) return null;
   const bot = { turns: game.bot_turns, lost: game.bot_lost };
   const human = { turns: game.best_turns, lost: game.best_lost };
-  if (compareScores(bot, human) > 0) return null;   // a human score already beats it
+  const order = game.best_turns == null ? -1 : compareScores(bot, human);
+  if (order > 0) return null;   // a human score already beats it
+  const tied = order === 0;
   return el("span", {
-    class: "badge bot-lead",
-    title: `${game.bot_name} — ${game.bot_turns} turns · ${game.bot_lost} lost. No human score beats it yet.`,
-    text: "Bot leads",
+    class: tied ? "badge bot-lead tied" : "badge bot-lead",
+    title: `${game.bot_name} — ${game.bot_turns} turns · ${game.bot_lost} lost. ` +
+      (tied ? "The board's best matches it exactly." : "No human score beats it yet."),
+    text: tied ? "Bot tied" : "Bot leads",
   });
 }
 
