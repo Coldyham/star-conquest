@@ -104,6 +104,14 @@ def read_match(match_id: str) -> pbp.Match:
     return match
 
 
+def rebuilt(match: pbp.Match, what: str):
+    """The board ``match``'s stored log rebuilds to, or a failure saying it can't."""
+    board = pbp.rebuild(match)
+    if board is None:
+        raise Failed(f"rebuilding {what}: the stored log could not be trusted")
+    return board[0]
+
+
 def check(origin: str, seats: int, turns: int) -> int:
     """Play a match out, reporting as it goes. 0 if everything held."""
     # The one override: `pbp.endpoint` resolves per call through here, so aiming
@@ -150,7 +158,7 @@ def check(origin: str, seats: int, turns: int) -> int:
     print("a public read carries no token, hashed or otherwise")
 
     seated = {s: pbp.Seat(match_id, s, t) for s, t in tokens.items()}
-    state, _log = pbp.rebuild(read_match(match_id), ai.decide)
+    state = rebuilt(read_match(match_id), "the opening position")
 
     # --- play it out ------------------------------------------------------ #
     for _ in range(turns):
@@ -192,8 +200,10 @@ def check(origin: str, seats: int, turns: int) -> int:
         # Two clients resolving the same turn is the design's central claim, so
         # it is checked rather than assumed: both compute it, both report, and
         # the second is told it was already done.
-        one, one_log, one_digest = pbp.resolve(match, ai.decide)
-        _, _, two_digest = pbp.resolve(match, ai.decide)
+        first, second = pbp.resolve(match, ai.decide), pbp.resolve(match, ai.decide)
+        if first is None or second is None:
+            raise Failed(f"turn {match.turn}: the stored log could not be trusted")
+        (one, one_log, one_digest), (_, _, two_digest) = first, second
         if one_digest != two_digest:
             raise Failed(f"turn {match.turn}: two clients resolved the same "
                          f"orders to different boards ({one_digest} vs {two_digest})")
@@ -213,7 +223,7 @@ def check(origin: str, seats: int, turns: int) -> int:
                          f"on turn {after.turn}")
         # A client that was never here rebuilds the same board from stored rows
         # alone — the property the whole thin server rests on.
-        state, _log = pbp.rebuild(after, ai.decide)
+        state = rebuilt(after, f"turn {after.turn}")
         if replay.digest_hex(state) != one_digest:
             raise Failed(f"turn {match.turn}: a fresh rebuild from the stored "
                          f"orders disagrees with the board that was reported")
@@ -249,7 +259,7 @@ def _orders_for(state, seat: int) -> list:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").partition("\n")[0])
     ap.add_argument("--origin", required=True,
                     help="the game site whose /api/ to check, e.g. "
                          "https://deploy-preview-60--star-conquest.netlify.app")

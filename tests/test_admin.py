@@ -164,3 +164,25 @@ def test_deleting_a_score_that_does_not_exist_is_refused():
     api = FakeApi([("scores", "", [{"id": 1, "game_key": "abc", "turns": 9}])])
     with pytest.raises(admin.Refused, match="2"):
         admin.plan_delete_score(api, [1, 2])
+
+
+def test_delete_campaign_keeps_the_graph_on_the_audit_row_and_drops_only_the_week():
+    row = {"week_start": "2026-10-05", "graph": {"nodes": [{"id": 0}, {"id": 1}]}}
+    api = FakeApi([("campaigns", "week_start=eq.2026-10-05", [row]),
+                   ("campaign_games", "", [{"node_id": 1, "game_key": "g"}])])
+    plan = admin.plan_delete_campaign(api, "2026-10-05")
+    assert plan.detail["campaign"] == row
+    admin.apply(api, plan, yes=True, reason="120-system nodes")
+    assert api.writes[0][:2] == ("insert", "admin_actions")
+    assert api.writes[1:] == [("delete", "campaigns", "week_start=eq.2026-10-05")]
+
+
+@pytest.mark.parametrize("week", ["2026-10-06", "last week"])
+def test_delete_campaign_wants_a_monday(week):
+    with pytest.raises(admin.Refused):
+        admin.plan_delete_campaign(FakeApi([]), week)
+
+
+def test_delete_campaign_refuses_a_week_that_has_none():
+    with pytest.raises(admin.Refused):
+        admin.plan_delete_campaign(FakeApi([]), "2026-10-05")
