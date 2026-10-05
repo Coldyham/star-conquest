@@ -133,7 +133,9 @@ Contested, actuary agrees with no other bot on a system's move kind much beyond
 chance. That confirms the candidate-share reading with every bot rather than
 one. thinker and claudebot are close to the same bot, and in the opening they
 are within 0.03. In the opening, knower, marshal and actuary are within 0.17-0.19
-of each other: the roster's land-grab is one land-grab.
+of each other: the roster's land-grab is one land-grab. actuary's planned
+opening ([`actuary.md`](actuary.md), "The planned opening") was built for that
+gap.
 
 ## Lane length across the parameter space
 
