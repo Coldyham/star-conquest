@@ -26,10 +26,14 @@ Google account, and only that account may post under it. A person claims an
 already in use is handed over here, since nothing on the site can prove who
 posted under it:
 
-    assign-name NAME EMAIL   give NAME to the account signed in with EMAIL.
+    assign-name NAME EMAIL [--fold OLD...]
+                             give NAME to the account signed in with EMAIL.
                              They must have signed in on the board once, so
                              the account exists. Refused if the account owns
                              another name, or someone else owns this one.
+                             --fold moves each OLD name's scores and tags onto
+                             NAME and deletes OLD, which is then free for
+                             anyone: one person's several names become one.
     release-name NAME        make NAME an ordinary unclaimed name again.
     names [--claimed]        list names and who (by account id) owns them.
 
@@ -360,7 +364,11 @@ def _set_owner(api: Supabase, user_id: int, was: str | None, owner: str | None) 
         raise Refused("the name changed hands while this ran; nothing was changed, run it again")
 
 
-def plan_assign_name(api: AdminApi, name: str, email: str) -> Plan:
+def plan_assign_name(api: AdminApi, name: str, email: str,
+                     fold: list[str] | tuple[str, ...] = ()) -> Plan:
+    """Give ``name`` to the account that signed in as ``email``, folding each of
+    ``fold`` into it first: their scores and tags move onto ``name``, and their
+    rows are deleted, so those names are free for anyone again."""
     name = name.strip()
     if not 1 <= len(name) <= 60:
         raise Refused("a name is 1-60 characters")
@@ -371,29 +379,80 @@ def plan_assign_name(api: AdminApi, name: str, email: str) -> Plan:
     uid = str(account["id"])
     rows = api.select("users", f"select=*&name_key=eq.{q(name_key(name))}&order=id.asc")
     user = rows[0] if rows else None
-    owned = api.select("users", f"select=id,name&owner=eq.{q(uid)}&order=id.asc")
-    if owned and (user is None or int(owned[0]["id"]) != int(user["id"])):
-        raise Refused(f"that account already owns {owned[0]['name']!r}; "
-                      "release-name it first (one name per account)")
-    if user is not None and user.get("owner") == uid:
-        return Plan("assign-name", f"{user['name']} ({user['id']})",
-                    [f"{user['name']!r} already belongs to that account"])
-    if user is not None and user.get("owner"):
+    if user is not None and user.get("owner") and user["owner"] != uid:
         raise Refused(f"{user['name']!r} is claimed by another account; release-name it first")
-    # The audit row names the account by id, never by email.
+
+    folded: list[dict] = []
+    for old in dict.fromkeys(name_key(f) for f in fold):
+        if old == name_key(name):
+            raise Refused(f"{old!r} is the name being kept; it cannot be folded into itself")
+        row = _one(api.select("users", f"select=*&name_key=eq.{q(old)}&order=id.asc"),
+                   f"user {old!r}")
+        if row.get("owner") and row["owner"] != uid:
+            raise Refused(f"{row['name']!r} is claimed by another account; release-name it first")
+        folded.append(row)
+    folded_ids = {int(r["id"]) for r in folded}
+
+    owned = api.select("users", f"select=id,name&owner=eq.{q(uid)}&order=id.asc")
+    for row in owned:
+        if (user is None or int(row["id"]) != int(user["id"])) and int(row["id"]) not in folded_ids:
+            raise Refused(f"that account already owns {row['name']!r}; release-name it, or "
+                          "--fold it into this one (one name per account)")
+
+    summary: list[str] = []
+    steps: list[Callable[[], str | None]] = []
+    moved: dict[str, dict] = {}
+    for row in folded:
+        rid = int(row["id"])
+        scores = api.select("scores", f"select=id&user_id=eq.{rid}&order=id.asc")
+        tags = api.select("config_tags", f"select=id&user_id=eq.{rid}&order=id.asc")
+        moved[str(rid)] = {"scores": [s["id"] for s in scores],
+                           "config_tags": [t["id"] for t in tags]}
+        summary.append(f"fold {row['name']!r} ({len(scores)} score(s), {len(tags)} tag(s)) "
+                       f"into {name if user is None else user['name']!r}; "
+                       f"{row['name']!r} is then free for anyone to use")
+        if row.get("owner") == uid:
+            # The account's old name lets go first: one name per account is a
+            # unique index, and the kept name is about to take its owner.
+            steps.append(lambda r=row: _set_owner(api, r["id"], uid, None))
+
+    def kept_id() -> int:
+        """The kept row's id, read when the steps run (it may be newly made)."""
+        return int(_one(api.select("users", f"select=id&name_key=eq.{q(name_key(name))}"
+                                            "&order=id.asc"), f"user {name!r}")["id"])
+
     if user is None:
-        return Plan(
-            "assign-name", name,
-            [f"create the name {name!r}, owned by that account (nobody has used it yet)"],
-            {"user": None, "owner": uid},
-            [lambda: api.insert("users", [{"name": name, "owner": uid}])])
-    scores = api.select("scores", f"select=id&user_id=eq.{int(user['id'])}&order=id.asc")
-    return Plan(
-        "assign-name", f"{user['name']} ({user['id']})",
-        [f"give {user['name']!r} and its {len(scores)} score(s) to that account; "
-         "from now on only they can post under it"],
-        {"user": user, "owner": uid},
-        [lambda: _set_owner(api, user["id"], None, uid)])
+        summary.insert(0, f"create the name {name!r}, owned by that account "
+                          "(nobody has used it yet)")
+        # Made (and owned) before the folds, so they have a row to move onto.
+        steps.append(lambda: api.insert("users", [{"name": name, "owner": uid}]))
+    elif user.get("owner") == uid:
+        if not folded:
+            return Plan("assign-name", f"{user['name']} ({user['id']})",
+                        [f"{user['name']!r} already belongs to that account"])
+    else:
+        scores = api.select("scores", f"select=id&user_id=eq.{int(user['id'])}&order=id.asc")
+        summary.insert(0, f"give {user['name']!r} and its {len(scores)} score(s) to that "
+                          "account; from now on only they can post under it")
+
+    if folded:
+        ids = ",".join(str(i) for i in sorted(folded_ids))
+        steps += [
+            lambda: api.update("scores", f"user_id=in.({ids})", {"user_id": kept_id()}) and None,
+            lambda: api.update("config_tags", f"user_id=in.({ids})",
+                               {"user_id": kept_id()}) and None,
+            lambda: api.delete("users", f"id=in.({ids})"),
+        ]
+    if user is not None and user.get("owner") != uid:
+        # Last, so a fold that fails part way never leaves the name claimed with
+        # half its old scores still elsewhere.
+        steps.append(lambda: _set_owner(api, user["id"], None, uid))
+
+    # The audit row names the account by id, never by email, and keeps every
+    # folded row and what moved off it, so a fold can be undone by hand.
+    return Plan("assign-name", name if user is None else f"{user['name']} ({user['id']})",
+                summary, {"user": user, "owner": uid, "folded": folded, "moved": moved},
+                steps)
 
 
 def plan_release_name(api: Supabase, name: str) -> Plan:
@@ -526,6 +585,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd = writes("assign-name", "give a name, used or not, to a signed-in account")
     cmd.add_argument("name")
     cmd.add_argument("email", help="the Google account's email, as it signed in")
+    cmd.add_argument("--fold", nargs="+", action="extend", default=[], metavar="OLD",
+                     help="other names of theirs to merge into NAME (then deleted)")
     cmd = writes("release-name", "make a claimed name anyone's to use again")
     cmd.add_argument("name")
     cmd = writes("delete-tag", "remove a tag from every config, or one")
@@ -556,7 +617,7 @@ def plan_for(api: AdminApi, args: argparse.Namespace) -> Plan:
         case "rename-user":
             return plan_rename_user(api, args.name, args.new_name)
         case "assign-name":
-            return plan_assign_name(api, args.name, args.email)
+            return plan_assign_name(api, args.name, args.email, args.fold)
         case "release-name":
             return plan_release_name(api, args.name)
         case "delete-tag":

@@ -361,7 +361,8 @@ already resolve simultaneously. The rationale for each rule is in
   owner may post a score or tag (`schema.sql`'s `sc_may_use_user` on the
   insert policies) or name a pbp seat (`pbp.mjs` `nameAllowed`) under it.
   `claim_name` is the only self-service writer, and only for an unused name. A
-  name already in use goes through `tools/admin.py assign-name`. `users.owner`
+  name already in use goes through `tools/admin.py assign-name` (`--fold`
+  merges a person's other names into it and frees them). `users.owner`
   is never publicly readable: `users` is granted by column, and pages read
   `claimed`. Signing in stays optional. Detail: `docs/design/leaderboard.md`,
   "Claimed names".

@@ -267,3 +267,107 @@ def test_a_rename_carries_the_owner_with_it():
     api = FakeApi([("users", "name_key=eq.ann&", [_named(ANN)])])
     admin.apply(api, admin.plan_rename_user(api, "Ann", "Annabel"), yes=True, reason="")
     assert api.writes[-1] == ("update", "users", "id=eq.7", {"name": "Annabel"})
+
+
+# --------------------------------------------------------------------------- #
+# Folding several used names into the one claimed name
+# --------------------------------------------------------------------------- #
+def _andy(owner=None):
+    return {"id": 8, "name": "andy", "name_key": "andy", "owner": owner, "claimed": bool(owner)}
+
+
+def _fold_api(andy_owner=None, owned=(), kept=True, **kw):
+    answers = [
+        ("users", "name_key=eq.andy&", [_andy(andy_owner)]),
+        ("users", "name_key=eq.aj&", [{"id": 9, "name": "AJ", "name_key": "aj", "owner": None}]),
+        ("users", f"owner=eq.{ANN}", list(owned)),
+        ("scores", "user_id=eq.8", [{"id": 31}, {"id": 32}]),
+        ("scores", "user_id=eq.9", [{"id": 33}]),
+        ("config_tags", "user_id=eq.8", [{"id": 41}]),
+    ]
+    if kept:
+        answers.insert(0, ("users", "name_key=eq.ann&", [_named()]))
+    return AuthFakeApi(answers, {"ann@example.com": ANN}, **kw)
+
+
+def test_folding_moves_every_score_and_tag_then_frees_the_old_names():
+    api = _fold_api()
+    plan = admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy", "AJ", "ANDY"])
+    admin.apply(api, plan, yes=True, reason="one person")
+    audit, *writes = api.writes
+    detail = audit[2][0]["detail"]
+    assert [r["name"] for r in detail["folded"]] == ["andy", "AJ"], "a repeat folds once"
+    assert detail["moved"]["8"] == {"scores": [31, 32], "config_tags": [41]}
+    assert detail["moved"]["9"] == {"scores": [33], "config_tags": []}
+    assert writes == [
+        ("update", "scores", "user_id=in.(8,9)", {"user_id": 7}),
+        ("update", "config_tags", "user_id=in.(8,9)", {"user_id": 7}),
+        ("delete", "users", "id=in.(8,9)"),
+        ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN}),
+    ]
+
+
+def test_an_old_name_the_account_owns_lets_go_before_the_kept_one_is_claimed():
+    api = _fold_api(andy_owner=ANN, owned=[{"id": 8, "name": "andy"}])
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=True, reason="")
+    writes = api.writes[1:]
+    assert writes[0] == ("update", "users", f"id=eq.8&owner=eq.{ANN}", {"owner": None})
+    assert writes[-1] == ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN})
+
+
+def test_the_one_name_refusal_points_at_fold():
+    api = _fold_api(owned=[{"id": 8, "name": "andy"}])
+    with pytest.raises(admin.Refused, match="--fold"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_folding_someone_elses_name_or_a_missing_one_or_itself_is_refused():
+    with pytest.raises(admin.Refused, match="another account"):
+        admin.plan_assign_name(_fold_api(andy_owner=BOB), "Ann", "ann@example.com", ["andy"])
+    with pytest.raises(admin.Refused, match="no such user"):
+        admin.plan_assign_name(_fold_api(), "Ann", "ann@example.com", ["nobody"])
+    with pytest.raises(admin.Refused, match="itself"):
+        admin.plan_assign_name(_fold_api(), "Ann", "ann@example.com", [" ANN "])
+
+
+def test_a_fold_dry_run_writes_nothing_and_counts_what_would_move(capsys):
+    api = _fold_api()
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=False, reason="")
+    assert api.writes == []
+    out = capsys.readouterr().out
+    assert "fold 'andy' (2 score(s), 1 tag(s))" in out and "free for anyone" in out
+
+
+def test_folding_into_a_name_nobody_has_used_makes_it_first():
+    api = _fold_api(kept=False)
+    plan = admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"])
+    # The kept row exists once the insert has run: hand it back from then on.
+    real_insert = api.insert
+
+    def insert(table, rows):
+        real_insert(table, rows)
+        api.answers.insert(0, ("users", "name_key=eq.ann&", [_named(ANN)]))
+
+    api.insert = insert
+    admin.apply(api, plan, yes=True, reason="")
+    writes = api.writes[1:]
+    assert writes[0] == ("insert", "users", [{"name": "Ann", "owner": ANN}])
+    assert writes[1] == ("update", "scores", "user_id=in.(8)", {"user_id": 7})
+    assert writes[-1] == ("delete", "users", "id=in.(8)")
+
+
+def test_folding_into_a_name_already_theirs_still_folds():
+    api = _fold_api()
+    api.answers[0] = ("users", "name_key=eq.ann&", [_named(ANN)])
+    api.answers[3] = ("users", f"owner=eq.{ANN}", [{"id": 7, "name": "Ann"}])
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=True, reason="")
+    assert api.writes[-1] == ("delete", "users", "id=in.(8)")
+
+
+def test_fold_takes_several_names_and_repeats():
+    args = admin.parse_args(["assign-name", "A", "a@x", "--fold", "b", "c", "--fold", "d"])
+    assert args.fold == ["b", "c", "d"]
+    assert admin.parse_args(["assign-name", "A", "a@x"]).fold == []

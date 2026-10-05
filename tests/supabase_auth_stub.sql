@@ -11,3 +11,7 @@ create or replace function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
 grant usage on schema auth to anon, authenticated, service_role;
+
+-- Supabase's service_role skips RLS (the reason the secret key can write what
+-- the public cannot), so updates and deletes from admin.py see every row.
+alter role service_role bypassrls;

@@ -118,3 +118,15 @@ def test_re_pasting_the_schema_keeps_claims_and_stays_private(board):
     _load()
     assert _ok("select my_name()", uid=ANN) == "Ann"
     _refused("select owner from users", "permission denied", role="anon")
+
+
+def test_the_admin_tool_can_fold_one_name_into_another(board):
+    """assign-name --fold, as service_role: scores move onto the kept user and
+    the folded row is deleted. Proves the grants and that no FK holds it."""
+    _ok("insert into users (name) values ('Kept')", role="service_role")
+    _ok("update scores set user_id = (select id from users where name = 'Kept')"
+        " where user_id = (select id from users where name = 'Used')", role="service_role")
+    _ok("delete from users where name = 'Used'", role="service_role")
+    assert _ok("select count(*) from scores s join users u on u.id = s.user_id"
+               " where u.name = 'Kept'", role="anon") == "1"
+    assert _ok("select count(*) from users where name = 'Used'", role="anon") == "0"

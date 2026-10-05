@@ -103,9 +103,9 @@ only for a fight; what is deliberately not animated.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is now covered by claimed names.
 - **Claimed names.** Signing in with Google is optional, and an account owns one name.
-  - Only an unused name can be claimed by the person claiming it. A name already in use is assigned by `admin.py assign-name`.
+  - Only an unused name can be claimed by the person claiming it. A name already in use is assigned by `admin.py assign-name`, and `--fold` merges a person's other names into it (the old names are freed).
   - RLS on `scores`/`config_tags` and `pbp.mjs` enforce the claim. The owner uuid is never public.
-  - *Decided against:* a per-week campaign token; claiming a used name on first sign-in; a pending email for assignment; checking a JWT inside `pbp.mjs`.
+  - *Decided against:* a per-week campaign token; claiming a used name on first sign-in; a pending email for assignment; checking a JWT inside `pbp.mjs`; keeping folded names as aliases.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/pbp.md

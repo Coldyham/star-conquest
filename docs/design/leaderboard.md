@@ -863,6 +863,20 @@ this section gives the reasons.
   owner. It needs the account to exist (the person signs in once), so no
   pending-by-email state is ever stored.
 
+**Folding several names into one.**
+- `assign-name NAME EMAIL --fold OLD…` moves each old name's scores and tags
+  onto the kept row, then deletes the old rows.
+- The folded names are freed rather than kept as aliases. Aliases would need a
+  table and a lookup in `submit.mjs`, `pbp.mjs`, `sc_may_use_user` and the
+  player page.
+- The cost: someone else can then post under a freed name, and an old `?u=`
+  link shows an empty card.
+- Crowns, steals and campaign standing are derived from `counted_scores`, so
+  they recompute on the merged row, and a person's two names stop counting as
+  two players.
+- The audit row keeps the folded rows and which score and tag ids moved, so a
+  fold can be undone by hand.
+
 **Why one name per account.** It is a partial unique index on `users.owner`,
 nothing more. More than one name per account would let a single account
 reserve names it never plays under.
@@ -906,6 +920,8 @@ the same sentence as a backstop.
   and buys only skipping one sign-in.
 - Checking a JWT's signature inside `pbp.mjs`: it would need the project's JWT
   secret in Netlify.
+- Keeping folded names as aliases of the kept one: freed instead (see
+  "Folding several names into one").
 - Making `claimed` gate reading: claims change who may write, and nothing about
   what anyone can see.
 

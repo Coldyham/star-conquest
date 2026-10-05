@@ -550,7 +550,8 @@ seat with it.
   per account; *Release* gives it back.
 - **A name already in use** is handed over by the owner: the person signs in
   once, then `tools/admin.py assign-name NAME EMAIL` gives it to them (see
-  Moderation).
+  Moderation). `--fold OLD…` merges several names one person has used into the
+  one they keep.
 - **Where it is enforced:**
   - `schema.sql`'s insert policies on `scores` and `config_tags`
     (`sc_may_use_user`, against the caller's `auth.uid()`).
@@ -620,7 +621,7 @@ nothing is moderated without a trace and a deletion can be put back by hand.
 | `delete-game KEY` | Removes a map with its scores, tags, bot results and uploaded replays. |
 | `rename-user NAME NEW` | Renames a player everywhere their name shows. A claimed name keeps its owner. |
 | `names [--claimed]` | Lists player names, and the account id that owns each claimed one. |
-| `assign-name NAME EMAIL` | Gives a name, scores and all, to the Google account that signed in as `EMAIL`. That person must have signed in on `account.html` once first. Refused if the account already owns a name, or another account owns this one. |
+| `assign-name NAME EMAIL [--fold OLD…]` | Gives a name, scores and all, to the Google account that signed in as `EMAIL`. That person must have signed in on `account.html` once first. Refused if the account already owns a name, or another account owns this one. `--fold` merges a person's other names into it: each `OLD` name's scores and tags move onto `NAME`, then `OLD` is deleted and is free for anyone to use. |
 | `release-name NAME` | Makes a claimed name anyone's to use again. Its scores stay. |
 | `delete-tag TAG [--config KEY]` | Removes a tag everywhere, or from one config. |
 | `delete-config-name KEY` | Clears a config's name, so the next one posted sticks. |

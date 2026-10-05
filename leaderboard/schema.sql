@@ -1316,7 +1316,10 @@ grant select, insert on public.admin_actions to service_role;
 -- What the moderation commands read and change. Deleting a score cascades to
 -- its config_tags and score_checks rows through their foreign keys; config_tags
 -- is also deleted from directly, when a tag is removed on its own.
-grant select, insert, update on public.users to service_role;
+grant select, insert, update, delete on public.users to service_role;
+-- assign-name --fold moves one person's scores and tags between users rows and
+-- deletes the rows it folded.
+grant update on public.scores, public.config_tags to service_role;
 -- users.owner is also read by netlify/functions/pbp.mjs (is this seat name
 -- claimed, and by whom) and written by admin.py assign-name/release-name.
 grant select, update, delete on public.configs to service_role;
