@@ -16,29 +16,31 @@ MATCH = "f7697d6f02fbc2e9"
 STAMP = "2026-09-24T10:14:14.123456+00:00"
 
 
-class FakeApi:
+class FakeApi(admin.AdminApi):
     """Answers each select with the first canned rows whose table matches and
-    whose marker appears in the query; records every write."""
+    whose marker appears in the query; records every write. Its blank url makes
+    anything not stood in for here fail rather than reach a network."""
 
     def __init__(self, answers: list[tuple[str, str, list[dict]]], *, stale: bool = False):
+        super().__init__(url="", key="")
         self.answers = answers
         self.stale = stale
         self.writes: list[tuple] = []
 
-    def select(self, table, query):
+    def select(self, table: str, query: str) -> list[dict]:
         for name, marker, rows in self.answers:
             if name == table and marker in query:
                 return [dict(r) for r in rows]
         return []
 
-    def insert(self, table, rows):
+    def insert(self, table: str, rows: list[dict]) -> None:
         self.writes.append(("insert", table, rows))
 
-    def update(self, table, query, patch):
+    def update(self, table: str, query: str, patch: dict) -> list[dict]:
         self.writes.append(("update", table, query, patch))
         return [] if self.stale else [patch]
 
-    def delete(self, table, query):
+    def delete(self, table: str, query: str) -> None:
         self.writes.append(("delete", table, query))
 
 
@@ -80,7 +82,9 @@ def test_a_new_link_replaces_the_seats_token_and_prints_one_that_opens_it(capsys
     assert table == "pbp_matches"
     assert "updated_at=eq.2026-09-24T10%3A14%3A14.123456%2B00%3A00" in query
     link = next(line for line in capsys.readouterr().out.splitlines() if "#pbp=" in line)
-    match_id, token = pbp.parse_link(link.split("#", 1)[1])
+    parsed = pbp.parse_link(link.split("#", 1)[1])
+    assert parsed is not None
+    match_id, token = parsed
     assert match_id == MATCH
     assert patch["seats"]["tokens"] == {"1": "h1", "2": admin.hash_token(token)}
     assert token not in str(audit), "the plaintext token must never be stored"
@@ -176,7 +180,7 @@ class AuthFakeApi(FakeApi):
         super().__init__(answers, **kw)
         self.accounts = accounts or {}
 
-    def auth_user(self, email):
+    def auth_user(self, email: str) -> dict | None:
         uid = self.accounts.get(email.strip().lower())
         return {"id": uid, "email": email} if uid else None
 
