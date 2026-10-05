@@ -54,7 +54,8 @@ uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
 uv run python tools/admin.py matches            # moderation: delete scores/maps/
                                                 # matches, rename, drop tags, reissue
-                                                # or reopen a seat (dry run until --yes)
+                                                # or reopen a seat, assign or release
+                                                # a claimed name (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/config_census.py            # which setups people actually
@@ -355,6 +356,15 @@ already resolve simultaneously. The rationale for each rule is in
   and only counts down the server times it is given (`starconquest/campaign.py`),
   never reimplementing a rule. Detail:
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
+- **A claimed name is its owner's alone.** One name per Google account
+  (Supabase Auth, `leaderboard/js/auth.mjs`, PKCE over plain fetch). Only the
+  owner may post a score or tag (`schema.sql`'s `sc_may_use_user` on the
+  insert policies) or name a pbp seat (`pbp.mjs` `nameAllowed`) under it.
+  `claim_name` is the only self-service writer, and only for an unused name. A
+  name already in use goes through `tools/admin.py assign-name`. `users.owner`
+  is never publicly readable: `users` is granted by column, and pages read
+  `claimed`. Signing in stays optional. Detail: `docs/design/leaderboard.md`,
+  "Claimed names".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. Endpoints are built at call time from

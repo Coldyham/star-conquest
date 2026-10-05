@@ -21,6 +21,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+| [`account.html`](account.html) | sign in with Google and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
@@ -523,6 +524,45 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
    them.
 
+7. **Optional — let players claim names.** Without this, every name stays
+   free text, as it always was. To turn it on:
+   - In Google Cloud, create an OAuth client (*APIs & Services → Credentials →
+     OAuth client ID*, type *Web application*). Set its authorised redirect URI
+     to the project's `https://<project>.supabase.co/auth/v1/callback`.
+   - In Supabase, *Authentication → Sign In / Providers → Google*: enable it and
+     paste the client ID and secret. The secret lives there, not on Netlify, so
+     nothing changes about the site's own variables.
+   - Under *Authentication → URL Configuration*, set the Site URL to the
+     production board's `https://<site>/board/account.html`. Add
+     `https://*--<site>.netlify.app/board/account.html` to the redirect URLs so
+     deploy previews can sign in too.
+
+## Claimed names
+
+A name is free text until somebody claims it. Then only the Google account that
+owns it can post a score (and so make a campaign move) or name a play-by-post
+seat with it.
+
+- **Claiming yourself** ([`account.html`](account.html)): sign in, type a name,
+  and claim it. Only a name nobody has used can be claimed this way, meaning one
+  with no `users` row, or a row with no score and no tag behind it. Nothing on
+  the site can prove who posted under a name that has scores already. One name
+  per account; *Release* gives it back.
+- **A name already in use** is handed over by the owner: the person signs in
+  once, then `tools/admin.py assign-name NAME EMAIL` gives it to them (see
+  Moderation).
+- **Where it is enforced:**
+  - `schema.sql`'s insert policies on `scores` and `config_tags`
+    (`sc_may_use_user`, against the caller's `auth.uid()`).
+  - `netlify/functions/pbp.mjs` (`nameAllowed`) for seat names.
+  - `submit.mjs` and the game check first only to explain the refusal.
+- **What stays private:** `users.owner`, the account's uuid, has no public
+  select grant, and pages read `users.claimed` instead. The email never leaves
+  Supabase Auth. The board keeps the session in `localStorage` (`sc_auth`),
+  which the web game reads to open a match under a claimed name. The desktop and
+  Android builds have no session, so a claimed name is refused there, and an
+  expired session counts as none until the account page renews it.
+
 ## Finding each other
 
 The game and the board are one Netlify site, so they find each other by being
@@ -578,7 +618,10 @@ nothing is moderated without a trace and a deletion can be put back by hand.
 |---|---|
 | `delete-score ID…` | Removes scores and the tags posted with them. Their replays stop being public; the uploads stay private. |
 | `delete-game KEY` | Removes a map with its scores, tags, bot results and uploaded replays. |
-| `rename-user NAME NEW` | Renames a player everywhere their name shows. |
+| `rename-user NAME NEW` | Renames a player everywhere their name shows. A claimed name keeps its owner. |
+| `names [--claimed]` | Lists player names, and the account id that owns each claimed one. |
+| `assign-name NAME EMAIL` | Gives a name, scores and all, to the Google account that signed in as `EMAIL`. That person must have signed in on `account.html` once first. Refused if the account already owns a name, or another account owns this one. |
+| `release-name NAME` | Makes a claimed name anyone's to use again. Its scores stay. |
 | `delete-tag TAG [--config KEY]` | Removes a tag everywhere, or from one config. |
 | `delete-config-name KEY` | Clears a config's name, so the next one posted sticks. |
 | `new-link MATCH SEAT` | Mints a play-by-post seat a new link and prints it once. The old link stops working and the seat stays claimed: the way to hand a seat on privately. `--game-url` points the link at a preview build. |
@@ -712,9 +755,11 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
   (see "Checked scores" above) — but only for scores that carry one. Anything
   posted by hand, or before that existed, checks as `missing`: unverified rather
   than suspect, and shown as such.
-- **Names are not identities.** No auth, keyed by name, so two people typing the
-  same name share a row — and so share a player card. Anyone can also post under
-  your name, which is the same trade the board makes everywhere else.
+- **An unclaimed name is not an identity.** Names are keyed by name, so two
+  people typing the same unclaimed name share a row, and so share a player card.
+  Anyone can post under a name nobody has claimed. Claiming one (see "Claimed
+  names") closes that for one name per Google account, and signing in stays
+  optional.
 - **A score is wins only.** The game only offers the challenge link when the
   human won and played at least one turn by hand, so nothing else can be
   posted as a score. A setup with no result behind it is the exception — see

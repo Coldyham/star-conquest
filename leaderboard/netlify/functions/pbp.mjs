@@ -398,7 +398,7 @@ function cors(origin) {
   const headers = { "Cache-Control": "no-store" };
   if (allowedOrigin(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
-    headers["Access-Control-Allow-Headers"] = "Content-Type";
+    headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
     headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
     headers["Vary"] = "Origin";
   }
@@ -434,6 +434,44 @@ function db(url, key) {
   };
 }
 
+/**
+ * The Supabase Auth account behind a request's `Authorization: Bearer`, or null
+ * for none or a token Auth refuses. Asked of Auth itself (`/auth/v1/user`)
+ * rather than by checking the JWT here, so this function holds no signing
+ * secret and a signed-out or revoked session is refused the same way.
+ */
+export async function callerUid(authorization, url, key) {
+  if (!authorization || !/^Bearer \S+$/.test(authorization)) return null;
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}/auth/v1/user`, {
+      headers: { apikey: key, Authorization: authorization },
+    });
+    if (!response.ok) return null;
+    const user = await response.json();
+    return typeof user?.id === "string" ? user.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a seat may be named `name` by this caller: an empty name, a name no
+ * one has claimed (schema.sql's `users.owner`), or the caller's own. `uid` is a
+ * thunk so Auth is only asked when the name is actually claimed. Null when the
+ * store can't say, which the caller reports rather than guessing either way.
+ */
+export async function nameAllowed(call, name, uid) {
+  if (!name) return true;
+  const rows = await call(
+    `/users?select=owner&name_key=eq.${encodeURIComponent(name.trim().toLowerCase())}&limit=1`);
+  if (rows === null) return null;
+  if (!rows.length || !rows[0].owner) return true;
+  return rows[0].owner === await uid();
+}
+
+/** What a refused seat name is told. Matched by `pbp.py` and the lobby. */
+export const CLAIMED_NAME = "name is claimed: sign in on the board as its owner, or pick another";
+
 export default async function handler(request) {
   const origin = request.headers.get("origin");
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
@@ -467,8 +505,9 @@ export default async function handler(request) {
   } catch {
     return reply(400, { error: "bad json" }, origin);
   }
-  if (action === "create") return await handleCreate(call, body, origin);
-  if (action === "claim") return await handleClaim(call, body, origin);
+  const uid = () => callerUid(request.headers.get("authorization"), url, key);
+  if (action === "create") return await handleCreate(call, body, origin, uid);
+  if (action === "claim") return await handleClaim(call, body, origin, uid);
   if (action === "seat") return await handleSeat(call, body, origin);
   if (action === "submit") return await handleSubmit(call, body, origin);
   if (action === "lapse") return await handleLapse(call, body, origin);
@@ -584,9 +623,12 @@ async function briefState(call, matchId, have) {
 }
 
 /** Open a match, and mint one token per seated player. */
-async function handleCreate(call, body, origin) {
+async function handleCreate(call, body, origin, uid) {
   const row = validateMatch(body);
   if (typeof row === "string") return reply(400, { error: row }, origin);
+  const allowed = await nameAllowed(call, row.names[1], uid);
+  if (allowed === null) return reply(502, { error: "store refused" }, origin);
+  if (!allowed) return reply(403, { error: CLAIMED_NAME }, origin);
 
   const tokens = {};
   const hashes = {};
@@ -707,13 +749,16 @@ async function handleList(call, query, origin) {
  * is rewritten, so the loser must not land on top of the winner's hash. A
  * resolve in between trips it too; that loser is simply told to try again.
  */
-async function handleClaim(call, body, origin) {
+async function handleClaim(call, body, origin, uid) {
   if (!body || typeof body !== "object") return reply(400, { error: "not an object" }, origin);
   const { match_id: matchId, seat } = body;
   if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return reply(400, { error: "bad match_id" }, origin);
   if (!Number.isInteger(seat) || seat < 1 || seat > MAX_SEATS) return reply(400, { error: "bad seat" }, origin);
   const name = cleanText(body.name, NAME_MAX);
   if (name === null) return reply(400, { error: "bad name" }, origin);
+  const allowed = await nameAllowed(call, name, uid);
+  if (allowed === null) return reply(502, { error: "store refused" }, origin);
+  if (!allowed) return reply(403, { error: CLAIMED_NAME }, origin);
 
   const rows = await call(
     `/pbp_matches?select=match_id,seats,names,public,finished,updated_at&match_id=eq.${matchId}`);

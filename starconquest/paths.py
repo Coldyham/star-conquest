@@ -77,6 +77,13 @@ WEB_PBP_RULES_KEY = "sc_pbp_rules"
 # is created with it filled in.
 WEB_PBP_NAME_KEY = "sc_pbp_name"
 
+# The board's Google sign-in session (`leaderboard/js/auth.mjs`'s SESSION_KEY),
+# JSON with an `access_token`. Read only by the web game's ``?action=create``
+# call, so a match may be opened under the player's own claimed name. The game
+# never refreshes or writes it: an expired one is refused like none at all, and
+# the board's account page is where a session is renewed.
+WEB_AUTH_KEY = "sc_auth"
+
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.
 #

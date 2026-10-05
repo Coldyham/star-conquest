@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your name · Star Conquest Leaderboard</title>
+<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
+  <details class="menu">
+    <summary class="btn" aria-label="Menu">☰ Menu</summary>
+    <nav class="actions">
+      <a class="btn" href="../game/">▶ Play</a>
+      <a class="btn" href="index.html">All maps</a>
+      <a class="btn" href="campaign.html">Campaign</a>
+      <a class="btn" href="crowns.html">Crowns</a>
+      <a class="btn" href="pbp.html">Shared matches</a>
+      <a class="btn" href="submit.html">Enter score</a>
+      <a class="btn" href="account.html">Your name</a>
+    </nav>
+  </details>
+</header>
+
+<main>
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Claim your name</h1>
+  <!-- Optional, and said so first: every unclaimed name still works without an
+       account. What signing in buys is that nobody else can post a score, make
+       a campaign move or take a play-by-post seat under the name you claim. -->
+  <p class="lede">
+    You never need to sign in to play or post. Signing in with Google lets you
+    claim one name, so nobody else can post scores, make campaign moves or take
+    a shared-match seat under it.
+  </p>
+  <p class="lede">
+    Only a name nobody has used on the board yet can be claimed here. If you
+    have already been posting under a name, ask the board's owner to assign it
+    to you once you have signed in.
+  </p>
+
+  <div class="form">
+    <p class="hint" id="who">Checking…</p>
+    <button id="sign-in" type="button" hidden>Sign in with Google</button>
+
+    <form id="claim" class="form" autocomplete="off" hidden>
+      <label for="name">Name to claim</label>
+      <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
+      <button id="claim-go" type="submit">Claim</button>
+    </form>
+
+    <button id="release" type="button" hidden>Release this name</button>
+    <button id="sign-out" type="button" class="ghost" hidden>Sign out</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </div>
+</main>
+
+<footer class="attract">
+  <span class="coin">▚</span> No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>
+</footer>
+
+<script type="module" src="js/account-page.mjs"></script>
+</body>
+</html>

@@ -14,7 +14,9 @@ Pure/headless: `main` imports pygame, but nothing here draws.
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -25,7 +27,10 @@ import pytest
 from starconquest import main as app
 from starconquest import ai, config, engine, pbp, replay, webstore
 from starconquest.model import Order
+from starconquest.paths import WEB_AUTH_KEY
 from starconquest.settings import Settings
+
+ROOT = Path(__file__).resolve().parents[1]
 
 pygame.init()
 pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -1058,8 +1063,51 @@ def test_an_untouched_tab_reads_less_often_and_a_busy_one_never_does():
 def test_a_read_says_which_turn_it_holds_only_when_asked_to(monkeypatch):
     sent = []
     monkeypatch.setattr(pbp, "endpoint", lambda action: f"https://x/api/pbp?action={action}")
-    monkeypatch.setattr(pbp, "request", lambda url, body=None: sent.append(url))
+    monkeypatch.setattr(pbp, "request", lambda url, body=None, signed=False: sent.append(url))
     pbp.fetch_state(MATCH)
     pbp.fetch_state(MATCH, 4)
     assert sent == [f"https://x/api/pbp?action=state&match={MATCH}",
                     f"https://x/api/pbp?action=state&match={MATCH}&have=4"]
+
+
+# --------------------------------------------------------------------------- #
+# Claimed names (leaderboard/schema.sql's users.owner, pbp.mjs's nameAllowed)
+# --------------------------------------------------------------------------- #
+def test_a_claimed_name_is_told_apart_from_a_bad_token():
+    """Both are a 403; only the body says which, and only the name is something
+    the player fixes on the board rather than by checking their link."""
+    body = json.dumps({"error": app.PBP_CLAIMED_ERROR})
+    assert app.pbp_trouble(pbp.REFUSED, body) == app.PBP_CLAIMED_MSG
+    assert app.pbp_trouble(pbp.REFUSED, '{"error": "bad token"}') == app.PBP_REFUSED_MSG
+
+
+def test_the_claimed_name_refusal_is_the_endpoints_own_words():
+    text = (ROOT / "leaderboard" / "netlify" / "functions" / "pbp.mjs").read_text()
+    assert f'export const CLAIMED_NAME = "{app.PBP_CLAIMED_ERROR}";' in text
+
+
+def test_a_match_opened_under_a_name_carries_the_sign_in(monkeypatch):
+    """Only a named create needs the board's session: the endpoint asks Auth
+    only when the name turns out to be claimed, and no other call names one."""
+    sent = []
+    monkeypatch.setattr(pbp, "call",
+                        lambda action, payload=None, signed=False, **kw: sent.append(signed))
+    pbp.create("00112233445566ff", Settings(), 1, [1], name="Ann")
+    pbp.create("00112233445566ff", Settings(), 1, [1], name="  ")
+    assert sent == [True, False]
+
+
+def test_a_signed_web_call_reads_the_session_in_js(monkeypatch):
+    evaluated = []
+
+    class _Window:
+        def eval(self, code):
+            evaluated.append(code)
+
+    import platform as _platform
+    monkeypatch.setattr(_platform, "window", _Window(), raising=False)
+    assert pbp._call_web("https://x/api/pbp?action=create", "{}", signed=True) is not None
+    assert pbp._call_web("https://x/api/pbp?action=submit", "{}") is not None
+    assert f'localStorage.getItem("{WEB_AUTH_KEY}")' in evaluated[0]
+    assert "h.Authorization='Bearer '+a.access_token" in evaluated[0]
+    assert "Authorization" not in evaluated[1], "an unsigned call sends no session"

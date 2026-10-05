@@ -101,7 +101,11 @@ only for a fight; what is deliberately not animated.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup.
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
-- **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
+- **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is now covered by claimed names.
+- **Claimed names.** Signing in with Google is optional, and an account owns one name.
+  - Only an unused name can be claimed by the person claiming it. A name already in use is assigned by `admin.py assign-name`.
+  - RLS on `scores`/`config_tags` and `pbp.mjs` enforce the claim. The owner uuid is never public.
+  - *Decided against:* a per-week campaign token; claiming a used name on first sign-in; a pending email for assignment; checking a JWT inside `pbp.mjs`.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/pbp.md
@@ -234,6 +238,7 @@ the measured result was indistinguishable from the baseline.
 
 ### Leaderboard ([`design/leaderboard.md`](design/leaderboard.md))
 - An always-on service for the bot column; honouring slot 0's `AiParams`; ranking losses by turns; a Watch link that re-decides the match live; a git SHA as `engine_rev`: all rejected. *Bot replays.*
+- A per-week campaign token for launches: superseded by claimed names (opt-in, one name per Google account, owner uuid never public, which is why it is not the rejected durable client id). Claiming a used name on first sign-in; a pending email for `assign-name`; a JWT check inside `pbp.mjs`: all rejected. *Claimed names.*
 - A JS replay viewer; a durable client id; a durable IP-based rate limit; a per-model replay floor; sealing forks of a watched replay: all rejected. A full board snapshot per turn: **set aside for now, not ruled out.** *Checked scores.*
 - A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.

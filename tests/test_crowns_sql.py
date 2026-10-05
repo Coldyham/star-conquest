@@ -18,6 +18,8 @@ import pytest
 
 DSN = os.environ.get("SC_TEST_PG", "")
 SCHEMA = Path(__file__).resolve().parents[1] / "leaderboard" / "schema.sql"
+# Supabase's `auth` schema, which schema.sql references (users.owner, auth.uid()).
+AUTH_STUB = Path(__file__).resolve().parent / "supabase_auth_stub.sql"
 DB = "sc_crowns_test"
 
 pytestmark = pytest.mark.skipif(not DSN or not shutil.which("psql"),
@@ -42,7 +44,8 @@ def board():
           " if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;"
           " end $$", DB)
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
-                          "-f", str(SCHEMA)], capture_output=True, text=True)
+                          "-f", str(AUTH_STUB), "-f", str(SCHEMA)],
+                         capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     # Users 1-3; each map a separate story, scores posted a minute apart in order.
     _psql("""

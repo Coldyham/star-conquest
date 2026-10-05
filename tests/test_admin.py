@@ -164,3 +164,106 @@ def test_deleting_a_score_that_does_not_exist_is_refused():
     api = FakeApi([("scores", "", [{"id": 1, "game_key": "abc", "turns": 9}])])
     with pytest.raises(admin.Refused, match="2"):
         admin.plan_delete_score(api, [1, 2])
+
+
+# --------------------------------------------------------------------------- #
+# Claimed names
+# --------------------------------------------------------------------------- #
+class AuthFakeApi(FakeApi):
+    """FakeApi plus Auth's account list, by email."""
+
+    def __init__(self, answers, accounts=None, **kw):
+        super().__init__(answers, **kw)
+        self.accounts = accounts or {}
+
+    def auth_user(self, email):
+        uid = self.accounts.get(email.strip().lower())
+        return {"id": uid, "email": email} if uid else None
+
+
+ANN = "11111111-1111-1111-1111-111111111111"
+BOB = "22222222-2222-2222-2222-222222222222"
+
+
+def _named(owner=None, **over):
+    return {"id": 7, "name": "Ann", "name_key": "ann", "owner": owner,
+            "claimed": owner is not None, **over}
+
+
+def test_assigning_a_used_name_is_a_dry_run_until_yes(capsys):
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()]),
+                       ("scores", "user_id=eq.7", [{"id": 1}, {"id": 2}])],
+                      {"ann@example.com": ANN})
+    plan = admin.plan_assign_name(api, " ann ", "Ann@Example.com")
+    admin.apply(api, plan, yes=False, reason="")
+    assert api.writes == []
+    assert "2 score(s)" in capsys.readouterr().out
+
+
+def test_assigning_a_used_name_audits_first_and_sets_the_owner_conditionally():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])], {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"),
+                yes=True, reason="their old name")
+    audit, write = api.writes
+    assert audit[:2] == ("insert", "admin_actions")
+    assert audit[2][0]["detail"]["owner"] == ANN
+    assert "example.com" not in str(audit), "the audit row names the account by id only"
+    assert write == ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN})
+
+
+def test_assigning_a_name_nobody_has_used_creates_it_owned():
+    api = AuthFakeApi([], {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"), yes=True, reason="")
+    assert api.writes[-1] == ("insert", "users", [{"name": "Ann", "owner": ANN}])
+
+
+def test_assigning_to_an_account_that_never_signed_in_is_refused():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])])
+    with pytest.raises(admin.Refused, match="sign in"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_an_account_owns_one_name():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()]),
+                       ("users", f"owner=eq.{ANN}", [{"id": 9, "name": "Annie"}])],
+                      {"ann@example.com": ANN})
+    with pytest.raises(admin.Refused, match="Annie"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_a_name_someone_else_owns_must_be_released_first():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named(BOB)])], {"ann@example.com": ANN})
+    with pytest.raises(admin.Refused, match="release-name"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_assigning_a_name_its_owner_already_has_does_nothing(capsys):
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named(ANN)]),
+                       ("users", f"owner=eq.{ANN}", [{"id": 7, "name": "Ann"}])],
+                      {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"), yes=True, reason="")
+    assert api.writes == []
+    assert "nothing to do" in capsys.readouterr().out
+
+
+def test_a_name_that_changed_hands_mid_assign_is_refused():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])], {"ann@example.com": ANN},
+                      stale=True)
+    with pytest.raises(admin.Refused, match="changed hands"):
+        admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"),
+                    yes=True, reason="")
+
+
+def test_releasing_a_name_clears_its_owner():
+    api = FakeApi([("users", "name_key=eq.ann", [_named(ANN)])])
+    admin.apply(api, admin.plan_release_name(api, "ANN"), yes=True, reason="asked")
+    assert api.writes[-1] == ("update", "users", f"id=eq.7&owner=eq.{ANN}", {"owner": None})
+    with pytest.raises(admin.Refused, match="not claimed"):
+        admin.plan_release_name(FakeApi([("users", "", [_named()])]), "Ann")
+
+
+def test_a_rename_carries_the_owner_with_it():
+    """rename-user patches the name alone, so a claimed name stays claimed."""
+    api = FakeApi([("users", "name_key=eq.ann&", [_named(ANN)])])
+    admin.apply(api, admin.plan_rename_user(api, "Ann", "Annabel"), yes=True, reason="")
+    assert api.writes[-1] == ("update", "users", "id=eq.7", {"name": "Annabel"})

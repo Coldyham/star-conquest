@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from tests.test_crowns_sql import DSN, SCHEMA, _psql, pytestmark  # noqa: F401
+from tests.test_crowns_sql import AUTH_STUB, DSN, SCHEMA, _psql, pytestmark  # noqa: F401
 
 DB = "sc_embargo_test"
 
@@ -36,7 +36,8 @@ def board():
           " if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;"
           " end $$", DB)
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
-                          "-f", str(SCHEMA)], capture_output=True, text=True)
+                          "-f", str(AUTH_STUB), "-f", str(SCHEMA)],
+                         capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     # Seeds 1-3 are this week's nodes, 4 last week's; 9 is on no campaign. The
     # game rows are browser-written (`6`, not the worker's `6.0`).
