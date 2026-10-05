@@ -423,7 +423,9 @@ than it is.
   `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
   out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
-  (sometimes its symmetric variant, plus one or two "?" nodes rolled with
+  of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
+  120-system test game was enough to put big maps in a week, and a big map is
+  a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
   `settings.randomise_knobs`; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
@@ -437,7 +439,10 @@ than it is.
   first win from a player without one and can't be taken; a field node falls
   to a win posted while holding a neighbour (or within `GRACE_MS` of losing
   one, or the node itself), and a held one only to a strictly better score; see "The grace
-  period" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
+  period" in this file. A bad week is remade by deleting its row
+  (`tools/admin.py delete-campaign`, audited with the old graph) and letting
+  the worker run again; scores already posted on its nodes stay on their maps
+  but stop counting toward the week. The Advanced slider ranges live in `settings` (`ADV_*`) for
   this reason; `menu` aliases them.
 - **A map can be registered with no score at all, and can carry a one-time
   reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any

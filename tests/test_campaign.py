@@ -109,6 +109,16 @@ def test_hand_drawn_and_too_new_configs_are_never_picked():
     assert all(not f.setup.get("custom_map") and f.setup.get("players", 3) != 5 for f in pool)
 
 
+def test_a_config_past_the_standard_box_is_never_picked():
+    big = _game("big", 5, nodes=120)
+    edge = _game("edge", 6, nodes=config.STANDARD_MAX_NODES)
+    pool = campaign.families([big, edge, *GAMES], START)
+    assert [f.setup["nodes"] for f in pool].count(config.STANDARD_MAX_NODES) == 1
+    assert all(f.setup["nodes"] <= config.STANDARD_MAX_NODES for f in pool)
+    graph = _graph(games=[big])   # nothing left but the defaults
+    assert all(n["systems"] <= config.CUSTOM_MAX_NODES for n in graph["nodes"])
+
+
 def test_an_empty_board_still_makes_a_playable_week():
     graph = _graph(games=[])
     assert graph["nodes"] and all(n["systems"] > 0 for n in graph["nodes"])

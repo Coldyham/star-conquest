@@ -14,6 +14,7 @@ should not be there, and a play-by-post seat that needs a new holder.
 
     uv run python tools/admin.py delete-score 123 --reason "fake"   # say what it would do
     uv run python tools/admin.py delete-score 123 --reason "fake" --yes   # ...and do it
+    uv run python tools/admin.py delete-campaign 2026-10-05 --yes   # remake a week's
 
 Every command that writes is a dry run unless ``--yes`` is passed, and every one
 that is applied first writes an ``admin_actions`` row: what was done, to what,
@@ -340,6 +341,33 @@ def plan_delete_game(api: Supabase, game_key: str) -> Plan:
          lambda: api.delete("games", f"game_key=eq.{key}")])
 
 
+def plan_delete_campaign(api: Supabase, week: str) -> Plan:
+    """Remove a week's campaign so the hourly worker (``tools/campaign.py``) makes
+    it again. Nothing else is stored about a campaign, so nothing else goes: the
+    scores posted on its nodes stay on their maps, they just stop counting toward
+    this week's holdings, and those maps' embargoes lift with the row."""
+    try:
+        start = datetime.strptime(week, "%Y-%m-%d").date()
+    except ValueError:
+        raise Refused(f"{week!r} is not a date (YYYY-MM-DD)") from None
+    if start.weekday() != 0:
+        raise Refused(f"{week} is not a Monday; a campaign week starts on one")
+    row = _one(api.select("campaigns", f"select=*&week_start=eq.{week}&order=week_start.asc"),
+               "campaign")
+    nodes = (row.get("graph") or {}).get("nodes", [])
+    played = api.select("campaign_games", f"select=node_id,game_key&week_start=eq.{week}"
+                                          "&order=node_id.asc")
+    return Plan(
+        "delete-campaign", week,
+        [f"delete the campaign for the week of {week} ({len(nodes)} nodes, "
+         f"{len(played)} already posted on)",
+         "the scores on those maps stay, but stop counting toward this week's "
+         "holdings, and the maps' campaign embargoes lift",
+         "the next run of tools/campaign.py makes the week again"],
+        {"campaign": row, "posted_nodes": played},
+        [lambda: api.delete("campaigns", f"week_start=eq.{week}")])
+
+
 def plan_rename_user(api: Supabase, old: str, new: str) -> Plan:
     new = new.strip()
     if not 1 <= len(new) <= 60:
@@ -579,6 +607,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd.add_argument("ids", type=int, nargs="+")
     cmd = writes("delete-game", "delete a map and everything posted on it")
     cmd.add_argument("game_key")
+    cmd = writes("delete-campaign", "delete a week's campaign so the worker makes it again")
+    cmd.add_argument("week", help="the week's Monday, YYYY-MM-DD")
     cmd = writes("rename-user", "change a player's name everywhere it shows")
     cmd.add_argument("name")
     cmd.add_argument("new_name")
@@ -614,6 +644,8 @@ def plan_for(api: AdminApi, args: argparse.Namespace) -> Plan:
             return plan_delete_score(api, args.ids)
         case "delete-game":
             return plan_delete_game(api, args.game_key)
+        case "delete-campaign":
+            return plan_delete_campaign(api, args.week)
         case "rename-user":
             return plan_rename_user(api, args.name, args.new_name)
         case "assign-name":
