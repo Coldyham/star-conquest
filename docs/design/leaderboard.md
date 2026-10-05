@@ -407,6 +407,32 @@ than it is.
   follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
   fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
 
+**Why one site.** The game and the board were two Netlify sites until the
+merge, which went live in October 2026.
+- **Deploys.** Both drew on one free-tier pool of about 20 production
+  publishes a month, and most changes touched both. The pool ran out once,
+  with a merged board fix waiting over a week for a slot.
+- **One localStorage.** Separate origins meant the lobby's "your matches" was
+  a hand-off from the game plus a lobby-side cache, and two name keys.
+- **The PWA stays a PWA.** Leaving the fullscreen game for the board brought
+  back the browser chrome, and on iOS lost the app's storage.
+- **No hostname hacks.** Previews found each other by adding or removing
+  `-leaderboard` in the URL (`sibling_host`/`siblingGame`); one origin needs
+  none of it.
+
+**Onto the game's origin, not the board's,** because localStorage doesn't
+migrate between origins: the game's holds seat tokens, bests and preferences,
+and the board's held only a posting name and the lobby cache. The board went
+under `/board/`, which also settled the `index.html` and `favicon.png`
+collisions. The cost: every change now builds the game with pygbag, so a board
+typo fix is no longer cheap to preview.
+
+**Decided against: keeping the functions on the old board site behind a
+`/api/` proxy** (the merge brief's option B). It kept `SUPABASE_SECRET_KEY` off
+the site that builds fork previews, but left two sites to deploy and put a
+proxy between the rate limit and the client's IP. The functions moved instead,
+and the fork-preview risk is held by the "Require approval" policy.
+
 ### The pages are templates
 
 Every page carried an identical copy of the head and the menu, so adding a page
