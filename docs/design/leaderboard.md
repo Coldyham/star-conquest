@@ -407,6 +407,32 @@ than it is.
   follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
   fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
 
+### The pages are templates
+
+Every page carried an identical copy of the head and the menu, so adding a page
+or a menu entry meant editing all of them, and the privacy link went into nine
+footers by hand. Each page is now a Jinja2 template extending
+`leaderboard/templates/base.html`, rendered by `tools/render_board.py` inside
+`build_web.sh`. A page sets `title`, `description`, `main_class` and `script`,
+and fills `main` and `footer`; the footer's flavour text stays per page and the
+shared links come from the base.
+
+- **At build time, because Netlify serves files.** There is no server to render
+  on, so the include runs either before deploy or in the browser. The build
+  already runs Python (`tools/pwa/inject.py`), and what reaches a visitor is the
+  same complete HTML as before, menu and all, with no script needed to show it.
+  Converting changed no rendered byte except two footers.
+- **Decided against: a JS include** (an empty `<header>` a module fills on
+  load). It kept "no build step", but the menu would vanish when the script
+  failed and could pop in a frame late, and the markup would live in JS strings.
+- **Decided against: copies pinned by a test.** It catches drift but still
+  makes every menu change an edit to every page.
+- **The cost** is that `leaderboard/` is no longer servable raw: local work
+  renders first (`leaderboard/README.md`, "Local development"). The allow-list
+  of servable files moved from `build_web.sh` into `render_board.PAGES`,
+  `STATIC_FILES` and `STATIC_DIRS`, and `tests/test_web_build.py` checks that
+  every page renders with exactly one, identical header and one privacy link.
+
 ## Crowns, the weekly campaign and embargoes
 
 - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players

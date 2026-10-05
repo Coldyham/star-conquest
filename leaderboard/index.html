@@ -1,32 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Star Conquest Leaderboard</title>
-<meta name="description" content="Posted scores on Star Conquest challenge maps.">
-<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
-<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-<header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <details class="menu">
-    <summary class="btn" aria-label="Menu">☰ Menu</summary>
-    <nav class="actions">
-      <a class="btn" href="../game/">▶ Play</a>
-      <a class="btn" href="index.html">All maps</a>
-      <a class="btn" href="campaign.html">Campaign</a>
-      <a class="btn" href="crowns.html">Crowns</a>
-      <a class="btn" href="pbp.html">Shared matches</a>
-      <a class="btn" href="submit.html">Enter score</a>
-      <a class="btn" href="account.html">Your name</a>
-    </nav>
-  </details>
-</header>
+{% extends "templates/base.html" %}
+{% set description = "Posted scores on Star Conquest challenge maps." %}
+{% set script = "js/home.mjs" %}
 
-<main>
+{% block main %}
   <h1>Recently played</h1>
   <p class="lede">
     Every map someone has posted a score on, newest first. Each row shows the best
@@ -36,14 +12,7 @@
   <div id="group-toggle"></div>
   <div id="filters"></div>
   <div id="games" class="loading">Loading…</div>
-</main>
+{% endblock %}
 
-<footer class="attract">
-  <span class="coin">▚</span> Insert coin &nbsp;·&nbsp;
-  <a href="submit.html">Enter a score</a> &nbsp;·&nbsp; Fewest turns wins
-  &nbsp;·&nbsp; <a href="privacy.html">Privacy</a>
-</footer>
-
-<script type="module" src="js/home.mjs"></script>
-</body>
-</html>
+{% block footer %}Insert coin &nbsp;·&nbsp;
+  <a href="submit.html">Enter a score</a> &nbsp;·&nbsp; Fewest turns wins{% endblock %}

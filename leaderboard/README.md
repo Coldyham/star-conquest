@@ -5,10 +5,14 @@ paste the link here with a name, and the score joins the ranking for that map. A
 plain settings-share link works too, with no score yet: it registers the setup so
 others can play it and post their own — see "Sharing a setup with no score" below.
 
-Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
-API. It is served from the game's own Netlify site: `tools/build_web.sh` copies
-the pages into `web/board/` (the site root sends visitors here; the game is at
-`/game/`) and the root `netlify.toml` bundles
+Plain HTML/CSS/ES modules, talking straight to Supabase's REST API. The one build
+step is the pages themselves: each `*.html` here is a Jinja2 template extending
+[`templates/base.html`](templates/base.html), which holds the head, the menu and
+the footer's shared links, so a menu entry is added in one place. It is served
+from the game's own Netlify site: `tools/build_web.sh` runs
+[`tools/render_board.py`](../tools/render_board.py) to render the pages into
+`web/board/` (the site root sends visitors here; the game is at `/game/`) and the
+root `netlify.toml` bundles
 `netlify/functions/` to answer at `/api/`. The game itself works without it.
 
 ## Pages
@@ -637,7 +641,7 @@ stored.
 ## Local development
 
 ```sh
-cd leaderboard && python3 -m http.server 8000   # quickest: open localhost:8000
+uv run python tools/render_board.py && cd web/board && python3 -m http.server 8000   # quickest: open localhost:8000
 ./tools/build_web.sh && cd web && python3 -m http.server 8000   # as deployed: localhost:8000/board/
 netlify dev                                     # ...or this, from the repo root, to run the functions too
 ```
@@ -645,7 +649,8 @@ netlify dev                                     # ...or this, from the repo root
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
 PostgREST accepts any origin for the publishable key. Without one, every page says so
 instead of failing obscurely. A plain static server does not run
-`netlify/functions/`. From localhost the game falls back to the production
+`netlify/functions/`. Serving `leaderboard/` itself shows raw templates: re-run
+`render_board.py` after editing a page. From localhost the game falls back to the production
 `/api/` (`localhost:8000` is in the functions' CORS allowlist), and the board's
 `/api/pbp` needs `netlify dev` with the two environment variables set.
 

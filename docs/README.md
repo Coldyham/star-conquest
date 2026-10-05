@@ -102,6 +102,7 @@ only for a fight; what is deliberately not animated.
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is now covered by claimed names.
+- **The pages are templates.** Jinja2 at build time (`tools/render_board.py`), one base for the head, menu and footer links. *Decided against: a JS include; copies pinned by a test.*
 - **Claimed names.** Signing in with Google is optional, and an account owns one name.
   - Only an unused name can be claimed by the person claiming it. A name already in use is assigned by `admin.py assign-name`, and `--fold` merges a person's other names into it (the old names are freed).
   - RLS on `scores`/`config_tags` and `pbp.mjs` enforce the claim. The owner uuid is never public.
@@ -242,6 +243,7 @@ the measured result was indistinguishable from the baseline.
 - A JS replay viewer; a durable client id; a durable IP-based rate limit; a per-model replay floor; sealing forks of a watched replay: all rejected. A full board snapshot per turn: **set aside for now, not ruled out.** *Checked scores.*
 - A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
+- A JS include for the board's shared header (menu missing without the script, markup in JS strings); keeping nine copies pinned by a test: both rejected for Jinja2 at build time. *The pages are templates.*
 - A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
 
 ### Play-by-post ([`design/pbp.md`](design/pbp.md))

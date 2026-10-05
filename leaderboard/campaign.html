@@ -1,31 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Campaign · Star Conquest Leaderboard</title>
-<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
-<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-<header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <details class="menu">
-    <summary class="btn" aria-label="Menu">☰ Menu</summary>
-    <nav class="actions">
-      <a class="btn" href="../game/">▶ Play</a>
-      <a class="btn" href="index.html">All maps</a>
-      <a class="btn" href="campaign.html">Campaign</a>
-      <a class="btn" href="crowns.html">Crowns</a>
-      <a class="btn" href="pbp.html">Shared matches</a>
-      <a class="btn" href="submit.html">Enter score</a>
-      <a class="btn" href="account.html">Your name</a>
-    </nav>
-  </details>
-</header>
+{% extends "templates/base.html" %}
+{% set title = "Campaign" %}
+{% set script = "js/campaign-page.mjs" %}
 
-<main>
+{% block main %}
   <a class="back" href="index.html">← All maps</a>
   <h1>Campaign</h1>
   <p class="lede">
@@ -49,15 +26,8 @@
 
   <h2 class="section-title">Moves</h2>
   <div id="feed"></div>
-</main>
+{% endblock %}
 
-<footer class="attract">
-  <span class="coin">▚</span> Player 1 &nbsp;·&nbsp;
+{% block footer %}Player 1 &nbsp;·&nbsp;
   <a href="index.html">All maps</a> &nbsp;·&nbsp;
-  <a href="submit.html">Enter a score</a>
-  &nbsp;·&nbsp; <a href="privacy.html">Privacy</a>
-</footer>
-
-<script type="module" src="js/campaign-page.mjs"></script>
-</body>
-</html>
+  <a href="submit.html">Enter a score</a>{% endblock %}

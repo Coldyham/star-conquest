@@ -371,7 +371,10 @@ already resolve simultaneously. The rationale for each rule is in
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. The sensitive-variable policy must stay on
   "Require approval". `legacy-board/` proxies `/api/`. `tools/pwa/sw.js` never
-  touches `/api/` (`tests/test_web_build.py`). Detail:
+  touches `/api/` (`tests/test_web_build.py`). Board pages are Jinja2
+  templates extending `leaderboard/templates/base.html`, rendered by
+  `tools/render_board.py` (whose `PAGES` is the servable allow-list); put shared
+  chrome in the base, never back into a page. Detail:
   `docs/design/leaderboard.md`.
 
 **The AI** (reasons: `docs/design/bots.md` and the per-bot files)

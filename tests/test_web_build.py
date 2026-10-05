@@ -13,17 +13,12 @@ import tomllib
 from pathlib import Path
 
 from starconquest import paths
+from tools import render_board
 
 ROOT = Path(__file__).resolve().parent.parent
 SW = (ROOT / "tools" / "pwa" / "sw.js").read_text()
 BUILD = (ROOT / "tools" / "build_web.sh").read_text()
 ROUTER = (ROOT / "tools" / "pwa" / "root.html").read_text()
-
-
-def _bash_array(name: str) -> list[str]:
-    match = re.search(rf"^{name}=\((.*?)\)$", BUILD, re.MULTILINE)
-    assert match is not None, f"{name} not found in build_web.sh"
-    return match.group(1).split()
 
 
 def test_the_service_worker_never_answers_the_api():
@@ -40,15 +35,32 @@ def test_the_service_worker_fetches_board_pages_network_first():
 
 
 def test_the_board_copy_is_an_allow_list_of_servable_files():
-    files = _bash_array("BOARD_FILES")
-    dirs = _bash_array("BOARD_DIRS")
-    for name in files + dirs:
-        assert (ROOT / "leaderboard" / name).exists(), f"build_web.sh copies missing {name}"
-    staged = set(files) | set(dirs)
-    for never in ("netlify", "tests", "README.md", "netlify.toml", "schema.sql", "fold-game-key.sql"):
+    assert 'tools/render_board.py" --out "$ROOT/web/board"' in BUILD
+    staged = set(render_board.PAGES) | set(render_board.STATIC_FILES) | set(render_board.STATIC_DIRS)
+    for name in staged:
+        assert (ROOT / "leaderboard" / name).exists(), f"render_board stages missing {name}"
+    for never in ("netlify", "tests", "templates", "README.md", "netlify.toml", "schema.sql",
+                  "fold-game-key.sql"):
         assert never not in staged
     pages = {p.name for p in (ROOT / "leaderboard").glob("*.html")}
-    assert pages <= set(files), f"a board page is not staged: {pages - set(files)}"
+    assert pages <= set(render_board.PAGES), f"a board page is not staged: {pages - set(render_board.PAGES)}"
+
+
+def test_every_board_page_renders_with_the_shared_chrome(tmp_path):
+    render_board.build(tmp_path)
+    header = re.compile(r'<header class="bar">.*?</header>', re.S)
+    headers = set()
+    for page in render_board.PAGES:
+        html = (tmp_path / page).read_text()
+        assert html.startswith("<!doctype html>"), page
+        assert "{%" not in html and "{{" not in html and "{#" not in html, page
+        found = header.findall(html)
+        assert len(found) == 1, f"{page} has {len(found)} headers"
+        headers |= set(found)
+        assert html.count('href="privacy.html">Privacy</a>') == 1, f"{page}'s footer"
+    assert len(headers) == 1
+    for name in render_board.STATIC_FILES + render_board.STATIC_DIRS:
+        assert (tmp_path / name).exists()
 
 
 def test_the_root_site_bundles_the_boards_functions():
@@ -165,9 +177,10 @@ def test_the_board_links_to_the_game_under_game():
     config = (ROOT / "leaderboard" / "js" / "config.mjs").read_text()
     assert 'GAME_URL_FALLBACK = "https://star-conquest.netlify.app/game/"' in config
     assert "`https://${host}/game/`" in config
-    for page in (ROOT / "leaderboard").glob("*.html"):
-        assert 'href="../game/">' in page.read_text(), f"{page.name}'s Play button"
-        assert 'href="../">' not in page.read_text()
+    for page in render_board.PAGES:
+        html = render_board.render(page)
+        assert 'href="../game/">' in html, f"{page}'s Play button"
+        assert 'href="../">' not in html
     from tools import admin
     assert admin.GAME_URL == "https://star-conquest.netlify.app/game/"
 
