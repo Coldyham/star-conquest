@@ -44,6 +44,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
 | [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed; the planned opening (Opening: Planned) |
+| [`design/convoy.md`](design/convoy.md) | convoy (built, measured, not shipped; code at `7153065`): supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
@@ -138,6 +139,14 @@ only for a fight; what is deliberately not animated.
 - **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
 - **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; it costs marshal as a host; the deleted first attempt (rules about contested neutrals).
 
+### design/convoy.md
+- **The plan.** Supply per system and turn, objectives as N ships by turn t, defences then guard reservations then strikes by value per ship, launch at the last moment.
+- **Where convoy stands.** Five cells against the roster: above thinker everywhere, level with knower-Predict, below marshal and actuary.
+- **How differently it plays.** Distinct in the opening, close to the phase bots when contested; few strikes converge from more than one source.
+- **Its opening in front of another bot.** Costs in front of marshal, no gain over actuary's Planned; not borrowed.
+- **Where it loses to actuary.** Level at contact, out-traded after it.
+- **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
+
 ### design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
 - **Where marshal stands.** **The current full roster ladder; update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
@@ -210,6 +219,14 @@ the measured result was indistinguishable from the baseline.
 - A planned opening reaching 2 turns past the halfway line: worse at every size. *The clock is about twice the earliest strike.*
 - The planned opening in front of marshal: worse in every cell. *In front of marshal it costs.*
 - **Open, not rejected:** clock 3 for the slow regime.
+
+### convoy ([`design/convoy.md`](design/convoy.md))
+- Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*
+- `STRIKE_PAD` 1.5 and 2.0: worse, 2.0 catastrophic. A doomed garrison staying to fight: 38%. *Same section.*
+- Filling short frontier guards from the interior, staging ships at the last system before the target, spending existing ships before future hulls: all null, deleted. *Same section.*
+- Defence at the nominal roll: a lean (54.8%, z ~1.5), not adopted; worth re-running. *Same section.*
+- Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
+- Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
 
 ### The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
