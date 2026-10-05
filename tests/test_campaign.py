@@ -109,6 +109,16 @@ def test_hand_drawn_and_too_new_configs_are_never_picked():
     assert all(not f.setup.get("custom_map") and f.setup.get("players", 3) != 5 for f in pool)
 
 
+def test_a_config_past_the_standard_box_is_never_picked():
+    big = _game("big", 5, nodes=120)
+    edge = _game("edge", 6, nodes=config.STANDARD_MAX_NODES)
+    pool = campaign.families([big, edge, *GAMES], START)
+    assert [f.setup["nodes"] for f in pool].count(config.STANDARD_MAX_NODES) == 1
+    assert all(f.setup["nodes"] <= config.STANDARD_MAX_NODES for f in pool)
+    graph = _graph(games=[big])   # nothing left but the defaults
+    assert all(n["systems"] <= config.CUSTOM_MAX_NODES for n in graph["nodes"])
+
+
 def test_an_empty_board_still_makes_a_playable_week():
     graph = _graph(games=[])
     assert graph["nodes"] and all(n["systems"] > 0 for n in graph["nodes"])
@@ -126,3 +136,21 @@ def test_the_layout_ignores_whatever_knobs_a_previous_build_left_in_config():
         assert _graph(seed=11) == first
     finally:
         config.NODE_JITTER = before
+
+
+def test_a_symmetric_node_rolls_how_its_sectors_meet():
+    from starconquest import mapgen
+    seen = set()
+    for seed in range(40):
+        for node in _graph(seed=seed)["nodes"]:
+            setup = node["settings"]
+            if setup.get("mode") == "symmetric":
+                seen.add(setup.get("layout", mapgen.SYMMETRIC_LAYOUTS[0]))
+    assert seen == set(mapgen.SYMMETRIC_LAYOUTS)
+
+
+def test_a_layout_people_play_is_kept():
+    ring = [_game("r", 5, mode="symmetric", layout="ring")]
+    nodes = [n for n in _graph(games=ring)["nodes"] if n["kind"] == "home"]
+    for node in nodes:   # homes are never "?" nodes, so every one is that family
+        assert node["settings"]["layout"] == "ring"

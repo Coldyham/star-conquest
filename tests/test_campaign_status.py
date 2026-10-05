@@ -148,7 +148,7 @@ def test_the_watcher_asks_once_the_setup_settles_then_refreshes(monkeypatch):
     watch.pump(settings, now=campaign.SETTLE_S)
     assert len(sent) == 1
     assert sent[0].url.startswith("https://site/api/campaign?token=")
-    assert sent[0].url.endswith("&name=ann")
+    assert sent[0].url.endswith("&name=ann&starting=1")   # from the menu: a game about to begin
 
     sent[0].answer = (pbp.OK, answer(why="grace", graceUntil=NOW + 30 * MIN))
     watch.pump(settings, now=1.0)
@@ -166,6 +166,29 @@ def test_the_watcher_asks_once_the_setup_settles_then_refreshes(monkeypatch):
     sent[2].answer = (pbp.MISSING, '{"error": "not a node"}')
     watch.pump(settings, now=200.0 + campaign.REFRESH_S + 1)
     assert watch.status is None
+
+
+def test_the_game_under_way_asks_with_its_stamp_and_a_new_stamp_asks_again(monkeypatch):
+    watch, sent = _watching(monkeypatch)
+    settings = Settings(seed=42)
+    watch.pump(settings, now=0.0)
+    watch.pump(settings, now=campaign.SETTLE_S)
+    sent[0].answer = (pbp.OK, answer(why="adjacent"))
+    watch.pump(settings, now=1.0)
+    assert campaign.stamp(watch.status) == "adjacent"
+
+    # Into the game, stamped: the answer stays, and the board is asked again at once.
+    watch.pump(settings, now=2.0, start="adjacent")
+    assert watch.status is not None and len(sent) == 2
+    assert sent[1].url.endswith("&name=ann&start=adjacent")
+    # An unstamped game says nothing about its start, which the board trusts.
+    sent[1].answer = (pbp.OK, answer())
+    watch.pump(settings, now=3.0, start="")
+    assert len(sent) == 3 and sent[2].url.endswith("&name=ann")
+    # Back on the menu, a game about to begin again.
+    watch.pump(settings, now=4.0)
+    assert len(sent) == 4 and sent[3].url.endswith("&starting=1")
+    assert campaign.stamp(None) == ""
 
 
 def test_a_changed_setup_drops_the_old_answer_at_once(monkeypatch):
@@ -293,3 +316,29 @@ def test_main_writes_the_label_each_frame_but_never_for_a_watched_replay(monkeyp
     ui.watched = True
     main.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label is None
+
+
+def test_a_game_started_after_losing_access_is_told_its_win_wont_count():
+    late = status(why="late-start", can=False, graceUntil=NOW + 12 * MIN)
+    assert campaign.label(late, 100.0) == "Node 3: not a move"
+    _, lines = campaign.confirm(late, 100.0)
+    assert lines[0] == "A win here won't be a campaign move."
+    assert "only covers a game started before that" in lines[1]
+
+
+def test_the_stamp_taken_at_start_rides_on_the_posted_score(monkeypatch):
+    settings = Settings(seed=42)
+    state, ui, log = main.start_game(settings, 42, False)
+    state.turn = 30            # a challenge with no turns reads as none at all
+    watch = campaign.Watcher()
+    watch.status = status(why="adjacent")
+    main.stamp_campaign(ui, watch)
+    assert ui.campaign_start == "adjacent"
+    shared = main.challenge_settings(settings, state, ui, 42, log)
+    assert shared.challenge is not None and shared.challenge.campaign == "adjacent"
+    back = Settings.from_token(shared.to_token())
+    assert back.challenge is not None and back.challenge.campaign == "adjacent"
+    # Nothing looked up, nothing claimed.
+    watch.status = None
+    main.stamp_campaign(ui, watch)
+    assert main.challenge_settings(settings, state, ui, 42, log).challenge.campaign == ""

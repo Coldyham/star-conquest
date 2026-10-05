@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, campaign, combat, config, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, mapgen, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -75,8 +75,8 @@ _TABS = (
 )
 
 _CH = 34  # control height
-_ROW_H = 58  # vertical pitch between Basic-tab rows (eight of them fit the
-             # fixed panel at 58; at 62 the last one hangs 6px out of it)
+_ROW_H = 52  # vertical pitch between Basic-tab rows (nine of them fit the
+             # fixed panel at 52; at 54 the last one hangs 4px out of it)
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
@@ -794,7 +794,21 @@ def _tab_changed(tab: str, settings: Settings) -> bool:
         if any(settings.ai_strategy[i] != "heuristic" for i in seats):
             return True
         return any(settings.ai[i] != _DEFAULT_AI_PARAMS for i in seats)
+    if tab == "basic" and _layout_changed(settings):
+        return True
     return any(_changed(settings, attr) for attr in _TAB_FIELDS.get(tab, ()))
+
+
+def _layout_changed(settings: Settings) -> bool:
+    """A layout left over from a symmetric setup is not a change to a map it
+    cannot shape — the same rule that keeps it out of the setup's key."""
+    return not settings.layout_inert() and _changed(settings, "layout")
+
+
+def _step_layout(settings: Settings, step: int) -> None:
+    layouts = mapgen.SYMMETRIC_LAYOUTS
+    at = layouts.index(settings.layout) if settings.layout in layouts else 0
+    settings.layout = layouts[(at + step) % len(layouts)]
 
 
 def _draw_tabs(surface, ms: MenuState, settings: Settings, w: int) -> None:
@@ -862,6 +876,18 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
                 ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
             ],
         )
+    y += _ROW_H
+
+    # How a symmetric map's sectors meet. Offered only where it shapes the map;
+    # elsewhere the row says why, rather than vanishing and shifting every row
+    # below it.
+    _row_label(surface, "Layout", left, y, _layout_changed(settings))
+    if drawn:
+        _derived(surface, "hand-drawn", right, y)
+    elif settings.layout_inert():
+        _derived(surface, "symmetric maps only", right, y)
+    else:
+        _stepper(surface, ms, "layout", settings.layout.title(), right, y, value_w=96)
     y += _ROW_H
 
     _row_label(surface, "Seed", left, y, _changed(settings, "seed"))
@@ -1338,8 +1364,8 @@ def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *,
     ms.rects[key] = pygame.Rect(x, y + 14, width, 24)
 
 
-def _stepper(surface, ms, key, value: str, right: int, y: int) -> None:
-    bw, vw = 34, 64
+def _stepper(surface, ms, key, value: str, right: int, y: int, value_w: int = 64) -> None:
+    bw, vw = 34, value_w
     x = right - (bw + vw + bw)
     minus = pygame.Rect(x, y, bw, _CH)
     box = pygame.Rect(x + bw, y, vw, _CH)
@@ -1990,6 +2016,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         settings.mode = "random"
     elif hit == "mode_symmetric":
         settings.mode = "symmetric"
+    elif hit == "layout_dec":
+        _step_layout(settings, -1)
+    elif hit == "layout_inc":
+        _step_layout(settings, +1)
     elif hit == "seed_field":
         ms.editing_seed = True
         ms.seed_text = "" if settings.seed is None else str(settings.seed)

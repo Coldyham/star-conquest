@@ -200,7 +200,7 @@ def _generated(settings: Settings, seed: int | None = None) -> CustomMap:
     # A larger board is laid out in a larger box (`config.world_side`) that this
     # canvas cannot hold, so the creator only ever adopts a standard-sized one.
     nodes = min(settings.nodes, config.STANDARD_MAX_NODES)
-    state = mapgen.generate(concrete, settings.mode, nodes, settings.players)
+    state = mapgen.generate(concrete, settings.mode, nodes, settings.players, settings.layout)
     return _centred(custommap.from_state(state))
 
 

@@ -14,8 +14,8 @@ decided against. **Check that list before proposing a mechanism, a bot tactic or
 a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
-as a whole, then `knower`, `marshal`, `marshal-pricing` and `marshal-flow`;
-`pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
+as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow` and
+`actuary`; `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -43,6 +43,8 @@ uv run python -m tests.sim --film --trials 200   # ...also checking every turn's
 uv run python -m tests.sim --trials 200          # batch stats (winners, length, timeouts)
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
+uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a
+                                                 # bot's aux knob (here Oracle: Search)
 
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot:
                                                 # legal orders, read-only, reproducible
@@ -51,7 +53,7 @@ uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, comput
 uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
 uv run python tools/admin.py matches            # moderation: delete scores/maps/
-                                                # matches, rename, drop tags, reissue
+                                                # matches/campaigns, rename, drop tags, reissue
                                                 # or reopen a seat (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
@@ -343,7 +345,10 @@ already resolve simultaneously. The rationale for each rule is in
 - **Crowns, the weekly campaign and embargoes derive their state from
   `counted_scores` and stored maps; nothing about who holds what is stored.**
   `campaign_games` matches by jsonb equality, never `sc_config_key`. The
-  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored, and
+  campaign's one timer (`GRACE_MS`) is derived in `fold`, never stored; it
+  covers only a game started with access, which the game stamps at Start
+  (`Challenge.campaign` → `scores.campaign_start`, a claim that can only narrow
+  the grace, so a blank is trusted). And
   `attemptStatus` is the one answer to "may I move here" for the page and the
   game alike: the game asks
   `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)
@@ -388,8 +393,11 @@ already resolve simultaneously. The rationale for each rule is in
   new `AiParams` fields. Detail: `docs/design/bots.md`.
 - **A bot can warn about a setup** with `setup_warning(settings, seats)`
   (`ai.setup_warning`, `settings.setup_warnings`), raised on Start and on the
-  play-by-post roster's Confirm. knower's is fitted in
-  `docs/design/knower.md`, "Cost per decide".
+  play-by-post roster's Confirm; a hook that declares `people` is also told
+  which seats a person holds. knower's is fitted in
+  `docs/design/knower.md`, "Cost per decide", and counts every rival bot that
+  declares `decide_ms(settings, seat)` (`ai.decide_ms`; actuary does), since a
+  Search seat runs each one on every turn of every line it rolls out.
 - **An all-bot game has no human seat.** `build_state` clears the `is_human`
   `mapgen` stamps on pid 1 when `Settings.autoplay` is set. The seat is claimed
   by the first turn *ended* under manual control (`end_turn`'s `claim_seat`,
@@ -447,6 +455,13 @@ already resolve simultaneously. The rationale for each rule is in
 Two modes: `random` (jittered grid, relaxation, a planar Euclidean MST plus a few
 crossing-rejected extra edges) and `symmetric` (one sector rotated about a
 shared centre). Both must stay connected and planar-ish (`test_mapgen.py`).
+A symmetric map's `Settings.layout` (`mapgen.SYMMETRIC_LAYOUTS`: `hub`, `ring`,
+`wheel`, `core`) says what joins the sectors. **`hub` must keep drawing exactly
+the board it always did** (`test_symmetric.py` pins it; a change is a
+`RULES_VERSION` bump), every added lane is chosen on sector 0 and rotated, and
+nothing past the sectors draws from `state.rng`. `layout` is inert off a
+generated symmetric map (`Settings.layout_inert`), and is then read as `hub` by
+the key and pruned from the link.
 `symmetric` can return **more nodes than asked** (41 at 40), hence
 `config.CUSTOM_MAX_NODES`. Past `config.STANDARD_MAX_NODES` (40) the box grows
 (`config.world_side`); below it nothing moves. The Advanced tab's lane survey

@@ -56,7 +56,63 @@ so treat it as history rather than a current ranking.
 Depth 0 is thinker-*strength*, not thinker: `RESERVE_FLOOR` is 0 against
 thinker's 1, `_richness` peeks a hop further (`BEYOND_DECAY`), and tie-breaks
 are deterministic where thinker's draw from `state.rng`. It measures stronger
-than thinker (80%-20%), so the two are not interchangeable.
+than thinker (73-77% on the current code; an earlier, unrecorded run read
+80%-20%), so the two are not interchangeable. All three settings against both
+neighbours are under the next heading.
+
+## Each Oracle setting against thinker and marshal
+
+knower at Off / Predict / Search (`aux` 0/1/2) head to head with thinker and
+marshal, two seats, both seatings per seed, everything else default
+(2026-10, at `cf3408b`). Each knower row is one `--aux` ladder, which also
+plays thinker against marshal; the three cells, at `--aux knower=0`, `1` and `2`:
+
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 100
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 50 --mode symmetric
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 50 --nodes 24 --max-turns 1500  # with config.SHIP_LY_PER_TURN = 3
+
+The ladder's per-pair grid shows rates only; the counts below came from a
+driver that stamped seats the same way and logged each game. Seeds 1-30 of the
+first cell reproduce the roster ladder's knower cells (Predict) in
+[`marshal.md`](marshal.md) to the game, 51-4 and 24-30. Win rate is knower's,
+over finished games; ± is a 95% interval:
+
+    random, 18 nodes, 6 ly/turn, seeds 1-100 (200 games a cell)
+                  vs thinker              vs marshal            s/game
+      Off         73% ±7 (125-47)  28 TO  14% ±5 (25-158)  17 TO   0.07
+      Predict     85% ±5 (156-28)  16 TO  38% ±7 (72-119)   9 TO   0.15
+      Search      99% ±2 (196-3)    1 TO  81% ±5 (162-37)   1 TO   3.5
+
+    symmetric (hub), 18 nodes, 6 ly/turn, seeds 1-50 (100 games a cell)
+      Off        100% (26-0)       74 TO   3% (1-34)       65 TO   0.13
+      Predict    100% (59-0)       41 TO  30% ±15 (11-26)  63 TO   0.31
+      Search     100% (100-0)       0 TO  88% ±7 (74-10)   16 TO   4.0
+
+    random, 24 nodes, 3 ly/turn, --max-turns 1500, seeds 1-50 (100 a cell)
+      Off         77% ±9 (61-18)   21 TO   6% ±5 (5-76)    19 TO   0.27
+      Predict     84% ±8 (67-13)   20 TO  22% ±9 (19-69)   12 TO   0.68
+      Search     100% (100-0)       0 TO  62% ±10 (61-38)   1 TO  14
+
+What it says:
+
+- **Each setting is a full tier.** On the random maps Off beats thinker about
+  three games in four and loses to marshal about six in seven. Predict loses
+  to marshal in every cell. Search is the only setting that beats marshal, and
+  it does so in all three cells.
+- **The roster ladder's 93% for knower over thinker was a lucky 30 seeds.**
+  Over 100 seeds Predict reads 85%, and its 44% against marshal reads 38%. The
+  ladder's knower is Predict (default `AiParams`), so the ladder ranks the
+  default setting, not the bot at its best; `bot_replay` already runs it at
+  Search (`REPLAY_AUX`).
+- **Search ends games.** Off and Predict time out a lot against thinker on
+  the symmetric map (74 and 41 of 100). Search times out once against thinker
+  in all 400 of its games across the three cells. On the symmetric map the
+  timeout counts are half the result, since the win rates there rest on a few
+  dozen finished games.
+- **Cost.** Search costs 13-23x Predict per game (whole-game seconds, four
+  games in parallel on a 4-core box, so read the ratio, not the absolute).
+  [Cost per decide](#cost-per-decide-and-where-the-search-guard-trips) is the
+  per-turn measurement.
 
 ## Built, measured, removed
 
@@ -193,6 +249,10 @@ The two aggressive postures stopped paying once a real rusher was a candidate,
 which expresses "commit everything" far better than a margin tweak to knower's
 own phases. Dropping them paid for the whole depth increase and more. They are
 still listed in `POSTURE_VARIANTS`, outside the width.
+
+actuary was measured as a fifth candidate (10.4% of contested picks, its move
+distinct from the default 91% of the time) but is not in the list; see
+[`actuary.md`](actuary.md), "As one of knower's borrowed candidates".
 
 ## How far to look: the longest lane, plus a cushion
 
@@ -355,6 +415,20 @@ longest lane / plies reached, W where it warns:
 
 So it is a slow-ship warning now: almost every map at 1 ly/turn, the largest at
 3, never at the default speed or faster. Off and Predict never warn.
+
+**Rival bots that think are counted too.** `ply_ms` was fitted against
+opponents that answer in microseconds, so it holds nothing for one that takes
+milliseconds. A Search seat runs every rival bot's `decide` on each rolled turn
+of each line (`_rollout_decide`), and the forecast runs it once more, so a rival
+costing `r` ms adds `_lines() * r` to every ply and `r` to the root (`_rivals`,
+read off `ai.decide_ms`, which a model declares). People, oracles and other
+knower seats are modelled with `_blind`, already inside `ply_ms`, and are not
+counted. With two actuary seats on 40 systems (6 ly/turn) the warning now
+fires and says the search reaches about 2 of its 4-turn lanes; with marshal in
+the same seats it stays silent. Checked against a timed game (guards lifted,
+40 systems, 3 seats, horizon 8, load 0.3): knower's decide p75 512 ms against
+the model's ~560 ms, and actuary's calls inside its rollouts p75 4.4 ms against
+its declared 5.0.
 
 Every figure it quotes is turn one's. With `SHIP_SPEED_GROWTH_PCT` on that is the
 slowest the game gets — lanes shorten and plies cheapen as ships speed up, and

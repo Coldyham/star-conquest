@@ -125,3 +125,29 @@ def test_campaign_scores_are_the_weeks_hand_played_scores_on_its_nodes(board):
     games = _psql("select node_id, kind, game_key from campaign_games"
                   " where week_start = '2026-09-28'", board)
     assert games.splitlines() == ["0|field|node"]   # nobody has posted on the home
+
+
+def test_campaign_scores_carry_the_stamp_from_the_start_of_the_game(board):
+    """`scores.campaign_start` rides through to `campaign_scores` for fold's
+    grace; blank by default, and nothing but a reason's shape is stored."""
+    _psql("""
+      insert into campaigns (week_start, graph) values ('2026-10-05', jsonb_build_object(
+        'nodes', jsonb_build_array(jsonb_build_object('id', 4, 'kind', 'field', 'settings',
+          '{"mode":"random","players":3,"nodes":18,"seed":400}'::jsonb)),
+        'lanes', '[]'::jsonb));
+      insert into games (game_key, mode, players, nodes, seed, settings_json) values
+        ('stamped', 'random', 3, 18, 400, '{"mode":"random","players":3,"nodes":18,"seed":400}');
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, campaign_start)
+        values ('stamped', 1, 40, 2, 40, '', '2026-10-05 01:00Z', 'adjacent');
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at)
+        values ('stamped', 2, 38, 2, 38, '', '2026-10-05 02:00Z');
+    """, board)
+    rows = _psql("select user_name, campaign_start from campaign_scores"
+                 " where week_start = '2026-10-05' order by submitted_at", board)
+    assert rows.splitlines() == ["alice|adjacent", "bob|"]
+    refused = subprocess.run(
+        ["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+         "insert into scores (game_key, user_id, turns, lost, hand, raw_token, campaign_start)"
+         " values ('stamped', 3, 30, 0, 30, '', 'Adjacent; drop')"],
+        capture_output=True, text=True)
+    assert refused.returncode != 0 and "campaign_start" in refused.stderr

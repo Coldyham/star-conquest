@@ -129,7 +129,7 @@ the registry is incomplete while yours is importing.
 ## Start by asking
 
 Ask before writing anything. The person you are working for wants *their* bot,
-and the roster already has six bots that all think alike (see the next section)
+and the roster already has five bots that think alike (see the next section)
 — your job is to get an idea out of them, not to fit them to the template at the
 bottom of this page.
 
@@ -147,11 +147,12 @@ bottom of this page.
    *known* for. If they have none, offer some of these, none of which any
    existing bot does:
 
-   - **Solve the whole board at once.** Every bot in the roster decides system
-     by system, in isolation. Treat a turn as one pool of ships against every
-     target and allocate it globally — an assignment or flow problem rather than
-     a loop. (`marshal` needed a whole extra phase to recover leftovers a global
-     solve would never have created.)
+   - **Solve the whole board at once.** Every bot in the roster but `actuary`
+     decides system by system, in isolation. Treat a turn as one pool of ships
+     against every target and allocate it globally — an assignment or flow
+     problem rather than a loop. (`marshal` needed a whole extra phase to recover
+     leftovers a global solve would never have created. `actuary` is a greedy
+     take on it, one launch at a time; an exact solve has not been tried.)
    - **Play the graph, not the fight.** Aim at articulation points and cut the
      enemy's territory in two; value a system for what it disconnects rather than
      for its garrison.
@@ -178,11 +179,13 @@ a line or two what each does — they will want to tune them.
 
 ## What the incumbents already do — and where they are blind
 
-Six bots ship with the game, and five of them are the same idea: *walk my
+Seven bots ship with the game, and five of them are the same idea: *walk my
 systems, score the neighbours, launch when a margin is cleared.* Three are
 literally forks of one another. The measurements below are real and worth
 respecting — but they are measurements of **that** frame, and the frame is not
-the game.
+the game. The newest, `actuary`, has no such loop: it projects every system's
+future, values the board in ships, and keeps whichever launch raises that value
+most. It tops the ladder at the default settings.
 
 The evidence is `knower`, the strongest bot here, which searches by trying
 several candidate plans and keeping the best. Over 1128 contested decisions, the
@@ -287,7 +290,8 @@ uv run python -m tests.sim --ladder --trials 20    # against the whole roster
 `--swap` or `--ladder` rather than a single game: both play every seating, so a
 result is not merely a report on which corner of the map is stronger. Beating
 `heuristic` is the first bar. The roster above it, weakest to strongest, is
-`rusherplus`, `claudebot`, `thinker`, `marshal`, `knower`.
+`rusherplus`, `claudebot`, `thinker`, `marshal`, `actuary`, `knower` (`knower`
+on its Search setting; at its default, `actuary` beats it).
 
 **Read the head-to-head grid, not just the ranking.** `--ladder` prints who beat
 whom, and a bot that finishes fifth overall while taking games off `marshal` is a

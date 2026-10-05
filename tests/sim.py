@@ -30,6 +30,12 @@ Cap wall-clock time per decide() call to keep an "oracle"-style bot (one that
 pre-simulates rivals' moves, e.g. models/knower.py) from brute-forcing a whole
 game tree; a bot that blows its budget just takes no orders that turn:
     uv run python -m tests.sim --ladder --trials 50 --bot-timeout 0.5
+
+Set a strategy's ``AiParams.aux`` knob (its one bot-defined setting, e.g.
+knower's Oracle) for every seat that strategy holds; repeatable, one per name.
+Every other seat keeps the default. This is how knower's three Oracle settings
+were measured against thinker and marshal (docs/design/knower.md):
+    uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 100
 """
 
 from __future__ import annotations
@@ -37,9 +43,10 @@ from __future__ import annotations
 import argparse
 import atexit
 import itertools
+import math
 import signal
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from starconquest import ai, config, engine, mapgen, replay, settings, turnfilm
 from starconquest.model import AiParams, GameState
@@ -251,7 +258,8 @@ def print_state(state: GameState) -> None:
     print(f"turn {state.turn:>3} | " + "  ".join(parts) + f"  | neutral {neutral}, fleets {fleets}")
 
 
-def _assign_strategies(state: GameState, strategies: list[str]) -> None:
+def _assign_strategies(state: GameState, strategies: list[str],
+                       aux: dict[str, float] | None = None) -> None:
     """Stamp non-neutral seats with named strategies, in seat order (1-based).
 
     Mirrors ``settings.build_state``: the seat with player id ``i`` takes
@@ -259,6 +267,10 @@ def _assign_strategies(state: GameState, strategies: list[str]) -> None:
     (``"heuristic"``). Names must already be registered (``ai.load_models`` /
     ``ai.STRATEGIES``) — an unregistered name would have ``decide`` silently fall
     back to the heuristic, so the CLI validates them up front rather than here.
+
+    ``aux`` maps a strategy name to the ``AiParams.aux`` every seat playing it
+    gets (``--aux``); only that one field moves, and a name it doesn't mention
+    keeps its default params.
     """
     for player in state.players.values():
         if player.is_neutral:
@@ -266,6 +278,8 @@ def _assign_strategies(state: GameState, strategies: list[str]) -> None:
         idx = player.id - 1
         if 0 <= idx < len(strategies):
             player.ai_strategy = strategies[idx]
+        if aux and player.ai_strategy in aux:
+            player.ai_params = replace(player.ai_params, aux=aux[player.ai_strategy])
 
 
 def _rotations(strategies: list[str]) -> list[list[str]]:
@@ -290,13 +304,15 @@ def play(
     strategies: list[str] | None = None,
     bot_timeout: float = 0.0,
     film: bool = False,
+    layout: str = mapgen.SYMMETRIC_LAYOUTS[0],
+    aux: dict[str, float] | None = None,
 ) -> SimResult:
-    state = mapgen.generate(seed, mode, nodes, players)
+    state = mapgen.generate(seed, mode, nodes, players, layout)
     # AI-vs-AI: drive every slot with the AI, including the human's seat.
     for p in state.players.values():
         p.is_human = False
-    if strategies:
-        _assign_strategies(state, strategies)
+    if strategies or aux:
+        _assign_strategies(state, strategies or [], aux)
     check_invariants(state)
     if verbose:
         print_state(state)
@@ -495,23 +511,26 @@ def positions(log: replay.GameLog, every: int, skip_last: int = 0) -> list[int]:
 
 
 def run_trials(seeds, mode, nodes, players, max_turns, strategies=None, bot_timeout=0.0,
-               film=False) -> list[SimResult]:
+               film=False, layout=mapgen.SYMMETRIC_LAYOUTS[0], aux=None) -> list[SimResult]:
     return [play(s, mode, nodes, players, max_turns, strategies=strategies,
-                 bot_timeout=bot_timeout, film=film) for s in seeds]
+                 bot_timeout=bot_timeout, film=film, layout=layout, aux=aux) for s in seeds]
 
 
-def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0) -> list[SwapGame]:
+def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0,
+             layout=mapgen.SYMMETRIC_LAYOUTS[0], aux=None) -> list[SwapGame]:
     """Play every rotation of the roster on each seed (same map, seats rotated)."""
     n = len(strategies)
     games: list[SwapGame] = []
     for seed in seeds:
         for assignment in _rotations(strategies):
-            r = play(seed, mode, nodes, n, max_turns, strategies=assignment, bot_timeout=bot_timeout)
+            r = play(seed, mode, nodes, n, max_turns, strategies=assignment, bot_timeout=bot_timeout,
+                     layout=layout, aux=aux)
             games.append(SwapGame(r, assignment))
     return games
 
 
-def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0) -> list[SwapGame]:
+def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0,
+               layout=mapgen.SYMMETRIC_LAYOUTS[0], aux=None) -> list[SwapGame]:
     """Pairwise round-robin: every unordered pair, both seatings, on every seed.
 
     Two players per game, so a win means "beat *that* bot" rather than "survived
@@ -523,7 +542,8 @@ def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0) -> list[S
     for seed in seeds:
         for a, b in itertools.combinations(roster, 2):
             for assignment in ([a, b], [b, a]):
-                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout)
+                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout,
+                         layout=layout, aux=aux)
                 games.append(SwapGame(r, assignment))
     return games
 
@@ -674,10 +694,41 @@ def _report_degraded() -> None:
             print(f"  {note}")
 
 
+def _parse_aux(ap: argparse.ArgumentParser, specs: list[str],
+               strategies: list[str] | None) -> dict[str, float]:
+    """``--aux NAME=VALUE`` flags as ``{name: aux}``, refusing anything that
+    would silently do nothing: a malformed pair, a name given twice, or a name
+    no seat in this run plays. Prints what each setting means (e.g. "Oracle:
+    Search") so a pasted result says which knower it was."""
+    roster = strategies or ["heuristic"]
+    aux: dict[str, float] = {}
+    for spec in specs:
+        name, sep, value = spec.partition("=")
+        try:
+            number = float(value)
+        except ValueError:
+            number = math.nan
+        if not sep or not name or not math.isfinite(number):
+            ap.error(f"--aux takes NAME=VALUE, e.g. knower=2; got {spec!r}")
+        if name in aux:
+            ap.error(f"--aux {name} given twice")
+        if name not in roster:
+            ap.error(f"--aux {name}: no seat plays it; the roster is {', '.join(roster)}")
+        aux[name] = number
+    for name, value in aux.items():
+        spec = ai.aux_spec(name)
+        stop = ai.aux_stop_name(name, value)
+        meaning = f" ({spec[0]}: {stop})" if spec and stop else f" ({spec[0]})" if spec else " (ignored: it declares no AUX_LABEL)"
+        print(f"aux: {name}={value:g}{meaning}")
+    return aux
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Headless AI-vs-AI simulation harness")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--mode", choices=["random", "symmetric"], default="random")
+    ap.add_argument("--layout", choices=mapgen.SYMMETRIC_LAYOUTS, default=mapgen.SYMMETRIC_LAYOUTS[0],
+                    help="how a symmetric map's sectors are joined (ignored on a random map)")
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--players", type=int, default=None, help=f"seat count (defaults to the number of --ai names, else {config.DEFAULT_PLAYERS})")
     ap.add_argument(
@@ -688,6 +739,8 @@ def main() -> None:
     )
     ap.add_argument("--swap", action="store_true", help="free-for-all: rotate the roster through every seat (cancels start bias) and rank by total wins per strategy")
     ap.add_argument("--ladder", action="store_true", help="pairwise round-robin: every pair head-to-head, both seatings, ranked with a matchup grid")
+    ap.add_argument("--aux", action="append", default=[], metavar="NAME=VALUE",
+                    help="set strategy NAME's ai_params.aux knob (e.g. knower=2 for Oracle: Search) on every seat it holds; repeatable")
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
     ap.add_argument("--bot-timeout", type=float, default=0.0, help="wall-clock seconds allowed per decide() call (0 = disabled)")
@@ -713,6 +766,8 @@ def main() -> None:
         _register_external(args)
         strategies = ai.available_strategies()
 
+    aux = _parse_aux(ap, args.aux, strategies)
+
     if args.swap or args.ladder:
         flag = "--swap" if args.swap else "--ladder"
         seats = 2 if args.ladder else len(strategies)
@@ -722,10 +777,12 @@ def main() -> None:
             ap.error(f"{flag} sets the seat count itself; omit --players (it is forced to {seats})")
         seeds = range(args.seed, args.seed + args.trials)
         if args.ladder:
-            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
+            games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,
+                               args.layout, aux)
             _summarise_ladder(games, strategies, args.trials)
         else:
-            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout)
+            games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,
+                             args.layout, aux)
             _summarise_swap(games, strategies, args.trials)
         return
 
@@ -738,10 +795,12 @@ def main() -> None:
 
     if args.trials > 1:
         seeds = range(args.seed, args.seed + args.trials)
-        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout, args.film)
+        results = run_trials(seeds, args.mode, args.nodes, players, args.max_turns, strategies, args.bot_timeout, args.film,
+                             args.layout, aux)
         _summarise(results, strategies)
     else:
-        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout, args.film)
+        r = play(args.seed, args.mode, args.nodes, players, args.max_turns, args.verbose, strategies, args.bot_timeout, args.film,
+                 args.layout, aux)
         if r.winner == 0:
             winner = "draw"
         elif r.winner is None:
