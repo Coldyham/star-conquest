@@ -57,6 +57,8 @@ uv run python tools/admin.py matches            # moderation: delete scores/maps
                                                 # or reopen a seat (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
+uv run python tools/bot_distance.py             # how differently each bot plays
+                                                # the same positions, by phase
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
