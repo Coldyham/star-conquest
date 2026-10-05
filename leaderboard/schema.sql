@@ -438,7 +438,8 @@ create index if not exists bot_scores_match_idx
 -- ---------------------------------------------------------------------------
 -- campaigns: the weekly meta-map (campaign.html, js/campaign.mjs). One row per
 -- week, written once near its start by the worker (tools/campaign.py) and never
--- again — the only stored part of the campaign. It has to be stored: which
+-- again (tools/admin.py delete-campaign removes one by hand, and the worker then
+-- makes it afresh) — the only stored part of the campaign. It has to be stored: which
 -- configs existed and which seeds were free are facts about the moment it was
 -- made, the "?" nodes are random rolls, and the layout comes from the game's
 -- own mapgen, which the board cannot run.
@@ -1009,8 +1010,9 @@ grant insert, update on public.bot_scores to service_role;
 grant select on public.scores to service_role;
 -- select: which scores already have a verdict (`verify_scores.pending`).
 grant select, insert, update on public.score_checks to service_role;
--- The weekly campaign worker (tools/campaign.py) writes each week's map once.
-grant select, insert on public.campaigns to service_role;
+-- The weekly campaign worker (tools/campaign.py) writes each week's map once;
+-- delete is tools/admin.py's delete-campaign, so a bad week can be made again.
+grant select, insert, delete on public.campaigns to service_role;
 -- ...and counts last week's active players off the same rule the board uses.
 grant select on public.counted_scores to service_role;
 -- select + delete for the worker (read a replay, prune one a longer upload has
