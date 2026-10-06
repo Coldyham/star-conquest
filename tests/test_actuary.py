@@ -287,6 +287,13 @@ def _planned(state, seat=1):
     return state
 
 
+@pytest.fixture
+def small_side(ac, monkeypatch):
+    """Let the opening run on a hand-built board. Ours are small enough to read
+    by eye, which puts them under `OPENING_MIN_SIDE`."""
+    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 0)
+
+
 def _costly_neutral(rival_lane):
     """Our home 1 next to a costly, poor neutral 2; the rival's home 3 is
     ``rival_lane`` turns beyond a neutral 4 that sits between us."""
@@ -325,7 +332,7 @@ def test_planned_orders_are_legal_and_reproducible(ac):
         engine.end_turn(state, decide=ai.decide)
 
 
-def test_the_opening_ends_at_contact(ac):
+def test_the_opening_ends_at_contact(ac, small_side):
     """Bordering a rival, or a rival fleet heading for us, hands the seat to the
     ledger."""
     state = _costly_neutral(30)
@@ -339,7 +346,20 @@ def test_the_opening_ends_at_contact(ac):
     assert ac.opening(state, 1) is None
 
 
-def test_after_contact_planned_plays_the_ledger(ac):
+def test_a_side_too_small_to_plan_is_left_to_the_ledger(ac, monkeypatch):
+    """Our side counts what we hold plus the region: here home 1 and neutrals
+    2 and 4, three systems."""
+    state = _costly_neutral(30)
+    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 3)
+    assert ac.opening(state, 1) is not None
+    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 4)
+    assert ac.opening(state, 1) is None
+    planned = _orders(ac, state)
+    state.players[1].ai_params = AiParams(aux=0.0)
+    assert planned == _orders(ac, state)
+
+
+def test_after_contact_planned_plays_the_ledger(ac, small_side):
     state = _costly_neutral(30)
     state.systems[4].owner_id = 2
     planned = _orders(ac, state)
@@ -351,7 +371,7 @@ def test_a_neutral_equally_near_a_rival_is_not_ours_to_take(ac):
     assert ac._Opening(_costly_neutral(2), 1).region == {2}
 
 
-def test_keeps_its_ships_when_contact_is_near(ac):
+def test_keeps_its_ships_when_contact_is_near(ac, small_side):
     """The rival can land on us in four turns; neutral 2 costs nearly six ships
     even taken with everything, and repays a sixth of one a turn."""
     state = _costly_neutral(2)
@@ -359,13 +379,13 @@ def test_keeps_its_ships_when_contact_is_near(ac):
     assert not any(dst == 2 for _, dst, _ in _orders(ac, state))
 
 
-def test_spends_them_when_contact_is_far(ac):
+def test_spends_them_when_contact_is_far(ac, small_side):
     state = _costly_neutral(30)
     assert ac._Opening(state, 1).clock > 20
     assert any(dst in (2, 4) for _, dst, _ in _orders(ac, state))
 
 
-def test_moves_ships_with_nothing_to_take_towards_the_expansion(ac):
+def test_moves_ships_with_nothing_to_take_towards_the_expansion(ac, small_side):
     """Home 1 is inland; 5 borders the neutrals, so 1's ships go to 5."""
     state = _planned(_board({1: (1, 20, 3), 5: (1, 0, 3), 2: (0, 4, 2), 3: (2, 12, 3)},
                             [(1, 5, 2), (5, 2, 2), (2, 3, 40)]))

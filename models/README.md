@@ -282,7 +282,8 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first
-contact, which its *Opening* knob can turn off), `knower.py` (the oracle — it runs every rival's
+contact when its side of the map is big enough to, which its *Opening* knob can
+turn off), `knower.py` (the oracle — it runs every rival's
 own `decide` before the engine asks for it).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
