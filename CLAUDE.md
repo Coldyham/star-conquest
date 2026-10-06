@@ -338,7 +338,8 @@ already resolve simultaneously. The rationale for each rule is in
   (`standings.botWatchKind`). `bot_scores` has no public insert path.
 - **The game uploads replays and the worker checks scores against them.**
   `share.post_log` sends; `tools/verify_scores.py` records `verified` /
-  `mismatch` / `unreadable` / `missing` (and `outdated`) in `score_checks`,
+  `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
+  rival lineup the setup no longer deals) in `score_checks`,
   binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
