@@ -32,7 +32,8 @@ plays until it first borders a rival. *Planned*, the default, treats the
 land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival,
 and scores a dozen expansion plans by the ships and income they would hold when a
 rival could first strike. It plays the first turn of the best plan, and the
-ledger takes over at contact. *Greedy* is the ledger from the first turn.
+ledger takes over at contact, or from the first turn when our side of the map is
+too small to plan. *Greedy* is the ledger from the first turn.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -75,6 +76,7 @@ GREEDY, PLANNED = 0, 1          # the Opening knob's stops; anything unreadable 
 OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
 OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
 OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
+OPENING_MIN_SIDE = 7            # a side (held + region) smaller than this is left to the ledger
 OPENING_ORDERS = ("value", "near", "cheap")
 OPENING_SENDS = ("lean", "mass")
 OPENING_SKIPS = (True, False)
@@ -562,8 +564,8 @@ def _with(arrivals, t, owner, ships):
 # The planned opening (Opening: Planned)
 # --------------------------------------------------------------------------- #
 def opening(state, pid):
-    """This turn's orders under the planned opening while the seat borders no
-    rival, else ``None`` (and the ledger plays). Measurements behind it:
+    """This turn's orders under the planned opening until `_Opening.over`, else
+    ``None`` (and the ledger plays). Measurements behind it:
     "The planned opening" in docs/design/actuary.md."""
     plan = _Opening(state, pid)
     if plan.over():
@@ -619,15 +621,15 @@ class _Opening:
         return max(1, min(OPENING_CLOCK_MAX, round(OPENING_CLOCK_SCALE * best)))
 
     def over(self):
-        """Bordering a live rival, a rival fleet heading for us, or nothing left
-        in the region."""
+        """Bordering a live rival, a rival fleet heading for us, or our side of
+        the map (what we hold plus the region) under `OPENING_MIN_SIDE`."""
         sysmap = self.state.systems
         for sid in self.owned:
             if any(sysmap[n].owner_id in self.rivals for n in self.travel[sid]):
                 return True
         if any(f.owner_id in self.rivals and f.dest_id in self.owned for f in self.state.fleets):
             return True
-        return not self.region
+        return not self.region or len(self.owned) + len(self.region) < OPENING_MIN_SIDE
 
     def orders(self):
         best, best_score = [], -math.inf
