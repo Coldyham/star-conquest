@@ -37,6 +37,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning |
+| [`design/par.md`](design/par.md) | The par search spike: the floor, lucky and honest dice, what a rewind does to the rng, first readings |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
@@ -105,6 +106,9 @@ only for a fight; what is deliberately not animated.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
+### design/par.md
+- **Par search (spike).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice; the beam search; first readings; the `verify_scores` gap it exposes.
+
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
 

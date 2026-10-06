@@ -284,6 +284,13 @@ seat produces a log that verifies like any other. That is what `hand` is for, an
 the verifier recomputes it from the log's own per-turn autoplay flags rather than
 trusting the number in the link.
 
+Nor does it prove the game was played under the real rules of chance. The
+verifier replays recorded orders and recorded dice. It does not check that the
+dice came from the seed (it can't, since a rewind resets the stream), or that
+the bots' orders are what those bots would have played. A log with hand-picked
+dice or doctored bot moves verifies. `tools/par_search.py`'s lucky lines are one
+example (`docs/design/par.md`). This is a known limit, not yet addressed.
+
 ### Watching one back
 
 A posted score names its replay, so the board can offer *Watch* — and the link
