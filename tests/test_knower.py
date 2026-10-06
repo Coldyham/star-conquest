@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from starconquest import ai, engine, mapgen
+from starconquest import ai, config, engine, mapgen
 from starconquest.model import GameState, Order, Player, System
 from tests import sim
 
@@ -586,6 +586,26 @@ def test_an_external_candidate_never_touches_the_real_board(kn):
 
     assert kn._fingerprint(state) == fingerprint, "a candidate mutated the board"
     assert state.rng.getstate() == rng_state, "a candidate drew from the real rng"
+
+
+def test_an_external_candidate_reads_its_own_default_aux(kn):
+    """`aux` means something different to every bot, so a borrowed candidate must
+    not read ours: under Search it would take our Oracle stop (2) as its own knob."""
+    seen = []
+
+    def spy(state, pid):
+        seen.append(state.players[pid].ai_params.aux)
+        return []
+
+    ai.register("aux_spy_test", spy)
+    try:
+        state = _state()
+        state.players[2].ai_params.aux = 2
+        kn._external_plan(state, 2, "aux_spy_test", 11)
+        assert seen == [config.AI_AUX], "a borrowed candidate read our Oracle stop"
+        assert state.players[2].ai_params.aux == 2, "the real seat's aux was touched"
+    finally:
+        ai.STRATEGIES.pop("aux_spy_test", None)
 
 
 def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
