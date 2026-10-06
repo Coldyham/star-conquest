@@ -202,8 +202,10 @@ order, fight resolution or map generation from a seed (and
 `test_leaderboard_sync` pins the pair). Version-1 logs and outdated logs
 (`GameLog.is_current`) are declined rather than replayed as if they reproduced.
 A log also carries the per-turn `"ai"` flag (for `hand_turns` and the seat claim),
-`"rules"` (forwarding rules) and `match_id` (from `settings.fresh_rng`; `truncate`
-keeps it, `fork` mints a new one). History mode is shell-only (`Ui.history`,
+`"rules"` (forwarding rules), `match_id` (from `settings.fresh_rng`; `truncate`
+keeps it, `fork` mints a new one) and `strategies`, each seat's bot as built,
+which `reconstruct` stamps back so a random seat keeps the bot it was dealt
+whatever the roster does since. History mode is shell-only (`Ui.history`,
 `main.build_history`); rewind truncates mid-game and forks a finished game.
 Reasons and alternatives: `docs/design/core.md`.
 
@@ -338,7 +340,8 @@ already resolve simultaneously. The rationale for each rule is in
   (`standings.botWatchKind`). `bot_scores` has no public insert path.
 - **The game uploads replays and the worker checks scores against them.**
   `share.post_log` sends; `tools/verify_scores.py` records `verified` /
-  `mismatch` / `unreadable` / `missing` (and `outdated`) in `score_checks`,
+  `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
+  rival lineup the setup no longer deals) in `score_checks`,
   binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
@@ -377,8 +380,11 @@ already resolve simultaneously. The rationale for each rule is in
 - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`)
   is resolved inside `build_state` by `settings.resolve_strategy`, never by a
   dispatcher bot. The pick is derived (`random.Random(f"{seed}:strategy:{pid}")`)
-  from `ai.available_strategies()`. `Settings` keeps `"random"`; the win overlay
-  (`render._winner_label`) reveals the bot. Detail: `docs/design/core.md`.
+  from `settings.RANDOM_POOL`, never the loaded roster. **Editing the pool
+  re-deals every random map ever shared**, so a new bot joins it only on purpose
+  (`test_the_pool_still_deals_what_it_dealt`). `Settings` keeps `"random"`; the
+  win overlay (`render._winner_label`) reveals the bot. Detail:
+  `docs/design/core.md`.
 - **A bot that reads other seats** (see `models/knower.py`) must never call
   `ai.load_models()`, must read `ai.STRATEGIES` lazily inside `decide`, and must
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot

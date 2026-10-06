@@ -232,7 +232,9 @@ and a plan for the whole of it can be searched.
   ships one hop towards the nearest of ours that has. The first turn of the
   best-scoring policy is played, and the search runs again next turn.
 - **The hand-over.** The opening ends when an owned system borders a live
-  rival's, when a rival fleet heads for one of ours, or when the region is empty.
+  rival's, when a rival fleet heads for one of ours, or when our side of the map
+  (what we hold plus the region) is under `OPENING_MIN_SIDE`, 7 systems. On a
+  small map that is from the first turn. See "A side too small to plan".
 
 Cost per opening decide, native CPython: median 0.5 ms at 18 nodes, 0.3 ms at
 40, 2.9 ms at 120 (max 7.3), all below the ledger's. `decide_ms` is unchanged.
@@ -272,6 +274,9 @@ may want clock 3; it times out a third of the time there, so it was not chased.
 
 ### Where Planned stands
 
+Measured before the side floor (next section), which changes nothing on a map
+where our side starts at 7 or more.
+
 **Against the roster, the gain is on big maps** (seeds 101-130, 60 games a cell
 less timeouts, win rate against the column):
 
@@ -301,6 +306,76 @@ is 0.18 from Greedy and 0.22 from marshal, the same spacing those two have from
 each other. More of what it launches goes between its own systems (60% against
 Greedy's 44%): ships with nothing to take move towards the edge of the
 expansion.
+
+### A side too small to plan
+
+Found on a 7-system board (key `7e42b0d745b15833`, two seats, claudebot), where
+the bot column, computed before Planned existed, showed actuary winning in 19
+turns; Planned took 55.
+One game says little: claudebot breaks ties on `state.rng` and every fight draws
+from it, so one ship's difference moves the rest of the game. The figures here
+re-seed `state.rng` right after `build_state`, so each map is played several
+times with different dice. Over 40 such streams on that board Greedy's median
+win was 22 turns (13-165) and Planned's 36.5 (16-105).
+
+**Where Planned lost.** Through the human's seat, Planned against Greedy, against
+each of the roster, seeds 1-40 and five dice streams each (win rate, paired z):
+
+    2 seats   5 nodes   72.7 -> 68.3  (z -5.0)
+              6 nodes   72.1 -> 69.1  (z -3.1)
+              7 nodes   81.9 -> 77.5  (z -4.7)
+              8+ nodes  level (z within +-1.1)
+    3 seats   7 nodes   63.2 -> 57.7  (z -4.7), level from 15
+    4 seats   9 nodes   56.0 -> 53.3  (z -2.0), level from 16
+
+**What predicts it** is how much of the map is ours to plan. Binned per map by
+the region at turn 0, Planned minus Greedy in win points: 0-2 neutrals -1.1 to
+-3.4 (z -1.6 to -4.0), 3 -1.4, 4-5 -0.7, 6-8 +0.7, 9 and more about +3. Lanes
+from home to the nearest rival reads the same way (2-3 lanes -2.3 to -3.3, 7 or
+more positive). The earliest strike in turns barely separates them.
+
+**Handing over earlier by distance does not work.** Ending the opening when an
+owned system is within 2 or 3 lanes of a rival's (rather than bordering one)
+fixed the small maps, but lanes to a rival shrink as the seat expands, so on a
+big map it cut the end off every opening (win rate, vs the roster):
+
+                        Greedy   1 lane   2 lanes   3 lanes
+    2 seats, 80 nodes    70.1     78.5     76.4      72.9
+    3 seats, 40 nodes    74.2     79.6     77.1      76.2
+
+**Our side of the map does.** Held plus region stays roughly constant through an
+opening, as the region turns into systems we hold, so a floor on it stops only
+the openings that were too small from the start. At turn 0 it is a median 3
+systems on 7 nodes with two seats, 8 on 18, 19 on 40 and 38 on 80; 4 on 40
+nodes with six seats. Seeds 101-140, against Planned without the floor, pooled
+over two runs, one of 5-24 nodes and one of 10-80:
+
+    floor     5-24 nodes           10-80 nodes
+      4     +0.8  (z +3.5)
+      5     +1.5  (z +5.1)
+      6     +1.7  (z +5.4)
+      7     +1.9  (z +5.5)     -0.1  (z -0.3)
+      9                        -0.7  (z -1.7)
+     12                        -0.6  (z -1.1)
+     16                        -0.7  (z -1.3)
+
+Shipped at 7. Confirmed on fresh seeds 301-330 against the previous actuary
+loaded as a separate bot, so it is also measured against itself (21 cells, 2-6
+seats, 5-80 nodes, 8,778 paired games): +1.9 points at 24 nodes and under
+(z +5.4), +0.8 at 40 and 80 (z +1.8), +1.8 overall (z +5.6). By opponent: marshal
++3.9, knower +3.1, thinker +1.8, the previous actuary +1.5, the rest +0.2 to
++1.4. On that 7-system board it now plays Greedy's game exactly.
+
+**Not a bot-column fix.** The board's bot column could instead try both stops
+on every map and keep the better. On this board that would mostly have picked
+the luckier dice, not the better opening, and it would choose the profile with
+hindsight per map where `bot_replay.REPLAY_AUX` chooses it once per bot. Fixing
+the default fixes the board and the menu alike.
+
+**Open:** with two seats on 10-18 nodes Planned still trails Greedy a little on
+seeds 301-330 (-1.3 at 10, -3.2 at 18, z about -2.3), though not on seeds
+101-140. A higher floor costs the 40-80 node gain, so it would need another
+signal.
 
 ### In front of marshal it costs
 

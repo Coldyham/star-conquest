@@ -48,6 +48,9 @@ def test_a_win_stores_the_exact_replay_a_watch_link_would_play():
     assert (state.winner == seat.id) == row["won"] == result.won
     assert state.turn == row["turns"] == result.turns
     assert seat.ships_lost == row["lost"] == result.lost
+    # ...and it names the bot that played the human's seat, not the setup's
+    # strategy for it, which is what a person would have been seated behind.
+    assert decoded.strategies[seat.id] == seat.ai_strategy == job.bot
 
 
 def test_a_loss_stores_no_replay():

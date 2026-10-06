@@ -396,6 +396,8 @@ def play_settings(
     if seat is None:
         raise ValueError("this setup has no human seat to replay")
     _hand_over(seat, bot, aux)
+    if log is not None and not log.turns:
+        log.strategies = replay.seat_strategies(state)
 
     check_invariants(state)
     timeouts = [0]

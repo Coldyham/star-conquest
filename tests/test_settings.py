@@ -16,6 +16,7 @@ from starconquest.model import AiParams
 from starconquest.settings import (
     _GLOBAL_KNOBS,
     _LEGACY_KEY_DROPS,
+    RANDOM_POOL,
     RANDOM_STRATEGY,
     Challenge,
     Settings,
@@ -556,7 +557,7 @@ def test_build_state_stamps_per_seat_strategy():
 
 @contextlib.contextmanager
 def _roster(*names):
-    """Register throwaway strategies, so a pool test doesn't ride on models/."""
+    """Register throwaway strategies, so a test doesn't ride on models/."""
     from starconquest import ai
     saved = dict(ai.STRATEGIES)
     try:
@@ -569,11 +570,23 @@ def _roster(*names):
         ai.STRATEGIES.update(saved)
 
 
+@contextlib.contextmanager
+def _pool(*names):
+    """Deal random seats from ``names`` instead of the shipped pool."""
+    from starconquest import settings as settings_module
+    saved = settings_module.RANDOM_POOL
+    settings_module.RANDOM_POOL = tuple(names)
+    try:
+        yield
+    finally:
+        settings_module.RANDOM_POOL = saved
+
+
 def test_a_random_seat_resolves_to_a_real_bot():
     """The whole point: the placeholder never reaches a live game, so every
     oracle, `botio`'s seat reveal and the bot column see the bot that is really
     deciding rather than a dispatcher they cannot see through."""
-    with _preserve_config(), _roster("alpha", "beta"):
+    with _preserve_config(), _pool("alpha", "beta"):
         s = Settings(players=3, nodes=18)
         s.ai_strategy[1] = RANDOM_STRATEGY
         state = build_state(s, 5)
@@ -584,13 +597,13 @@ def test_a_random_seat_resolves_to_a_real_bot():
 def test_a_random_seat_is_the_same_bot_every_time_that_seed_is_played():
     """A seed reproduces the opponents as surely as it reproduces the map — which
     is what lets a challenge link be raced fairly, and a match be resumed."""
-    with _roster("alpha", "beta", "gamma", "delta"):
+    with _pool("alpha", "beta", "gamma", "delta"):
         picks = [resolve_strategy(RANDOM_STRATEGY, 7, 2) for _ in range(20)]
         assert len(set(picks)) == 1
 
 
 def test_random_seats_are_drawn_independently_of_each_other():
-    with _roster("alpha", "beta", "gamma", "delta"):
+    with _pool("alpha", "beta", "gamma", "delta"):
         # Over enough seeds, two seats must disagree at least sometimes; a shared
         # draw would make them identical on every one.
         pairs = [(resolve_strategy(RANDOM_STRATEGY, n, 2),
@@ -602,7 +615,7 @@ def test_resolving_a_random_seat_never_touches_the_engine_dice():
     """Derived, never drawn (`botio.decide_seed`'s rule). Leaving a seat to chance
     must not shift `state.rng`, or the same seed would fight the same map
     differently depending on how many seats were left to it."""
-    with _preserve_config(), _roster("alpha", "beta", "gamma"):
+    with _preserve_config(), _pool("alpha", "beta", "gamma"):
         fixed = Settings(players=3, nodes=18)
         fixed.ai_strategy[1] = "alpha"
         chance = Settings(players=3, nodes=18)
@@ -615,23 +628,38 @@ def test_resolving_a_random_seat_never_touches_the_engine_dice():
 
 
 def test_a_named_strategy_passes_through_resolution_untouched():
-    with _roster("alpha", "beta"):
+    with _pool("alpha", "beta"):
         assert resolve_strategy("beta", 3, 2) == "beta"
         assert resolve_strategy("not_registered", 3, 2) == "not_registered"
 
 
-def test_a_random_seat_falls_back_when_nothing_is_registered():
-    """Same degradation `ai.decide` already applies to an unrecognised name,
-    rather than an exception out of the one funnel to a GameState."""
+def test_the_pick_ignores_what_is_registered():
+    """Two builds with different `models/` (a stale cached web build, a desktop
+    with a drop-in) must still deal a seed the same bots."""
     with _roster():
-        assert resolve_strategy(RANDOM_STRATEGY, 3, 2) == "heuristic"
+        bare = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
+    with _roster("heuristic", "alpha", "beta", "gamma"):
+        busy = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
+    assert bare == busy
+    assert set(bare) <= set(RANDOM_POOL)
 
 
-def test_the_pool_never_offers_the_placeholder_itself():
-    """`random` names no decision function, so picking it would loop."""
-    with _roster("alpha", RANDOM_STRATEGY):
-        assert all(resolve_strategy(RANDOM_STRATEGY, n, 2) == "alpha"
-                   for n in range(20))
+def test_every_bot_in_the_pool_ships():
+    """A pool name with no model behind it would play as the heuristic, silently."""
+    from starconquest import ai
+    ai.load_models()
+    assert set(RANDOM_POOL) <= set(ai.STRATEGIES)
+    assert len(set(RANDOM_POOL)) == len(RANDOM_POOL)
+    assert RANDOM_STRATEGY not in RANDOM_POOL, "random names no decision function"
+
+
+def test_the_pool_still_deals_what_it_dealt():
+    """Editing `RANDOM_POOL` (adding, removing or reordering a bot) re-deals
+    nearly every random seat on every map ever shared; this pins the deal, so the
+    edit is never made in passing. Map ea1d2a0bf0a95ba4 is the one where two
+    players on different rosters were dealt different lineups."""
+    assert [resolve_strategy(RANDOM_STRATEGY, 626502, pid) for pid in (2, 3, 4, 5)] == [
+        "heuristic", "claudebot", "claudebot", "rusherplus"]
 
 
 def test_random_seed_is_in_range_and_not_a_fixed_sequence():
@@ -872,7 +900,7 @@ def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
     asked: list = []
     s = Settings(players=2)
     s.ai_strategy[1] = RANDOM_STRATEGY
-    with _roster("warn_c"), _warning_bot("warn_c", asked):
+    with _roster("warn_c"), _pool("warn_c"), _warning_bot("warn_c", asked):
         assert setup_warnings(s) == []          # no seed: nobody knows the bot yet
         s.seed = 17
         assert resolve_strategy(RANDOM_STRATEGY, 17, 2) == "warn_c"
