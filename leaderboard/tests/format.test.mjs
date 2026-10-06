@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
+import { botLeadBadge, botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
 
 const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString();
 
@@ -98,4 +98,22 @@ test("a bot replayed at a tuned profile says so; a default one just gives its na
   assert.equal(botProfile({ bot: "claudebot" }), "claudebot");
   // A fractional knob is not a search depth; don't print it as one.
   assert.equal(botProfile({ bot: "x", aux: 0.75, aux_label: "Greed" }), "x · greed 0.75");
+});
+
+test("a bot ahead of the board's best leads, a dead heat is a tie, and a beaten bot has no badge", () => {
+  // el() only needs createElement; a plain object stands in for the DOM node.
+  globalThis.document ??= {
+    createElement: () => ({ setAttribute() {}, append() {} }),
+    createTextNode: (text) => text,
+  };
+  const game = (best_turns, best_lost) =>
+    ({ bot_name: "marshal", bot_turns: 20, bot_lost: 3, best_turns, best_lost });
+  assert.equal(botLeadBadge(game(25, 0)).textContent, "Bot leads");
+  assert.equal(botLeadBadge(game(20, 4)).textContent, "Bot leads");
+  const tie = botLeadBadge(game(20, 3));
+  assert.equal(tie.textContent, "Bot tied");
+  assert.match(tie.className, /\btied\b/);
+  assert.equal(botLeadBadge(game(20, 2)), null);
+  assert.equal(botLeadBadge(game(19, 9)), null);
+  assert.equal(botLeadBadge({ ...game(20, 3), bot_name: null }), null);
 });

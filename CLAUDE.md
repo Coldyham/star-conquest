@@ -14,8 +14,8 @@ decided against. **Check that list before proposing a mechanism, a bot tactic or
 a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
-as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow` and
-`actuary`; `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
+as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
+`actuary` and `convoy`; `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -53,10 +53,12 @@ uv run python tools/bot_replay.py --dry-run     # leaderboard bot column, comput
 uv run python tools/verify_scores.py --dry-run  # replay each posted score's log
                                                 # and say whether it checks out
 uv run python tools/admin.py matches            # moderation: delete scores/maps/
-                                                # matches, rename, drop tags, reissue
+                                                # matches/campaigns, rename, drop tags, reissue
                                                 # or reopen a seat (dry run until --yes)
 uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
+uv run python tools/bot_distance.py             # how differently each bot plays
+                                                # the same positions, by phase
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
@@ -357,7 +359,8 @@ already resolve simultaneously. The rationale for each rule is in
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
-  `tools/pwa/root.html` routes the root. Endpoints are built at call time from
+  `tools/pwa/root.html` routes the root. It is also the installed app's
+  `start_url`, reopening the half last open (`sc_app_last`). Endpoints are built at call time from
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. The sensitive-variable policy must stay on
   "Require approval". `legacy-board/` proxies `/api/`. `tools/pwa/sw.js` never

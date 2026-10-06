@@ -5,7 +5,9 @@ cover the drop-in contract every model owes (legal orders, no mutation,
 reproducibility, nothing drawn from `state.rng`) and then the three things its
 design rests on: the projection agrees with the engine wherever it is not
 deliberately pessimistic, a launch's priced gain is exactly the change in the
-ledger, and the caches that keep a decide cheap change no answer.
+ledger, and the caches that keep a decide cheap change no answer. Last, the
+planned opening (Opening: Planned): when it hands over, and the trade its score
+makes between ships and income.
 
 Internals are reached through `sys.modules["sc_model_actuary"]`, the synthetic
 name `ai.load_models` imports each model file under.
@@ -20,7 +22,7 @@ import sys
 import pytest
 
 from starconquest import ai, config, engine, mapgen
-from starconquest.model import Fleet, GameState, Player, System
+from starconquest.model import AiParams, Fleet, GameState, Player, System
 from tests import sim
 
 
@@ -139,8 +141,18 @@ def test_game_is_reproducible_from_its_seed(ac):
     assert (a.winner, a.turns) == (b.winner, b.turns)
 
 
-def test_actuary_declares_no_aux_slider(ac):
-    assert ai.aux_spec("actuary") is None
+def test_the_opening_slider_defaults_to_planned(ac):
+    assert ai.aux_spec("actuary") == ("Opening", 0.0, 1.0, 1.0, True)
+    assert ai.aux_names("actuary") == ("Greedy", "Planned")
+    assert AiParams().aux == ac.PLANNED
+
+
+@pytest.mark.parametrize("aux, stop", [(0.0, "GREEDY"), (1.0, "PLANNED"), (7.0, "PLANNED"),
+                                       (0.5, "GREEDY"), ("junk", "PLANNED")])
+def test_the_opening_knob_reads_tolerantly(ac, aux, stop):
+    from types import SimpleNamespace
+    seat = SimpleNamespace(ai_params=SimpleNamespace(aux=aux))
+    assert ac._opening_of(seat) == getattr(ac, stop)
 
 
 def test_actuary_is_not_an_oracle(ac):
@@ -265,3 +277,109 @@ def test_declares_what_a_decide_costs(ac):
 def test_beats_the_heuristic(ac):
     r = sim.play(2, nodes=18, players=2, strategies=["actuary", "heuristic"], max_turns=300)
     assert r.winner == 1
+
+
+# --------------------------------------------------------------------------- #
+# The planned opening (Opening: Planned)
+# --------------------------------------------------------------------------- #
+def _planned(state, seat=1):
+    state.players[seat].ai_params = AiParams()
+    return state
+
+
+def _costly_neutral(rival_lane):
+    """Our home 1 next to a costly, poor neutral 2; the rival's home 3 is
+    ``rival_lane`` turns beyond a neutral 4 that sits between us."""
+    return _planned(_board({1: (1, 20, 3), 2: (0, 14, 6), 3: (2, 12, 3), 4: (0, 3, 5)},
+                           [(1, 2, 2), (1, 4, 2), (4, 3, rival_lane)]))
+
+
+def test_greedy_never_consults_the_plan(ac, monkeypatch):
+    def boom(state, pid):
+        raise AssertionError("the opening ran on a Greedy seat")
+
+    monkeypatch.setattr(ac, "opening", boom)
+    state = _costly_neutral(30)
+    state.players[1].ai_params = AiParams(aux=0.0)
+    ac.decide(state, 1)
+
+
+def test_planned_orders_are_legal_and_reproducible(ac):
+    state = _state(nodes=40, players=2, seat=2)
+    state.players[2].ai_params = AiParams()
+    for _ in range(40):
+        if state.winner is not None:
+            break
+        rng_before = state.rng.getstate()
+        orders = ai.decide(state, 2)
+        assert state.rng.getstate() == rng_before
+        assert [(o.source_id, o.dest_id, o.ships) for o in ac.decide(copy.deepcopy(state), 2)] == \
+            [(o.source_id, o.dest_id, o.ships) for o in orders]
+        per_source: dict[int, int] = {}
+        for order in orders:
+            assert state.systems[order.source_id].owner_id == 2
+            assert state.travel_turns(order.source_id, order.dest_id) is not None
+            per_source[order.source_id] = per_source.get(order.source_id, 0) + order.ships
+        for sid, total in per_source.items():
+            assert 0 < total <= state.systems[sid].ships
+        engine.end_turn(state, decide=ai.decide)
+
+
+def test_the_opening_ends_at_contact(ac):
+    """Bordering a rival, or a rival fleet heading for us, hands the seat to the
+    ledger."""
+    state = _costly_neutral(30)
+    assert ac.opening(state, 1) is not None
+    state.systems[4].owner_id = 2
+    assert ac.opening(state, 1) is None
+    state.systems[4].owner_id = 0
+    state.fleets.append(Fleet(2, 3, 4, 5, 30, 3))
+    assert ac.opening(state, 1) is not None
+    state.fleets.append(Fleet(2, 4, 1, 5, 2, 1))
+    assert ac.opening(state, 1) is None
+
+
+def test_after_contact_planned_plays_the_ledger(ac):
+    state = _costly_neutral(30)
+    state.systems[4].owner_id = 2
+    planned = _orders(ac, state)
+    state.players[1].ai_params = AiParams(aux=0.0)
+    assert planned == _orders(ac, state)
+
+
+def test_a_neutral_equally_near_a_rival_is_not_ours_to_take(ac):
+    assert ac._Opening(_costly_neutral(2), 1).region == {2}
+
+
+def test_keeps_its_ships_when_contact_is_near(ac):
+    """The rival can land on us in four turns; neutral 2 costs nearly six ships
+    even taken with everything, and repays a sixth of one a turn."""
+    state = _costly_neutral(2)
+    assert ac._Opening(state, 1).clock == round(4 * ac.OPENING_CLOCK_SCALE)
+    assert not any(dst == 2 for _, dst, _ in _orders(ac, state))
+
+
+def test_spends_them_when_contact_is_far(ac):
+    state = _costly_neutral(30)
+    assert ac._Opening(state, 1).clock > 20
+    assert any(dst in (2, 4) for _, dst, _ in _orders(ac, state))
+
+
+def test_moves_ships_with_nothing_to_take_towards_the_expansion(ac):
+    """Home 1 is inland; 5 borders the neutrals, so 1's ships go to 5."""
+    state = _planned(_board({1: (1, 20, 3), 5: (1, 0, 3), 2: (0, 4, 2), 3: (2, 12, 3)},
+                            [(1, 5, 2), (5, 2, 2), (2, 3, 40)]))
+    assert (1, 5, 20) in _orders(ac, state)
+
+
+def test_every_plan_it_compares_is_a_different_plan(ac):
+    """The policies are a cross product; on an open board they should not all
+    agree, or the search is buying nothing."""
+    import itertools
+    plan = ac._Opening(_state(nodes=40, players=2, seat=1), 1)
+    firsts = set()
+    for policy in itertools.product(ac.OPENING_ORDERS, ac.OPENING_SENDS, ac.OPENING_SKIPS):
+        sim_ = ac._OpeningSim(plan, policy)
+        sim_.run()
+        firsts.add(tuple((o.source_id, o.dest_id, o.ships) for o in sim_.first))
+    assert len(firsts) > 1

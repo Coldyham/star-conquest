@@ -385,9 +385,18 @@ than it is.
   from an explicit allow-list. The game itself is at `/game/`; the root is
   `tools/pwa/root.html`, a router that opens the board for a visitor and
   forwards a fragment (every challenge, replay and seat link the game ever
-  shared is the root plus one) or an installed app's launch to `/game/`. The
-  manifest, icons and service worker stay at the root, so old installs keep
-  their scope and manifest `id`. The functions are bundled from
+  shared is the root plus one) to `/game/`. The manifest, icons and service
+  worker stay at the root, so old installs keep their scope and manifest `id`.
+  The app is installable from either half: every board page links the
+  manifest, and `js/nav.mjs` registers the worker. Its `start_url` is the
+  router, which reopens whichever half the installed app was last on
+  (`sc_app_last`, written only in standalone/fullscreen display, by `nav.mjs`
+  and by the game page's `tools/pwa/inject.py` head), and the game if nothing
+  is recorded. So an install from before this keeps opening the game until it
+  visits the board. A fixed launch target either way would be wrong for
+  someone: the board is a fine front page, but a player who installed to play
+  wants the game. A per-device toggle would be one more control to find, for a
+  choice the last-visited half already makes. The functions are bundled from
   `leaderboard/netlify/functions/` and answer at root `/api/`. On a
   `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
   and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy
@@ -423,7 +432,9 @@ than it is.
   `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
   out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
-  (sometimes its symmetric variant, plus one or two "?" nodes rolled with
+  of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
+  120-system test game was enough to put big maps in a week, and a big map is
+  a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
   `settings.randomise_knobs`; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
@@ -437,7 +448,10 @@ than it is.
   first win from a player without one and can't be taken; a field node falls
   to a win posted while holding a neighbour (or within `GRACE_MS` of losing
   one, or the node itself), and a held one only to a strictly better score; see "The grace
-  period" in this file. The Advanced slider ranges live in `settings` (`ADV_*`) for
+  period" in this file. A bad week is remade by deleting its row
+  (`tools/admin.py delete-campaign`, audited with the old graph) and letting
+  the worker run again; scores already posted on its nodes stay on their maps
+  but stop counting toward the week. The Advanced slider ranges live in `settings` (`ADV_*`) for
   this reason; `menu` aliases them.
 - **A map can be registered with no score at all, and can carry a one-time
   reveal date over its board.** `js/submit.mjs`'s `ensureGame` accepts any

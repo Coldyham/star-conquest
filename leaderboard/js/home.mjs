@@ -8,8 +8,8 @@ import {
   leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
-  filtersFromParams, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, urlFor,
-  viewKind,
+  filtersFromParams, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
+  urlFor, viewKind,
 } from "./listing.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -120,6 +120,17 @@ function picker(name, label, value, options) {
   return el("label", { class: "pick" }, [el("span", { text: label }), select]);
 }
 
+/**
+ * Which way round the sort reads, worded for it ("Fewest first"). The sort's
+ * own direction submits blank, so it stays out of the URL (listing.mjs).
+ */
+function dirPicker(filters) {
+  const sort = sortFor(filters);
+  const other = sort.dir === "desc" ? "asc" : "desc";
+  return picker("dir", "Order", filters.dir,
+    [["", sort.arrows[sort.dir]], [other, sort.arrows[other]]]);
+}
+
 function toggle(name, label, on, title) {
   const box = el("input", { type: "checkbox", name, value: "1" });
   box.checked = on;
@@ -152,6 +163,7 @@ function controls(filters) {
 
   const picks = el("div", { class: "picks" }, [
     picker("sort", "Sort", filters.sort, SORTS[kind].map((s) => [s.value, s.label])),
+    dirPicker(filters),
     picker("players", "Players", filters.players || "",
       [["", "Any"], ...PLAYER_COUNTS.map((n) => [n, `${n}`])]),
     picker("mode", "Map", filters.mode, [["", "Any"], ...MODES.map((m) => [m, m[0].toUpperCase() + m.slice(1)])]),
@@ -165,7 +177,8 @@ function controls(filters) {
     const toggles = [
       toggle("contested", "Contested", filters.contested,
         "Maps two or more players have a counted score on — the ones a crown can be held on"),
-      toggle("botlead", "Bot leads", filters.botlead, "Maps where no human score beats the best bot yet"),
+      toggle("botlead", "Bot unbeaten", filters.botlead,
+        "Maps where no human score beats the best bot yet — a bot leading or tied"),
       toggle("campaign", "Campaign", filters.campaign, "This week's campaign maps that have a score on the board"),
     ];
     if (myName()) {
@@ -181,7 +194,11 @@ function controls(filters) {
     go();
   });
   form.addEventListener("change", (event) => {
-    if (event.target !== search) go();
+    if (event.target === search) return;
+    // A new sort starts in its own direction: "Most first" carried over from
+    // Scores would put the slowest wins first under Best turns.
+    if (event.target.name === "sort") form.elements.dir.value = "";
+    go();
   });
   return form;
 }
@@ -192,7 +209,7 @@ function filterBar(filters) {
   if (!isFiltered(filters)) return null;
   const children = [];
   if (filters.bot) children.push(el("span", { class: "current", text: `Vs ${filters.bot}` }));
-  const reset = urlFor({ group: filters.config ? "game" : filters.group, sort: filters.sort });
+  const reset = urlFor({ group: filters.config ? "game" : filters.group, sort: filters.sort, dir: filters.dir });
   children.push(el("a", { class: "clear", href: reset, text: "Clear filters" }));
   return el("div", { class: "filters" }, children);
 }

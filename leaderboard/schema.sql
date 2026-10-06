@@ -438,7 +438,8 @@ create index if not exists bot_scores_match_idx
 -- ---------------------------------------------------------------------------
 -- campaigns: the weekly meta-map (campaign.html, js/campaign.mjs). One row per
 -- week, written once near its start by the worker (tools/campaign.py) and never
--- again — the only stored part of the campaign. It has to be stored: which
+-- again (tools/admin.py delete-campaign removes one by hand, and the worker then
+-- makes it afresh) — the only stored part of the campaign. It has to be stored: which
 -- configs existed and which seeds were free are facts about the moment it was
 -- made, the "?" nodes are random rolls, and the layout comes from the game's
 -- own mapgen, which the board cannot run.
@@ -690,8 +691,9 @@ select
   -- contenders: distinct players with a counted score (counted_scores below),
   -- so `contenders >= 2` is exactly the set crown_holders has a row for.
   coalesce(field.contenders, 0) as contenders,
-  -- bot_leads: a winning bot exists and no human score beats it — a tie still
-  -- reads as the bot's, the same verdict as format.mjs's botLeadBadge.
+  -- bot_leads: a winning bot exists and no human score beats it — a tie
+  -- included, so the "Bot unbeaten" filter lists both of format.mjs's
+  -- botLeadBadge wordings ("Bot leads", "Bot tied").
   (bot.turns is not null
     and (best.turns is null or (bot.turns, bot.lost) <= (best.turns, best.lost))) as bot_leads,
   -- fog: settings_json is pruned to non-defaults and the default is fog off,
@@ -760,7 +762,10 @@ with agg as (
     config_key,
     count(*)::integer         as game_count,
     sum(score_count)::integer as score_count,
-    max(last_activity)        as last_activity
+    max(last_activity)        as last_activity,
+    -- The "Avg best turns" sort's column: each map's best, averaged over the
+    -- group, so one lucky seed doesn't stand for the whole setup.
+    round(avg(best_turns), 1) as avg_best_turns
   from public.game_summary
   where score_count > 0
   group by config_key
@@ -786,7 +791,8 @@ select
   agg.last_activity,
   -- New columns go last. fog is part of sc_config_key, so every game in the
   -- group shares it; see game_summary.fog.
-  (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog
+  (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog,
+  agg.avg_best_turns
 from agg
 join rep on rep.config_key = agg.config_key
 left join public.configs cfg on cfg.config_key = agg.config_key
@@ -1009,8 +1015,9 @@ grant insert, update on public.bot_scores to service_role;
 grant select on public.scores to service_role;
 -- select: which scores already have a verdict (`verify_scores.pending`).
 grant select, insert, update on public.score_checks to service_role;
--- The weekly campaign worker (tools/campaign.py) writes each week's map once.
-grant select, insert on public.campaigns to service_role;
+-- The weekly campaign worker (tools/campaign.py) writes each week's map once;
+-- delete is tools/admin.py's delete-campaign, so a bad week can be made again.
+grant select, insert, delete on public.campaigns to service_role;
 -- ...and counts last week's active players off the same rule the board uses.
 grant select on public.counted_scores to service_role;
 -- select + delete for the worker (read a replay, prune one a longer upload has

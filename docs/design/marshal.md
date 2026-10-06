@@ -165,29 +165,31 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 1260 games, 80 timed out and are excluded from the
+nodes, default settings — 1260 games, 77 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
 docstring, the next time marshal or the roster's pricing changes. Re-run
-2026-10 with actuary added ([`actuary.md`](actuary.md)); every cell between the
-six older bots is the same as the run before it, since nothing else changed and
-the ladder is deterministic:
+2026-10-05 with actuary's planned opening as its default
+([`actuary.md`](actuary.md), "The planned opening"). Every cell between the six
+other bots is the same as the run before it, since nothing else changed and the
+ladder is deterministic; at its old default (Greedy) actuary read 308 wins, 73%
+against knower, 67% against marshal and 96% against thinker:
 
-    actuary 308 (26%), marshal 276 (23%), knower 265 (22%), thinker 162 (14%),
+    actuary 310 (26%), marshal 274 (23%), knower 270 (23%), thinker 160 (14%),
     claudebot 91 (8%), heuristic 50 (4%), rusherplus 28 (2%)
 
     head-to-head (row's win rate vs column)
                 actuar  knower  marsha  thinke  claude  heuris  rusher
-      actuary        —     73%     67%     96%    100%    100%    100%
-      knower       27%       —     44%     93%     96%    100%    100%
-      marshal      33%     56%       —     94%    100%    100%     98%
-      thinker       4%      7%      6%       —     94%     96%    100%
+      actuary        —     66%     71%    100%    100%    100%    100%
+      knower       34%       —     44%     93%     96%    100%    100%
+      marshal      29%     56%       —     94%    100%    100%     98%
+      thinker       0%      7%      6%       —     94%     96%    100%
       claudebot     0%      4%      0%      6%       —     78%     85%
       heuristic     0%      0%      0%      4%     22%       —     68%
       rusherplus    0%      0%      2%      0%     15%     32%       —
 
 knower here is at its default, Predict. With `--aux knower=0` (Off) the same
-ladder reads actuary 321, marshal 291, knower 209, thinker 172, actuary beating
-knower-0 98%. For all three Oracle settings against marshal and thinker over
+ladder read actuary 321, marshal 291, knower 209, thinker 172, actuary beating
+knower-0 98% (actuary at Greedy, not re-run). For all three Oracle settings against marshal and thinker over
 more seeds, see [`knower.md`](knower.md), "Each Oracle setting against thinker
 and marshal".
 

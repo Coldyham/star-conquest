@@ -43,7 +43,8 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
-| [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed |
+| [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed; the planned opening (Opening: Planned) |
+| [`design/convoy.md`](design/convoy.md) | convoy (built, measured, not shipped; code at `7153065`): supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
@@ -109,6 +110,7 @@ only for a fight; what is deliberately not animated.
 
 ### design/bots.md
 - **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.
+- **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
 - **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
 - **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
 - **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime. The first position-suite numbers.
@@ -135,6 +137,15 @@ only for a fight; what is deliberately not animated.
 - **Where actuary stands.** Four map cells, free-for-all, the combat sliders. Weak at 24 nodes 3 ly/turn and at jitter 0.3.
 - **As one of knower's borrowed candidates (measured, not shipped).** 10.4% of contested picks, distinct from the default 91% of the time.
 - **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
+- **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; it costs marshal as a host; the deleted first attempt (rules about contested neutrals).
+
+### design/convoy.md
+- **The plan.** Supply per system and turn, objectives as N ships by turn t, defences then guard reservations then strikes by value per ship, launch at the last moment.
+- **Where convoy stands.** Five cells against the roster: above thinker everywhere, level with knower-Predict, below marshal and actuary.
+- **How differently it plays.** Distinct in the opening, close to the phase bots when contested; few strikes converge from more than one source.
+- **Its opening in front of another bot.** Costs in front of marshal, no gain over actuary's Planned; not borrowed.
+- **Where it loses to actuary.** Level at contact, out-traded after it.
+- **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
 
 ### design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
@@ -204,6 +215,18 @@ the measured result was indistinguishable from the baseline.
 - Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
 - Pricing threats at the worst roll: hoarded garrisons; worse in both cells measured. *Same section.*
 - Shipping it as a knower `EXTERNAL_CANDIDATES` entry: not done (cost on every Search root, effect on knower unmeasured), not rejected. *As one of knower's borrowed candidates.*
+- Rules about contested neutrals (land after a rival racing for one, veto an unholdable capture and guard beside it, veto a capture that does not repay before the earliest possible arrival): worse than Greedy in every cell. *The first attempt.*
+- A planned opening reaching 2 turns past the halfway line: worse at every size. *The clock is about twice the earliest strike.*
+- The planned opening in front of marshal: worse in every cell. *In front of marshal it costs.*
+- **Open, not rejected:** clock 3 for the slow regime.
+
+### convoy ([`design/convoy.md`](design/convoy.md))
+- Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*
+- `STRIKE_PAD` 1.5 and 2.0: worse, 2.0 catastrophic. A doomed garrison staying to fight: 38%. *Same section.*
+- Filling short frontier guards from the interior, staging ships at the last system before the target, spending existing ships before future hulls: all null, deleted. *Same section.*
+- Defence at the nominal roll: a lean (54.8%, z ~1.5), not adopted; worth re-running. *Same section.*
+- Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
+- Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
 
 ### The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*

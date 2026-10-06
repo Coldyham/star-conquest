@@ -23,22 +23,45 @@ export const GAME_COLUMNS = [
 // select=* is fine here unlike game_summary above.
 const CONFIG_COLUMNS = "*";
 
-// Each order ends on the view's own key: last_activity ties (and nulls), and
+// Each sort names one column and the direction it reads best in (`dir`): the
+// latest first, the most first, but the fewest turns first. `?dir=` flips it.
+// Every order then ends on the view's own key, after last activity for the
+// sorts that aren't already by it: ties (and nulls) on the sorted column, and
 // offset paging over a tied order can repeat or skip a row between pages.
-const RECENT = "last_activity.desc.nullslast";
+// Nulls (a map no score has a best on yet) go last either way round. `arrows`
+// is how the direction picker words each way.
+const COUNT = { desc: "Most first", asc: "Fewest first" };
+const DATE = { desc: "Newest first", asc: "Oldest first" };
 export const SORTS = {
   game: [
-    { value: "recent", label: "Recent activity", order: `${RECENT},game_key` },
-    { value: "scores", label: "Most scores", order: `score_count.desc,${RECENT},game_key` },
-    { value: "players", label: "Most players", order: `contenders.desc,${RECENT},game_key` },
-    { value: "new", label: "Newest maps", order: "first_seen_at.desc,game_key" },
+    { value: "recent", label: "Recent activity", column: "last_activity", dir: "desc", arrows: DATE },
+    { value: "scores", label: "Scores", column: "score_count", dir: "desc", arrows: COUNT },
+    { value: "players", label: "Players", column: "contenders", dir: "desc", arrows: COUNT },
+    { value: "systems", label: "Systems", column: "nodes", dir: "desc", arrows: COUNT },
+    { value: "turns", label: "Best turns", column: "best_turns", dir: "asc", arrows: COUNT },
+    { value: "new", label: "Map added", column: "first_seen_at", dir: "desc", arrows: DATE },
   ],
   config: [
-    { value: "recent", label: "Recent activity", order: `${RECENT},config_key` },
-    { value: "scores", label: "Most scores", order: `score_count.desc,${RECENT},config_key` },
-    { value: "maps", label: "Most maps", order: `game_count.desc,${RECENT},config_key` },
+    { value: "recent", label: "Recent activity", column: "last_activity", dir: "desc", arrows: DATE },
+    { value: "scores", label: "Scores", column: "score_count", dir: "desc", arrows: COUNT },
+    { value: "maps", label: "Maps", column: "game_count", dir: "desc", arrows: COUNT },
+    { value: "systems", label: "Systems", column: "nodes", dir: "desc", arrows: COUNT },
+    { value: "turns", label: "Avg best turns", column: "avg_best_turns", dir: "asc", arrows: COUNT },
   ],
 };
+export const DIRS = ["desc", "asc"];
+
+/** The sort a view's filters ask for, falling back to its first. */
+export function sortFor(filters) {
+  const sorts = SORTS[viewKind(filters)];
+  return sorts.find((s) => s.value === filters.sort) || sorts[0];
+}
+
+/** The `order=` a sort and direction make — see SORTS above. */
+export function orderFor(sort, dir, key) {
+  const tail = sort.column === "last_activity" ? key : `last_activity.desc.nullslast,${key}`;
+  return `${sort.column}.${dir}.nullslast,${tail}`;
+}
 
 export const MODES = ["random", "symmetric"];
 export const PLAYER_COUNTS = [2, 3, 4, 5, 6];
@@ -75,6 +98,7 @@ export function filtersFromParams(params) {
     group,
     q: cleanQuery(params.get("q") || ""),
     sort: "recent",
+    dir: "",
     players: PLAYER_COUNTS.includes(players) ? players : 0,
     mode: MODES.includes(mode) ? mode : "",
     fog: fog === "on" || fog === "off" ? fog : "",
@@ -84,7 +108,13 @@ export function filtersFromParams(params) {
     campaign: params.get("campaign") === "1",
   };
   const sort = params.get("sort");
-  if (SORTS[viewKind(filters)].some((s) => s.value === sort)) filters.sort = sort;
+  const known = SORTS[viewKind(filters)].some((s) => s.value === sort);
+  if (known) filters.sort = sort;
+  // Blank is the sort's own direction, so a link without `dir` keeps reading
+  // the way it always did, and changing the sort resets it. A sort this view
+  // doesn't have (By config's "maps" on By game) drops its direction with it.
+  const dir = params.get("dir");
+  if (DIRS.includes(dir) && (known || !sort) && dir !== sortFor(filters).dir) filters.dir = dir;
   return filters;
 }
 
@@ -96,6 +126,7 @@ export function urlFor(filters) {
   if (filters.group === "config") params.set("group", "config");
   if (filters.q) params.set("q", filters.q);
   if (filters.sort && filters.sort !== "recent") params.set("sort", filters.sort);
+  if (filters.dir) params.set("dir", filters.dir);
   if (filters.players) params.set("players", String(filters.players));
   if (filters.mode) params.set("mode", filters.mode);
   if (filters.fog) params.set("fog", filters.fog);
@@ -107,7 +138,7 @@ export function urlFor(filters) {
   return qs ? `index.html?${qs}` : "index.html";
 }
 
-/** True when anything narrows the list (a sort or the grouping does not). */
+/** True when anything narrows the list (a sort, its direction or the grouping does not). */
 export function isFiltered(filters) {
   return Boolean(filters.config || filters.bot || filters.q || filters.players || filters.mode ||
     filters.fog || filters.contested || filters.botlead || filters.unplayed || filters.campaign);
@@ -159,7 +190,7 @@ function notIn(keys) {
  */
 export function listQuery(filters, { played = [], nodes = [] } = {}) {
   const kind = viewKind(filters);
-  const sort = SORTS[kind].find((s) => s.value === filters.sort) || SORTS[kind][0];
+  const sort = sortFor(filters);
   let query = kind === "config"
     ? `config_summary?select=${CONFIG_COLUMNS}`
     : `game_summary?select=${GAME_COLUMNS}&score_count=gt.0`;
@@ -175,7 +206,7 @@ export function listQuery(filters, { played = [], nodes = [] } = {}) {
     if (filters.campaign) query += nodes.length ? `&game_key=in.(${quoted(nodes)})` : "&game_key=is.null";
   }
   query += searchClause(filters.q, kind);
-  query += `&order=${sort.order}`;
+  query += `&order=${orderFor(sort, filters.dir || sort.dir, kind === "config" ? "config_key" : "game_key")}`;
   return { kind, query };
 }
 
@@ -190,7 +221,7 @@ export const RANDOM_POOL = 1000;
  * hand-drawn map changes only its star names and dice.
  */
 export function randomPoolQuery(filters) {
-  const { query } = listQuery({ ...filters, config: "", group: "config", sort: "recent" });
+  const { query } = listQuery({ ...filters, config: "", group: "config", sort: "recent", dir: "" });
   return query.replace("config_summary?select=*", "config_summary?select=config_key,settings_json") +
     `&settings_json->custom_map=is.null&limit=${RANDOM_POOL}`;
 }
