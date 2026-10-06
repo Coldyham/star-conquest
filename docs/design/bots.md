@@ -820,10 +820,10 @@ the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[
     chance must not shift `state.rng`, or the same seed would fight the same map
     differently depending on how many seats were left to it. A seed therefore
     reproduces the opponents as surely as it reproduces the map, which is what
-    lets a challenge link on one be raced fairly. The pool is
-    `ai.available_strategies()` read at build time, so a drop-in model joins it;
-    that cannot move a stored game, since `replay.reconstruct` applies recorded
-    orders and dice and asks no seat to decide. `Settings` keeps `"random"`, so
+    lets a challenge link on one be raced fairly. The pool is the fixed
+    `settings.RANDOM_POOL`, not the loaded roster, so every build deals a seed
+    the same bots; a new bot joins it only on purpose, since that re-deals every
+    random map (`docs/design/core.md`). `Settings` keeps `"random"`, so
     a shared link stays a mystery to its recipient and the leaderboard's
     opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
     the bot that played — the setup's rule, not its outcome. Disclosing the

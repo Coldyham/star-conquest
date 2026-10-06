@@ -4,8 +4,9 @@ A match is fully determined by its ``Settings``, its concrete ``seed`` and, per
 turn, the orders every seat issued plus the combat draws they produced. So we
 never snapshot a ``GameState``; we record those inputs:
 
-    {settings, seed, turns: [{"ai": bool, "orders": [...], "dice": [...],
-                              "rules": {src: [dest, keep]}}, ...], ...}
+    {settings, seed, strategies: {pid: name},
+     turns: [{"ai": bool, "orders": [...], "dice": [...],
+              "rules": {src: [dest, keep]}}, ...], ...}
 
 ``reconstruct`` feeds each turn straight back through ``engine.end_turn`` as a
 ``TurnRecord``, so the board is rebuilt without asking a single seat to decide
@@ -164,6 +165,27 @@ def rules_from_dict(raw) -> dict[int, tuple[int, int]]:
     return rules
 
 
+def seat_strategies(state: GameState) -> dict[int, str]:
+    """The strategy each seat of ``state`` is played by, neutral left out — what
+    ``GameLog.strategies`` records."""
+    return {pid: p.ai_strategy for pid, p in sorted(state.players.items()) if not p.is_neutral}
+
+
+def _strategies_from_dict(raw) -> dict[int, str]:
+    """``GameLog.strategies`` read back; malformed entries are dropped."""
+    out: dict[int, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for pid, name in raw.items():
+        try:
+            seat = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(name, str) and name:
+            out[seat] = name
+    return out
+
+
 @dataclass
 class GameLog:
     """The complete input history of one match — settings, seed and every turn's
@@ -181,6 +203,12 @@ class GameLog:
     # thing as `version`, which is the *format* of this file: one says how to read
     # the log, the other says whether replaying it still reproduces the game.
     rules_version: int = field(default_factory=lambda: engine.RULES_VERSION)
+    # Which strategy each seat was built with (`seat_strategies`), so a seat left
+    # to `settings.RANDOM_STRATEGY` keeps the bot it was dealt: the pick depends
+    # on the roster loaded at Start, which moves with the code and with a stale
+    # cached build. Empty on a log written before the field existed, which
+    # rebuilds with today's picks as it always did.
+    strategies: dict[int, str] = field(default_factory=dict)
     winner: int | None = None
     finished: bool = False
     created_at: str = field(default_factory=_now_iso)
@@ -272,6 +300,7 @@ class GameLog:
             seed=self.seed,
             settings=self.settings,
             turns=list(self.turns[:n]),
+            strategies=dict(self.strategies),
             version=self.version,   # the turns come with it, so the format does too
             path=_game_path(self.seed),
         )   # `match_id` and `rules_version` are deliberately left to their
@@ -319,6 +348,7 @@ class GameLog:
             "seed": self.seed,
             "match_id": self.match_id,
             "rules_version": self.rules_version,
+            "strategies": {str(pid): name for pid, name in sorted(self.strategies.items())},
             "settings": self.settings,
             "turns": self.turns,
             "winner": self.winner,
@@ -347,6 +377,7 @@ class GameLog:
             # A log written before the field existed predates any rules bump by
             # definition, so version 1 is the honest reading of its absence.
             rules_version=int(data.get("rules_version", 1) or 1),
+            strategies=_strategies_from_dict(data.get("strategies")),
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
             created_at=str(data.get("created_at", "")),
@@ -419,9 +450,15 @@ def _game_path(seed: int) -> Path:
     return GAMES_DIR / f"game_{stamp}_{seed}.json"
 
 
-def new_log(settings: Settings, seed: int) -> GameLog:
-    """Start a log for a new match; ``save`` writes it once the first turn lands."""
-    return GameLog(seed=seed, settings=settings.to_dict(), path=_game_path(seed))
+def new_log(settings: Settings, seed: int, state: GameState | None = None) -> GameLog:
+    """Start a log for a new match; ``save`` writes it once the first turn lands.
+
+    ``state`` is the board the match was built as, whose seat strategies the log
+    records. A caller that builds it later (``tests/sim.play_settings``) records
+    them itself.
+    """
+    return GameLog(seed=seed, settings=settings.to_dict(), path=_game_path(seed),
+                   strategies=seat_strategies(state) if state is not None else {})
 
 
 def list_logs() -> list[Path]:
@@ -507,9 +544,21 @@ def reconstruct(
     than storing a second flag is what keeps an *old* log replaying correctly —
     and a scripted turn asks no seat to decide, so nothing else here would ever
     have flipped it back.
+
+    Each seat gets the strategy ``log.strategies`` recorded, not the one today's
+    roster would deal it, so a resumed match plays on against the bots it began
+    with and a watched one names them. A log with no turns and nothing recorded
+    (a play-by-post match nobody has resolved yet) records the seats built here:
+    nothing has been played, so this board is the match's start.
     """
     settings = Settings.from_dict(log.settings)
     state = build_state(settings, log.seed)
+    if log.strategies:
+        for pid, name in log.strategies.items():
+            if pid in state.players and not state.players[pid].is_neutral:
+                state.players[pid].ai_strategy = name
+    elif not log.turns:
+        log.strategies = seat_strategies(state)
     claimed = state.human() is not None
     if on_turn is not None:
         on_turn(state)

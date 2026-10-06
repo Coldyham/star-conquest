@@ -290,8 +290,9 @@ leaves the seat's bot to the match seed, and `settings.build_state` resolves it 
 one of the above before the game starts. It is deliberately not a model file that
 forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
 seat whose bot it does not yet know (see *Predicting the other seats*), and every
-answer it could give is wrong for some pick. A drop-in of yours joins the pool the
-moment it registers; don't name one `random.py`.
+answer it could give is wrong for some pick. The pool is a fixed list
+(`settings.RANDOM_POOL`), so every copy of the game deals a seed the same bots; a
+drop-in of yours is never dealt. Don't name one `random.py`.
 
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating
