@@ -36,9 +36,16 @@ MODES = ("random", "symmetric")
 # module `is_oracle_seat(player)` and gets no seed with which to answer for a
 # dispatcher, `botio`'s seat reveal, the leaderboard's bot column — then sees the
 # bot that is really deciding. It is a key into `ai.STRATEGIES` only by absence:
-# a model file must never be named this, and the pool below is drawn from the
-# registry, so one that was would simply be picked as itself.
+# a model file must never be named this.
 RANDOM_STRATEGY = "random"
+
+# The bots a seat left to `RANDOM_STRATEGY` is dealt from. The pick indexes this
+# by length and position, so adding, removing or reordering a name re-deals
+# nearly every random seat on every map ever shared: edit it only on purpose
+# (`docs/design/core.md`, "A seat left to the seed").
+RANDOM_POOL: tuple[str, ...] = (
+    "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus",
+)
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
 _roll_count = itertools.count()
@@ -713,21 +720,14 @@ def resolve_strategy(name: str, seed: int, pid: int) -> str:
     engine's stream untouched, gives each seat an independent pick, and still
     reproduces exactly: the same setup and seed always face the same opponents.
 
-    The pool is ``ai.available_strategies()``, i.e. whatever is registered *now*
-    — so it includes drop-in models and holds no bot back, oracles included. A
-    roster that gains or loses a file deals nearly every random seat a different
-    bot, so a recorded match keeps the bots it was dealt in
-    ``replay.GameLog.strategies`` rather than asking here again. A caller that
-    never ran ``ai.load_models()`` sees only the built-in heuristic, which is the
-    same degradation ``ai.decide`` already applies to an unrecognised strategy
-    name.
+    The pool is ``RANDOM_POOL``, never what happens to be registered, so every
+    build deals a seed the same bots whatever its ``models/`` holds. A pick that
+    is not registered here plays as the heuristic, which is the degradation
+    ``ai.decide`` already applies to an unrecognised strategy name.
     """
     if name != RANDOM_STRATEGY:
         return name
-    pool = [n for n in ai.available_strategies() if n != RANDOM_STRATEGY]
-    if not pool:
-        return "heuristic"
-    return pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+    return RANDOM_POOL[random.Random(f"{seed}:strategy:{pid}").randrange(len(RANDOM_POOL))]
 
 
 def build_state(settings: Settings, seed: int) -> GameState:

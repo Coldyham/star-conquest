@@ -377,8 +377,11 @@ already resolve simultaneously. The rationale for each rule is in
 - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`)
   is resolved inside `build_state` by `settings.resolve_strategy`, never by a
   dispatcher bot. The pick is derived (`random.Random(f"{seed}:strategy:{pid}")`)
-  from `ai.available_strategies()`. `Settings` keeps `"random"`; the win overlay
-  (`render._winner_label`) reveals the bot. Detail: `docs/design/core.md`.
+  from `settings.RANDOM_POOL`, never the loaded roster. **Editing the pool
+  re-deals every random map ever shared**, so a new bot joins it only on purpose
+  (`test_the_pool_still_deals_what_it_dealt`). `Settings` keeps `"random"`; the
+  win overlay (`render._winner_label`) reveals the bot. Detail:
+  `docs/design/core.md`.
 - **A bot that reads other seats** (see `models/knower.py`) must never call
   `ai.load_models()`, must read `ai.STRATEGIES` lazily inside `decide`, and must
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot

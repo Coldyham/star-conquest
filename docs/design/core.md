@@ -23,7 +23,7 @@ keep pre-compression links working.
 
 The Strategy dropdown's last entry, `random`, is the one option that names no
 decision function. `settings.resolve_strategy` turns it into a real bot inside
-`build_state`, drawing from `ai.available_strategies()`. The point is to play
+`build_state`, drawing from `settings.RANDOM_POOL`. The point is to play
 without knowing who you are playing: a large part of this game's skill is
 knowing how a given bot answers a given opening, and that is knowledge a fixed
 opponent hands you before the first turn.
@@ -54,35 +54,49 @@ link on a mystery setup raceable, and a mystery match resumable. Each seat draws
 from its own stream, so three random seats are three independent picks rather
 than three copies of one.
 
-**The pool is read at build time, so the log records what it dealt.**
-`ai.available_strategies()` is whatever is registered now, so a drop-in model
-joins the pool without being named anywhere. A caller that never ran
-`ai.load_models()` sees only the built-in heuristic, which is the same
-degradation `ai.decide` already applies to an unrecognised strategy name.
+**The pool is a fixed list, and the log records what it dealt.** The pick
+indexes the pool by its length and position, so a pool that gains, loses or
+reorders a name deals nearly every random seat a different bot. It cannot move a
+stored game's *board*, because `replay.reconstruct` applies the recorded orders
+and deals the recorded dice and asks no seat to decide anything (the property
+`bot_replay.replay_rev` rests on). It moves everything else.
 
-The pick indexes into the pool by its length, so a roster that gains or loses a
-file deals nearly every random seat a different bot. It cannot move a stored
-game's *board*, because `replay.reconstruct` applies the recorded orders and
-deals the recorded dice and asks no seat to decide anything (the property
-`bot_replay.replay_rev` rests on). It did move everything else about one. Map
-`ea1d2a0bf0a95ba4` (seed 626502, four random seats) was posted twice on
-2026-10-06, 23 minutes apart with no deploy between. Re-running every bot on the
-recorded openings showed the two players had faced heuristic / claudebot /
-claudebot / rusherplus and rusherplus / heuristic / heuristic / heuristic: the
-second lineup is what a six-bot roster deals, most likely a build cached by the
-service worker (stale-while-revalidate) from before actuary joined. Re-deriving
-the picks also meant a resumed match switched bots partway through if the roster
-had moved, and a watched replay's win overlay named today's pick.
+The pool was once `ai.available_strategies()`, read at build time, so a drop-in
+joined it without being named anywhere. Map `ea1d2a0bf0a95ba4` (seed 626502,
+four random seats) was posted twice on 2026-10-06, 23 minutes apart with no
+deploy between. Re-running every bot on the recorded openings showed the two
+players had faced heuristic / claudebot / claudebot / rusherplus and rusherplus /
+heuristic / heuristic / heuristic. The second lineup is what a six-bot roster
+deals, most likely a build the service worker had cached (stale-while-revalidate)
+from before actuary joined. Every bot added to `models/` re-dealt every random
+map on the board the same way, the weekly campaign's all-random maps and the
+offline bot column included. Re-deriving the picks also meant a resumed match
+switched bots partway through if the roster had moved, and a watched replay's
+win overlay named today's pick.
 
-So `replay.GameLog.strategies` records each seat's strategy as built
-(`replay.seat_strategies`), and `reconstruct` stamps it back on. `main.start_game`
-records it through `new_log`. `sim.play_settings` records it after the hand-over,
-so a bot-column replay names the bot in the human's seat. A play-by-post log
-records it on its first rebuild, while it has no turns, so the resolver's upload
-carries the picks and every other client adopts them. A log from before the field
-existed has none and rebuilds with today's picks, as it always did. Recording
-makes a lineup readable after the fact. It does not stop two players of one key
-being dealt different lineups; that needs the pool itself pinned.
+Two fixes, each covering what the other cannot:
+
+- **`settings.RANDOM_POOL` is written out**, so every build deals a seed the same
+  bots whatever its `models/` holds, a stale cached build included, as long as
+  the pool is unchanged. A pool name that is not registered plays as the
+  heuristic (`ai.decide`'s fallback); `test_every_bot_in_the_pool_ships` keeps
+  that from happening silently, and `test_the_pool_still_deals_what_it_dealt`
+  pins the deal. A new bot is not dealt until someone adds it, and adding it
+  re-deals every random map, so it is done on purpose, like a `RULES_VERSION`
+  bump. Drop-ins are never dealt.
+- **`replay.GameLog.strategies` records each seat's strategy as built**
+  (`replay.seat_strategies`), and `reconstruct` stamps it back on.
+  `main.start_game` records it through `new_log`. `sim.play_settings` records it
+  after the hand-over, so a bot-column replay names the bot in the human's seat.
+  A play-by-post log records it on its first rebuild, while it has no turns, so
+  the resolver's upload carries the picks and every other client adopts them. A
+  log from before the field existed has none and rebuilds with today's picks.
+
+The alternative to a fixed pool was a roster fingerprint in the challenge key
+whenever a seat is random: the same key would always mean the same lineup, but
+every bot added would split every random map on the board, its scores, crowns
+and campaign standings with it, and leave old challenge links racing a score
+set against a different lineup.
 
 **The win overlay reveals it.** `render._winner_label` reads `Player.ai_strategy`
 — the resolved name — so a mystery match ends on "Verdant (Knower) wins!" rather
