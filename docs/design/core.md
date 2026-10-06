@@ -54,16 +54,35 @@ link on a mystery setup raceable, and a mystery match resumable. Each seat draws
 from its own stream, so three random seats are three independent picks rather
 than three copies of one.
 
-**The pool is read at build time, and that costs nothing a replay depends on.**
+**The pool is read at build time, so the log records what it dealt.**
 `ai.available_strategies()` is whatever is registered now, so a drop-in model
-joins the pool without being named anywhere. A roster that gains or loses a file
-therefore *can* change which bot a brand-new match faces — but it cannot move a
-single stored one, because `replay.reconstruct` applies the recorded orders and
-deals the recorded dice and asks no seat to decide anything. The property
-`bot_replay.replay_rev` rests on ("retuning, rewriting or deleting a `models/`
-bot cannot move a stored game") is untouched. A caller that never ran
+joins the pool without being named anywhere. A caller that never ran
 `ai.load_models()` sees only the built-in heuristic, which is the same
 degradation `ai.decide` already applies to an unrecognised strategy name.
+
+The pick indexes into the pool by its length, so a roster that gains or loses a
+file deals nearly every random seat a different bot. It cannot move a stored
+game's *board*, because `replay.reconstruct` applies the recorded orders and
+deals the recorded dice and asks no seat to decide anything (the property
+`bot_replay.replay_rev` rests on). It did move everything else about one. Map
+`ea1d2a0bf0a95ba4` (seed 626502, four random seats) was posted twice on
+2026-10-06, 23 minutes apart with no deploy between. Re-running every bot on the
+recorded openings showed the two players had faced heuristic / claudebot /
+claudebot / rusherplus and rusherplus / heuristic / heuristic / heuristic: the
+second lineup is what a six-bot roster deals, most likely a build cached by the
+service worker (stale-while-revalidate) from before actuary joined. Re-deriving
+the picks also meant a resumed match switched bots partway through if the roster
+had moved, and a watched replay's win overlay named today's pick.
+
+So `replay.GameLog.strategies` records each seat's strategy as built
+(`replay.seat_strategies`), and `reconstruct` stamps it back on. `main.start_game`
+records it through `new_log`. `sim.play_settings` records it after the hand-over,
+so a bot-column replay names the bot in the human's seat. A play-by-post log
+records it on its first rebuild, while it has no turns, so the resolver's upload
+carries the picks and every other client adopts them. A log from before the field
+existed has none and rebuilds with today's picks, as it always did. Recording
+makes a lineup readable after the fact. It does not stop two players of one key
+being dealt different lineups; that needs the pool itself pinned.
 
 **The win overlay reveals it.** `render._winner_label` reads `Player.ai_strategy`
 — the resolved name — so a mystery match ends on "Verdant (Knower) wins!" rather

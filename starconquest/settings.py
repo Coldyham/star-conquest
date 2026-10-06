@@ -714,15 +714,13 @@ def resolve_strategy(name: str, seed: int, pid: int) -> str:
     reproduces exactly: the same setup and seed always face the same opponents.
 
     The pool is ``ai.available_strategies()``, i.e. whatever is registered *now*
-    — so it includes drop-in models and holds no bot back, oracles included. It
-    is read at build time rather than baked in because that is the only honest
-    answer to "which bots exist", and the cost is bounded: a recorded match
-    replays its stored orders and dice and asks no seat to decide (see
-    ``replay.reconstruct``), so a roster that gains or loses a file cannot move a
-    single stored game — it can only change whose name is stamped on a *new* one.
-    A caller that never ran ``ai.load_models()`` sees only the built-in
-    heuristic, which is the same degradation ``ai.decide`` already applies to an
-    unrecognised strategy name.
+    — so it includes drop-in models and holds no bot back, oracles included. A
+    roster that gains or loses a file deals nearly every random seat a different
+    bot, so a recorded match keeps the bots it was dealt in
+    ``replay.GameLog.strategies`` rather than asking here again. A caller that
+    never ran ``ai.load_models()`` sees only the built-in heuristic, which is the
+    same degradation ``ai.decide`` already applies to an unrecognised strategy
+    name.
     """
     if name != RANDOM_STRATEGY:
         return name

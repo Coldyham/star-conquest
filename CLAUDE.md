@@ -200,8 +200,10 @@ order, fight resolution or map generation from a seed (and
 `test_leaderboard_sync` pins the pair). Version-1 logs and outdated logs
 (`GameLog.is_current`) are declined rather than replayed as if they reproduced.
 A log also carries the per-turn `"ai"` flag (for `hand_turns` and the seat claim),
-`"rules"` (forwarding rules) and `match_id` (from `settings.fresh_rng`; `truncate`
-keeps it, `fork` mints a new one). History mode is shell-only (`Ui.history`,
+`"rules"` (forwarding rules), `match_id` (from `settings.fresh_rng`; `truncate`
+keeps it, `fork` mints a new one) and `strategies`, each seat's bot as built,
+which `reconstruct` stamps back so a random seat keeps the bot it was dealt
+whatever the roster does since. History mode is shell-only (`Ui.history`,
 `main.build_history`); rewind truncates mid-game and forks a finished game.
 Reasons and alternatives: `docs/design/core.md`.
 
