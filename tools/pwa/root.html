@@ -14,8 +14,10 @@
   fragment never reaches the server, so only a script here can tell them apart:
 
   - a fragment goes to the game, fragment intact;
-  - an installed app (standalone/fullscreen) goes to the game too, since a home
-    screen install from before the move still launches /index.html;
+  - an installed app (standalone/fullscreen) is the manifest's start_url, and
+    reopens whichever half it was last on (sc_app_last, written by the board's
+    nav.mjs and the game page's injected head, only inside the installed app),
+    the game if it has never been anywhere;
   - anything else is a visitor, and gets the board.
 -->
 <script>
@@ -23,7 +25,9 @@
   var standalone = navigator.standalone === true ||
     (window.matchMedia && window.matchMedia(
       "(display-mode: standalone), (display-mode: fullscreen)").matches);
-  var game = location.hash.length > 1 || standalone;
+  var last = null;
+  try { last = localStorage.getItem("sc_app_last"); } catch (e) {}
+  var game = location.hash.length > 1 || (standalone && last !== "board");
   location.replace((game ? "/game/" : "/board/") + location.search + location.hash);
 })();
 </script>

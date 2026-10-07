@@ -91,13 +91,13 @@ def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
     assert "--can_close" not in call
 
 
-
 def test_the_game_page_gets_our_favicon_not_pygbags():
     """Without `--icon`, pygbag downloads its own default into /game/favicon.png,
     and the game page links that one rather than the site root's."""
     call = BUILD[BUILD.index("pygbag --build"):].split(")", 1)[0]
     assert '--icon "$ROOT/tools/pwa/favicon.png"' in call
     assert (ROOT / "tools" / "pwa" / "favicon.png").exists()
+
 
 def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
@@ -163,13 +163,14 @@ def test_the_router_sends_shared_links_to_the_game_and_visitors_to_the_board():
     assert "display-mode: standalone" in ROUTER, "an old install launches /index.html"
 
 
-def test_the_manifest_keeps_its_id_and_launches_the_game():
+def test_the_manifest_keeps_its_id_and_launches_the_router():
     import json
     manifest = json.loads((ROOT / "tools" / "pwa" / "manifest.webmanifest").read_text())
     # `id` resolves against start_url, so it must be absolute to stay the
     # pre-move default (the old start_url) and let existing installs update.
     assert manifest["id"] == "/index.html"
-    assert manifest["start_url"] == "./game/index.html"
+    # The router, not /game/, so a launch can reopen the board.
+    assert manifest["start_url"] == "./index.html"
     assert manifest["scope"] == "./"
 
 
@@ -190,3 +191,23 @@ def test_the_launcher_imports_pygame_for_pygbag():
     top-level main.py; the shim importing only the package boots to black."""
     launcher = (ROOT / "main.py").read_text()
     assert re.search(r"^import pygame\b", launcher, re.MULTILINE)
+
+
+def test_every_board_page_is_installable():
+    """A browser offers the install only on a page that links the manifest and
+    is controlled by the worker, so the board needs both, not just /game/."""
+    for page in render_board.PAGES:
+        assert '<link rel="manifest" href="/manifest.webmanifest">' in render_board.render(page), page
+    nav = (ROOT / "leaderboard" / "js" / "nav.mjs").read_text()
+    assert 'register("/sw.js")' in nav
+    assert "mountApp();" in nav[nav.index("export function mountNav"):]
+
+
+def test_an_app_launch_reopens_the_last_half():
+    """The router reads the half each side records inside the installed app."""
+    assert 'localStorage.getItem("sc_app_last")' in ROUTER
+    assert 'last !== "board"' in ROUTER, "a never-recorded launch must still open the game"
+    inject = (ROOT / "tools" / "pwa" / "inject.py").read_text()
+    nav = (ROOT / "leaderboard" / "js" / "nav.mjs").read_text()
+    assert 'setItem("sc_app_last", "game")' in inject
+    assert 'setItem("sc_app_last", "board")' in nav

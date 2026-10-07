@@ -205,7 +205,7 @@ def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
 def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
     """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
-    return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed)
+    return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed, state)
 
 
 def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameState, Ui]:

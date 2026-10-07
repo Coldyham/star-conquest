@@ -30,7 +30,7 @@ def _won_match(max_turns: int = 400):
         settings = Settings(players=3, nodes=14, seed=seed, autoplay=True)
         with _preserve_config():
             state = build_state(settings, seed)
-            log = replay.new_log(settings, seed)
+            log = replay.new_log(settings, seed, state)
             hid = replay.HUMAN_SEAT
             turns = 0
             while state.winner is None and turns < max_turns:
@@ -151,6 +151,57 @@ def test_a_wrong_score_played_under_current_rules_is_still_a_mismatch(posted):
     score = {**score, "lost": score["lost"] + 7}
     with _preserve_config():
         assert verify_scores.verify(score, blob, setup).verdict == "mismatch"
+
+
+def _with_strategies(blob, strategies):
+    log = replay.GameLog.decode(blob)
+    log.strategies = strategies
+    return log.encoded()
+
+
+def test_a_score_dealt_a_different_lineup_is_set_aside(posted):
+    """A build dealing from another pool (one from before it was fixed, or before
+    an edit to it) played honestly against bots this map's other scores did not
+    face: unverifiable against them, not wrong."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    assert log.strategies, "the fixture records its lineup"
+    rival = next(pid for pid in log.strategies if pid != replay.HUMAN_SEAT)
+    drifted = _with_strategies(blob, {**log.strategies, rival: "rusherplus"})
+    with _preserve_config():
+        check = verify_scores.verify(score, drifted, setup)
+    assert check.verdict == "outdated"
+    assert f"seat {rival} faced rusherplus" in check.detail
+
+
+def test_a_random_seat_is_checked_against_the_pool(posted, monkeypatch):
+    """The case the check exists for: the setup says "random", so the lineup it
+    deals comes from `RANDOM_POOL`, and an edit to the pool sets old scores aside."""
+    from starconquest import settings as settings_module
+    from starconquest.settings import RANDOM_STRATEGY
+    score, blob, setup = posted
+    setup = {**setup, "ai_strategy": [RANDOM_STRATEGY] * len(setup["ai_strategy"])}
+    log = replay.GameLog.decode(blob)
+    log.settings = setup
+    log.strategies = {pid: settings_module.resolve_strategy(RANDOM_STRATEGY, log.seed, pid)
+                      for pid in log.strategies}
+    blob = log.encoded()
+    with _preserve_config():
+        assert verify_scores.verify(score, blob, setup).verdict == "verified"
+        monkeypatch.setattr(settings_module, "RANDOM_POOL", ("alpha",))
+        check = verify_scores.verify(score, blob, setup)
+    assert check.verdict == "outdated" and "the setup deals alpha" in check.detail
+
+
+def test_the_human_seat_and_an_unrecorded_lineup_are_not_checked(posted):
+    """The human's seat was played by a person whatever it was built with, and a
+    log from before lineups were recorded has nothing to compare."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    human_renamed = _with_strategies(blob, {**log.strategies, replay.HUMAN_SEAT: "knower"})
+    with _preserve_config():
+        assert verify_scores.verify(score, human_renamed, setup).verdict == "verified"
+        assert verify_scores.verify(score, _with_strategies(blob, {}), setup).verdict == "verified"
 
 
 def test_a_score_with_no_uploaded_log_is_missing_not_suspect(posted):

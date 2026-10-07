@@ -79,7 +79,7 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
     if strategies is not None:
         settings.ai_strategy[:len(strategies)] = strategies
     state = build_state(settings, seed)
-    log = replay.new_log(settings, seed)
+    log = replay.new_log(settings, seed, state)
     hid = replay.HUMAN_SEAT
     turns = 0
     while state.winner is None and turns < max_turns:
@@ -654,3 +654,108 @@ def test_rewinding_past_every_hand_played_turn_un_claims_the_seat():
     dropped = replay.GameLog.from_dict(log.to_dict())
     dropped.truncate(first_hand)               # ...and now none do
     assert replay.reconstruct(dropped)[0].human() is None
+
+
+# --------------------------------------------------------------------------- #
+# Seat strategies: a random seat keeps the bot it was dealt
+# --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def _pool(*names):
+    """Deal random seats from ``names``, each registered as a strategy that
+    issues no orders."""
+    from starconquest import settings as settings_module
+    saved_pool, saved = settings_module.RANDOM_POOL, dict(ai.STRATEGIES)
+    try:
+        settings_module.RANDOM_POOL = tuple(names)
+        for name in names:
+            ai.register(name, lambda state, pid: [])
+        yield
+    finally:
+        settings_module.RANDOM_POOL = saved_pool
+        ai.STRATEGIES.clear()
+        ai.STRATEGIES.update(saved)
+
+
+def _random_setup(seed):
+    """Seats 2 and 3 left to chance; the seed is one whose picks move when a
+    third bot joins a pool of two (checked, so a reseed can't hide it)."""
+    from starconquest.settings import RANDOM_STRATEGY, resolve_strategy
+    s = Settings(mode="random", players=3, nodes=16, seed=seed)
+    s.ai_strategy[1] = s.ai_strategy[2] = RANDOM_STRATEGY
+    with _pool("alpha", "beta"):
+        before = [resolve_strategy(RANDOM_STRATEGY, seed, pid) for pid in (2, 3)]
+    with _pool("alpha", "beta", "gamma"):
+        after = [resolve_strategy(RANDOM_STRATEGY, seed, pid) for pid in (2, 3)]
+    assert before != after
+    return s
+
+
+def test_new_log_records_the_strategy_each_seat_was_built_with():
+    with _preserve_config(), _pool("alpha", "beta"):
+        s = _random_setup(7)
+        state = build_state(s, 7)
+        log = replay.new_log(s, 7, state)
+    assert 0 not in log.strategies, "neutral is not a seat"
+    assert log.strategies == {pid: p.ai_strategy for pid, p in state.players.items() if pid}
+    assert set(log.strategies.values()) <= {"heuristic", "alpha", "beta"}, "resolved, never 'random'"
+
+
+def test_strategies_round_trip_and_drop_junk():
+    log = replay.GameLog(seed=1, settings={}, strategies={2: "marshal", 3: "knower"})
+    assert replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict()))).strategies == log.strategies
+    junk = {"strategies": {"2": "marshal", "x": "knower", "3": "", "4": 5}}
+    assert replay.GameLog.from_dict(junk).strategies == {2: "marshal"}
+    assert replay.GameLog.from_dict({"strategies": ["marshal"]}).strategies == {}
+
+
+def test_reconstruct_keeps_the_bots_a_match_was_dealt_after_the_pool_moves():
+    """A pool edited since a match was played deals its seed different bots; a
+    resumed or watched match must still face the ones it was played against."""
+    with _preserve_config():
+        s = _random_setup(7)
+        with _pool("alpha", "beta"):
+            state = build_state(s, 7)
+            log = replay.new_log(s, 7, state)
+            log.record_turn(engine.end_turn(state, human_orders=[], decide=ai.decide))
+        dealt = replay.seat_strategies(state)
+        with _pool("alpha", "beta", "gamma"):
+            assert replay.seat_strategies(build_state(s, 7)) != dealt   # today's picks differ
+            rebuilt, _ = replay.reconstruct(replay.GameLog.decode(log.encoded()))
+    assert replay.seat_strategies(rebuilt) == dealt
+
+
+def test_an_old_log_without_strategies_rebuilds_as_it_always_did():
+    """Nothing recorded means nothing to restore: the seats get today's picks,
+    and the log is not back-filled with a guess at what it was played against."""
+    with _preserve_config():
+        s = _random_setup(7)
+        with _pool("alpha", "beta"):
+            state = build_state(s, 7)
+            log = replay.new_log(s, 7)
+            log.record_turn(engine.end_turn(state, human_orders=[], decide=ai.decide))
+        assert log.strategies == {}
+        with _pool("alpha", "beta", "gamma"):
+            today = replay.seat_strategies(build_state(s, 7))
+            rebuilt, _ = replay.reconstruct(log)
+    assert replay.seat_strategies(rebuilt) == today
+    assert log.strategies == {}
+
+
+def test_a_turnless_log_records_its_seats_when_first_rebuilt():
+    """A play-by-post match starts as a log with no turns (`pbp.match_log`), built
+    by whichever client gets there first; that build is the match's start, so the
+    log the resolver uploads carries its picks and every other client adopts them."""
+    with _preserve_config(), _pool("alpha", "beta"):
+        s = _random_setup(7)
+        log = replay.GameLog(seed=7, settings=s.to_dict())
+        state, _ = replay.reconstruct(log)
+    assert log.strategies == replay.seat_strategies(state)
+
+
+def test_fork_and_truncate_keep_the_strategies():
+    log = replay.GameLog(seed=9, settings=Settings(seed=9).to_dict(), strategies={2: "marshal"})
+    for _ in range(4):
+        log.record_turn(_record([]))
+    assert log.fork(2).strategies == {2: "marshal"}
+    log.truncate(1)
+    assert log.strategies == {2: "marshal"}

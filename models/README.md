@@ -282,7 +282,8 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first
-contact, which its *Opening* knob can turn off), `knower.py` (the oracle — it runs every rival's
+contact when its side of the map is big enough to, which its *Opening* knob can
+turn off), `knower.py` (the oracle — it runs every rival's
 own `decide` before the engine asks for it).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
@@ -290,8 +291,9 @@ leaves the seat's bot to the match seed, and `settings.build_state` resolves it 
 one of the above before the game starts. It is deliberately not a model file that
 forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
 seat whose bot it does not yet know (see *Predicting the other seats*), and every
-answer it could give is wrong for some pick. A drop-in of yours joins the pool the
-moment it registers; don't name one `random.py`.
+answer it could give is wrong for some pick. The pool is a fixed list
+(`settings.RANDOM_POOL`), so every copy of the game deals a seed the same bots; a
+drop-in of yours is never dealt. Don't name one `random.py`.
 
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating

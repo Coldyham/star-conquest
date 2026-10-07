@@ -371,6 +371,18 @@ not wrong. The check happens *after* the replay, so the many old games a bump do
 not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
+**The random pool is the other axis, and it gets the same verdict.** A seat left
+to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
+dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
+A score whose numbers reproduce but whose rival seats faced bots other than the
+ones its setup deals today is `outdated`: played honestly, by a build from before
+the pool was fixed or before an edit to it, against a lineup the map's other
+scores did not face. It stays counted, without the verified tick. `outdated`
+rather than `mismatch` because an edit to the pool would otherwise drop every
+honest earlier score on a random map, and a tampered lineup gains nothing a
+tampered score would not. `settings` is in `replay_rev`, so a pool edit makes
+`--stale` re-decide. A log that records no lineup is judged on its numbers.
+
 **Rewinding needs no versioning at all**, because it does not claim to reproduce
 anything. A rewind replays the prefix exactly, then plays *on* from there — a
 counterfactual by construction, which is why `fork` mints a new `match_id`. Both
@@ -385,9 +397,18 @@ than it is.
   from an explicit allow-list. The game itself is at `/game/`; the root is
   `tools/pwa/root.html`, a router that opens the board for a visitor and
   forwards a fragment (every challenge, replay and seat link the game ever
-  shared is the root plus one) or an installed app's launch to `/game/`. The
-  manifest, icons and service worker stay at the root, so old installs keep
-  their scope and manifest `id`. The functions are bundled from
+  shared is the root plus one) to `/game/`. The manifest, icons and service
+  worker stay at the root, so old installs keep their scope and manifest `id`.
+  The app is installable from either half: every board page links the
+  manifest, and `js/nav.mjs` registers the worker. Its `start_url` is the
+  router, which reopens whichever half the installed app was last on
+  (`sc_app_last`, written only in standalone/fullscreen display, by `nav.mjs`
+  and by the game page's `tools/pwa/inject.py` head), and the game if nothing
+  is recorded. So an install from before this keeps opening the game until it
+  visits the board. A fixed launch target either way would be wrong for
+  someone: the board is a fine front page, but a player who installed to play
+  wants the game. A per-device toggle would be one more control to find, for a
+  choice the last-visited half already makes. The functions are bundled from
   `leaderboard/netlify/functions/` and answer at root `/api/`. On a
   `.netlify.app` page `webstore.leaderboard_origin` is the page's own origin,
   and `GAME_URL` in `leaderboard/js/config.mjs` mirrors it. So every deploy

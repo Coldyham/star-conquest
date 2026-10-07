@@ -104,7 +104,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 
-from starconquest import ai, combat, engine
+from starconquest import ai, combat, config, engine
 from starconquest.model import Order
 
 # Lets a sibling oracle bot recognise us (and us it) so two of them proxy each
@@ -997,11 +997,18 @@ def _external_plan(state, pid, name, salt):
     ``ai.STRATEGIES`` is read *here* rather than at import: models/ files load in
     sorted filename order, so anything after `knower` is missing from the registry
     until well after this module's top level has run.
+
+    The probe's seat carries *our* ``ai_params``, and ``aux`` is the one field each
+    strategy reads its own way: left alone, a candidate with a knob of its own would
+    read our Oracle stop (2 under Search) as its setting. So it is reset to
+    ``config.AI_AUX``, the documented "untuned", and the candidate plays as it does
+    by default.
     """
     fn = ai.STRATEGIES.get(name)
     if fn is None or fn is decide or _is_oracle(fn):
         return None            # unregistered, or ourselves — nothing new to propose
     probe = _clone(state, _priv(state, pid, salt))
+    probe.players[pid].ai_params.aux = config.AI_AUX   # `_clone` copied the params
     try:
         orders = fn(probe, pid) or []
         # Mirrors `engine._own_orders`: a seat commands its own ships and nothing

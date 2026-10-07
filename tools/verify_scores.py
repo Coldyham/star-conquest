@@ -27,7 +27,8 @@ Five verdicts, stored in ``score_checks``:
 
     verified    the log replays and reproduces the score exactly
     mismatch    it replays and produces something else, or is for another setup
-    outdated    it does not reproduce, and it was played under older *rules*
+    outdated    it does not reproduce, and it was played under older *rules*;
+                or it reproduces, but against bots its setup no longer deals
     unreadable  the blob does not decode, or cannot be replayed
     missing     nothing was ever uploaded for this score's match_id
 
@@ -39,6 +40,13 @@ on every log when it is played, and a score that fails to reproduce having been
 played under an older stamp is reported as unverifiable rather than as wrong. The
 check is made *after* the replay, not before, so the many old games a rules change
 does not actually disturb still verify normally.
+
+A lineup that disagrees is ``outdated`` for the same reason. A log records the
+bot each seat was built with (``GameLog.strategies``), and a seat left to chance
+is dealt from ``settings.RANDOM_POOL``. A log dealt from another pool, by a build
+from before the pool was fixed or before an edit to it, was played honestly
+against bots the map's other scores did not face. A log that records no bots
+cannot be checked, and is judged on its numbers alone.
 
 ``missing`` is a fact, not an absence: a score posted before the game uploaded
 logs, or by someone whose upload was blocked, is unverified rather than suspect,
@@ -60,7 +68,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from starconquest import engine, replay
-from starconquest.settings import Settings
+from starconquest.settings import Settings, resolve_strategy
 from tools.bot_replay import (
     MISSING_CREDENTIALS,
     Supabase,
@@ -207,7 +215,25 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
         detail = (f"posted {claimed[0]}/{claimed[1]}/{claimed[2]} turns/lost/hand, "
                   f"replay gives {actual[0]}/{actual[1]}/{actual[2]}")
         return Check(sid, *_disagreement(log, detail))
+    drift = _lineup_drift(log, human.id)
+    if drift:
+        return Check(sid, "outdated", f"dealt a different lineup: {drift}")
     return Check(sid, "verified")
+
+
+def _lineup_drift(log: replay.GameLog, human_id: int) -> str:
+    """Each rival seat whose recorded bot is not the one its setup deals today,
+    or ``""``. The human's seat is left out: whatever it was built with, a
+    person played it."""
+    cfg = Settings.from_dict(log.settings)
+    drift = []
+    for pid, played in sorted(log.strategies.items()):
+        if pid == human_id:
+            continue
+        dealt = resolve_strategy(cfg.seat_strategy(pid), log.seed, pid)
+        if played != dealt:
+            drift.append(f"seat {pid} faced {played}, the setup deals {dealt}")
+    return "; ".join(drift)
 
 
 def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
