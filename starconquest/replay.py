@@ -450,6 +450,24 @@ def _game_path(seed: int) -> Path:
     return GAMES_DIR / f"game_{stamp}_{seed}.json"
 
 
+def reseed(state: GameState) -> None:
+    """Put ``state.rng`` where a live turn's decisions and dice start from.
+
+    Derived from the seed and the turn rather than carried over from the turn
+    before, so a rewound board rolls what the board played straight through
+    rolled. ``reconstruct`` deals recorded dice and asks no bot to decide, so a
+    rebuilt board's rng never moves from where map generation left it, and a
+    carried rng would hand every rewind a fresh roll of the turn it lands on.
+    `pbp.reseed` is the same rule for a shared match, under its own salt.
+
+    Called by the shell before it resolves a turn of its own
+    (`main.resolve_turn`), never inside `engine.end_turn`: a predicting bot plays
+    `end_turn` on copies with a private rng, and deriving there would hand it
+    the real dice.
+    """
+    state.rng.seed(f"{state.seed}:turn:{state.turn}")
+
+
 def new_log(settings: Settings, seed: int, state: GameState | None = None) -> GameLog:
     """Start a log for a new match; ``save`` writes it once the first turn lands.
 
