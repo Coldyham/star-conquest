@@ -154,3 +154,31 @@ def test_a_layout_people_play_is_kept():
     nodes = [n for n in _graph(games=ring)["nodes"] if n["kind"] == "home"]
     for node in nodes:   # homes are never "?" nodes, so every one is that family
         assert node["settings"]["layout"] == "ring"
+
+
+
+def test_cut_nodes_finds_the_chokes_of_the_field_alone():
+    # 0-1-2 triangle, 2-3 bridge, 3-4 tail; 5 is a home hanging off 4.
+    lanes = [(0, 1), (1, 2), (0, 2), (2, 3), (3, 4), (4, 5)]
+    assert campaign.cut_nodes(5, lanes) == {2, 3}
+
+
+def test_the_field_has_fewer_choke_points_than_a_game_board():
+    # A game board's 0.4 averaged 6.3 cut nodes on a 20-node field.
+    total = sum(len(campaign.cut_nodes(20, _graph(active=5, seed=seed)["lanes"]))
+                for seed in range(20))
+    assert total / 20 < 4
+
+
+def test_cut_nodes_hold_the_biggest_maps_and_never_a_mystery():
+    for seed in range(20):
+        graph = _graph(active=5, seed=seed, games=SIZED)
+        field = [n for n in graph["nodes"] if n["kind"] == "field"]
+        cuts = campaign.cut_nodes(len(field), graph["lanes"])
+        plain = sorted((n["systems"] for n in field if not n["mystery"]), reverse=True)
+        on_cuts = sorted((n["systems"] for n in field if n["id"] in cuts), reverse=True)
+        assert on_cuts == plain[:len(cuts)]
+        assert not any(n["mystery"] for n in field if n["id"] in cuts)
+
+
+SIZED = [_game(f"s{n}", 200 + n, nodes=n) for n in (7, 10, 13, 18, 24, 30)]
