@@ -216,6 +216,47 @@ all 84.
   could win kept the honest search going to turn 35,827 before the budget
   stopped it. Fixed, with `test_the_beam_stops_at_max_turns`.
 
+## Exhaustive on a tiny map (`06a74fc834bdf656`, 2026-10-07)
+
+The map has 5 systems and 2 players against heuristic. We hold 3, the rival
+holds 2, and 2's only lane leads to 1, so the fastest route is 3 → 1 → 2, 8
+turns each. That is the floor of 16. With two players no rival can annihilate
+another, so the floor is a strict bound here. The board's best was 17/4, made
+by waiting one turn before attacking. The beam found 16/4 on lucky dice and
+17/4 on honest.
+
+**What makes it exhaustible.** Every roll the game deals there is one call to
+`random()` (heuristic's tie-break `uniform` and combat's), and a rewind leaves
+the rng at R0, where map generation left it. So the rng at the start of any
+turn is R0 plus some count of draws. The search ran over (board, draw count)
+for turns 0-15. At every turn it tried "carry on" and "rewind here", crossed
+with the human's orders:
+- every turn-0 send from 3 to 1 of 9-12 ships;
+- relaunching all, or all but one, from 1 to 2;
+- fishing sends from 3: one ship or every ship to the neutral at 4, or one ship
+  to 1.
+
+It pruned on the floor and kept the fewest losses per (board, draw count). It
+took 2 minutes and expanded about 2 million turns. It checked that no other rng
+method was ever called.
+
+**Result: 16 is reachable on real dice, and 16/10 is the best.**
+- 10,464 lines win on turn 16. Their losses are 10 (7,900 lines), 11 (1,888),
+  12 (564) and 13 (112).
+- **None of them win without a rewind.** 10,012 need one rewind, and 452 need two.
+  The simplest: send all 12 on turn 0, rewind to turn 7 so the fights at 1 roll
+  from R0, then relaunch the survivors at 2. It replays through `reconstruct`
+  to 16/10.
+- The same evening a person posted 16/10 on the board, matching the search
+  exactly.
+
+So the lucky beam's 16/4 rested on rolls no rewind reaches, and the honest
+beam's 17 was a real limit of play without fishing. **The order set is a
+model, not every legal order.** It covers every send that can still win by 16
+and the obvious fishing sends, not every split of every garrison. The script was
+a one-off and is not committed. It would generalise to any map small enough
+that floor-pruning leaves a few thousand states a turn.
+
 ## Next, if it goes further
 
 - **A par on the board** would be the best honest line per map, computed
