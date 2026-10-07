@@ -13,11 +13,12 @@ and reports three numbers for the setup:
 * the **best line found** by a beam search over turns, scored by rollouts;
 * with ``--log``, the turn the recorded player actually won on.
 
-``--dice lucky`` resolves every fight the searcher is in at its best roll: the
-ceiling for a player who rewinds until a fight goes their way. ``--dice honest``
-draws the dice, and also tries each turn as if the player had just rewound to it
-(`_RESET`), which is the re-roll the game really offers. The two modes, what each
-number is a bound on and what the first runs found are in docs/design/par.md.
+``--dice lucky`` resolves every fight the searcher is in at its best roll, for a
+player who rewinds until a fight goes their way. It is not a ceiling: rival
+fights still roll, and fall differently. ``--dice honest`` draws the dice, and
+also tries each turn as if the player had just rewound to it (`_RESET`), which
+is the re-roll the game really offers. What each mode measures and what the
+runs found are in docs/design/par.md.
 
 The winning line is a real `replay.GameLog`: it is replayed through
 `replay.reconstruct` before it is reported, and ``--out`` saves it.
@@ -297,9 +298,14 @@ class Search:
     def __init__(self, cfg: Settings, seed: int, dice: str = "lucky", width: int = 6,
                  names: tuple[str, ...] = CANDIDATES, policy: str = ROLLOUT_POLICY,
                  budget: float = 600.0, max_turns: int = MAX_TURNS,
-                 resets: bool | None = None, verbose: bool = False) -> None:
+                 resets: bool | None = None, verbose: bool = False,
+                 strategies: dict[int, str] | None = None) -> None:
         self.cfg, self.seed = cfg, seed
         self.root = build_state(cfg, seed)
+        for pid, name in (strategies or {}).items():
+            if pid in self.root.players and not self.root.players[pid].is_neutral:
+                self.root.players[pid].ai_strategy = name
+        self.strategies = replay.seat_strategies(self.root)
         human = self.root.human()
         if human is None:
             raise ValueError("this setup has no human seat to search for")
@@ -413,7 +419,8 @@ class Search:
             yield
 
     def log(self) -> replay.GameLog:
-        out = replay.GameLog(seed=self.seed, settings=self.cfg.to_dict())
+        out = replay.GameLog(seed=self.seed, settings=self.cfg.to_dict(),
+                             strategies=dict(self.strategies))
         for record in self.best.records:
             out.record_turn(record, human_ai=False)
         out.mark_finished(self.me)
@@ -446,9 +453,9 @@ def check_line(log: replay.GameLog, me: int) -> tuple[bool, int, int]:
 # --------------------------------------------------------------------------- #
 # Command line
 # --------------------------------------------------------------------------- #
-def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | None]:
-    """The setup to search, its seed, and the recorded player's (turn, lost) when
-    ``--log`` names a match they won."""
+def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | None, dict[int, str]]:
+    """The setup to search, its seed, the recorded player's (turn, lost) when
+    ``--log`` names a match they won, and the bots a ``--log`` match was dealt."""
     if args.log:
         log = replay.load(Path(args.log))
         if not log.is_current:
@@ -459,11 +466,11 @@ def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | N
         played = None
         if human is not None and state.winner == human.id:
             played = (state.turn, human.ships_lost)
-        return cfg, log.seed, played
+        return cfg, log.seed, played, dict(log.strategies)
     cfg = Settings(mode=args.mode, players=args.players, nodes=args.nodes, seed=args.seed)
     for i, name in enumerate(args.ai or []):
         cfg.ai_strategy[i + 1] = name
-    return cfg, args.seed, None
+    return cfg, args.seed, None, {}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -491,10 +498,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     ai.load_models()
     ai.set_budget_scale(math.inf)
-    cfg, seed, played = _setup(args)
+    cfg, seed, played, strategies = _setup(args)
     search = Search(cfg, seed, dice=args.dice, width=args.width,
                     names=tuple(args.candidates), policy=args.policy, budget=args.budget,
-                    max_turns=args.max_turns, resets=args.resets, verbose=args.verbose)
+                    max_turns=args.max_turns, resets=args.resets, verbose=args.verbose,
+                    strategies=strategies)
     rivals = [search.root.players[p].ai_strategy for p in sorted(rivals_of(search.root, search.me))]
     root_floor = floor(search.root, search.me)
     print(f"setup: {cfg.mode}, {len(search.root.systems)} systems, {cfg.players} players, "

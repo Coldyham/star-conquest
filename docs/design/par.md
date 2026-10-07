@@ -62,10 +62,12 @@ almost nothing (losses ≈ B²/2A), so "ships needed" barely prunes anything.
   `combat.resolve_fight` inside the tool's own process. Every fight (arrivals,
   pile-up folds, lane clashes) calls it by name, so one wrapper covers them all.
   The rolls dealt are recorded, so the line replays through `reconstruct`.
-  Against marshal and actuary, which draw nothing, this is fully deterministic
-  and an **upper bound** on what rewind-fishing can reach. Against bots that
-  draw, the rivals' tie-breaks and their fights with each other still come from
-  the stream, so the result is one sample, not a bound. Don't call it a ceiling.
+  **It is not a ceiling, even against marshal and actuary.** Fights between two
+  rivals still draw from the stream, and in lucky mode the searcher's own fights
+  stop consuming it, so those rival fights fall differently. The best roll in
+  each fight is also not always the best for the game, since a different
+  survivor count changes what every bot does next. Measured, honest dice found a
+  sooner win than lucky in 2 of 18 paired runs (see "Readings").
 - **`honest`**: dice and tie-breaks come from the copied board's own rng, and
   every turn is also tried from the reset stream (`--resets`). This is the
   **achievable** number. Throwaway re-rolls are not modelled yet.
@@ -92,34 +94,68 @@ checked before it is reported.
 heuristic, a turn costs about 0.05 ms. Rival decide cost dominates as maps and
 rosters grow. Rivals on knower Search take seconds per decide, so leave them out.
 
-## First readings (2026-10-06, two runs only)
+## Readings (2026-10-07)
 
-Both runs used lucky dice and beam width 4-6:
+Every run used beam width 6 with a 1200 s budget, and none needed the budget.
+All 38 best lines (these 36 and the 2026-10-06 pair) replay through
+`reconstruct` to the turn and losses reported. Cells are turn/ships lost; "bot
+alone" is the best single roster bot playing the seat under the same dice, with
+the seat still flagged human, so it is not the board's bot column.
 
-| Setup | Floor | Best found | Bots alone (same dice) | Time |
-| --- | --- | --- | --- | --- |
-| random, 8 nodes, 2 players, seed 3, vs heuristic | 17 | 28 (lost 3) | actuary 30/4; marshal and thinker stalemate at 400 | <1 s |
-| random, 13 nodes, 3 players, seed 1, vs marshal + actuary | 24 | 48 (lost 8) | marshal 48/11, actuary 69/17 | 12 s |
+**Against recorded human wins** (local `games/`, `--log`):
 
-What they suggest, nothing more yet:
+| Systems, players, rivals | Floor | Human | Honest | Lucky | Time (honest) |
+| --- | --- | --- | --- | --- | --- |
+| 9, 2, heuristic | 6 | 32/28 | 13/5 | 11/2 | 1 s |
+| 9, 2, marshal | 6 | 24/11 | 14/7 | 16/2 | 1 s |
+| 11, 3, heuristic ×2 | 19 | 67/52 | 42/26 | 42/9 | 4 s |
+| 15, 4, marshal knower thinker | 12 | 68/45 | 47/44 | 44/17 | 645 s |
+| 18, 3, heuristic ×2 | 21 | **42/20** | 51/30 | 40/5 | 6 s |
+| 25, 4, marshal knower thinker | 15 | 64/82 | 44/35 | 37/12 | 559 s |
 
-- Small maps against cheap rivals are fast. The search finished its beam well
-  inside budget on both.
-- On 13 nodes the search matched marshal's turn and only shaved losses. The
-  candidate set probably can't express a faster plan: every candidate is some
-  bot's idea. Wider beams, more mutations, or a planner of its own are the next
-  things to try.
-- The floor sits about half the best found on both maps. It is useful as a
-  floor, too loose to prune much (46 of 1902 children on 13 nodes).
-- Aside: marshal and thinker stalemate on the 8-node 2-player map against
-  heuristic in the plain harness too (`sim.play_settings`), so this is not a
-  search artefact. It could be worth a look on its own.
+**Grid** (random, 3 players, seeds 1 and 2; honest | lucky, best bot alone in brackets):
 
-## Not yet run
+| Nodes | vs marshal + actuary | vs thinker + heuristic |
+| --- | --- | --- |
+| 8 | 40 (92), 51 (90) \| 48 (73), 42 (101) | 103 (none), 52 (73) \| 41 (63), 32 (60) |
+| 13 | 61 (101), 81 (none) \| 48 (48), 60 (174) | 53 (78), 64 (146) \| 47 (57), 55 (81) |
+| 18 | 73 (none), 78 (277) \| 48 (96), 57 (115) | 57 (58), 67 (167) \| 33 (47), 53 (62) |
 
-- The 18-node cell, the honest mode, the thinker + heuristic cell, and
-  comparisons against real human wins (`--log`).
-- Wider beams and longer budgets.
+What they say:
+
+- **The search beat the recorded human win in 5 of 6 games on honest dice**,
+  by 10 to 25 turns, and with fewer ships lost every time. The exception is the
+  18-system game against two heuristics (42 against 51). Lucky dice reach 40
+  there, so the person may have fished well or found a plan no candidate
+  proposes. A real score therefore usually has a lot of room in it, and the
+  board could show a par.
+- **It nearly always beats the best bot alone, often by a lot** (8 nodes
+  against marshal + actuary: 40 against 92). It tied once (13 nodes, seed 1,
+  lucky: 48 against marshal's 48). The beam turns a roster of mediocre seat
+  players into a strong one, because it is choosing among their ideas turn by
+  turn with the bots' replies known.
+- **Lucky beat honest in 15 of 18 pairs, tied once on turns and lost twice**.
+  This is why lucky is not a ceiling (see "Dice modes").
+- **The floor is loose.** The best line found lands at 1.5 to 4.7 times the
+  floor, and the floor pruned 0 to 14% of children. It is honest as a "nobody
+  can beat this" number and does little as a search bound.
+- **Cost is fine for everything but knower.** Grid runs took 3-161 s, and
+  marshal + actuary cost about 3x thinker + heuristic. The two games with
+  knower as a rival took 4-11 minutes, which is still affordable for a
+  scheduled job on the board's maps, which mostly have 12-33 nodes.
+- Aside: on the 8-node 2-player map, marshal and thinker never win against
+  heuristic in the plain harness either (`sim.play_settings`), so this is not
+  something the search caused. It could be worth a look on its own.
+
+## Next, if it goes further
+
+- **A par on the board** would be the best honest line per map, computed
+  offline like the bot column, with its log stored for a Watch link. The
+  floor alone is free, but too loose to be interesting.
+- **Search quality.** Wider beams, throwaway re-rolls in honest mode, and
+  candidates that aren't some bot's idea (the 18-system human win suggests
+  these exist).
+- **Cost.** Anything with knower as a rival wants its own time budget.
 
 ## A gap this exposes in `verify_scores`
 
