@@ -69,18 +69,23 @@ almost nothing (losses ≈ B²/2A), so "ships needed" barely prunes anything.
   `combat.resolve_fight` inside the tool's own process. Every fight (arrivals,
   pile-up folds, lane clashes) calls it by name, so one wrapper covers them all.
   The rolls dealt are recorded, so the line replays through `reconstruct`.
-  **It is not a ceiling, even against marshal and actuary.** Fights between two
-  rivals still draw from the stream, and in lucky mode the searcher's own fights
-  stop consuming it, so those rival fights fall differently. The best roll in
+  Under the derived rng no player can reach these rolls, since a rewind no
+  longer re-rolls, so lucky is an optimist's yardstick rather than a model of
+  any play. **It is not a ceiling, even against marshal and actuary.** Fights
+  between two rivals still draw from the turn's stream, and in lucky mode the
+  searcher's own fights stop consuming it, so those rival fights fall
+  differently. The best roll in
   each fight is also not always the best for the game, since a different
   survivor count changes what every bot does next. Measured, honest dice found a
   sooner win than lucky in 2 of 18 paired runs (see "Readings").
-- **`honest`**: dice and tie-breaks come from the copied board's own rng, and
-  every turn is also tried from the reset stream (`--resets`). This is the
-  **achievable** number under the old rewind rule. Throwaway re-rolls are not
-  modelled yet. Now that `replay.reseed` is on main, honest mode should seed
-  each turn the way the game does instead of carrying or resetting, and its
-  readings should be retaken.
+- **`honest`**: every simulated turn is seeded as the game seeds it
+  (`replay.reseed` inside `par_search.step`), so the dice and tie-breaks are
+  the ones a player would meet with the same orders. Rewinding offers nothing
+  more, so this is the **achievable** number. Only a different order set rolls
+  differently, and the search's candidates are its only fishing. Until
+  2026-10-07 honest mode carried the rng and also tried each turn from the
+  stream a rewind left (`--resets`, now removed), which modelled the old
+  re-roll rule.
 
 ## The search
 
@@ -91,8 +96,8 @@ It is a beam search over turns:
 - **Scoring**: each child is ranked by a rollout to the end with `--policy`
   (marshal) in the seat.
 - **Pruning and merging**: a child whose floor can't beat the best (turns,
-  then lost) is pruned, and transpositions are merged on the board, ignoring
-  the rng.
+  then lost) is pruned, and transpositions are merged on the board. That merge
+  is exact, since each turn's rng follows from the turn.
 - **Incumbents**: every winning rollout is a complete line and a new incumbent.
   The starting incumbent comes from each candidate bot playing the seat alone,
   under the same dice.
@@ -105,6 +110,11 @@ heuristic, a turn costs about 0.05 ms. Rival decide cost dominates as maps and
 rosters grow. Rivals on knower Search take seconds per decide, so leave them out.
 
 ## Readings (2026-10-07)
+
+> **Possibly stale.** This section was measured before `replay.reseed`, with
+> honest mode carrying the rng and trying rewinds. Honest numbers would now
+> differ (no rewind re-rolls), and lucky numbers can move too, since rival
+> tie-breaks and rival fights roll from different streams. Not recomputed.
 
 Every run used beam width 6 with a 1200 s budget, and none needed the budget.
 All 38 best lines (these 36 and the 2026-10-06 pair) replay through
@@ -157,6 +167,11 @@ What they say:
   something the search caused. It could be worth a look on its own.
 
 ## The live board (2026-10-07)
+
+> **Possibly stale.** This section was measured before `replay.reseed`, with
+> honest mode carrying the rng and trying rewinds. Honest numbers would now
+> differ (no rewind re-rolls), and lucky numbers can move too, since rival
+> tie-breaks and rival fights roll from different streams. Not recomputed.
 
 Every board map with fewer than 20 systems was searched: 86 of the 119 maps,
 counting systems by building each map rather than reading `nodes`. 80 have a
@@ -227,6 +242,9 @@ all 84.
 
 ## Exhaustive on a tiny map (`06a74fc834bdf656`, 2026-10-07)
 
+> The first half of this section models the old rewind rule on purpose. The
+> last paragraph is the same search under `replay.reseed`.
+
 The map has 5 systems and 2 players against heuristic. We hold 3, the rival
 holds 2, and 2's only lane leads to 1, so the fastest route is 3 → 1 → 2, 8
 turns each. That is the floor of 16. With two players no rival can annihilate
@@ -282,8 +300,8 @@ board shows.
 
 ## Next, if it goes further
 
-- **Honest mode under the derived rng** (see "Dice modes"), then retake the
-  readings.
+- **Retake the readings** under the derived rng. Honest mode now seeds turns
+  as the game does, and the tables above predate that.
 - **Search quality.** The first lever is rolling out with more than one bot
   and keeping the best, since the default marshal rollout hides whole maps from
   the search. After that: wider beams, throwaway re-rolls in honest mode, and
@@ -295,6 +313,34 @@ board shows.
 
 `tools/verify_scores.py` checks that a log replays consistently. It does not
 check that the dice came from the seed, or that the bots' orders are what those
-bots would play. A lucky line from this tool, or any hand-made log, therefore
-verifies. This is recorded in `docs/design/leaderboard.md`, "Checked scores",
-and is not fixed here.
+bots would play. Rechecked on 2026-10-07, after `replay.reseed`, on a 12-node
+3-player map against heuristics: **both halves are still open.**
+
+- **Dice.** A lucky line, which carries hand-picked rolls in 19 of its 20
+  fighting turns, verifies.
+- **Bot orders.** An honest line with 2 rival orders deleted from its last 10
+  turns still wins on the same turn (36 lost instead of 34) and verifies.
+
+**What `replay.reseed` makes possible, and what it doesn't.** Every live turn
+now starts from `Random(f"{seed}:turn:{turn}")`. The bots draw first, then
+combat draws its dice back to back. So a genuine turn's dice are an unbroken
+run of `random()` values from that stream, starting after however many 32-bit
+words the bots used. A prototype that scans the first 4096 words for that run
+found it on 27 of 27 fighting turns of an honest line, 1 of 20 of the lucky
+line, and 0 of 6 of a board log from before the change. It has three limits:
+
+- **Where the run starts isn't known.** The bots' draws come first, and the
+  verifier would have to re-run the bots to count them, which the board rules
+  out ("bots are free to move"). Accepting any start leaves a cheater a few
+  thousand starting points to fish among per turn.
+- **It says nothing about bot orders.** The doctored line above passes it,
+  27 of 27, because its recorded dice are unchanged.
+- **It only applies to games played after `replay.reseed`.** A log does not
+  say which rule it was played under, so the verifier would need a marker.
+
+Rolling combat from a stream of its own, seeded from `(seed, turn)` and handed
+to `end_turn` only by the shell, would remove the first limit: the dice would
+then follow exactly from the fights in order, with nothing to fish among. That
+needs `main.resolve_turn` and the verifier to agree on it, and a marker in the
+log, and is not built. The bot-orders half stays open by design. Also recorded
+in `docs/design/leaderboard.md`, "Checked scores".

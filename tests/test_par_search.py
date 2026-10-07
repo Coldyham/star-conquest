@@ -66,3 +66,31 @@ def test_the_beam_stops_at_max_turns():
                                    width=2, budget=30, max_turns=5)
         search.run()
         assert search.stats.layers <= 5
+
+
+def test_a_step_rolls_the_turn_the_game_would_roll():
+    """`step` seeds the turn as the game does (`replay.reseed`), so whatever rng a
+    board carries in, the turn comes out the same."""
+    ai.load_models()
+    with _preserve_config():
+        root = build_state(Settings(players=3, nodes=12, seed=2), 2)
+        records = []
+        for salt in (1, 2):
+            board = par_search.clone(root, random.Random(salt))
+            records.append([par_search.step(board, []) for _ in range(40)])
+        assert records[0] == records[1]
+        assert any(r.dice for r in records[0])
+
+
+def test_an_honest_line_replays():
+    ai.load_models()
+    ai.set_budget_scale(math.inf)
+    try:
+        with _preserve_config():
+            search = par_search.Search(Settings(players=2, nodes=8, seed=3), 3,
+                                       dice="honest", width=2, budget=30)
+            best = search.run()
+            assert best.turn < math.inf
+            assert par_search.check_line(search.log(), search.me) == (True, best.turn, best.lost)
+    finally:
+        ai.set_budget_scale(1.0)

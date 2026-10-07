@@ -15,12 +15,12 @@ and reports three numbers for the setup:
 * with ``--log``, the turn the recorded player actually won on; with
   ``--game-key``, the board's best counted score and best bot-column win.
 
-``--dice lucky`` resolves every fight the searcher is in at its best roll, for a
-player who rewinds until a fight goes their way. It is not a ceiling: rival
-fights still roll, and fall differently. ``--dice honest`` draws the dice, and
-also tries each turn as if the player had just rewound to it (`_RESET`), which
-is the re-roll the game really offers. What each mode measures and what the
-runs found are in docs/design/par.md.
+Every turn is seeded as the game seeds it (`replay.reseed`), so a rewind
+offers no new dice and only a different set of orders rolls differently.
+``--dice honest`` plays those dice. ``--dice lucky`` resolves every fight the
+searcher is in at its best roll instead, which no player can reach: it is an
+optimist's yardstick, not a ceiling, since rival fights still roll. What each
+mode measures and what the runs found are in docs/design/par.md.
 
 The winning line is a real `replay.GameLog`: it is replayed through
 `replay.reconstruct` before it is reported, and ``--out`` saves it.
@@ -53,8 +53,6 @@ ROLLOUT_POLICY = "marshal"
 DROP_ONE_CAP = 3          # drop-one-strike variants per node, from the first candidate
 MAX_TURNS = 400
 
-_CONTINUE = "continue"
-_RESET = "reset"
 _SALT_PROBE = 101
 
 
@@ -81,7 +79,8 @@ def clone(state: GameState, rng: random.Random | None = None) -> GameState:
 
 
 def board_key(state: GameState) -> tuple:
-    """Everything about a position the rules read, the rng aside."""
+    """Everything about a position the rules read. The rng is not in it because
+    each turn is seeded from the turn (`step`)."""
     return (
         state.turn,
         tuple((s.owner_id, s.ships, s.prod_progress) for _, s in sorted(state.systems.items())),
@@ -293,7 +292,8 @@ class Stats:
 
 def step(board: GameState, orders: list[Order]) -> engine.TurnRecord:
     """One turn on ``board`` with ``orders`` for the human seat and every bot seat
-    deciding for itself."""
+    deciding for itself, on the rng the game would give that turn."""
+    replay.reseed(board)
     return engine.end_turn(board, human_orders=orders, decide=ai.decide)
 
 
@@ -301,7 +301,7 @@ class Search:
     def __init__(self, cfg: Settings, seed: int, dice: str = "lucky", width: int = 6,
                  names: tuple[str, ...] = CANDIDATES, policy: str = ROLLOUT_POLICY,
                  budget: float = 600.0, max_turns: int = MAX_TURNS,
-                 resets: bool | None = None, verbose: bool = False,
+                 verbose: bool = False,
                  strategies: dict[int, str] | None = None) -> None:
         self.cfg, self.seed = cfg, seed
         self.root = build_state(cfg, seed)
@@ -313,10 +313,8 @@ class Search:
         if human is None:
             raise ValueError("this setup has no human seat to search for")
         self.me = human.id
-        self.reset_state = self.root.rng.getstate()
         self.dice, self.width, self.names, self.policy = dice, width, names, policy
         self.budget, self.max_turns, self.verbose = budget, max_turns, verbose
-        self.resets = (dice == "honest") if resets is None else resets
         self.best = Best()
         self.stats = Stats()
         self.started = 0.0
@@ -354,16 +352,10 @@ class Search:
 
     def expand(self, node: Node) -> Iterator[Node]:
         self.stats.expanded += 1
-        variants = [_CONTINUE] + ([_RESET] if self.resets else [])
         for orders in candidates(node.board, self.me, self.names):
-            for variant in variants:
-                rng = None
-                if variant == _RESET:
-                    rng = random.Random()
-                    rng.setstate(self.reset_state)
-                board = clone(node.board, rng)
-                record = step(board, orders)
-                yield Node(board, node, record)
+            board = clone(node.board)
+            record = step(board, orders)
+            yield Node(board, node, record)
 
     def run(self) -> Best:
         self.started = time.perf_counter()
@@ -515,8 +507,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--mode", default="random")
     ap.add_argument("--ai", nargs="*", help="strategies for seats 2.. (default heuristic)")
     ap.add_argument("--dice", choices=("lucky", "honest"), default="lucky")
-    ap.add_argument("--resets", action=argparse.BooleanOptionalAction, default=None,
-                    help="also try each turn as just rewound to (default: on for honest)")
     ap.add_argument("--width", type=int, default=6, help="beam width")
     ap.add_argument("--candidates", nargs="*", default=list(CANDIDATES))
     ap.add_argument("--policy", default=ROLLOUT_POLICY, help="rollout bot for the human seat")
@@ -534,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg, seed, played, strategies = _setup(args)
     search = Search(cfg, seed, dice=args.dice, width=args.width,
                     names=tuple(args.candidates), policy=args.policy, budget=args.budget,
-                    max_turns=args.max_turns, resets=args.resets, verbose=args.verbose,
+                    max_turns=args.max_turns, verbose=args.verbose,
                     strategies=strategies)
     rivals = [search.root.players[p].ai_strategy for p in sorted(rivals_of(search.root, search.me))]
     root_floor = floor(search.root, search.me)
