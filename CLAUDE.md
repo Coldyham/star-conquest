@@ -205,6 +205,9 @@ keeps it, `fork` mints a new one) and `strategies`, each seat's bot as built,
 which `reconstruct` stamps back so a random seat keeps the bot it was dealt
 whatever the roster does since. History mode is shell-only (`Ui.history`,
 `main.build_history`); rewind truncates mid-game and forks a finished game.
+**A live turn's rng is derived, never carried** (`replay.reseed`, called by
+`main.resolve_turn` and never inside `end_turn`), so a rewound turn ended with
+the same orders rolls the same dice rather than a fresh set.
 Reasons and alternatives: `docs/design/core.md`.
 
 ### Play-by-post (pbp.py)
@@ -273,7 +276,7 @@ already resolve simultaneously. The rationale for each rule is in
   `settings.random_seed()`/`settings.fresh_rng()` (the web build's fixed
   interpreter image makes global `random` repeat across loads). The sanctioned
   exceptions derive a stream rather than draw one: `botio.decide_seed`, the
-  random-seat pick, `pbp.reseed`.
+  random-seat pick, `pbp.reseed`, `replay.reseed`.
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use `model.lane_key` (a `frozenset`). Neutral is a real player, `id == 0`.
   Star names (`System.name`, `starnames.py`, generated from

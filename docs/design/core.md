@@ -385,6 +385,30 @@ clone made by `knower._clone` shares both, so a rollout would meet the same
 jitter the real turn is about to — handing the search the actual dice. The
 recorded-draws route keeps rollouts rolling their own.
 
+**A live turn's rng is derived, and a rewind is not a re-roll.** Until
+2026-10-07 the live game carried `state.rng` from turn to turn. A rebuilt board
+cannot carry it: `reconstruct` deals the recorded dice and asks no bot to
+decide, so a rebuilt board's rng sits exactly where map generation left it,
+whatever turn it was rebuilt to. Every "rewind to here" followed by End Turn
+therefore rolled that turn afresh. A player reported it (one fight left 6 ships
+played straight through and 7 after rewinding a turn), and the par search
+(`tools/par_search.py`, branch `par-search`) had found it was load-bearing: on `06a74fc834bdf656` every 16-turn win needed
+at least one rewind. `main.resolve_turn` now calls `replay.reseed`, which seeds
+the rng from `(seed, turn)` before anything draws, so a rewound turn ended with
+the same orders lands where the straight game did
+(`test_a_rewound_turn_rolls_what_the_straight_game_rolled`). Changing that
+turn's orders still changes its dice, since bots and fights draw in order.
+
+This is not the `(seed, turn)` derivation rejected above, which would have
+replaced the dice inside `end_turn`. That is still true there: knower plays
+`end_turn` on copies with a private rng, and deriving inside it would hand
+every rollout the real dice. The shell derives *before* calling the engine,
+exactly as `pbp.reseed` already did for a shared match, so copies keep rolling
+their own. `RULES_VERSION` did not move: a stored game deals its recorded dice
+and never reads the rng. Scores posted before the change were set when a
+rewind re-rolled, and some (that 16/10 among them) may not be repeatable
+since.
+
 Version-1 logs can no longer be replayed faithfully, so `latest_log` skips them
 rather than offering a resume that quietly rebuilds a different game.
 

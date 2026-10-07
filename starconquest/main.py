@@ -941,6 +941,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # are already in `seat_orders`, sent a turn ago.
     unclaimed = state.human() is None and seat_orders is None and script is None
     claim = ui.human_id if unclaimed and not ui.autoplay else None
+    if seat_orders is None and script is None:
+        # Before anything draws, the human seat's own `ai.decide` under autoplay
+        # included. A shared match derives its own (`pbp.reseed`, at the caller).
+        replay.reseed(state)
     if seat_orders is not None or script is not None:
         human_orders = None
     elif unclaimed and ui.autoplay:
