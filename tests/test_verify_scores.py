@@ -120,6 +120,19 @@ def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(post
         assert verify_scores.verify(score, blob, as_jsonb).verdict == "verified"
 
 
+def test_a_log_that_left_its_seed_to_the_log_is_still_the_same_setup(posted):
+    """A game started on a fresh seed records ``seed: None`` in the log's settings
+    and the concrete seed on the log itself, which is the board it was built
+    from. `challenge_key` hashes the seed, so the comparison has to fill it in,
+    or every such score reads as somebody else's map (score 67 on
+    ``4222d9e81bd86a17``, a real 25-turn win, was filed as a mismatch this way)."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    log.settings = {**log.settings, "seed": None}
+    with _preserve_config():
+        assert verify_scores.verify(score, log.encoded(), setup).verdict == "verified"
+
+
 def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monkeypatch):
     """The one thing that can legitimately break an old replay is the *engine*
     moving — never a bot. A score played under the old rules that no longer
