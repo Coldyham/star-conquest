@@ -15,7 +15,7 @@ a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
-`actuary` and `convoy`; `pbp` for play-by-post; `par` for the par search spike. Keep each design file under ~1000 lines, and split by
+`actuary` and `convoy`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -64,7 +64,7 @@ uv run python tools/config_census.py            # which setups people actually
 uv run python tools/setup_sweep.py              # ...and whether the roster's
                                                 # ranking moves on one of them
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # floor and
-                                                # best line found for one setup (spike)
+                                                # best line found for one setup (local check)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 

@@ -2,8 +2,8 @@
 
 This tool estimates the best score possible on one setup: it plays the human seat
 as a person who rewinds freely and knows exactly what every bot will do. It is a
-**measurement spike**, not a feature. Nothing reads its output yet, and nothing
-goes on the board until the numbers say it is worth doing.
+**local check**, run by hand to see how much room a score or a map has. Nothing
+reads its output, and it will not go on the board (see "Not on the board").
 
 ## The question
 
@@ -38,6 +38,13 @@ turns deep. A bounded search is cheap, though, and gives two numbers per map: a
   Against thinker or claudebot, fishing for a roll also reshuffles what the
   rival does.
 
+  **That was the game until 2026-10-07.** `replay.reseed` (branch
+  `rewind-derived-dice` at the time of writing, reasons in `docs/design/core.md`,
+  "Persistence, replay & history") now seeds each live turn from `(seed, turn)`.
+  A rewound turn ended with the same orders rolls the same dice, and only
+  changing that turn's orders shifts them. Every reading below was taken under
+  the old rule.
+
 ## The floor
 
 Win means every rival is gone, with no systems and no fleets (`engine._check_win`).
@@ -70,7 +77,10 @@ almost nothing (losses ≈ B²/2A), so "ships needed" barely prunes anything.
   sooner win than lucky in 2 of 18 paired runs (see "Readings").
 - **`honest`**: dice and tie-breaks come from the copied board's own rng, and
   every turn is also tried from the reset stream (`--resets`). This is the
-  **achievable** number. Throwaway re-rolls are not modelled yet.
+  **achievable** number under the old rewind rule. Throwaway re-rolls are not
+  modelled yet. Once `replay.reseed` is on main, honest mode should seed each
+  turn the way the game does instead of carrying or resetting, and its
+  readings should be retaken.
 
 ## The search
 
@@ -127,8 +137,7 @@ What they say:
   by 10 to 25 turns, and with fewer ships lost every time. The exception is the
   18-system game against two heuristics (42 against 51). Lucky dice reach 40
   there, so the person may have fished well or found a plan no candidate
-  proposes. A real score therefore usually has a lot of room in it, and the
-  board could show a par.
+  proposes. A real score therefore usually has a lot of room in it.
 - **It nearly always beats the best bot alone, often by a lot** (8 nodes
   against marshal + actuary: 40 against 92). It tied once (13 nodes, seed 1,
   lucky: 48 against marshal's 48). The beam turns a roster of mediocre seat
@@ -170,7 +179,7 @@ all 84.
 - **On honest dice the search plays about as well as the board's best player**
   (median 1 turn sooner). On lucky dice it is about 10 turns sooner. A board best
   is the best of many attempts, and probably rewind-fished, so lucky is the fairer
-  comparison and the likelier shape of a published par.
+  yardstick when checking one.
 - **Seven maps have a line that reaches the floor, so nobody can win them
   sooner.** On one of these (`e33cf0993ff6b95c`, 7 systems, against heuristic),
   the board's best is already on the floor at turn 15. The search ties it on
@@ -257,11 +266,24 @@ and the obvious fishing sends, not every split of every garrison. The script was
 a one-off and is not committed. It would generalise to any map small enough
 that floor-pruning leaves a few thousand states a turn.
 
+**Under the derived rng, 16 is gone.** The same search with each turn seeded as
+`replay.reseed` seeds it (no carry or rewind modes, since they now coincide)
+finds no line that wins on turn 16; every one has passed the floor by turn 10.
+Sending 12 on turn 0 now captures 1 with 5 left, where the carried stream
+gave 6. The best left is probably 17, as the board's 17/4 scores have it. The
+16/10 was set under the old re-roll rule.
+
+## Not on the board (decided 2026-10-07)
+
+Publishing a par or a floor per map was considered and decided against. The
+tool stays as something to run locally against a map or a score
+(`--game-key`, `--log`). The bot column remains the only computed number the
+board shows.
+
 ## Next, if it goes further
 
-- **A par on the board** would be the best honest line per map, computed
-  offline like the bot column, with its log stored for a Watch link. The
-  floor alone is free, but too loose to be interesting.
+- **Honest mode under the derived rng** (see "Dice modes"), then retake the
+  readings.
 - **Search quality.** The first lever is rolling out with more than one bot
   and keeping the best, since the default marshal rollout hides whole maps from
   the search. After that: wider beams, throwaway re-rolls in honest mode, and

@@ -37,7 +37,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning |
-| [`design/par.md`](design/par.md) | The par search spike: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
+| [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
@@ -107,7 +107,7 @@ only for a fight; what is deliberately not animated.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/par.md
-- **Par search (spike).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings: it beat 5 of 6 recorded human wins, and on the live board (86 maps under 20 systems) lucky dice beat the best human score on 76 of 84; the rollout bot matters more than the beam; the `verify_scores` gap it exposes.
+- **Par search (a local check).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings: it beat 5 of 6 recorded human wins, and on the live board (86 maps under 20 systems) lucky dice beat the best human score on 76 of 84; the rollout bot matters more than the beam; the `verify_scores` gap it exposes.
 
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
@@ -268,6 +268,10 @@ the measured result was indistinguishable from the baseline.
 - A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
 - A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
+
+### Par search ([`design/par.md`](design/par.md))
+- A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*
+- Lucky dice as a ceiling: withdrawn, since rival fights still roll and honest dice beat lucky in 2 of 18 pairs. *Dice modes.*
 
 ### Play-by-post ([`design/pbp.md`](design/pbp.md))
 - Every client re-running every bot from the stored orders: forked matches. Replaced by "the stored log is the record". Enforced fog: not attempted; fog is convenience. Resolving a turn on a clock: never. *The one idea everything follows from*, *Traps*.
