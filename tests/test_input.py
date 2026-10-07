@@ -866,6 +866,43 @@ def test_leaderboard_is_only_a_game_over_action():
         pygame.quit()
 
 
+def test_a_rewound_turn_rolls_what_the_straight_game_rolled(tmp_path, monkeypatch):
+    """Rewinding to a turn and ending it again with the same orders lands on the
+    board the game played straight through landed on: the turn's rng is derived
+    (`replay.reseed`), not carried, so a rewind is not a free re-roll."""
+    from starconquest.settings import build_state
+    from tests.test_replay import _preserve_config, _snapshot
+
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        with _preserve_config():
+            cfg = Settings(seed=3, nodes=12, players=3)
+            state = build_state(cfg, 3)
+            ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()),
+                    human_id=1, autoplay=True)
+            log = replay.new_log(cfg, 3, state)
+            log.path = tmp_path / "game.json"
+            boards = [_snapshot(state)]
+            while state.winner is None and state.turn < 40:
+                main.resolve_turn(state, ui, log)
+                boards.append(_snapshot(state))
+            fought = [i for i in range(log.turn_count) if log.script_for(i).dice]
+            assert fought
+            for turn in fought:
+                rewound = replay.GameLog.from_dict(log.to_dict())
+                rewound.truncate(turn)
+                again, _ = replay.reconstruct(rewound)
+                ui2 = Ui(view=WorldView(mapgen.map_bounds(again), config.play_rect()),
+                         human_id=1, autoplay=True)
+                main.resolve_turn(again, ui2, None)
+                assert _snapshot(again) == boards[turn + 1], f"turn {turn} re-rolled"
+    finally:
+        pygame.quit()
+
+
 def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
     """A game played by hand and then autoplayed to its end reports the hand
     count, and the Ui's running tally agrees with the log's per-turn flags."""
