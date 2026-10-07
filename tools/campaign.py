@@ -59,6 +59,11 @@ HOME_OFFSET = 110.0           # world units a home sits outside its edge node
 MYSTERY_MAX_NODES = config.STANDARD_MAX_NODES
 FAMILY_MAX_NODES = config.STANDARD_MAX_NODES   # a config past this is never a node
 SEED_TRIES = 50
+# Extra lanes past the MST, as a fraction of it: three times a game board's 0.4.
+# At 0.4 a 12-node field averaged 4.3 cut nodes (a single node every route
+# through it must cross) and a 40-node one 14.6; at 1.2 they average 0 and 0.7,
+# still short of every planar lane mapgen would accept.
+FIELD_EXTRA_EDGE_FRACTION = 1.2
 
 
 def week_start(now: dt.datetime) -> dt.date:
@@ -172,8 +177,12 @@ def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int
 def _layout(n_field: int, n_homes: int, rng: random.Random):
     """Field positions and lanes from the game's own planar mapgen, plus a ring of
     homes: one per edge node ``peripheral_starts`` picks, pushed outward from the
-    centre, each with a single lane to its edge node."""
-    apply_globals(Settings.defaults())   # mapgen reads the knobs live off config
+    centre, each with a single lane to its edge node. The field is meshed more
+    densely than a game board (``FIELD_EXTRA_EDGE_FRACTION``) so few nodes are
+    choke points that one well-defended score walls off."""
+    knobs = Settings.defaults()
+    knobs.extra_edge_fraction = FIELD_EXTRA_EDGE_FRACTION
+    apply_globals(knobs)   # mapgen reads the knobs live off config
     board = mapgen.generate(rng.randrange(config.SEED_MAX), "random", n_field, 2)
     pos = {sid: s.pos for sid, s in board.systems.items()}
     lanes = sorted(tuple(sorted((lane.a, lane.b))) for lane in board.lanes.values())

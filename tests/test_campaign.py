@@ -154,3 +154,40 @@ def test_a_layout_people_play_is_kept():
     nodes = [n for n in _graph(games=ring)["nodes"] if n["kind"] == "home"]
     for node in nodes:   # homes are never "?" nodes, so every one is that family
         assert node["settings"]["layout"] == "ring"
+
+
+def _cut_nodes(links: dict[int, set[int]]) -> set[int]:
+    """Nodes whose removal disconnects the rest (Tarjan's articulation points)."""
+    disc: dict[int, int] = {}
+    low: dict[int, int] = {}
+    cuts: set[int] = set()
+
+    def visit(node: int, parent: int | None) -> None:
+        disc[node] = low[node] = len(disc)
+        children = 0
+        for nxt in links[node]:
+            if nxt not in disc:
+                children += 1
+                visit(nxt, node)
+                low[node] = min(low[node], low[nxt])
+                if parent is not None and low[nxt] >= disc[node]:
+                    cuts.add(node)
+            elif nxt != parent:
+                low[node] = min(low[node], disc[nxt])
+        if parent is None and children > 1:
+            cuts.add(node)
+
+    visit(next(iter(links)), None)
+    return cuts
+
+
+def test_the_field_has_few_choke_points():
+    # A home's own edge node is unavoidably a cut point of the whole graph; the
+    # field among itself should rarely have one (a game board's 0.4 averaged 6).
+    total = 0
+    for seed in range(20):
+        graph = _graph(active=5, seed=seed)
+        field = {n["id"] for n in graph["nodes"] if n["kind"] == "field"}
+        links = {k: v & field for k, v in _neighbours(graph).items() if k in field}
+        total += len(_cut_nodes(links))
+    assert total / 20 < 1

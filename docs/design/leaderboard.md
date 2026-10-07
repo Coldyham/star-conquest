@@ -455,7 +455,9 @@ than it is.
 - **The weekly campaign stores its map and derives its state.**
   `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
-  out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
+  out by `mapgen` with three times a game board's extra lanes
+  (`FIELD_EXTRA_EDGE_FRACTION`, so few field nodes are cut points a single
+  par-tight score can wall off), each an unplayed seed on an existing non-hand-drawn config
   of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
   120-system test game was enough to put big maps in a week, and a big map is
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
