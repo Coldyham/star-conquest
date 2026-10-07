@@ -178,6 +178,7 @@ def same_setup(log: replay.GameLog, settings_json: dict | None) -> bool:
     seed = posted.seed if posted.seed is not None else log.seed
     if seed != log.seed:
         return False
+    posted.seed = played.seed = seed
     return bool(set(posted.challenge_keys()) & set(played.challenge_keys()))
 
 
