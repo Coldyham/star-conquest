@@ -150,18 +150,25 @@ What they say:
 ## The live board (2026-10-07)
 
 Every board map with fewer than 20 systems was searched: 86 of the 119 maps,
-counting systems by building each map rather than reading `nodes`. 67 have a
-counted score, and 80 have a win in the bot column. Each map ran on both dice
-modes (`--game-key`, beam width 6, 1200 s budget). All 172 lines found replay
-through `reconstruct` to the turn and losses reported.
+counting systems by building each map rather than reading `nodes`. 80 have a
+win in the bot column. Each map ran on both dice modes (`--game-key`, beam
+width 6, 1200 s budget). All 172 lines found replay through `reconstruct` to
+the turn and losses reported.
+
+**Human scores:** 67 maps have a counted score, but 84 have a score that
+replays. `verify_scores` had wrongly marked 40 scores `mismatch` and so dropped
+them from `counted_scores`, because a log that leaves its seed to the log
+read as another map. That is fixed on branch `verify-seedless-log`. Two more
+already verify on today's main but have not been re-checked. The table counts
+all 84.
 
 | Against | Lucky | Honest |
 | --- | --- | --- |
-| Board best (67 maps) | beats 59, worse 8; median 11 turns sooner | beats 37, ties 4, worse 26; median 1 turn sooner |
+| Best human score (84 maps) | beats 76, worse 8; median 10 turns sooner | beats 47, ties 4, worse 32, no win 1; median 1 turn sooner |
 | Bot column's best win (80 maps) | beats 80 | beats 75 |
 
 - **On honest dice the search plays about as well as the board's best player**
-  (median 1 turn sooner). On lucky dice it is about 11 turns sooner. A board best
+  (median 1 turn sooner). On lucky dice it is about 10 turns sooner. A board best
   is the best of many attempts, and probably rewind-fished, so lucky is the fairer
   comparison and the likelier shape of a published par.
 - **Seven maps have a line that reaches the floor, so nobody can win them
@@ -184,10 +191,22 @@ through `reconstruct` to the turn and losses reported.
   | `e11525f88c9f825d` | 14, marshal knower thinker | 19 | 34/15 | 35/9 | 40/17 |
   | `698b9659d4c657a1` | 19, marshal actuary | 10 | 41/24 | 42/17 | 42/29 |
 
-- **One map may only be winnable with luck.** `4222d9e81bd86a17` is 5
-  systems at 19.5 ly/turn, so every lane takes one turn. Nobody has posted a
-  score, and every bot in the column stalemates to turn 600. The honest search
-  finds no win in 400 turns either, while the lucky search wins on turn 16.
+- **The rollout bot matters more than the beam.** `4222d9e81bd86a17` is 5
+  systems at 19.5 ly/turn, so every lane takes one turn. Every bot in the
+  column stalemates to turn 600, and so does the honest search with its default
+  marshal rollouts, because marshal is what stalemates. People have won it on
+  turn 25 (lost 17, against the marshal of 2026-09-17, which today's marshal
+  first departs from on turn 15) and turn 35 (lost 13). Rerun with other
+  rollout bots (honest dice):
+
+  | Rollout bot | Width 6 | Width 16 |
+  | --- | --- | --- |
+  | marshal | no win | 28/19 |
+  | actuary | **16/10** | **16/10** |
+  | rusherplus | 47/24 | 22/11 |
+  | thinker, heuristic | no win | no win |
+
+  So an honest 16 exists, at the floor plus 9. The lucky search also found 16.
 - **Knower is the cost.** Maps without knower took at most 64 s a mode, most
   of them a few seconds. Maps with knower took 1-20 minutes, and 9 runs hit the 1200 s budget. Every budget hit had knower as a
   rival, apart from the beam bug below.
@@ -202,9 +221,11 @@ through `reconstruct` to the turn and losses reported.
 - **A par on the board** would be the best honest line per map, computed
   offline like the bot column, with its log stored for a Watch link. The
   floor alone is free, but too loose to be interesting.
-- **Search quality.** Wider beams, throwaway re-rolls in honest mode, and
-  candidates that aren't some bot's idea (the 18-system human win suggests
-  these exist).
+- **Search quality.** The first lever is rolling out with more than one bot
+  and keeping the best, since the default marshal rollout hides whole maps from
+  the search. After that: wider beams, throwaway re-rolls in honest mode, and
+  candidates that aren't some bot's idea (the maps where people still win
+  sooner suggest these exist).
 - **Cost.** Anything with knower as a rival wants its own time budget.
 
 ## A gap this exposes in `verify_scores`
