@@ -38,9 +38,9 @@ turns deep. A bounded search is cheap, though, and gives two numbers per map: a
   Against thinker or claudebot, fishing for a roll also reshuffles what the
   rival does.
 
-  **That was the game until 2026-10-07.** `replay.reseed` (branch
-  `rewind-derived-dice` at the time of writing, reasons in `docs/design/core.md`,
-  "Persistence, replay & history") now seeds each live turn from `(seed, turn)`.
+  **That was the game until 2026-10-07.** `replay.reseed` (PR #104, reasons
+  in `docs/design/core.md`, "Persistence, replay & history") now seeds each live
+  turn from `(seed, turn)`.
   A rewound turn ended with the same orders rolls the same dice, and only
   changing that turn's orders shifts them. Every reading below was taken under
   the old rule.
@@ -78,8 +78,8 @@ almost nothing (losses ≈ B²/2A), so "ships needed" barely prunes anything.
 - **`honest`**: dice and tie-breaks come from the copied board's own rng, and
   every turn is also tried from the reset stream (`--resets`). This is the
   **achievable** number under the old rewind rule. Throwaway re-rolls are not
-  modelled yet. Once `replay.reseed` is on main, honest mode should seed each
-  turn the way the game does instead of carrying or resetting, and its
+  modelled yet. Now that `replay.reseed` is on main, honest mode should seed
+  each turn the way the game does instead of carrying or resetting, and its
   readings should be retaken.
 
 ## The search
