@@ -147,6 +147,56 @@ What they say:
   heuristic in the plain harness either (`sim.play_settings`), so this is not
   something the search caused. It could be worth a look on its own.
 
+## The live board (2026-10-07)
+
+Every board map with fewer than 20 systems was searched: 86 of the 119 maps,
+counting systems by building each map rather than reading `nodes`. 67 have a
+counted score, and 80 have a win in the bot column. Each map ran on both dice
+modes (`--game-key`, beam width 6, 1200 s budget). All 172 lines found replay
+through `reconstruct` to the turn and losses reported.
+
+| Against | Lucky | Honest |
+| --- | --- | --- |
+| Board best (67 maps) | beats 59, worse 8; median 11 turns sooner | beats 37, ties 4, worse 26; median 1 turn sooner |
+| Bot column's best win (80 maps) | beats 80 | beats 75 |
+
+- **On honest dice the search plays about as well as the board's best player**
+  (median 1 turn sooner). On lucky dice it is about 11 turns sooner. A board best
+  is the best of many attempts, and probably rewind-fished, so lucky is the fairer
+  comparison and the likelier shape of a published par.
+- **Seven maps have a line that reaches the floor, so nobody can win them
+  sooner.** On one of these (`e33cf0993ff6b95c`, 7 systems, against heuristic),
+  the board's best is already on the floor at turn 15. The search ties it on
+  turns and loses 4 ships to the person's 9.
+- **People still beat the lucky search on 8 maps**, by 1-8 turns, usually
+  losing more ships to do it. Five of the eight have knower as a rival, and two
+  of those ran into the time budget. The rest point to plans no candidate
+  proposes:
+
+  | Map | Systems, rivals | Floor | Board best | Lucky | Honest |
+  | --- | --- | --- | --- | --- | --- |
+  | `83653810811196b0` | 5, heuristic | 12 | 18/7 | 21/3 | 21/8 |
+  | `24be4a35810b94e8` | 7, marshal thinker | 17 | 51/31 | 52/7 | 53/15 |
+  | `50f1e509421c1cd3` | 13, marshal knower | 14 | 27/11 | 29/5 | 35/15 |
+  | `7f7fabfca0969ba4` | 13, marshal knower | 18 | 38/25 | 46/12 | 41/24 |
+  | `91e180ce1b50757f` | 13, marshal knower | 16 | 42/23 | 47/13 | 68/50 |
+  | `a0e7c9f268079977` | 14, marshal knower thinker | 19 | 64/37 | 67/28 | 209/144 |
+  | `e11525f88c9f825d` | 14, marshal knower thinker | 19 | 34/15 | 35/9 | 40/17 |
+  | `698b9659d4c657a1` | 19, marshal actuary | 10 | 41/24 | 42/17 | 42/29 |
+
+- **One map may only be winnable with luck.** `4222d9e81bd86a17` is 5
+  systems at 19.5 ly/turn, so every lane takes one turn. Nobody has posted a
+  score, and every bot in the column stalemates to turn 600. The honest search
+  finds no win in 400 turns either, while the lucky search wins on turn 16.
+- **Knower is the cost.** Maps without knower took at most 64 s a mode, most
+  of them a few seconds. Maps with knower took 1-20 minutes, and 9 runs hit the 1200 s budget. Every budget hit had knower as a
+  rival, apart from the beam bug below.
+- **The floor stays loose:** best found is a median 2.1x the floor on lucky dice
+  and 2.7x on honest.
+- **A bug the board found:** the beam ignored `--max-turns`, so a map nobody
+  could win kept the honest search going to turn 35,827 before the budget
+  stopped it. Fixed, with `test_the_beam_stops_at_max_turns`.
+
 ## Next, if it goes further
 
 - **A par on the board** would be the best honest line per map, computed

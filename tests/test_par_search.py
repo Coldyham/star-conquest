@@ -57,3 +57,12 @@ def test_best_line_replays():
             assert par_search.check_line(search.log(), search.me) == (True, best.turn, best.lost)
     finally:
         ai.set_budget_scale(1.0)
+
+
+def test_the_beam_stops_at_max_turns():
+    ai.load_models()
+    with _preserve_config():
+        search = par_search.Search(Settings(players=3, nodes=12, seed=1), 1,
+                                   width=2, budget=30, max_turns=5)
+        search.run()
+        assert search.stats.layers <= 5

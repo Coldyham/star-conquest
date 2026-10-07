@@ -3,6 +3,7 @@
 
     uv run python tools/par_search.py --nodes 13 --players 3 --ai marshal actuary
     uv run python tools/par_search.py --log games/game_x.json   # a played match
+    uv run python tools/par_search.py --game-key 06a74fc834bdf656  # a live board map
     uv run python tools/par_search.py --seed 42 --dice honest --width 4 --budget 300
     uv run python tools/par_search.py ... --out best.json       # keep the winning line
 
@@ -11,7 +12,8 @@ and reports three numbers for the setup:
 
 * the **floor**: no line can win before this turn (`floor`), whatever the dice;
 * the **best line found** by a beam search over turns, scored by rollouts;
-* with ``--log``, the turn the recorded player actually won on.
+* with ``--log``, the turn the recorded player actually won on; with
+  ``--game-key``, the board's best counted score and best bot-column win.
 
 ``--dice lucky`` resolves every fight the searcher is in at its best roll, for a
 player who rewinds until a fight goes their way. It is not a ceiling: rival
@@ -33,6 +35,7 @@ import math
 import random
 import sys
 import time
+import urllib.parse
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -386,6 +389,8 @@ class Search:
                         if board.winner is not None:
                             self._consider(board, child.records(), "search")
                             continue
+                        if board.turn >= self.max_turns:
+                            continue
                         lost = self.lost(board)
                         bound = floor(board, self.me, self.horizon())
                         if bound == math.inf or self.best.cannot_beat(bound, lost):
@@ -453,9 +458,36 @@ def check_line(log: replay.GameLog, me: int) -> tuple[bool, int, int]:
 # --------------------------------------------------------------------------- #
 # Command line
 # --------------------------------------------------------------------------- #
+def board_setup(game_key: str) -> tuple[Settings, int, tuple[int, int] | None, str | None]:
+    """A live board map's setup and seed, its best counted (turn, lost), and its
+    best bot-column win as text. Public tables only, read with the board's own
+    publishable key, so no credentials are needed."""
+    from tools.bot_replay import Supabase, _settings_for
+    from tools.config_census import anon_credentials
+
+    api = Supabase(*anon_credentials())
+    key = urllib.parse.quote(game_key, safe="")
+    rows = api.select("games", f"select=game_key,seed,settings_json&game_key=eq.{key}")
+    built = _settings_for(rows[0]) if rows else None
+    if built is None:
+        raise SystemExit(f"no replayable board map with key {game_key}")
+    scores = api.select("counted_scores", f"select=turns,lost&game_key=eq.{key}"
+                                          "&order=turns.asc,lost.asc&limit=1")
+    bots = api.select("bot_scores", f"select=bot,turns,lost&game_key=eq.{key}&won=is.true"
+                                    "&order=turns.asc,lost.asc&limit=1")
+    best = (scores[0]["turns"], scores[0]["lost"]) if scores else None
+    bot = f"{bots[0]['bot']} turn {bots[0]['turns']}, lost {bots[0]['lost']}" if bots else None
+    return built[0], built[1], best, bot
+
+
 def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | None, dict[int, str]]:
     """The setup to search, its seed, the recorded player's (turn, lost) when
-    ``--log`` names a match they won, and the bots a ``--log`` match was dealt."""
+    ``--log`` names a match they won or ``--game-key`` a map with a counted
+    score, and the bots a ``--log`` match was dealt."""
+    if args.game_key:
+        cfg, seed, best, bot = board_setup(args.game_key)
+        print(f"board: best bot column {bot or 'no win'}")
+        return cfg, seed, best, {}
     if args.log:
         log = replay.load(Path(args.log))
         if not log.is_current:
@@ -476,6 +508,7 @@ def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | N
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--log", help="search the setup of this saved match")
+    ap.add_argument("--game-key", help="search this live leaderboard map")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--nodes", type=int, default=13)
     ap.add_argument("--players", type=int, default=3)
@@ -517,7 +550,8 @@ def main(argv: list[str] | None = None) -> int:
           f"{s.rollouts} rollouts ({s.rollout_turns} turns), "
           f"{time.perf_counter() - search.started:.0f}s")
     if played is not None:
-        print(f"recorded player: turn {played[0]}, lost {played[1]}")
+        label = "board best" if args.game_key else "recorded player"
+        print(f"{label}: turn {played[0]}, lost {played[1]}")
     if best.turn == math.inf:
         print("best: no winning line found")
         return 1
