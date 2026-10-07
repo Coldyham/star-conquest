@@ -455,15 +455,18 @@ than it is.
 - **The weekly campaign stores its map and derives its state.**
   `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
-  out by `mapgen` with three times a game board's extra lanes
-  (`FIELD_EXTRA_EDGE_FRACTION`, so few field nodes are cut points a single
-  par-tight score can wall off), each an unplayed seed on an existing non-hand-drawn config
+  out by `mapgen` with half again a game board's extra lanes
+  (`FIELD_EXTRA_EDGE_FRACTION`), each an unplayed seed on an existing non-hand-drawn config
   of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
   120-system test game was enough to put big maps in a week, and a big map is
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
   `settings.randomise_knobs`; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
-  nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
+  nodes `mapgen.peripheral_starts` picks. A *cut node* (`cut_nodes`: one whose
+  loss splits the field, so a single par-tight score there walls off what lies
+  behind it) gets one of the week's biggest maps and never a "?"; meshing the
+  field until there were none (1.2) cleared them but turned a big week into a
+  web, so the few left are made the hardest to lock down instead. A node's `settings` is stored in the
   pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
   matches it to its game by seed plus jsonb *equality* — never
   `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a

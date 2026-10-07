@@ -156,38 +156,29 @@ def test_a_layout_people_play_is_kept():
         assert node["settings"]["layout"] == "ring"
 
 
-def _cut_nodes(links: dict[int, set[int]]) -> set[int]:
-    """Nodes whose removal disconnects the rest (Tarjan's articulation points)."""
-    disc: dict[int, int] = {}
-    low: dict[int, int] = {}
-    cuts: set[int] = set()
 
-    def visit(node: int, parent: int | None) -> None:
-        disc[node] = low[node] = len(disc)
-        children = 0
-        for nxt in links[node]:
-            if nxt not in disc:
-                children += 1
-                visit(nxt, node)
-                low[node] = min(low[node], low[nxt])
-                if parent is not None and low[nxt] >= disc[node]:
-                    cuts.add(node)
-            elif nxt != parent:
-                low[node] = min(low[node], disc[nxt])
-        if parent is None and children > 1:
-            cuts.add(node)
-
-    visit(next(iter(links)), None)
-    return cuts
+def test_cut_nodes_finds_the_chokes_of_the_field_alone():
+    # 0-1-2 triangle, 2-3 bridge, 3-4 tail; 5 is a home hanging off 4.
+    lanes = [(0, 1), (1, 2), (0, 2), (2, 3), (3, 4), (4, 5)]
+    assert campaign.cut_nodes(5, lanes) == {2, 3}
 
 
-def test_the_field_has_few_choke_points():
-    # A home's own edge node is unavoidably a cut point of the whole graph; the
-    # field among itself should rarely have one (a game board's 0.4 averaged 6).
-    total = 0
+def test_the_field_has_fewer_choke_points_than_a_game_board():
+    # A game board's 0.4 averaged 6.3 cut nodes on a 20-node field.
+    total = sum(len(campaign.cut_nodes(20, _graph(active=5, seed=seed)["lanes"]))
+                for seed in range(20))
+    assert total / 20 < 4
+
+
+def test_cut_nodes_hold_the_biggest_maps_and_never_a_mystery():
     for seed in range(20):
-        graph = _graph(active=5, seed=seed)
-        field = {n["id"] for n in graph["nodes"] if n["kind"] == "field"}
-        links = {k: v & field for k, v in _neighbours(graph).items() if k in field}
-        total += len(_cut_nodes(links))
-    assert total / 20 < 1
+        graph = _graph(active=5, seed=seed, games=SIZED)
+        field = [n for n in graph["nodes"] if n["kind"] == "field"]
+        cuts = campaign.cut_nodes(len(field), graph["lanes"])
+        plain = sorted((n["systems"] for n in field if not n["mystery"]), reverse=True)
+        on_cuts = sorted((n["systems"] for n in field if n["id"] in cuts), reverse=True)
+        assert on_cuts == plain[:len(cuts)]
+        assert not any(n["mystery"] for n in field if n["id"] in cuts)
+
+
+SIZED = [_game(f"s{n}", 200 + n, nodes=n) for n in (7, 10, 13, 18, 24, 30)]
