@@ -287,14 +287,18 @@ trusting the number in the link.
 Nor does it prove the game was played under the real rules of chance. The
 verifier replays recorded orders and recorded dice. It does not check that the
 dice came from the seed, or that the bots' orders are what those bots would
-have played. A log with hand-picked dice or doctored bot moves verifies;
-`tools/par_search.py`'s lucky lines are one example. Since 2026-10-08 the
-dice half can be checked: each fight's dice are keyed from the board
-(`engine._Dice`), and a turn marked `keyed` in the log can be rolled again from
-its recorded orders and compared, as `pbp.verify_turn` does for a shared match.
-The verifier does not do it yet, and turns from before carry no marker and can't
-be checked. The bot half stays open by design. What was measured is in
-`docs/design/par.md`, "A gap this exposes in `verify_scores`". A known limit, not yet addressed.
+have played. Until 2026-10-08 a log with hand-picked dice or doctored bot moves
+verified; `tools/par_search.py`'s lucky lines are one example. Since then each
+fight's dice are keyed from the board (`engine._Dice`), and the verifier rolls
+every turn marked `keyed` again from its recorded orders (`replay.dice_follow`,
+via `verify_scores._DiceAudit`) and calls a log whose dice differ a `mismatch`.
+A real lucky line is caught at its first hand-picked roll. Turns from before
+keying carry no marker and pass unchecked; the verdict's detail counts the
+fighting turns that did. An unkeyed turn after a keyed one is a `mismatch`,
+since a game is keyed from the moment keying arrived. Two gaps remain. A forged
+log with every marker stripped reads as an old game, and only when it was
+played could tell it apart. And the bot half stays open by design. What was
+measured is in `docs/design/par.md`, "A gap this exposes in `verify_scores`".
 
 ### Watching one back
 

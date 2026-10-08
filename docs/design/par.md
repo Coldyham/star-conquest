@@ -322,7 +322,8 @@ board shows.
 `tools/verify_scores.py` checks that a log replays consistently. It does not
 check that the dice came from the seed, or that the bots' orders are what those
 bots would play. Rechecked on 2026-10-07, after `replay.reseed`, on a 12-node
-3-player map against heuristics: **both halves are still open.**
+3-player map against heuristics: **both halves are still open.** The dice half
+was closed on 2026-10-08 for keyed turns (the last paragraph of this section).
 
 - **Dice.** A lucky line, which carries hand-picked rolls in 19 of its 20
   fighting turns, verifies.
@@ -350,6 +351,11 @@ Rolling combat from a stream of its own removes the first limit, and was built
 on 2026-10-08 (`docs/design/core.md`, "Two streams"). Each fight's dice are
 derived inside `end_turn` from the board alone, and every turn since carries a
 `keyed` marker, so a keyed turn's dice can be rolled again from its recorded
-orders and compared, with nothing to fish among. `pbp.verify_turn` already does
-this. `tools/verify_scores.py` does not yet. The bot-orders half stays open by
-design. Also recorded in `docs/design/leaderboard.md`, "Checked scores".
+orders and compared, with nothing to fish among. `pbp.verify_turn` does this for
+a shared match's live turn, and `tools/verify_scores.py` does it for every keyed
+turn behind a posted score (`_DiceAudit`, a `mismatch` on the first that
+differs). On a 12-node 3-player map, seed 5, a lucky line (20 fighting turns)
+was caught at turn 7, and an honest line passed all 87 of its turns. The second
+limit holds for a log with every `keyed` marker stripped, which reads as one
+from before the change. The bot-orders half stays open by design. Also recorded
+in `docs/design/leaderboard.md`, "Checked scores".

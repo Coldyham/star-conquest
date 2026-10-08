@@ -638,9 +638,7 @@ def verify_turn(state: GameState, record: engine.TurnRecord, match: Match) -> bo
         log = match_log(match)
         return log is not None and not any(
             log.keyed_for(i) for i in range(min(state.turn, log.turn_count)))
-    scratch = copy.deepcopy(state)
-    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
-    return rolled.dice == list(record.dice)
+    return replay.dice_follow(state, record)
 
 
 def settled_turn(match: Match, turn: int) -> engine.TurnRecord | None:

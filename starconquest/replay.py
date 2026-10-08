@@ -53,6 +53,7 @@ after each turn so the file on disk always reflects the live match.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import re
@@ -541,6 +542,21 @@ def latest_log() -> GameLog | None:
 # person, this has to become a question the log answers per turn rather than one
 # seat named up front.
 HUMAN_SEAT = 1
+
+
+def dice_follow(state: GameState, record: engine.TurnRecord) -> bool:
+    """Whether ``record``'s dice are what its orders really roll on ``state``.
+
+    The turn is fought again on a copy, with the recorded orders and no recorded
+    dice, so every fight rolls the dice keyed to it (``engine._Dice``) and the two
+    lists are compared. Only meaningful for a keyed turn: one from before keying
+    drew its dice off ``state.rng`` after its bots, which nothing can repeat.
+    ``pbp.verify_turn`` asks it of a shared match's live turn, and
+    ``tools/verify_scores.py`` of every keyed turn behind a posted score.
+    """
+    scratch = copy.deepcopy(state)
+    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
+    return rolled.dice == list(record.dice)
 
 
 def reconstruct(

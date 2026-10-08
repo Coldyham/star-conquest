@@ -387,6 +387,12 @@ The pieces, in the order a submission touches them:
 **The verifier binds the replay to the setup** (`same_setup`), or an easy map's
 log could be attached to a hard map's score and would verify perfectly.
 
+**It checks the dice too**, on every turn the log marks `keyed`: each fight's
+dice follow from the board, so the turn is fought again from its recorded orders
+and a log whose dice differ (hand-picked rolls) is a `mismatch`. Turns played
+before dice were keyed (2026-10-08) can't be re-rolled and pass unchecked, and
+the verdict's detail says how many.
+
 What this does *not* do: prove a human played the game. A bot driving the seat
 produces a log that verifies like any other — which is what `hand` discloses, and
 the verifier recomputes it from the log's own per-turn autoplay flags rather than
