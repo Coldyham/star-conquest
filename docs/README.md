@@ -152,6 +152,7 @@ only for a fight; what is deliberately not animated.
 - **What a turn shows** and **the model and the prior.** Fresh fleets, one-turn launches from the garrison residual, strike records by ratio, send share, guard, evacuation; the prior fitted from roster self-play.
 - **The prediction check (`tools/reader_check.py`).** Four predictors (none, all, prior, reader), Brier and squared ship error; the two plan measures replaced before the first reading. Results in four cells on two seed ranges; what the model can tell apart (guard and evacuation, not the strike curve).
 - **Sizing a strike to its target, and splitting the strike from the target.** Re-read under actuary's `MIN_GAIN` 1e-9. Sizing kept: ship error down in 5 of 8 cell-runs, most at 24 and 40 nodes. The split deleted. The all-in share separates the roster.
+- **Predicting people (`--logs public`).** Posted human games scored offline. Memory beats the prior on people by 3.6% of Brier; knower's blind guess at a person, read as a forecast, is worse than assuming they hold, which backs `TRUST_HUMAN` off. What the model reads off people.
 - **The gate.** Still not passed: memory wins on whether a strike comes, and the ship-error failures left are mostly intervals that cross zero. *Open:* whether that is power (a gate decision), and a strike curve that tells the bots apart.
 
 ### design/convoy.md

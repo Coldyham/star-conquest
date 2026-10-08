@@ -271,6 +271,85 @@ The all-in share splits the roster in two. actuary, marshal, rusherplus and
 knower send all-in on most strikes. thinker, claudebot and heuristic size
 theirs to the target.
 
+## Predicting people (`--logs public`)
+
+The case for reader over knower is a person, whose code knower cannot run. A
+recorded game holds every seat's orders for every turn, so this can be scored
+without playing. `--logs public` replays the logs a posted leaderboard score made
+public (`public_replays`, read with the board's publishable key). On every turn
+the person played by hand, each bot seat next to them predicts their launches,
+and the prediction is scored against what the log says they did.
+
+A fifth predictor joins the four: **knower**'s guess at a person, its blind plan
+for their seat (`_blind`), read as certain. That is not how knower uses it.
+`TRUST_HUMAN` is off, so the guess may only raise a threat, never relax a guard,
+and launches it predicts are added back to the person's garrisons. The column
+measures the forecast knower has to hand, not knower's play.
+
+141 logs (of 145 under the current rules, 157 public) with 10 or more hand
+turns, 24,359 (source, target) pairs, strikes on 10.6% (2026-10-08):
+
+                 none     all     prior   reader   knower
+    Brier       0.106    0.894    0.091    0.088    0.183
+    ship error  130.5   1645.3    110.6    106.9    224.6
+
+reader minus each, 95% interval over games:
+
+    Brier       none -0.018 [-0.023,-0.015]   prior -0.0033 [-0.0041,-0.0025]
+                knower -0.095 [-0.107,-0.084]
+    ship error  none -23.6 [-43.7,-9.2]       prior -3.7 [-9.0,+0.8]
+                knower -118 [-216,-49]
+
+- **Memory reads a person, by a little.** Against the prior it gains 3.6% of
+  Brier, clear of zero. That is at the low end of the 4-13% it gains on roster
+  bots. The gain grows with turns since contact (30+ turns in: prior 0.089,
+  reader 0.085). On ship error against the prior the interval crosses zero.
+- **knower's guess at a person is worse than assuming they hold.** Its Brier,
+  0.183, is behind "none" (0.106) and gets worse the longer the game runs
+  (0.146 in the first 5 turns after contact, 0.199 from 30 on). So keeping
+  `TRUST_HUMAN` off is right, and a calibrated forecast of a person is
+  something knower does not have.
+- **On small maps the ship error does not separate from "none".** Of the 141
+  games, 87 are on 11 systems or fewer. There reader's Brier still clears every
+  baseline, but its ship error against "none" is -2.4 [-6.0, +3.3]. On the 54
+  larger maps every comparison clears except ship error against the prior.
+
+What the model reads off people, at the end of each log, beside the bots in the
+same games (median over seats):
+
+                  all-in   sized /
+                  share    target   guard   evac
+    human (141)    0.66     1.52    0.05    0.35
+    marshal (104)  0.63     1.35    0.05    0.68
+    heuristic (56) 0.31     1.29    0.15    0.11
+    knower (46)    0.64     1.15    0.05    0.65
+
+The person sends all-in about as often as marshal and knower do, overkills a
+sized strike by more than any bot, reads as keeping no standing guard, and stays
+in a doomed system about twice as often as marshal does. See the caveats on the
+guard and the overkill. marshal's guard reads 0.05 here where it
+read 0.55 in self-play: these are short games on small maps, and the guard is
+only recorded at a frontier system that launched.
+
+**Caveats.**
+- Rows carry no identity, and by the author's account almost all 141 games
+  are theirs. So this measures how well reader reads one player, not people.
+- The strike curves read the same for people as for every bot (0.17 at 1.5,
+  0.28 at 2.0), as in self-play.
+- **The guard ignores relief.** It is what a frontier system that launched kept
+  home, against its largest adjacent enemy, with no account of our own ships
+  landing there or able to reach it before an enemy could. The author's own
+  rule is to empty a system when reinforcements are inbound or near enough to
+  beat the enemy there. That would read as "no standing guard" here. It fits
+  the earlier finding that the person loses fewer systems than bots do
+  ([`marshal-flow.md`](marshal-flow.md), "What the board's human wins say").
+  Untested.
+- **The overkill may be the endgame.** "Sized / target" is, for a strike that
+  did not send nine-tenths of its garrison or more, the ships sent over the
+  target's effective garrison on arrival. Every posted score is a win, so the
+  logs include the closing turns, where a winning side has force to spare.
+  Untested.
+
 ## The gate
 
 Set before the first run: reader beats none, all and prior on Brier and on the

@@ -4,6 +4,7 @@
     uv run python tools/reader_check.py                       # every cell, seeds 1-60
     uv run python tools/reader_check.py --cells 18n6 --seeds 1-4   # a smoke run
     uv run python tools/reader_check.py --fit-prior --seeds 1001-1040
+    uv run python tools/reader_check.py --logs public          # predict people instead
 
 Roster games are played with every seat on its own bot. Before each turn, for
 every seat holding a system next to a live rival's (a contested position), four
@@ -29,11 +30,18 @@ The turn is then played and the rivals' real orders scored against each:
 Intervals are 95% bootstraps over games. reader never plays; it only watches.
 `--fit-prior` pools every rival's counts instead and prints the prior's
 constants for models/reader.py.
+
+`--logs` replays recorded games instead: the replays a posted score made public
+(read with the board's publishable key) or the local games/ dir. On every turn
+the person played by hand, each bot seat next to them predicts their launches,
+and a fifth predictor joins the four: **knower**, its blind plan for a human
+seat (`knower._blind`), read as certain.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 import random
 import statistics
@@ -46,7 +54,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, config, engine, mapgen
+from starconquest import ai, config, engine, mapgen, replay
 from tests import sim
 from tools.bot_distance import lineups
 
@@ -58,6 +66,8 @@ WARMUP = ((0, 4), (5, 14), (15, 29), (30, 10**9))
 METRICS = ("brier", "mse", "waste", "miss")
 SEPARATION_TURN = 60
 SEPARATION_RATIOS = (1.0, 1.5, 2.0)
+HUMAN = "human"
+SMALL_MAP = 11              # --logs reports maps of this many systems or fewer apart
 EPS = 1e-3
 
 
@@ -84,13 +94,15 @@ def _contested(state, pid: int) -> bool:
                for s in systems.values() if s.owner_id == pid for n in s.neighbors)
 
 
-def _predictions(state, pid: int, reader) -> dict[str, dict[tuple[int, int, int], tuple[float, float]]]:
-    """{predictor: {(rival, source, target): (p, ships)}} over every contested pair."""
+def _predictions(state, pid: int, reader, rival: int | None = None
+                 ) -> dict[str, dict[tuple[int, int, int], tuple[float, float]]]:
+    """{predictor: {(rival, source, target): (p, ships)}} over every contested pair,
+    or only `rival`'s."""
     systems = state.systems
     pairs = {}
     for s in systems.values():
         q = s.owner_id
-        if q in (0, pid):
+        if q in (0, pid) or (rival is not None and q != rival):
             continue
         for n in s.neighbors:
             if systems[n].owner_id == pid:
@@ -100,7 +112,8 @@ def _predictions(state, pid: int, reader) -> dict[str, dict[tuple[int, int, int]
     for name, models in (("prior", {}), ("reader", None)):
         got = {k: (0.0, 0.0) for k in pairs}
         for t in reader.predict(state, pid, models):
-            got[(t.rival, t.source, t.target)] = (t.p, t.ships)
+            if (t.rival, t.source, t.target) in got:
+                got[(t.rival, t.source, t.target)] = (t.p, t.ships)
         out[name] = got
     return out
 
@@ -144,32 +157,8 @@ def play_game(job):
         engine.end_turn(state, decide=recording)
 
         for pid, by_predictor in preds.items():
-            bucket = _bucket(turn - first_contact[pid])
-            came: dict[tuple[int, int, int], int] = defaultdict(int)
-            for q, orders in actual.items():
-                if q == pid:
-                    continue
-                for o in orders:
-                    if owner_before.get(o.source_id) == q and owner_before.get(o.dest_id) == pid:
-                        came[(q, o.source_id, o.dest_id)] += max(0, o.ships)
-            for name, pairs in by_predictor.items():
-                per_target: dict[tuple[int, int], list[float]] = defaultdict(lambda: [0.0, 0.0])
-                for key, (p, ships) in pairs.items():
-                    q, _src, dst = key
-                    y = 1.0 if came.get(key, 0) > 0 else 0.0
-                    s = sums[(name, bot_of[q], bucket)]
-                    s["pairs"] += 1
-                    s["strikes"] += y
-                    s["brier"] += (p - y) ** 2
-                    s["logloss"] -= math.log(max(EPS, p if y else 1.0 - p))
-                    per_target[(q, dst)][0] += p * ships
-                    per_target[(q, dst)][1] += came.get(key, 0)
-                for (q, _dst), (want, got) in per_target.items():
-                    s = sums[(name, bot_of[q], bucket)]
-                    s["targets"] += 1
-                    s["mse"] += (want - got) ** 2
-                    s["waste"] += want if got == 0 else 0.0
-                    s["miss"] += max(0.0, got - want)
+            came = _came(actual, owner_before, pid)
+            _score(sums, by_predictor, came, bot_of, _bucket(turn - first_contact[pid]))
 
     raw = [(bot_of[q], m) for q, m in reader.models_for(state).items() if q in bot_of]
     return {"seed": seed, "cell": cell, "turns": state.turn,
@@ -177,6 +166,146 @@ def play_game(job):
             "separation": separation,
             "raw": [(bot, {name: getattr(m, name) for name in reader.Model.COUNTS})
                     for bot, m in raw]}
+
+
+def _came(actual: dict[int, list], owner_before: dict[int, int], pid: int):
+    """Ships each rival really sent from a system it held at our system, per
+    (rival, source, target)."""
+    came: dict[tuple[int, int, int], int] = defaultdict(int)
+    for q, orders in actual.items():
+        if q == pid:
+            continue
+        for o in orders:
+            if owner_before.get(o.source_id) == q and owner_before.get(o.dest_id) == pid:
+                came[(q, o.source_id, o.dest_id)] += max(0, o.ships)
+    return came
+
+
+def _score(sums, by_predictor, came, label_of, bucket) -> None:
+    for name, pairs in by_predictor.items():
+        per_target: dict[tuple[int, int], list[float]] = defaultdict(lambda: [0.0, 0.0])
+        for key, (p, ships) in pairs.items():
+            q, _src, dst = key
+            y = 1.0 if came.get(key, 0) > 0 else 0.0
+            s = sums[(name, label_of[q], bucket)]
+            s["pairs"] += 1
+            s["strikes"] += y
+            s["brier"] += (p - y) ** 2
+            s["logloss"] -= math.log(max(EPS, p if y else 1.0 - p))
+            per_target[(q, dst)][0] += p * ships
+            per_target[(q, dst)][1] += came.get(key, 0)
+        for (q, _dst), (want, got) in per_target.items():
+            s = sums[(name, label_of[q], bucket)]
+            s["targets"] += 1
+            s["mse"] += (want - got) ** 2
+            s["waste"] += want if got == 0 else 0.0
+            s["miss"] += max(0.0, got - want)
+
+
+# --------------------------------------------------------------------------- #
+# Recorded human games (--logs)
+# --------------------------------------------------------------------------- #
+def load_logs(source: str, min_hand: int) -> list[replay.GameLog]:
+    """Current-rules logs with at least `min_hand` turns played by hand: the
+    replays a posted score made public (`public_replays`, the publishable key),
+    or the local games/ dir."""
+    if source == "local":
+        from tools.position_suite import local_logs
+        logs = local_logs()
+    else:
+        from tools.bot_replay import Supabase
+        from tools.config_census import anon_credentials
+        url, key = anon_credentials()
+        logs = []
+        for row in Supabase(url, key).select("public_replays", "select=match_id,log&order=match_id"):
+            try:
+                logs.append(replay.GameLog.decode(row["log"]))
+            except ValueError:
+                continue
+    return [log for log in logs if log.is_current and log.hand_turns >= min_hand]
+
+
+def _borders(state, pid: int, rival: int) -> bool:
+    systems = state.systems
+    return any(systems[n].owner_id == rival
+               for s in systems.values() if s.owner_id == pid for n in s.neighbors)
+
+
+def _knower_guess(state, rival: int) -> dict[tuple[int, int, int], tuple[float, float]]:
+    """What knower expects a person to launch: its own blind plan for their seat
+    (`knower._surrogate` hands a human seat `_blind`), taken as certain."""
+    knower = sys.modules["sc_model_knower"]
+    out: dict[tuple[int, int, int], int] = defaultdict(int)
+    for o in knower._blind(copy.deepcopy(state), rival) or []:
+        if state.systems[o.source_id].owner_id == rival and o.ships > 0:
+            out[(rival, o.source_id, o.dest_id)] += o.ships
+    return {k: (1.0, float(v)) for k, v in out.items()}
+
+
+def score_log(log: replay.GameLog):
+    """One recorded game: on every turn the person played by hand, each bot seat
+    next to them predicts their launches at it, scored against the log."""
+    reader = _reader()
+    reader.reset()
+    human = replay.HUMAN_SEAT
+    label_of = {human: HUMAN}
+    first_contact: dict[int, int] = {}
+    sums: dict = defaultdict(lambda: defaultdict(float))
+
+    def on_turn(state):
+        reader.models_for(state)
+        i = state.turn
+        if (state.winner is not None or i >= log.turn_count or log.turn_is_ai(i)
+                or human not in state.players or state.is_defeated(human)):
+            return
+        owner_before = {sid: s.owner_id for sid, s in state.systems.items()}
+        actual = {human: [o for o in log.orders_for(i) if o.owner_id == human]}
+        guess = None
+        for pid in sorted(state.players):
+            if (pid == human or state.players[pid].is_neutral or state.is_defeated(pid)
+                    or not _borders(state, pid, human)):
+                continue
+            first_contact.setdefault(pid, i)
+            preds = _predictions(state, pid, reader, rival=human)
+            if guess is None:
+                guess = _knower_guess(state, human)
+            preds["knower"] = {k: guess.get(k, (0.0, 0.0)) for k in preds["none"]}
+            _score(sums, preds, _came(actual, owner_before, pid), label_of,
+                   _bucket(i - first_contact[pid]))
+
+    state, settings = replay.reconstruct(log, on_turn=on_turn)
+    seats = {pid: (HUMAN if pid == human else p.ai_strategy)
+             for pid, p in state.players.items() if not p.is_neutral}
+    return {"seed": log.match_id, "cell": "small" if settings.nodes <= SMALL_MAP else "large",
+            "turns": state.turn, "sums": {k: dict(v) for k, v in sums.items()},
+            "separation": _describe(reader.models_for(state), seats, reader), "raw": []}
+
+
+def report_humans(games) -> None:
+    predictors = (*PREDICTORS, "knower")
+    for label, group in (("all maps", games),
+                         (f"{SMALL_MAP} systems or fewer", [g for g in games if g["cell"] == "small"]),
+                         (f"more than {SMALL_MAP}", [g for g in games if g["cell"] == "large"])):
+        if not group:
+            continue
+        rs = {p: _rates(_total(group, p)) for p in predictors}
+        print(f"\n=== {label}: {len(group)} games, {rs['reader']['pairs']:.0f} pairs, "
+              f"strike rate {rs['reader']['rate']:.3f}")
+        print("  " + " " * 8 + "".join(f"{p:>9}" for p in predictors))
+        for metric, fmt in (("brier", "{:>9.4f}"), ("mse", "{:>9.1f}"),
+                            ("waste", "{:>9.2f}"), ("miss", "{:>9.2f}")):
+            print(f"  {metric:<8}" + "".join(fmt.format(rs[p][metric]) for p in predictors))
+        print("  warm-up, brier prior / reader / knower, since first contact:")
+        for lo, _hi in WARMUP:
+            b = _bucket(lo)
+            r = {p: _rates(_total(group, p, None, b)) for p in ("prior", "reader", "knower")}
+            print(f"    {b:>6}  {r['prior']['brier']:.4f} / {r['reader']['brier']:.4f} / "
+                  f"{r['knower']['brier']:.4f}   ({r['reader']['pairs']:.0f} pairs)")
+        print("  reader minus each, 95% interval over games (negative is better):")
+        for metric in ("brier", "mse"):
+            print(f"    {metric:<6}" + "  ".join(
+                _interval(base, *_diff_ci(group, "reader", base, metric), metric)
+                for base in ("none", "all", "prior", "knower")))
 
 
 def _describe(models, bot_of, reader):
@@ -286,14 +415,14 @@ def _interval(label, point, lo, hi, metric) -> str:
     return f"{label} {point:+.2f} [{lo:+.2f},{hi:+.2f}]"
 
 
-def separation(games) -> None:
+def separation(games, when: str = f"at turn {SEPARATION_TURN}") -> None:
     rows = defaultdict(list)
     for g in games:
         for row in g["separation"]:
             rows[row[0]].append(row[1:])
     if not rows:
         return
-    print(f"\n=== fitted parameters at turn {SEPARATION_TURN}, median over rivals "
+    print(f"\n=== fitted parameters {when}, median over rivals "
           "(chance of a strike on a player at ratio 1.0 / 1.5 / 2.0, on a neutral at 1.5; "
           "all-in share; sized strike / target; guard; evac):")
 
@@ -366,7 +495,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--fit-prior", action="store_true",
                         help="pool every rival's counts and print the prior's constants")
+    parser.add_argument("--logs", choices=("public", "local"), default=None,
+                        help="score predictions of the person in recorded games instead: "
+                             "posted scores' public replays, or the local games/ dir")
+    parser.add_argument("--min-hand", type=int, default=10,
+                        help="with --logs, skip a game with fewer turns played by hand")
     args = parser.parse_args(argv)
+    if args.logs:
+        return main_logs(args)
 
     cells = list(CELLS) if "all" in args.cells else args.cells
     unknown = [c for c in cells if c not in CELLS]
@@ -399,6 +535,25 @@ def main(argv: list[str] | None = None) -> int:
     separation(games)
     print(f"\ngate: reader clears every baseline against {', '.join(GATE_BOTS)} "
           f"in {passed} of {len(cells)} cells (needs 3 of 4)")
+    return 0
+
+
+def main_logs(args) -> int:
+    _init()
+    if "sc_model_reader" not in sys.modules or "sc_model_knower" not in sys.modules:
+        print("not loaded: models/reader.py or models/knower.py", file=sys.stderr)
+        return 2
+    logs = load_logs(args.logs, args.min_hand)
+    started = time.time()
+    games = []
+    with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init) as pool:
+        for i, game in enumerate(pool.map(score_log, logs), 1):
+            games.append(game)
+            print(f"  {i}/{len(logs)} logs · {time.time() - started:.0f}s", end="\r", flush=True)
+    print(f"{len(games)} {args.logs} logs with {args.min_hand}+ hand turns, "
+          f"in {time.time() - started:.0f}s")
+    report_humans(games)
+    separation(games, "at the end of each log")
     return 0
 
 
