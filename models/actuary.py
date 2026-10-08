@@ -60,16 +60,18 @@ FRONT_DECAY = 0.5           # ...falling by this factor per turn of travel back
 RISK_WEIGHT = 0.6           # share of a system's worth lost to a full shortfall
 REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relieve
                             # a system we strike, if they can land in time
-MIN_GAIN = 0.05             # a candidate must move the ledger by at least this
+MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
+                            # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython,
 # fitted to a grid of 18-120 systems, 3-18 ly/turn and 2-5 seats (see "Cost, and
 # the caches that make it affordable" in docs/design/actuary.md). Seats and ship
-# speed barely move it, so only the system count is in the fit.
+# speed barely move it, so only the system count is in the fit. Refitted for
+# MIN_GAIN 0, which commits more launches on big maps ("What it costs").
 COST_REF_NODES = 40
-COST_DECIDE_MS = 5.0
-COST_NODES_EXP = 0.55
+COST_DECIDE_MS = 6.4
+COST_NODES_EXP = 0.77
 
 # --- the opening ------------------------------------------------------------ #
 GREEDY, PLANNED = 0, 1          # the Opening knob's stops; anything unreadable is PLANNED
