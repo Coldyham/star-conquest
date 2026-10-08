@@ -213,11 +213,9 @@ def load_logs(source: str, min_hand: int) -> list[replay.GameLog]:
         from tools.position_suite import local_logs
         logs = local_logs()
     else:
-        from tools.bot_replay import Supabase
-        from tools.config_census import anon_credentials
-        url, key = anon_credentials()
+        from tools.config_census import public_rows
         logs = []
-        for row in Supabase(url, key).select("public_replays", "select=match_id,log&order=match_id"):
+        for row in public_rows("public_replays", "select=match_id,log&order=match_id"):
             try:
                 logs.append(replay.GameLog.decode(row["log"]))
             except ValueError:
