@@ -350,6 +350,109 @@ only recorded at a frontier system that launched.
   logs include the closing turns, where a winning side has force to spare.
   Untested.
 
+## The person's habits (`tools/human_habits.py`)
+
+Three questions the reading above raised, answered from the same posted games
+(142 with 10+ hand turns, 140 of them won by the person). Roster self-play is
+alongside them, since a bot that lost to the person is no baseline: 240 games
+on 7 systems/2 seats, 11/2, 11/3 and 18/3 at the default settings, seeds 1-60,
+23 hitting 400 turns. Every share leaves neutrals out unless it says otherwise
+(2026-10-08).
+
+**A replayed log rewrites `config`.** `replay.reconstruct` goes through
+`build_state`, which writes that game's balance knobs into `config`. A worker
+that replays a log and then plays self-play plays it under the log's settings,
+so the tool resets to the defaults before each self-play game. The first draft
+did not, and its self-play figures moved from run to run.
+
+### Which share marks the endgame
+
+The person's share of players' income, of players' ships, and of the whole
+board's income (neutral systems counted), turn by turn:
+
+                               players' income   players' ships   whole-board income
+    first to reach 2/3 wins          90%               99%               95%
+      (self-play, n 224/224/210)
+    median turns left after          41                26                28
+    reaches 2/3 at (person,          0.70              0.78              0.78
+      share of the game)
+    falls below half after,          10                 0                 3
+      person's games
+    never reaches 2/3                 2                 2                27
+
+- **Players' income crosses first** (84 games to 31 at 2/3), about a tenth of a
+  game ahead of ships. It is the earlier warning, not a reliable one: the first
+  seat to 60% of it wins 73% of self-play games, against 91% for ships.
+- **Players' ship share at 2/3 is the marker of a won game.** 99% at 2/3, and
+  100% at 75% (221 games). In the person's 142 games a lead past 60% of ships
+  fell back below half twice, and never past 2/3.
+- **Whole-board income cannot be the marker.** Its denominator is larger, so it
+  never crosses first, and 27 of the person's games never reach 2/3 of it,
+  since they are won by elimination with neutrals standing.
+- **At 50% the players-only shares mean nothing.** Every two-seat game starts at
+  exactly half, and income swings during the land-grab, where whole-board
+  income does not trip.
+
+### Waves: the overkill is the endgame
+
+Everything one side lands on a target it does not hold on one turn, over the
+target's effective garrison on arrival, median, by the side's share of ships:
+
+                      under 1/2   1/2 to 2/3   over 2/3
+    person              1.38        1.63         1.79
+    actuary (won)       1.50        1.48         1.33
+    marshal (won)       1.56        1.48         1.67
+    thinker (won)       1.43        1.43         1.50
+    knower (won)        1.33        1.25         1.00
+
+A whole wave, not one source's share, since several bots split a strike across
+sources and one source's share understates what lands. Before the person holds
+half the ships, their waves sit inside the winning bots' range (1.33-1.56). The
+overkill the model read off the person in "Predicting people" is the closing
+turns of won games, as the author suspected.
+
+### Relief: emptying a frontier system with cover
+
+A voluntary frontier empty sends 90% or more of a garrison with no hostile fleet
+inbound bigger than it. It is *covered* when enough of the side's ships can land
+before the earliest enemy to beat the threat (hostile ships inbound plus the
+largest adjacent enemy garrison, over the advantage). Either they are already
+flying there (*inbound*), or a neighbour that is not launching this turn can
+get there first (*reachable*). Lost means lost within 5 turns:
+
+                     empties   covered enough      lost within 5 turns
+                               inbound  reachable  covered   short   uncovered
+    person             1936      29%      16%       1-7%      14%       30%
+    actuary (won)      1070      14%       8%       6-14%     40%       57%
+    knower (won)        636       8%       7%       4-12%     50%       76%
+    marshal (won)       165      55%       7%       6-9%      38%       54%
+    rusherplus (won)    176      41%       9%       5-12%     22%       55%
+
+The author's own rule is to empty a system when relief is inbound or can get
+there before the enemy, and it shows. The person empties often and has it
+covered 45% of the time, where actuary and knower manage 22% and 15%. Covered,
+the systems almost never fall. The person's short and uncovered empties also
+fall far less often than any winning bot's (14% and 30%, against 22-50% and
+54-76%). The opponents in the person's games are bots losing to them, which may
+punish an exposed system less than a winning bot would. marshal rarely empties
+a frontier system voluntarily at all (165 times in its won games, against
+actuary's 1070), and when it does it is usually covered.
+
+**A bot could borrow the reachable half.** actuary's projection already counts
+its own fleets landing on a system, so cover that is inbound is priced. A
+neighbour that could get there first is not.
+
+### Frontier losses
+
+Systems lost per 100 frontier system-turns held: the person 3.0; in self-play
+the winning seats heuristic 2.3, claudebot 3.0, thinker 4.1, marshal 4.4,
+rusherplus 4.4, knower 4.5, actuary 5.0. The person's rate is at the low end of
+a winning bot's. Per game they lose far fewer ([`marshal-flow.md`](marshal-flow.md),
+"What the board's human wins say": 3.5 against marshal's 25) mostly because
+they end games in about a third of the turns. Counted over every system they
+hold rather than the frontier, the rate reads 0.75, but that measures the size
+of a winner's interior.
+
 ## The gate
 
 Set before the first run: reader beats none, all and prior on Brier and on the

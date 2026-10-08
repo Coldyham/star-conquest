@@ -236,6 +236,15 @@ when a bot is tried as a knower candidate, shuffle the candidate order so the
 last one is not undercounted on ties, and measure whether knower wins more
 with it, which was not measured for actuary.
 
+## The person's habits
+
+What the posted human games say about how their (one, mostly) player plays,
+against roster self-play: which share marks a won game (2/3 of players' ships),
+that their overkill is the endgame, and that they empty frontier systems with
+relief covered far more often than any bot. It is in
+[`reader.md`](reader.md), "The person's habits" (`tools/human_habits.py`),
+beside reader's model of the same games.
+
 ## Lane length across the parameter space
 
 `WORLD_SIZE` is a constant up to a standard board (`config.STANDARD_MAX_NODES`,

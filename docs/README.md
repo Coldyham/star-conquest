@@ -118,6 +118,7 @@ only for a fight; what is deliberately not animated.
 - **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
 - **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built, and reader's model (stage 1, `reader.md`); duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Also two measurement ideas not yet built.
 - **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
+- **The person's habits.** A pointer to `reader.md`.
 - **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
 - **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime. The first position-suite numbers.
 - **Replaying a bot for the leaderboard.** Best profile, not menu default. Guards lifted 100x (`inf` in tests). The seat-flag incident, and how a stored replay and the autoplay fix resolved it.
@@ -153,6 +154,7 @@ only for a fight; what is deliberately not animated.
 - **The prediction check (`tools/reader_check.py`).** Four predictors (none, all, prior, reader), Brier and squared ship error; the two plan measures replaced before the first reading. Results in four cells on two seed ranges; what the model can tell apart (guard and evacuation, not the strike curve).
 - **Sizing a strike to its target, and splitting the strike from the target.** Re-read under actuary's `MIN_GAIN` 1e-9. Sizing kept: ship error down in 5 of 8 cell-runs, most at 24 and 40 nodes. The split deleted. The all-in share separates the roster.
 - **Predicting people (`--logs public`).** Posted human games scored offline. Memory beats the prior on people by 3.6% of Brier; knower's blind guess at a person, read as a forecast, is worse than assuming they hold, which backs `TRUST_HUMAN` off. What the model reads off people.
+- **The person's habits (`tools/human_habits.py`).** Posted games against roster self-play. 2/3 of players' ships marks a won game, and players' income crosses earlier but less reliably. The overkill is the endgame. The person empties frontier systems with relief covered 45% of the time (winning actuary 22%); a replayed log rewrites `config`. Frontier losses per system-turn.
 - **The gate.** Still not passed: memory wins on whether a strike comes, and the ship-error failures left are mostly intervals that cross zero. *Open:* whether that is power (a gate decision), and a strike curve that tells the bots apart.
 
 ### design/convoy.md

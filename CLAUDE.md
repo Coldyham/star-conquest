@@ -62,6 +62,8 @@ uv run python tools/bot_distance.py             # how differently each bot plays
 uv run python tools/reader_check.py             # how well reader's model predicts
                                                 # the roster's launches (stage 1);
                                                 # --logs public: posted human games
+uv run python tools/human_habits.py             # how the person plays (posted games)
+                                                # against roster self-play
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
