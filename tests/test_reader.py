@@ -156,8 +156,8 @@ def test_eviction_is_a_cold_start_and_nothing_else(rd):
 # What one turn shows
 # --------------------------------------------------------------------------- #
 def test_observe_counts_every_strike_a_turn_made(rd):
-    """Each (source, non-own target) pair that got ships is one strike, and every
-    other non-own neighbour of a garrisoned system is one pass."""
+    """Each (source, non-own target) pair that got ships is one strike, all-in or
+    sized, and every other non-own neighbour of a garrisoned system is one pass."""
     state = _game()
     _play(rd, state, 20)
     before = copy.deepcopy(state)
@@ -175,8 +175,8 @@ def test_observe_counts_every_strike_a_turn_made(rd):
         pairs = sum(1 for s in before.systems.values() if s.owner_id == pid and s.ships > 0
                     for n in s.neighbors if before.systems[n].owner_id != pid)
         model = seen.get(pid, rd.EMPTY)
-        assert sum(model.strikes) == len(struck)
-        assert sum(model.send) == len(struck)
+        assert sum(model.strikes) == sum(model.allin) == len(struck)
+        assert sum(model.size) == model.allin[1]
         assert sum(model.strikes) + sum(model.passes) == pairs
 
 
@@ -190,9 +190,10 @@ def test_a_one_turn_launch_is_recovered_from_the_garrison(rd):
     assert not state.fleets
     model = rd.observe(rd._Snap(before), rd._Snap(state), state)[1]
     neutral = rd.NEUTRAL * 2 * rd.RATIO_BINS
-    assert model.strikes[neutral + rd._ratio_bin(10 / 3)] == 1
-    assert model.send[8] == 1
-    assert sum(model.passes) == 1           # the rival next door, not struck
+    assert model.strikes[neutral + rd._ratio_bin(10 / 3)] == 1 and sum(model.strikes) == 1
+    assert sum(model.passes) == 1             # the rival next door, not struck
+    assert model.allin == (0.0, 1.0)          # 8 of 10 is sized, not all-in
+    assert model.size[rd._ratio_bin(8 / 3)] == 1
 
 
 def test_the_production_mirror_matches_the_engine(rd):
@@ -234,6 +235,7 @@ def test_a_source_strikes_once_at_most(rd):
             assert state.systems[t.source].owner_id == t.rival != pid
             per_source[t.source] = per_source.get(t.source, 0.0) + t.p
         assert all(total <= 1.0 + 1e-9 for total in per_source.values())
+        assert all(0.0 <= t.ships <= state.systems[t.source].ships for t in rd.predict(state, pid))
 
 
 def test_predict_leaves_the_state_alone_and_draws_nothing(rd, monkeypatch):

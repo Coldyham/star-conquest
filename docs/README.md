@@ -151,7 +151,8 @@ only for a fight; what is deliberately not animated.
 - **The memo tree.** A board is a node found by content; its parent is a stored board it provably follows (`_follows`). What a cold start costs.
 - **What a turn shows** and **the model and the prior.** Fresh fleets, one-turn launches from the garrison residual, strike records by ratio, send share, guard, evacuation; the prior fitted from roster self-play.
 - **The prediction check (`tools/reader_check.py`).** Four predictors (none, all, prior, reader), Brier and squared ship error; the two plan measures replaced before the first reading. Results in four cells on two seed ranges; what the model can tell apart (guard and evacuation, not the strike curve).
-- **The gate.** Not passed: memory wins on whether a strike comes, not on how many ships. *Open:* sizing a strike to its target, and a two-step strike-then-target model.
+- **Sizing a strike to its target, and splitting the strike from the target.** Re-read under actuary's `MIN_GAIN` 1e-9. Sizing kept: ship error down in 5 of 8 cell-runs, most at 24 and 40 nodes. The split deleted. The all-in share separates the roster.
+- **The gate.** Still not passed: memory wins on whether a strike comes, and the ship-error failures left are mostly intervals that cross zero. *Open:* whether that is power (a gate decision), and a strike curve that tells the bots apart.
 
 ### design/convoy.md
 - **The plan.** Supply per system and turn, objectives as N ships by turn t, defences then guard reservations then strikes by value per ship, launch at the last moment.
@@ -237,6 +238,9 @@ the measured result was indistinguishable from the baseline.
 - `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
 - **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
 - `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*
+
+### reader ([`design/reader.md`](design/reader.md))
+- Splitting a strike into "does this source strike at all" and "which target": behind the per-target curve on strike chance in all 8 cell-runs, its prior too; did not separate the bots. Deleted. *Sizing a strike to its target, and splitting the strike from the target.*
 
 ### convoy ([`design/convoy.md`](design/convoy.md))
 - Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*

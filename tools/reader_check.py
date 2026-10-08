@@ -175,7 +175,8 @@ def play_game(job):
     return {"seed": seed, "cell": cell, "turns": state.turn,
             "sums": {k: dict(v) for k, v in sums.items()},
             "separation": separation,
-            "raw": [(bot, (m.strikes, m.passes, m.send, m.guard, m.evac)) for bot, m in raw]}
+            "raw": [(bot, {name: getattr(m, name) for name in reader.Model.COUNTS})
+                    for bot, m in raw]}
 
 
 def _describe(models, bot_of, reader):
@@ -186,7 +187,8 @@ def _describe(models, bot_of, reader):
         neutral = reader.strike_curve(m, reader.NEUTRAL, 0)
         out.append((bot, m.turns, *(player[reader._ratio_bin(r)] for r in SEPARATION_RATIOS),
                     neutral[reader._ratio_bin(1.5)],
-                    reader.send_share(m), reader.guard_share(m), reader.evac_rate(m)))
+                    reader.allin_rate(m), reader.size_ratio(m),
+                    reader.guard_share(m), reader.evac_rate(m)))
     return out
 
 
@@ -271,12 +273,17 @@ def report(games, cell) -> dict[str, bool]:
             for base in ("none", "all", "prior"):
                 point, lo, hi = _diff_ci(games, "reader", base, metric, {bot})
                 ok = ok and hi < 0
-                parts.append(f"{base} {point:+.4f} [{lo:+.4f},{hi:+.4f}]" if metric == "brier"
-                             else f"{base} {point:+.2f} [{lo:+.2f},{hi:+.2f}]")
+                parts.append(_interval(base, point, lo, hi, metric))
             print(f"    {bot:<9}{metric:<6}" + "  ".join(parts))
         verdicts[bot] = ok
         print(f"    {bot:<9}{'clears every baseline' if ok else 'does not clear'}")
     return verdicts
+
+
+def _interval(label, point, lo, hi, metric) -> str:
+    if metric == "brier":
+        return f"{label} {point:+.4f} [{lo:+.4f},{hi:+.4f}]"
+    return f"{label} {point:+.2f} [{lo:+.2f},{hi:+.2f}]"
 
 
 def separation(games) -> None:
@@ -288,7 +295,7 @@ def separation(games) -> None:
         return
     print(f"\n=== fitted parameters at turn {SEPARATION_TURN}, median over rivals "
           "(chance of a strike on a player at ratio 1.0 / 1.5 / 2.0, on a neutral at 1.5; "
-          "send; guard; evac):")
+          "all-in share; sized strike / target; guard; evac):")
 
     def med(xs):
         xs = [x for x in xs if x is not None]
@@ -297,38 +304,50 @@ def separation(games) -> None:
     for bot in sorted(rows):
         r = rows[bot]
         print(f"  {bot:<11} n={len(r):<4} " + "  ".join(
-            med([x[i] for x in r]) for i in range(1, 8)))
+            med([x[i] for x in r]) for i in range(1, 9)))
+
+
+def _literal(name: str, values, indent: int = 0) -> str:
+    """A tuple constant, wrapped at 11 values a line, ready to paste."""
+    pad = " " * (indent + len(name) + 4) if name else " " * (indent + 1)
+    lines, row = [], []
+    for v in values:
+        row.append(f"{v:.3f}")
+        if len(row) == 11:
+            lines.append(", ".join(row))
+            row = []
+    if row:
+        lines.append(", ".join(row))
+    head = f"{name} = (" if name else " " * indent + "("
+    return head + (",\n" + pad).join(lines) + ")"
 
 
 def fit_prior(games, reader) -> None:
-    rows = reader._ROWS * reader.RATIO_BINS
-    strikes, passes = [0.0] * rows, [0.0] * rows
-    send, guard, evac = [0.0] * reader.SEND_BINS, [0.0] * reader.GUARD_BINS, [0.0, 0.0]
+    total = {name: [0.0] * len(getattr(reader.EMPTY, name)) for name in reader.Model.COUNTS}
     for g in games:
-        for _bot, (s, p, sd, gd, ev) in g["raw"]:
-            strikes = [a + b for a, b in zip(strikes, s)]
-            passes = [a + b for a, b in zip(passes, p)]
-            send = [a + b for a, b in zip(send, sd)]
-            guard = [a + b for a, b in zip(guard, gd)]
-            evac = [a + b for a, b in zip(evac, ev)]
-    curves = []
+        for _bot, counts in g["raw"]:
+            for name, xs in counts.items():
+                total[name] = [a + b for a, b in zip(total[name], xs)]
+    print("\nPRIOR_STRIKE = (")
     for row in range(reader._ROWS):
         base = row * reader.RATIO_BINS
-        hit = strikes[base:base + reader.RATIO_BINS]
-        total = [h + m for h, m in zip(hit, passes[base:base + reader.RATIO_BINS])]
-        rates = [(h + 0.5) / (n + 1.0) for h, n in zip(hit, total)]
-        curves.append(reader._monotone(rates, [n + 1.0 for n in total]))
-    print("\nPRIOR_STRIKE = (")
-    for row, curve in enumerate(curves):
-        kind = "neutral" if row // 2 == reader.NEUTRAL else "player"
-        print(f"    # {kind}, {'pressed' if row % 2 else 'unpressed'}")
-        print("    (" + ", ".join(f"{v:.3f}" for v in curve) + "),")
+        hit = total["strikes"][base:base + reader.RATIO_BINS]
+        seen = [h + m for h, m in zip(hit, total["passes"][base:base + reader.RATIO_BINS])]
+        rates = [(h + 0.5) / (n + 1.0) for h, n in zip(hit, seen)]
+        curve = reader._monotone(rates, [n + 1.0 for n in seen])
+        print(f"    # {'player' if row // 2 else 'neutral'}, "
+              f"{'pressed' if row % 2 else 'unpressed'}")
+        print(_literal("", curve, 4) + ",")
     print(")")
-    for name, xs in (("PRIOR_SEND", send), ("PRIOR_GUARD", guard)):
-        total = sum(xs) or 1.0
-        print(f"{name} = (" + ", ".join(f"{x / total:.3f}" for x in xs) + ")")
-    print(f"PRIOR_EVAC = {(evac[0] + 0.5) / (sum(evac) + 1.0):.3f}")
-    print(f"# from {len(games)} games, {sum(strikes):.0f} strikes, {sum(passes):.0f} passes")
+    allin, sized = total["allin"]
+    print(f"PRIOR_ALLIN = {(allin + 0.5) / (allin + sized + 1.0):.3f}")
+    for name, xs in (("PRIOR_SIZE", total["size"]), ("PRIOR_GUARD", total["guard"])):
+        norm = sum(xs) or 1.0
+        print(_literal(name, [x / norm for x in xs]))
+    left, stayed = total["evac"]
+    print(f"PRIOR_EVAC = {(left + 0.5) / (left + stayed + 1.0):.3f}")
+    print(f"# from {len(games)} games: {sum(total['strikes']):.0f} strikes, "
+          f"{sum(total['passes']):.0f} passes")
 
 
 def _seeds(text: str) -> list[int]:

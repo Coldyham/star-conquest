@@ -99,11 +99,21 @@ else a pass. Also:
 ## The model and the prior
 
 Counts per ratio bin, read as a strike chance with `PRIOR_WEIGHT` pseudo-counts
-of the prior and fitted monotone (pool adjacent violators). The prior is the
-roster pooled in self-play: all four cells, seeds 1001-1040, 160 games, 24,428
-strikes and 215,250 passes (`tools/reader_check.py --fit-prior`). `predict`
-gives each rival source a chance per neighbour, scaled to sum to at most one,
-and ships equal to its average send share times its garrison.
+of the prior and fitted monotone (pool adjacent violators). `predict` gives each
+rival source a chance per neighbour, scaled to sum to at most one.
+
+A strike's size is two counts. One is whether it sent all-in (`ALL_IN`, 90% of
+the garrison or more). The other is, for a strike that did not, what it sent
+against the target's effective garrison. A predicted strike is the all-in share
+times the garrison, plus the rest times the average sized ratio times the
+target, capped at the garrison (`strike_ships`). The first version sized every
+strike as the average share of the garrison; see "Sizing a strike to its
+target" for why it changed.
+
+The prior is the roster pooled in self-play: all four cells, seeds 1001-1040,
+160 games (`tools/reader_check.py --fit-prior`). It was re-fitted on 2026-10-08
+for actuary's `MIN_GAIN` of 1e-9 ([`actuary.md`](actuary.md)): 22,261 strikes
+and 202,052 passes.
 
 ## The prediction check (`tools/reader_check.py`)
 
@@ -138,8 +148,8 @@ reading:**
 
 ### Results
 
-Four cells, seeds 1-60 and then fresh seeds 61-120, 240 games each run, load
-average under 1. Brier and MSE over all rivals, none / prior / reader:
+The stage-1 model, under actuary's old `MIN_GAIN` of 0.05. Four cells, seeds
+1-60 and then fresh seeds 61-120, 240 games each run, load average under 1. Brier and MSE over all rivals, none / prior / reader:
 
                      Brier, seeds 1-60          Brier, seeds 61-120
     18 nodes, 6 ly   0.132 / 0.095 / 0.090      0.118 / 0.086 / 0.080
@@ -201,24 +211,98 @@ within 0.04 in every column except evacuation, which moved by up to 0.16
   run away"), reads 0.26 and 0.28, pulled up from 0 by the prior: the lowest on
   seeds 1-60, and 0.02 above heuristic on 61-120.
 
+## Sizing a strike to its target, and splitting the strike from the target
+
+The first reading's ship error pointed at the size, and its strike curve could
+not tell the bots apart. Two changes were tried (2026-10-08), after actuary's
+`MIN_GAIN` dropped to 1e-9 ([`actuary.md`](actuary.md)), so every figure in this
+section is under that actuary. All of them are on fresh seeds 121-180 and
+181-240, with the prior re-fitted on seeds 1001-1040 for each form.
+
+- **Sizing a strike to its target**, as in "The model and the prior".
+- **Splitting the strike in two.** First, does a source strike anything, read
+  against the best ratio it has on offer and split by whether a player's system
+  is next door. Then, which target, from eight classes: neutral or player, the
+  best ratio on offer or not, a ratio of at least 1 or not. Each class is
+  weighted by how often it was struck when offered.
+
+Three forms on the same seeds: the stage-1 model (from a worktree, prior
+re-fitted), both changes together, and sizing alone. All-rivals figures:
+
+                       Brier, reader             ship error (MSE), reader
+                       stage 1  both  sizing     none   stage 1  both  sizing
+    seeds 121-180
+    18 nodes, 6 ly     0.0779  0.0792 0.0779    193.5   102.3  103.0  102.5
+    24 nodes, 3 ly     0.0641  0.0649 0.0641     65.2    65.5   60.1   57.7
+    40 nodes, 6 ly     0.1026  0.1051 0.1026    105.1   183.8   78.4   73.9
+    18 nodes, 18 ly    0.0937  0.0948 0.0937     46.6    41.5   37.7   36.8
+    seeds 181-240
+    18 nodes, 6 ly     0.0776  0.0789 0.0776     45.1    38.0   39.9   37.8
+    24 nodes, 3 ly     0.0689  0.0701 0.0689     83.8    79.4   76.3   70.8
+    40 nodes, 6 ly     0.1017  0.1044 0.1017    420.2   304.2  272.3  262.0
+    18 nodes, 18 ly    0.0752  0.0778 0.0752     55.8    34.7   36.7   36.8
+
+- **The split is worse.** Its strike chance is behind stage 1's in all 8
+  cell-runs. Scored against sizing alone per rival, it is behind in all 24
+  readings of marshal, actuary and thinker, and in 16 of them outside the
+  interval. Its prior is worse too, so the structure costs and the fit does not
+  rescue it. **Deleted.** The two steps also did not separate the bots: every
+  rival read about the same chance to strike at a given best ratio, and a
+  player-over-neutral pick weight of 0.98-1.07.
+- **Sizing is the gain.** With the strike chance unchanged (it is stage 1's,
+  bit for bit), ship error falls in 5 of the 8 cell-runs, is level in 2 and is
+  2 points worse in 1. The fall is largest at 40 nodes (184 to 74, 304 to 262)
+  and 24 nodes (66 to 58, 79 to 71). **Kept.**
+
+What it can tell apart, at turn 60, median over rivals, seeds 181-240. Seeds
+121-180 agree to within 0.04, except thinker's guard (0.20 there):
+
+                strike on a player at       neutral   all-in  sized /
+                1.0    1.5    2.0           at 1.5    share   target   guard   evac
+    actuary     0.06   0.19   0.29          0.31      0.71    1.27     0.05    0.62
+    claudebot   0.05   0.15   0.28          0.35      0.25    1.17     0.55    0.30
+    heuristic   0.05   0.15   0.28          0.10      0.19    1.42     0.45    0.35
+    knower      0.09   0.20   0.29          0.35      0.55    1.09     0.05    0.56
+    marshal     0.05   0.15   0.28          0.34      0.64    1.30     0.55    0.62
+    rusherplus  0.06   0.15   0.28          0.33      0.62    1.36     0.05    0.52
+    thinker     0.04   0.15   0.28          0.34      0.28    1.18     0.05    0.66
+
+The all-in share splits the roster in two. actuary, marshal, rusherplus and
+knower send all-in on most strikes. thinker, claudebot and heuristic size
+theirs to the target.
+
 ## The gate
 
 Set before the first run: reader beats none, all and prior on Brier and on the
 ships metric, outside the intervals, against marshal, actuary and thinker, in at
 least 3 of the 4 cells, and the fitted parameters visibly separate the roster.
 
-**It did not pass:** 1 of 4 cells on seeds 1-60 and 0 of 4 on seeds 61-120.
-What failed is the ships metric and the strike curve's separation. The
-strike-or-not prediction with memory clears every baseline almost everywhere,
-and the guard and evacuation estimates separate the bots and recover their
-constants. So memory buys something, and reader does not reduce to a stateless
-model.
+**It did not pass.** The stage-1 model read 1 of 4 cells on seeds 1-60 and 0
+of 4 on 61-120. What failed was the ships metric and the strike curve's
+separation. The strike-or-not prediction with memory cleared every baseline
+almost everywhere, and the guard and evacuation estimates separated the bots
+and recovered their constants. So memory buys something, and reader does not
+reduce to a stateless model.
 
-**Open, not rejected.** Two changes to the model, untested:
-- size a predicted strike to its target (sent over effective target, not over
-  the garrison);
-- model a source's decision as two steps: whether it strikes at all, and then
-  which target.
+**With strikes sized to their target, it still does not pass:** 0 of 4 cells on
+both seeds 121-180 and 181-240.
+- Brier clears 35 of 36 comparisons in each run, and ship error 27 and 29.
+- 16 of the 18 failures are ship error, and in 13 of those 16 the point
+  estimate favours reader. They are mostly intervals that cross zero by a little
+  (marshal against the prior at 18 ly: -143.50 [-304.73, +0.27]), not a model
+  that predicts worse.
+- Ship errors are heavy-tailed. One big strike missed or invented dominates a
+  game, so 60 games a cell resolve them poorly.
+- The comparisons against "prior" are harder than at stage 1, since the prior
+  now sizes strikes too.
 
-Either needs a fresh pair of seed ranges for its own reading. Building on
-actuary's ledger (stage 2) waits on a model that passes.
+The gate also asked that the fitted parameters separate the roster. The guard,
+evacuation and all-in share do, and the strike curve still does not.
+
+**Open, not rejected.**
+- Whether the remaining ship-error failures are a lack of power. That needs
+  more games a cell, which would change the gate after seeing results, so it is
+  a decision for whoever owns the gate.
+- A strike curve that tells the bots apart.
+
+Building on actuary's ledger (stage 2) waits on either.

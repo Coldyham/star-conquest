@@ -11,12 +11,13 @@ into a running model of the rival:
     arrival, and whether it struck. Counted per ratio bin, split by neutral or
     player target and by whether the rival's system had hostile ships inbound,
     then fitted monotone (`strike_curve`).
-  * **How much a strike sends**, as a share of the source's garrison.
+  * **How many ships a strike sends.** Whether it sends all its garrison, and if
+    not, what it sends against the target's effective garrison (`strike_ships`).
   * **What a frontier system keeps home**, against its largest adjacent enemy.
   * **Whether a doomed system leaves.**
 
 `predict` turns a rival's model into the launches it should make at our systems
-this turn, each with a probability.
+this turn, each with a probability and an expected size.
 
 **Memory is keyed by the game's path.** Each board is a node in a memo tree,
 found by content: a node's parent is a stored board one turn earlier that this
@@ -42,9 +43,9 @@ from starconquest import config
 
 # --- tunables -------------------------------------------------------------- #
 NODE_CAP = 512              # boards remembered, least recently used dropped first
-RATIO_BINS = 31             # garrison-to-target ratio in tenths; the last is 3.0 and up
-SEND_BINS = 11              # ships sent / garrison in tenths; the last is everything
+RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 GUARD_BINS = 21             # kept / largest adjacent enemy in tenths; the last is 2.0 and up
+ALL_IN = 0.9                # a strike sending this share of its garrison is all-in
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
 
 NEUTRAL, PLAYER = 0, 1      # target kinds
@@ -56,28 +57,29 @@ _ROWS = 4                   # (kind, pressed) pairs, row = kind * 2 + pressed
 # assumed to play like the average of the roster.
 PRIOR_STRIKE = (
     # neutral, unpressed
-    (0.007, 0.007, 0.011, 0.011, 0.018, 0.018, 0.018, 0.019, 0.019, 0.019, 0.019,
-     0.020, 0.038, 0.199, 0.208, 0.284, 0.284, 0.284, 0.284, 0.324, 0.379, 0.379,
-     0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379),
+    (0.004, 0.007, 0.009, 0.012, 0.018, 0.018, 0.020, 0.020, 0.020, 0.023, 0.023,
+     0.024, 0.038, 0.192, 0.207, 0.290, 0.290, 0.290, 0.324, 0.333, 0.333, 0.333,
+     0.333, 0.333, 0.333, 0.333, 0.333, 0.333, 0.333, 0.333, 0.333),
     # neutral, pressed
-    (0.013, 0.014, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.030, 0.030,
-     0.030, 0.044, 0.097, 0.135, 0.184, 0.184, 0.184, 0.184, 0.250, 0.325, 0.325,
-     0.325, 0.325, 0.325, 0.325, 0.325, 0.325, 0.325, 0.325, 0.325),
+    (0.008, 0.008, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.023, 0.023, 0.023,
+     0.023, 0.036, 0.091, 0.091, 0.091, 0.167, 0.167, 0.250, 0.379, 0.379, 0.379,
+     0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379, 0.379),
     # player, unpressed
-    (0.037, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.038, 0.053,
-     0.053, 0.102, 0.111, 0.124, 0.161, 0.202, 0.245, 0.283, 0.283, 0.317, 0.371,
-     0.371, 0.371, 0.371, 0.371, 0.371, 0.371, 0.371, 0.371, 0.371),
+    (0.034, 0.034, 0.034, 0.035, 0.035, 0.040, 0.040, 0.040, 0.040, 0.040, 0.061,
+     0.061, 0.100, 0.128, 0.128, 0.155, 0.212, 0.224, 0.254, 0.254, 0.278, 0.278,
+     0.325, 0.329, 0.329, 0.329, 0.329, 0.329, 0.329, 0.329, 0.329),
     # player, pressed
-    (0.055, 0.080, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.133,
-     0.133, 0.140, 0.189, 0.206, 0.279, 0.311, 0.311, 0.311, 0.379, 0.379, 0.379,
-     0.379, 0.379, 0.379, 0.379, 0.382, 0.382, 0.382, 0.382, 0.425),
+    (0.057, 0.077, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.081, 0.131,
+     0.131, 0.168, 0.177, 0.218, 0.286, 0.286, 0.297, 0.297, 0.336, 0.375, 0.375,
+     0.375, 0.375, 0.375, 0.375, 0.375, 0.426, 0.426, 0.426, 0.445),
 )
-PRIOR_SEND = (0.055, 0.048, 0.048, 0.042, 0.038, 0.067, 0.066, 0.082, 0.078, 0.052,
-              0.424)
-PRIOR_GUARD = (0.526, 0.019, 0.020, 0.042, 0.030, 0.075, 0.060, 0.024, 0.017, 0.005,
-               0.060, 0.008, 0.012, 0.006, 0.003, 0.008, 0.004, 0.002, 0.002, 0.000,
-               0.080)
-PRIOR_EVAC = 0.527
+PRIOR_ALLIN = 0.464
+PRIOR_SIZE = (0.032, 0.050, 0.058, 0.043, 0.031, 0.053, 0.034, 0.023, 0.024, 0.005, 0.076,
+              0.023, 0.059, 0.092, 0.061, 0.084, 0.039, 0.014, 0.013, 0.004, 0.073, 0.002,
+              0.005, 0.005, 0.001, 0.007, 0.004, 0.002, 0.001, 0.000, 0.081)
+PRIOR_GUARD = (0.517, 0.018, 0.019, 0.043, 0.036, 0.077, 0.068, 0.027, 0.017, 0.005, 0.059,
+               0.008, 0.009, 0.006, 0.003, 0.008, 0.004, 0.002, 0.002, 0.000, 0.071)
+PRIOR_EVAC = 0.531
 
 
 class Threat(NamedTuple):
@@ -94,24 +96,25 @@ class Threat(NamedTuple):
 class Model:
     """What one rival has been seen to do: raw counts, the prior added on read."""
 
-    __slots__ = ("strikes", "passes", "send", "guard", "evac", "turns")
+    __slots__ = ("strikes", "passes", "allin", "size", "guard", "evac", "turns")
+    COUNTS = __slots__[:-1]
 
-    def __init__(self, strikes, passes, send, guard, evac, turns):
-        self.strikes = strikes
-        self.passes = passes
-        self.send = send
-        self.guard = guard
-        self.evac = evac
+    def __init__(self, strikes, passes, allin, size, guard, evac, turns):
+        self.strikes = strikes      # per (kind, pressed, target ratio bin): struck
+        self.passes = passes        # ...and not struck
+        self.allin = allin          # (strikes sending all-in, strikes sized to a target)
+        self.size = size            # per ratio bin: a sized strike's ships / target
+        self.guard = guard          # per bin: kept home / largest adjacent enemy
+        self.evac = evac            # (doomed and left, doomed and stayed)
         self.turns = turns
 
     def plus(self, other: Model) -> Model:
-        return Model(_add(self.strikes, other.strikes), _add(self.passes, other.passes),
-                     _add(self.send, other.send), _add(self.guard, other.guard),
-                     _add(self.evac, other.evac), self.turns + other.turns)
+        return Model(*(_add(getattr(self, name), getattr(other, name))
+                       for name in self.COUNTS), self.turns + other.turns)
 
 
-EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS),
-              (0.0,) * SEND_BINS, (0.0,) * GUARD_BINS, (0.0, 0.0), 0)
+EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), (0.0, 0.0),
+              (0.0,) * RATIO_BINS, (0.0,) * GUARD_BINS, (0.0, 0.0), 0)
 
 
 def _add(a: tuple, b: tuple) -> tuple:
@@ -272,9 +275,19 @@ def _follows(prev: _Snap, cur: _Snap, state) -> bool:
     return True
 
 
+
+
 # --------------------------------------------------------------------------- #
 # One turn's evidence
 # --------------------------------------------------------------------------- #
+class _Option(NamedTuple):
+    target: int
+    kind: int
+    turns: int
+    eff: float
+    ratio: float
+
+
 def _ratio_bin(ratio: float) -> int:
     return min(RATIO_BINS - 1, max(0, int(ratio * 10)))
 
@@ -309,6 +322,21 @@ def _largest_enemy(snap: _Snap, state, sid: int, q: int) -> int:
                 if snap.owner[n] not in (0, q)), default=0)
 
 
+def _options(snap: _Snap, state, sid: int) -> list[_Option]:
+    """Every neighbour of `sid` its holder does not hold, priced as a target."""
+    q = snap.owner[sid]
+    garrison = snap.ships[sid]
+    out = []
+    for n in sorted(state.systems[sid].neighbors):
+        holder = snap.owner[n]
+        if holder == q:
+            continue
+        turns = state.travel_turns(sid, n) or 1
+        eff = _effective(state, snap, n, turns)
+        out.append(_Option(n, NEUTRAL if holder == 0 else PLAYER, turns, eff, garrison / eff))
+    return out
+
+
 def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
     """What each player did on the turn from `prev` to `cur`, as counts. `state`
     is read for the map alone."""
@@ -339,33 +367,27 @@ def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
                     unknown = unseen
         launched = sum(out.values()) + unknown
 
-        c = counts.setdefault(q, {"strikes": [0.0] * (_ROWS * RATIO_BINS),
-                                  "passes": [0.0] * (_ROWS * RATIO_BINS),
-                                  "send": [0.0] * SEND_BINS,
-                                  "guard": [0.0] * GUARD_BINS,
-                                  "evac": [0.0, 0.0]})
+        c = counts.setdefault(q, {name: list(getattr(EMPTY, name)) for name in Model.COUNTS})
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
-        for n in sorted(state.systems[sid].neighbors):
-            holder = prev.owner[n]
-            if holder == q:
-                continue
-            kind = NEUTRAL if holder == 0 else PLAYER
-            turns = state.travel_turns(sid, n) or 1
-            cell = (kind * 2 + pressed) * RATIO_BINS + _ratio_bin(
-                garrison / _effective(state, prev, n, turns))
-            if out.get(n, 0) > 0:
-                c["strikes"][cell] += 1
-                c["send"][_share_bin(out[n] / garrison, SEND_BINS)] += 1
-            else:
+        for option in _options(prev, state, sid):
+            cell = (option.kind * 2 + pressed) * RATIO_BINS + _ratio_bin(option.ratio)
+            ships = out.get(option.target, 0)
+            if ships <= 0:
                 c["passes"][cell] += 1
+                continue
+            c["strikes"][cell] += 1
+            if ships >= ALL_IN * garrison:
+                c["allin"][0] += 1
+            else:
+                c["allin"][1] += 1
+                c["size"][_ratio_bin(ships / option.eff)] += 1
         threat = _largest_enemy(prev, state, sid, q)
         if threat > 0 and launched > 0:
             c["guard"][_share_bin((garrison - launched) / threat, GUARD_BINS)] += 1
         if hostile.get(sid, 0) > garrison * config.DEFENDER_ADVANTAGE:
             c["evac"][0 if 2 * launched >= garrison else 1] += 1
 
-    return {q: Model(tuple(c["strikes"]), tuple(c["passes"]), tuple(c["send"]),
-                     tuple(c["guard"]), tuple(c["evac"]), 1)
+    return {q: Model(*(tuple(c[name]) for name in Model.COUNTS), 1)
             for q, c in counts.items()}
 
 
@@ -388,7 +410,8 @@ def _monotone(values: list[float], weights: list[float]) -> list[float]:
 
 
 def strike_curve(model: Model, kind: int, pressed: int) -> list[float]:
-    """Chance of a strike in each ratio bin, never falling as the ratio rises."""
+    """Chance one target is struck, per bin of its own ratio, never falling as
+    the ratio rises."""
     row = kind * 2 + pressed
     base = row * RATIO_BINS
     prior = PRIOR_STRIKE[row]
@@ -401,14 +424,23 @@ def strike_curve(model: Model, kind: int, pressed: int) -> list[float]:
     return _monotone(rates, weights)
 
 
-def _centre(b: int, bins: int) -> float:
-    return 1.0 if b == bins - 1 and bins == SEND_BINS else (b + 0.5) / 10
+def allin_rate(model: Model) -> float:
+    """The share of strikes that send all the garrison."""
+    allin, sized = model.allin
+    return (allin + PRIOR_WEIGHT * PRIOR_ALLIN) / (allin + sized + PRIOR_WEIGHT)
 
 
-def send_share(model: Model) -> float:
-    """The share of its garrison a strike sends, on average."""
-    weights = [model.send[b] + PRIOR_WEIGHT * PRIOR_SEND[b] for b in range(SEND_BINS)]
-    return sum(w * _centre(b, SEND_BINS) for b, w in enumerate(weights)) / sum(weights)
+def size_ratio(model: Model) -> float:
+    """What a strike that is not all-in sends, against its target, on average."""
+    weights = [model.size[b] + PRIOR_WEIGHT * PRIOR_SIZE[b] for b in range(RATIO_BINS)]
+    return sum(w * (b + 0.5) / 10 for b, w in enumerate(weights)) / sum(weights)
+
+
+def strike_ships(model: Model, garrison: int, eff: float) -> float:
+    """The ships a strike from `garrison` at a target of effective `eff` sends,
+    on average."""
+    allin = allin_rate(model)
+    return allin * garrison + (1.0 - allin) * min(garrison, size_ratio(model) * eff)
 
 
 def guard_share(model: Model) -> float:
@@ -419,8 +451,8 @@ def guard_share(model: Model) -> float:
     for b, w in enumerate(weights):
         run += w
         if run >= half:
-            return _centre(b, GUARD_BINS)
-    return _centre(GUARD_BINS - 1, GUARD_BINS)
+            return (b + 0.5) / 10
+    return (GUARD_BINS - 0.5) / 10
 
 
 def evac_rate(model: Model) -> float:
@@ -448,27 +480,21 @@ def predict(state, pid: int, models: dict[int, Model] | None = None) -> list[Thr
         garrison = snap.ships[sid]
         if q in (0, pid) or garrison <= 0:
             continue
-        neighbours = sorted(state.systems[sid].neighbors)
-        if not any(n in mine for n in neighbours):
+        if not any(n in mine for n in state.systems[sid].neighbors):
             continue
         model = models.get(q, EMPTY)
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
-        options = []
-        for n in neighbours:
-            holder = snap.owner[n]
-            if holder == q:
-                continue
-            kind = NEUTRAL if holder == 0 else PLAYER
-            if (q, kind, pressed) not in curves:
-                curves[(q, kind, pressed)] = strike_curve(model, kind, pressed)
-            turns = state.travel_turns(sid, n) or 1
-            p = curves[(q, kind, pressed)][_ratio_bin(
-                garrison / _effective(state, snap, n, turns))]
-            options.append((n, turns, p))
-        total = sum(p for _n, _t, p in options)
+        options = _options(snap, state, sid)
+        chances = []
+        for option in options:
+            key = (q, option.kind, pressed)
+            if key not in curves:
+                curves[key] = strike_curve(model, option.kind, pressed)
+            chances.append(curves[key][_ratio_bin(option.ratio)])
+        total = sum(chances)
         scale = 1.0 / total if total > 1.0 else 1.0
-        ships = send_share(model) * garrison
-        for n, turns, p in options:
-            if n in mine:
-                out.append(Threat(q, sid, n, turns, ships, p * scale))
+        for option, p in zip(options, chances):
+            if option.target in mine:
+                out.append(Threat(q, sid, option.target, option.turns,
+                                  strike_ships(model, garrison, option.eff), p * scale))
     return out
