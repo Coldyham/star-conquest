@@ -89,14 +89,14 @@ trips sooner and the search stops shallower. actuary declares its cost
 (`decide_ms`: 75th-percentile ms = `6.4 * (nodes / 40) ** 0.77`. It was first
 fitted as `5.0 * (nodes / 40) ** 0.55` to a grid of 18-120 systems, 3-18 ly/turn
 and 2-5 seats at load 0.05, where seats and ship speed barely moved it, and was
-refitted for `MIN_GAIN` 0 in "What it costs" below), and knower's setup warning counts it; see "Cost per
+refitted for the lower `MIN_GAIN` in "What it costs" below), and knower's setup warning counts it; see "Cost per
 decide" in [`knower.md`](knower.md). Offline runs (`bot_replay`, `tests.sim`
 with guards lifted) are unaffected. The oracle's single call per turn is well
 inside its 50 ms.
 
 ## Where actuary stands
 
-Measured before `MIN_GAIN` 0 shipped (see "The 2026-10 sweep"), so these
+Measured before `MIN_GAIN` came down from 0.05 (see "The 2026-10 sweep"), so these
 understate it, most of all at 24 nodes 3 ly/turn.
 
 Head to head, both seatings, seeds 301-340 (80 games a cell, timeouts left
@@ -317,7 +317,13 @@ module): actuary's share of wins 61% → 63% at 18 nodes and 61% → 69% at 40,
 taken mostly from marshal. No cell got worse. knower at Search is the one
 opponent where the gain is not yet clear of the noise, at a small sample.
 
-**Shipped** (2026-10): `MIN_GAIN` 0, `FRONT_DECAY` left at 0.5, `decide_ms` refitted.
+**Shipped** (2026-10) as `MIN_GAIN` 1e-9, with `FRONT_DECAY` left at 0.5 and
+`decide_ms` refitted. The floor is an epsilon, not exactly 0. At 0 a launch the
+`_idle` prune skips as unable to pay could still price at +4e-15 of float noise
+when priced, so the cached and uncached plans disagreed (`test_the_caches_change_no_answer`).
+The two floors choose different orders on 4.5% of decides. Paired against each
+other through marshal, seeds 4001-5200 in the same five cells (12,000 games), 1e-9
+reads -0.12 points (z -1.1), and no cell is significant: the same bot.
 
 ## The planned opening (Opening: Planned)
 
