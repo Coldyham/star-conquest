@@ -2506,3 +2506,33 @@ def test_the_invite_overlay_is_modal_and_names_the_seat_it_copies():
         assert ui.pbp_invite_close_rect == (0, 0, 0, 0)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# UI size: the fit to the window, and the player's own size on top of it
+# --------------------------------------------------------------------------- #
+def test_ui_scale_fits_the_window_like_the_menu_does():
+    """The board grows with the window, as the menu's canvas does, so the two
+    stay in proportion; a window smaller than the baseline never shrinks it."""
+    base = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    assert main.ui_scale_for(base, False, 100) == 1.0
+    assert main.ui_scale_for((base[0] * 2, base[1] * 2), False, 100) == 2.0
+    assert main.ui_scale_for((base[0] * 2, base[1]), False, 100) == 1.0
+    assert main.ui_scale_for((800, 600), False, 100) == 1.0
+
+
+def test_ui_size_multiplies_the_fit_except_on_touch():
+    big = (config.BASE_SCREEN_W * 3 // 2, config.BASE_SCREEN_H * 3 // 2)
+    assert main.ui_scale_for(big, False, 125) == 1.5 * 1.25
+    assert main.ui_scale_for(big, True, 125) == 1.5 * config.TOUCH_UI_SCALE
+
+
+def test_ctrl_plus_minus_and_zero_set_the_ui_size():
+    def key(k, mod=pygame.KMOD_CTRL):
+        return main.ui_size_key(pygame.event.Event(pygame.KEYDOWN, key=k, mod=mod), 100)
+
+    assert key(pygame.K_EQUALS) == key(pygame.K_KP_PLUS) == 110
+    assert key(pygame.K_MINUS) == key(pygame.K_KP_MINUS) == 90
+    assert key(pygame.K_0) == 100
+    assert key(pygame.K_EQUALS, mod=0) is None   # plain −/+ still zooms the map
+    assert key(pygame.K_z) is None

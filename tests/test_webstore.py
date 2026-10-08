@@ -13,7 +13,8 @@ import json
 import pytest
 
 from starconquest import paths, webstore
-from starconquest.paths import WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
+from starconquest.paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY,
+                               WEB_UI_SIZE_KEY)
 
 
 @pytest.fixture(autouse=True)
@@ -253,3 +254,26 @@ def test_animate_turns_round_trips_and_can_be_switched_back_on():
     assert webstore.animate_turns() is False
     assert webstore.set_animate_turns(True) is True
     assert webstore.animate_turns() is True
+
+
+# --- the UI size preference -------------------------------------------------- #
+def test_ui_size_is_100_until_set_and_round_trips():
+    assert webstore.ui_size() == 100
+    assert webstore.set_ui_size(125) is True
+    assert webstore.ui_size() == 125
+
+
+def test_a_stored_ui_size_off_the_steps_reads_as_the_nearest_step():
+    """Every value read back is one the stepper can step from."""
+    for stored, read in (("130", 125), ("9000", webstore.UI_SIZES[-1]),
+                         ("1", webstore.UI_SIZES[0]), ("big", 100), ("", 100)):
+        webstore.set(WEB_UI_SIZE_KEY, stored)
+        assert webstore.ui_size() == read
+
+
+def test_stepping_the_ui_size_stops_at_either_end():
+    first, last = webstore.UI_SIZES[0], webstore.UI_SIZES[-1]
+    assert webstore.step_ui_size(100, +1) == 110
+    assert webstore.step_ui_size(100, -1) == 90
+    assert webstore.step_ui_size(first, -1) == first
+    assert webstore.step_ui_size(last, +1) == last
