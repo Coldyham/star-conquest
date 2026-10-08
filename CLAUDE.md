@@ -210,8 +210,13 @@ which `reconstruct` stamps back so a random seat keeps the bot it was dealt
 whatever the roster does since. History mode is shell-only (`Ui.history`,
 `main.build_history`); rewind truncates mid-game and forks a finished game.
 **A live turn's rng is derived, never carried** (`replay.reseed`, called by
-`main.resolve_turn` and never inside `end_turn`), so a rewound turn ended with
-the same orders rolls the same dice rather than a fresh set.
+`main.resolve_turn` and never inside `end_turn`), and every bot seat decides
+from that same start (`engine.decide_seat`), so no seat's draws reach another's.
+**Combat never draws from it**: each fight rolls a stream keyed by seed,
+`GameState.dice_salt`, turn and place (`engine._Dice`), derived inside
+`end_turn`, so a rewound turn ended with the same orders rolls the same dice and
+no move elsewhere re-rolls a fight. A copy rolls the real dice too, which knower's
+Search is welcome to. Turns record `keyed`; replays still deal recorded dice.
 Reasons and alternatives: `docs/design/core.md`.
 
 ### Play-by-post (pbp.py)
@@ -229,8 +234,10 @@ already resolve simultaneously. The rationale for each rule is in
   a turn uploads its log, and every other client applies it (`pbp.match_log`,
   `pbp.settled_turn`). Nobody decides that turn again, because the bots stop on
   a wall clock. The resolver's rng is derived (`pbp.reseed`), never carried.
-  Bots decide on a scratch copy (`pbp.turn_orders`), so the dice roll after every
-  order is fixed. Each stepping client re-rolls them (`pbp.verify_turn`).
+  Bots decide on a scratch copy (`pbp.turn_orders`). The match rolls its own
+  dice (`pbp.DICE_SALT`, stamped by `pbp.seat_people`), and each stepping client
+  re-rolls them (`pbp.verify_turn`; an unkeyed turn passes only until the match
+  has a keyed one).
   `match_log` refuses a log that files an order under a person's seat. The
   endpoint keeps the first upload, and a client that loses the race rebuilds
   from it. The uploaded log carries no forwarding rules (`pbp.shareable`), so
@@ -280,7 +287,8 @@ already resolve simultaneously. The rationale for each rule is in
   `settings.random_seed()`/`settings.fresh_rng()` (the web build's fixed
   interpreter image makes global `random` repeat across loads). The sanctioned
   exceptions derive a stream rather than draw one: `botio.decide_seed`, the
-  random-seat pick, `pbp.reseed`, `replay.reseed`.
+  random-seat pick, `pbp.reseed`, `replay.reseed`, and the combat dice
+  (`engine._Dice`, one stream per fight, never `state.rng`).
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use `model.lane_key` (a `frozenset`). Neutral is a real player, `id == 0`.
   Star names (`System.name`, `starnames.py`, generated from
@@ -346,8 +354,8 @@ already resolve simultaneously. The rationale for each rule is in
 - **The game uploads replays and the worker checks scores against them.**
   `share.post_log` sends; `tools/verify_scores.py` records `verified` /
   `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
-  rival lineup the setup no longer deals) in `score_checks`,
-  binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
+  rival lineup the setup no longer deals) in `score_checks`, re-rolling every
+  `keyed` turn's dice (`replay.dice_follow`) and binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
   never does. `game_logs` is unreadable and unwritable by the public (writes via

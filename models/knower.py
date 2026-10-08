@@ -34,9 +34,9 @@ ever *raise* a threat: it never relaxes a guard, never believes a human vacated 
 system, and never plans around a human fleet spending itself. See ``TRUST_HUMAN``.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it, and
-draws **nothing** from ``state.rng`` — every tie-break here is deterministic, which
-leaves the rng exactly where the seats after us expect to find it and so keeps
-their prediction bit-exact.
+draws **nothing** from ``state.rng`` — every tie-break here is deterministic. Every
+seat decides from the same start of the turn's rng (``engine.decide_seat``), so
+predicting a rival from a copy of it is bit-exact, whichever side of us it sits.
 
 --- Oracle: Off, Predict, Search -------------------------------------------- #
 
@@ -379,12 +379,11 @@ def decide(state, pid):
 def _build_oracle(state, me):
     """Run every other seat's decision function and fold the result into a board.
 
-    Seats are predicted in the engine's own order (`engine._collect_orders`:
-    ascending pid, skipping neutral/human/dead) so that seats *after* us share one
-    rng that advances exactly as the real one will — making their orders
-    bit-exact. Seats *before* us have already drawn from ``state.rng`` from a
-    position we cannot recover, so they get a private rng and are right except
-    where they hit a genuine tie (measured: 99.6% of turns).
+    Every seat decides from the same start of ``state.rng``
+    (``engine.decide_seat``), and that start is where the rng stands as we are
+    asked, so each bot seat is predicted from its own copy of it and its orders
+    come out bit-exact, before us in seat order or after. A person's seat is
+    modelled from a private rng, since what it plays never came from one.
     """
     global LAST_ORACLE
 
@@ -392,30 +391,19 @@ def _build_oracle(state, me):
     post = _clone(state, _priv(state, me, 1))
     orc = Oracle(post=post, trusted={0}, launched=defaultdict(int))  # neutrals never launch
 
-    # Seats before us: right logic, right inputs, unrecoverable rng position.
-    for q in [q for q in sorted(state.players) if q < me]:
-        _predict_seat(state, orc, me, q, _priv(state, q, 2), "likely")
-
-    # Seats after us: one shared rng, positioned where they will really find it.
-    shared = random.Random()
-    shared.setstate(state.rng.getstate())
-    for q in [q for q in sorted(state.players) if q > me]:
+    start = state.rng.getstate()
+    for q in sorted(state.players):
         player = state.players[q]
-        if player.is_neutral or not player.alive:
+        if q == me or player.is_neutral or not player.alive:
             continue
         if time.perf_counter() > deadline:
             break                     # out of budget: the rest stay untrusted
         if player.is_human:
-            # The engine never calls `decide` for a human seat (engine.py:99), so
-            # this prediction must not advance the shared stream.
             _predict_seat(state, orc, me, q, _priv(state, q, 4), "modelled")
             continue
-        if not _predict_seat(state, orc, me, q, shared, "exact"):
-            # That seat raised, mutated its board or had to be proxied, so it
-            # consumed a different number of draws than the real one will. Every
-            # seat after it is off-position now — still worth predicting, but the
-            # bit-exact chain is over.
-            shared = _priv(state, q, 3)
+        rng = random.Random()
+        rng.setstate(start)
+        _predict_seat(state, orc, me, q, rng, "exact")
 
     LAST_ORACLE = orc
     return orc
@@ -858,10 +846,12 @@ def _rollout(state, pid, plan, humans, rng):
 
     One ply, not a whole line — each line is stepped a ply at a time so the search
     can stop between plies. ``rng`` is the *ply's* stream, handed identically to
-    every line on that ply (common random numbers), so all of them meet the same
-    combat jitter and a score gap between lines reflects the plan rather than the dice.
-    Being the clone's own stream, it also leaves ``state.rng`` untouched, which is
-    what the seats after us are predicted from.
+    every line on that ply (common random numbers), so every rival tie-breaks the
+    same way on all of them. The combat jitter needs no such care: the dice are
+    keyed per fight from the board (``engine._Dice``), so every line meets the
+    real ones, and a score gap between lines reflects the plan rather than the
+    dice. Being the clone's own stream, it also leaves ``state.rng`` untouched,
+    which is what every seat is predicted from.
 
     Note the board is *advanced* here, unlike the oracle's static post-launch board —
     so `state.travel_turns` re-times lanes as `state.turn` climbs under
@@ -990,8 +980,8 @@ def _external_plan(state, pid, name, salt):
     what it would do in our chair. Same three precautions as `_predict_seat`, for the
     same reasons: a private clone (a rival is not obliged to honour the read-only
     contract), a state-derived rng (both of the bots named above tie-break through
-    ``state.rng``, and advancing the real one would leave every seat after us
-    predicted off-position), and everything caught (a broken candidate may cost
+    ``state.rng``, and advancing the real one would move the start every rival
+    is predicted from), and everything caught (a broken candidate may cost
     itself its slot in the search and nothing more).
 
     ``ai.STRATEGIES`` is read *here* rather than at import: models/ files load in

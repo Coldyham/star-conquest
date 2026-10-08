@@ -206,6 +206,29 @@ def test_reconstruct_matches_original(policy, seed):
     assert _snapshot(rebuilt) == before
 
 
+def test_a_turn_records_whether_its_dice_were_keyed():
+    with _preserve_config():
+        _, log = _play(777, policy="pass", max_turns=30)
+        again = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
+    assert log.turn_count and all(again.keyed_for(i) for i in range(again.turn_count))
+    assert again.script_for(0).keyed
+
+
+def test_a_log_from_before_keyed_dice_still_rebuilds():
+    """An older turn carries no ``keyed``, and its dice were drawn in walk order
+    off `state.rng`. Recorded dice are dealt back in that same walk order
+    whichever fight asks, so the board it rebuilds is the one that was played."""
+    with _preserve_config():
+        original, log = _play(54321, policy="mixed")
+        data = log.to_dict()
+        for entry in data["turns"]:
+            entry.pop("keyed")
+        older = replay.GameLog.from_dict(data)
+        rebuilt, _ = replay.reconstruct(older)
+    assert not any(older.keyed_for(i) for i in range(older.turn_count))
+    assert _snapshot(rebuilt) == _snapshot(original)
+
+
 @pytest.fixture
 def unreproducible_bot():
     """A registered strategy that decides differently every time it is asked the

@@ -6,10 +6,12 @@ then resolves one turn deterministically, returning a ``TurnRecord`` of
 everything the turn consumed — and accepting one back in ``script`` to replay it:
 
     1. AI phase        — each AI player's decisions are applied (injected via
-                         ``decide`` so the engine never imports the AI). A seat may
-                         only command its own ships: orders naming a different owner
-                         are dropped (``_own_orders``), since ``apply_order`` alone
-                         cannot tell which seat issued an order.
+                         ``decide`` so the engine never imports the AI). Every seat
+                         decides from the same start of ``state.rng``
+                         (``decide_seat``), so no seat's draws reach another's. A
+                         seat may only command its own ships: orders naming a
+                         different owner are dropped (``_own_orders``), since
+                         ``apply_order`` alone cannot tell which seat issued an order.
     2. Advance fleets  — every in-transit fleet counts down one turn.
     3. Lane battles    — (opt-in) enemy fleets whose paths cross in transit fight
                          pairwise, nearest crossing first; winners fly on as they were.
@@ -22,10 +24,15 @@ everything the turn consumed — and accepting one back in ``script`` to replay 
     6. Win check       — a player is alive if it holds a system or has a fleet in
                          transit; the game ends when <= 1 remain.
     7. turn += 1.
+
+The dice are not ``state.rng``. Each fight rolls from a stream of its own, keyed
+by the board's seed, ``dice_salt``, the turn and where the fight is (``_Dice``),
+so a fight's dice cannot be moved by anything that happens anywhere else.
 """
 
 from __future__ import annotations
 
+import random
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -70,27 +77,64 @@ class TurnRecord:
 
     orders: list[Order] = field(default_factory=list)
     dice: list[float] = field(default_factory=list)
+    # Whether the dice were rolled per fight (`_Dice.at`). A turn from before that
+    # rolled them off `state.rng` after the bots, and only its recorded values
+    # reproduce it; a keyed turn's dice follow from its board and orders, so they
+    # can be rolled again and compared (`pbp.verify_turn`).
+    keyed: bool = False
 
 
 class _Dice:
-    """Combat's rng for one turn, keeping every draw it deals.
+    """Combat's dice for one turn, keeping every draw it deals.
 
-    Given ``recorded`` draws it deals those instead of rolling: a replay skips the
-    AI entirely, so ``state.rng`` no longer sits where it did when the turn was
-    first fought, and only the recorded values reproduce that battle. Rolling on
-    past the end of a short (hand-edited) record keeps a replay playable rather
-    than half-resolved.
+    Each fight rolls from its own stream (``at``), seeded from the board's seed,
+    ``dice_salt`` and turn plus where the fight is. A fight's dice therefore
+    depend on nothing but which fight it is: launching a fleet elsewhere, adding a
+    fight earlier in the walk, or a bot drawing more or less cannot re-roll it.
+    They come from the board alone, so a predicting bot that plays ``end_turn``
+    on a copy rolls the real dice too — which only sharpens its own choices,
+    since nothing it does moves any other seat's.
+
+    Given ``recorded`` draws it deals those instead of rolling, in walk order,
+    whichever stream asks: a replay deals what the turn was fought with, which is
+    what keeps a turn from before keying reproducible. Rolling on past the end of
+    a short (hand-edited) record keeps a replay playable rather than half-resolved.
     """
 
-    def __init__(self, rng, recorded: Iterable[float] | None = None) -> None:
-        self._rng = rng
+    def __init__(self, state: GameState, recorded: Iterable[float] | None = None) -> None:
+        self._prefix = f"{state.seed}:{state.dice_salt}:{state.turn}"
+        self._streams: dict[str, random.Random] = {}
         self._recorded = deque(recorded or ())
         self.drawn: list[float] = []
 
-    def uniform(self, a: float, b: float) -> float:
-        value = self._recorded.popleft() if self._recorded else self._rng.uniform(a, b)
+    def at(self, *where: object) -> _Fight:
+        """The dice for the fight at ``where`` (``("node", id)``, ``("lane", lo, hi)``)."""
+        key = ":".join(map(str, (self._prefix, *where)))
+        if key not in self._streams:
+            self._streams[key] = random.Random(key)
+        return _Fight(self, self._streams[key])
+
+    def _deal(self, rng: random.Random, a: float, b: float) -> float:
+        value = self._recorded.popleft() if self._recorded else rng.uniform(a, b)
         self.drawn.append(value)
         return value
+
+
+class _Fight:
+    """One fight's view of the turn's dice: what ``combat`` is handed as its rng."""
+
+    def __init__(self, dice: _Dice, rng: random.Random) -> None:
+        self._dice = dice
+        self._rng = rng
+
+    @property
+    def drawn(self) -> list[float]:
+        """The turn's record, for a tool that deals a fight its own rolls
+        (`tools/par_search.lucky`) and must still have them recorded."""
+        return self._dice.drawn
+
+    def uniform(self, a: float, b: float) -> float:
+        return self._dice._deal(self._rng, a, b)
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +217,7 @@ def end_turn(
     for order in orders:  # order-independent: each system has a single owner
         watch.launched(state, apply_order(state, order))
 
-    dice = _Dice(state.rng, script.dice if script is not None else None)
+    dice = _Dice(state, script.dice if script is not None else None)
     _advance_fleets(state)
     watch.advanced(state)
     _resolve_lane_battles(state, dice, watch)
@@ -184,7 +228,7 @@ def end_turn(
     _check_win(state)
     state.turn += 1
     watch.ended(state)
-    return TurnRecord(orders, dice.drawn)
+    return TurnRecord(orders, dice.drawn, keyed=script.keyed if script is not None else True)
 
 
 def _claim_seat(state: GameState, pid: int) -> None:
@@ -218,14 +262,14 @@ def _collect_orders(state: GameState, human_orders: list[Order] | None,
 
     Seats are walked in **ascending id**, people and bots alike: a seat a person
     holds contributes what they submitted, any other live seat is asked to
-    ``decide``. That single rule replaces the older "the human first, then the
-    bots" one and emits the identical sequence for every game that rule could
-    describe — the human is always pid 1 (``mapgen._make_players``), so it was
-    already ascending. It matters that this is an order and not a set: fleets are
-    appended as they launch, ``_resolve_arrivals`` walks them in that order, and
-    the combat dice are consumed along that walk. Two clients that collected the
-    same orders in a different sequence would fight different battles, which is
-    what makes this the load-bearing line for play-by-post.
+    ``decide`` (through ``decide_seat``, so every bot sees the same start of
+    ``state.rng`` and the walk order never reaches a decision). It matters that
+    the result is an order and not a set: fleets are appended as they launch,
+    which hands out lane tracks and sets the walk ``_resolve_arrivals`` takes and
+    the sequence a replay deals its recorded dice in. Two clients that collected
+    the same orders in a different sequence would record the same fights in a
+    different order, which is what makes this the load-bearing line for
+    play-by-post.
 
     ``seat_orders`` is how more than one person submits: ``{pid: orders}``,
     overriding ``human_orders`` for any seat it names. ``human_orders`` alone is
@@ -259,8 +303,24 @@ def _collect_orders(state: GameState, human_orders: list[Order] | None,
             # order either way.
             continue
         else:
-            orders.extend(_own_orders(decide(state, pid), pid))  # same pre-apply state
+            orders.extend(_own_orders(decide_seat(state, pid, decide), pid))  # same pre-apply state
     return orders
+
+
+def decide_seat(state: GameState, pid: int, decide: DecideFn) -> list[Order]:
+    """``decide(state, pid)``, with ``state.rng`` put back where it was.
+
+    Every seat decides from the same start of the turn's stream, so a bot plays
+    the same in any seat, a bot that draws more or less cannot change what any
+    other seat does, and a predicting bot can run any rival from where that rival
+    will really find the rng. Anything that asks a seat to decide for the live
+    turn goes through here.
+    """
+    start = state.rng.getstate()
+    try:
+        return decide(state, pid)
+    finally:
+        state.rng.setstate(start)
 
 
 def _own_orders(orders: list[Order] | None, seat: int | None) -> list[Order]:
@@ -383,7 +443,8 @@ def _resolve_lane_battles(state: GameState, dice: _Dice, watch: turnfilm.Watch) 
                 continue  # killed at an earlier crossing this same turn
             a, b = state.fleets[a_i], state.fleets[b_i]
             a_ships, b_ships = a.ships, b.ships
-            winner, survivors = combat.resolve_lane_clash(state, a, b, dice)
+            winner, survivors = combat.resolve_lane_clash(
+                state, a, b, dice.at("lane", min(lane), max(lane)))
             if winner == a.owner_id:
                 a.ships, survivor, dead = survivors, a, (b,)
                 destroyed.add(b_i)
@@ -414,7 +475,8 @@ def _resolve_arrivals(state: GameState, dice: _Dice, watch: turnfilm.Watch) -> N
         node = state.systems[node_id]
         was_owner, was_ships = node.owner_id, node.ships
         folds = watch.folds()
-        combat.resolve_arrival(state, node_id, fleets, dice, on_step=folds)
+        combat.resolve_arrival(state, node_id, fleets, dice.at("node", node_id),
+                               on_step=folds)
         watch.landed(state, node_id, fleets, was_owner, was_ships, folds)
 
 

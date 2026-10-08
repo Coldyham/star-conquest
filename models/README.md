@@ -216,11 +216,13 @@ their `ai_params` applied for free, because their own function reads them.
 
 - **Clone the state first.** `decide` is contractually read-only, but you cannot
   assume a rival honours that, and you need your own `rng` anyway (below).
-- **Draw nothing from `state.rng`.** Seats decide in ascending player id, so the
-  seats after you will find the stream exactly where you leave it. Leave it alone
-  and their orders are reproducible bit-for-bit; draw once and they aren't. Use a
-  private `random.Random` seeded from `state.seed`/`state.turn` — never the clock,
-  or a seed will stop reproducing its match.
+- **Draw nothing from `state.rng`.** Every seat decides from the same start of
+  the turn's stream (`engine.decide_seat`), and that start is where the rng stands
+  when you are asked, so a copy of it predicts any rival bit-for-bit. Draw from it
+  and you move the start you are predicting from. Use a private `random.Random`
+  seeded from `state.seed`/`state.turn` — never the clock, or a seed will stop
+  reproducing its match. Combat dice never come from `state.rng`: `end_turn` on a
+  copy of the board rolls the fights the real turn will roll.
 - **Read `ai.STRATEGIES` lazily, inside `decide`.** Model files are imported in
   sorted filename order, so at *your* import time the registry is still incomplete.
 - **Never call `ai.load_models()` from a model.** It imports every file in this

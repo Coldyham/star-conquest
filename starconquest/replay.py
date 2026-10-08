@@ -5,7 +5,7 @@ turn, the orders every seat issued plus the combat draws they produced. So we
 never snapshot a ``GameState``; we record those inputs:
 
     {settings, seed, strategies: {pid: name},
-     turns: [{"ai": bool, "orders": [...], "dice": [...],
+     turns: [{"ai": bool, "orders": [...], "dice": [...], "keyed": bool,
               "rules": {src: [dest, keep]}}, ...], ...}
 
 ``reconstruct`` feeds each turn straight back through ``engine.end_turn`` as a
@@ -22,6 +22,11 @@ a bot's determinism is enforceable, so the log stopped depending on it: the dice
 are recorded for the same reason, since skipping the AI leaves ``state.rng``
 somewhere other than where the battle found it. Version-1 logs can no longer be
 replayed faithfully and are skipped by ``latest_log``.
+
+``keyed`` says the turn's dice were rolled per fight (``engine._Dice``), so they
+follow from the board and the orders and can be rolled again to check them.
+Absent on a turn from before that, whose dice came off ``state.rng`` after the
+bots and are only what was recorded.
 
 Two consequences worth stating, because replays are now kept and shared. First,
 **a bot is never consulted**, so changing one — retuning it, rewriting it,
@@ -48,6 +53,7 @@ after each turn so the file on disk always reflects the live match.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import re
@@ -261,6 +267,7 @@ class GameLog:
                 "ai": bool(human_ai),
                 "orders": [_order_to_dict(o) for o in record.orders],
                 "dice": list(record.dice),
+                "keyed": bool(record.keyed),
                 "rules": rules_to_dict(rules),
             }
         )
@@ -328,9 +335,15 @@ class GameLog:
         raw = entry.get("dice", []) if isinstance(entry, dict) else []
         return [float(d) for d in raw if isinstance(d, (int, float))]
 
+    def keyed_for(self, turn_index: int) -> bool:
+        """Whether turn ``turn_index`` rolled its dice per fight (``engine._Dice``)."""
+        entry = self.turns[turn_index]
+        return isinstance(entry, dict) and entry.get("keyed") is True
+
     def script_for(self, turn_index: int) -> engine.TurnRecord:
         """Turn ``turn_index`` in the form ``engine.end_turn`` replays."""
-        return engine.TurnRecord(self.orders_for(turn_index), self.dice_for(turn_index))
+        return engine.TurnRecord(self.orders_for(turn_index), self.dice_for(turn_index),
+                                 keyed=self.keyed_for(turn_index))
 
     def rules_for(self, turn_index: int) -> dict[int, tuple[int, int]]:
         """The human's standing auto-forward rules in force on ``turn_index``.
@@ -451,19 +464,20 @@ def _game_path(seed: int) -> Path:
 
 
 def reseed(state: GameState) -> None:
-    """Put ``state.rng`` where a live turn's decisions and dice start from.
+    """Put ``state.rng`` where a live turn's decisions start from.
 
     Derived from the seed and the turn rather than carried over from the turn
-    before, so a rewound board rolls what the board played straight through
-    rolled. ``reconstruct`` deals recorded dice and asks no bot to decide, so a
-    rebuilt board's rng never moves from where map generation left it, and a
-    carried rng would hand every rewind a fresh roll of the turn it lands on.
-    `pbp.reseed` is the same rule for a shared match, under its own salt.
+    before, so a rewound board decides what the board played straight through
+    decided. ``reconstruct`` asks no bot to decide, so a rebuilt board's rng never
+    moves from where map generation left it, and a carried rng would hand every
+    rewind a fresh set of tie-breaks on the turn it lands on. Every bot seat then
+    decides from this same start (``engine.decide_seat``). The dice are not drawn
+    from it at all: ``engine._Dice`` keys them per fight. `pbp.reseed` is the same
+    rule for a shared match, under its own salt.
 
-    Called by the shell before it resolves a turn of its own
-    (`main.resolve_turn`), never inside `engine.end_turn`: a predicting bot plays
-    `end_turn` on copies with a private rng, and deriving there would hand it
-    the real dice.
+    Called by whatever resolves a live turn (`main.resolve_turn`, `tests.sim`,
+    `tools/par_search`), never inside `engine.end_turn`: a predicting bot plays
+    `end_turn` on copies with a private rng of its own.
     """
     state.rng.seed(f"{state.seed}:turn:{state.turn}")
 
@@ -528,6 +542,21 @@ def latest_log() -> GameLog | None:
 # person, this has to become a question the log answers per turn rather than one
 # seat named up front.
 HUMAN_SEAT = 1
+
+
+def dice_follow(state: GameState, record: engine.TurnRecord) -> bool:
+    """Whether ``record``'s dice are what its orders really roll on ``state``.
+
+    The turn is fought again on a copy, with the recorded orders and no recorded
+    dice, so every fight rolls the dice keyed to it (``engine._Dice``) and the two
+    lists are compared. Only meaningful for a keyed turn: one from before keying
+    drew its dice off ``state.rng`` after its bots, which nothing can repeat.
+    ``pbp.verify_turn`` asks it of a shared match's live turn, and
+    ``tools/verify_scores.py`` of every keyed turn behind a posted score.
+    """
+    scratch = copy.deepcopy(state)
+    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
+    return rolled.dice == list(record.dice)
 
 
 def reconstruct(
