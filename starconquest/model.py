@@ -291,6 +291,10 @@ class GameState:
     mode: str = "random"
     winner: int | None = None
     rng: random.Random = field(default_factory=random.Random)
+    # Which family of combat dice this board rolls (`engine._Dice`): a shared match
+    # stamps its own (`pbp.seat_people`), so playing its seed alone shows nothing
+    # of the dice it will roll.
+    dice_salt: str = "dice"
 
     # -- construction ------------------------------------------------------- #
     @classmethod

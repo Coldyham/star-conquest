@@ -402,10 +402,10 @@ def test_a_scripted_turn_replays_without_asking_any_seat():
 
 
 def test_a_scripted_turn_refights_the_battle_on_the_recorded_dice():
-    """Combat's swing is drawn from `state.rng`, which a replay leaves in a place
-    it never was live (nobody decided anything on the way there). So the recorded
-    draws are dealt back in its place, and they — not this run's rng — settle the
-    fight: the same 10-vs-10 attack goes either way on the dice it is given."""
+    """A turn from before dice were keyed per fight rolled them off `state.rng`,
+    which a replay leaves somewhere it never was live. So the recorded draws are
+    dealt back instead, and they — not anything rolled now — settle the fight: the
+    same 10-vs-10 attack goes either way on the dice it is given."""
     def fight(dice):
         s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
         s.rng = random.Random(7)      # would roll its own swing, if it were asked
@@ -424,6 +424,100 @@ def test_end_turn_records_the_draws_a_live_fight_made():
     s.rng = random.Random(7)
     record = engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)])
     assert len(record.dice) == 2      # one swing per side of the one fight
+
+
+def test_every_bot_seat_decides_from_the_same_start_of_the_rng():
+    """No seat's place in the order reaches what it draws, and the rng is left
+    where the turn started."""
+    s = make_state([(0, 1, 5, 100), (1, 2, 5, 100), (2, 3, 5, 100)], [(0, 1, 2), (1, 2, 2)])
+    start = s.rng.getstate()
+    seen: dict[int, list[float]] = {}
+
+    def probe(state, pid):
+        seen[pid] = [state.rng.random() for _ in range(pid)]  # each seat draws a different amount
+        return []
+
+    engine.end_turn(s, decide=probe)
+    assert seen[1] == seen[2][:1] == seen[3][:1]
+    assert seen[2] == seen[3][:2]
+    s.rng.setstate(start)
+    assert s.rng.random() == seen[1][0]
+
+
+def _contested(burn: int):
+    """A turn where seat 1 draws ``burn`` values and seat 2 sizes an attack off
+    the rng: what seat 2 ordered, and the dice the fight rolled."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 30, 100)], [(0, 1, 1)])
+    s.rng = random.Random(11)
+
+    def decide(state, pid):
+        if pid == 1:
+            for _ in range(burn):
+                state.rng.random()
+            return []
+        return [Order(2, 1, 0, 15 + int(state.rng.random() * 10))]
+
+    record = engine.end_turn(s, decide=decide)
+    return [o for o in record.orders if o.owner_id == 2], record.dice
+
+
+def test_a_seat_that_draws_more_moves_nobody_else():
+    orders, dice = _contested(0)
+    assert dice, "the attack must have been fought"
+    for burn in (1, 7):
+        assert _contested(burn) == (orders, dice)
+
+
+def _front_and_back(back_line: list[Order]):
+    """Seat 1 attacks system 1, after ``back_line``: (the fight's dice, its result)."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 12, 100), (2, 1, 10, 100), (3, 0, 4, 100),
+                    (4, 1, 6, 100)], [(0, 1, 1), (2, 3, 1), (4, 0, 1)], human=1)
+    s.seed = 5
+    record = engine.end_turn(s, human_orders=[*back_line, Order(1, 0, 1, 20)])
+    return record.dice[-2:], (s.systems[1].owner_id, s.systems[1].ships)
+
+
+def test_a_fight_rolls_the_same_dice_whatever_happens_elsewhere():
+    """Its dice are keyed to where it is, so neither a fight walked before it nor a
+    back-line move can re-roll it."""
+    alone = _front_and_back([])
+    assert _front_and_back([Order(1, 2, 3, 10)]) == alone        # a fight walked first
+    assert _front_and_back([Order(1, 4, 0, 6)]) == alone         # a reinforcement behind it
+
+
+def test_a_copy_of_the_board_rolls_the_real_dice():
+    """The dice come from the board, never its rng: a predicting bot playing
+    `end_turn` on a copy with an rng of its own meets the fight that will happen."""
+    import copy
+
+    def fought(board):
+        return engine.end_turn(board, human_orders=[Order(1, 0, 1, 10)]).dice
+
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+    s.seed = 9
+    clone = copy.deepcopy(s)
+    clone.rng = random.Random(1234)
+    assert fought(clone) == fought(s)
+
+
+def test_a_board_rolls_its_own_family_of_dice():
+    def fought(salt):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+        s.dice_salt = salt
+        return engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)]).dice
+
+    assert fought("dice") == fought("dice")
+    assert fought("dice") != fought("pbp-dice")
+
+
+def test_a_turn_says_whether_its_dice_were_keyed():
+    def play(script=None):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+        return engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)], script=script)
+
+    assert play().keyed
+    assert not play(engine.TurnRecord([Order(1, 0, 1, 10)], [0.1, -0.1])).keyed
+    assert play(engine.TurnRecord([Order(1, 0, 1, 10)], [0.1, -0.1], keyed=True)).keyed
 
 
 def _never_called(state, pid):

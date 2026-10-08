@@ -64,7 +64,7 @@ implemented, and the brief is kept for its reasoning.
   - *Keys outlive the schema that made them.* `_LEGACY_KEY_DROPS`, `findTwin` folding, newest key wins, the `sc_config_key` trade-off, the int/float `aux` digest leak.
 - **Ship-speed growth.** Applies at launch only, and compounds rather than growing linearly (with the reason). Re-times from `length_ly`.
 - **In-lane battles.** A fight is a geometric meeting, fought pairwise; the winner is only thinned. Growth mostly switches the feature off.
-- **Persistence, replay & history.** Format v2 records orders plus dice, and the alternatives that lost. Rules live in the log. The `"ai"` flag doubles as the seat claim. A resume always lands paused. A live turn's rng is derived (`replay.reseed`), so a rewind is not a re-roll.
+- **Persistence, replay & history.** Format v2 records orders plus dice, and the alternatives that lost. Rules live in the log. The `"ai"` flag doubles as the seat claim. A resume always lands paused. A live turn's rng is derived (`replay.reseed`), so a rewind is not a re-roll. *Two streams*: bots decide in parallel from the turn's start (`engine.decide_seat`), and each fight rolls dice keyed to its place (`engine._Dice`), so seat order and unrelated moves can't move a roll; why knower seeing the real dice is fine; the `keyed` marker.
   - *`match_id`.*
 - **Star names.** Generated at build time; named last so seeds don't move. Labels are placed collision-first, with a reserved slot for marks.
 - **Symmetric layouts** (under "Past a standard board the box grows"). Hub, ring, wheel and core; why `hub` is pinned rather than a `RULES_VERSION` bump; added lanes chosen on one seam and rotated; why `core` opens the middle up; where `layout` is inert.
@@ -249,7 +249,7 @@ the measured result was indistinguishable from the baseline.
 - Challenge links in the address bar or `localStorage`: no. Locking a challenge's widgets: no. *Challenge links.*
 - Re-timing fleets in flight under growth, linear growth, rescaling the baked `travel_turns`: all rejected. *Ship-speed growth.*
 - Pooled lane battles and merging the survivors: produced wrong results and visible teleports. *In-lane battles.*
-- Replaying by re-running the AI (format v1), re-running `decide` just to advance the rng, snapshotting the Mersenne Twister state per turn, and deriving the dice from `(seed, turn)`: all rejected. *Persistence, replay & history.*
+- Replaying by re-running the AI (format v1), re-running `decide` just to advance the rng, and snapshotting the Mersenne Twister state per turn: all rejected. Deriving the dice from `(seed, turn)` was rejected too, then built per fight on 2026-10-08 (the dice are still recorded). *Persistence, replay & history.*
 - Reading star names from a data file at runtime: no, they are generated. *Star names.*
 
 ### Shell ([`design/shell.md`](design/shell.md))

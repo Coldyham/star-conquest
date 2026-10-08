@@ -288,13 +288,13 @@ Nor does it prove the game was played under the real rules of chance. The
 verifier replays recorded orders and recorded dice. It does not check that the
 dice came from the seed, or that the bots' orders are what those bots would
 have played. A log with hand-picked dice or doctored bot moves verifies;
-`tools/par_search.py`'s lucky lines are one example. Since `replay.reseed`
-seeds each live turn from `(seed, turn)`, the dice half has become checkable
-in part: a genuine turn's dice are a run of that turn's stream. The run's start
-depends on how much the bots drew, though, which only re-running them would
-show. The bot half stays open by design. What was measured, and what would
-close the dice half, is in `docs/design/par.md`, "A gap this exposes in
-`verify_scores`". A known limit, not yet addressed.
+`tools/par_search.py`'s lucky lines are one example. Since 2026-10-08 the
+dice half can be checked: each fight's dice are keyed from the board
+(`engine._Dice`), and a turn marked `keyed` in the log can be rolled again from
+its recorded orders and compared, as `pbp.verify_turn` does for a shared match.
+The verifier does not do it yet, and turns from before carry no marker and can't
+be checked. The bot half stays open by design. What was measured is in
+`docs/design/par.md`, "A gap this exposes in `verify_scores`". A known limit, not yet addressed.
 
 ### Watching one back
 

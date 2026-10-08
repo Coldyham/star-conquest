@@ -45,6 +45,14 @@ turns deep. A bounded search is cheap, though, and gives two numbers per map: a
   changing that turn's orders shifts them. Every reading below was taken under
   the old rule.
 
+  **And until 2026-10-08 for the rest.** Bots now decide in parallel from the
+  turn's start (`engine.decide_seat`), and combat never draws from `state.rng`.
+  Each fight rolls a stream keyed by seed, turn and place (`engine._Dice`), so
+  the two sources are no longer coupled, and changing an order shifts only the
+  fights that order takes part in. A throwaway fight elsewhere uses up nothing.
+  Reasons in `docs/design/core.md`, "Two streams". Readings below that depend on
+  fishing for a roll through unrelated orders are stale.
+
 ## The floor
 
 Win means every rival is gone, with no systems and no fleets (`engine._check_win`).
@@ -338,9 +346,10 @@ line, and 0 of 6 of a board log from before the change. It has three limits:
 - **It only applies to games played after `replay.reseed`.** A log does not
   say which rule it was played under, so the verifier would need a marker.
 
-Rolling combat from a stream of its own, seeded from `(seed, turn)` and handed
-to `end_turn` only by the shell, would remove the first limit: the dice would
-then follow exactly from the fights in order, with nothing to fish among. That
-needs `main.resolve_turn` and the verifier to agree on it, and a marker in the
-log, and is not built. The bot-orders half stays open by design. Also recorded
-in `docs/design/leaderboard.md`, "Checked scores".
+Rolling combat from a stream of its own removes the first limit, and was built
+on 2026-10-08 (`docs/design/core.md`, "Two streams"). Each fight's dice are
+derived inside `end_turn` from the board alone, and every turn since carries a
+`keyed` marker, so a keyed turn's dice can be rolled again from its recorded
+orders and compared, with nothing to fish among. `pbp.verify_turn` already does
+this. `tools/verify_scores.py` does not yet. The bot-orders half stays open by
+design. Also recorded in `docs/design/leaderboard.md`, "Checked scores".

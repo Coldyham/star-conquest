@@ -942,7 +942,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     unclaimed = state.human() is None and seat_orders is None and script is None
     claim = ui.human_id if unclaimed and not ui.autoplay else None
     if seat_orders is None and script is None:
-        # Before anything draws, the human seat's own `ai.decide` under autoplay
+        # Before any seat decides, the human seat's own `ai.decide` under autoplay
         # included. A shared match derives its own (`pbp.reseed`, at the caller).
         replay.reseed(state)
     if seat_orders is not None or script is not None:
@@ -951,11 +951,10 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # Nothing to attribute orders to, so pass none and let
         # `engine._collect_orders` decide this seat in its own loop, exactly as it
         # does every other. Computing them here *as well* would run the seat's
-        # strategy twice, and the spare draws from `state.rng` would desync every
-        # oracle's bit-exact stream tracking.
+        # strategy twice.
         human_orders = None
     elif ui.autoplay:
-        human_orders = ai.decide(state, ui.human_id)
+        human_orders = engine.decide_seat(state, ui.human_id, ai.decide)
     else:
         human_orders = list(ui.pending) + auto_forward_orders(state, ui)
     # Two gates, here rather than at the three call sites. `marking` is the wider
@@ -1555,7 +1554,7 @@ async def main() -> None:
                             pbp_stale = False
                     elif verdict == PBP_STEP and not (
                             (script := pbp.settled_turn(match, state.turn))
-                            and pbp.verify_turn(state, script, match.seed)):
+                            and pbp.verify_turn(state, script, match)):
                         # A record we cannot trust — missing, filing an order a
                         # person never sent, or rolling dice its orders do not
                         # roll. The board stays where it was, and says why.
@@ -1564,8 +1563,8 @@ async def main() -> None:
                         # One turn played onto the live board and watched like any
                         # other. Stepping applies the record the resolver stored,
                         # checked above, so no bot here decides again; resolving is
-                        # the one place one does, on a scratch copy, before the
-                        # turn's dice roll from an rng derived for it (`pbp.reseed`).
+                        # the one place one does, on a scratch copy, from an rng
+                        # derived for the turn (`pbp.reseed`).
                         turn = state.turn
                         if verdict == PBP_STEP:
                             reel = resolve_turn(state, ui, log, settings,

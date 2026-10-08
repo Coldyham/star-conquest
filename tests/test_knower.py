@@ -115,9 +115,8 @@ def test_knower_does_not_mutate_state(kn):
     assert state.turn == original.turn and state.winner == original.winner
 
 
-def test_prediction_of_a_later_seat_is_exact(kn):
-    """A seat that decides after us is predicted order-for-order, every turn."""
-    state = _state()
+def _predictions_hold(kn, state, knower, rivals, turns=30):
+    """How many of ``rivals``' real decisions knower predicted order-for-order."""
     real: dict[int, list[Order]] = {}
 
     def spy(st, pid):
@@ -126,40 +125,45 @@ def test_prediction_of_a_later_seat_is_exact(kn):
         return orders
 
     checked = 0
-    for _ in range(30):
+    for _ in range(turns):
         if state.winner is not None:
             break
         real.clear()
-        ai.decide(state, 2)                      # builds the oracle
-        predicted = kn.LAST_ORACLE.orders.get(3)
+        ai.decide(state, knower)                 # builds the oracle
+        predicted = dict(kn.LAST_ORACLE.orders)
         engine.end_turn(state, decide=spy)
-        if 3 in real and state.players[3].alive:
-            assert predicted == real[3], f"seat 3 mispredicted on turn {state.turn}"
-            checked += 1
-    assert checked > 10, "the test never actually exercised a prediction"
+        for q in rivals:
+            if q in real and state.players[q].alive:
+                assert predicted.get(q) == real[q], f"seat {q} mispredicted on turn {state.turn}"
+                checked += 1
+    return checked
 
 
-def test_earlier_seat_prediction_is_close_but_not_guaranteed(kn):
-    """A seat that already drew is predicted from an unrecoverable rng position.
+def test_prediction_of_a_later_seat_is_exact(kn):
+    """A seat that decides after us is predicted order-for-order, every turn."""
+    assert _predictions_hold(kn, _state(), 2, [3]) > 10, \
+        "the test never actually exercised a prediction"
 
-    Its orders are still right except where it hit a genuine tie, so this asserts
-    the useful property — the prediction exists and is usually right — rather than
-    exactness we cannot honestly claim.
-    """
-    state = _state(knower_seat=3)                 # seat 1 and 2 decide before us
+
+def test_prediction_of_an_earlier_seat_is_exact(kn):
+    """Every seat decides from the same start of the rng (`engine.decide_seat`), so
+    a seat that decides before us is predicted as exactly as one after."""
+    state = _state(knower_seat=3)                 # seats 1 and 2 decide before us
+    assert _predictions_hold(kn, state, 3, [1, 2]) > 20, \
+        "the test never actually exercised a prediction"
     ai.decide(state, 3)
-    assert kn.LAST_ORACLE.seats[2] == "likely"
-    assert 2 in kn.LAST_ORACLE.trusted
+    assert kn.LAST_ORACLE.seats[2] == "exact" and 2 in kn.LAST_ORACLE.trusted
 
 
-def test_predicting_a_human_seat_does_not_break_the_chain(kn):
-    """The engine skips human seats, so predicting one must not advance the stream."""
+def test_a_human_seat_is_modelled_and_the_bots_around_it_stay_exact(kn):
+    """The engine never asks a person's seat to decide, so it is modelled from a
+    private rng and never trusted; the bot seats are still predicted exactly."""
     state = _state(knower_seat=2, players=4)
     state.players[3].is_human = True
     ai.decide(state, 2)
     orc = kn.LAST_ORACLE
     assert orc.seats[3] == "modelled" and 3 not in orc.trusted
-    assert orc.seats[4] == "exact" and 4 in orc.trusted   # chain survived seat 3
+    assert orc.seats[4] == "exact" and 4 in orc.trusted
 
 
 # --------------------------------------------------------------------------- #
