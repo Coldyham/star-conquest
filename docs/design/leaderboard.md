@@ -297,7 +297,15 @@ keying carry no marker and pass unchecked; the verdict's detail counts the
 fighting turns that did. An unkeyed turn after a keyed one is a `mismatch`,
 since a game is keyed from the moment keying arrived. Two gaps remain. A forged
 log with every marker stripped reads as an old game, and only when it was
-played could tell it apart. And the bot half stays open by design. What was
+played could tell it apart. And the bot half stays open by design.
+
+*Open: a cutover for unkeyed logs.* Once keyed dice have been live long enough,
+a score submitted well after the deploy whose log is unkeyed could be treated as
+unverified. `submitted_at` is server-stamped, so the date can be trusted. No
+cutover is set yet, deliberately: the change may sit unpublished for a while,
+and the service worker serves the cached build first (stale-while-revalidate),
+so an honest player can run the old code for a session or two after a deploy.
+Any cutover needs the real deploy date plus a grace period. What was
 measured is in `docs/design/par.md`, "A gap this exposes in `verify_scores`".
 
 ### Watching one back
