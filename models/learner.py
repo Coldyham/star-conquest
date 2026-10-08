@@ -1,8 +1,8 @@
-"""reader — a model of each rival, read off the board and kept from turn to turn.
+"""learner — a model of each rival, read off the board and kept from turn to turn.
 
 Every rival decides on the board we saw last turn, since turns resolve
 simultaneously, and what it decided is on the board we see now: its fresh
-fleets, and the ships a one-turn lane carried off unseen. reader keeps the last
+fleets, and the ships a one-turn lane carried off unseen. learner keeps the last
 board, so each turn it can pair what a rival saw with what it did, and fold that
 into a running model of the rival:
 
@@ -19,27 +19,39 @@ into a running model of the rival:
 `predict` turns a rival's model into the launches it should make at our systems
 this turn, each with a probability and an expected size.
 
+**As a bot it is actuary, played on a board with those launches on it.** Each
+predicted launch at one of our systems goes onto a private copy of the board as
+a fleet of its expected size (chance times ships), with its source left
+standing, so a prediction can only add a threat, and actuary's ledger plans
+against that copy. The seat's ``ai_params.aux`` (``AUX_LABEL``: *Trust*) is *Raise*
+(that, the default) or *Off* (nothing added: the seat plays exactly as actuary).
+
 **Memory is keyed by the game's path.** Each board is a node in a memo tree,
 found by content: a node's parent is a stored board one turn earlier that this
 board provably follows from (`_follows`), and its models are the parent's plus
 what that turn showed. The same board always finds the same node, a branch gets
 its own, and a board with no known parent starts from the prior (a cold start).
 
-There is no ``decide`` yet, so ``ai.load_models`` imports this file and registers
-nothing. docs/design/reader.md has why memory is keyed this way, the
-measurements, and the gate a bot waits on.
+It reads other seats from the board, never by running their code, but it
+advertises ``IS_ORACLE`` so an oracle (knower) models it rather than running a
+``decide`` whose answer depends on what it remembers. docs/design/learner.md has
+why memory is keyed this way and the measurements.
 
-Draws nothing from ``state.rng`` or the ``random`` module, and never mutates the
-state.
+Contract: ``decide(state, pid) -> list[Order]``. Draws nothing from ``state.rng``
+or the ``random`` module, and never mutates the state.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import random
+import sys
 from collections import Counter, OrderedDict, defaultdict
 from typing import NamedTuple
 
-from starconquest import config
+from starconquest import ai, config
+from starconquest.model import Fleet
 
 # --- tunables -------------------------------------------------------------- #
 NODE_CAP = 512              # boards remembered, least recently used dropped first
@@ -48,12 +60,15 @@ GUARD_BINS = 21             # kept / largest adjacent enemy in tenths; the last 
 ALL_IN = 0.9                # a strike sending this share of its garrison is all-in
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
 
+OFF, RAISE = 0, 1           # the Trust knob's stops; anything above or unreadable is Raise
+READ_MS = 1.0               # what the memo and `predict` add to actuary's decide, ms
+
 NEUTRAL, PLAYER = 0, 1      # target kinds
 _ROWS = 4                   # (kind, pressed) pairs, row = kind * 2 + pressed
 
 # --- the prior -------------------------------------------------------------- #
 # Pooled over the roster in self-play, all four cells, seeds 1001-1040
-# (`tools/reader_check.py --fit-prior`). A rival nobody has watched yet is
+# (`tools/learner_check.py --fit-prior`). A rival nobody has watched yet is
 # assumed to play like the average of the roster.
 PRIOR_STRIKE = (
     # neutral, unpressed
@@ -460,6 +475,19 @@ def evac_rate(model: Model) -> float:
     return (left + PRIOR_WEIGHT * PRIOR_EVAC) / (left + stayed + PRIOR_WEIGHT)
 
 
+def _chances(model: Model, options: list[_Option], pressed: int, curves: dict) -> list[float]:
+    """Each option's chance of a strike from one source, scaled to sum to at most
+    one, since a source mostly strikes once."""
+    chances = []
+    for option in options:
+        key = (id(model), option.kind, pressed)
+        if key not in curves:
+            curves[key] = strike_curve(model, option.kind, pressed)
+        chances.append(curves[key][_ratio_bin(option.ratio)])
+    total = sum(chances)
+    return [p / total for p in chances] if total > 1.0 else chances
+
+
 def predict(state, pid: int, models: dict[int, Model] | None = None) -> list[Threat]:
     """The launches each rival should make at `pid`'s systems this turn.
 
@@ -473,7 +501,7 @@ def predict(state, pid: int, models: dict[int, Model] | None = None) -> list[Thr
         snap = _Snap(state)
     mine = {sid for sid, owner in snap.owner.items() if owner == pid}
     hostile = _hostile_inbound(snap)
-    curves: dict[tuple[int, int, int], list[float]] = {}
+    curves: dict = {}
     out: list[Threat] = []
     for sid in sorted(snap.owner):
         q = snap.owner[sid]
@@ -485,16 +513,76 @@ def predict(state, pid: int, models: dict[int, Model] | None = None) -> list[Thr
         model = models.get(q, EMPTY)
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
         options = _options(snap, state, sid)
-        chances = []
-        for option in options:
-            key = (q, option.kind, pressed)
-            if key not in curves:
-                curves[key] = strike_curve(model, option.kind, pressed)
-            chances.append(curves[key][_ratio_bin(option.ratio)])
-        total = sum(chances)
-        scale = 1.0 / total if total > 1.0 else 1.0
-        for option, p in zip(options, chances):
+        for option, p in zip(options, _chances(model, options, pressed, curves)):
             if option.target in mine:
                 out.append(Threat(q, sid, option.target, option.turns,
-                                  strike_ships(model, garrison, option.eff), p * scale))
+                                  strike_ships(model, garrison, option.eff), p))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# The bot
+# --------------------------------------------------------------------------- #
+IS_ORACLE = True
+
+# What the AI tab's generic aux slider is called when this bot holds the seat (read
+# by `ai.aux_spec`/`ai.aux_names`; see models/README.md).
+AUX_LABEL = "Trust"
+AUX_RANGE = (OFF, RAISE, 1)
+AUX_INT = True
+AUX_NAMES = ("Off", "Raise")
+
+
+def is_oracle_seat(player) -> bool:
+    """Every seat: what a seat decides depends on the boards it has seen, so an
+    oracle has to model it rather than run it."""
+    return True
+
+
+def _trust_of(player) -> int:
+    try:
+        return OFF if float(player.ai_params.aux) < 0.5 else RAISE
+    except Exception:                     # noqa: BLE001
+        return RAISE
+
+
+def _board(state, pid: int, trust: int) -> object:
+    """A private copy of the board with each rival's expected launches at our
+    systems flying on it (Raise), their sources left standing."""
+    board = copy.copy(state)
+    board.systems = {sid: copy.copy(s) for sid, s in state.systems.items()}
+    for s in board.systems.values():
+        s.neighbors = list(s.neighbors)
+    board.fleets = [copy.copy(f) for f in state.fleets]
+    board.players = {q: copy.copy(p) for q, p in state.players.items()}
+    for p in board.players.values():
+        p.ai_params = copy.copy(p.ai_params)
+    board.adjacency = {sid: dict(nbrs) for sid, nbrs in state.adjacency.items()}
+    board.rng = random.Random(0)
+    if trust == OFF:
+        return board
+    for threat in predict(state, pid):
+        ships = round(threat.p * threat.ships)
+        if ships > 0:
+            board.fleets.append(Fleet(threat.rival, threat.source, threat.target, ships,
+                                      threat.turns, threat.turns))
+    return board
+
+
+def decide(state, pid):
+    if not any(s.owner_id == pid for s in state.systems.values()):
+        return []
+    actuary = sys.modules.get("sc_model_actuary")
+    if actuary is None:
+        return ai.compute_orders(state, pid)
+    _node_for(state)
+    board = _board(state, pid, _trust_of(state.players[pid]))
+    board.players[pid].ai_params.aux = float(actuary.PLANNED)
+    return actuary.decide(board, pid)
+
+
+def decide_ms(settings, seat) -> float:
+    """Typical CPU ms of one decide (`ai.decide_ms`): actuary's, plus reading."""
+    actuary = sys.modules.get("sc_model_actuary")
+    base = actuary.decide_ms(settings, seat) if actuary is not None else 0.0
+    return base + READ_MS

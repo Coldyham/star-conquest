@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""How well does reader's model predict the roster's launches?
+"""How well does learner's model predict the roster's launches?
 
-    uv run python tools/reader_check.py                       # every cell, seeds 1-60
-    uv run python tools/reader_check.py --cells 18n6 --seeds 1-4   # a smoke run
-    uv run python tools/reader_check.py --fit-prior --seeds 1001-1040
-    uv run python tools/reader_check.py --logs public          # predict people instead
+    uv run python tools/learner_check.py                       # every cell, seeds 1-60
+    uv run python tools/learner_check.py --cells 18n6 --seeds 1-4   # a smoke run
+    uv run python tools/learner_check.py --fit-prior --seeds 1001-1040
+    uv run python tools/learner_check.py --logs public          # predict people instead
 
 Roster games are played with every seat on its own bot. Before each turn, for
 every seat holding a system next to a live rival's (a contested position), four
@@ -12,8 +12,8 @@ predictors say which launches the rivals will make at that seat's systems:
 
 * **none** — nobody launches (actuary's projection).
 * **all** — every adjacent rival garrison comes, whole (actuary's risk reach).
-* **prior** — reader's model with no memory: the prior, the same for every rival.
-* **reader** — reader's model of each rival, from every turn it has watched.
+* **prior** — learner's model with no memory: the prior, the same for every rival.
+* **learner** — learner's model of each rival, from every turn it has watched.
 
 The turn is then played and the rivals' real orders scored against each:
 
@@ -27,9 +27,9 @@ The turn is then played and the rivals' real orders scored against each:
 * **waste** — ships predicted at a target nobody struck: guard held for nothing.
 * **miss** — ships that came beyond the prediction.
 
-Intervals are 95% bootstraps over games. reader never plays; it only watches.
+Intervals are 95% bootstraps over games. learner never plays; it only watches.
 `--fit-prior` pools every rival's counts instead and prints the prior's
-constants for models/reader.py.
+constants for models/learner.py.
 
 `--logs` replays recorded games instead: the replays a posted score made public
 (read with the board's publishable key) or the local games/ dir. On every turn
@@ -60,7 +60,7 @@ from tools.bot_distance import lineups
 
 CELLS = {"18n6": (18, 6.0), "24n3": (24, 3.0), "40n6": (40, 6.0), "18n18": (18, 18.0)}
 ROSTER = ("claudebot", "thinker", "marshal", "actuary", "knower", "rusherplus", "heuristic")
-PREDICTORS = ("none", "all", "prior", "reader")
+PREDICTORS = ("none", "all", "prior", "learner")
 GATE_BOTS = ("marshal", "actuary", "thinker")
 WARMUP = ((0, 4), (5, 14), (15, 29), (30, 10**9))
 METRICS = ("brier", "mse", "waste", "miss")
@@ -71,8 +71,8 @@ SMALL_MAP = 11              # --logs reports maps of this many systems or fewer 
 EPS = 1e-3
 
 
-def _reader():
-    return sys.modules["sc_model_reader"]
+def _learner():
+    return sys.modules["sc_model_learner"]
 
 
 def _init() -> None:
@@ -94,7 +94,7 @@ def _contested(state, pid: int) -> bool:
                for s in systems.values() if s.owner_id == pid for n in s.neighbors)
 
 
-def _predictions(state, pid: int, reader, rival: int | None = None
+def _predictions(state, pid: int, learner, rival: int | None = None
                  ) -> dict[str, dict[tuple[int, int, int], tuple[float, float]]]:
     """{predictor: {(rival, source, target): (p, ships)}} over every contested pair,
     or only `rival`'s."""
@@ -109,9 +109,9 @@ def _predictions(state, pid: int, reader, rival: int | None = None
                 pairs[(q, s.id, n)] = s.ships
     out = {"none": {k: (0.0, 0.0) for k in pairs},
            "all": {k: (1.0, float(g)) for k, g in pairs.items()}}
-    for name, models in (("prior", {}), ("reader", None)):
+    for name, models in (("prior", {}), ("learner", None)):
         got = {k: (0.0, 0.0) for k in pairs}
-        for t in reader.predict(state, pid, models):
+        for t in learner.predict(state, pid, models):
             if (t.rival, t.source, t.target) in got:
                 got[(t.rival, t.source, t.target)] = (t.p, t.ships)
         out[name] = got
@@ -124,8 +124,8 @@ def play_game(job):
     seed, cell, lineup, max_turns = job
     nodes, speed = CELLS[cell]
     config.SHIP_LY_PER_TURN = speed
-    reader = _reader()
-    reader.reset()
+    learner = _learner()
+    learner.reset()
     state = mapgen.generate(seed, "random", nodes, len(lineup))
     for p in state.players.values():
         p.is_human = False
@@ -136,15 +136,15 @@ def play_game(job):
     separation: list = []
 
     while state.winner is None and state.turn < max_turns:
-        reader.models_for(state)
+        learner.models_for(state)
         preds = {}
         for pid in sorted(bot_of):
             if state.is_defeated(pid) or not _contested(state, pid):
                 continue
             first_contact.setdefault(pid, state.turn)
-            preds[pid] = _predictions(state, pid, reader)
+            preds[pid] = _predictions(state, pid, learner)
         if state.turn == SEPARATION_TURN:
-            separation += _describe(reader.models_for(state), bot_of, reader)
+            separation += _describe(learner.models_for(state), bot_of, learner)
         owner_before = {sid: s.owner_id for sid, s in state.systems.items()}
         actual: dict[int, list] = {}
 
@@ -160,11 +160,11 @@ def play_game(job):
             came = _came(actual, owner_before, pid)
             _score(sums, by_predictor, came, bot_of, _bucket(turn - first_contact[pid]))
 
-    raw = [(bot_of[q], m) for q, m in reader.models_for(state).items() if q in bot_of]
+    raw = [(bot_of[q], m) for q, m in learner.models_for(state).items() if q in bot_of]
     return {"seed": seed, "cell": cell, "turns": state.turn,
             "sums": {k: dict(v) for k, v in sums.items()},
             "separation": separation,
-            "raw": [(bot, {name: getattr(m, name) for name in reader.Model.COUNTS})
+            "raw": [(bot, {name: getattr(m, name) for name in learner.Model.COUNTS})
                     for bot, m in raw]}
 
 
@@ -243,15 +243,15 @@ def _knower_guess(state, rival: int) -> dict[tuple[int, int, int], tuple[float, 
 def score_log(log: replay.GameLog):
     """One recorded game: on every turn the person played by hand, each bot seat
     next to them predicts their launches at it, scored against the log."""
-    reader = _reader()
-    reader.reset()
+    learner = _learner()
+    learner.reset()
     human = replay.HUMAN_SEAT
     label_of = {human: HUMAN}
     first_contact: dict[int, int] = {}
     sums: dict = defaultdict(lambda: defaultdict(float))
 
     def on_turn(state):
-        reader.models_for(state)
+        learner.models_for(state)
         i = state.turn
         if (state.winner is not None or i >= log.turn_count or log.turn_is_ai(i)
                 or human not in state.players or state.is_defeated(human)):
@@ -264,7 +264,7 @@ def score_log(log: replay.GameLog):
                     or not _borders(state, pid, human)):
                 continue
             first_contact.setdefault(pid, i)
-            preds = _predictions(state, pid, reader, rival=human)
+            preds = _predictions(state, pid, learner, rival=human)
             if guess is None:
                 guess = _knower_guess(state, human)
             preds["knower"] = {k: guess.get(k, (0.0, 0.0)) for k in preds["none"]}
@@ -276,7 +276,7 @@ def score_log(log: replay.GameLog):
              for pid, p in state.players.items() if not p.is_neutral}
     return {"seed": log.match_id, "cell": "small" if settings.nodes <= SMALL_MAP else "large",
             "turns": state.turn, "sums": {k: dict(v) for k, v in sums.items()},
-            "separation": _describe(reader.models_for(state), seats, reader), "raw": []}
+            "separation": _describe(learner.models_for(state), seats, learner), "raw": []}
 
 
 def report_humans(games) -> None:
@@ -287,35 +287,35 @@ def report_humans(games) -> None:
         if not group:
             continue
         rs = {p: _rates(_total(group, p)) for p in predictors}
-        print(f"\n=== {label}: {len(group)} games, {rs['reader']['pairs']:.0f} pairs, "
-              f"strike rate {rs['reader']['rate']:.3f}")
+        print(f"\n=== {label}: {len(group)} games, {rs['learner']['pairs']:.0f} pairs, "
+              f"strike rate {rs['learner']['rate']:.3f}")
         print("  " + " " * 8 + "".join(f"{p:>9}" for p in predictors))
         for metric, fmt in (("brier", "{:>9.4f}"), ("mse", "{:>9.1f}"),
                             ("waste", "{:>9.2f}"), ("miss", "{:>9.2f}")):
             print(f"  {metric:<8}" + "".join(fmt.format(rs[p][metric]) for p in predictors))
-        print("  warm-up, brier prior / reader / knower, since first contact:")
+        print("  warm-up, brier prior / learner / knower, since first contact:")
         for lo, _hi in WARMUP:
             b = _bucket(lo)
-            r = {p: _rates(_total(group, p, None, b)) for p in ("prior", "reader", "knower")}
-            print(f"    {b:>6}  {r['prior']['brier']:.4f} / {r['reader']['brier']:.4f} / "
-                  f"{r['knower']['brier']:.4f}   ({r['reader']['pairs']:.0f} pairs)")
-        print("  reader minus each, 95% interval over games (negative is better):")
+            r = {p: _rates(_total(group, p, None, b)) for p in ("prior", "learner", "knower")}
+            print(f"    {b:>6}  {r['prior']['brier']:.4f} / {r['learner']['brier']:.4f} / "
+                  f"{r['knower']['brier']:.4f}   ({r['learner']['pairs']:.0f} pairs)")
+        print("  learner minus each, 95% interval over games (negative is better):")
         for metric in ("brier", "mse"):
             print(f"    {metric:<6}" + "  ".join(
-                _interval(base, *_diff_ci(group, "reader", base, metric), metric)
+                _interval(base, *_diff_ci(group, "learner", base, metric), metric)
                 for base in ("none", "all", "prior", "knower")))
 
 
-def _describe(models, bot_of, reader):
+def _describe(models, bot_of, learner):
     out = []
     for q, bot in sorted(bot_of.items()):
-        m = models.get(q, reader.EMPTY)
-        player = reader.strike_curve(m, reader.PLAYER, 0)
-        neutral = reader.strike_curve(m, reader.NEUTRAL, 0)
-        out.append((bot, m.turns, *(player[reader._ratio_bin(r)] for r in SEPARATION_RATIOS),
-                    neutral[reader._ratio_bin(1.5)],
-                    reader.allin_rate(m), reader.size_ratio(m),
-                    reader.guard_share(m), reader.evac_rate(m)))
+        m = models.get(q, learner.EMPTY)
+        player = learner.strike_curve(m, learner.PLAYER, 0)
+        neutral = learner.strike_curve(m, learner.NEUTRAL, 0)
+        out.append((bot, m.turns, *(player[learner._ratio_bin(r)] for r in SEPARATION_RATIOS),
+                    neutral[learner._ratio_bin(1.5)],
+                    learner.allin_rate(m), learner.size_ratio(m),
+                    learner.guard_share(m), learner.evac_rate(m)))
     return out
 
 
@@ -378,27 +378,27 @@ def report(games, cell) -> dict[str, bool]:
     for bot in [*bots, None]:
         label = bot or "all rivals"
         rs = {p: _rates(_total(games, p, {bot} if bot else None)) for p in PREDICTORS}
-        print(f"  {label:<11}{rs['reader']['pairs']:>8.0f}{rs['reader']['rate']:>7.3f}   "
+        print(f"  {label:<11}{rs['learner']['pairs']:>8.0f}{rs['learner']['rate']:>7.3f}   "
               + "".join(f"{rs[p]['brier']:>8.4f}" for p in PREDICTORS)
               + "   " + "".join(f"{rs[p]['mse']:>7.1f}" for p in PREDICTORS))
     rs = {p: _rates(_total(games, p)) for p in PREDICTORS}
     print("  all rivals  waste " + " ".join(f"{p} {rs[p]['waste']:.2f}" for p in PREDICTORS))
     print("              miss  " + " ".join(f"{p} {rs[p]['miss']:.2f}" for p in PREDICTORS))
 
-    print("  warm-up (all rivals), brier prior / reader, since first contact:")
+    print("  warm-up (all rivals), brier prior / learner, since first contact:")
     for lo, hi in WARMUP:
         b = _bucket(lo)
-        pr, rd = (_rates(_total(games, p, None, b)) for p in ("prior", "reader"))
+        pr, rd = (_rates(_total(games, p, None, b)) for p in ("prior", "learner"))
         print(f"    {b:>6}  {pr['brier']:.4f} / {rd['brier']:.4f}   ({rd['pairs']:.0f} pairs)")
 
     verdicts = {}
-    print("  reader minus each baseline, 95% interval (negative is better):")
+    print("  learner minus each baseline, 95% interval (negative is better):")
     for bot in GATE_BOTS:
         ok = True
         for metric in ("brier", "mse"):
             parts = []
             for base in ("none", "all", "prior"):
-                point, lo, hi = _diff_ci(games, "reader", base, metric, {bot})
+                point, lo, hi = _diff_ci(games, "learner", base, metric, {bot})
                 ok = ok and hi < 0
                 parts.append(_interval(base, point, lo, hi, metric))
             print(f"    {bot:<9}{metric:<6}" + "  ".join(parts))
@@ -449,19 +449,19 @@ def _literal(name: str, values, indent: int = 0) -> str:
     return head + (",\n" + pad).join(lines) + ")"
 
 
-def fit_prior(games, reader) -> None:
-    total = {name: [0.0] * len(getattr(reader.EMPTY, name)) for name in reader.Model.COUNTS}
+def fit_prior(games, learner) -> None:
+    total = {name: [0.0] * len(getattr(learner.EMPTY, name)) for name in learner.Model.COUNTS}
     for g in games:
         for _bot, counts in g["raw"]:
             for name, xs in counts.items():
                 total[name] = [a + b for a, b in zip(total[name], xs)]
     print("\nPRIOR_STRIKE = (")
-    for row in range(reader._ROWS):
-        base = row * reader.RATIO_BINS
-        hit = total["strikes"][base:base + reader.RATIO_BINS]
-        seen = [h + m for h, m in zip(hit, total["passes"][base:base + reader.RATIO_BINS])]
+    for row in range(learner._ROWS):
+        base = row * learner.RATIO_BINS
+        hit = total["strikes"][base:base + learner.RATIO_BINS]
+        seen = [h + m for h, m in zip(hit, total["passes"][base:base + learner.RATIO_BINS])]
         rates = [(h + 0.5) / (n + 1.0) for h, n in zip(hit, seen)]
-        curve = reader._monotone(rates, [n + 1.0 for n in seen])
+        curve = learner._monotone(rates, [n + 1.0 for n in seen])
         print(f"    # {'player' if row // 2 else 'neutral'}, "
               f"{'pressed' if row % 2 else 'unpressed'}")
         print(_literal("", curve, 4) + ",")
@@ -509,8 +509,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _init()
     missing = [b for b in args.bots if b not in ai.STRATEGIES]
-    if missing or "sc_model_reader" not in sys.modules:
-        print(f"not loaded: {', '.join(missing) or 'models/reader.py'}", file=sys.stderr)
+    if missing or "sc_model_learner" not in sys.modules:
+        print(f"not loaded: {', '.join(missing) or 'models/learner.py'}", file=sys.stderr)
         return 2
 
     seeds = _seeds(args.seeds)
@@ -527,19 +527,19 @@ def main(argv: list[str] | None = None) -> int:
           f"bots: {', '.join(args.bots)}")
 
     if args.fit_prior:
-        fit_prior(games, _reader())
+        fit_prior(games, _learner())
         return 0
     passed = sum(all(report(games, cell).values()) for cell in cells)
     separation(games)
-    print(f"\ngate: reader clears every baseline against {', '.join(GATE_BOTS)} "
+    print(f"\ngate: learner clears every baseline against {', '.join(GATE_BOTS)} "
           f"in {passed} of {len(cells)} cells (needs 3 of 4)")
     return 0
 
 
 def main_logs(args) -> int:
     _init()
-    if "sc_model_reader" not in sys.modules or "sc_model_knower" not in sys.modules:
-        print("not loaded: models/reader.py or models/knower.py", file=sys.stderr)
+    if "sc_model_learner" not in sys.modules or "sc_model_knower" not in sys.modules:
+        print("not loaded: models/learner.py or models/knower.py", file=sys.stderr)
         return 2
     logs = load_logs(args.logs, args.min_hand)
     started = time.time()

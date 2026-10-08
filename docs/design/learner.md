@@ -1,18 +1,19 @@
-# reader design notes
+# learner design notes
 
-**Stage 1 only: a model, measured; not a bot.** `models/reader.py` has no
-`decide`, so `ai.load_models` imports it and registers nothing, and it is in no
-ladder, pool or bot column. It is the fourth proposal in
-[`bots.md`](bots.md), "New bot families (proposed 2026-10-05)": a model of each
-rival read off the board, kept from turn to turn, to be built into actuary's
-ledger if it predicts well enough. It did not pass the gate set for that (see
-"The gate"). Roster-wide rules and the measurement checklist are in
-[`bots.md`](bots.md). Index: [`../README.md`](../README.md).
+**A model of each rival, and a bot built on it.** `models/learner.py` reads each
+rival's habits off the boards it has seen and keeps them from turn to turn. As a
+bot it plays actuary's ledger on a board with the launches it expects added (see
+"As a bot"). It is the fourth proposal in [`bots.md`](bots.md), "New bot families
+(proposed 2026-10-05)". The model did not pass the gate set before building the
+bot (see "The gate"), and the bot was built anyway, on 2026-10-08. It is not in
+`settings.RANDOM_POOL` or `ai.LADDER_ORDER`. Roster-wide rules and the
+measurement checklist are in [`bots.md`](bots.md). Index:
+[`../README.md`](../README.md).
 
 ## Why the oracle flag does not make memory safe
 
-The proposal was to mark reader `IS_ORACLE`, so knower would model its seat with
-`_blind` rather than run its `decide`, and reader could then keep a model of
+The proposal was to mark learner `IS_ORACLE`, so knower would model its seat with
+`_blind` rather than run its `decide`, and learner could then keep a model of
 each opponent between turns. The flag does stop knower. It does not stop the
 other callers that run a bot's `decide` on something other than the live board
 in turn order:
@@ -39,7 +40,7 @@ So memory is keyed by the game's path, not by "the current game".
 
 ## The memo tree
 
-Every board reader sees is a node, found by content: the turn, each system's
+Every board learner sees is a node, found by content: the turn, each system's
 owner, ships and production progress, and every fleet in flight. A node's key
 also carries a digest of the map (adjacency, production) and of the rules that
 change what a board means (jitter, defender advantage, neutral production, in-lane
@@ -57,7 +58,7 @@ That check is strict:
 Several candidates break on the smallest board key, so the pick is
 deterministic. The node's models are its parent's plus what that turn showed.
 
-The consequences, each pinned in `tests/test_reader.py`:
+The consequences, each pinned in `tests/test_learner.py`:
 - the same board finds the same node, so repeated calls and copies answer
   alike;
 - two branches from one board get their own nodes and models;
@@ -111,20 +112,20 @@ strike as the average share of the garrison; see "Sizing a strike to its
 target" for why it changed.
 
 The prior is the roster pooled in self-play: all four cells, seeds 1001-1040,
-160 games (`tools/reader_check.py --fit-prior`). It was re-fitted on 2026-10-08
+160 games (`tools/learner_check.py --fit-prior`). It was re-fitted on 2026-10-08
 for actuary's `MIN_GAIN` of 1e-9 ([`actuary.md`](actuary.md)): 22,261 strikes
 and 202,052 passes.
 
-## The prediction check (`tools/reader_check.py`)
+## The prediction check (`tools/learner_check.py`)
 
-reader never plays. Roster games are played with every seat on its own bot, in
+learner never plays. Roster games are played with every seat on its own bot, in
 3-seat lineups drawn from claudebot, thinker, marshal, actuary, knower
 (Predict), rusherplus and heuristic. Before each turn, for every seat on a
 contested position, four predictors say what the rivals will launch at it:
 - **none**: nobody launches (actuary's projection);
 - **all**: every adjacent rival garrison comes whole (actuary's risk reach);
-- **prior**: reader's model without memory;
-- **reader**: reader's model with memory.
+- **prior**: learner's model without memory;
+- **learner**: learner's model with memory.
 
 The turn is played and the rivals' real orders score them:
 - **Brier**: per (rival source, our target) pair, strike chance against whether
@@ -149,7 +150,7 @@ reading:**
 ### Results
 
 The stage-1 model, under actuary's old `MIN_GAIN` of 0.05. Four cells, seeds
-1-60 and then fresh seeds 61-120, 240 games each run, load average under 1. Brier and MSE over all rivals, none / prior / reader:
+1-60 and then fresh seeds 61-120, 240 games each run, load average under 1. Brier and MSE over all rivals, none / prior / learner:
 
                      Brier, seeds 1-60          Brier, seeds 61-120
     18 nodes, 6 ly   0.132 / 0.095 / 0.090      0.118 / 0.086 / 0.080
@@ -166,17 +167,17 @@ The stage-1 model, under actuary's old `MIN_GAIN` of 0.05. Four cells, seeds
 "all" is far behind both ways (Brier 0.83-0.91, MSE in the hundreds to
 thousands), which is the cost of actuary's risk term read as a forecast. It
 predicts 8-37 ships per contested (rival, target) pair at targets nobody struck,
-against 0.6-2.0 for reader.
+against 0.6-2.0 for learner.
 
 Against marshal, actuary and thinker separately, per run, each predictor's
-difference from reader with its interval:
+difference from learner with its interval:
 
-- **Will this source strike this target (Brier).** reader beats all three
+- **Will this source strike this target (Brier).** learner beats all three
   baselines in 35 of 36 comparisons on seeds 1-60 and 36 of 36 on seeds
   61-120. The exception is marshal against the prior at 18 ly
   ([-0.013, +0.001]). Memory helps everywhere, by 4-13% of the prior's score,
   and the gain grows with turns since contact (at 18 ly, seeds 1-60, 30+ turns
-  in: prior 0.074, reader 0.056).
+  in: prior 0.074, learner 0.056).
 - **How many ships come (MSE).** 28 of 36 in each run. Five failures a run are
   against "none" and three against the prior. Over both runs, 8 of the 16
   failures have thinker as the rival and 5 actuary; 6 are in the 24-node,
@@ -229,7 +230,7 @@ section is under that actuary. All of them are on fresh seeds 121-180 and
 Three forms on the same seeds: the stage-1 model (from a worktree, prior
 re-fitted), both changes together, and sizing alone. All-rivals figures:
 
-                       Brier, reader             ship error (MSE), reader
+                       Brier, learner             ship error (MSE), learner
                        stage 1  both  sizing     none   stage 1  both  sizing
     seeds 121-180
     18 nodes, 6 ly     0.0779  0.0792 0.0779    193.5   102.3  103.0  102.5
@@ -273,7 +274,7 @@ theirs to the target.
 
 ## Predicting people (`--logs public`)
 
-The case for reader over knower is a person, whose code knower cannot run. A
+The case for learner over knower is a person, whose code knower cannot run. A
 recorded game holds every seat's orders for every turn, so this can be scored
 without playing. `--logs public` replays the logs a posted leaderboard score made
 public (`public_replays`, read with the board's publishable key). On every turn
@@ -289,11 +290,11 @@ measures the forecast knower has to hand, not knower's play.
 141 logs (of 145 under the current rules, 157 public) with 10 or more hand
 turns, 24,359 (source, target) pairs, strikes on 10.6% (2026-10-08):
 
-                 none     all     prior   reader   knower
+                 none     all     prior   learner   knower
     Brier       0.106    0.894    0.091    0.088    0.183
     ship error  130.5   1645.3    110.6    106.9    224.6
 
-reader minus each, 95% interval over games:
+learner minus each, 95% interval over games:
 
     Brier       none -0.018 [-0.023,-0.015]   prior -0.0033 [-0.0041,-0.0025]
                 knower -0.095 [-0.107,-0.084]
@@ -303,14 +304,14 @@ reader minus each, 95% interval over games:
 - **Memory reads a person, by a little.** Against the prior it gains 3.6% of
   Brier, clear of zero. That is at the low end of the 4-13% it gains on roster
   bots. The gain grows with turns since contact (30+ turns in: prior 0.089,
-  reader 0.085). On ship error against the prior the interval crosses zero.
+  learner 0.085). On ship error against the prior the interval crosses zero.
 - **knower's guess at a person is worse than assuming they hold.** Its Brier,
   0.183, is behind "none" (0.106) and gets worse the longer the game runs
   (0.146 in the first 5 turns after contact, 0.199 from 30 on). So keeping
   `TRUST_HUMAN` off is right, and a calibrated forecast of a person is
   something knower does not have.
 - **On small maps the ship error does not separate from "none".** Of the 141
-  games, 87 are on 11 systems or fewer. There reader's Brier still clears every
+  games, 87 are on 11 systems or fewer. There learner's Brier still clears every
   baseline, but its ship error against "none" is -2.4 [-6.0, +3.3]. On the 54
   larger maps every comparison clears except ship error against the prior.
 
@@ -333,7 +334,7 @@ only recorded at a frontier system that launched.
 
 **Caveats.**
 - Rows carry no identity, and by the author's account almost all 141 games
-  are theirs. So this measures how well reader reads one player, not people.
+  are theirs. So this measures how well learner reads one player, not people.
 - The strike curves read the same for people as for every bot (0.17 at 1.5,
   0.28 at 2.0), as in self-play.
 - **The guard ignores relief.** It is what a frontier system that launched kept
@@ -455,7 +456,7 @@ of a winner's interior.
 
 ## The gate
 
-Set before the first run: reader beats none, all and prior on Brier and on the
+Set before the first run: learner beats none, all and prior on Brier and on the
 ships metric, outside the intervals, against marshal, actuary and thinker, in at
 least 3 of the 4 cells, and the fitted parameters visibly separate the roster.
 
@@ -463,14 +464,14 @@ least 3 of the 4 cells, and the fitted parameters visibly separate the roster.
 of 4 on 61-120. What failed was the ships metric and the strike curve's
 separation. The strike-or-not prediction with memory cleared every baseline
 almost everywhere, and the guard and evacuation estimates separated the bots
-and recovered their constants. So memory buys something, and reader does not
+and recovered their constants. So memory buys something, and learner does not
 reduce to a stateless model.
 
 **With strikes sized to their target, it still does not pass:** 0 of 4 cells on
 both seeds 121-180 and 181-240.
 - Brier clears 35 of 36 comparisons in each run, and ship error 27 and 29.
 - 16 of the 18 failures are ship error, and in 13 of those 16 the point
-  estimate favours reader. They are mostly intervals that cross zero by a little
+  estimate favours learner. They are mostly intervals that cross zero by a little
   (marshal against the prior at 18 ly: -143.50 [-304.73, +0.27]), not a model
   that predicts worse.
 - Ship errors are heavy-tailed. One big strike missed or invented dominates a
@@ -488,3 +489,135 @@ evacuation and all-in share do, and the strike curve still does not.
 - A strike curve that tells the bots apart.
 
 Building on actuary's ledger (stage 2) waits on either.
+
+## As a bot
+
+`decide` finds this board's node (so the model keeps up), then copies the board
+and puts each predicted launch at one of our systems onto the copy as a fleet of
+its expected size, chance times ships, rounded. actuary's ledger plans against
+that copy at its planned opening (`actuary.PLANNED`, whatever learner's own `aux`
+says). The seat's `aux` is learner's *Trust* knob:
+
+- **Off (0)**: nothing is added, so the seat plays exactly as actuary. Checked
+  against actuary at Planned on 1,507 decisions (12, 18 and 40 systems, four
+  seeds): no difference.
+- **Raise (1, the default, and anything above)**: the fleets fly, their sources
+  keep their ships. A prediction can only add a threat. This is knower's rule
+  for an untrusted seat.
+
+Two stops that also thinned the sources were built, measured and deleted; see
+"Trusting a prediction". Nothing stored names them: they never left the branch.
+
+It advertises `IS_ORACLE` and `is_oracle_seat` (always true), so knower models a
+learner seat with `_blind` rather than run a `decide` whose answer depends on what
+it remembers (`test_knower_never_runs_learners_decide`). It draws nothing from
+`state.rng`. With actuary missing it falls back to the heuristic. `decide_ms` is
+actuary's plus `READ_MS` (1 ms): over actuary's own decide learner adds a median
+0.35 / 0.56 / 0.81 ms and a 75th percentile of 0.51 / 0.77 / 1.25 ms at 18 / 40 /
+80 systems, timed at load 3.4, so read high.
+
+### Against actuary
+
+Each stop head to head with actuary, both seatings, seeds 1-50 (100 games a
+cell, timeouts excluded), learner's win rate. Trust and Sure are the deleted stops
+of the next section:
+
+                    12 systems   18 systems   40 systems
+    Off                50%          50%          50%
+    Raise              48%          44%          51%
+    Trust              45%          47%          41%
+    Sure               47%          43%          49%
+
+Off reads exactly 50%, the deterministic null. At 100 games a cell the interval
+is about ±10 points, so Raise cannot be told from actuary. The predicted launches
+do not make actuary plan better against actuary. That is what the gate
+predicted: the model forecasts whether a strike comes, and not well enough how
+big.
+
+### Trusting a prediction (built, measured, deleted)
+
+Raise never lets a prediction thin a rival's source, so the ledger never prices a
+strike at a garrison that has left. Two ways of letting it were tried.
+
+**Trust: thin every source by its expected launch.** Each fleet was launched on
+the copy (`engine.apply_order`), deducting chance times ships from its source.
+That lost: 44% against actuary pooled over 300 games, against Raise's 48%. An
+expected value is the wrong thing to deduct. About 60% of the roster's strikes
+send the whole garrison (see "Waves" and the all-in share above), so a source
+mostly sends nearly everything or nothing. A calibrated 30% leaves the garrison
+whole seven times in ten, and a strike priced against the thinned one fails.
+
+**Sure: trust a confident call, once the model has earned it against that rival.**
+The author's proposal: start at Raise and trust more as the model proves itself.
+How often the model is confident, and how often it is right when it is, over
+76,991 predictions at 18 and 40 systems (seeds 1-40, 3 seats, every roster bot as
+a rival):
+
+    chance        share of predictions   came true
+    under 0.1           63.2%              4.2%
+    0.3-0.4              7.9%             43.1%
+    0.5-0.6              1.9%             60.9%
+    0.7-0.8              0.45%            82.0%
+    0.8 and up           0.28%            98%
+
+    a call of 0.5 or more, by rival: came true
+    rusherplus 86%   thinker 71%   marshal 70%   knower 56%   claudebot 52%
+    actuary 44%   heuristic 31%
+
+The model is calibrated, slightly under-confident. It is not sharper later in a
+game: from 30 turns into contact on, the table is the same to a point. So a ramp
+on game time would only trust the same forecasts more. What can ramp is a record
+per rival. Sure kept one in the memo: every call of 0.5 or more (`SURE_P`) the
+model made at a rival's move, and whether it came true. Once a rival's calls were
+coming true 70% of the time (`SURE_HIT`, counted from a prior of 1 in 2), a
+confident call against that rival thinned its source by the whole predicted
+strike. Every other prediction stayed at Raise.
+
+It changed nothing: 47 / 43 / 49% against actuary (Raise 48 / 44 / 51), 70%
+against marshal (Raise 71%), 97% against knower (Raise 96%), at 60-100 games a
+cell. How often it trusted a call, 2 seats, 18 systems, seeds 1-10 both seatings:
+
+    against   turns with a trusted call   calls trusted
+    actuary          0.3%                       12
+    knower           1.6%                       32
+    marshal         13.5%                      683
+
+The gate stays shut against actuary, rightly, since the model's confident calls
+about actuary come true 44% of the time. Against marshal it opens on one turn in
+seven, and trusting those calls still buys nothing. So the model's confidence is
+not where the strength is, against the bots it can read or the ones it cannot.
+Deleted, with Trust.
+
+### The roster ladder
+
+`uv run python -m tests.sim --ladder --trials 30` (18 systems, 6 ly/turn,
+default settings, 1680 games, 72 timed out). learner is first, 357 wins to
+actuary's 343. The full grid is in [`marshal.md`](marshal.md), "Full roster
+ladder". learner against each:
+
+               knower  actuary  marshal  thinker  claudebot  heuristic  rusherplus
+    learner       96%     47%      70%      97%      100%       100%        100%
+    actuary      70%      -       64%      97%      100%       100%        100%
+
+**Most of the lead is the oracle flag.** knower at Predict runs actuary's own
+`decide` and reads it exactly. It cannot run learner, so it falls back to its blind
+plan and keeps its guard. Off is actuary plus the flag, so it separates the two
+(seeds 1-30, 60 games a cell, ±12 points):
+
+    learner vs        Off (actuary + flag)   Raise    actuary itself
+    knower                 90%               96%         70%
+    marshal                64%               71%         64%
+
+The flag is worth about 20 points against knower. Raise adds about 6 against
+knower and 7 against marshal, inside the noise at 60 games, and gives 3 back
+against actuary. So the ranking says more about knower than about learner.
+**Any bot that advertises `IS_ORACLE` without predicting anyone gets the same
+20 points**, since the flag is a claim knower takes on trust. The contract is
+in `models/README.md`, "Predicting the other seats". learner's own claim rests on
+its memory (`is_oracle_seat`), which is real, but nothing stops a bot claiming
+it falsely.
+
+**Not measured:** the other cells (slow, fast, large), the free-for-all, knower at
+Search (the leaderboard's profile, `bot_replay.REPLAY_AUX`), and anything
+against a person. learner joins the nightly bot column the moment `models/` on
+`main` has it (`tools/bot_replay.py` replays every registered bot).

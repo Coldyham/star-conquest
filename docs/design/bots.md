@@ -153,7 +153,7 @@ land-grab, and the planned opening paid there. convoy was the most distinct
 bot in the opening but no better there. In the contested middle it played like
 a phase bot and lost to actuary (convoy.md, "Where it loses to actuary").
 Distinct is not better, so each proposal below still has to win games. The three
-that target the contested middle (reader, duelist, riposte) go where convoy
+that target the contested middle (learner, duelist, riposte) go where convoy
 lost.
 
 **Built.**
@@ -164,21 +164,22 @@ lost.
 - **convoy**, the turn as routing over time: supply at (system, turn), strikes
   as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
 
-**reader: a rival modelled from the board, without running its code.**
+**learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent
 against the target's garrison plus what it builds before landing), and its
 reserve from its frontier garrisons. Then guard each border just above what
 would trigger that rival's own rule, and commit the rest. No other non-oracle
 bot changes its guards depending on the opponent: against rusherplus it would
 hold almost nothing, against marshal much more. Unlike knower it reads a human
-seat as readily as a bot. Stage 1, the model with memory kept from turn to turn,
-is built and measured in [`reader.md`](reader.md), with why memory has to be keyed
-by the game's path rather than by an oracle flag. This reopens the ideas [`marshal.md`](marshal.md), "What the
+seat as readily as a bot. Built: the model with memory kept from turn to turn,
+and then a bot that plays actuary's ledger on a board with the model's predicted
+launches added. Both are in [`learner.md`](learner.md), with why memory has to be
+keyed by the game's path rather than by an oracle flag. This reopens the ideas [`marshal.md`](marshal.md), "What the
 measurements deleted", rejected as needing "a model of rivals, which is knower's
 territory" (baiting, the offensive half of standing aside). The model here comes
-from board facts, not from rival code. The host chosen for stage 2 is actuary's
-ledger rather than marshal's guard, behind a gate on how well the model
-predicts; the model has not passed it yet.
+from board facts, not from rival code. The host is actuary's ledger rather than
+marshal's guard. The bot was built although the model had not passed the gate
+set for it.
 
 **duelist: the simultaneous move played as a matrix game.** At each contact,
 list both sides' few options (hold, strike, reinforce, evacuate). Price each
@@ -194,7 +195,7 @@ Against knower, mixing hides duelist only from the lower seat: knower re-runs a
 later seat on the real rng positioned where that seat will find it, and an
 earlier one on a private rng. Report the two seatings apart. Risk: against a
 fixed, predictable bot the best answer is not mixed, so mixing gives up value.
-It combines with reader: best-respond to reader's model, and mix only where that
+It combines with learner: best-respond to learner's model, and mix only where that
 model is unsure. Its cost is actuary's or more, so it declares `decide_ms`.
 
 **apprentice: an evaluator learned from data.** actuary's candidate moves and
@@ -242,8 +243,8 @@ What the posted human games say about how their (one, mostly) player plays,
 against roster self-play: which share marks a won game (2/3 of players' ships),
 that their overkill is the endgame, and that they empty frontier systems with
 relief covered far more often than any bot. It is in
-[`reader.md`](reader.md), "The person's habits" (`tools/human_habits.py`),
-beside reader's model of the same games.
+[`learner.md`](learner.md), "The person's habits" (`tools/human_habits.py`),
+beside learner's model of the same games.
 
 ## Lane length across the parameter space
 

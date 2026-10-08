@@ -565,7 +565,7 @@ retries.
     launched ships that were own-to-own transfers   64%       42%
 
 Per frontier system-turn held, rather than per game, the person loses systems at
-the low end of a winning bot's rate. See [`reader.md`](reader.md), "Frontier
+the low end of a winning bot's rate. See [`learner.md`](learner.md), "Frontier
 losses".
 
 **Captures stick.** Call a rival capture *safe* when the ships that landed,

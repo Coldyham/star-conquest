@@ -1,7 +1,5 @@
-"""reader's memory and model (models/reader.py).
-
-The module has no ``decide`` yet, so it is reached through ``sys.modules`` under
-the name ``ai.load_models`` imports each model file under.
+"""learner's memory, model and play (models/learner.py), reached through
+``sys.modules`` under the name ``ai.load_models`` imports each model file under.
 """
 
 from __future__ import annotations
@@ -13,15 +11,15 @@ import sys
 import pytest
 
 from starconquest import ai, config, engine, mapgen
-from starconquest.model import GameState, Order, Player, System
+from starconquest.model import AiParams, GameState, Order, Player, System
 from tests import sim
 
 
 @pytest.fixture(scope="module")
 def rd():
     ai.load_models()
-    assert "sc_model_reader" in sys.modules, "models/reader.py failed to import"
-    return sys.modules["sc_model_reader"]
+    assert "sc_model_learner" in sys.modules, "models/learner.py failed to import"
+    return sys.modules["sc_model_learner"]
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +40,7 @@ def _game(seed=3, nodes=18, bots=("marshal", "rusherplus", "thinker")):
 
 
 def _play(rd, state, turns):
-    """Advance `turns` turns, letting reader see every board on the way."""
+    """Advance `turns` turns, letting learner see every board on the way."""
     for _ in range(turns):
         rd.models_for(state)
         engine.end_turn(state, decide=ai.decide)
@@ -66,9 +64,6 @@ def _board(systems, lanes):
 def _scripted(orders):
     return lambda state, pid: [o for o in orders if o.owner_id == pid]
 
-
-def test_reader_registers_no_strategy(rd):
-    assert "reader" not in ai.STRATEGIES
 
 
 # --------------------------------------------------------------------------- #
@@ -249,7 +244,7 @@ def test_predict_leaves_the_state_alone_and_draws_nothing(rd, monkeypatch):
                       for f in s.fleets), s.turn, s.winner)
 
     def drew(*_args, **_kwargs):
-        raise AssertionError("reader drew from the random module")
+        raise AssertionError("learner drew from the random module")
 
     for name in ("random", "uniform", "randint", "randrange", "choice", "shuffle", "sample"):
         monkeypatch.setattr(random, name, drew)
@@ -259,3 +254,83 @@ def test_predict_leaves_the_state_alone_and_draws_nothing(rd, monkeypatch):
         rd.predict(state, pid, {})
     assert board(state) == before
     assert state.rng.getstate() == rng
+
+
+# --------------------------------------------------------------------------- #
+# The bot
+# --------------------------------------------------------------------------- #
+def _orders(fn, state, pid):
+    return [(o.source_id, o.dest_id, o.ships) for o in fn(state, pid)]
+
+
+def _seat(state, pid, aux):
+    state.players[pid].ai_strategy = "learner"
+    state.players[pid].ai_params.aux = aux
+    return state
+
+
+def test_learner_is_a_strategy_and_an_oracle(rd):
+    assert "learner" in ai.STRATEGIES
+    assert rd.IS_ORACLE and rd.is_oracle_seat(Player(1, "P1", (0, 0, 0)))
+    assert ai.aux_spec("learner")[0] == "Trust"
+
+
+def test_untuned_is_raise_and_unreadable_is_too(rd):
+    for aux, trust in ((1.0, rd.RAISE), (0.0, rd.OFF), (2.0, rd.RAISE), (9.0, rd.RAISE),
+                       (float("nan"), rd.RAISE)):
+        assert rd._trust_of(Player(1, "P1", (0, 0, 0), ai_params=AiParams(aux=aux))) == trust
+
+
+def test_off_plays_exactly_as_actuary(rd):
+    """With nothing added to its board, learner is actuary at its Planned opening."""
+    actuary = sys.modules["sc_model_actuary"]
+    for nodes in (12, 18):
+        state = _seat(_game(nodes=nodes), 1, rd.OFF)
+        for _ in range(60):
+            if state.winner is not None:
+                break
+            planned = copy.deepcopy(state)
+            planned.players[1].ai_params.aux = float(actuary.PLANNED)
+            assert _orders(rd.decide, state, 1) == _orders(actuary.decide, planned, 1)
+            engine.end_turn(state, decide=ai.decide)
+
+
+def test_raise_adds_threats_and_leaves_their_sources_standing(rd):
+    state = _seat(_game(), 1, rd.RAISE)
+    _play(rd, state, 40)
+    threats = [t for t in rd.predict(state, 1) if round(t.p * t.ships) > 0]
+    assert threats, "nothing predicted at turn 40: pick another position"
+    raised = rd._board(state, 1, rd.RAISE)
+    assert len(raised.fleets) - len(state.fleets) == len(threats)
+    for sid in {t.source for t in threats}:
+        assert raised.systems[sid].ships == state.systems[sid].ships
+    assert rd._board(state, 1, rd.OFF).fleets == state.fleets
+
+
+def test_decide_leaves_the_state_alone_and_draws_nothing(rd):
+    state = _seat(_game(), 1, rd.RAISE)
+    _play(rd, state, 30)
+    before = copy.deepcopy(state)
+    rng = state.rng.getstate()
+    first = _orders(rd.decide, state, 1)
+    assert state.rng.getstate() == rng
+    assert [(s.id, s.owner_id, s.ships) for s in state.systems.values()] == \
+        [(s.id, s.owner_id, s.ships) for s in before.systems.values()]
+    assert len(state.fleets) == len(before.fleets)
+    assert _orders(rd.decide, copy.deepcopy(state), 1) == first
+
+
+def test_knower_never_runs_learners_decide(rd, monkeypatch):
+    """An oracle models a learner seat instead of running it, so nothing it does
+    on its copies of the board reaches learner's memory."""
+    calls = []
+    real = rd._node_for
+    monkeypatch.setattr(rd, "_node_for", lambda state: calls.append(state.turn) or real(state))
+    state = _seat(_game(bots=("knower", "learner", "marshal")), 2, rd.RAISE)
+    knower = sys.modules["sc_model_knower"]
+    for aux in (1.0, 2.0):
+        state.players[1].ai_params.aux = aux
+        for _ in range(10):
+            knower.decide(copy.deepcopy(state), 1)
+            engine.end_turn(state, decide=lambda st, pid: [] if pid == 2 else ai.decide(st, pid))
+    assert not calls

@@ -15,7 +15,7 @@ a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
-`actuary`, `convoy` and `reader`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
+`actuary`, `convoy` and `learner`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -59,7 +59,7 @@ uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/bot_distance.py             # how differently each bot plays
                                                 # the same positions, by phase
-uv run python tools/reader_check.py             # how well reader's model predicts
+uv run python tools/learner_check.py             # how well learner's model predicts
                                                 # the roster's launches (stage 1);
                                                 # --logs public: posted human games
 uv run python tools/human_habits.py             # how the person plays (posted games)
@@ -406,6 +406,12 @@ already resolve simultaneously. The rationale for each rule is in
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
   advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
   callers prefer.
+- **A bot that remembers between turns keys its memory by the game's path**
+  (`models/learner.py`'s memo tree: a board finds its parent by content), never by
+  "the current game": `decide` also runs on copies, branches, rewinds and
+  isolated positions, and `ai.load_models()` wipes module state. It advertises
+  `IS_ORACLE`, so knower models it rather than running it. Detail:
+  `docs/design/learner.md`.
 - **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
   never a constant**, with the jitter half floored at its `TUNED_SWING`, and
   floors its ask at `target.ships + 1`. Margins compare against the *effective*
