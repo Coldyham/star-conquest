@@ -137,6 +137,105 @@ of each other: the roster's land-grab is one land-grab. actuary's planned
 opening ([`actuary.md`](actuary.md), "The planned opening") was built for that
 gap.
 
+## New bot families (proposed 2026-10-05)
+
+After actuary, a list of bot designs that should be at least claudebot's
+strength and play moves the roster does not. The roster at the time had three
+shapes: the phase bots (claudebot, thinker, marshal, knower at Off), actuary's
+projected ledger, which assumes no rival launches again, and knower's oracle.
+Nothing modelled a rival from what it can see, hedged against the rival's move
+in the same turn, planned across several hops and turns at once, or took its
+values from data. Six proposals, one per gap. Two were built and are recorded
+in their own files. The other four are written up here, unbuilt.
+
+**What the two built ones taught.** The opening is where the roster plays one
+land-grab, and the planned opening paid there. convoy was the most distinct
+bot in the opening but no better there. In the contested middle it played like
+a phase bot and lost to actuary (convoy.md, "Where it loses to actuary").
+Distinct is not better, so each proposal below still has to win games. The three
+that target the contested middle (reader, duelist, riposte) go where convoy
+lost.
+
+**Built.**
+
+- **surveyor**, the opening planned as a schedule: which neutrals, in what
+  order, with which converging groups, priced by payback. Folded into actuary as
+  Opening: Planned. See [`actuary.md`](actuary.md), "The planned opening".
+- **convoy**, the turn as routing over time: supply at (system, turn), strikes
+  as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
+
+**reader: a rival modelled from the board, without running its code.**
+Estimate each rival's attack margin from its fleets in flight (ships sent
+against the target's garrison plus what it builds before landing), and its
+reserve from its frontier garrisons. Then guard each border just above what
+would trigger that rival's own rule, and commit the rest. No other non-oracle
+bot changes its guards depending on the opponent: against rusherplus it would
+hold almost nothing, against marshal much more. Unlike knower it reads a human
+seat as readily as a bot. It must be stateless: `GameState` carries no history,
+and module-level memory would be corrupted by knower calling `decide` on board
+copies. This reopens the ideas [`marshal.md`](marshal.md), "What the
+measurements deleted", rejected as needing "a model of rivals, which is knower's
+territory" (baiting, the offensive half of standing aside). The model here comes
+from board facts, not from rival code. First test: replace marshal's guard
+sizing (`FRONTIER_GUARD`, `_max_adjacent_enemy`) with the estimate, as a paired
+A/B, before giving it a skeleton of its own.
+
+**duelist: the simultaneous move played as a matrix game.** At each contact,
+list both sides' few options (hold, strike, reinforce, evacuate). Price each
+pair with actuary's ledger, solve the small zero-sum game in pure Python, and
+draw a move from the mixed strategy through `state.rng`. It is the one design
+that assumes the rival moves this turn too and hedges against it. actuary
+assumes it never launches, and knower best-responds to one predicted move. The
+case for it: 86.7% of out-shipped garrisons are gone when the strike lands
+([`marshal-pricing.md`](marshal-pricing.md), "Garrisons run away"), so strike
+and evacuate are a guessing game, and any fixed rule loses a guessing game to
+someone who has learned it, including a person who plays the same bot often.
+Against knower, mixing hides duelist only from the lower seat: knower re-runs a
+later seat on the real rng positioned where that seat will find it, and an
+earlier one on a private rng. Report the two seatings apart. Risk: against a
+fixed, predictable bot the best answer is not mixed, so mixing gives up value.
+It combines with reader: best-respond to reader's model, and mix only where that
+model is unsure. Its cost is actuary's or more, so it declares `decide_ms`.
+
+**apprentice: an evaluator learned from data.** actuary's candidate moves and
+a one- or two-turn projection, scored by a linear function whose weights are
+fitted offline: on positions out of real games (`position_suite`'s corpus)
+labelled with who went on to win, or by learning from self-play. The weights
+ship as a constant table, so it stays deterministic and needs no numpy in
+play; the fitting script lives in `tools/` and may use anything. Its values come
+from data rather than from reasoning someone wrote down, including positions
+only people create. Risk: the human corpus was 47 games at the first census
+("The first census and setup sweep off the live board"), and a fit to bot
+self-play learns the roster's habits. Clearing claudebot is likely; matching
+actuary is not.
+
+**riposte: the counter-punch.** When a rival launches, the system it launched
+from is thin now. Strike that source with whatever lands before it refills, and
+defend the target only where the trade loses ships. It answers in microseconds,
+so it suits the browser and is cheap as a knower candidate (actuary was not
+added there for its cost). Expect claudebot's strength. Its value is as a
+distinct opponent, not a climber. It sits near two null results: striking
+vacating targets first ([`knower.md`](knower.md), "Built, measured, removed":
+an ordering change inside knower) and rushing the enemy
+([`marshal-pricing.md`](marshal-pricing.md), "Rushing the enemy"). Check first
+with `bot_distance.py` whether actuary already plays it: its ledger sees a
+source thinned by its own launch.
+
+**Considered and left out of the list.** Territory or chokepoint play
+(betweenness lost at every weight; pocket-sealing was a constant offset), one
+hammer stack (spearhead, 23-42%), arriving after a rival breaks a neutral (null),
+all in "Decided against" in [`../README.md`](../README.md). A decoupled
+simultaneous-move tree search would cost what knower's search does and overlap
+it.
+
+**Measurement ideas from the same list, not yet built.** `bot_distance.py`
+covers distance, kappa and fingerprints. Two more were proposed. Fit one rating
+per bot to the ladder grid (Bradley-Terry) and read the residuals: a bot that
+plays differently beats or loses to someone its rating says it should not. And
+when a bot is tried as a knower candidate, shuffle the candidate order so the
+last one is not undercounted on ties, and measure whether knower wins more
+with it, which was not measured for actuary.
+
 ## Lane length across the parameter space
 
 `WORLD_SIZE` is a constant up to a standard board (`config.STANDARD_MAX_NODES`,

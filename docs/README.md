@@ -115,6 +115,7 @@ only for a fight; what is deliberately not animated.
 ### design/bots.md
 - **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.
 - **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
+- **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built; reader (rivals modelled from the board), duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Also two measurement ideas not yet built.
 - **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
 - **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
 - **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime. The first position-suite numbers.
