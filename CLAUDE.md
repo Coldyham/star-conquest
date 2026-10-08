@@ -15,7 +15,7 @@ a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
-`actuary` and `convoy`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
+`actuary`, `convoy` and `reader`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -59,6 +59,8 @@ uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/bot_distance.py             # how differently each bot plays
                                                 # the same positions, by phase
+uv run python tools/reader_check.py             # how well reader's model predicts
+                                                # the roster's launches (stage 1)
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's

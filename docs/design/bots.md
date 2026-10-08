@@ -171,14 +171,14 @@ reserve from its frontier garrisons. Then guard each border just above what
 would trigger that rival's own rule, and commit the rest. No other non-oracle
 bot changes its guards depending on the opponent: against rusherplus it would
 hold almost nothing, against marshal much more. Unlike knower it reads a human
-seat as readily as a bot. It must be stateless: `GameState` carries no history,
-and module-level memory would be corrupted by knower calling `decide` on board
-copies. This reopens the ideas [`marshal.md`](marshal.md), "What the
+seat as readily as a bot. Stage 1, the model with memory kept from turn to turn,
+is built and measured in [`reader.md`](reader.md), with why memory has to be keyed
+by the game's path rather than by an oracle flag. This reopens the ideas [`marshal.md`](marshal.md), "What the
 measurements deleted", rejected as needing "a model of rivals, which is knower's
 territory" (baiting, the offensive half of standing aside). The model here comes
-from board facts, not from rival code. First test: replace marshal's guard
-sizing (`FRONTIER_GUARD`, `_max_adjacent_enemy`) with the estimate, as a paired
-A/B, before giving it a skeleton of its own.
+from board facts, not from rival code. The host chosen for stage 2 is actuary's
+ledger rather than marshal's guard, behind a gate on how well the model
+predicts; the model has not passed it yet.
 
 **duelist: the simultaneous move played as a matrix game.** At each contact,
 list both sides' few options (hold, strike, reinforce, evacuate). Price each
