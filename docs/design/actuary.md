@@ -74,7 +74,8 @@ bigger stack keeps more than the ships added to it). `tests/test_actuary.py`
 checks both shortcuts change no answer, and that a priced gain equals the
 ledger recomputed from scratch.
 
-Per decide, native CPython, load average ~2 (2026-10):
+Per decide, native CPython, load average ~2 (2026-10, at `MIN_GAIN` 0.05, before
+the sweep below; for today's cost see its "What it costs"):
 
     18 nodes, 6 ly/turn    median 1.6 ms   p99  8.6 ms
     24 nodes, 3 ly/turn    median 1.8 ms   p99 11.0 ms
@@ -85,14 +86,18 @@ That is two to three orders of magnitude above the phase bots (microseconds).
 It matters to knower: a Search seat runs every non-oracle rival's `decide` on
 each rolled turn of each line, so against actuary its 150 ms `SEARCH_BUDGET_S`
 trips sooner and the search stops shallower. actuary declares its cost
-(`decide_ms`: 75th-percentile ms = `5.0 * (nodes / 40) ** 0.55`, fitted to a grid
-of 18-120 systems, 3-18 ly/turn and 2-5 seats at load 0.05, where seats and ship
-speed barely moved it), and knower's setup warning counts it; see "Cost per
+(`decide_ms`: 75th-percentile ms = `6.4 * (nodes / 40) ** 0.77`. It was first
+fitted as `5.0 * (nodes / 40) ** 0.55` to a grid of 18-120 systems, 3-18 ly/turn
+and 2-5 seats at load 0.05, where seats and ship speed barely moved it, and was
+refitted for `MIN_GAIN` 0 in "What it costs" below), and knower's setup warning counts it; see "Cost per
 decide" in [`knower.md`](knower.md). Offline runs (`bot_replay`, `tests.sim`
 with guards lifted) are unaffected. The oracle's single call per turn is well
 inside its 50 ms.
 
 ## Where actuary stands
+
+Measured before `MIN_GAIN` 0 shipped (see "The 2026-10 sweep"), so these
+understate it, most of all at 24 nodes 3 ly/turn.
 
 Head to head, both seatings, seeds 301-340 (80 games a cell, timeouts left
 out), win rate is actuary's:
@@ -275,10 +280,22 @@ turns), p75 ms per decide and mean orders:
 
 That is 7-13% on the default-sized maps, 32% in the slow cell and 51% at 80
 nodes. The cost grows with size faster than `decide_ms`'s exponent of 0.55
-assumes. Shipping `MIN_GAIN` 0 means refitting `COST_DECIDE_MS` and
-`COST_NODES_EXP` on the idle-machine grid "Cost, and the caches" describes,
-since knower's setup warning reads them. Timeouts in the slow cell also rise,
-from 7.8% to 10.8%.
+assumes. Timeouts in the slow cell also rise, from 7.8% to 10.8%.
+
+**The `decide_ms` refit.** The first fit's machine is not this one, so only a
+ratio is carried over, as knower's "Cost per decide" does. The grid was 18, 24,
+40, 80 and 120 systems x 3/6/18 ly/turn x 2/5 seats, with every seat stock actuary
+and seeds 1-2 to turn 200. Every live seat was timed every 5 turns with both
+constants on the same position, using thread CPU time, at load under 1. The p75
+ratio, `MIN_GAIN` 0 over 0.05, ran 1.0-1.25 at 18-24 systems, 1.0-1.8 at 40,
+1.2-1.6 at 80 and 1.4-2.2 at 120. Fitted:
+
+    ratio  1.33 x (systems/40)^+0.22 x (seats/2)^-0.07 x (ly/6)^-0.03
+    systems only:  1.28 x (systems/40)^+0.22
+
+Seats and speed barely move it, as before. Folded into the old fit, that gives
+`COST_DECIDE_MS` 6.4 (5.0 x 1.28) and `COST_NODES_EXP` 0.77 (0.55 + 0.22): 7.2 ms
+at 64 systems where it was 6.5, and 14.6 at 120 where it was 9.1.
 
 **Against the rest of the roster it holds.** Same harness, stock and `MIN_GAIN` 0
 as the only arms, seeds 3001 on (150 seeds, 300 paired games a cell; knower at
@@ -300,8 +317,7 @@ module): actuary's share of wins 61% → 63% at 18 nodes and 61% → 69% at 40,
 taken mostly from marshal. No cell got worse. knower at Search is the one
 opponent where the gain is not yet clear of the noise, at a small sample.
 
-**Not yet shipped.** The candidate is `MIN_GAIN` 0 alone. What remains before
-changing `models/actuary.py` is the `decide_ms` refit above.
+**Shipped** (2026-10): `MIN_GAIN` 0, `FRONT_DECAY` left at 0.5, `decide_ms` refitted.
 
 ## The planned opening (Opening: Planned)
 
