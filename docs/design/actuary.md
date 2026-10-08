@@ -237,14 +237,53 @@ lane plus `HORIZON_PAD`, a median of 11 turns at 24 nodes 3 ly/turn (10-13), 8 a
 18 @6, 6 at 40 @6 and 5 at 24 @12. Both arms were inert. A cap that bites in the
 slow cell would be 6-8.
 
-**Not yet shipped.** These are one-at-a-time readings against marshal only. Still
-to measure before changing `models/actuary.py`:
-- the two winners together, and their neighbours (`MIN_GAIN` 0.02, `FRONT_DECAY`
-  0.65 / 0.85), on fresh seeds;
-- the cost per decide at `MIN_GAIN` 0, since more commits pass the floor
-  (`decide_ms`, knower's setup warning);
-- the rest of the roster (knower, thinker), free-for-all, and the advantage
-  sliders.
+**Confirmed on fresh seeds; the two do not stack.** Same harness and cells, seeds
+2001-2600 (about 1,150 games a cell, 5,750 an arm), pooled diff against stock and
+paired z:
+
+                       18@6    24@3    40@6    24@12   18@6 j0.3   pooled         z
+    stock              64.4    43.1    56.3    65.8    24.8        51.2
+    MIN_GAIN 0         +3.4   +16.7   +12.5    +2.9    +2.2        +7.5   (59.1)  +15.1
+    MIN_GAIN 0.02      +2.2    +3.5    +3.7    +1.5    +1.2        +2.4            +5.1
+    FRONT_DECAY 0.75   +1.8   +10.8    +9.7    +1.6    +1.9        +5.2           +10.5
+    FRONT_DECAY 0.85   +2.8   +14.0   +10.0    +1.3    +1.5        +5.9           +11.7
+    both (0, 0.75)     +3.8   +15.7   +11.8    +2.2    +2.0        +7.1           +14.0
+    both (0, 0.85)     +2.0   +14.5   +10.7    +2.0    +1.5        +6.2           +11.8
+    HORIZON_MAX 8      -0.0    -0.2    +0.0    +0.0    +0.0        -0.1            -0.2
+
+`MIN_GAIN` 0 reproduces to the decimal and is positive in every cell. Most of
+it is lost at 0.02, so the floor itself is the problem, not its size.
+`FRONT_DECAY` reproduces too, and 0.85 is at least as good as 0.75. Combined,
+they are no better than `MIN_GAIN` 0 alone. A guess, not tested: both let the
+greedy keep moving interior ships toward the front, one by valuing the front
+from further back and the other by accepting the small gains such a move books.
+A cap of 8 on the horizon binds only in the slow cell (it is inert in 95-100% of
+games elsewhere) and does nothing there either. A long horizon is not the
+slow-regime weakness.
+
+**What it costs.** `MIN_GAIN` 0 commits more launches, and each commit
+re-prices. Timed on the machine idle (load under 1), one process, every variant
+on the same positions (stock actuary against marshal, seeds 5001-5006, up to 250
+turns), p75 ms per decide and mean orders:
+
+                    stock           MIN_GAIN 0      FRONT_DECAY 0.75   both (0, 0.75)
+    18 @6        2.97   2.5       3.22   3.5       3.18   3.1         3.21   3.5
+    24 @3        4.54   2.3       5.99   5.8       5.58   4.7         6.02   5.8
+    40 @6        3.98   2.8       4.26   3.7       4.20   3.5         4.23   3.7
+    24 @12       2.37   2.4       2.68   3.8       2.66   3.2         2.68   3.8
+    80 @6       11.70   7.1      17.71  19.1      15.06  13.0        17.79  19.1
+
+That is 7-13% on the default-sized maps, 32% in the slow cell and 51% at 80
+nodes. The cost grows with size faster than `decide_ms`'s exponent of 0.55
+assumes. Shipping `MIN_GAIN` 0 means refitting `COST_DECIDE_MS` and
+`COST_NODES_EXP` on the idle-machine grid "Cost, and the caches" describes,
+since knower's setup warning reads them. Timeouts in the slow cell also rise,
+from 7.8% to 10.8%.
+
+**Not yet shipped.** The candidate is `MIN_GAIN` 0 alone, measured against marshal
+only. Still to measure before changing `models/actuary.py`: the rest of the
+roster (knower at Predict and Search, thinker), free-for-all, the advantage
+sliders, and the `decide_ms` refit above.
 
 ## The planned opening (Opening: Planned)
 
