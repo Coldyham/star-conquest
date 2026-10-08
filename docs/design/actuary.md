@@ -280,10 +280,28 @@ assumes. Shipping `MIN_GAIN` 0 means refitting `COST_DECIDE_MS` and
 since knower's setup warning reads them. Timeouts in the slow cell also rise,
 from 7.8% to 10.8%.
 
-**Not yet shipped.** The candidate is `MIN_GAIN` 0 alone, measured against marshal
-only. Still to measure before changing `models/actuary.py`: the rest of the
-roster (knower at Predict and Search, thinker), free-for-all, the advantage
-sliders, and the `decide_ms` refit above.
+**Against the rest of the roster it holds.** Same harness, stock and `MIN_GAIN` 0
+as the only arms, seeds 3001 on (150 seeds, 300 paired games a cell; knower at
+Search 100 seeds, cut short at 40 nodes). Win rate stock → `MIN_GAIN` 0:
+
+                        vs thinker      vs knower-1      vs knower-2 (Search)
+    18 @6               94.2 → 95.5     70.5 → 78.2      41.0 → 43.5  (z +0.9)
+    24 @3               87.8 → 95.8     65.8 → 76.8
+    40 @6               97.3 → 99.7     50.7 → 70.8      37.1 → 45.7  (n 70, z +1.9)
+    24 @12              96.5 → 96.5     51.0 → 53.8
+    18 @6 jitter 0.3    63.3 → 68.3     43.7 → 45.7
+    pooled diff         +3.3 (z +5.9)   +8.7 (z +8.9)
+
+Against marshal across the advantage sliders, pooled +7.2 (z +6.6): at 18
+nodes 59.5 → 64.3 (advantage 0.75) and 54.3 → 61.8 (1.5), at 40 nodes 56.7 →
+69.0 and 58.7 → 63.0. Free-for-all (`tests.sim --swap`, actuary + marshal +
+thinker, seeds 301-400, 300 games each, the variant as a scratch copy of the
+module): actuary's share of wins 61% → 63% at 18 nodes and 61% → 69% at 40,
+taken mostly from marshal. No cell got worse. knower at Search is the one
+opponent where the gain is not yet clear of the noise, at a small sample.
+
+**Not yet shipped.** The candidate is `MIN_GAIN` 0 alone. What remains before
+changing `models/actuary.py` is the `decide_ms` refit above.
 
 ## The planned opening (Opening: Planned)
 
