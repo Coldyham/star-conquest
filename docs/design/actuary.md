@@ -325,6 +325,53 @@ The two floors choose different orders on 4.5% of decides. Paired against each
 other through marshal, seeds 4001-5200 in the same five cells (12,000 games), 1e-9
 reads -0.12 points (z -1.1), and no cell is significant: the same bot.
 
+## Behind on income, ahead on ships (measured, not built)
+
+The ledger values ships, and gives ground rather than lose them: a doomed
+garrison leaves, and while it is behind no strike clears the worst roll. Asked
+from two games against learner (2026-10-08), the idea was a switch for one
+standing: behind the top-income rival on income but ahead on ships. That ship
+lead is a wasting asset, gone in *ship lead ÷ income gap* turns (the clock).
+Holding still lets it run out, and when the expected outcome is a loss, variance
+is worth buying. While the clock is short, the switch would price strikes at the
+nominal roll and drop `RISK_WEIGHT` towards 0.
+
+**How often the standing arises** was counted first, since a switch that changes
+rare decisions measures null on the ladder whether or not the idea is right
+(learner's Trust, [`learner.md`](learner.md)). The method:
+
+- **Games:** 280 roster self-play games, the eight `models/` bots in every
+  pairing, both seatings, at 6 ly/turn: 11, 18 and 24 nodes with two seats, and
+  11 and 18 with three (56 games a cell). Also the 142 posted human games.
+- **Standing:** each seat on each turn after contact (it borders a rival), against
+  its top-income rival, with ships counted in garrisons and in flight.
+
+Share of post-contact seat-turns, and how often that seat went on to win:
+
+                                  self-play          posted human games
+    ahead on both                 37%   79%          27%   90%
+    ahead on income only           6%   39%           5%   52%
+    behind on income, ahead ships  7%   31%           7%   31%
+    behind on both                48%    4%          56%    4%
+
+**The standing is mostly parity, and a real lead is already converted.**
+- **Short episodes, tiny leads.** Episodes last a median of 2 turns. On a short
+  clock (under 10 turns) the median lead is 1-2 ships, and the episode mostly
+  ends with the lead lost in one exchange, not worn away by income.
+- **A real lead is rare and already won.** With a lead of 20%+ of the rival's
+  ships, actuary has 76 such episodes in its 84 games and wins 87% of them;
+  learner has 68 and wins 74%.
+- **The switch's case is a handful.** A real lead on a short clock happens 4
+  times in actuary's 84 games, 7 in learner's, and twice for actuary across the
+  posted games. Every posted game is a win for the person, so the bots' win
+  rate there says nothing.
+
+Not built: the switch would change too few decisions to measure. The standing
+where seats actually lose is behind on both, about half of all post-contact
+turns, and it was the real one in the game that prompted this. Variance-seeking
+there is a separate idea, unmeasured. A seat short of ships has less to gamble
+with.
+
 ## The planned opening (Opening: Planned)
 
 The seat's `aux` knob (`AUX_LABEL` *Opening*) has two stops. *Planned* (1, the

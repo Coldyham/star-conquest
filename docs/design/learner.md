@@ -617,7 +617,128 @@ in `models/README.md`, "Predicting the other seats". learner's own claim rests o
 its memory (`is_oracle_seat`), which is real, but nothing stops a bot claiming
 it falsely.
 
+**It plays actuary's moves.** `tools/bot_distance.py --bots actuary learner
+marshal --every 1 --phase contested` gives 21 two-seat games at 18 nodes and
+6 ly/turn, with 4,289 contested positions. Positions come one turn apart, so
+learner's memory chains as in a game. learner is 0.08 from actuary, with kappa
+0.90 on each system's move kind. That is closer than thinker and claudebot
+(0.11), the roster's nearest pair ([`bots.md`](bots.md), "How differently two
+bots play"). Both are 0.36 from marshal. Raise launches a little more of the
+garrison (57% to 55%), more of it to its own systems (59% to 56%) and less at
+rivals (38% to 42%), and costs 1.1 ms a decide at the median against 0.8. As a
+third stop on actuary's Opening knob it would be a variant, not a new bot.
+Above Planned it moves no stored record: actuary reads any `aux` from 1 up as
+Planned, and the menu cannot set more than 1. But a higher stop should play
+better, and flag aside it is level with actuary.
+
 **Not measured:** the other cells (slow, fast, large), the free-for-all, knower at
 Search (the leaderboard's profile, `bot_replay.REPLAY_AUX`), and anything
 against a person. learner joins the nightly bot column the moment `models/` on
 `main` has it (`tools/bot_replay.py` replays every registered bot).
+
+## Joining actuary as a stop: the gate (written, not run)
+
+learner plays actuary's moves (0.08 apart, above), so it would join the roster
+as a third stop on actuary's knob, `aux` 2, above Planned, which moves no
+stored record. A higher stop has to play better, and the ladder cannot show
+that: its lead is the oracle flag, and Raise's own gains are inside the noise at
+60 games. The gate measures the model with the flag held equal.
+
+**The harness.** `tools/sweep.py`, as in actuary's 2026-10 sweep
+([`actuary.md`](actuary.md)). It runs paired duels, each seed played in both
+seatings, with the result for each arm diffed against the stock arm on the same
+(cell, seed, seating).
+- **Arms:** `off:strategy=learner,aux=0` (stock: actuary plus the flag) and
+  `raise:strategy=learner,aux=1`. Both claim `IS_ORACLE`, so no opponent reads
+  either one, and the diff is the model alone.
+- **Cells:** the 2026-10 five: `random:18:6`, `random:24:3`, `random:40:6`,
+  `random:24:12` and `random:18:6,combat_jitter=0.3`.
+- **Seeds:** fresh ones, 6001 on, so none overlaps a sweep already run. Smoke
+  first, as the harness requires.
+
+**The runs:**
+
+    baseline                    seeds   games an arm   why
+    actuary (Planned)            100      1,000        null control: off reads exactly 50.0;
+                                                       raise is the head-to-head
+    marshal                      350      3,500        the main reading, as in 2026-10
+    knower, aux=1 (Predict)      150      1,500        the oracle that runs everyone it can
+    knower, aux=2 (Search)       100        400        the bot column's profile; 18:6 and
+                                                       40:6 only, for cost
+
+thinker is left out, because actuary already beats it 94-100%.
+
+**It passes if every one of these holds:**
+1. **Better against marshal.** Raise beats Off pooled, by z ≥ +2, with no cell
+   worse at z ≤ -2.
+2. **Not worse elsewhere.** Raise is not worse than Off against knower at
+   Predict or at Search: neither pooled diff below 0 at z ≤ -2.
+3. **Not worse against actuary.** Raise against stock actuary reads 50% or
+   better pooled, inside the interval or above it.
+4. **Affordable.** The cost per decide stays under actuary's `decide_ms`
+   plus `READ_MS`. That holds today: 1.1 ms against 0.8 at the median, 18
+   nodes.
+
+**What follows:**
+- **Pass:** learner's code joins `models/actuary.py`, since a bot cannot import
+  another (it reaches it lazily through `sys.modules`). The knob gets a third
+  stop:
+  - the label changes from *Opening* to something wider;
+  - `AUX_RANGE` becomes `(0, 2, 1)`;
+  - `is_oracle_seat` returns True only at stop 2, so knower keeps reading
+    stops 0 and 1 as it does now;
+  - `bot_replay.REPLAY_AUX` leaves actuary at 1 unless chosen otherwise, so the
+    bot column does not move.
+
+  `models/learner.py` is deleted, and `learner` never ships under its own name.
+- **Fail:** learner stays on the branch as a recorded experiment and does not
+  join `models/` on `main`.
+
+### Proposed improvements (each an extra arm in the same gate)
+
+Each one is checked against the gate as a further `strategy=learner` arm,
+behind a temporary flag, against Raise and Off on the same seeds.
+
+**1. Price the threat in the risk term, not as an extra fleet.**
+- **The double count.** Raise adds a fleet of `round(p × ships)` and leaves
+  its source standing. actuary's `_risk` then counts that whole garrison as
+  able to strike too, so a predicted threat is charged twice. That fits the
+  fingerprint: Raise sends more to its own systems and less at rivals.
+- **The change.** `_risk`'s `reach` becomes each rival's predicted strike at
+  each of our systems, with the size from `strike_ships` and the chance from
+  the curve, in place of every adjacent garrison at full strength. The fleets
+  come off the board.
+- **Why it matters.** The risk term prices every one of our systems every turn,
+  so this changes far more decisions than the added fleets do. Trust's lesson
+  was that rare changes measure null. This was stage 2's second seam in the
+  plan, and it was never built.
+- **What it needs.** A hook in actuary's `_Ledger` for an outside reach.
+
+**2. Price the strike and no-strike outcomes separately.**
+- **The flaw.** A source sends nearly everything or nothing (the all-in share,
+  0.46 in the prior). An expected fleet of `p × ships` is a launch that never
+  happens: the flaw that sank Trust, still in Raise.
+- **The change.** For each threatened system, project both cases, strike and no
+  strike, and weight each by p.
+- **Why it's cheap.** The ledger re-projects only the systems a launch touches,
+  and a threat lands on one system, so this costs two timelines per threatened
+  system, not two whole decides.
+- **Order.** It fits with 1 or replaces it. Measure 1 first.
+
+**3. Use what tells the bots apart: guard and evacuation.**
+- **What separates.** The strike curve does not separate the roster ("What the
+  model can tell apart"); the guard share and evacuation rate do.
+- **The change.** The ledger prices a capture against the garrison that will be
+  there. Against a rival whose doomed garrisons leave, a capture costs a
+  smaller strike, and the ships that left show up next door. Against one whose
+  garrisons stay, it costs the full fight.
+- **What it changes.** Feed `evac_rate` into the target's projected garrison on
+  the turn a strike lands, and add the evacuees to the rival's nearest system.
+  This touches actuary's own strikes, which are its decisions that matter most,
+  not only its defence.
+
+**Not for this gate.** Remembering a person across games: the model forecasts
+people better than knower's guess ("Predicting people"), but learner's memory
+lasts one game, and the gate cannot measure play against a person. It would
+need a stored per-device model of "the person". That is a separate decision,
+made only once a stop has earned its place.
