@@ -62,8 +62,9 @@ These came before any code was written, and the rest of the design follows from 
    a client that could lie about its orders, and the answer to both is that a
    play-by-post match is between people who chose to play each other.
 
-   Dice are the reason this is nearly free: they come from `state.rng`, seeded by
-   the match seed, so given the same order sequence every client draws the same
+   Dice are the reason this is nearly free: each fight's come from a stream
+   keyed by the match seed, turn and place (`engine._Dice`, under
+   `pbp.DICE_SALT`), so given the same orders every client draws the same
    numbers. The digest turns "should agree" into "demonstrably agreed".
 3. **Separate `pbp_*` tables, same Supabase project, function-only writer.** The
    existing board's append-only, no-identity guarantees stay literally true and
@@ -182,14 +183,20 @@ The trust this adds is bounded to the bots' orders, which is the same honesty
 fog already asks for and cannot be checked while bots decide on a clock. It
 cannot write a person's orders: `match_log` refuses a log that files an order
 under a seat that the seat's stored row does not hold. And it cannot write the
-dice: `pbp.turn_orders` has the bots decide on a scratch copy (in the ascending
-sequence `_collect_orders` uses, one shared board and rng between them), so the
-turn itself runs with every order already fixed and rolls from the rng
-`reseed` put there — a pure function of seed, turn and orders. Every stepping
-client re-rolls it (`pbp.verify_turn`) and refuses a turn that disagrees. This
-only checks turns as they are stepped; a client rebuilding from the opening
-applies the older turns unchecked, since turns resolved before this existed
-rolled after their bots and would not verify. A log may carry *fewer* — the
+dice: `pbp.turn_orders` has the bots decide on a scratch copy, each from the
+same start of the rng (`engine.decide_seat`), and the turn itself runs with
+every order already fixed. Each fight rolls from a stream keyed by the seed, the
+match's own `pbp.DICE_SALT`, the turn and the place (`engine._Dice`), so the dice
+are a pure function of the board and the orders. Every stepping client re-rolls
+them (`pbp.verify_turn`) and refuses a turn that disagrees. This only checks
+turns as they are stepped; a client rebuilding from the opening applies the
+older turns unchecked. Turns resolved before the dice were keyed per fight
+(2026-10-08) carry no `keyed` flag, rolled their dice after their bots, and
+cannot be re-rolled. `verify_turn` lets one through only while no earlier turn of
+the match is keyed. A match under way at the change keeps moving, and once it
+has a keyed turn, a stale client's unkeyed upload is refused. The salt is
+stamped by `pbp.seat_people`, which every path that makes a board a match's
+board goes through, so playing the seed alone shows nothing of the match's dice. A log may carry *fewer* — the
 engine drops an order out of a system lost before launch. The uploaded copy has
 the resolver's standing forwarding rules stripped (`pbp.shareable`); every
 other client opens from it, and a route plan is one player's own. So each

@@ -14,6 +14,7 @@ Pure/headless: `main` imports pygame, but nothing here draws.
 
 from __future__ import annotations
 
+import copy
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -257,27 +258,51 @@ def _fought_turn():
         state, log = rebuilt
         _resolved, log, _ = pbp.resolve(match, ai.decide)
         if log.dice_for(turn):
-            return state, log.script_for(turn), 4
+            return state, log.script_for(turn), match
         log_blob = pbp.shareable(log).encoded()
     pytest.fail("no fight in sixty turns")
 
 
 def test_a_turn_rolled_honestly_checks_out():
-    state, record, seed = _fought_turn()
-    assert pbp.verify_turn(state, record, seed)
+    state, record, match = _fought_turn()
+    assert record.keyed and pbp.verify_turn(state, record, match)
 
 
 def test_a_turn_with_dice_its_orders_do_not_roll_is_caught():
     """The resolver writes the bots' orders, which nothing can check; it cannot
     also pick the dice."""
-    state, record, seed = _fought_turn()
+    state, record, match = _fought_turn()
     record.dice[0] = 0.0 if record.dice[0] else 0.5
-    assert not pbp.verify_turn(state, record, seed)
+    assert not pbp.verify_turn(state, record, match)
 
 
-def test_deciding_the_bots_leaves_the_turns_dice_alone():
+def test_a_shared_match_rolls_dice_of_its_own():
+    """Playing the match's seed alone must show nothing of the dice it will roll."""
+    state, record, match = _fought_turn()
+    assert state.dice_salt == pbp.DICE_SALT
+    solo = copy.deepcopy(state)
+    solo.dice_salt = "dice"
+    rolled = engine.end_turn(solo, script=engine.TurnRecord(list(record.orders), []))
+    assert rolled.dice != record.dice
+
+
+def test_an_unkeyed_turn_passes_only_until_the_match_has_a_keyed_one():
+    """A match under way when dice were keyed keeps moving on the turns its
+    pre-change clients resolved; once a turn is keyed, an unkeyed one is refused."""
+    state, record, match = _fought_turn()
+    older = engine.TurnRecord(list(record.orders), [0.5] * len(record.dice))
+    log = pbp.match_log(match)
+    assert log is not None and log.turn_count and log.keyed_for(0)
+    assert not pbp.verify_turn(state, older, match)
+    for entry in log.turns:
+        entry["keyed"] = False
+    match.log = log.encoded()
+    assert pbp.verify_turn(state, older, match)
+
+
+def test_deciding_the_bots_leaves_the_live_rng_alone():
     """The bots decide on a scratch copy, so the live rng still stands where the
-    turn's seed put it — which is the whole of what makes the dice checkable."""
+    turn's seed put it."""
     ai.load_models()
     settings = Settings(mode="random", players=3, nodes=14, seed=7)
     match = pbp.match_from_dict(_payload(seats=(1,), players=3,
@@ -826,7 +851,7 @@ def _tick(server: _Endpoint, client) -> None:
         client[0], client[1], client[2] = app.open_match(match, seat, Settings())
     elif verdict == app.PBP_STEP:
         script = pbp.settled_turn(match, state.turn)
-        assert script is not None and pbp.verify_turn(state, script, match.seed), \
+        assert script is not None and pbp.verify_turn(state, script, match), \
             "an honest resolver's turn must check out on every other client"
         app.resolve_turn(state, ui, log, Settings(), script=script)
         app.pbp_opened(ui)

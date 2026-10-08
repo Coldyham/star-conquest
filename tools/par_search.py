@@ -15,8 +15,9 @@ and reports three numbers for the setup:
 * with ``--log``, the turn the recorded player actually won on; with
   ``--game-key``, the board's best counted score and best bot-column win.
 
-Every turn is seeded as the game seeds it (`replay.reseed`), so a rewind
-offers no new dice and only a different set of orders rolls differently.
+Every turn is seeded as the game seeds it (`replay.reseed`), and every fight
+rolls the dice keyed to it (`engine._Dice`), so a rewind offers no new dice and
+only a different set of orders *in that fight* rolls differently.
 ``--dice honest`` plays those dice. ``--dice lucky`` resolves every fight the
 searcher is in at its best roll instead, which no player can reach: it is an
 optimist's yardstick, not a ceiling, since rival fights still roll. What each
@@ -143,7 +144,8 @@ def floor(state: GameState, me: int, horizon: int = MAX_TURNS) -> float:
 # --------------------------------------------------------------------------- #
 class _Fixed:
     """Deals ``rolls`` in order, appending each to ``dice.drawn`` when ``dice`` is
-    the engine's recorder, so the turn's record carries what was dealt."""
+    the engine's (one fight's view of the turn's record, `engine._Fight`), so the
+    turn's record carries what was dealt."""
 
     def __init__(self, dice, rolls: list[float]) -> None:
         self._dice = dice
