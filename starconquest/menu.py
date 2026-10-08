@@ -317,6 +317,9 @@ class MenuState:
     # Looks up whether the setup on the menu is a campaign node (web only).
     # Pumped from `pump`, and by `main` while that setup is being played.
     campaign_watch: campaign.Watcher = field(default_factory=campaign.Watcher)
+    # The player's UI size, a `webstore.UI_SIZES` percentage. Held here so `main`
+    # can read it every frame without a trip to the store; `set_ui_size` writes both.
+    ui_size: int = field(default_factory=webstore.ui_size)
     # The Advanced tab's lane readout: `settings.lane_lengths` for the setup whose
     # `lane_survey_key` is stored beside it. Filled by `pump` (the mutate side),
     # never by `draw`, which only shows it while the key still matches.
@@ -445,6 +448,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _text(surface, f["small"], ms.status, _START_BORDER if ms.status_ok else _STATUS_ERR, center=(w // 2, 852))
     if not config.touch_ui:
         _text(surface, f["small"], "Enter: start game   ·   Esc: quit", config.COLOR_TEXT_DIM, center=(w // 2, 886))
+        _ui_size_control(surface, ms, w)
     if ms.confirm_clear_map:
         _draw_clear_map(surface, ms, w, surface.get_height())
     if ms.pbp_prompt:
@@ -453,6 +457,20 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _draw_slow(surface, ms, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
         _draw_unchallenge(surface, ms, settings, w, surface.get_height())
+
+
+def _ui_size_control(surface, ms: MenuState, w: int) -> None:
+    """The UI size stepper, in the canvas's bottom-right corner.
+
+    It sizes the game board and the map creator, not this menu, which always
+    fits its fixed canvas to the window. Not drawn on touch, where the boost is
+    already fitted to a finger and a bigger one would push labels out of their
+    boxes.
+    """
+    right, y = w - 40, 886 - _CH // 2
+    _stepper(surface, ms, "ui_size", f"{ms.ui_size}%", right, y, value_w=72)
+    _text(surface, _fonts()["small"], "Game UI size", config.COLOR_TEXT_DIM,
+          midright=(right - 34 - 72 - 34 - 12, 886))
 
 
 def _draw_challenge(surface, settings: Settings, w: int) -> None:
@@ -2016,6 +2034,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         settings.mode = "random"
     elif hit == "mode_symmetric":
         settings.mode = "symmetric"
+    elif hit == "ui_size_dec":
+        set_ui_size(ms, webstore.step_ui_size(ms.ui_size, -1))
+    elif hit == "ui_size_inc":
+        set_ui_size(ms, webstore.step_ui_size(ms.ui_size, +1))
     elif hit == "layout_dec":
         _step_layout(settings, -1)
     elif hit == "layout_inc":
@@ -2250,6 +2272,14 @@ def set_status(ms: MenuState, text: str, ok: bool) -> None:
     ms.status = text
     ms.status_ok = ok
     ms.status_until = pygame.time.get_ticks() + (_STATUS_MS if ok else _STATUS_ERROR_MS)
+
+
+def set_ui_size(ms: MenuState, pct: int) -> None:
+    """Make ``pct`` the UI size. Public because ``main``'s Ctrl +/− keys set it too;
+    ``main`` reads ``ms.ui_size`` every frame and rescales when it moves."""
+    ms.ui_size = pct
+    if not webstore.set_ui_size(pct):
+        set_status(ms, "Couldn't save the UI size here — it lasts this session", False)
 
 
 def _set_players(settings: Settings, n: int) -> None:

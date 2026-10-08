@@ -440,8 +440,9 @@ already resolve simultaneously. The rationale for each rule is in
   (`btn_w`, `btn`, `row_h`, `draw_modal`, `wrap`) and `config.s()`. `render`
   binds the kit to `_`-prefixed module globals so tests can swap them — keep
   that. `menu` deliberately does not use the kit: it lays out on a fixed
-  1440x960 canvas with unscaled fonts. `config.apply_ui_scale` runs once at boot;
-  key any font cache on `config.ui_scale`.
+  1440x960 canvas with unscaled fonts. `config.apply_ui_scale` runs at boot and
+  again whenever the window or the player's UI size moves (`main.ui_scale_for`,
+  `webstore.ui_size`); key any font cache on `config.ui_scale`.
 - **`config.touch_ui` is the input modality.** On touch, drop keyboard-only
   strings (`render._key_hint` and friends) and floor tappable controls at
   `config.TOUCH_MIN_TARGET`.

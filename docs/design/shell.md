@@ -18,9 +18,8 @@ other, before layout was switched to measure-then-place.
 
 The one place `TOUCH_MIN_TARGET` gives way is the send popup's own height:
 seven tap-floored rows can outgrow the band it's placed in on a window smaller
-than the design baseline (`config.apply_ui_scale` runs once at boot and is
-floored at 1x, so shrinking past the baseline doesn't shrink the UI — a resize
-reflows the measured layout but never re-fits the font scale). Because the
+than the design baseline (the window fit in `main.ui_scale_for` is floored at
+1x, so shrinking past the baseline doesn't shrink the UI). Because the
 clamp pins an oversized panel to the top, the row that falls out of `draw`'s clip is the
 destructive Delete — invisible but still live, since input hit-tests the
 recorded rect.
@@ -334,14 +333,22 @@ prevented.
   fixed 1440x960 canvas and letterbox-blits it, so its fonts must be *unscaled*
   (`config.FONT_SIZE*` would scale twice) and it keeps its own `_fonts`/`_text`/
   `_button`.
-  **The scale is, however, fixed for the run:** `config.apply_ui_scale` is called
-  exactly once, inline at boot (`main.py`, after `set_mode`), floored at the
-  design baseline — so shrinking the window past the baseline does not shrink the
-  UI. A resize rewrites `config.SCREEN_W/H` and rebuilds the `WorldView`, so
-  measured layout reflows, but the font size does not move. Cache off a font size
-  anyway only if it is keyed on `config.ui_scale` (`widgets.fonts`,
-  `menu._modal_fonts` both are) — the boot-time call happens before the first
-  frame, but a cache built at import time would still be wrong.
+  **The scale follows the window and the player.** `main.ui_scale_for` fits the
+  design baseline into the surface (floored at 1x, so shrinking the window past
+  the baseline does not shrink the UI), then applies the touch boost or, off
+  touch, the player's UI size (`webstore.ui_size`, a percentage stepped from
+  `webstore.UI_SIZES`; the menu's bottom-right stepper and Ctrl +/−/0 in every
+  scene set it through `menu.set_ui_size`, and `MenuState.ui_size` is the copy
+  `main` reads each frame). `main` calls `apply_ui_scale` before the first frame
+  and again from the loop's reflow whenever the surface size or that scale
+  moves; the reflow rewrites `config.SCREEN_W/H`, rebuilds the `WorldView` and
+  resets the camera, and reflows the map creator. The scale used to be fixed at
+  boot, which left the board at 1x in a window opened at the baseline and then
+  maximised, while the letterboxed menu grew with it. A UI size is a local
+  preference, not a `Settings` field, for the same reason `animate_turns` is.
+  Cache off a font size only if it is keyed on `config.ui_scale`
+  (`widgets.fonts`, `menu._modal_fonts` both are), since the scale can now move
+  mid-run.
 - **`config.touch_ui` is the input modality**, set beside the scale in
   `apply_ui_scale` from `main`'s single boot-time probe (Android, or a touch
   browser). On a touch build the shell drops every keyboard-only string — the
