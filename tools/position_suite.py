@@ -203,7 +203,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="seconds per decide() before a seat forfeits the turn")
     parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
                         help="override a bot's aux for this run, e.g. --aux knower=8 "
-                             "(default: tools.bot_replay.REPLAY_AUX, the same profile "
+                             "(default: tools.bot_replay.replay_aux, the same profile "
                              "the leaderboard's bot column replays each bot at)")
     parser.add_argument("--budget-scale", type=float, default=None,
                         help="multiply the bots' own per-decide wall-clock guards by "
@@ -219,9 +219,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     # Lazy, and read even off the local path: this is a batch tool with nothing
     # waiting on a frame, so — same reasoning as tools/bot_replay.py — a bot's own
-    # wall-clock guard is worth lifting out of the way, and a bot with a measured
-    # best profile (today, just knower) is worth measuring there rather than at
-    # its untuned default.
+    # wall-clock guard is worth lifting out of the way, and each bot is worth
+    # measuring at its best profile rather than at its untuned default.
     from tools.bot_replay import BUDGET_SCALE, replay_aux
 
     args = parse_args(argv)

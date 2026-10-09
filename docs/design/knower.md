@@ -5,7 +5,7 @@ rival's real `decide`, then searches over candidate openings. This file covers
 why the oracle is possible, what it buys, the depth search and its horizon
 (Oracle: Off / Predict / Search), the borrowed candidates, and the cost of a
 decide, which drives the slow-setup warning. Roster-wide rules (margins,
-measurement method, leaderboard replays at `REPLAY_AUX`) are in
+measurement method, leaderboard replays at `replay_aux`) are in
 [`bots.md`](bots.md). marshal's results against knower are in
 [`marshal.md`](marshal.md), "Where marshal stands". Index:
 [`../README.md`](../README.md).
@@ -115,7 +115,7 @@ What it says:
   Over 100 seeds Predict reads 85%, and its 44% against marshal reads 38%. The
   ladder's knower is Predict (default `AiParams`), so the ladder ranks the
   default setting, not the bot at its best; `bot_replay` already runs it at
-  Search (`REPLAY_AUX`).
+  Search (`replay_aux`).
 - **Search ends games.** Off and Predict time out a lot against thinker on
   the symmetric map (74 and 41 of 100). Search times out once against thinker
   in all 400 of its games across the three cells. On the symmetric map the

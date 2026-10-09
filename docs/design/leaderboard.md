@@ -4,7 +4,7 @@ Why the board's two offline workers are shaped as they are: the bot column
 (`tools/bot_replay.py`, the `bot_scores` table) and checked scores (`share.py`
 uploads, `tools/verify_scores.py`, watching a replay). It also covers replay
 versioning. `CLAUDE.md` states the rules under "Challenge links carry a score to
-beat". The bot-side measurements behind the bot column (`REPLAY_AUX`,
+beat". The bot-side measurements behind the bot column (`replay_aux`,
 `BUDGET_SCALE`, the seat-flag incident) are in [`bots.md`](bots.md),
 "Replaying a bot for the leaderboard". The site's own setup is in
 `leaderboard/README.md`. Related: [`core.md`](core.md) (challenge keys, the
@@ -71,8 +71,10 @@ default `AiParams` — with one exception.
 That exception is `aux`, the one bot-defined knob. Every other field belongs to
 the built-in heuristic's own tuning and says nothing about a drop-in's identity,
 but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
-statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
-makes it, and today it holds one entry: `knower` on Oracle: Search. Opponent
+statement only the caller can make. `bot_replay.replay_aux` is where the board
+makes it: every bot at the top of its own slider, since each strategy's slider
+runs from its cheapest stop to its strongest. Today that is `knower` on Oracle:
+Search and `actuary` on Style: Learning. Opponent
 seats keep both the strategy and the params the setup gave them — those *are* the
 map's difficulty, and changing them would answer a different question.
 
@@ -811,8 +813,8 @@ The best-score rule settles a collision with what already exists.
   than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
   only funnel that pushes them into `config`. The replayed seat gets default
   `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
-  `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` on
-  Oracle: Search) and the value in force is stored on the row; opponents keep
+  `bot_replay.replay_aux` puts each bot at the top of its own slider there
+  (`knower` on Oracle: Search, `actuary` on Style: Learning) and the value in force is stored on the row; opponents keep
   theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
   `is_human`, sets the strategy and params; plain `engine.end_turn(state,
   decide=decide)` then drives every seat, the replayed one included, just as

@@ -141,9 +141,9 @@ def test_game_is_reproducible_from_its_seed(ac):
     assert (a.winner, a.turns) == (b.winner, b.turns)
 
 
-def test_the_opening_slider_defaults_to_planned(ac):
-    assert ai.aux_spec("actuary") == ("Opening", 0.0, 1.0, 1.0, True)
-    assert ai.aux_names("actuary") == ("Greedy", "Planned")
+def test_the_style_slider_defaults_to_planned(ac):
+    assert ai.aux_spec("actuary") == ("Style", 0.0, 2.0, 1.0, True)
+    assert ai.aux_names("actuary") == ("Greedy", "Planned", "Learning")
     assert AiParams().aux == ac.PLANNED
 
 

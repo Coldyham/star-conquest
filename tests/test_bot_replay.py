@@ -89,6 +89,14 @@ def test_a_tuned_profile_is_disclosed_by_its_stop_name():
     leave the reader to decode "oracle 2" (`format.mjs`'s `botProfile`)."""
     ai.load_models()
     assert bot_replay.aux_note("knower", 1.0) == ""                   # the default: nothing to say
-    assert bot_replay.aux_note("knower", bot_replay.REPLAY_AUX["knower"]) == "Oracle: Search"
+    assert bot_replay.aux_note("knower", bot_replay.replay_aux("knower")) == "Oracle: Search"
     assert bot_replay.aux_note("knower", 12) == "Oracle: Search"      # an old depth, clamped
     assert bot_replay.aux_note("marshal", 4) == ""                    # ignores aux entirely
+
+
+def test_each_bot_replays_at_the_top_of_its_own_slider():
+    ai.load_models()
+    assert bot_replay.aux_note("knower", bot_replay.replay_aux("knower")) == "Oracle: Search"
+    assert bot_replay.aux_note("actuary", bot_replay.replay_aux("actuary")) == "Style: Learning"
+    assert bot_replay.replay_aux("marshal") == 1.0                    # declares no knob
+    assert bot_replay.replay_aux("actuary", {"actuary": 1.0}) == 1.0  # --aux still wins

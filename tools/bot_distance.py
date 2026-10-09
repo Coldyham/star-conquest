@@ -28,7 +28,7 @@ a live rival's; **opening** means it does not yet. During the opening most bots
 play the land-grab and a measure pooled across both phases hides that, while a
 bot whose difference is all in its opening never shows on contested ones.
 
-Bots are measured at the leaderboard's profile (`tools.bot_replay.REPLAY_AUX`,
+Bots are measured at the leaderboard's profile (`tools.bot_replay.replay_aux`,
 `BUDGET_SCALE`), as `tools/position_suite.py` does, so a wall-clock guard cannot
 make a bot's answer depend on the machine. `--null` asks every bot twice on
 separate copies; anything above 0 there is how far a bot disagrees with itself.
@@ -355,7 +355,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--supabase", action="store_true",
                         help="positions from the shared corpus instead of self-play")
     parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
-                        help="override a bot's aux (default: tools.bot_replay.REPLAY_AUX)")
+                        help="override a bot's aux (default: tools.bot_replay.replay_aux)")
     parser.add_argument("--null", action="store_true",
                         help="ask every bot twice, to show how far it disagrees with itself")
     parser.add_argument("--csv", type=Path, default=None,
