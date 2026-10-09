@@ -183,7 +183,7 @@ HUD_RIGHT_W = 240            # reserved right column for the system/lane info pa
 # The end-turn button is the single most-tapped control, so it gets its own big
 # zone: the full width of the right info panel, reaching above the ordinary
 # bottom bar (see render._draw_side_panel, which reserves this same height so
-# the queued-orders list never draws underneath it).
+# the panel's details never draw underneath it).
 END_TURN_H = 96
 FOOTER_BTN_H = 40            # height of the smaller bottom-bar buttons (play/pause, etc.)
 

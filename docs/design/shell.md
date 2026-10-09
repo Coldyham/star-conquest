@@ -299,7 +299,7 @@ swallow the win screen's own controls. On the render side the mode swaps the
 footer strip wholesale and `_lay_out_footer`'s shared zeroing loop retires every
 live-play rect for free; the confirm takes the End Turn button's slot, which makes
 ending a turn mid-plan impossible by construction instead of by a guard. The
-panel's queued/rule lists are suppressed too — their × buttons would mutate
+panel's Clear forwarding buttons are suppressed too — they would mutate
 `auto_forward` underneath the preview.
 
 **`keep` is 0 on a new rule** (the Forward tab's own default), but a replaced rule
@@ -397,7 +397,7 @@ prevented.
   with `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop
   (`pygame.quit()`) directly on the web build.
 
-## Send popup, queued list and spectating: the rules in full
+## Send popup and spectating: the rules in full
 
 - **The send popup is the *only* ship-count editor.** Composing a new send opens
   it (`Ui.begin_send`), and so does reopening an already-queued order or
@@ -416,12 +416,15 @@ prevented.
     `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`
     (an empty source, the touch default) and a zeroed rect (popup closed
     mid-drag).
-- **The side panel's queued list is capped and scrolled, not truncated.** It
-  takes at most half the panel, and what doesn't fit is reached with
-  `ui.order_scroll` (▲/▼ buttons, or the wheel while over the panel). Each
-  drawn row carries **its own index** into `pending` (`ui.order_hitboxes` is
-  `(index, row, delete)`) — a positional mapping would silently delete the
-  wrong order once only a window of the list is on screen.
+- **Orders and rules are reached from the map, not from a list.** A click near
+  a lane picks what is drawn on it, and repeat clicks cycle through everything
+  sharing the lane (`input._pick_lane`); the popup it opens holds the Delete
+  button. The side panel used to end in a list of every queued order and rule,
+  capped and scrolled. It went once the popup opened on edit as well as on
+  create: the popup already showed everything a row did and put Delete in easy
+  reach, and the list was noise that still ran into the system details above
+  it. What nothing replaces is a glance at orders queued off-screen; a count
+  under End Turn would cover that if it is ever missed.
 - **Losing makes the human a spectator, not a blind one.** `fog.observe`
   returns empty for a landless player, so `main._accumulate_fog` reveals the
   whole board (dropping frozen `player_intel`) once

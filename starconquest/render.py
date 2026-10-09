@@ -31,7 +31,6 @@ _key_hint = widgets.key_hint
 _wrap = widgets.wrap
 _draw_slider = widgets.slider
 _draw_step_button = widgets.step_button
-_draw_x_button = widgets.x_button
 _lane_style = widgets.lane_style
 _pill_rect = widgets.pill_rect
 _label_pill = widgets.label_pill
@@ -1161,8 +1160,8 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the
     # full width of the right info panel, reaching up above the ordinary bottom
-    # bar (_draw_side_panel/_draw_order_list reserve the same config.END_TURN_H
-    # so the queued-orders list never draws underneath it).
+    # bar (_draw_side_panel reserves the same config.END_TURN_H so the panel's
+    # details never draw underneath it).
     ebw, ebh = config.HUD_RIGHT_W, config.END_TURN_H
     br = pygame.Rect(w - ebw, h - ebh, ebw, ebh)
     fill, edge = _BTN_GREEN
@@ -1266,7 +1265,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     rather than drawn overlapping. The ranking matters because a touch player has
     no keys to fall back on: Menu survives longest, since it reaches the setup
     screen and Quit from there, and Clear goes first, since the popup's own Cancel
-    and the × on a queued row already do its job. Fast forward ranks just below
+    and Delete already do its job. Fast forward ranks just below
     those two, because it is only ever offered in the one situation it is the
     point of the screen — watching a match you are out of.
 
@@ -1521,21 +1520,8 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
     pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), config.s(1))
 
-    # queued-orders list occupies the bottom of the panel (always visible so
-    # orders can be reviewed / removed); details fill the space above it. Hidden
-    # in history mode — those orders belong to the live turn, not the past board.
-    # `content_bottom` is where the details above have to stop: the top of the
-    # queued-orders block when there is one, else the panel's own floor.
-    # Route mode suppresses them for a different reason than history: their × and
-    # row buttons would mutate `auto_forward` underneath the plan being previewed,
-    # and the panel's space is better spent on what confirming would do.
-    if ui.history or ui.mode == ROUTING:
-        ui.order_hitboxes = []
-        ui.forward_hitboxes = []
-        ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
-        content_bottom = py + ph - config.s(8)
-    else:
-        content_bottom = _draw_order_list(surface, state, ui)
+    # `content_bottom` is where the details have to stop: the panel's own floor.
+    content_bottom = py + ph - config.s(8)
 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.in_pbp:
@@ -1608,143 +1594,11 @@ def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -
     return y + h + config.s(10)
 
 
-_ORDER_ROW_H = 22  # normal row pitch
-_ORDER_ROW_SEL_H = 36  # a selected row grows, so its × delete button is easy to hit
-
-
-def _draw_order_list(surface, state: GameState, ui: Ui) -> int:
-    """Bottom-of-panel list of queued orders, followed by standing auto-forward
-    rules. Records an (index, row, delete) hit-rect per order on
-    ``ui.order_hitboxes`` and a (source_id, row, delete) hit-rect per rule on
-    ``ui.forward_hitboxes``, both for input to test clicks against. The
-    currently-selected row is drawn taller with a bigger delete button, so it can
-    be removed by tap on touch (where the keyboard X shortcut isn't available).
-
-    The block is capped at part of the panel so the system details above it are
-    never pushed off the top, and scrolls (``ui.order_scroll``, driven by the ▲/▼
-    buttons or the wheel over the panel) when there is more than fits — every entry
-    stays reachable, which a bare "+N more" line could not promise.
-
-    Returns the y this block starts at — the floor for whatever the panel draws
-    above it, so the help text can't run down into the list."""
-    ui.order_hitboxes = []
-    ui.forward_hitboxes = []
-    ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
-    w, h = surface.get_size()
-    px = w - config.HUD_RIGHT_W
-    # the panel's footer is the big End Turn button, not the ordinary bottom bar
-    bottom = h - config.END_TURN_H
-    floor = bottom - config.s(8)
-    rules = sorted(ui.auto_forward.items())  # stable order across frames
-    if not ui.pending and not rules:
-        ui.order_scroll_max = 0
-        return floor
-
-    font = _fonts()["small"]
-    x = px + config.s(12)
-    row_w = config.HUD_RIGHT_W - config.s(24)
-    gap = config.s(2)
-    # a row is at least tall enough for its own text, whatever the scale does
-    rh = max(config.s(_ORDER_ROW_H), font.get_height() + config.ROW_GAP)
-    rh_sel = max(config.s(_ORDER_ROW_SEL_H), rh + config.s(10))
-    arrow = _tap_size(config.s(18))
-    title_h = max(_row_h(), arrow + config.s(4))
-
-    # orders first, then rules; each order carries its own index into `pending`, so
-    # a scrolled window still deletes and selects the right one.
-    entries = [("order", i) for i in range(len(ui.pending))] + [("rule", src) for src, _ in rules]
-    n = len(entries)
-
-    def selected_of(kind, key) -> bool:
-        return key == (ui.sel_order if kind == "order" else ui.sel_forward)
-
-    def row_h(kind, key) -> int:
-        return rh_sel if selected_of(kind, key) else rh
-
-    # Half the panel at most: the details above are about whatever you have
-    # selected right now, and used to get overrun by a long list.
-    panel_h = bottom - config.HUD_TOP_H
-    avail = max(rh, panel_h // 2 - title_h - config.s(8))
-
-    def page_from(start: int) -> list:
-        """The entries that fit when the window starts at ``start``."""
-        out, used = [], 0
-        for e in entries[start:]:
-            if used + row_h(*e) > avail:
-                break
-            out.append(e)
-            used += row_h(*e)
-        return out
-
-    # Furthest useful scroll: the first start whose page still reaches the last
-    # entry, so scrolling can't strand you on a part-empty window past the end.
-    max_scroll = max(0, n - 1)
-    for start in range(n):
-        if start + len(page_from(start)) >= n:
-            max_scroll = start
-            break
-    ui.order_scroll_max = max_scroll
-    first = max(0, min(ui.order_scroll, max_scroll))  # tolerate a stale offset
-    shown = page_from(first)
-
-    block_h = title_h + sum(row_h(*e) for e in shown)
-    top = bottom - config.s(8) - block_h
-    rule_y = top - config.s(6)
-    pygame.draw.line(surface, (40, 44, 60), (px + config.s(8), rule_y), (px + config.HUD_RIGHT_W - config.s(8), rule_y), config.s(1))
-    title = f"Queued ({n})" if max_scroll == 0 else f"Queued ({first + 1}-{first + len(shown)}/{n})"
-    _text(surface, font, title, config.COLOR_TEXT_DIM, midleft=(x, top + title_h // 2))
-    if max_scroll > 0:
-        down = pygame.Rect(x + row_w - arrow, top + (title_h - arrow) // 2, arrow, arrow)
-        up = pygame.Rect(down.x - arrow - config.s(4), down.y, arrow, arrow)
-        _draw_arrow_button(surface, up, up=True, enabled=first > 0)
-        _draw_arrow_button(surface, down, up=False, enabled=first < max_scroll)
-        ui.order_up_rect = (up.x, up.y, up.w, up.h)
-        ui.order_down_rect = (down.x, down.y, down.w, down.h)
-
-    y = top + title_h
-    hcolor = config.player_color(ui.human_id)
-    for kind, key in shown:
-        selected = selected_of(kind, key)
-        this_h = rh_sel if selected else rh
-        row = (x, y, row_w, this_h - gap)
-        if kind == "order":
-            o = ui.pending[key]
-            label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
-        else:
-            dest, keep = ui.auto_forward[key]
-            label = f"{key}->{dest}   keep {keep}"
-        if selected:
-            pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=config.s(4))
-        dsz = config.s(26) if selected else config.s(16)
-        dr = (x + row_w - dsz - config.s(2), y + (this_h - gap - dsz) // 2, dsz, dsz)
-        _draw_x_button(surface, dr, boxed=selected)
-        _text(surface, font, label, config.COLOR_SELECT if selected else hcolor, midleft=(x + config.s(6), y + (this_h - gap) // 2))
-        if kind == "order":
-            ui.order_hitboxes.append((key, row, dr))
-        else:
-            ui.forward_hitboxes.append((key, row, dr))
-        y += this_h
-    return rule_y - config.s(6)
-
-
-def _draw_arrow_button(surface, rect: pygame.Rect, up: bool, enabled: bool) -> None:
-    """A ▲/▼ scroll button for the queued list — drawn rather than typed, since the
-    monospace font has no arrow glyph (same reason as ``_draw_return_glyph``). A
-    disabled one still draws, dimmed, so the pair doesn't jump about as you scroll.
-    """
-    color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
-    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
-    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
-    cx, cy = rect.center
-    r = max(2, rect.w // 5)
-    pts = [(cx - r, cy + r // 2), (cx + r, cy + r // 2), (cx, cy - r)] if up else [(cx - r, cy - r // 2), (cx + r, cy - r // 2), (cx, cy + r)]
-    pygame.draw.polygon(surface, color, pts)
-
-
 def _draw_h_arrow_button(surface, rect: pygame.Rect, left: bool, enabled: bool) -> None:
-    """A ◀/▶ step button for the history scrubber — the same drawn-triangle idiom
-    as ``_draw_arrow_button``, just turned sideways. A disabled one (at either end
-    of the history) still draws, dimmed, so the pair doesn't shift as you scrub."""
+    """A ◀/▶ step button for the history scrubber — drawn rather than typed, since
+    the monospace font has no arrow glyph (same reason as ``_draw_return_glyph``).
+    A disabled one (at either end of the history) still draws, dimmed, so the
+    pair doesn't shift as you scrub."""
     color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
     pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
     pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
@@ -1877,10 +1731,8 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
 # this off at `content_bottom` rather than spilling, with no ellipsis and no
 # scroll, so every line past the panel's floor is prose nobody ever reads the end
 # of. An empty panel holds 23 rows on the touch build and 28-35 on a desktop or
-# browser one; the queued list takes up to half of that back, leaving 11-16. The
-# touch text is the binding case, which is the wrong way round — it is the build
-# with no keyboard shortcuts to fall back on, and it was the one losing whole
-# paragraphs. So only what has to be taught lives here (the goal, the send, the
+# browser one, and the touch text is the binding case, which is the wrong way
+# round — it is the build with no keyboard shortcuts to fall back on. So only what has to be taught lives here (the goal, the send, the
 # standing rule), ordered with the most droppable line last, and anything a
 # control already explains at the point of use stays there instead: route mode's
 # two sub-modes are described by `_panel_route` once it is open, and the actions
@@ -1913,9 +1765,8 @@ Drag to pan, wheel to zoom."""
 
 # History review is a different scene with different controls, so it gets its own
 # pair rather than the live-play text above: none of the live legend's verbs work
-# while scrubbing (there is no turn to end and no order to give — `_draw_side_panel`
-# hides the queued list, and `input._handle_history_event` is modal and answers
-# nothing else), and none of the controls that *do* work here are named there.
+# while scrubbing (there is no turn to end and no order to give —
+# `input._handle_history_event` is modal and answers nothing else), and none of the controls that *do* work here are named there.
 _LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
 Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.

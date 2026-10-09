@@ -458,8 +458,8 @@ already resolve simultaneously. The rationale for each rule is in
   `edit_order`, `edit_forward`; `Ui.editing_existing`). A dormant rule never
   opens it (`Ui.rule_is_live`; `prune_forward` deletes rules whose source was
   taken). Its slider is hit-tested before the panel drag.
-- **The queued list is capped and scrolled** (`ui.order_scroll`), and each row
-  carries its own index into `pending` (`ui.order_hitboxes`).
+- **Orders and rules are reached from the map** (`input._pick_lane`, repeat
+  clicks cycle a shared lane); the side panel has no list of them.
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:

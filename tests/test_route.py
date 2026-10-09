@@ -683,18 +683,17 @@ def test_render_zeroes_end_turn_so_it_cannot_be_hit_while_routing():
         pygame.quit()
 
 
-def test_render_suppresses_the_panel_lists_while_routing():
-    """Their × buttons would mutate auto_forward underneath the preview."""
+def test_render_suppresses_clear_forwarding_while_routing():
+    """It would mutate auto_forward underneath the preview."""
     state, ui = _display_setup()
     try:
         screen = pygame.display.get_surface()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
         render.draw(screen, state, ui)
-        assert ui.forward_hitboxes                 # normally listed
+        assert ui.clear_forward_rect != (0, 0, 0, 0)   # normally offered
         ui.begin_route()
         render.draw(screen, state, ui)
-        assert ui.forward_hitboxes == [] and ui.order_hitboxes == []
         assert ui.clear_forward_rect == (0, 0, 0, 0)
     finally:
         pygame.quit()

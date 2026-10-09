@@ -1241,28 +1241,9 @@ def test_lane_click_cycles_orders_on_same_lane():
 # --------------------------------------------------------------------------- #
 # Editing standing auto-forward rules
 # --------------------------------------------------------------------------- #
-def test_click_rule_row_reopens_the_popup_on_the_forward_tab():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
-
-        _click_pos(state, ui, (110, 105))
-        assert ui.sel_forward == home
-        assert ui.sel_order is None
-        assert ui.mode == CHOOSING and ui.forward_armed
-        assert (ui.selected, ui.dest) == (home, nbr)
-        assert ui.keep == 2
-        assert ui.editing_existing
-    finally:
-        pygame.quit()
-
-
-def test_click_rule_lane_selects_it():
+def test_click_rule_lane_reopens_the_popup_on_the_forward_tab():
     """Clicking a rule's chevron lane reopens the popup on it, just like a queued
-    order's lane — the panel row is no longer the only way in."""
+    order's lane."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -1273,6 +1254,8 @@ def test_click_rule_lane_selects_it():
         assert ui.sel_forward == home
         assert ui.sel_order is None
         assert ui.mode == CHOOSING and ui.forward_armed and ui.keep == 2
+        assert (ui.selected, ui.dest) == (home, nbr)
+        assert ui.editing_existing
     finally:
         pygame.quit()
 
@@ -1329,18 +1312,17 @@ def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
 
 
 def test_dormant_rule_is_highlighted_but_never_opens_the_popup():
-    """A rule whose source we no longer hold stays in the list, but the popup reads
-    that source's garrison and would let the Send tab queue an order out of enemy
-    territory — so it highlights only."""
+    """A rule whose source we no longer hold is still a rule until the turn prunes
+    it, but the popup reads that source's garrison and would let the Send tab queue
+    an order out of enemy territory — so it highlights only."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.auto_forward[home] = (nbr, 2)
         state.systems[home].owner_id = 2          # captured
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
 
-        _click_pos(state, ui, (110, 105))
+        ui.edit_forward(state, home)
         assert ui.sel_forward == home
         assert ui.mode != CHOOSING
         assert ui.selected is None and ui.dest is None
@@ -1375,20 +1357,6 @@ def test_lane_click_cycles_order_and_rule_on_same_lane():
         _click_pos(state, ui, mid); third = picked()
         assert {first, second} == {("order", 0), ("rule", home)}
         assert third == first          # wraps back around
-    finally:
-        pygame.quit()
-
-
-def test_click_rule_delete_button_removes_it():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
-
-        _click_pos(state, ui, (145, 105))
-        assert home not in ui.auto_forward
     finally:
         pygame.quit()
 
@@ -1497,100 +1465,22 @@ def test_right_click_closes_the_edit_popup_then_selecting_system_clears_it():
 
 
 # --------------------------------------------------------------------------- #
-# Queued-list scrolling
+# The wheel over the side panel
 # --------------------------------------------------------------------------- #
-def _queue_many(state, ui, count):
-    """Queue ``count`` distinct orders and draw, so the list lays itself out."""
-    from starconquest import render
-    from starconquest.model import Order
-
-    ids = sorted(state.systems)
-    for i in range(count):
-        src, dst = ids[i % len(ids)], ids[(i + 1) % len(ids)]
-        ui.pending.append(Order(1, src, dst, i + 1))
-    screen = pygame.display.get_surface()
-    render._FONTS.clear()
-    render.draw(screen, state, ui)
-    return screen
-
-
-def test_long_queue_scrolls_instead_of_hiding_entries():
-    """A queue too long for its capped block becomes scrollable, and every entry is
-    reachable — a bare '+N more' line left the overflow unmanageable."""
+def test_wheel_over_the_panel_leaves_the_map_alone():
+    """The wheel zooms over the map only; from the info panel a stray flick would
+    throw the camera about."""
     state, ui = _setup()
     try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        assert ui.order_scroll_max > 0, "40 orders should overflow the capped block"
-        assert ui.order_up_rect[2] > 0 and ui.order_down_rect[2] > 0
-
-        seen = set()
-        for _ in range(ui.order_scroll_max + 1):
-            seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-            _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-            render.draw(screen, state, ui)
-        seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-        assert seen == set(range(40)), "scrolling must reach every queued order"
-    finally:
-        pygame.quit()
-
-
-def test_deleting_a_row_while_scrolled_removes_that_order():
-    """The regression guard for the hit-rect index: rows carry their own index into
-    `pending`, so the second visible row of a scrolled list is not order #1."""
-    state, ui = _setup()
-    try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-        render.draw(screen, state, ui)
-        assert ui.order_scroll > 0
-
-        idx, _row, delete = ui.order_hitboxes[0]
-        assert idx == ui.order_scroll, "the first drawn row is the scroll offset"
-        doomed = ui.pending[idx]
-        before = len(ui.pending)
-        _click_pos(state, ui, pygame.Rect(*delete).center)
-        assert len(ui.pending) == before - 1
-        assert doomed not in ui.pending, "deleted the wrong order"
-    finally:
-        pygame.quit()
-
-
-def test_scroll_offset_survives_orders_being_removed():
-    """A stale offset (orders resolved out from under it) snaps back into range on
-    the next scroll rather than needing one press per vanished row."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
-        ui.order_scroll = ui.order_scroll_max
-        del ui.pending[5:]                       # most of the list goes away
-        _queue_many(state, ui, 0)                # redraw with the short list
-        ui.scroll_orders(1)
-        assert ui.order_scroll <= ui.order_scroll_max
-    finally:
-        pygame.quit()
-
-
-def test_wheel_over_the_panel_scrolls_the_list_not_the_map():
-    """The wheel means 'scroll this list' over the info panel and 'zoom' over the
-    map, so a flick while reviewing orders doesn't throw the camera about."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
         zoom = ui.view.zoom
         panel = (config.SCREEN_W - config.HUD_RIGHT_W // 2, config.SCREEN_H // 2)
         pygame.mouse.set_pos(panel)
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.order_scroll == 1
         assert ui.view.zoom == zoom, "the wheel must not zoom the map from the panel"
 
         pygame.mouse.set_pos((config.SCREEN_W // 4, config.SCREEN_H // 2))
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.view.zoom > zoom, "over the map the wheel still zooms"
-        assert ui.order_scroll == 1
     finally:
         pygame.quit()
 

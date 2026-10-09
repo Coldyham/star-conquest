@@ -323,11 +323,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
         pos = pygame.mouse.get_pos()
         if ui.count_adjust_active():
             ui.step_count(state, event.y)
-        elif _over_side_panel(pos):
-            # over the info panel the wheel belongs to the queued list, not the map
-            # (zooming the map from off-map was disorienting anyway)
-            ui.scroll_orders(-event.y)
-        else:
+        elif not _over_side_panel(pos):  # zooming the map from off-map is disorienting
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -486,7 +482,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
 
     if event.type == pygame.MOUSEWHEEL:
         pos = pygame.mouse.get_pos()
-        if not _over_side_panel(pos):  # the panel holds the route summary, not a list
+        if not _over_side_panel(pos):  # the panel holds the route summary, not the map
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -694,42 +690,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
             ui.popup_pos = (px, py)
             return None
 
-    # Scroll the queued list — the touch route to entries past the visible window
-    # (the wheel does it too, see handle_event). Tested before the rows below so a
-    # tap on a button never falls through to whatever row sits under it.
-    if ui.order_up_rect[2] and _point_in_rect(pos, ui.order_up_rect):
-        ui.scroll_orders(-1)
-        return None
-    if ui.order_down_rect[2] and _point_in_rect(pos, ui.order_down_rect):
-        ui.scroll_orders(1)
-        return None
-
-    # Clicks in the queued-orders panel take priority: a delete button removes
-    # its order, a row selects it for editing (scroll adjusts, X removes). Each row
-    # carries its own index into `pending`, since only a window of the list is drawn.
-    for idx, row, delete in ui.order_hitboxes:
-        if idx >= len(ui.pending):
-            continue
-        if _point_in_rect(pos, delete):
-            del ui.pending[idx]
-            ui.sel_order = None
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_order(state, idx)
-            return None
-
-    # Same panel, standing auto-forward rules: a delete button clears the
-    # rule, a row selects it for editing (scroll adjusts `keep`, X removes).
-    for src, row, delete in ui.forward_hitboxes:
-        if src not in ui.auto_forward:
-            continue
-        if _point_in_rect(pos, delete):
-            ui.clear_forward(src)
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_forward(state, src)
-            return None
-
     node = pick_node(state, ui, pos)
     if node is None:
         # Empty space near a lane selects the order or rule drawn there; repeat
@@ -782,7 +742,7 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int] | None:
 
     Orders and rules can share one lane (including opposite directions), so when
     more than one is in range a repeat click cycles through them all rather than
-    always grabbing the same one — the list panel can still target any directly.
+    always grabbing the same one — this is the only way in to any of them.
     """
     hits: list[tuple[float, tuple[str, int]]] = []
     for i, o in enumerate(ui.pending):

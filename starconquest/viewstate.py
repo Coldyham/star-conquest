@@ -214,21 +214,6 @@ class Ui:
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
     play_pause_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Hit-rects for the queued-orders panel, rebuilt by render each frame and
-    # tested by input (same store-rect-then-test handoff as end_turn_rect).
-    # (pending_index, row_rect, delete_rect) per drawn row — the index is carried
-    # explicitly rather than implied by position, because the list scrolls and only
-    # a window of it is drawn; a positional mapping would delete the wrong order.
-    order_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
-    # Queued-list scrolling: `order_scroll` is the first entry drawn, and render
-    # records how far it may go in `order_scroll_max` (0 == everything fits) along
-    # with the ▲/▼ button rects. The list is capped to part of the panel so the
-    # system details above it are never pushed off, so it can overflow well before
-    # the orders themselves become unmanageable.
-    order_scroll: int = 0
-    order_scroll_max: int = 0
-    order_up_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    order_down_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Hit-rects for the −/+ ship-count buttons flanking the active count label in
     # the send popup. Rebuilt by render each frame; zeroed when the popup is closed
     # (same handoff as end_turn_rect).
@@ -271,9 +256,6 @@ class Ui:
     # Below it, a button that clears only the rules pointed at a system we don't
     # hold; drawn (and hit-tested) only while at least one such rule exists.
     clear_dangerous_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Hit-rects for auto-forward rule rows, listed below the queued orders:
-    # (source_id, row_rect, delete_rect) tuples.
-    forward_hitboxes: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
     # History-mode hit-rects, rebuilt by render each frame and tested by input
     # (same store-rect-then-test handoff as end_turn_rect). `history_button_rect`
     # is the bottom-bar (and game-over overlay) toggle; the others are live only
@@ -1221,8 +1203,8 @@ class Ui:
         A *dormant* rule (`rule_is_live` false) is highlighted but not opened: the
         popup reads the source's garrison and the destination's owner unguarded, and
         pointing it at a system we don't hold would let the Send tab queue an order
-        out of someone else's territory. Highlighting still gives the list row, its
-        ×, and the X key something to act on.
+        out of someone else's territory. Highlighting still gives the X key
+        something to act on.
         """
         if self.mode == CHOOSING and self.forward_armed and self.selected == sid:
             return
@@ -1245,15 +1227,6 @@ class Ui:
     def clear_pending(self) -> None:
         self.pending.clear()
         self.sel_order = None
-        self.order_scroll = 0  # the list it scrolled through is gone
-
-    def scroll_orders(self, delta: int) -> None:
-        """Move the queued-list window by ``delta`` rows, clamped to what render
-        reported as scrollable. Clamps where we are *before* applying ``delta``, so
-        an offset left stale by removed orders snaps back on the first scroll
-        instead of needing one press per vanished row."""
-        here = max(0, min(self.order_scroll, self.order_scroll_max))
-        self.order_scroll = max(0, min(self.order_scroll_max, here + delta))
 
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""
