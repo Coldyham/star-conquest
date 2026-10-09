@@ -168,6 +168,9 @@ def label(status: Status | None, now: float | None = None) -> str | None:
         return None
     name = status.name
     if status.why in ("own", "own-home"):
+        if status.beat is not None:
+            turns, lost, _holder = status.beat
+            return f"{name}: yours, beat {turns}t / {lost} lost"
         return f"{name}: yours"
     if status.why == "no-name":
         return f"Campaign {name.lower()}"
