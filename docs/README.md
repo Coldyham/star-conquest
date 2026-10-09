@@ -45,6 +45,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
 | [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed; the planned opening (Opening: Planned) |
+| [`design/learner.md`](design/learner.md) | learner: each rival's habits read off the board and kept turn to turn, memory keyed by the game's path, how well it predicts the roster's launches and a person's, the gate it did not pass, the bot built on actuary anyway, and how its model became actuary's third stop (Style: Learning) |
 | [`design/convoy.md`](design/convoy.md) | convoy (built, measured, not shipped; code at `7153065`): supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
@@ -100,7 +101,7 @@ only for a fight; what is deliberately not animated.
 - **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
-  - *Through `build_state`*; *what the replayed seat is tuned to* (`REPLAY_AUX`); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
+  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
@@ -116,7 +117,9 @@ only for a fight; what is deliberately not animated.
 ### design/bots.md
 - **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.
 - **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
+- **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built, and learner's model (stage 1, `learner.md`); duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Also two measurement ideas not yet built.
 - **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
+- **The person's habits.** A pointer to `learner.md`.
 - **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
 - **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime. The first position-suite numbers.
 - **Replaying a bot for the leaderboard.** Best profile, not menu default. Guards lifted 100x (`inf` in tests). The seat-flag incident, and how a stored replay and the autoplay fix resolved it.
@@ -142,7 +145,23 @@ only for a fight; what is deliberately not animated.
 - **Where actuary stands.** Four map cells, free-for-all, the combat sliders. Weak at 24 nodes 3 ly/turn and at jitter 0.3.
 - **As one of knower's borrowed candidates (measured, not shipped).** 10.4% of contested picks, distinct from the default 91% of the time.
 - **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
+- **The 2026-10 sweep: off the plateau.** 58,400 duels against marshal: `MIN_GAIN` 0 (+7.4 pooled, +18.6 at 24 nodes 3 ly/turn) and `FRONT_DECAY` 0.75 (+5.6) win in every cell; risk and reinforce weights confirmed. Reproduced on fresh seeds, where the two do not stack and a horizon cap of 8 does nothing. `MIN_GAIN` 0 costs 7-13% a decide at default sizes, 51% at 80 nodes. It also wins against thinker, knower-Predict, across the advantage sliders and in free-for-all; level-to-better against knower at Search. Shipped as `MIN_GAIN` 1e-9 (exactly 0 commits float noise; level with 0 over 12,000 games), with `decide_ms` refitted to `6.4 * (nodes/40)^0.77`.
+- **Behind on income, ahead on ships (measured, not built).** A switch to recklessness while a ship lead runs out against an income gap. The standing is 7% of post-contact turns, mostly a 1-2 ship lead for 2 turns; a real lead on a short clock came up 4 times in 84 actuary games. Behind on both is where seats lose.
 - **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; a side too small to plan (under 7 systems held plus region) is left to the ledger; it costs marshal as a host; the deleted first attempt (rules about contested neutrals).
+
+### design/learner.md
+- **Why the oracle flag does not make memory safe.** Every caller that runs a bot's `decide` on copies, branches, isolated positions or rewound boards, and `load_models` wiping module state.
+- **The memo tree.** A board is a node found by content; its parent is a stored board it provably follows (`_follows`). What a cold start costs.
+- **What a turn shows** and **the model and the prior.** Fresh fleets, one-turn launches from the garrison residual, strike records by ratio, send share, guard, evacuation; the prior fitted from roster self-play.
+- **The prediction check (`tools/learner_check.py`).** Four predictors (none, all, prior, learner), Brier and squared ship error; the two plan measures replaced before the first reading. Results in four cells on two seed ranges; what the model can tell apart (guard and evacuation, not the strike curve).
+- **Sizing a strike to its target, and splitting the strike from the target.** Re-read under actuary's `MIN_GAIN` 1e-9. Sizing kept: ship error down in 5 of 8 cell-runs, most at 24 and 40 nodes. The split deleted. The all-in share separates the roster.
+- **Predicting people (`--logs public`).** Posted human games scored offline. Memory beats the prior on people by 3.6% of Brier; knower's blind guess at a person, read as a forecast, is worse than assuming they hold, which backs `TRUST_HUMAN` off. What the model reads off people.
+- **The person's habits (`tools/human_habits.py`).** Posted games against roster self-play. 2/3 of players' ships marks a won game, and players' income crosses earlier but less reliably. The overkill is the endgame. The person empties frontier systems with relief covered 45% of the time (winning actuary 22%); a replayed log rewrites `config`. Frontier losses per system-turn.
+- **As a bot.** actuary's ledger on a board with the expected launches added; the Trust knob (Off = actuary exactly, Raise); against actuary Raise is level; first on the roster ladder, mostly because the oracle flag stops knower reading it (worth ~20 points against knower to any bot that claims it). 0.08 from actuary on contested positions, closer than any two roster bots.
+- **Trusting a prediction (built, measured, deleted).** Thinning a source by its expected launch (Trust) and trusting confident calls once proven per rival (Sure). The model's calibration: confident calls are rare and not sharper late in a game.
+- **The gate.** Still not passed: memory wins on whether a strike comes, and the ship-error failures left are mostly intervals that cross zero. *Open:* whether that is power (a gate decision), and a strike curve that tells the bots apart.
+- **Joining actuary as a stop: the gate (written, not run).** Superseded by the next section. Raise against Off (both flagged, so the model alone) through `tools/sweep.py`: against stock actuary as a null control, marshal, and knower at Predict and Search, in actuary's five 2026-10 cells, fresh seeds from 6001. What passing means (a third stop on actuary's knob, above Planned) and failing (stays on the branch). Proposed improvements, each an extra arm: the prediction as the risk term's reach (Raise charges a threat twice), the strike and no-strike outcomes priced separately in place of an expected fleet, and evacuation and guard fed into the price of a capture.
+- **Learning: the curve in the risk term.** Built 2026-10-09 as actuary's third Style stop. Assuming a rival will not strike is close to right, and a launch cannot be recalled, so Raise (threat only) was the wrong use. Learning scales each rival garrison in actuary's risk by min(1, `LEARN_REACH` x the rival's strike curve at the ratio to the garrison we will hold). Raise, and Raise kept to unanswerable strikes: level with actuary. A flat reach scaled by `predict`'s call: better against marshal only. The curve read at the projected garrison: `LEARN_REACH` 8, plateau 8-13; on fresh seeds better against marshal (z +2.46, all at 18 systems), a lean against knower Off, level with actuary; against knower Predict and Search, with the oracle claim held equal (Planned flagged too), a lean of z +1.5 / +0.8, not significant; the rest of that row is the claim. Slow, fast and jitter 0.06: better against marshal in all three (z +2.0 to +3.0), better against actuary in the slow cell, nowhere worse; the free-for-all leans better (3 and 4 seats). 15-20% more per decide. The knob, the per-seat oracle claim, and the readings moved to `tools/learner_check.py`.
 
 ### design/convoy.md
 - **The plan.** Supply per system and turn, objectives as N ships by turn t, defences then guard reservations then strikes by value per ship, launch at the last moment.
@@ -225,7 +244,17 @@ the measured result was indistinguishable from the baseline.
 - The planned opening in front of marshal: worse in every cell. *In front of marshal it costs.*
 - Handing the opening over 2 or 3 lanes from a rival: fixes small maps, gives back the 40-80 node gain. A side floor of 9-16: costs a little at 24-80 nodes. *A side too small to plan.*
 - Trying several `aux` values per map in the bot column and keeping the best: mostly picks the luckier dice (one board ranges 13-165 turns on dice alone); fix the bot instead. *Same section.*
-- **Open, not rejected:** clock 3 for the slow regime. Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
+- `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
+- **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
+- Pricing strikes at the nominal roll and dropping the risk weight while behind on income but ahead on ships: not built, since a real lead on a short clock arises 4 times in 84 games (2 across the posted human games) and a real lead is already converted 87% of the time. Variance-seeking while behind on both: unmeasured. *Behind on income, ahead on ships.*
+- `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*
+
+### learner ([`design/learner.md`](design/learner.md))
+- Thinning a rival's source by its expected launch (Trust): 44% against actuary, worse than Raise; a source sends nearly all or nothing, so an expected value is the wrong thing to deduct. *Trusting a prediction.*
+- Trusting confident calls (p 0.5+) against a rival once 70% have come true (Sure): indistinguishable from Raise; the gate stays shut against actuary and opening it against marshal buys nothing. *Same section.*
+- Splitting a strike into "does this source strike at all" and "which target": behind the per-target curve on strike chance in all 8 cell-runs, its prior too; did not separate the bots. Deleted. *Sizing a strike to its target, and splitting the strike from the target.*
+- Raise (each predicted strike added as a fleet), with or without keeping only the strikes we could not answer after seeing them: level with actuary; a prediction that can only add threat only adds caution. Its file was deleted when the model joined actuary. *Learning: the curve in the risk term.*
+- Scaling actuary's risk by `predict`'s call at today's garrison (flat K, 1-64): better against marshal, worse against knower Off and actuary; relaxing thins the garrison the call was made at. A per-rival calibration correction points the wrong way (knower's low calls strike less than predicted). *Same section.*
 
 ### convoy ([`design/convoy.md`](design/convoy.md))
 - Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*

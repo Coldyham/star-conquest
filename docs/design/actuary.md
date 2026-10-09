@@ -5,7 +5,10 @@ shared skeleton. Every other bot from claudebot up walks the systems it owns in
 phases (budget, defend, strike, flow the rest forward). actuary has no phases.
 It projects the whole board forward, values it in ships, and commits whichever
 launch raises that value most until none does. By default the land-grab, up to
-first contact, is played by a planner instead; see "The planned opening". Roster-wide rules and the measurement checklist are in
+first contact, is played by a planner instead; see "The planned opening". A
+third stop, *Learning*, also prices the risk next door by a model of each rival
+kept from turn to turn; it is in [`learner.md`](learner.md), "Learning: the
+curve in the risk term". Roster-wide rules and the measurement checklist are in
 [`bots.md`](bots.md). Index: [`../README.md`](../README.md).
 
 ## The ledger and the greedy
@@ -74,7 +77,8 @@ bigger stack keeps more than the ships added to it). `tests/test_actuary.py`
 checks both shortcuts change no answer, and that a priced gain equals the
 ledger recomputed from scratch.
 
-Per decide, native CPython, load average ~2 (2026-10):
+Per decide, native CPython, load average ~2 (2026-10, at `MIN_GAIN` 0.05, before
+the sweep below; for today's cost see its "What it costs"):
 
     18 nodes, 6 ly/turn    median 1.6 ms   p99  8.6 ms
     24 nodes, 3 ly/turn    median 1.8 ms   p99 11.0 ms
@@ -85,14 +89,18 @@ That is two to three orders of magnitude above the phase bots (microseconds).
 It matters to knower: a Search seat runs every non-oracle rival's `decide` on
 each rolled turn of each line, so against actuary its 150 ms `SEARCH_BUDGET_S`
 trips sooner and the search stops shallower. actuary declares its cost
-(`decide_ms`: 75th-percentile ms = `5.0 * (nodes / 40) ** 0.55`, fitted to a grid
-of 18-120 systems, 3-18 ly/turn and 2-5 seats at load 0.05, where seats and ship
-speed barely moved it), and knower's setup warning counts it; see "Cost per
+(`decide_ms`: 75th-percentile ms = `6.4 * (nodes / 40) ** 0.77`. It was first
+fitted as `5.0 * (nodes / 40) ** 0.55` to a grid of 18-120 systems, 3-18 ly/turn
+and 2-5 seats at load 0.05, where seats and ship speed barely moved it, and was
+refitted for the lower `MIN_GAIN` in "What it costs" below), and knower's setup warning counts it; see "Cost per
 decide" in [`knower.md`](knower.md). Offline runs (`bot_replay`, `tests.sim`
 with guards lifted) are unaffected. The oracle's single call per turn is well
 inside its 50 ms.
 
 ## Where actuary stands
+
+Measured before `MIN_GAIN` came down from 0.05 (see "The 2026-10 sweep"), so these
+understate it, most of all at 24 nodes 3 ly/turn.
 
 Head to head, both seatings, seeds 301-340 (80 games a cell, timeouts left
 out), win rate is actuary's:
@@ -184,13 +192,197 @@ noise except one:
 at least as good as 0.25 in five of six cells (+4 points against marshal over
 200 games at the default cell, +12 against knower-0 at 24 nodes 3 ly/turn, +7
 and +9 at 40 nodes), and 0.75 was no better than 0.5. Shipped at 0.5. None of
-the others has been tuned. A real sweep should start with the slow regime.
+the others had been tuned then. The plateau was a small-sample reading: see the
+next section, where two of these constants are a long way off it.
+
+## The 2026-10 sweep: off the plateau
+
+`tools/sweep.py --strategy actuary`, every arm duelled against stock **marshal**
+(the baseline), both seatings, Planned opening throughout. Self-play was tried
+first and dropped: two actuaries stalemate to the 600-turn cap about half the
+time. Stock actuary is itself an arm, so each variant is compared with it on the
+same (cell, seed, seating). The diff counts a timeout as half a win, and the z
+is paired. "Inert" is the share of games bit-identical to stock's. Five cells:
+18 nodes @6 ly/turn, 24 @3, 40 @6, 24 @12, and 18 @6 at combat jitter 0.3. Seeds
+1-353 (about 700 games a cell, 3,400 an arm). The run was planned for 1,000 seeds
+and stopped at 58,400 games.
+
+Win rate against marshal; diff and paired z against stock:
+
+                       18@6    24@3    40@6    24@12   18@6 j0.3   pooled         z
+    stock              65.9    40.5    58.7    63.0    23.3        50.6
+    MIN_GAIN 0         +2.0   +18.6    +9.6    +3.1    +4.0        +7.4   (58.4)  +11.7
+    MIN_GAIN 0.5       -6.7    -7.0   -15.2    -5.2    -3.1        -7.4           -10.0
+    FRONT_DECAY 0.75   +2.8   +12.3    +7.0    +3.4    +2.3        +5.6   (56.4)   +8.7
+    FRONT_DECAY 0.25   -5.9    -5.8   -10.9    -4.2    -2.9        -5.9            -8.8
+    RISK_WEIGHT 1.0   -12.3   -11.6    -5.0    -0.8    -4.3        -6.8            -9.3
+    RISK_WEIGHT 0.3    -5.9    -1.1    -6.5     0.0    -0.1        -2.7            -3.9
+    TAIL_TURNS 14      -5.9    -3.4    +0.7    +1.0    -3.1        -2.1            -2.9
+    TAIL_TURNS 36      -1.8    +4.9    -3.1    +1.8    +2.4        +0.8            +1.3
+    REINFORCE 0        -3.4    -2.5    -3.0    -1.8    +1.6        -1.8            -3.3
+    REINFORCE 0.6      -1.8    -1.1    +2.1    +1.5    -0.4        +0.1            +0.1
+    HORIZON_PAD 1      +1.1    +2.4    -0.8    +1.0    +2.0        +1.1            +1.7
+    HORIZON_PAD 6      -1.6    +0.5    -2.5    +0.1    +2.5        -0.2            -0.3
+    OPENING_CLOCK 3    -1.4    +1.5    +0.9    +2.6    +0.9        +0.9            +1.4
+
+**Two constants were off the plateau, and both bite hardest in the slow cell.**
+`MIN_GAIN` and `FRONT_DECAY` are monotonic over the three values tried. Each is
+better in every cell at the lower `MIN_GAIN` or higher `FRONT_DECAY`, and worse
+in every cell the other way. At 24 nodes 3 ly/turn, `MIN_GAIN` 0 takes actuary
+from 40.5% to 60.8% against marshal and `FRONT_DECAY` 0.75 to 53.8%, which closes
+the slow-regime weakness in "Where actuary stands". A guess, not tested: in
+the slow cell a single launch moves the ledger less per turn of horizon, so a
+fixed 0.05 floor refuses moves that pay. A slower decay keeps the front's pull
+alive across long interior lanes.
+
+**`RISK_WEIGHT` 0.6 and `REINFORCE_WEIGHT` 0.3 are where they should be.** Both
+directions cost. Nothing else moved clearly. `OPENING_CLOCK_SCALE` 3, the open
+question from "The clock is about twice the earliest strike", is +1.5 in the
+slow cell and +0.9 pooled (z +1.4): not a finding.
+
+**The horizon cap could not be tested at 12 or 20.** The horizon is the longest
+lane plus `HORIZON_PAD`, a median of 11 turns at 24 nodes 3 ly/turn (10-13), 8 at
+18 @6, 6 at 40 @6 and 5 at 24 @12. Both arms were inert. A cap that bites in the
+slow cell would be 6-8.
+
+**Confirmed on fresh seeds; the two do not stack.** Same harness and cells, seeds
+2001-2600 (about 1,150 games a cell, 5,750 an arm), pooled diff against stock and
+paired z:
+
+                       18@6    24@3    40@6    24@12   18@6 j0.3   pooled         z
+    stock              64.4    43.1    56.3    65.8    24.8        51.2
+    MIN_GAIN 0         +3.4   +16.7   +12.5    +2.9    +2.2        +7.5   (59.1)  +15.1
+    MIN_GAIN 0.02      +2.2    +3.5    +3.7    +1.5    +1.2        +2.4            +5.1
+    FRONT_DECAY 0.75   +1.8   +10.8    +9.7    +1.6    +1.9        +5.2           +10.5
+    FRONT_DECAY 0.85   +2.8   +14.0   +10.0    +1.3    +1.5        +5.9           +11.7
+    both (0, 0.75)     +3.8   +15.7   +11.8    +2.2    +2.0        +7.1           +14.0
+    both (0, 0.85)     +2.0   +14.5   +10.7    +2.0    +1.5        +6.2           +11.8
+    HORIZON_MAX 8      -0.0    -0.2    +0.0    +0.0    +0.0        -0.1            -0.2
+
+`MIN_GAIN` 0 reproduces to the decimal and is positive in every cell. Most of
+it is lost at 0.02, so the floor itself is the problem, not its size.
+`FRONT_DECAY` reproduces too, and 0.85 is at least as good as 0.75. Combined,
+they are no better than `MIN_GAIN` 0 alone. A guess, not tested: both let the
+greedy keep moving interior ships toward the front, one by valuing the front
+from further back and the other by accepting the small gains such a move books.
+A cap of 8 on the horizon binds only in the slow cell (it is inert in 95-100% of
+games elsewhere) and does nothing there either. A long horizon is not the
+slow-regime weakness.
+
+**What it costs.** `MIN_GAIN` 0 commits more launches, and each commit
+re-prices. Timed on the machine idle (load under 1), one process, every variant
+on the same positions (stock actuary against marshal, seeds 5001-5006, up to 250
+turns), p75 ms per decide and mean orders:
+
+                    stock           MIN_GAIN 0      FRONT_DECAY 0.75   both (0, 0.75)
+    18 @6        2.97   2.5       3.22   3.5       3.18   3.1         3.21   3.5
+    24 @3        4.54   2.3       5.99   5.8       5.58   4.7         6.02   5.8
+    40 @6        3.98   2.8       4.26   3.7       4.20   3.5         4.23   3.7
+    24 @12       2.37   2.4       2.68   3.8       2.66   3.2         2.68   3.8
+    80 @6       11.70   7.1      17.71  19.1      15.06  13.0        17.79  19.1
+
+That is 7-13% on the default-sized maps, 32% in the slow cell and 51% at 80
+nodes. The cost grows with size faster than `decide_ms`'s exponent of 0.55
+assumes. Timeouts in the slow cell also rise, from 7.8% to 10.8%.
+
+**The `decide_ms` refit.** The first fit's machine is not this one, so only a
+ratio is carried over, as knower's "Cost per decide" does. The grid was 18, 24,
+40, 80 and 120 systems x 3/6/18 ly/turn x 2/5 seats, with every seat stock actuary
+and seeds 1-2 to turn 200. Every live seat was timed every 5 turns with both
+constants on the same position, using thread CPU time, at load under 1. The p75
+ratio, `MIN_GAIN` 0 over 0.05, ran 1.0-1.25 at 18-24 systems, 1.0-1.8 at 40,
+1.2-1.6 at 80 and 1.4-2.2 at 120. Fitted:
+
+    ratio  1.33 x (systems/40)^+0.22 x (seats/2)^-0.07 x (ly/6)^-0.03
+    systems only:  1.28 x (systems/40)^+0.22
+
+Seats and speed barely move it, as before. Folded into the old fit, that gives
+`COST_DECIDE_MS` 6.4 (5.0 x 1.28) and `COST_NODES_EXP` 0.77 (0.55 + 0.22): 7.2 ms
+at 64 systems where it was 6.5, and 14.6 at 120 where it was 9.1.
+
+**Against the rest of the roster it holds.** Same harness, stock and `MIN_GAIN` 0
+as the only arms, seeds 3001 on (150 seeds, 300 paired games a cell; knower at
+Search 100 seeds, cut short at 40 nodes). Win rate stock → `MIN_GAIN` 0:
+
+                        vs thinker      vs knower-1      vs knower-2 (Search)
+    18 @6               94.2 → 95.5     70.5 → 78.2      41.0 → 43.5  (z +0.9)
+    24 @3               87.8 → 95.8     65.8 → 76.8
+    40 @6               97.3 → 99.7     50.7 → 70.8      37.1 → 45.7  (n 70, z +1.9)
+    24 @12              96.5 → 96.5     51.0 → 53.8
+    18 @6 jitter 0.3    63.3 → 68.3     43.7 → 45.7
+    pooled diff         +3.3 (z +5.9)   +8.7 (z +8.9)
+
+Against marshal across the advantage sliders, pooled +7.2 (z +6.6): at 18
+nodes 59.5 → 64.3 (advantage 0.75) and 54.3 → 61.8 (1.5), at 40 nodes 56.7 →
+69.0 and 58.7 → 63.0. Free-for-all (`tests.sim --swap`, actuary + marshal +
+thinker, seeds 301-400, 300 games each, the variant as a scratch copy of the
+module): actuary's share of wins 61% → 63% at 18 nodes and 61% → 69% at 40,
+taken mostly from marshal. No cell got worse. knower at Search is the one
+opponent where the gain is not yet clear of the noise, at a small sample.
+
+**Shipped** (2026-10) as `MIN_GAIN` 1e-9, with `FRONT_DECAY` left at 0.5 and
+`decide_ms` refitted. The floor is an epsilon, not exactly 0. At 0 a launch the
+`_idle` prune skips as unable to pay could still price at +4e-15 of float noise
+when priced, so the cached and uncached plans disagreed (`test_the_caches_change_no_answer`).
+The two floors choose different orders on 4.5% of decides. Paired against each
+other through marshal, seeds 4001-5200 in the same five cells (12,000 games), 1e-9
+reads -0.12 points (z -1.1), and no cell is significant: the same bot.
+
+## Behind on income, ahead on ships (measured, not built)
+
+The ledger values ships, and gives ground rather than lose them: a doomed
+garrison leaves, and while it is behind no strike clears the worst roll. Asked
+from two games against learner (2026-10-08), the idea was a switch for one
+standing: behind the top-income rival on income but ahead on ships. That ship
+lead is a wasting asset, gone in *ship lead ÷ income gap* turns (the clock).
+Holding still lets it run out, and when the expected outcome is a loss, variance
+is worth buying. While the clock is short, the switch would price strikes at the
+nominal roll and drop `RISK_WEIGHT` towards 0.
+
+**How often the standing arises** was counted first, since a switch that changes
+rare decisions measures null on the ladder whether or not the idea is right
+(learner's Trust, [`learner.md`](learner.md)). The method:
+
+- **Games:** 280 roster self-play games, the eight `models/` bots in every
+  pairing, both seatings, at 6 ly/turn: 11, 18 and 24 nodes with two seats, and
+  11 and 18 with three (56 games a cell). Also the 142 posted human games.
+- **Standing:** each seat on each turn after contact (it borders a rival), against
+  its top-income rival, with ships counted in garrisons and in flight.
+
+Share of post-contact seat-turns, and how often that seat went on to win:
+
+                                  self-play          posted human games
+    ahead on both                 37%   79%          27%   90%
+    ahead on income only           6%   39%           5%   52%
+    behind on income, ahead ships  7%   31%           7%   31%
+    behind on both                48%    4%          56%    4%
+
+**The standing is mostly parity, and a real lead is already converted.**
+- **Short episodes, tiny leads.** Episodes last a median of 2 turns. On a short
+  clock (under 10 turns) the median lead is 1-2 ships, and the episode mostly
+  ends with the lead lost in one exchange, not worn away by income.
+- **A real lead is rare and already won.** With a lead of 20%+ of the rival's
+  ships, actuary has 76 such episodes in its 84 games and wins 87% of them;
+  learner has 68 and wins 74%.
+- **The switch's case is a handful.** A real lead on a short clock happens 4
+  times in actuary's 84 games, 7 in learner's, and twice for actuary across the
+  posted games. Every posted game is a win for the person, so the bots' win
+  rate there says nothing.
+
+Not built: the switch would change too few decisions to measure. The standing
+where seats actually lose is behind on both, about half of all post-contact
+turns, and it was the real one in the game that prompted this. Variance-seeking
+there is a separate idea, unmeasured. A seat short of ships has less to gamble
+with.
 
 ## The planned opening (Opening: Planned)
 
-The seat's `aux` knob (`AUX_LABEL` *Opening*) has two stops. *Planned* (1, the
-default, and anything above or unreadable) runs `opening(state, pid)` until the
-seat first borders a rival, and the ledger from then on. *Greedy* (0) is the
+The seat's `aux` knob (`AUX_LABEL` *Style*, *Opening* until 2026-10-09) has
+three stops. *Planned* (1, the default, and anything unreadable) runs
+`opening(state, pid)` until the seat first borders a rival, and the ledger from
+then on. *Learning* (2, and anything above) plays the same opening, and its
+ledger prices the risk with each rival's learned strike curve
+([`learner.md`](learner.md), "Learning: the curve in the risk term"). *Greedy* (0) is the
 ledger from the first turn, exactly as actuary played before the knob existed:
 0 of 930 decisions differed. Planned became the default before actuary was
 published, so no shared challenge link ever carried Greedy as actuary's
@@ -369,7 +561,7 @@ seats, 5-80 nodes, 8,778 paired games): +1.9 points at 24 nodes and under
 **Not a bot-column fix.** The board's bot column could instead try both stops
 on every map and keep the better. On this board that would mostly have picked
 the luckier dice, not the better opening, and it would choose the profile with
-hindsight per map where `bot_replay.REPLAY_AUX` chooses it once per bot. Fixing
+hindsight per map where `bot_replay.replay_aux` chooses it once per bot. Fixing
 the default fixes the board and the menu alike.
 
 **Open:** with two seats on 10-18 nodes Planned still trails Greedy a little on

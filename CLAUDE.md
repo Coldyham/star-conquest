@@ -15,7 +15,7 @@ a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
-`actuary` and `convoy`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
+`actuary`, `convoy` and `learner`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -59,6 +59,12 @@ uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/bot_distance.py             # how differently each bot plays
                                                 # the same positions, by phase
+uv run python tools/learner_check.py             # how well actuary's model of each
+                                                # rival (Style: Learning) predicts
+                                                # the roster's launches;
+                                                # --logs public: posted human games
+uv run python tools/human_habits.py             # how the person plays (posted games)
+                                                # against roster self-play
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
@@ -343,7 +349,7 @@ already resolve simultaneously. The rationale for each rule is in
   through the human's seat via `tests/sim.play_settings`, which goes through
   `build_state` so tuned knobs apply. The seat is handed over outright
   (`sim._hand_over` clears `is_human`), gets default `AiParams` except
-  `bot_replay.REPLAY_AUX`'s `aux`, and runs with wall-clock guards lifted 100x
+  `aux`, the top of its own slider (`bot_replay.replay_aux`), and runs with wall-clock guards lifted 100x
   (`ai.set_budget_scale`, a model's `BUDGET_SCALE`). `engine_rev` hashes the
   outcome modules, `models/` and `tests/sim.py`; `replay_rev` excludes `ai`,
   `models/` and the harness. `won`, never `turns`, decides a result. A win
@@ -401,6 +407,12 @@ already resolve simultaneously. The rationale for each rule is in
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
   advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
   callers prefer.
+- **A bot that remembers between turns keys its memory by the game's path**
+  (`models/actuary.py`'s memo tree, used at Style: Learning: a board finds its
+  parent by content), never by "the current game": `decide` also runs on copies,
+  branches, rewinds and isolated positions, and `ai.load_models()` wipes module
+  state. Such a seat answers `is_oracle_seat`, so knower models it rather than
+  running it. Detail: `docs/design/learner.md`.
 - **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
   never a constant**, with the jitter half floored at its `TUNED_SWING`, and
   floors its ask at `target.ships + 1`. Margins compare against the *effective*

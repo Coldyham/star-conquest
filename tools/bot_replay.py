@@ -98,24 +98,21 @@ _REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
 # stay out of `_REPLAY_MODULES`.
 _OUTCOME_HARNESS = ("tests", "sim.py")
 
-# Where a bot is replayed at something other than its default profile.
+# Every bot is replayed at the top of its own `aux` slider, not its menu default.
 #
 # `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
-# interprets it and each strategy assigns its own meaning, so "this bot at its
-# best" is a judgement only a caller can make. 1.0 is the documented untuned
-# value and stays the default for everything not named here.
+# interprets it and each strategy assigns its own meaning. The board's bot column
+# is there to show the best a bot can do, and each strategy's slider runs from its
+# cheapest stop up to its strongest, so the top of the declared `AUX_RANGE` (read
+# through `ai.aux_spec`) is that bot at its best. A bot that declares no knob
+# replays at 1.0, the documented untuned value. Today that puts knower on Oracle:
+# Search and actuary on Style: Learning.
 #
-# knower reads aux as its Oracle mode, and 2 is Search, the top of its own slider
-# (`SEARCH_DEPTH_MAX`): the oracle plus a rollout as long as the map's longest lane
-# and a cushion. It was 12 when that slider was a search depth, which now clamps to
-# the same Search. Its work is iteration-bounded, so the result stays reproducible;
-# the caveat is `knower.SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard
-# that, if it ever trips, makes the plan depend on the wall clock, which is why the
+# knower's Search is iteration-bounded, so the result stays reproducible; the
+# caveat is `knower.SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard that,
+# if it ever trips, makes the plan depend on the wall clock, which is why the
 # worker lifts it (`BUDGET_SCALE` below). Search costs tens of times Predict in
 # wall clock, which is what --limit and the deadline are for.
-REPLAY_AUX: dict[str, float] = {
-    "knower": 2,
-}
 
 # How far to lift the bots' own wall-clock catastrophe guards (`ai.set_budget_scale`).
 #
@@ -202,10 +199,12 @@ def replay_rev() -> str:
 
 
 def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:
-    """The `aux` value this bot is replayed at (`config.AI_AUX`'s 1.0 by default)."""
+    """The `aux` value this bot is replayed at: the top of its declared slider, or
+    `config.AI_AUX`'s 1.0 for a bot that declares none. Needs `ai.load_models()`."""
     if overrides and bot in overrides:
         return overrides[bot]
-    return REPLAY_AUX.get(bot, 1.0)
+    spec = ai.aux_spec(bot)
+    return spec[2] if spec else 1.0
 
 
 def aux_note(bot: str, aux: float) -> str:
@@ -425,7 +424,7 @@ def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[s
     * a different ``aux`` means the row answers a *different question* — it is
       some other version of that bot. That one refills on an ordinary run, with
       no flag: leaving it would put two incomparable knowers side by side on one
-      board. It only ever fires when ``REPLAY_AUX`` actually changes.
+      board. It only ever fires when ``replay_aux``'s answer actually changes.
     """
     jobs: list[Job] = []
     for row in games:
@@ -477,7 +476,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "reproducible. 1 restores the in-game behaviour")
     parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
                         help="override a bot's replay profile for this run, e.g. "
-                             "--aux knower=8 (default: REPLAY_AUX in this file)")
+                             "--aux knower=1 (default: the top of each bot's own slider)")
     parser.add_argument("--recompute", action="store_true",
                         help="redo pairs that already have a row")
     parser.add_argument("--stale", action="store_true",

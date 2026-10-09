@@ -13,9 +13,9 @@ is a supply at a system and a turn. Every objective (a strike, a defence, a
 guard) asks for N ships on one system by one turn. Objectives are committed
 greedily against that supply, and the only orders issued are for ships that must
 leave this turn to arrive on time. It was the third proposal in a list of new bot
-families that would play differently from the roster (2026-10-05), after the
-opening planner that became actuary's Opening knob ([`actuary.md`](actuary.md),
-"The planned opening"). Roster-wide rules and the measurement checklist are in
+families that would play differently from the roster ([`bots.md`](bots.md), "New
+bot families (proposed 2026-10-05)"), after the opening planner that became
+actuary's Opening knob ([`actuary.md`](actuary.md), "The planned opening"). Roster-wide rules and the measurement checklist are in
 [`bots.md`](bots.md). Index: [`../README.md`](../README.md).
 
 ## The plan

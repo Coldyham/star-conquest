@@ -111,7 +111,7 @@ measures come back:
 
 Positions are split into **contested** (the seat holds a system next to a live
 rival's) and **opening**, and each bot's nearest neighbour is reported in both.
-Bots run at the leaderboard profile (`REPLAY_AUX`, guards lifted). `--null` asks
+Bots run at the leaderboard profile (`replay_aux`, guards lifted). `--null` asks
 each bot twice; every current bot is at exactly 0 from itself.
 
 First reading, 21 two-seat self-play games, 18 nodes, 6 ly/turn, every 5 turns
@@ -136,6 +136,118 @@ are within 0.03. In the opening, knower, marshal and actuary are within 0.17-0.1
 of each other: the roster's land-grab is one land-grab. actuary's planned
 opening ([`actuary.md`](actuary.md), "The planned opening") was built for that
 gap.
+
+## New bot families (proposed 2026-10-05)
+
+After actuary, a list of bot designs that should be at least claudebot's
+strength and play moves the roster does not. The roster at the time had three
+shapes: the phase bots (claudebot, thinker, marshal, knower at Off), actuary's
+projected ledger, which assumes no rival launches again, and knower's oracle.
+Nothing modelled a rival from what it can see, hedged against the rival's move
+in the same turn, planned across several hops and turns at once, or took its
+values from data. Six proposals, one per gap. Two were built and are recorded
+in their own files. The other four are written up here, unbuilt.
+
+**What the two built ones taught.** The opening is where the roster plays one
+land-grab, and the planned opening paid there. convoy was the most distinct
+bot in the opening but no better there. In the contested middle it played like
+a phase bot and lost to actuary (convoy.md, "Where it loses to actuary").
+Distinct is not better, so each proposal below still has to win games. The three
+that target the contested middle (learner, duelist, riposte) go where convoy
+lost.
+
+**Built.**
+
+- **surveyor**, the opening planned as a schedule: which neutrals, in what
+  order, with which converging groups, priced by payback. Folded into actuary as
+  Opening: Planned. See [`actuary.md`](actuary.md), "The planned opening".
+- **convoy**, the turn as routing over time: supply at (system, turn), strikes
+  as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
+
+**learner (proposed as reader): a rival modelled from the board, without running its code.**
+Estimate each rival's attack margin from its fleets in flight (ships sent
+against the target's garrison plus what it builds before landing), and its
+reserve from its frontier garrisons. Then guard each border just above what
+would trigger that rival's own rule, and commit the rest. No other non-oracle
+bot changes its guards depending on the opponent: against rusherplus it would
+hold almost nothing, against marshal much more. Unlike knower it reads a human
+seat as readily as a bot. Built: the model with memory kept from turn to turn,
+and then a bot that plays actuary's ledger on a board with the model's predicted
+launches added. That bot was level with actuary; the model now plays as
+actuary's third stop instead, *Learning*, which prices the threat next door by
+how often each rival strikes a garrison as thin as ours will be. All of it is in
+[`learner.md`](learner.md), with why memory has to be
+keyed by the game's path rather than by an oracle flag. This reopens the ideas [`marshal.md`](marshal.md), "What the
+measurements deleted", rejected as needing "a model of rivals, which is knower's
+territory" (baiting, the offensive half of standing aside). The model here comes
+from board facts, not from rival code. The host is actuary's ledger rather than
+marshal's guard. The bot was built although the model had not passed the gate
+set for it.
+
+**duelist: the simultaneous move played as a matrix game.** At each contact,
+list both sides' few options (hold, strike, reinforce, evacuate). Price each
+pair with actuary's ledger, solve the small zero-sum game in pure Python, and
+draw a move from the mixed strategy through `state.rng`. It is the one design
+that assumes the rival moves this turn too and hedges against it. actuary
+assumes it never launches, and knower best-responds to one predicted move. The
+case for it: 86.7% of out-shipped garrisons are gone when the strike lands
+([`marshal-pricing.md`](marshal-pricing.md), "Garrisons run away"), so strike
+and evacuate are a guessing game, and any fixed rule loses a guessing game to
+someone who has learned it, including a person who plays the same bot often.
+Against knower, mixing hides duelist only from the lower seat: knower re-runs a
+later seat on the real rng positioned where that seat will find it, and an
+earlier one on a private rng. Report the two seatings apart. Risk: against a
+fixed, predictable bot the best answer is not mixed, so mixing gives up value.
+It combines with learner: best-respond to learner's model, and mix only where that
+model is unsure. Its cost is actuary's or more, so it declares `decide_ms`.
+
+**apprentice: an evaluator learned from data.** actuary's candidate moves and
+a one- or two-turn projection, scored by a linear function whose weights are
+fitted offline: on positions out of real games (`position_suite`'s corpus)
+labelled with who went on to win, or by learning from self-play. The weights
+ship as a constant table, so it stays deterministic and needs no numpy in
+play; the fitting script lives in `tools/` and may use anything. Its values come
+from data rather than from reasoning someone wrote down, including positions
+only people create. Risk: the human corpus was 47 games at the first census
+("The first census and setup sweep off the live board"), and a fit to bot
+self-play learns the roster's habits. Clearing claudebot is likely; matching
+actuary is not.
+
+**riposte: the counter-punch.** When a rival launches, the system it launched
+from is thin now. Strike that source with whatever lands before it refills, and
+defend the target only where the trade loses ships. It answers in microseconds,
+so it suits the browser and is cheap as a knower candidate (actuary was not
+added there for its cost). Expect claudebot's strength. Its value is as a
+distinct opponent, not a climber. It sits near two null results: striking
+vacating targets first ([`knower.md`](knower.md), "Built, measured, removed":
+an ordering change inside knower) and rushing the enemy
+([`marshal-pricing.md`](marshal-pricing.md), "Rushing the enemy"). Check first
+with `bot_distance.py` whether actuary already plays it: its ledger sees a
+source thinned by its own launch.
+
+**Considered and left out of the list.** Territory or chokepoint play
+(betweenness lost at every weight; pocket-sealing was a constant offset), one
+hammer stack (spearhead, 23-42%), arriving after a rival breaks a neutral (null),
+all in "Decided against" in [`../README.md`](../README.md). A decoupled
+simultaneous-move tree search would cost what knower's search does and overlap
+it.
+
+**Measurement ideas from the same list, not yet built.** `bot_distance.py`
+covers distance, kappa and fingerprints. Two more were proposed. Fit one rating
+per bot to the ladder grid (Bradley-Terry) and read the residuals: a bot that
+plays differently beats or loses to someone its rating says it should not. And
+when a bot is tried as a knower candidate, shuffle the candidate order so the
+last one is not undercounted on ties, and measure whether knower wins more
+with it, which was not measured for actuary.
+
+## The person's habits
+
+What the posted human games say about how their (one, mostly) player plays,
+against roster self-play: which share marks a won game (2/3 of players' ships),
+that their overkill is the endgame, and that they empty frontier systems with
+relief covered far more often than any bot. It is in
+[`learner.md`](learner.md), "The person's habits" (`tools/human_habits.py`),
+beside learner's model of the same games.
 
 ## Lane length across the parameter space
 
@@ -223,7 +335,7 @@ gap found here is a hypothesis; confirming it still wants a paired sweep with a
 z-score, the same as everything else in this file.
 
 **Each bot replays at its measured-best profile, not its menu default —
-the same rule `bot_replay.REPLAY_AUX` follows for the leaderboard's bot
+the same rule `bot_replay.replay_aux` follows for the leaderboard's bot
 column, reused rather than re-decided here.** The first real run measured
 knower at `aux=1.0` (search depth 1, the untuned default) purely because
 nobody had wired the override through; its win rate and turn counts in any
@@ -292,7 +404,7 @@ tool no blind heuristic has, which is the mechanism this would be explained
 by rather than a coincidence — worth widening the corpus before leaning on it
 further, not before noting it.
 
-## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
+## Replaying a bot for the leaderboard (`bot_replay.replay_aux`, `BUDGET_SCALE`)
 
 The board's bot column replays each `models/` bot through the human's seat on a
 posted map (`tools/bot_replay.py`; the infrastructure is in
@@ -300,10 +412,13 @@ posted map (`tools/bot_replay.py`; the infrastructure is in
 roster fall out of that, and both were measured.
 
 **Which version of a bot goes on the board.** Its best one, not its menu default.
-`REPLAY_AUX` names the exceptions and today holds one: `knower` on Oracle: Search
-(it was search depth 12 until the knob became three named stops; see [`knower.md`](knower.md), "How far to
-look"). That is the top of knower's own slider (`SEARCH_DEPTH_MAX`). It is
-not a small difference. On a 16-node map, same seed, same opponents, at the old
+`replay_aux` puts every bot at the top of its own declared slider (`AUX_RANGE`,
+read through `ai.aux_spec`), and a bot that declares none at 1.0. A slider runs
+from a bot's cheapest stop to its strongest, so the top is the bot at its best,
+and a new bot's knob needs no entry anywhere to be replayed there. Today that is
+`knower` on Oracle: Search (`SEARCH_DEPTH_MAX`; it was search depth 12 until the
+knob became three named stops, see [`knower.md`](knower.md), "How far to look")
+and `actuary` on Style: Learning. For knower it is not a small difference. On a 16-node map, same seed, same opponents, at the old
 depth 12:
 
     knower @ 1 (default)     336 turns, 346 ships lost
