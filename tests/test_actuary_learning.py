@@ -29,11 +29,11 @@ def ac():
 
 @pytest.fixture(autouse=True)
 def _fresh(ac):
-    speed, cap, reach = config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH
+    speed, cap, reach, split = config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH, ac.LEARN_SPLIT
     ac.reset()
     yield
     ac.reset()
-    config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH = speed, cap, reach
+    config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH, ac.LEARN_SPLIT = speed, cap, reach, split
 
 
 def _game(seed=3, nodes=18, bots=("marshal", "rusherplus", "thinker")):
@@ -307,10 +307,11 @@ def test_the_style_knob_has_three_stops(ac):
     assert not getattr(ac, "IS_ORACLE", False), "only a Learning seat is an oracle's"
 
 
-def test_learning_counting_every_garrison_in_full_plays_as_planned(ac):
+@pytest.mark.parametrize("split", [0, 1])
+def test_learning_counting_every_garrison_in_full_plays_as_planned(ac, split):
     """With every learned chance read as certain, the risk is actuary's own, so
     Learning plays exactly as Planned; only the reach in the risk differs."""
-    ac.LEARN_REACH = 1e9
+    ac.LEARN_REACH, ac.LEARN_SPLIT = 1e9, split
     for nodes in (12, 18):
         state = _seat(_game(nodes=nodes), 1, float(ac.LEARNING))
         for _ in range(60):
@@ -339,6 +340,30 @@ def test_a_learned_rival_thins_the_risk_and_a_thin_garrison_brings_it_back(ac):
     assert ac._Ledger(state, 1, {2: from_thin}).risk[1] == 0.0
     state.systems[1].ships = 2
     assert ac._Ledger(state, 1, {2: from_thin}).risk[1] > 0.0
+
+
+def test_split_prices_a_whole_strike_at_its_chance(ac):
+    """Split, a garrison next door strikes whole or not at all: the risk is the
+    chance times the shortfall against all of it, where the reach form prices
+    the shortfall against that chance's share of it, often none."""
+    state = _board({1: (1, 4, 0), 2: (2, 9, 0)}, [(1, 2, 2)])
+    full = ac._Ledger(state, 1).risk[1]
+    chance = 0.25
+    curve = [chance / ac.LEARN_REACH] * ac.RATIO_BINS
+    assert ac._Ledger(state, 1, {2: curve}).risk[1] == 0.0       # 9 x 0.25 is held off
+    ac.LEARN_SPLIT = 1
+    assert ac._Ledger(state, 1, {2: curve}).risk[1] == pytest.approx(chance * full)
+
+
+def test_split_takes_each_source_whole_and_independent(ac):
+    """Two garrisons, either of which alone is held off and both together not:
+    only the both-strike outcome is short."""
+    state = _board({1: (1, 6, 0), 2: (2, 5, 0), 3: (2, 5, 0)}, [(1, 2, 2), (1, 3, 2)])
+    both = ac._Ledger(state, 1).risk[1]
+    assert both > 0.0
+    ac.LEARN_SPLIT = 1
+    ledger = ac._Ledger(state, 1, {2: [0.5 / ac.LEARN_REACH] * ac.RATIO_BINS})
+    assert ledger.risk[1] == pytest.approx(0.25 * both)
 
 
 def test_decide_leaves_the_state_alone_and_draws_nothing(ac):
