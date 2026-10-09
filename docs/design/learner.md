@@ -887,6 +887,29 @@ The model adds a lean on top, against both knower stops, that is not significant
 Search stops on a wall clock, so its moves shift with CPU load and its pairing is
 noisier than the rest.
 
+**Other cells and the free-for-all**, seeds 6001-6200 (FFA 6001-6100, every seat
+rotation), Learning against Planned on the same seeds and seatings, paired:
+
+    cell                   against        Planned -> Learning   paired
+    slow (24, 3 ly/turn)   marshal        61.7% -> 69.4%        +47 / -22  z +3.01
+                           knower Off     96.3% -> 97.5%         +7 /  -3  z +1.26
+                           actuary        56.4% (Learning's)               z +2.37
+    fast (24, 12 ly/turn)  marshal        65.6% -> 70.4%        +54 / -35  z +2.01
+                           knower Off     91.3% -> 91.8%        +11 /  -9  z +0.45
+                           actuary        49.4%                            z -0.25
+    jitter 0.06 (18, 6)    marshal        70.4% -> 75.5%        +47 / -28  z +2.19
+                           knower Off     95.3% -> 96.2%        +11 /  -8  z +0.69
+                           actuary        51.6%                            z +0.62
+    FFA, 3 seats at 18     with marshal, knower Off               63.5% -> 66.4%   +33 / -25  z +1.05
+    FFA, 4 seats at 24     with actuary, marshal, knower Off      46.6% -> 49.0%   +51 / -42  z +0.93
+
+No cell is worse. The marshal gain holds in all three (z +2.0 to +3.0), and the
+slow cell is the one where Learning also beats actuary itself. The low-jitter
+cell (0.06, a setting people play) is better against marshal, level elsewhere.
+The free-for-all leans better in both lineups, not significantly. The slow cell
+leaves 12-14% of games undecided at 500 turns, in both arms alike; those are
+dropped.
+
 **Cost.** Learning adds the memo read and a curve lookup per risk term: CPU ms a
 decide against marshal, seeds 1-6, up to turn 150, Planned then Learning:
 
@@ -915,6 +938,6 @@ never runs a Learning seat.
   1-4` its report and `--fit-prior` match the old learner's to the digit.
   `tools/human_habits.py` reads `_Snap` and `_effective` from actuary.
 
-**Not measured:** the slow, fast and wide-jitter cells, the free-for-all, and play against a person. The proposed improvements in the last
-section (strike and no-strike priced apart, evacuation in the price of a
+**Not measured:** wide jitter (0.3), knower in a free-for-all at Predict, and
+play against a person. The proposed improvements in the last section (strike and no-strike priced apart, evacuation in the price of a
 capture) are untouched and would now be arms against Learning.
