@@ -125,6 +125,16 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python tools/verify_scores.py --prune
 
+      # Read each posted replay for the player page's Playstyle panel: one row
+      # per match, from public_replays only (tools/playstyle_worker.py).
+      - name: Playstyle readings
+        if: always() && steps.check.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python tools/playstyle_worker.py --prune --deadline-minutes 5
+
       # Make this week's campaign map, if it hasn't been made yet. Hourly is what
       # makes it robust: the first run after Monday 00:00 UTC writes the row and
       # every later one that week finds it and does nothing, so a missed or

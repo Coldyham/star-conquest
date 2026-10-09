@@ -4,6 +4,8 @@ import {
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
+import { BASELINE } from "./playstyle-baseline.mjs";
+import { MIN_GAMES, ROWS, pool, summary } from "./playstyle.mjs";
 import { standings, tally } from "./standings.mjs";
 
 // Four names is as many as a cabinet row holds before the score column collapses,
@@ -12,11 +14,14 @@ const MAX_ROSTER = 4;
 // Enough that a regular's whole record fits on the page, few enough that the two
 // follow-up queries stay one short URL each.
 const MAX_MAPS = 60;
+// match_ids per readings query, so each stays one short URL.
+const READINGS_CHUNK = 80;
 
 const heading = document.getElementById("who");
 const lede = document.getElementById("lede");
 const tallyBox = document.getElementById("tally");
 const target = document.getElementById("scores");
+const playstyleBox = document.getElementById("playstyle");
 const form = document.getElementById("compare");
 const nameField = document.getElementById("rival");
 const extras = document.getElementById("extras");
@@ -167,6 +172,73 @@ function mapEntry(row, game, comparing, shown) {
   ]);
 }
 
+// -- playstyle -------------------------------------------------------------
+
+async function readingsFor(matchIds) {
+  const ids = [...new Set(matchIds.filter(Boolean))];
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += READINGS_CHUNK) chunks.push(ids.slice(i, i + READINGS_CHUNK));
+  const pages = await Promise.all(
+    chunks.map((chunk) => select(`playstyle_readings?select=match_id,readings&match_id=${inList(chunk)}`)),
+  );
+  return new Map(pages.flat().map((row) => [row.match_id, row.readings]));
+}
+
+/** One column per name with enough games read, plus the roster's. */
+function drawPlaystyle(rows, roster, readings) {
+  if (!readings) return;
+  const columns = roster.map((player) => {
+    const ids = new Set(rows.filter((row) => row.users.name_key === player.key).map((row) => row.match_id));
+    const record = pool([...ids].map((id) => readings.get(id)));
+    return { name: player.name, games: record ? record.games : 0, summary: summary(record) };
+  });
+  if (!columns.some((column) => column.games >= MIN_GAMES)) return;
+  const bots = { name: "Bots", games: BASELINE.games, summary: summary(BASELINE), bots: true };
+  const shown = [...columns, bots];
+
+  const cell = (column, row) => {
+    if (column.games < MIN_GAMES) {
+      return el("td", { class: "short", text: row === ROWS[0] ? `${column.games} of ${MIN_GAMES}` : "—" });
+    }
+    return el("td", { class: column.bots ? "bots" : null, text: row.show(column.summary) });
+  };
+
+  clear(playstyleBox).append(
+    el("h2", { class: "section-title", text: "Playstyle" }),
+    el("p", {
+      class: "playstyle-note",
+      text:
+        `Read from the replays of posted wins, so it only describes winning games. ` +
+        `Anyone posting under a name adds to that name's figures. ` +
+        `Bots: the winning bot in ${BASELINE.games} games the bots played against each other.`,
+    }),
+    el("div", { class: "playstyle-wrap" }, [
+      el("table", { class: "playstyle" }, [
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", { scope: "col" }),
+            ...shown.map((column) => el("th", { scope: "col", class: column.bots ? "bots" : null, text: column.name })),
+          ]),
+        ]),
+        el(
+          "tbody",
+          {},
+          ROWS.map((row) =>
+            el("tr", {}, [
+              el("th", { scope: "row" }, [
+                el("span", { class: "ps-label", text: row.label }),
+                el("span", { class: "ps-hint", text: row.hint }),
+              ]),
+              ...shown.map((column) => cell(column, row)),
+            ]),
+          ),
+        ),
+      ]),
+    ]),
+  );
+  playstyleBox.hidden = false;
+}
+
 // -- loading ---------------------------------------------------------------
 
 /** PostgREST's nesting, flattened to what standings.mjs works on. */
@@ -209,7 +281,7 @@ async function load() {
     // names to ids first: one round trip fewer, and it hands back each name as
     // its owner originally typed it, which is what the page should display.
     const rows = await select(
-      `scores?select=game_key,turns,lost,hand,submitted_at,users!inner(name,name_key)` +
+      `scores?select=game_key,turns,lost,hand,submitted_at,match_id,users!inner(name,name_key)` +
         `&users.name_key=${inList(asked.map((name) => name.trim().toLowerCase()))}` +
         `&order=submitted_at.desc&limit=2000`,
     );
@@ -240,10 +312,12 @@ async function load() {
       return;
     }
 
-    const [games, field] = await Promise.all([
+    const [games, field, readings] = await Promise.all([
       select(`games?select=*&game_key=${inList(keys)}`),
       // Every score on those maps, which is what turns a result into a placing.
       select(`scores?select=game_key,turns,lost&game_key=${inList(keys)}&limit=5000`),
+      // Optional: a board without the readings table just has no Playstyle panel.
+      readingsFor(rows.map((row) => row.match_id)).catch(() => null),
     ]);
 
     const setups = new Map(games.map((game) => [game.game_key, game]));
@@ -266,6 +340,7 @@ async function load() {
     clear(target).append(
       el("ul", { class: "entries" }, board.map((row) => mapEntry(row, setups.get(row.gameKey), comparing, shown))),
     );
+    drawPlaystyle(rows, roster, readings);
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

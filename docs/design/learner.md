@@ -756,7 +756,10 @@ behind a temporary flag, against Raise and Off on the same seeds.
 people better than knower's guess ("Predicting people"), but learner's memory
 lasts one game, and the gate cannot measure play against a person. It would
 need a stored per-device model of "the person". That is a separate decision,
-made only once a stop has earned its place.
+made only once a stop has earned its place. A stored per-player profile was
+later weighed for this and dropped (`leaderboard.md`, "Decided against: warming
+actuary's learner from a profile"), since the curve a profile would seed does
+not tell players apart.
 
 ## Learning: the curve in the risk term
 
@@ -937,7 +940,9 @@ never runs a Learning seat.
   guard and evacuation readings with their priors, counted by `Watcher` from
   `actuary.launches` on the turns actuary's memo links. On `--cells 18n6 --seeds
   1-4` its report and `--fit-prior` match the old learner's to the digit.
-  `tools/human_habits.py` reads `_Snap` and `_effective` from actuary.
+  `tools/playstyle.py` (behind `tools/human_habits.py` and the board's Playstyle
+  panel) reads `_Snap` and `_effective` from actuary; its `reading_rev` hashes
+  actuary for that reason.
 
 **Not measured:** wide jitter (0.3), knower in a free-for-all at Predict, and
 play against a person. The proposed improvements in the last section (strike and no-strike priced apart, evacuation in the price of a

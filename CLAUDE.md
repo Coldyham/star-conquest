@@ -65,6 +65,8 @@ uv run python tools/learner_check.py             # how well actuary's model of e
                                                 # --logs public: posted human games
 uv run python tools/human_habits.py             # how the person plays (posted games)
                                                 # against roster self-play
+uv run python tools/playstyle.py --baseline     # regenerate the board's Playstyle
+                                                # panel's bots column
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
@@ -366,6 +368,11 @@ already resolve simultaneously. The rationale for each rule is in
   `netlify/functions/log.mjs`), rows carry no identity, and `public_replays`
   exposes only matches a posted score points at. `Ui.can_post` gates every
   sharing action, so a watched replay (`Ui.watched`) can't be posted as yours.
+- **Playstyle readings are keyed by match, never by name**, and read from
+  `public_replays` only (`tools/playstyle_worker.py`, `playstyle_readings`); the
+  player page pools a name's rows through its own scores. Every field sums, and
+  `leaderboard/js/playstyle-baseline.mjs` is generated, never edited. Detail:
+  `docs/design/leaderboard.md`, "Playstyle readings".
 - **Crowns, the weekly campaign and embargoes derive their state from
   `counted_scores` and stored maps; nothing about who holds what is stored.**
   `campaign_games` matches by jsonb equality, never `sc_config_key`. The
