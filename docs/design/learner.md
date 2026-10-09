@@ -871,10 +871,21 @@ selection seeds' 54.1% did not hold: level, not better.
 
 **Most of the knower Predict row is the oracle flag, not the model.** knower runs
 actuary's `decide` at Planned and reads it exactly. A Learning seat claims
-`is_oracle_seat`, so knower models it blind, and that claim was worth about 20
-points to learner against knower ("The roster ladder"). The row says Learning
-loses nothing to knower; it cannot say how much the model adds. knower at Search
-was not run.
+`is_oracle_seat`, so knower models it blind. To hold that equal, Planned was
+run again with `is_oracle_seat` patched to always answer true, so knower models
+both arms blind and only the model differs (same fresh seeds, Search on 100 of
+them for cost):
+
+    against           flagged Planned -> Learning         paired
+    knower Predict    18: 92.6% -> 94.4%  (+17 / -10)     pooled +26 / -16  z +1.54
+                      40: 94.2% -> 95.0%   (+9 /  -6)
+    knower Search     18: 78.7% -> 77.7%  (+17 / -19)     pooled +40 / -33  z +0.82
+                      40: 68.8% -> 73.4%  (+23 / -14)
+
+The claim alone took Planned from 80.1 / 68.0% to 92.6 / 94.2% against Predict.
+The model adds a lean on top, against both knower stops, that is not significant.
+Search stops on a wall clock, so its moves shift with CPU load and its pairing is
+noisier than the rest.
 
 **Cost.** Learning adds the memo read and a curve lookup per risk term: CPU ms a
 decide against marshal, seeds 1-6, up to turn 150, Planned then Learning:
@@ -904,7 +915,6 @@ never runs a Learning seat.
   1-4` its report and `--fit-prior` match the old learner's to the digit.
   `tools/human_habits.py` reads `_Snap` and `_effective` from actuary.
 
-**Not measured:** the slow, fast and wide-jitter cells, knower at Search, the
-free-for-all, and play against a person. The proposed improvements in the last
+**Not measured:** the slow, fast and wide-jitter cells, the free-for-all, and play against a person. The proposed improvements in the last
 section (strike and no-strike priced apart, evacuation in the price of a
 capture) are untouched and would now be arms against Learning.
