@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 
 from . import config, model, turnfilm
 from .geometry import WorldView
-from .model import GameState, Order
+from .model import ForwardRule, GameState, Order
 
 # interaction modes
 IDLE = "idle"  # nothing selected
@@ -77,12 +77,11 @@ class Ui:
     hover: int | None = None  # system under the cursor
     dest: int | None = None  # chosen destination system id
     chosen: int = 0  # ships the active one-shot send commits
-    keep: int = 0  # ships held back by the active forward rule
     # In CHOOSING the send is already committed: as a one-shot order at
-    # `sel_order` (when forward_armed is False, sized by `chosen`) or as the
-    # standing rule out of `selected` in `auto_forward` (when forward_armed is
-    # True, holding back `keep` and forwarding the rest). The popup edits
-    # whichever is live.
+    # `sel_order` (when forward_armed is False, sized by `chosen`) or as the lane
+    # to `dest` of the standing rule out of `selected` in `auto_forward` (when
+    # forward_armed is True: the popup edits that lane's share and the system's
+    # hold). The popup edits whichever is live.
     forward_armed: bool = False  # active send is a standing forward rule
     # True when the popup was opened on an order/rule that *predates* it (see
     # `edit_order`/`edit_forward`) rather than one it just created. Can't be
@@ -92,10 +91,11 @@ class Ui:
     editing_existing: bool = False
     pending: list[Order] = field(default_factory=list)
     sel_order: int | None = None  # index into `pending` being edited, if any
-    # standing auto-forward rules: source_id -> (dest_id, keep). Human-only QoL,
-    # so it lives here rather than in the pure GameState. Each turn a rule
-    # forwards (garrison - keep) ships from source to dest (see main.resolve_turn).
-    auto_forward: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # standing auto-forward rules: source_id -> ForwardRule (a hold, and a share
+    # per lane). Human-only QoL, so it lives here rather than in the pure
+    # GameState. Each turn a rule sends each lane its share of (free ships - hold)
+    # (`forward_this_turn`, expanded by main.auto_forward_orders).
+    auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
     # Route mode (see ROUTING above) has two sub-modes, both of which end in one
     # `route_plan` the player confirms. They differ only in how `model.flow_field`
@@ -111,7 +111,7 @@ class Ui:
     #                      is skipped when building the plan instead, so re-aiming
     #                      somewhere else hands the system straight back as a
     #                      source rather than silently having dropped it.
-    #   route_plan       — source -> (next hop, keep): the rules a confirm writes.
+    #   route_plan       — source -> (next hop, hold): the rules a confirm writes.
     #                      Covers the *whole* path, not just the selected systems,
     #                      so ships actually conveyor the full distance.
     #   route_replaces   — sources whose existing rule this would change (the old
@@ -219,6 +219,14 @@ class Ui:
     # (same handoff as end_turn_rect).
     minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The Forward tab's extra controls: −/+ on the system's hold, and, once a system
+    # forwards down two or more lanes, one (dest, row, minus, plus) per lane plus
+    # the Even split / Delete all pair. Same handoff as the rects above.
+    hold_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hold_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    share_rows: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
+    even_split_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    delete_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The popup's count slider: the whole row is the grab target, but the knob
     # *travels* over the row inset by `config.SLIDER_KNOB_R` at each end, so it
     # never overhangs the panel and never lags the finger (see `set_slider_from_x`,
@@ -556,29 +564,19 @@ class Ui:
         below would do something) rather than zoom the camera — mirrors
         ``step_count``'s own dispatch conditions exactly, so the two can't
         drift out of sync."""
-        return (self.mode == CHOOSING and (self.forward_armed or self.selected is not None)) or (
-            self.sel_forward is not None and self.sel_forward in self.auto_forward
-        )
+        return self.mode == CHOOSING and self.selected is not None
 
     def step_count(self, state: GameState, delta: int) -> None:
-        """Nudge the ship count being adjusted by ``delta`` — the shared logic
-        behind both the mouse wheel and the popup's −/+ buttons. Applies to the
-        active send (CHOOSING — send count or forward keep), or to a *dormant*
-        standing rule highlighted without opening the popup (see `edit_forward`);
-        a live one is edited through the popup, so the CHOOSING branch has it."""
+        """Nudge the count being adjusted by ``delta`` steps — the shared logic
+        behind both the mouse wheel and the popup's −/+ buttons: ships on the Send
+        tab, the edited lane's share (`config.FORWARD_STEP_PCT` a step) on the
+        Forward tab."""
         if not self.count_adjust_active():
             return
-        if self.mode == CHOOSING and self.forward_armed:
-            self.set_keep(state, self.keep + delta)  # forward: adjust keep
-        elif self.mode == CHOOSING and self.selected is not None:
-            self.set_send_count(state, self.chosen + delta)  # send: adjust count
-        elif self.sel_forward is not None and self.sel_forward in self.auto_forward:
-            # adjust a standing rule's `keep` in place; it ranges over the
-            # source's whole garrison (0 keeps nothing, all forwards nothing)
-            src = self.sel_forward
-            dest, keep = self.auto_forward[src]
-            cap = state.systems[src].ships if src in state.systems else keep
-            self.auto_forward[src] = (dest, max(0, min(cap, keep + delta)))
+        if self.forward_armed:
+            self.step_share(delta)
+        else:
+            self.set_send_count(state, self.chosen + delta)
 
     # -- the popup's count slider ------------------------------------------- #
     def slider_range(self, state: GameState) -> tuple[int, int, int]:
@@ -590,8 +588,7 @@ class Ui:
         if self.mode != CHOOSING or self.selected is None:
             return (0, 0, 0)
         if self.forward_armed:
-            garrison = state.systems[self.selected].ships if self.selected in state.systems else 0
-            return (0, garrison, self.keep)
+            return (0, 100, self.edited_share())
         cap = self._active_cap(state)
         return (1 if cap > 0 else 0, cap, self.chosen)
 
@@ -600,9 +597,9 @@ class Ui:
 
         Inverse of the knob placement in ``widgets.slider``: the travel is the
         recorded row inset by the knob radius at each end, so the knob sits exactly
-        under the pointer across the whole range. Funnels into ``set_keep`` /
+        under the pointer across the whole range. Funnels into ``set_share`` /
         ``set_send_count``, inheriting their clamping and the write-through to the
-        queued order. A no-op on a zeroed rect (the popup closed mid-drag) or a
+        rule or the queued order; a share snaps to `config.FORWARD_SNAP_PCT`. A no-op on a zeroed rect (the popup closed mid-drag) or a
         zero-width range (an empty source)."""
         x, _y, w, _h = self.slider_rect
         lo, hi, _value = self.slider_range(state)
@@ -612,7 +609,8 @@ class Ui:
         t = max(0.0, min(1.0, (px - x - config.SLIDER_KNOB_R) / travel))
         count = round(lo + t * (hi - lo))
         if self.forward_armed:
-            self.set_keep(state, count)
+            snap = config.FORWARD_SNAP_PCT
+            self.set_share(round(count / snap) * snap)
         else:
             self.set_send_count(state, count)
 
@@ -621,9 +619,6 @@ class Ui:
         """The most ships the active send can commit from ``selected``."""
         if self.selected is None:
             return 0
-        if self.forward_armed:
-            # a rule forwards (garrison - keep); its ceiling is the whole garrison
-            return state.systems[self.selected].ships
         cap = self.available(state, self.selected)
         if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             cap += self.pending[self.sel_order].ships  # the send's own committed ships
@@ -645,7 +640,6 @@ class Ui:
         self.forward_armed = False
         self.editing_existing = False  # this popup created its own subject
         self.chosen = max(0, avail)
-        self.keep = 0
         self.popup_pos = None  # fresh target -> auto-place the popup
         self.dragging_popup = False
         self.dragging_slider = False
@@ -659,7 +653,7 @@ class Ui:
 
     def set_send_count(self, state: GameState, count: int) -> None:
         """Set the active one-shot send's ship count (clamped) on its order.
-        Send-tab only — forwarding is sized by `keep` (see set_keep)."""
+        Send-tab only — forwarding is sized by shares (see set_share)."""
         if self.mode != CHOOSING or self.forward_armed or self.selected is None:
             return
         cap = self._active_cap(state)
@@ -668,13 +662,62 @@ class Ui:
         if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             self.pending[self.sel_order].ships = self.chosen
 
-    def set_keep(self, state: GameState, keep: int) -> None:
-        """Set how many ships the active forward rule holds back each turn
-        (0 == forward everything). Forward-tab only."""
+    # -- the Forward tab ------------------------------------------------------ #
+    def edited_rule(self) -> ForwardRule | None:
+        """The standing rule the Forward tab is editing, if it is open."""
         if self.mode != CHOOSING or not self.forward_armed or self.selected is None:
+            return None
+        return self.auto_forward.get(self.selected)
+
+    def edited_share(self) -> int:
+        """The edited lane's share of its system's surplus (0 when there is none)."""
+        rule = self.edited_rule()
+        return rule.shares.get(self.dest, 0) if rule is not None and self.dest is not None else 0
+
+    def set_share(self, pct: int) -> None:
+        """Move the edited lane's share toward ``pct`` (see `model.shares_set`: a rise
+        takes from what stays home first, then from the other lanes)."""
+        rule = self.edited_rule()
+        if rule is not None and self.dest in rule.shares:
+            rule.shares = model.shares_set(rule.shares, self.dest, pct)
+
+    def step_share(self, steps: int) -> None:
+        self.set_share(self.edited_share() + steps * config.FORWARD_STEP_PCT)
+
+    def step_hold(self, delta: int) -> None:
+        """Nudge how many ships the edited system holds back, across all its lanes."""
+        rule = self.edited_rule()
+        if rule is not None:
+            rule.hold = max(0, min(config.FORWARD_HOLD_MAX, rule.hold + delta))
+
+    def focus_lane(self, dest: int) -> None:
+        """Point the Forward tab at another lane of the same system."""
+        rule = self.edited_rule()
+        if rule is not None and dest in rule.shares:
+            self.dest = dest
+
+    def even_split(self) -> None:
+        rule = self.edited_rule()
+        if rule is not None:
+            rule.shares = model.shares_even(rule.shares)
+
+    def delete_all_forward(self) -> None:
+        """Drop every lane of the edited system's rule, and close the popup."""
+        if self.edited_rule() is None or self.selected is None:
             return
-        self.keep = max(0, min(state.systems[self.selected].ships, keep))
-        self.auto_forward[self.selected] = (self.dest, self.keep)
+        self.clear_forward(self.selected)
+        self._close_send()
+
+    def forward_this_turn(self, state: GameState, sid: int) -> dict[int, int]:
+        """Ships each lane of ``sid``'s rule will send at the end of this turn: its
+        share of the free ships beyond the hold. The one formula behind both the
+        orders `main.auto_forward_orders` issues and every number the popup and
+        panel show, so what you read is what goes."""
+        rule = self.auto_forward.get(sid)
+        if rule is None or sid not in state.systems:
+            return {}
+        surplus = self.available(state, sid) - rule.hold
+        return model.forward_split(surplus, rule.shares, state.turn)
 
     def send_all(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state))
@@ -682,17 +725,12 @@ class Ui:
     def send_half(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state) // 2)
 
-    def keep_none(self, state: GameState) -> None:
-        self.set_keep(state, 0)  # forward everything
-
-    def keep_half(self, state: GameState) -> None:
-        if self.selected is not None:
-            self.set_keep(state, state.systems[self.selected].ships // 2)
-
     def toggle_forward(self, state: GameState) -> None:
         """Flip the active send between a one-shot order (sized by `chosen`) and
-        a standing rule that holds back `keep` and forwards the rest each turn.
-        Arming defaults to keep 0 (forward everything)."""
+        a lane of the source's standing rule. Arming adds the lane with
+        `model.shares_with` — the only lane gets 100%, a second makes it 50/50 —
+        and disarming takes it back out with `model.shares_without`, so trying the
+        Forward tab and leaving it puts the other lanes back as they were."""
         if self.mode != CHOOSING or self.selected is None or self.dest is None:
             return
         self.forward_armed = not self.forward_armed
@@ -700,10 +738,10 @@ class Ui:
             if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
                 del self.pending[self.sel_order]
             self.sel_order = None
-            self.keep = 0
-            self.auto_forward[self.selected] = (self.dest, self.keep)
+            rule = self.auto_forward.setdefault(self.selected, ForwardRule())
+            rule.shares = model.shares_with(rule.shares, self.dest)
         else:
-            self.auto_forward.pop(self.selected, None)
+            self._drop_lane(self.selected, self.dest)
             cap = self._active_cap(state)
             if cap > 0:
                 self.chosen = max(1, min(cap, self.chosen))
@@ -722,17 +760,34 @@ class Ui:
         """Remove every standing forward rule at once."""
         self.auto_forward.clear()
 
+    def forward_lanes(self) -> int:
+        """How many lanes the standing rules forward down, all systems together."""
+        return sum(len(rule.shares) for rule in self.auto_forward.values())
+
     def clear_dangerous_forward(self, state: GameState) -> None:
-        """Remove only the standing rules currently pointed at a system we don't
-        hold, leaving the rest of the network untouched."""
+        """Remove only the lanes currently pointed at a system we don't hold, leaving
+        the rest of the network untouched (a split hands their share to its other
+        lanes, as deleting one by hand does)."""
         for sid in [s for s in self.auto_forward if self.rule_is_hostile(state, s)]:
-            self.auto_forward.pop(sid, None)
+            for dest in [d for d in self.auto_forward[sid].shares if self.lane_is_hostile(state, d)]:
+                self._drop_lane(sid, dest)
+
+    def _drop_lane(self, sid: int, dest: int) -> None:
+        """Take one lane out of ``sid``'s rule, handing its share to the others, and
+        drop the rule with its last lane."""
+        rule = self.auto_forward.get(sid)
+        if rule is None:
+            return
+        rule.shares = model.shares_without(rule.shares, dest)
+        if not rule.shares:
+            self.clear_forward(sid)
 
     def cancel_send(self) -> None:
-        """Discard the active send entirely, keeping just the source selected."""
+        """Discard the active send, keeping just the source selected. On the Forward
+        tab that is the one lane being edited; the system's other lanes stay."""
         if self.forward_armed:
-            if self.selected is not None:
-                self.auto_forward.pop(self.selected, None)
+            if self.selected is not None and self.dest is not None:
+                self._drop_lane(self.selected, self.dest)
         elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             del self.pending[self.sel_order]
         self._close_send()
@@ -755,7 +810,6 @@ class Ui:
         self.forward_armed = False
         self.dest = None
         self.chosen = 0
-        self.keep = 0
         self.popup_pos = None
         self.dragging_popup = False
         self.dragging_slider = False
@@ -956,7 +1010,7 @@ class Ui:
         point is the soonest-reached one and a route takes the fastest path rather
         than the one with fewest jumps.
 
-        Cycle detection is shared, and so is `_add_hop`, so `keep` preservation and
+        Cycle detection is shared, and so is `_add_hop`, so hold preservation and
         overwrite reporting are identical whichever sub-mode built the plan.
         """
         self.route_plan = {}
@@ -990,15 +1044,16 @@ class Ui:
         return {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
 
     def _add_hop(self, node: int, nxt: int) -> None:
-        """Record one planned rule, preserving the `keep` of an existing rule that
-        already pointed the same way — so re-running a route over a conveyor that is
-        already correct is idempotent rather than quietly resetting tuning. Only a
-        changed next hop resets it to 0 (forward everything)."""
+        """Record one planned rule: all of the system's surplus down one lane. The
+        hold of any existing rule is kept — it is about the system's own safety,
+        whichever way its ships go — so re-running a route over a conveyor that is
+        already correct is idempotent rather than quietly resetting tuning. An
+        existing rule is reported replaced only when its lanes change."""
         old = self.auto_forward.get(node)
-        keep = old[1] if old is not None and old[0] == nxt else 0
-        if old is not None and old != (nxt, keep):
+        hold = old.hold if old is not None else 0
+        if old is not None and old.shares != {nxt: 100}:
             self.route_replaces.add(node)
-        self.route_plan[node] = (nxt, keep)
+        self.route_plan[node] = (nxt, hold)
 
     def _plan_chain(self, state: GameState) -> None:
         """Chain routing: walk each selected system's path to the destination.
@@ -1102,22 +1157,18 @@ class Ui:
         are lossless, so nothing is destroyed; the ships simply never reach a
         front, which is worse than losing them because it looks like it is
         working. `confirm_route` breaks any loop it finds here.
+
+        A split rule is several edges out of one system, and a loop down any of
+        them traps that share, so every lane with a share counts. What is flagged is
+        each system on a cycle reachable from the plan (`model.cycle_nodes`).
         """
-        merged: dict[int, int] = {
-            src: dest for src, (dest, _keep) in self.auto_forward.items()
+        graph: dict[int, list[int]] = {
+            src: [d for d, pct in rule.shares.items() if pct > 0]
+            for src, rule in self.auto_forward.items()
             if self.rule_is_live(state, src)
         }
-        merged.update({src: dest for src, (dest, _keep) in self.route_plan.items()})
-        for start in self.route_plan:
-            walked: list[int] = []
-            seen: set[int] = set()
-            node: int | None = start
-            while node is not None and node not in seen:
-                seen.add(node)
-                walked.append(node)
-                node = merged.get(node)
-            if node is not None:  # re-entered the path we came down: a loop
-                self.route_cycles.update(walked[walked.index(node):])
+        graph.update({src: [dest] for src, (dest, _hold) in self.route_plan.items()})
+        self.route_cycles = model.cycle_nodes(graph, set(self.route_plan))
 
     def confirm_route(self, state: GameState) -> None:
         """Write the proposal into `auto_forward` and leave the mode.
@@ -1134,7 +1185,8 @@ class Ui:
         for sid in self.route_cycles:
             if sid not in plan:
                 self.clear_forward(sid)
-        self.auto_forward.update(plan)
+        for src, (dest, hold) in plan.items():
+            self.auto_forward[src] = ForwardRule({dest: 100}, hold)
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
@@ -1145,7 +1197,6 @@ class Ui:
         self.selected = None
         self.dest = None
         self.chosen = 0
-        self.keep = 0
         self.sel_order = None
         self.forward_armed = False
         self.editing_existing = False
@@ -1155,19 +1206,25 @@ class Ui:
 
     def rule_is_live(self, state: GameState, sid: int) -> bool:
         """Is the standing rule out of ``sid`` one that will actually fire — i.e.
-        we still hold the source and the destination still exists? The same
-        predicate decides whether a rule is drawn, picked off its lane, expanded
-        into an order at end of turn, and editable in the popup — and, in
+        we still hold the source and every destination still exists? The same
+        predicate decides whether a rule is drawn, picked off its lanes, expanded
+        into orders at end of turn, and editable in the popup — and, in
         `prune_forward`, whether it survives the turn at all."""
         rule = self.auto_forward.get(sid)
         src = state.systems.get(sid)
-        return rule is not None and src is not None and src.owner_id == self.human_id and rule[0] in state.systems
+        return (rule is not None and bool(rule.shares) and src is not None
+                and src.owner_id == self.human_id and all(d in state.systems for d in rule.shares))
+
+    def lane_is_hostile(self, state: GameState, dest: int) -> bool:
+        """Does a lane into ``dest`` charge a system we don't hold?"""
+        return state.systems[dest].owner_id != self.human_id
 
     def rule_is_hostile(self, state: GameState, sid: int) -> bool:
         """Is the standing rule out of ``sid`` one of the "dangerous" ones
-        `_draw_forward_rules` tints — live, but pointed at a system we don't hold?
-        The same predicate is what `clear_dangerous_forward` sweeps."""
-        return self.rule_is_live(state, sid) and state.systems[self.auto_forward[sid][0]].owner_id != self.human_id
+        `_draw_forward_rules` tints — live, but with a lane pointed at a system we
+        don't hold? The same predicate is what `clear_dangerous_forward` sweeps."""
+        return self.rule_is_live(state, sid) and any(
+            self.lane_is_hostile(state, d) for d in self.auto_forward[sid].shares)
 
     def edit_order(self, state: GameState, i: int) -> None:
         """Reopen the send popup on an already-queued order — the one editor for a
@@ -1196,9 +1253,11 @@ class Ui:
         self.chosen = o.ships
         self.sel_order = i
 
-    def edit_forward(self, state: GameState, sid: int) -> None:
-        """Reopen the send popup's Forward tab on a standing rule — the mirror of
-        `edit_order`, and idempotent for the same reason.
+    def edit_forward(self, state: GameState, sid: int, dest: int | None = None) -> None:
+        """Reopen the send popup's Forward tab on a standing rule, at its lane to
+        ``dest`` (its first lane when that is not one of them) — the mirror of
+        `edit_order`, and idempotent for the same reason. Already open on the same
+        system, it only moves to the other lane, keeping a dragged popup put.
 
         A *dormant* rule (`rule_is_live` false) is highlighted but not opened: the
         popup reads the source's garrison and the destination's owner unguarded, and
@@ -1206,20 +1265,25 @@ class Ui:
         out of someone else's territory. Highlighting still gives the X key
         something to act on.
         """
+        rule = self.auto_forward.get(sid)
+        if rule is None:
+            return
+        if dest not in rule.shares:
+            dest = next(iter(rule.shares), None)
         if self.mode == CHOOSING and self.forward_armed and self.selected == sid:
+            if dest is not None:
+                self.dest = dest
             return
         self.reset_selection()
         self.sel_order = None
         self.sel_forward = sid
         if not self.rule_is_live(state, sid):
             return
-        dest, keep = self.auto_forward[sid]
         self.selected = sid
         self.dest = dest
         self.mode = CHOOSING
         self.forward_armed = True
         self.editing_existing = True
-        self.keep = keep
         # seed the Send tab too, so switching to it sends all (as composing does)
         # rather than the 1 ship a `chosen` of 0 would clamp up to
         self.chosen = self.available(state, sid)

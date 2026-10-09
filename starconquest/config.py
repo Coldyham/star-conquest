@@ -322,6 +322,10 @@ SEND_POPUP_W = 184          # px: panel width
 SEND_POPUP_BTN_H = 22       # px: height of each button row
 SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
+SPLIT_POPUP_W = 216         # px: panel width once a system forwards down 2+ lanes
+FORWARD_STEP_PCT = 10       # %: one −/+ press or wheel notch on a forwarding share
+FORWARD_SNAP_PCT = 5        # %: the share slider's resolution
+FORWARD_HOLD_MAX = 99       # ships: the most a forwarding system can be told to hold
 
 # Sliders (the send popup's count slider and history mode's turn scrubber — the
 # same widget, drawn by widgets.slider). The knob is inset by its radius at
@@ -412,6 +416,7 @@ _SCALABLE = (
     "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
     "FILM_LOSS_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
+    "SPLIT_POPUP_W",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )

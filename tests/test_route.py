@@ -19,7 +19,7 @@ from starconquest import main
 from starconquest import config, mapgen, model, render
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
-from starconquest.model import GameState, Player, System
+from starconquest.model import ForwardRule, GameState, Player, System
 from starconquest.viewstate import IDLE, ROUTING, Ui
 
 
@@ -219,12 +219,12 @@ def test_destination_must_have_been_seen():
 # --------------------------------------------------------------------------- #
 # Planning: replacing existing rules
 # --------------------------------------------------------------------------- #
-def test_keep_survives_a_replace_that_does_not_move_the_next_hop():
-    """Re-routing over an existing conveyor is idempotent, so a tuned keep isn't
+def test_hold_survives_a_replace_that_does_not_move_the_next_hop():
+    """Re-routing over an existing conveyor is idempotent, so a tuned hold isn't
     silently wiped by a plan that agreed with it anyway."""
     s = _line(4, owned={0, 1, 2, 3})
     ui = _ui(s)
-    ui.auto_forward[1] = (2, 4)    # already forwards the right way, keeping 4
+    ui.auto_forward[1] = ForwardRule({2: 100}, 4)    # already forwards the right way, keeping 4
     ui.route_sel = {0}
     ui.set_route_dest(s, 3)
     assert ui.route_plan[1] == (2, 4)
@@ -234,11 +234,35 @@ def test_keep_survives_a_replace_that_does_not_move_the_next_hop():
 def test_a_rule_pointing_elsewhere_is_replaced_and_reported():
     s = _graph([(0, 1), (1, 2), (1, 3)], {sid: 1 for sid in range(4)})
     ui = _ui(s)
-    ui.auto_forward[1] = (3, 2)    # points the wrong way
+    ui.auto_forward[1] = ForwardRule({3: 100}, 2)    # points the wrong way
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan[1] == (2, 0)      # re-aimed, keep reset
+    assert ui.route_plan[1] == (2, 2)      # re-aimed; the hold is the system's own
     assert ui.route_replaces == {1}
+
+
+def test_a_split_rule_is_replaced_even_when_one_lane_agrees():
+    s = _graph([(0, 1), (1, 2), (1, 3)], {sid: 1 for sid in range(4)})
+    ui = _ui(s)
+    ui.auto_forward[1] = ForwardRule({2: 50, 3: 50}, 0)
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 2)
+    assert ui.route_plan[1] == (2, 0)
+    assert ui.route_replaces == {1}
+    ui.confirm_route(s)
+    assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
+
+
+def test_a_split_lane_back_into_the_plan_is_a_cycle():
+    """A loop down one lane of a split traps that share, so it counts."""
+    s = _line(4, owned={0, 1, 2, 3})
+    ui = _ui(s)
+    ui.auto_forward[3] = ForwardRule({2: 50, 1: 50}, 0)   # the destination splits back
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 3)
+    assert 3 in ui.route_cycles
+    ui.confirm_route(s)
+    assert 3 not in ui.auto_forward
 
 
 # --------------------------------------------------------------------------- #
@@ -249,7 +273,7 @@ def test_a_destination_forwarding_back_into_the_plan_is_a_cycle():
     loop the plan would otherwise never contain."""
     s = _line(3, owned={0, 1, 2})
     ui = _ui(s)
-    ui.auto_forward[2] = (1, 0)    # dest forwards back to a planned system
+    ui.auto_forward[2] = ForwardRule({1: 100}, 0)    # dest forwards back to a planned system
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
     assert ui.route_cycles                 # flagged before the player confirms
@@ -259,12 +283,12 @@ def test_a_destination_forwarding_back_into_the_plan_is_a_cycle():
 def test_confirm_breaks_the_cycle_rather_than_arming_it():
     s = _line(3, owned={0, 1, 2})
     ui = _ui(s)
-    ui.auto_forward[2] = (1, 0)
+    ui.auto_forward[2] = ForwardRule({1: 100}, 0)
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
     ui.confirm_route(s)
     assert 2 not in ui.auto_forward         # the closing edge is dropped
-    assert ui.auto_forward == {0: (1, 0), 1: (2, 0)}
+    assert ui.auto_forward == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
 
 
 def test_a_rule_feeding_into_the_destination_is_not_a_cycle():
@@ -272,13 +296,13 @@ def test_a_rule_feeding_into_the_destination_is_not_a_cycle():
     it is another tributary, and must survive untouched."""
     s = _graph([(0, 1), (1, 2), (2, 3)], {sid: 1 for sid in range(4)})
     ui = _ui(s)
-    ui.auto_forward[3] = (2, 1)     # 3 also feeds the destination
+    ui.auto_forward[3] = ForwardRule({2: 100}, 1)     # 3 also feeds the destination
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
     assert ui.route_cycles == set()
     ui.confirm_route(s)
-    assert ui.auto_forward[3] == (2, 1)    # untouched, keep and all
-    assert ui.auto_forward[0] == (1, 0) and ui.auto_forward[1] == (2, 0)
+    assert ui.auto_forward[3] == ForwardRule({2: 100}, 1)    # untouched, keep and all
+    assert ui.auto_forward[0] == ForwardRule({1: 100}, 0) and ui.auto_forward[1] == ForwardRule({2: 100}, 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +315,7 @@ def test_confirm_writes_the_plan_and_leaves_the_mode():
     ui.route_sel = {0}
     ui.set_route_dest(s, 3)
     ui.confirm_route(s)
-    assert ui.auto_forward == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
+    assert ui.auto_forward == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
     assert ui.mode == IDLE and ui.route_sel == set() and ui.route_dest is None
 
 
@@ -625,7 +649,7 @@ def test_confirm_button_writes_the_plan():
         _tap(state, ui, nbr)
         ui.route_confirm_rect = (400, 100, 60, 20)
         _press(state, ui, (410, 110))
-        assert ui.auto_forward == {home: (nbr, 0)}
+        assert ui.auto_forward == {home: ForwardRule({nbr: 100}, 0)}
         assert ui.mode == IDLE
     finally:
         pygame.quit()
@@ -651,7 +675,7 @@ def test_enter_confirms_instead_of_ending_the_turn():
         ui.route_dest = nbr
         ui.recompute_route(state)
         assert _key(state, ui, pygame.K_RETURN) is None    # not "end_turn"
-        assert ui.auto_forward == {home: (nbr, 0)}
+        assert ui.auto_forward == {home: ForwardRule({nbr: 100}, 0)}
     finally:
         pygame.quit()
 
@@ -689,7 +713,7 @@ def test_render_suppresses_clear_forwarding_while_routing():
     try:
         screen = pygame.display.get_surface()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
         render.draw(screen, state, ui)
         assert ui.clear_forward_rect != (0, 0, 0, 0)   # normally offered
         ui.begin_route()
@@ -809,7 +833,7 @@ def test_rally_keeps_a_rule_that_already_points_the_right_way():
     s = _line(4, owned=range(4))
     ui = _ui(s)
     ui.route_rally = True
-    ui.auto_forward[2] = (1, 4)     # already flowing inward, keeping 4
+    ui.auto_forward[2] = ForwardRule({1: 100}, 4)     # already flowing inward, keeping 4
     ui.route_sel = {0}
     ui.recompute_route(s)
     assert ui.route_plan[2] == (1, 4)
@@ -822,10 +846,10 @@ def test_a_rally_plan_reports_the_rules_it_replaces():
     s = _graph([(0, 1), (1, 2), (2, 3), (1, 3)], {sid: 1 for sid in range(4)})
     ui = _ui(s)
     ui.route_rally = True
-    ui.auto_forward[3] = (2, 4)     # points away from the rally point
+    ui.auto_forward[3] = ForwardRule({2: 100}, 4)     # points away from the rally point
     ui.route_sel = {0}
     ui.recompute_route(s)
-    assert ui.route_plan[3] == (1, 0)   # re-aimed, keep reset
+    assert ui.route_plan[3] == (1, 4)   # re-aimed, hold kept
     assert ui.route_replaces == {3}
 
 
@@ -835,7 +859,7 @@ def test_a_rally_point_forwarding_back_into_the_field_is_a_cycle():
     s = _line(3, owned=range(3))
     ui = _ui(s)
     ui.route_rally = True
-    ui.auto_forward[0] = (1, 0)     # the rally point pushes straight back out
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0)     # the rally point pushes straight back out
     ui.route_sel = {0}
     ui.recompute_route(s)
     assert ui.route_cycles == {0, 1}
@@ -845,11 +869,11 @@ def test_rally_confirm_breaks_the_cycle_rather_than_arming_it():
     s = _line(3, owned=range(3))
     ui = _ui(s)
     ui.route_rally = True
-    ui.auto_forward[0] = (1, 0)
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0)
     ui.route_sel = {0}
     ui.recompute_route(s)
     ui.confirm_route(s)
-    assert ui.auto_forward == {1: (0, 0), 2: (1, 0)}   # the sink's rule is gone
+    assert ui.auto_forward == {1: ForwardRule({0: 100}, 0), 2: ForwardRule({1: 100}, 0)}   # the sink's rule is gone
 
 
 def test_rally_confirm_writes_the_field_and_leaves_the_mode():
@@ -857,7 +881,7 @@ def test_rally_confirm_writes_the_field_and_leaves_the_mode():
     ui = _rally(s, {0})
     ui.mode = ROUTING
     ui.confirm_route(s)
-    assert ui.auto_forward == {1: (0, 0), 2: (1, 0), 3: (2, 0)}
+    assert ui.auto_forward == {1: ForwardRule({0: 100}, 0), 2: ForwardRule({1: 100}, 0), 3: ForwardRule({2: 100}, 0)}
     assert ui.mode == IDLE and ui.route_sel == set()
 
 

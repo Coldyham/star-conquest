@@ -883,21 +883,20 @@ def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     """Turn standing auto-forward rules into this turn's orders for the human.
 
-    A rule keeps ``keep`` ships at the source and forwards the surplus onward.
-    We subtract ships already promised by manually-queued orders from the same
-    source so a rule cooperates with (rather than double-counts) manual sends.
+    A rule holds back its ``hold`` and sends each lane its share of the rest
+    (`Ui.forward_this_turn`, the same figures the popup shows). Ships already
+    promised by manually-queued orders from the same source are not counted as
+    free, so a rule cooperates with (rather than double-counts) manual sends.
     """
     orders: list[Order] = []
-    for src, (dest, keep) in ui.auto_forward.items():
+    for src in ui.auto_forward:
         # the same test that decides whether the rule is drawn, pickable, editable
         # and (at the end of this turn, in `Ui.prune_forward`) kept at all
         if not ui.rule_is_live(state, src):
             continue
-        if not state.are_adjacent(src, dest):
-            continue
-        send = ui.available(state, src) - keep
-        if send > 0:
-            orders.append(Order(ui.human_id, src, dest, send))
+        for dest, send in ui.forward_this_turn(state, src).items():
+            if send > 0 and state.are_adjacent(src, dest):
+                orders.append(Order(ui.human_id, src, dest, send))
     return orders
 
 

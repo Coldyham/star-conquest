@@ -25,7 +25,7 @@ import pytest
 
 from starconquest import main as app
 from starconquest import ai, config, engine, pbp, replay, webstore
-from starconquest.model import Order
+from starconquest.model import ForwardRule, Order
 from starconquest.settings import Settings
 
 pygame.init()
@@ -164,7 +164,7 @@ def test_the_uploaded_log_carries_none_of_our_standing_rules():
     """Every other client opens from it, and a route plan is ours alone."""
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 0)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 0)}
     match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
@@ -178,7 +178,7 @@ def test_reopening_a_match_brings_back_our_standing_rules():
     ends, and opening the match again reads it back."""
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 1)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 1)}
     match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
@@ -190,15 +190,15 @@ def test_reopening_a_match_brings_back_our_standing_rules():
                {"turn": 0, "seat": 2, "orders_json": []}]))
     opened = app.open_match(reopened, _seat(), Settings())
     assert opened is not None
-    assert opened[1].auto_forward == {src: (dst, 1)}
+    assert opened[1].auto_forward == {src: ForwardRule({dst: 100}, 1)}
 
 
 def test_a_saved_rule_out_of_a_system_since_lost_does_not_come_back():
     _, state, ui, _ = _opened()
     src, dst = _lane(state, 1)
-    pbp.remember_rules(MATCH, {src: (dst, 0), dst: (src, 0)})   # dst was never ours
+    pbp.remember_rules(MATCH, {src: ForwardRule({dst: 100}, 0), dst: ForwardRule({src: 100}, 0)})   # dst was never ours
     _, _, ui2, _ = _opened()
-    assert ui2.auto_forward == {src: (dst, 0)}
+    assert ui2.auto_forward == {src: ForwardRule({dst: 100}, 0)}
 
 
 def test_submitting_saves_the_rules_it_sent(monkeypatch):
@@ -206,19 +206,19 @@ def test_submitting_saves_the_rules_it_sent(monkeypatch):
     monkeypatch.setattr(pbp, "call", lambda *a, **kw: None)
     _, state, ui, _ = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 0)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 0)}
     app.pbp_send(state, ui, _seat())
-    assert pbp.remembered_rules(MATCH) == {src: (dst, 0)}
+    assert pbp.remembered_rules(MATCH) == {src: ForwardRule({dst: 100}, 0)}
 
 
 def test_forgetting_a_match_forgets_its_rules_too():
     pbp.remember(_seat())
-    pbp.remember_rules(MATCH, {3: (4, 0)})
+    pbp.remember_rules(MATCH, {3: ForwardRule({4: 100}, 0)})
     other = "ffeeddccbbaa0099"
-    pbp.remember_rules(other, {5: (6, 1)})
+    pbp.remember_rules(other, {5: ForwardRule({6: 100}, 1)})
     pbp.forget(MATCH)
     assert pbp.remembered_rules(MATCH) == {}
-    assert pbp.remembered_rules(other) == {5: (6, 1)}, "another match's are kept"
+    assert pbp.remembered_rules(other) == {5: ForwardRule({6: 100}, 1)}, "another match's are kept"
     pbp.remember_rules(other, {})
     assert pbp.remembered_rules(other) == {}
 
@@ -429,7 +429,7 @@ def test_submitting_sends_queued_orders_and_standing_rules_together(monkeypatch)
     other = dst
     state.systems[other].owner_id, state.systems[other].ships = 1, 4
     ui.pending.append(Order(1, src, dst, 1))
-    ui.auto_forward[other] = (src, 0)
+    ui.auto_forward[other] = ForwardRule({src: 100}, 0)
 
     app.pbp_send(state, ui, _seat())
     assert {o["src"] for o in sent["orders"]} == {src, other}

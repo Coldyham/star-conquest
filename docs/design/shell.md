@@ -184,7 +184,7 @@ seeds need not be traversable, so rally needed no new graph query and no new rul
 shape — only a different seeding. Chain seeds the one destination and walks each
 pick's path to it; rally seeds every pick at once and takes the returned field whole,
 since that field *is* the plan: every owned system it reached, mapped to its next hop
-inward. Everything downstream (the `keep`-preserving `_add_hop`, cycle detection, the
+inward. Everything downstream (the hold-preserving `_add_hop`, cycle detection, the
 confirm, the preview, the End Turn slot takeover) is shared, which is the reason this
 is a sub-mode toggle rather than a third top-level mode.
 
@@ -302,12 +302,17 @@ ending a turn mid-plan impossible by construction instead of by a guard. The
 panel's Clear forwarding buttons are suppressed too — they would mutate
 `auto_forward` underneath the preview.
 
-**`keep` is 0 on a new rule** (the Forward tab's own default), but a replaced rule
-that already pointed at the same next hop keeps its `keep` — so re-running a route
-over an existing conveyor is idempotent rather than quietly resetting tuning that
-was already correct.
+**A plan sends everything down one lane, and keeps any hold the system had.** A
+route is a conveyor, so each hop is a 100% share; a split the plan crosses is
+replaced and reported as replaced (`route_replaces`), even when one of its lanes
+already agreed. The hold survives any replace, whichever way the hop now points:
+it is about the system's own safety, not about a lane, so a route has no business
+resetting it — and re-running a route over a conveyor that is already correct
+stays idempotent rather than quietly wiping tuning. Cycle detection treats every
+lane with a share as an edge (`model.cycle_nodes`): a loop down one lane of a
+split traps that share as surely as a whole rule would.
 
-**One consequence worth knowing.** With whole-path `keep = 0`, losing a mid-chain
+**One consequence worth knowing.** With whole-path hold 0, losing a mid-chain
 system leaves its upstream neighbour forwarding its entire garrison into enemy
 territory every turn: `prune_forward` drops the captured system's rule, but the
 upstream one is still live and `rule_is_live` doesn't care who owns the far end.
@@ -315,6 +320,78 @@ A hand-made rule has always had this property, but the player made *one*, on
 purpose. Hence `_draw_forward_rules` tinting any rule aimed at a system we don't
 hold — it is a real move as well as a real accident, so it is flagged rather than
 prevented.
+
+## Forwarding rules: a hold and a share per lane (`model.ForwardRule`)
+
+A rule used to be one lane and a `keep`: send everything above N. "Keep half" set
+N to half the garrison *at the moment you pressed it*, and the caption under it
+("~7/turn") was the garrison at that moment too, so both went stale as the system
+grew; in practice the player kept 0 and only touched `keep` for a turn or two
+against a small inbound fleet. Now a rule is the system's `hold` (ships kept back,
+the old keep) plus a whole-number percent per lane of whatever is left. Every old
+rule converts exactly: keep N is hold N with 100%.
+
+**The hold belongs to the system, the share to the lane.** A switch per rule
+between "keep N" and "send N%" was mocked up and rejected: "keep N" really means
+"send the rest", so a system could only have one such lane, every other lane had
+to be a percent, and the switch had to explain that. Splitting the two quantities
+by what they are about removes the switch altogether.
+
+**Adding a lane splits evenly; removing one undoes it.** `model.shares_with` gives
+the new lane an even cut of what is being sent and shrinks the others in
+proportion, so 100 becomes 50/50 becomes 34/33/33, a lone 50% becomes 25/25 (the
+other half still stays home), and 70/30 becomes 47/20/33. `shares_without` is its
+inverse — an even split re-splits evenly, anything else hands the freed share back
+in proportion — so Cancel on a lane just added, or going back to the Send tab,
+leaves the others as they were. A rule sending nothing at all splits 100% when a
+lane joins, or the new lane would be born idle.
+
+**+ never hits a wall.** With adding defaulting to 100% split evenly, the shares
+nearly always total 100, so a + that stopped at 100 would be dead most of the
+time. `shares_set` takes a rise from what stays home first, then from the other
+lanes in proportion; − gives back to staying home. There is no "full" state and no
+message about one.
+
+**One formula for what goes.** `forward_split` rounds by largest remainder with
+what stays home as a share of its own, so the lanes sum to exactly their share of
+the surplus. A ship that could go either way rotates with the turn, among the
+shares that are actually sending — a 50/50 split of 5 alternates 3/2 and 2/3, and a
+lone 50% of one ship sends it every other turn. `Ui.forward_this_turn` applies it
+to the free ships beyond the hold, and is the only thing that does:
+`main.auto_forward_orders` issues it, and every number on the popup and panel
+("5 go · 7 stay", "Forwarding 50% · 5 go", "-> Alcyone (22) 50% · 5") reads it.
+Those numbers are exact rather than estimates because orders resolve against the
+start-of-turn garrison. Dict order is part of a rule (ties go to the earliest
+lane), so the log keeps lanes in the order they were added.
+
+**The popup has three shapes.** The Send tab is unchanged. A Forward tab with one
+lane edits that lane's share the way the Send tab edits a count — slider, −/+
+(`config.FORWARD_STEP_PCT`), 50%/100% — plus a hold row. With two or more lanes it
+becomes the system's split panel (`config.SPLIT_POPUP_W`): a row per lane with its
+own −/+, what stays home, the split as a bar, Even split and Delete all. The row
+for `ui.dest` is outlined; it is what the bottom button, the wheel and the map
+highlight act on, and a tap on another row (or another lane on the map) moves it.
+The panel is not a fixed size any more — a split grows with its lanes — so the
+anchor is chosen for the taller single-lane shape, and Send/Forward flips on one
+lane don't make it jump. On a screen too short for a split even at the label-height
+floor, it sheds the bar, then the "stays" row, then lanes, keeping a window round
+the one being edited with a "+N more · tap a lane" row; the rest are a tap on their
+lane away.
+
+**On the map, the hold sits under the system.** Each lane is labelled with its
+share when that is less than 100%, near the source; a held system gets one
+"hold N" badge under its disc, where its star name would go, and the name moves
+down a slot (`_hold_badge`, `name_floor` in `_draw_node_names`). Putting the hold
+on the lane labels instead repeated it on every lane of a split, where the labels
+crowded round the source and one lane's "hold 2" ran into the next lane's "50%".
+A share label that would land on the badge tries the lane's other side, then
+further along it.
+
+**Names fit by the same three steps everywhere they compete for room.** "Vega (7)"
+where it fits, "Vega" where only that does, "7" otherwise: `_fit_route` for the
+popup title (both ends together, so a title never mixes forms), `_fit_names` for
+the split panel's column (the whole column at once, so "Bodu (14)" never sits over
+a bare "Alcyone").
 
 ## Measured layout and `config.touch_ui`: the rules in full
 
@@ -414,8 +491,25 @@ prevented.
   - **The count slider must be claimed before the popup's drag fallthrough** —
     `slider_rect` is hit-tested first, and `dragging_slider` checked ahead of
     `dragging_popup` in the MOUSEMOTION chain. Both halves tolerate `lo == hi`
-    (an empty source, the touch default) and a zeroed rect (popup closed
-    mid-drag).
+    (an empty source on the Send tab) and a zeroed rect (popup closed
+    mid-drag). On the Forward tab it sizes a share, 0-100% snapped to
+    `config.FORWARD_SNAP_PCT`, whatever the garrison.
+- **A forwarding rule is a hold plus a share per lane** (`model.ForwardRule`),
+  and the share arithmetic is `model`'s alone (`shares_with`, `shares_without`,
+  `shares_set`, `shares_even`, `forward_split`). The shell never adds percentages
+  up itself.
+  - **`Ui.forward_this_turn` is the one formula** for what a rule sends. Orders
+    (`main.auto_forward_orders`) and every number the popup and panel show come
+    from it.
+  - **Arming the Forward tab adds a lane with `shares_with`; Cancel, Delete and
+    the Send tab take it out with `shares_without`**, so trying the tab and
+    leaving puts the other lanes back. A system's last lane takes its rule with
+    it (`Ui._drop_lane`).
+  - **A pick on the map names a lane** (`("rule", (src, dest))`), and
+    `Ui.edit_forward(sid, dest)` reopens that lane; on a system already open it
+    only moves the focus.
+  - **Split rows record `ui.share_rows`** as `(dest, row, minus, plus)`; −/+ on a
+    row focus that lane before stepping it.
 - **Orders and rules are reached from the map, not from a list.** A click near
   a lane picks what is drawn on it, and repeat clicks cycle through everything
   sharing the lane (`input._pick_lane`); the popup it opens holds the Delete

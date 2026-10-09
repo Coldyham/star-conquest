@@ -111,6 +111,54 @@ def _dijkstra_by_turns(state: GameState, allowed: set[int],
     return dist, parent
 
 
+def cycle_nodes(graph: dict[int, list[int]], starts: set[int]) -> set[int]:
+    """Every node on a cycle of ``graph`` (node -> successors) that can be reached
+    from ``starts``: the members of each strongly connected component of more than
+    one node, or of one with an edge to itself (Tarjan, iterative, so a long chain
+    of rules can't hit the recursion limit)."""
+    index: dict[int, int] = {}
+    low: dict[int, int] = {}
+    stack: list[int] = []
+    on_stack: set[int] = set()
+    out: set[int] = set()
+
+    def visit(node: int) -> None:
+        index[node] = low[node] = len(index)
+        stack.append(node)
+        on_stack.add(node)
+
+    for root in sorted(starts):
+        if root in index:
+            continue
+        visit(root)
+        work = [(root, iter(graph.get(root, ())))]
+        while work:
+            node, succ = work[-1]
+            for nxt in succ:
+                if nxt not in index:
+                    visit(nxt)
+                    work.append((nxt, iter(graph.get(nxt, ()))))
+                    break
+                if nxt in on_stack:
+                    low[node] = min(low[node], index[nxt])
+            else:
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[node])
+                if low[node] == index[node]:
+                    comp = []
+                    while True:
+                        w = stack.pop()
+                        on_stack.discard(w)
+                        comp.append(w)
+                        if w == node:
+                            break
+                    if len(comp) > 1 or node in graph.get(node, ()):
+                        out.update(comp)
+    return out
+
+
 @dataclass
 class AiParams:
     """Per-seat tuning for the AI.
@@ -277,6 +325,124 @@ class Order:
     source_id: int
     dest_id: int
     ships: int
+
+
+@dataclass
+class ForwardRule:
+    """A system's standing forwarding: hold back ``hold`` ships, then send each lane
+    its share of what is left, every turn. ``shares`` maps destination id to a whole
+    percent; they total at most 100, and whatever they leave stays home.
+
+    Dict order is the order lanes were added; the share helpers below break ties
+    by it, so it is part of the rule rather than an accident of storage.
+    """
+
+    shares: dict[int, int] = field(default_factory=dict)
+    hold: int = 0
+
+    def total(self) -> int:
+        return sum(self.shares.values())
+
+
+def _apportion(weights: list[int], total: int, start: int = 0) -> list[int]:
+    """Whole numbers in proportion to ``weights`` summing to exactly ``total``
+    (largest remainder). Equal remainders go to the earliest index counting round
+    from ``start``. Integer arithmetic throughout, so no float can tip a tie."""
+    wsum = sum(weights)
+    n = len(weights)
+    if total <= 0 or wsum <= 0:
+        return [0] * n
+    parts, rems = [], []
+    for w in weights:
+        q, r = divmod(w * total, wsum)
+        parts.append(q)
+        rems.append(r)
+    order = sorted(range(n), key=lambda i: (-rems[i], (i - start) % n))
+    for i in order[: total - sum(parts)]:
+        parts[i] += 1
+    return parts
+
+
+def _is_even(shares: dict[int, int]) -> bool:
+    """An even split, to within the one percent rounding leaves (34/33/33)."""
+    return not shares or max(shares.values()) - min(shares.values()) <= 1
+
+
+def forward_split(surplus: int, shares: dict[int, int], turn: int) -> dict[int, int]:
+    """Ships each lane of a rule sends this turn, out of ``surplus`` (the ships left
+    once the hold is kept back). Whatever the shares leave is a share of its own, so
+    it takes part in the rounding. A ship that could go either way rotates with
+    ``turn``, so a 50/50 split of an odd surplus alternates rather than always
+    favouring the first lane."""
+    if not shares:
+        return {}
+    home = -1  # never a system id
+    live = [(d, p) for d, p in [*shares.items(), (home, 100 - sum(shares.values()))] if p > 0]
+    out = dict.fromkeys(shares, 0)
+    if live:
+        parts = _apportion([p for _, p in live], max(0, surplus), turn % len(live))
+        out.update((d, n) for (d, _), n in zip(live, parts) if d != home)
+    return out
+
+
+def shares_with(shares: dict[int, int], dest: int) -> dict[int, int]:
+    """``shares`` with a lane to ``dest`` added: it gets an even cut of what is being
+    sent and the others shrink in proportion, so 100 becomes 50/50 becomes 34/33/33,
+    and a lone 50% becomes 25/25 with the other half still home. A rule that sends
+    nothing at all splits 100% instead, or the new lane would be born idle."""
+    if dest in shares:
+        return dict(shares)
+    if not shares:
+        return {dest: 100}
+    n = len(shares)
+    total = sum(shares.values()) or 100
+    weights = [1] * (n + 1) if _is_even(shares) else [s * n for s in shares.values()] + [total]
+    return dict(zip([*shares, dest], _apportion(weights, total)))
+
+
+def shares_without(shares: dict[int, int], dest: int) -> dict[int, int]:
+    """``shares`` with the lane to ``dest`` removed and its share handed back to the
+    others, so removing a lane undoes adding it: 50/50 becomes 100, 34/33/33 becomes
+    50/50."""
+    rest = [d for d in shares if d != dest]
+    if not rest:
+        return {}
+    weights = [shares[d] for d in rest]
+    if _is_even(shares) or not any(weights):
+        weights = [1] * len(rest)
+    return dict(zip(rest, _apportion(weights, sum(shares.values()))))
+
+
+def shares_set(shares: dict[int, int], dest: int, pct: int) -> dict[int, int]:
+    """``shares`` with ``dest``'s share moved toward ``pct`` (0-100). Raising it
+    takes from what stays home first, then from the other lanes in proportion, so
+    there is never a "full" state to back out of; lowering it gives the difference
+    back to staying home."""
+    if dest not in shares:
+        return dict(shares)
+    out = dict(shares)
+    cur = shares[dest]
+    pct = max(0, min(100, pct))
+    if pct <= cur:
+        out[dest] = pct
+        return out
+    need = pct - cur
+    from_home = min(need, max(0, 100 - sum(shares.values())))
+    others = [d for d in shares if d != dest]
+    pool = sum(shares[d] for d in others)
+    taken = min(need - from_home, pool)
+    out[dest] = cur + from_home + taken
+    if taken:
+        for d, s in zip(others, _apportion([shares[d] for d in others], pool - taken)):
+            out[d] = s
+    return out
+
+
+def shares_even(shares: dict[int, int]) -> dict[int, int]:
+    """``shares`` split evenly over the same total (100 when it was nothing)."""
+    if not shares:
+        return {}
+    return dict(zip(shares, _apportion([1] * len(shares), sum(shares.values()) or 100)))
 
 
 @dataclass

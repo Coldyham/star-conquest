@@ -460,6 +460,10 @@ already resolve simultaneously. The rationale for each rule is in
   taken). Its slider is hit-tested before the panel drag.
 - **Orders and rules are reached from the map** (`input._pick_lane`, repeat
   clicks cycle a shared lane); the side panel has no list of them.
+- **A forwarding rule is a system's hold plus a share per lane**
+  (`model.ForwardRule`); the share arithmetic lives in `model` only, and
+  `Ui.forward_this_turn` is the one formula behind both the orders and every
+  number shown. Detail: `docs/design/shell.md`, "Forwarding rules".
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:
