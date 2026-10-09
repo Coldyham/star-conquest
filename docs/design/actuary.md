@@ -561,7 +561,7 @@ seats, 5-80 nodes, 8,778 paired games): +1.9 points at 24 nodes and under
 **Not a bot-column fix.** The board's bot column could instead try both stops
 on every map and keep the better. On this board that would mostly have picked
 the luckier dice, not the better opening, and it would choose the profile with
-hindsight per map where `bot_replay.REPLAY_AUX` chooses it once per bot. Fixing
+hindsight per map where `bot_replay.replay_aux` chooses it once per bot. Fixing
 the default fixes the board and the menu alike.
 
 **Open:** with two seats on 10-18 nodes Planned still trails Greedy a little on

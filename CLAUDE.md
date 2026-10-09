@@ -349,7 +349,7 @@ already resolve simultaneously. The rationale for each rule is in
   through the human's seat via `tests/sim.play_settings`, which goes through
   `build_state` so tuned knobs apply. The seat is handed over outright
   (`sim._hand_over` clears `is_human`), gets default `AiParams` except
-  `bot_replay.REPLAY_AUX`'s `aux`, and runs with wall-clock guards lifted 100x
+  `aux`, the top of its own slider (`bot_replay.replay_aux`), and runs with wall-clock guards lifted 100x
   (`ai.set_budget_scale`, a model's `BUDGET_SCALE`). `engine_rev` hashes the
   outcome modules, `models/` and `tests/sim.py`; `replay_rev` excludes `ai`,
   `models/` and the harness. `won`, never `turns`, decides a result. A win

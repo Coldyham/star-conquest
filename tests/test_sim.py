@@ -15,7 +15,7 @@ from starconquest import settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
-from tools.bot_replay import REPLAY_AUX
+from tools.bot_replay import replay_aux
 
 
 def test_invariants_hold_and_most_games_terminate():
@@ -377,7 +377,7 @@ def test_balance_knobs_from_the_setup_reach_the_generated_map():
 
 def test_aux_reaches_the_replayed_seat_and_changes_how_it_plays():
     # models/knower.py reads aux as its Oracle mode, and the leaderboard replays it
-    # on Search (bot_replay.REPLAY_AUX), the top of its own slider. If aux stopped
+    # on Search (bot_replay.replay_aux), the top of its own slider. If aux stopped
     # reaching the seat the board would quietly be showing the Predict bot
     # instead, which is a materially weaker player — so assert the two differ.
     ai.load_models()
@@ -414,7 +414,7 @@ def test_a_tuned_replay_is_still_reproducible():
     # genuinely different plan indistinguishable.
     ai.load_models()
     cfg = _setup()
-    depth = REPLAY_AUX["knower"]
+    depth = replay_aux("knower")
     try:
         ai.set_budget_scale(math.inf)
         assert sim.play_settings(cfg, 11, "knower", aux=depth) == \

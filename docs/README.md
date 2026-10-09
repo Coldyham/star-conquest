@@ -100,7 +100,7 @@ only for a fight; what is deliberately not animated.
 - **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
-  - *Through `build_state`*; *what the replayed seat is tuned to* (`REPLAY_AUX`); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
+  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.

@@ -640,7 +640,7 @@ Planned, and the menu cannot set more than 1. But a higher stop should play
 better, and flag aside it is level with actuary.
 
 **Not measured:** the other cells (slow, fast, large), the free-for-all, knower at
-Search (the leaderboard's profile, `bot_replay.REPLAY_AUX`), and anything
+Search (the leaderboard's profile, `bot_replay.replay_aux`), and anything
 against a person. learner joins the nightly bot column the moment `models/` on
 `main` has it (`tools/bot_replay.py` replays every registered bot).
 
@@ -927,7 +927,8 @@ never runs a Learning seat.
   stops Greedy, Planned (the default, unchanged) and Learning. Before, any `aux`
   from 1 up read as Planned. The menu could not set more than 1, so only a
   hand-edited link could hold 2 or more, and a stored game never re-runs a bot.
-  `bot_replay.REPLAY_AUX` leaves actuary at 1, so the bot column plays Planned.
+  The bot column first left actuary at 1 (Planned); it now replays every bot at
+  the top of its slider (`bot_replay.replay_aux`), so it plays Learning.
 - **The oracle claim is per seat.** `is_oracle_seat` is true at Learning only, so
   knower still runs actuary's `decide` at Greedy and Planned and models a
   Learning seat blind. actuary has no module-level `IS_ORACLE`. `decide_ms`

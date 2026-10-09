@@ -111,7 +111,7 @@ measures come back:
 
 Positions are split into **contested** (the seat holds a system next to a live
 rival's) and **opening**, and each bot's nearest neighbour is reported in both.
-Bots run at the leaderboard profile (`REPLAY_AUX`, guards lifted). `--null` asks
+Bots run at the leaderboard profile (`replay_aux`, guards lifted). `--null` asks
 each bot twice; every current bot is at exactly 0 from itself.
 
 First reading, 21 two-seat self-play games, 18 nodes, 6 ly/turn, every 5 turns
@@ -335,7 +335,7 @@ gap found here is a hypothesis; confirming it still wants a paired sweep with a
 z-score, the same as everything else in this file.
 
 **Each bot replays at its measured-best profile, not its menu default —
-the same rule `bot_replay.REPLAY_AUX` follows for the leaderboard's bot
+the same rule `bot_replay.replay_aux` follows for the leaderboard's bot
 column, reused rather than re-decided here.** The first real run measured
 knower at `aux=1.0` (search depth 1, the untuned default) purely because
 nobody had wired the override through; its win rate and turn counts in any
@@ -404,7 +404,7 @@ tool no blind heuristic has, which is the mechanism this would be explained
 by rather than a coincidence — worth widening the corpus before leaning on it
 further, not before noting it.
 
-## Replaying a bot for the leaderboard (`bot_replay.REPLAY_AUX`, `BUDGET_SCALE`)
+## Replaying a bot for the leaderboard (`bot_replay.replay_aux`, `BUDGET_SCALE`)
 
 The board's bot column replays each `models/` bot through the human's seat on a
 posted map (`tools/bot_replay.py`; the infrastructure is in
@@ -412,10 +412,13 @@ posted map (`tools/bot_replay.py`; the infrastructure is in
 roster fall out of that, and both were measured.
 
 **Which version of a bot goes on the board.** Its best one, not its menu default.
-`REPLAY_AUX` names the exceptions and today holds one: `knower` on Oracle: Search
-(it was search depth 12 until the knob became three named stops; see [`knower.md`](knower.md), "How far to
-look"). That is the top of knower's own slider (`SEARCH_DEPTH_MAX`). It is
-not a small difference. On a 16-node map, same seed, same opponents, at the old
+`replay_aux` puts every bot at the top of its own declared slider (`AUX_RANGE`,
+read through `ai.aux_spec`), and a bot that declares none at 1.0. A slider runs
+from a bot's cheapest stop to its strongest, so the top is the bot at its best,
+and a new bot's knob needs no entry anywhere to be replayed there. Today that is
+`knower` on Oracle: Search (`SEARCH_DEPTH_MAX`; it was search depth 12 until the
+knob became three named stops, see [`knower.md`](knower.md), "How far to look")
+and `actuary` on Style: Learning. For knower it is not a small difference. On a 16-node map, same seed, same opponents, at the old
 depth 12:
 
     knower @ 1 (default)     336 turns, 346 ships lost
