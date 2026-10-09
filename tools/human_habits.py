@@ -17,7 +17,7 @@ bot that lost to the person is no baseline. Four readings:
    first seat to reach a threshold wins.
 2. **Waves.** Everything one side lands on a target it does not hold on one
    turn (this turn's launches and fleets already flying), over the target's
-   effective garrison on arrival (`models/learner.py`'s `_effective`), by the
+   effective garrison on arrival (`models/actuary.py`'s `_effective`), by the
    side's share of ships. A whole wave, not one source's share, since several
    bots split a strike across sources.
 3. **Relief.** Every voluntary frontier empty (90%+ of a garrison sent, no
@@ -60,8 +60,8 @@ COVER = ("inbound", "reachable", "short", "uncovered")
 MAX_TURNS = 400
 
 
-def _learner():
-    return sys.modules["sc_model_learner"]
+def _actuary():
+    return sys.modules["sc_model_actuary"]
 
 
 def shares(state) -> dict[int, tuple[float, float, float]]:
@@ -99,8 +99,8 @@ def _sent(state, orders) -> dict[int, dict[int, int]]:
 def waves(state, sent) -> list[tuple[int, float, float]]:
     """(side, landing force / target's effective garrison, side's ship share) for
     every wave launched this turn at a target the side does not hold."""
-    learner = _learner()
-    snap = learner._Snap(state)
+    ac = _actuary()
+    snap = ac._Snap(state)
     share = shares(state)
     group: dict[tuple[int, int, int], int] = defaultdict(int)
     for src, outs in sent.items():
@@ -112,7 +112,7 @@ def waves(state, sent) -> list[tuple[int, float, float]]:
     for (me, dst, turns), ships in sorted(group.items()):
         ships += sum(f.ships for f in state.fleets
                      if f.owner_id == me and f.dest_id == dst and f.turns_remaining == turns)
-        out.append((me, ships / learner._effective(state, snap, dst, turns),
+        out.append((me, ships / ac._effective(state, snap, dst, turns),
                     share.get(me, (0.0, 0.0, 0.0))[1]))
     return out
 
@@ -368,8 +368,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _init()
-    if "sc_model_learner" not in sys.modules:
-        print("not loaded: models/learner.py", file=sys.stderr)
+    if "sc_model_actuary" not in sys.modules:
+        print("not loaded: models/actuary.py", file=sys.stderr)
         return 2
     logs = load_logs(args.logs, args.min_hand)
     seeds = _seeds(args.seeds)
