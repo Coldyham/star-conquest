@@ -847,7 +847,45 @@ A plateau from 8 to 13, falling off below 6. `LEARN_REACH` is 8, the best of
 the plateau on the sum and level with its neighbours within noise. These seeds
 chose K, so they do not confirm it. The confirmation is the next table.
 
-*Confirmation on fresh seeds (6001-6200): running; results to follow.*
+**Confirmation, fresh seeds 6001-6200**, the shipped code (`models/actuary.py`
+at Learning against itself at Planned on the same seeds, so the knob alone
+differs):
+
+    against            18 systems             40 systems             pooled
+    marshal            +46 / -16  z +3.81     +38 / -39  z -0.11     +84 / -55   z +2.46
+    knower Off         +10 /  -7  z +0.73      +9 /  -3  z +1.73     +19 / -10   z +1.67
+    actuary            49.1%      z -0.36     52.3%      z +0.92     50.7%       z +0.40
+    knower Predict     +56 /  -4              +103 / -3              +159 / -7
+
+    win rates          Planned   Learning     Planned   Learning
+    marshal             69.2%     77.3%        68.5%     68.7%
+    knower Off          94.3%     94.6%        96.0%     96.9%
+    knower Predict      80.1%     94.5%        68.0%     95.1%
+
+Against the gate written for Raise (next-to-last section): better against marshal
+pooled (z +2.46, no cell at z -2 or worse), not worse against knower Off (it
+leans the other way), and level with actuary (50.7%). The marshal gain is all at
+18 systems on these seeds, where the selection seeds had it at both sizes, so
+read it as real but smaller than the selection table says. Against actuary the
+selection seeds' 54.1% did not hold: level, not better.
+
+**Most of the knower Predict row is the oracle flag, not the model.** knower runs
+actuary's `decide` at Planned and reads it exactly. A Learning seat claims
+`is_oracle_seat`, so knower models it blind, and that claim was worth about 20
+points to learner against knower ("The roster ladder"). The row says Learning
+loses nothing to knower; it cannot say how much the model adds. knower at Search
+was not run.
+
+**Cost.** Learning adds the memo read and a curve lookup per risk term: CPU ms a
+decide against marshal, seeds 1-6, up to turn 150, Planned then Learning:
+
+    systems    median          75th percentile
+    18         2.40 -> 2.87    3.55 -> 4.00
+    40         4.71 -> 5.43    7.57 -> 8.55
+    80         10.1 -> 11.5    14.1 -> 16.3
+
+About 15-20% more. `decide_ms` is unchanged, since only knower reads it, and knower
+never runs a Learning seat.
 
 ### What else it changed
 
