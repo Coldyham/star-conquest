@@ -173,7 +173,10 @@ bot changes its guards depending on the opponent: against rusherplus it would
 hold almost nothing, against marshal much more. Unlike knower it reads a human
 seat as readily as a bot. Built: the model with memory kept from turn to turn,
 and then a bot that plays actuary's ledger on a board with the model's predicted
-launches added. Both are in [`learner.md`](learner.md), with why memory has to be
+launches added. That bot was level with actuary; the model now plays as
+actuary's third stop instead, *Learning*, which prices the threat next door by
+how often each rival strikes a garrison as thin as ours will be. All of it is in
+[`learner.md`](learner.md), with why memory has to be
 keyed by the game's path rather than by an oracle flag. This reopens the ideas [`marshal.md`](marshal.md), "What the
 measurements deleted", rejected as needing "a model of rivals, which is knower's
 territory" (baiting, the offensive half of standing aside). The model here comes

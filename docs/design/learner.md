@@ -1,13 +1,21 @@
 # learner design notes
 
-**A model of each rival, and a bot built on it.** `models/learner.py` reads each
-rival's habits off the boards it has seen and keeps them from turn to turn. As a
-bot it plays actuary's ledger on a board with the launches it expects added (see
-"As a bot"). It is the fourth proposal in [`bots.md`](bots.md), "New bot families
-(proposed 2026-10-05)". The model did not pass the gate set before building the
-bot (see "The gate"), and the bot was built anyway, on 2026-10-08. It is not in
-`settings.RANDOM_POOL` or `ai.LADDER_ORDER`. Roster-wide rules and the
-measurement checklist are in [`bots.md`](bots.md). Index:
+**A model of each rival, read off the board, and the actuary stop built on it.**
+Since 2026-10-09 learner is not a bot of its own. Its model plays as actuary's
+third Style stop, *Learning* (`aux` 2 in `models/actuary.py`), which prices the
+risk next door by each rival's learned strike curve, read at the garrison we will
+hold (see "Learning: the curve in the risk term", the last section). The memo
+tree, the strike counts, the prior and the curve moved into actuary. The
+readings actuary does not play from (strike size, guard, evacuation, `predict`)
+moved into `tools/learner_check.py`, which counts them along the same memo path.
+`models/learner.py` was deleted with the move. The sections before the last
+record learner as it was built and measured, and their names (`learner`,
+*Trust*, *Raise*, `_board`) refer to that file.
+
+It was the fourth proposal in [`bots.md`](bots.md), "New bot families (proposed
+2026-10-05)". The model did not pass the gate set before building the bot (see
+"The gate"), and the bot was built anyway, on 2026-10-08. Roster-wide rules and
+the measurement checklist are in [`bots.md`](bots.md). Index:
 [`../README.md`](../README.md).
 
 ## Why the oracle flag does not make memory safe
@@ -638,6 +646,13 @@ against a person. learner joins the nightly bot column the moment `models/` on
 
 ## Joining actuary as a stop: the gate (written, not run)
 
+*Superseded on 2026-10-09.* This gate was written for Raise and never run. Raise
+was replaced instead: the model now scales actuary's risk term rather than adding
+fleets, and joined actuary as its third stop on the measurements in "Learning:
+the curve in the risk term". Its improvement 1, below, is close to what was
+built. The difference is that the strike chance is read off the curve at the
+garrison we will hold, not from `predict`'s call at today's.
+
 learner plays actuary's moves (0.08 apart, above), so it would join the roster
 as a third stop on actuary's knob, `aux` 2, above Planned, which moves no
 stored record. A higher stop has to play better, and the ladder cannot show
@@ -742,3 +757,116 @@ people better than knower's guess ("Predicting people"), but learner's memory
 lasts one game, and the gate cannot measure play against a person. It would
 need a stored per-device model of "the person". That is a separate decision,
 made only once a stop has earned its place.
+
+## Learning: the curve in the risk term
+
+Built 2026-10-09, from two observations by the author on why Raise was level with
+actuary:
+
+- **Assuming a rival will not strike is close to right.** Any one system is
+  unlikely to strike any one neighbour on any one turn. 63% of the model's calls
+  are under 0.1, and those come true 4% of the time ("Trusting a prediction").
+- **The two ways of being wrong do not cost the same.** A fleet sent is out of
+  control until it lands. Ships kept home can do something else next turn. So
+  acting on a predicted move that does not come costs more than waiting for one
+  that does. And every launch shows the turn after: ships leave at launch and
+  fleets in flight are on the board. A prediction only buys one turn's warning.
+
+Raise could only add threat, so it could only make actuary more cautious, in a
+game that is won close to the wire. But actuary's own risk term is already the
+pessimistic case: every adjacent rival garrison counts as striking in full
+(`_Ledger._risk`, `RISK_WEIGHT` 0.6). That is where the model has something to
+say: most of that threat is never coming.
+
+### What was measured, and what failed first
+
+Duels against one opponent, seeds 101-300, both seatings (about 390 decided
+games a cell), at 12, 18 and 40 systems, 6 ly/turn. A prototype ran in a scratch
+harness (`ai.register`), so nothing here moves a stored record. Against marshal
+and knower, each arm is paired by seed against actuary at Planned on the same
+seeds: seeds it turned from loss to win, from win to loss, and z on those flips.
+Against actuary the null is exactly 50%, so the win rate is read directly.
+
+**Raise, and Raise kept to the strikes we could not answer** (no system of ours
+next door could land relief in time after seeing the launch): 51.0 / 48.2 /
+51.3% against actuary at 12 / 18 / 40, and 50.1 / 50.1% at 12 / 18. The lead
+time is not the missing piece.
+
+**Relax: the risk's reach scaled by the call.** Each rival garrison next door
+counts at min(1, K x p) in `_risk`, where p is the model's chance that this
+source strikes this target this turn, from `predict`. With K large every p>0
+reads as 1, which is actuary exactly: that null read 38/76.
+
+    against      K=1     K=2     K=4     K=8     K=16    K=32    K=64
+    actuary 12   40.5%   41.4%   45.9%   46.2%
+    actuary 18   42.5%
+    marshal z            +0.85   +1.22   +2.65   +1.88   +1.19   +0.82
+    knower Off z         -1.98   -1.37   -1.86
+
+It gains against marshal, the rival the model reads best, and loses against
+knower and actuary. A fixed K tuned on one opponent is knowledge of who the
+opponent is, which is what a learner must not need. Against thinker every arm,
+actuary included, wins 97-100%, so thinker cannot tell arms apart and was dropped.
+
+**A per-rival calibration check does not separate them.** On calls under 1/8,
+strikes seen against strikes the model expected, 40 games a rival at 18 systems:
+knower Off 0.74, thinker 0.74, marshal 1.20, actuary 1.51. A correction would
+relax harder against knower, the wrong way.
+
+**The flaw: p is read at today's garrison.** Relaxing lets the ledger thin that
+garrison, and a thin garrison is what an opportunist strikes. The model already
+knows this: its strike curve is a function of the ratio of a rival's garrison
+to the target's. So read the curve at the garrison we will hold.
+
+### The stop
+
+At Learning, `_risk` counts a rival garrison of n ships next door, at turn t, as
+
+    n x min(1, LEARN_REACH x curve[ratio bin of n / (our ships at t x DEFENDER_ADVANTAGE)])
+
+where `curve` is that rival's strike curve on a player-held target, unpressed
+(`strike_curve(model, PLAYER, 0)`), from the boards this seat has seen. The rest
+of the ledger is actuary's. Thinning a garrison raises the ratio, so it raises
+the chance the curve gives and gives back the threat. A rival that strikes only
+at long odds costs nothing until we offer them. Every rival is read the same
+way, a person included, from what it has done this game. `LEARN_REACH` large
+reads every chance as 1 and is Planned exactly
+(`test_learning_counting_every_garrison_in_full_plays_as_planned`).
+
+Selection, same seeds as above, 18 and 40 systems pooled:
+
+      K    marshal (paired)       knower Off (paired)    actuary         sum of z
+      2    +78 / -74  z +0.32     +17 / -20  z -0.49     47.1%  z -1.61   -1.78
+      4    +87 / -63  z +1.96     +17 / -10  z +1.35     49.5%  z -0.25   +3.05
+      6    +86 / -54  z +2.70     +17 /  -6  z +2.29     50.7%  z +0.36   +5.36
+      8    +81 / -48  z +2.91     +18 /  -9  z +1.73     54.1%  z +2.25   +6.89
+     11    +86 / -46  z +3.48     +15 / -10  z +1.00     52.6%  z +1.42   +5.90
+     13    +80 / -48  z +2.83     +16 /  -7  z +1.88     53.2%  z +1.78   +6.49
+
+A plateau from 8 to 13, falling off below 6. `LEARN_REACH` is 8, the best of
+the plateau on the sum and level with its neighbours within noise. These seeds
+chose K, so they do not confirm it. The confirmation is the next table.
+
+*Confirmation on fresh seeds (6001-6200): running; results to follow.*
+
+### What else it changed
+
+- **The knob.** actuary's `AUX_LABEL` went from *Opening* to *Style*, with
+  stops Greedy, Planned (the default, unchanged) and Learning. Before, any `aux`
+  from 1 up read as Planned. The menu could not set more than 1, so only a
+  hand-edited link could hold 2 or more, and a stored game never re-runs a bot.
+  `bot_replay.REPLAY_AUX` leaves actuary at 1, so the bot column plays Planned.
+- **The oracle claim is per seat.** `is_oracle_seat` is true at Learning only, so
+  knower still runs actuary's `decide` at Greedy and Planned and models a
+  Learning seat blind. actuary has no module-level `IS_ORACLE`. `decide_ms`
+  prices Greedy and Planned, the stops knower runs.
+- **The tools.** `tools/learner_check.py` keeps `predict` and the strike-size,
+  guard and evacuation readings with their priors, counted by `Watcher` from
+  `actuary.launches` on the turns actuary's memo links. On `--cells 18n6 --seeds
+  1-4` its report and `--fit-prior` match the old learner's to the digit.
+  `tools/human_habits.py` reads `_Snap` and `_effective` from actuary.
+
+**Not measured:** the slow, fast and wide-jitter cells, knower at Search, the
+free-for-all, and play against a person. The proposed improvements in the last
+section (strike and no-strike priced apart, evacuation in the price of a
+capture) are untouched and would now be arms against Learning.
