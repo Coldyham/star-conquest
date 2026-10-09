@@ -63,14 +63,12 @@ cp "$ROOT/tools/pwa/screenshot-wide.png" "$ROOT/tools/pwa/screenshot-mobile.png"
 uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/game/index.html"
 
 # The leaderboard's pages, served at /board/ on this same origin (its functions
-# are bundled separately, from netlify.toml's [functions] directory). An explicit
-# list of what is servable rather than a copy with excludes, so function source,
-# tests, SQL and the README can never end up published by accident.
-BOARD_FILES=(index.html game.html submit.html user.html pbp.html crowns.html campaign.html favicon.png)
-BOARD_DIRS=(css js fonts)
-mkdir -p "$ROOT/web/board"
-for f in "${BOARD_FILES[@]}"; do cp "$ROOT/leaderboard/$f" "$ROOT/web/board/"; done
-for d in "${BOARD_DIRS[@]}"; do cp -r "$ROOT/leaderboard/$d" "$ROOT/web/board/"; done
+# are bundled separately, from netlify.toml's [functions] directory). The pages
+# are Jinja2 templates sharing one head, menu and footer; render_board.py renders
+# them and copies the static files, from an explicit allow-list of what is
+# servable, so function source, tests, SQL and the README can never end up
+# published by accident.
+uv run --project "$ROOT" python "$ROOT/tools/render_board.py" --out "$ROOT/web/board"
 
 # pygbag fetches the pygame-ce WASM wheel from <origin>/cdn/ at runtime. Mirror it
 # into the build so the deployment is fully self-contained — works on any static

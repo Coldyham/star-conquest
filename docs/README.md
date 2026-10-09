@@ -52,9 +52,7 @@ away"`), never with "above"/"below". Code comments do the same
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
 are written for outside developers building their own bots, and
 `tests/test_bot_brief.py` checks the brief against the code. Treat them as
-published documents, not working notes. [`site-merge-plan.md`](site-merge-plan.md)
-is the planning brief for merging the game and board sites. That merge is
-implemented, and the brief is kept for its reasoning.
+published documents, not working notes.
 
 ## Sections, by file
 
@@ -105,7 +103,13 @@ only for a fight; what is deliberately not animated.
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
-- **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
+- **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is now covered by claimed names.
+- **The game and the board are one site.** Why merge (deploy quota, one localStorage, the PWA, no hostname hacks); onto the game's origin under `/board/`. *Decided against: functions left on the old site behind a proxy.*
+  - **The pages are templates.** Jinja2 at build time (`tools/render_board.py`), one base for the head, menu and footer links. *Decided against: a JS include; copies pinned by a test.*
+- **Claimed names.** Signing in with Google is optional, and an account owns one name.
+  - Only an unused name can be claimed by the person claiming it. A name already in use is assigned by `admin.py assign-name`, and `--fold` merges a person's other names into it (the old names are freed).
+  - RLS on `scores`/`config_tags` and `pbp.mjs` enforce the claim. The owner uuid is never public.
+  - *Decided against:* a per-week campaign token; claiming a used name on first sign-in; a pending email for assignment; checking a JWT inside `pbp.mjs`; keeping folded names as aliases.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/par.md
@@ -297,9 +301,12 @@ the measured result was indistinguishable from the baseline.
 
 ### Leaderboard ([`design/leaderboard.md`](design/leaderboard.md))
 - An always-on service for the bot column; honouring slot 0's `AiParams`; ranking losses by turns; a Watch link that re-decides the match live; a git SHA as `engine_rev`: all rejected. *Bot replays.*
+- A per-week campaign token for launches: superseded by claimed names (opt-in, one name per Google account, owner uuid never public, which is why it is not the rejected durable client id). Claiming a used name on first sign-in; a pending email for `assign-name`; a JWT check inside `pbp.mjs`: all rejected. *Claimed names.*
 - A JS replay viewer; a durable client id; a durable IP-based rate limit; a per-model replay floor; sealing forks of a watched replay: all rejected. A full board snapshot per turn: **set aside for now, not ruled out.** *Checked scores.*
 - A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
+- Keeping the functions on the old board site behind a `/api/` proxy (the merge brief's option B): rejected for one site with the functions on it, the secret guarded by "Require approval". *The game and the board are one site.*
+- A JS include for the board's shared header (menu missing without the script, markup in JS strings); keeping nine copies pinned by a test: both rejected for Jinja2 at build time. *The pages are templates.*
 - A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
 
 ### Par search ([`design/par.md`](design/par.md))

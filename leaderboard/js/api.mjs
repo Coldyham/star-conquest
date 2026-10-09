@@ -6,9 +6,13 @@
 // Writes go through insert() only. There is no update() or remove() here because
 // there are no UPDATE/DELETE policies to call them with — see schema.sql.
 
+import { authHeader } from "./auth.mjs";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.mjs";
 
 export const UNIQUE_VIOLATION = "23505";
+// What PostgREST answers when a row-level security check refuses an insert —
+// here, a score or tag posted under someone else's claimed name.
+export const RLS_VIOLATION = "42501";
 
 export function configured() {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -28,11 +32,15 @@ async function request(path, options = {}) {
   }
   let res;
   try {
+    // A signed-in caller's own token stands in for the publishable key's, so
+    // auth.uid() in schema.sql's policies is theirs: that is all signing in
+    // changes, and only for a claimed name (see auth.mjs).
     res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
       ...options,
       headers: {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        ...(await authHeader()),
         "Content-Type": "application/json",
         ...options.headers,
       },
@@ -80,8 +88,13 @@ export async function selectPage(query, { offset = 0, size }) {
  * doesn't have one. Useful for a bulk insert where some rows in the batch may
  * already exist: without it, one duplicate fails the *whole* request.
  */
-export function insert(table, row, { returning = false, onConflict, ignoreDuplicates = false } = {}) {
-  const path = onConflict ? `${table}?on_conflict=${onConflict}` : table;
+export function insert(table, row, { returning = false, columns, onConflict, ignoreDuplicates = false } = {}) {
+  // `columns` narrows what a `returning` insert reads back. users needs it: the
+  // public may read every column but owner, and return=representation asks for
+  // all of them unless told otherwise.
+  const query = [onConflict ? `on_conflict=${onConflict}` : null, columns ? `select=${columns}` : null]
+    .filter(Boolean).join("&");
+  const path = query ? `${table}?${query}` : table;
   const prefer = [
     returning ? "return=representation" : "return=minimal",
     ignoreDuplicates ? "resolution=ignore-duplicates" : null,

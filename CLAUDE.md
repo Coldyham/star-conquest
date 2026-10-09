@@ -379,6 +379,16 @@ already resolve simultaneously. The rationale for each rule is in
   and only counts down the server times it is given (`starconquest/campaign.py`),
   never reimplementing a rule. Detail:
   `docs/design/leaderboard.md` and `leaderboard/README.md`.
+- **A claimed name is its owner's alone.** One name per Google account
+  (Supabase Auth, `leaderboard/js/auth.mjs`, PKCE over plain fetch). Only the
+  owner may post a score or tag (`schema.sql`'s `sc_may_use_user` on the
+  insert policies) or name a pbp seat (`pbp.mjs` `nameAllowed`) under it.
+  `claim_name` is the only self-service writer, and only for an unused name. A
+  name already in use goes through `tools/admin.py assign-name` (`--fold`
+  merges a person's other names into it and frees them). `users.owner`
+  is never publicly readable: `users` is granted by column, and pages read
+  `claimed`. Signing in stays optional. Detail: `docs/design/leaderboard.md`,
+  "Claimed names".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's
@@ -386,7 +396,10 @@ already resolve simultaneously. The rationale for each rule is in
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. The sensitive-variable policy must stay on
   "Require approval". `legacy-board/` proxies `/api/`. `tools/pwa/sw.js` never
-  touches `/api/` (`tests/test_web_build.py`). Detail:
+  touches `/api/` (`tests/test_web_build.py`). Board pages are Jinja2
+  templates extending `leaderboard/templates/base.html`, rendered by
+  `tools/render_board.py` (whose `PAGES` is the servable allow-list); put shared
+  chrome in the base, never back into a page. Detail:
   `docs/design/leaderboard.md`.
 
 **The AI** (reasons: `docs/design/bots.md` and the per-bot files)

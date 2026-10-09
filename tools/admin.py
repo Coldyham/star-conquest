@@ -21,6 +21,23 @@ that is applied first writes an ``admin_actions`` row: what was done, to what,
 why, and the rows it is about to remove or overwrite. A deletion is therefore
 undoable by hand from that row, and no moderation happens without a trace.
 
+A claimed name (`users.owner`, see `leaderboard/schema.sql`) belongs to one
+Google account, and only that account may post under it. A person claims an
+*unused* name for themselves on the board's account page; a name that is
+already in use is handed over here, since nothing on the site can prove who
+posted under it:
+
+    assign-name NAME EMAIL [--fold OLD...]
+                             give NAME to the account signed in with EMAIL.
+                             They must have signed in on the board once, so
+                             the account exists. Refused if the account owns
+                             another name, or someone else owns this one.
+                             --fold moves each OLD name's scores and tags onto
+                             NAME and deletes OLD, which is then free for
+                             anyone: one person's several names become one.
+    release-name NAME        make NAME an ordinary unclaimed name again.
+    names [--claimed]        list names and who (by account id) owns them.
+
 Three different things can be done to a play-by-post seat, and they are not
 interchangeable:
 
@@ -47,6 +64,7 @@ import json
 import secrets
 import sys
 import urllib.parse
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -65,6 +83,34 @@ from tools.bot_replay import (
 
 # `leaderboard/js/config.mjs`'s GAME_URL_FALLBACK: where a printed seat link opens.
 GAME_URL = "https://star-conquest.netlify.app/game/"
+
+
+class AdminApi(Supabase):
+    """`Supabase`, plus the one Auth admin read assign-name needs."""
+
+    def auth_user(self, email: str) -> dict | None:
+        """The Supabase Auth account signed in with ``email``, or None.
+
+        Auth's admin API has no filter by email, so this pages the whole list:
+        fine for a board this size, and only ever run by hand."""
+        wanted = email.strip().lower()
+        page = 1
+        while True:
+            request = urllib.request.Request(
+                f"{self.url.rstrip('/')}/auth/v1/admin/users?page={page}&per_page=1000")
+            for name, value in self._headers().items():
+                request.add_header(name, value)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    users = json.loads(response.read().decode("utf-8")).get("users") or []
+            except (OSError, ValueError) as err:
+                raise ApiError(f"GET auth/v1/admin/users failed: {err}") from err
+            for user in users:
+                if (user.get("email") or "").strip().lower() == wanted:
+                    return user
+            if len(users) < 1000:
+                return None
+            page += 1
 
 
 class Refused(RuntimeError):
@@ -338,6 +384,117 @@ def plan_rename_user(api: Supabase, old: str, new: str) -> Plan:
         [lambda: api.update("users", f"id=eq.{int(user['id'])}", {"name": new}) and None])
 
 
+def _set_owner(api: Supabase, user_id: int, was: str | None, owner: str | None) -> None:
+    """Rewrite a name's owner, conditional on it still being ``was`` — so a
+    claim or release landing in between is not overwritten."""
+    held = "owner=is.null" if was is None else f"owner=eq.{q(was)}"
+    if not api.update("users", f"id=eq.{int(user_id)}&{held}", {"owner": owner}):
+        raise Refused("the name changed hands while this ran; nothing was changed, run it again")
+
+
+def plan_assign_name(api: AdminApi, name: str, email: str,
+                     fold: list[str] | tuple[str, ...] = ()) -> Plan:
+    """Give ``name`` to the account that signed in as ``email``, folding each of
+    ``fold`` into it first: their scores and tags move onto ``name``, and their
+    rows are deleted, so those names are free for anyone again."""
+    name = name.strip()
+    if not 1 <= len(name) <= 60:
+        raise Refused("a name is 1-60 characters")
+    account = api.auth_user(email)
+    if not account:
+        raise Refused(f"no account has signed in as {email!r}; they must sign in on the "
+                      "board's account page once first")
+    uid = str(account["id"])
+    rows = api.select("users", f"select=*&name_key=eq.{q(name_key(name))}&order=id.asc")
+    user = rows[0] if rows else None
+    if user is not None and user.get("owner") and user["owner"] != uid:
+        raise Refused(f"{user['name']!r} is claimed by another account; release-name it first")
+
+    folded: list[dict] = []
+    for old in dict.fromkeys(name_key(f) for f in fold):
+        if old == name_key(name):
+            raise Refused(f"{old!r} is the name being kept; it cannot be folded into itself")
+        row = _one(api.select("users", f"select=*&name_key=eq.{q(old)}&order=id.asc"),
+                   f"user {old!r}")
+        if row.get("owner") and row["owner"] != uid:
+            raise Refused(f"{row['name']!r} is claimed by another account; release-name it first")
+        folded.append(row)
+    folded_ids = {int(r["id"]) for r in folded}
+
+    owned = api.select("users", f"select=id,name&owner=eq.{q(uid)}&order=id.asc")
+    for row in owned:
+        if (user is None or int(row["id"]) != int(user["id"])) and int(row["id"]) not in folded_ids:
+            raise Refused(f"that account already owns {row['name']!r}; release-name it, or "
+                          "--fold it into this one (one name per account)")
+
+    summary: list[str] = []
+    steps: list[Callable[[], str | None]] = []
+    moved: dict[str, dict] = {}
+    for row in folded:
+        rid = int(row["id"])
+        scores = api.select("scores", f"select=id&user_id=eq.{rid}&order=id.asc")
+        tags = api.select("config_tags", f"select=id&user_id=eq.{rid}&order=id.asc")
+        moved[str(rid)] = {"scores": [s["id"] for s in scores],
+                           "config_tags": [t["id"] for t in tags]}
+        summary.append(f"fold {row['name']!r} ({len(scores)} score(s), {len(tags)} tag(s)) "
+                       f"into {name if user is None else user['name']!r}; "
+                       f"{row['name']!r} is then free for anyone to use")
+        if row.get("owner") == uid:
+            # The account's old name lets go first: one name per account is a
+            # unique index, and the kept name is about to take its owner.
+            steps.append(lambda r=row: _set_owner(api, r["id"], uid, None))
+
+    def kept_id() -> int:
+        """The kept row's id, read when the steps run (it may be newly made)."""
+        return int(_one(api.select("users", f"select=id&name_key=eq.{q(name_key(name))}"
+                                            "&order=id.asc"), f"user {name!r}")["id"])
+
+    if user is None:
+        summary.insert(0, f"create the name {name!r}, owned by that account "
+                          "(nobody has used it yet)")
+        # Made (and owned) before the folds, so they have a row to move onto.
+        steps.append(lambda: api.insert("users", [{"name": name, "owner": uid}]))
+    elif user.get("owner") == uid:
+        if not folded:
+            return Plan("assign-name", f"{user['name']} ({user['id']})",
+                        [f"{user['name']!r} already belongs to that account"])
+    else:
+        scores = api.select("scores", f"select=id&user_id=eq.{int(user['id'])}&order=id.asc")
+        summary.insert(0, f"give {user['name']!r} and its {len(scores)} score(s) to that "
+                          "account; from now on only they can post under it")
+
+    if folded:
+        ids = ",".join(str(i) for i in sorted(folded_ids))
+        steps += [
+            lambda: api.update("scores", f"user_id=in.({ids})", {"user_id": kept_id()}) and None,
+            lambda: api.update("config_tags", f"user_id=in.({ids})",
+                               {"user_id": kept_id()}) and None,
+            lambda: api.delete("users", f"id=in.({ids})"),
+        ]
+    if user is not None and user.get("owner") != uid:
+        # Last, so a fold that fails part way never leaves the name claimed with
+        # half its old scores still elsewhere.
+        steps.append(lambda: _set_owner(api, user["id"], None, uid))
+
+    # The audit row names the account by id, never by email, and keeps every
+    # folded row and what moved off it, so a fold can be undone by hand.
+    return Plan("assign-name", name if user is None else f"{user['name']} ({user['id']})",
+                summary, {"user": user, "owner": uid, "folded": folded, "moved": moved},
+                steps)
+
+
+def plan_release_name(api: Supabase, name: str) -> Plan:
+    user = _one(api.select("users", f"select=*&name_key=eq.{q(name_key(name))}&order=id.asc"),
+                "user")
+    if not user.get("owner"):
+        raise Refused(f"{user['name']!r} is not claimed")
+    return Plan(
+        "release-name", f"{user['name']} ({user['id']})",
+        [f"release {user['name']!r}: its scores stay, and anyone may post under it again"],
+        {"user": user},
+        [lambda: _set_owner(api, user["id"], user["owner"], None)])
+
+
 def plan_delete_tag(api: Supabase, tag: str, config_key: str | None) -> Plan:
     key = tag_key(tag)
     where = f"&config_key=eq.{q(config_key)}" if config_key else ""
@@ -404,6 +561,13 @@ def show_tags(api: Supabase, config_key: str | None) -> None:
         print(f"{tag:<26} on {len(uses[tag])} config(s)")
 
 
+def show_names(api: Supabase, claimed_only: bool) -> None:
+    where = "&owner=not.is.null" if claimed_only else ""
+    for u in api.select("users", f"select=id,name,owner&order=name_key.asc{where}"):
+        owner = f"  owned by {u['owner']}" if u.get("owner") else ""
+        print(f"{u['id']:>6}  {u['name']!r}{owner}")
+
+
 def show_matches(api: Supabase) -> None:
     for m in api.select("pbp_matches", "select=match_id,seats,public,finished,turn,"
                                        "updated_at&order=updated_at.desc"):
@@ -436,6 +600,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd = sub.add_parser("tags", help="every tag in use, and how widely")
     cmd.add_argument("--config", help="only this config_key")
     sub.add_parser("matches", help="every play-by-post match, private ones included")
+    cmd = sub.add_parser("names", help="every player name, and which are claimed")
+    cmd.add_argument("--claimed", action="store_true", help="only claimed names")
 
     cmd = writes("delete-score", "delete scores and the tags posted with them")
     cmd.add_argument("ids", type=int, nargs="+")
@@ -446,6 +612,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd = writes("rename-user", "change a player's name everywhere it shows")
     cmd.add_argument("name")
     cmd.add_argument("new_name")
+    cmd = writes("assign-name", "give a name, used or not, to a signed-in account")
+    cmd.add_argument("name")
+    cmd.add_argument("email", help="the Google account's email, as it signed in")
+    cmd.add_argument("--fold", nargs="+", action="extend", default=[], metavar="OLD",
+                     help="other names of theirs to merge into NAME (then deleted)")
+    cmd = writes("release-name", "make a claimed name anyone's to use again")
+    cmd.add_argument("name")
     cmd = writes("delete-tag", "remove a tag from every config, or one")
     cmd.add_argument("tag")
     cmd.add_argument("--config", help="only from this config_key")
@@ -465,7 +638,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def plan_for(api: Supabase, args: argparse.Namespace) -> Plan:
+def plan_for(api: AdminApi, args: argparse.Namespace) -> Plan:
     match args.command:
         case "delete-score":
             return plan_delete_score(api, args.ids)
@@ -475,6 +648,10 @@ def plan_for(api: Supabase, args: argparse.Namespace) -> Plan:
             return plan_delete_campaign(api, args.week)
         case "rename-user":
             return plan_rename_user(api, args.name, args.new_name)
+        case "assign-name":
+            return plan_assign_name(api, args.name, args.email, args.fold)
+        case "release-name":
+            return plan_release_name(api, args.name)
         case "delete-tag":
             return plan_delete_tag(api, args.tag, args.config)
         case "delete-config-name":
@@ -494,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
     if not url or not key:
         print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
-    api = Supabase(url, key)
+    api = AdminApi(url, key)
     try:
         if args.command == "scores":
             show_scores(api, args.game, args.user, args.limit)
@@ -502,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
             show_tags(api, args.config)
         elif args.command == "matches":
             show_matches(api)
+        elif args.command == "names":
+            show_names(api, args.claimed)
         else:
             return apply(api, plan_for(api, args), yes=args.yes, reason=args.reason)
     except Refused as err:

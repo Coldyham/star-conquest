@@ -1003,3 +1003,10 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail .timer, .campaign-note .timer { color: var(--gold); }
 .campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
 .campaign-detail .btn + .btn { margin-left: 0.5rem; }
+
+/* -- the privacy notice (privacy.html) ------------------------------------ */
+.notice p, .notice ul { margin: 0 0 1rem; }
+.notice ul { padding-left: 1.25rem; }
+.notice li + li { margin-top: 0.5rem; }
+.notice strong { color: var(--green); }
+.notice .updated { color: var(--dim); font-size: 0.9em; }

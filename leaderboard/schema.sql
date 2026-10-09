@@ -1,7 +1,10 @@
 -- Star Conquest leaderboard schema. Paste into the Supabase SQL editor once.
 --
--- Trust model: no auth, no accounts. Anyone may read everything and insert a
--- user/game/score; the public may not update or delete anything. Scores are
+-- Trust model: no accounts needed. Anyone may read everything and insert a
+-- user/game/score; the public may not update or delete anything. The one
+-- exception is opt-in: a person signed in with Google (Supabase Auth) may claim
+-- one name nobody has used (`claim_name`), or the owner assigns them one that is
+-- in use (`tools/admin.py assign-name`), and then only they post under it. Scores are
 -- append-only and "the best score" is a query, never a row that gets overwritten.
 --
 -- With RLS enabled, a command with no policy is refused outright — so the absence
@@ -15,7 +18,7 @@
 -- those two now read it rather than `configs.tags` directly).
 
 -- ---------------------------------------------------------------------------
--- users: keyed by name alone. name_key is generated so "Andrew", "andrew " and
+-- users: keyed by name (owner, below, says who may use a claimed one). name_key is generated so "Andrew", "andrew " and
 -- "ANDREW" are one user without the client doing its own case folding.
 -- ---------------------------------------------------------------------------
 create table if not exists public.users (
@@ -25,6 +28,19 @@ create table if not exists public.users (
   created_at timestamptz not null default now(),
   constraint users_name_key_unique unique (name_key)
 );
+
+-- A claimed name: owner is the Supabase Auth account that alone may post under
+-- it (scores, tags, play-by-post seat names). Null for every name nobody has
+-- claimed, which is every name that existed before claiming did, and those work
+-- exactly as before. The uuid is never readable by the public (the column grant
+-- below leaves it out); `claimed` is what pages read. One name per account
+-- (users_owner_unique). Written only by `claim_name`/`release_name` and admin.py.
+alter table public.users add column if not exists
+  owner uuid references auth.users(id) on delete set null;
+alter table public.users add column if not exists
+  claimed boolean generated always as (owner is not null) stored;
+create unique index if not exists users_owner_unique
+  on public.users (owner) where owner is not null;
 
 -- ---------------------------------------------------------------------------
 -- games: one row per distinct setup. game_key is Challenge.key out of the token
@@ -909,6 +925,71 @@ alter table public.game_logs enable row level security;
 alter table public.score_checks enable row level security;
 alter table public.campaigns enable row level security;
 
+-- Whether the caller may post as this user row: it is unclaimed, or theirs.
+-- Security definer because the public cannot read users.owner (see the grants).
+create or replace function public.sc_may_use_user(p_user_id bigint)
+returns boolean language sql stable security definer set search_path = public as $$
+  select not exists (
+    select 1 from public.users u
+    where u.id = p_user_id and u.owner is not null
+      and u.owner is distinct from auth.uid())
+$$;
+
+-- claim_name: the one self-service way to own a name. Only a name nobody has
+-- used: no row yet, or a row with no score and no tag behind it (a submission
+-- that failed after ensureUser). A name already in use is the owner's to hand
+-- out (tools/admin.py assign-name), since nothing here proves who used it.
+-- Errors carry a fixed message the board matches on: "sign in", "already own",
+-- "name in use", "bad name".
+create or replace function public.claim_name(p_name text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  row_id bigint;
+  row_owner uuid;
+begin
+  if me is null then raise exception 'sign in to claim a name'; end if;
+  if char_length(trim(coalesce(p_name, ''))) not between 1 and 60 then
+    raise exception 'bad name';
+  end if;
+  if exists (select 1 from public.users where owner = me) then
+    raise exception 'you already own a name';
+  end if;
+  select id, owner into row_id, row_owner from public.users
+    where name_key = lower(trim(p_name)) for update;
+  if row_id is null then
+    begin
+      insert into public.users (name, owner) values (trim(p_name), me)
+        returning id into row_id;
+    exception when unique_violation then
+      raise exception 'name in use';
+    end;
+    return row_id;
+  end if;
+  if row_owner is not null
+     or exists (select 1 from public.scores where user_id = row_id)
+     or exists (select 1 from public.config_tags where user_id = row_id) then
+    raise exception 'name in use';
+  end if;
+  update public.users set owner = me where id = row_id;
+  return row_id;
+end
+$$;
+
+-- release_name: give your name back. It becomes an ordinary unclaimed name again
+-- (its scores stay on it), and you may claim another unused one.
+create or replace function public.release_name()
+returns void language sql security definer set search_path = public as $$
+  update public.users set owner = null where owner = auth.uid() and auth.uid() is not null
+$$;
+
+-- my_name: the name the signed-in caller owns, or null — the one way the board
+-- reads ownership back, since the public cannot select users.owner.
+create or replace function public.my_name()
+returns text language sql stable security definer set search_path = public as $$
+  select name from public.users where owner = auth.uid() and auth.uid() is not null
+$$;
+
 drop policy if exists "users public read"    on public.users;
 drop policy if exists "users public insert"  on public.users;
 drop policy if exists "games public read"    on public.games;
@@ -925,15 +1006,22 @@ drop policy if exists "score_checks public read" on public.score_checks;
 drop policy if exists "campaigns public read" on public.campaigns;
 
 create policy "users public read"    on public.users  for select using (true);
-create policy "users public insert"  on public.users  for insert with check (true);
+-- Claimed rows are made only by claim_name (security definer), never by a
+-- plain insert, so nobody can create a name pre-owned by someone else's uuid.
+create policy "users public insert"  on public.users  for insert with check (owner is null);
 create policy "games public read"    on public.games  for select using (true);
 create policy "games public insert"  on public.games  for insert with check (true);
 create policy "scores public read"   on public.scores for select using (true);
-create policy "scores public insert" on public.scores for insert with check (true);
+-- A claimed name is its owner's alone: auth.uid() is the signed-in caller's
+-- account, null for an anonymous one, so an anonymous post under a claimed name
+-- fails here. submit.mjs checks first to explain; this is the actual boundary.
+create policy "scores public insert" on public.scores for insert
+  with check (public.sc_may_use_user(user_id));
 create policy "configs public read"   on public.configs for select using (true);
 create policy "configs public insert" on public.configs for insert with check (true);
 create policy "config_tags public read"   on public.config_tags for select using (true);
-create policy "config_tags public insert" on public.config_tags for insert with check (true);
+create policy "config_tags public insert" on public.config_tags for insert
+  with check (public.sc_may_use_user(user_id));
 
 -- Read only, and no insert policy to match: bot_scores is written solely by
 -- tools/bot_replay.py under the service_role key, which bypasses RLS.
@@ -961,7 +1049,8 @@ create policy "campaigns public read" on public.campaigns for select using (true
 
 -- Explicit rather than relying on the project's default privileges, so this file
 -- is the whole story. Identity columns need no sequence grant (unlike serial).
-grant select on public.users, public.games, public.scores, public.configs,
+-- users is granted by column, below, so its owner uuid stays private.
+grant select on public.games, public.scores, public.configs,
   public.config_tags, public.game_summary, public.config_summary,
   public.bot_scores, public.score_checks, public.public_replays,
   public.counted_scores, public.crown_holders, public.crown_steals,
@@ -979,6 +1068,11 @@ grant select on public.users, public.games, public.scores, public.configs,
 -- the *caller's* privilege on it as a distinct relation, the same reason
 -- `configs` itself needs one (see the comment above the policies).
 grant select on public.config_tag_counts to anon, authenticated;
+-- Every users column but owner. The revoke first, because a re-paste over a
+-- table-wide grant would otherwise leave it standing beside the column one.
+revoke select on public.users from anon, authenticated;
+grant select (id, name, name_key, created_at, claimed) on public.users
+  to anon, authenticated;
 grant insert on public.users, public.games, public.scores, public.configs,
   public.config_tags to anon, authenticated;
 -- game_logs appears in neither grant: not in select (a replay is not public) and
@@ -986,6 +1080,12 @@ grant insert on public.users, public.games, public.scores, public.configs,
 -- rate-limit them). It is the one table the public can neither read nor write.
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
+-- Claiming needs a signed-in caller; the functions refuse a null auth.uid() too.
+revoke execute on function public.claim_name(text), public.release_name(),
+  public.my_name() from public, anon;
+grant execute on function public.claim_name(text), public.release_name(),
+  public.my_name() to authenticated;
+grant execute on function public.sc_may_use_user(bigint) to anon, authenticated;
 
 -- service_role bypassing RLS only skips policies — the base GRANT system
 -- underneath still applies, so tools/bot_replay.py needs its own explicit
@@ -1224,7 +1324,12 @@ grant select, insert on public.admin_actions to service_role;
 -- What the moderation commands read and change. Deleting a score cascades to
 -- its config_tags and score_checks rows through their foreign keys; config_tags
 -- is also deleted from directly, when a tag is removed on its own.
-grant select, update on public.users to service_role;
+grant select, insert, update, delete on public.users to service_role;
+-- assign-name --fold moves one person's scores and tags between users rows and
+-- deletes the rows it folded.
+grant update on public.scores, public.config_tags to service_role;
+-- users.owner is also read by netlify/functions/pbp.mjs (is this seat name
+-- claimed, and by whom) and written by admin.py assign-name/release-name.
 grant select, update, delete on public.configs to service_role;
 grant select, delete on public.config_tags to service_role;
 grant delete on public.scores, public.games, public.bot_scores to service_role;

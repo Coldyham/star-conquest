@@ -1,4 +1,6 @@
-import { configured, eq, insert, rpc, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, eq, insert, rpc, RLS_VIOLATION, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { storedSession } from "./auth.mjs";
+import { CLAIMED_MESSAGE, nameBlocked } from "./claims.mjs";
 import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
 // Posting again from the same browser shouldn't mean retyping your name — the
@@ -133,17 +135,36 @@ function embargoUntilFrom(daysValue) {
   return new Date(Date.now() + clamped * 86400000).toISOString();
 }
 
-/** Find or create the user, keyed by name alone — same race handling as above. */
-async function ensureUser(name) {
-  const query = `users?select=id&name_key=${eq(name.trim().toLowerCase())}&limit=1`;
-  const found = await select(query);
-  if (found.length) return found[0].id;
+/** The name the signed-in caller owns, or "" — signed out, or owning none. */
+async function ownName() {
+  if (!storedSession()) return "";
   try {
-    const [created] = await insert("users", { name: name.trim() }, { returning: true });
+    return (await rpc("my_name", {})) || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Find or create the user, keyed by name — same race handling as above. A name
+ * someone else has claimed is refused here, before the score insert that the
+ * database would refuse anyway (schema.sql's `sc_may_use_user`), so the player
+ * is told why.
+ */
+async function ensureUser(name) {
+  const query = `users?select=id,name,claimed&name_key=${eq(name.trim().toLowerCase())}&limit=1`;
+  const found = await select(query);
+  if (found.length) {
+    if (nameBlocked(found[0], await ownName())) throw new Error(CLAIMED_MESSAGE);
+    return found[0].id;
+  }
+  try {
+    const [created] = await insert("users", { name: name.trim() }, { returning: true, columns: "id" });
     return created.id;
   } catch (err) {
     if (err.code !== UNIQUE_VIOLATION) throw err;
     const [existing] = await select(query);
+    if (nameBlocked(existing, await ownName())) throw new Error(CLAIMED_MESSAGE);
     return existing.id;
   }
 }
@@ -296,7 +317,8 @@ linkField.addEventListener("input", refreshPreview);
  * everything after the '#', so a whole pasted URL works here too.
  */
 async function prefill() {
-  const name = myName();
+  // A claimed name is the one to post under, whatever was typed last.
+  const name = (await ownName()) || myName();
   if (name) nameField.value = name;
 
   const token = fragmentOf(location.hash);
@@ -385,6 +407,6 @@ form.addEventListener("submit", async (event) => {
     location.href = `game.html?key=${encodeURIComponent(gameKey)}`;
   } catch (err) {
     button.disabled = false;
-    say(err.message, "error");
+    say(err.code === RLS_VIOLATION ? CLAIMED_MESSAGE : err.message, "error");
   }
 });

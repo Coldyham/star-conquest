@@ -21,6 +21,7 @@ dev = [
     # Web (browser/WebAssembly) build tooling — see tools/build_web.sh.
     "pygbag>=0.9.3",
     "pip",            # pygbag's build/dev server shells out to `python -m pip`
+    "jinja2>=3.1.6",  # the leaderboard pages are templates — see tools/render_board.py
 ]
 
 [tool.ruff.lint]

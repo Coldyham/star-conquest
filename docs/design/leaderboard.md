@@ -454,6 +454,58 @@ than it is.
   follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
   fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
 
+**Why one site.** The game and the board were two Netlify sites until the
+merge, which went live in October 2026.
+- **Deploys.** Both drew on one free-tier pool of about 20 production
+  publishes a month, and most changes touched both. The pool ran out once,
+  with a merged board fix waiting over a week for a slot.
+- **One localStorage.** Separate origins meant the lobby's "your matches" was
+  a hand-off from the game plus a lobby-side cache, and two name keys.
+- **The PWA stays a PWA.** Leaving the fullscreen game for the board brought
+  back the browser chrome, and on iOS lost the app's storage.
+- **No hostname hacks.** Previews found each other by adding or removing
+  `-leaderboard` in the URL (`sibling_host`/`siblingGame`); one origin needs
+  none of it.
+
+**Onto the game's origin, not the board's,** because localStorage doesn't
+migrate between origins: the game's holds seat tokens, bests and preferences,
+and the board's held only a posting name and the lobby cache. The board went
+under `/board/`, which also settled the `index.html` and `favicon.png`
+collisions. The cost: every change now builds the game with pygbag, so a board
+typo fix is no longer cheap to preview.
+
+**Decided against: keeping the functions on the old board site behind a
+`/api/` proxy** (the merge brief's option B). It kept `SUPABASE_SECRET_KEY` off
+the site that builds fork previews, but left two sites to deploy and put a
+proxy between the rate limit and the client's IP. The functions moved instead,
+and the fork-preview risk is held by the "Require approval" policy.
+
+### The pages are templates
+
+Every page carried an identical copy of the head and the menu, so adding a page
+or a menu entry meant editing all of them, and the privacy link went into nine
+footers by hand. Each page is now a Jinja2 template extending
+`leaderboard/templates/base.html`, rendered by `tools/render_board.py` inside
+`build_web.sh`. A page sets `title`, `description`, `main_class` and `script`,
+and fills `main` and `footer`; the footer's flavour text stays per page and the
+shared links come from the base.
+
+- **At build time, because Netlify serves files.** There is no server to render
+  on, so the include runs either before deploy or in the browser. The build
+  already runs Python (`tools/pwa/inject.py`), and what reaches a visitor is the
+  same complete HTML as before, menu and all, with no script needed to show it.
+  Converting changed no rendered byte except two footers.
+- **Decided against: a JS include** (an empty `<header>` a module fills on
+  load). It kept "no build step", but the menu would vanish when the script
+  failed and could pop in a frame late, and the markup would live in JS strings.
+- **Decided against: copies pinned by a test.** It catches drift but still
+  makes every menu change an edit to every page.
+- **The cost** is that `leaderboard/` is no longer servable raw: local work
+  renders first (`leaderboard/README.md`, "Local development"). The allow-list
+  of servable files moved from `build_web.sh` into `render_board.PAGES`,
+  `STATIC_FILES` and `STATIC_DIRS`, and `tests/test_web_build.py` checks that
+  every page renders with exactly one, identical header and one privacy link.
+
 ## Crowns, the weekly campaign and embargoes
 
 - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
@@ -761,21 +813,13 @@ map. Measure the real distribution of lane lengths on a few generated weeks
 before choosing the scale. Homes sit `HOME_OFFSET` out, which is longer than many
 field lanes, so they may want their own fixed time.
 
-### The open problem: identity
+### Identity: claimed names
 
-Names are not identities ("Known limitations, accepted on purpose" in
-`leaderboard/README.md`), and today that is nearly harmless: a score forged in
-your name can only help you. A forged *launch* does real damage. It spends your
-one fleet and sends it where you didn't want it to go, and the window it opens
-blocks your next launch.
-
-A candidate, not a decision: a per-week campaign token, minted on your first
-home claim, kept in browser storage the way the game keeps `sc_pbp_seats`, and
-stored hashed on the server. Launches would go through a Netlify function that
-checks it, holding the only write key the way `pbp.mjs` and `log.mjs` do. The
-cost is that it would be the board's first per-person credential, with the
-device-bound trade play-by-post already makes: a lost token is a lost fleet
-until the week ends, unless `tools/admin.py` learns to reissue it.
+Names were not identities, and a forged *launch* was the case that made that
+matter (a fleet spent where you didn't send it). Claimed names close it for
+anyone who wants it closed; the full design is the section "Claimed names"
+below. A campaign launch is a posted score, so the same check covers it, and
+the per-week campaign token once proposed here is no longer needed.
 
 ### What building it would touch
 
@@ -898,3 +942,95 @@ The best-score rule settles a collision with what already exists.
   replay outlive *any* future rules change, at the cost of the size and
   bot-independence properties `replay.py`'s module doc argues for) — worth
   revisiting if snapshotting ever happens, but not before.
+
+## Claimed names
+
+One Google account may own one name, and only that account can then post under
+it: scores, which also covers campaign moves, and play-by-post seat names.
+Signing in is optional. Every unclaimed name works exactly as before, and that
+includes every name that existed before claiming did. Rules are in `CLAUDE.md`;
+this section gives the reasons.
+
+**Why Supabase Auth with Google.**
+- The board already runs on Supabase, so the session it issues is what RLS
+  reads (`auth.uid()`). The database enforces the claim for the plain PostgREST
+  inserts `submit.mjs` makes, with no function in front of them.
+- The Google client secret lives in Supabase's dashboard. No new Netlify
+  variable means nothing new for a fork's deploy preview to reach, so the
+  "Require approval" policy stays as it is.
+- `auth.mjs` runs the PKCE flow over plain fetch, on the same reasoning as
+  `api.mjs` loading no client library. PKCE rather than the implicit flow keeps
+  the token out of the address bar and history.
+
+**Why only an unused name can be claimed by its claimant.**
+- A name with scores behind it was typed by somebody, and nothing on the site
+  can say who.
+- "Unused" means no `users` row, or a row with no score and no tag (a submission
+  that failed after `ensureUser`). The test is a query, so there is no flag to
+  keep in step.
+- Names that are in use go through `tools/admin.py assign-name`, judged by the
+  owner. It needs the account to exist (the person signs in once), so no
+  pending-by-email state is ever stored.
+
+**Folding several names into one.**
+- `assign-name NAME EMAIL --fold OLD…` moves each old name's scores and tags
+  onto the kept row, then deletes the old rows.
+- The folded names are freed rather than kept as aliases. Aliases would need a
+  table and a lookup in `submit.mjs`, `pbp.mjs`, `sc_may_use_user` and the
+  player page.
+- The cost: someone else can then post under a freed name, and an old `?u=`
+  link shows an empty card.
+- Crowns, steals and campaign standing are derived from `counted_scores`, so
+  they recompute on the merged row, and a person's two names stop counting as
+  two players.
+- The audit row keeps the folded rows and which score and tag ids moved, so a
+  fold can be undone by hand.
+
+**Why one name per account.** It is a partial unique index on `users.owner`,
+nothing more. More than one name per account would let a single account
+reserve names it never plays under.
+
+**Why the owner uuid is never public.**
+- `users` is granted by column, without `owner`, and pages read the generated
+  `claimed` column instead.
+- The uuid is a durable per-person identifier. Publishing it would build the
+  cross-session tracking id the "durable client id" rejection refused.
+- The claim itself is opt-in and attached to a name the person chose. Anonymous
+  play never mints one.
+- `claim_name`, `release_name`, `my_name` and `sc_may_use_user` are
+  `security definer`, so they can read `owner` on the caller's behalf.
+
+**Why a check in the page and in the database.** RLS is the boundary. The page's
+own check (`claims.nameBlocked`) exists so a refused post says why, rather than
+surfacing PostgREST's bare "violates row-level security policy". `42501` maps to
+the same sentence as a backstop.
+
+**Play-by-post asks Auth, not a JWT library.**
+- `pbp.mjs` verifies a bearer by calling `/auth/v1/user`, so it holds no
+  signing secret, and a revoked session is refused the same way as a missing
+  one.
+- It only asks when the name is actually claimed, so an ordinary create costs
+  one extra select and no Auth call.
+- `CLAIMED_NAME` is the refusal text, pinned against `main.PBP_CLAIMED_ERROR`.
+
+**The game.**
+- The web game shares the board's origin, so it reads `sc_auth` in JS at fetch
+  time for `?action=create`, and the token never passes through Python.
+- It never refreshes the session. An expired one is refused like none, and the
+  player is pointed at the account page, which refreshes on load.
+- Desktop and Android have no session at all. A claimed name is refused there,
+  which is the honest answer for a build that cannot sign in.
+
+**Decided against.**
+- A per-week campaign token: covered by claims.
+- Claiming any name on first sign-in, used or not: anyone could take a name
+  that has scores.
+- Storing a pending email for `assign-name`: it would put an email on a row,
+  and buys only skipping one sign-in.
+- Checking a JWT's signature inside `pbp.mjs`: it would need the project's JWT
+  secret in Netlify.
+- Keeping folded names as aliases of the kept one: freed instead (see
+  "Folding several names into one").
+- Making `claimed` gate reading: claims change who may write, and nothing about
+  what anyone can see.
+
