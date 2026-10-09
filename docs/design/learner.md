@@ -751,6 +751,8 @@ behind a temporary flag, against Raise and Off on the same seeds.
   the turn a strike lands, and add the evacuees to the rival's nearest system.
   This touches actuary's own strikes, which are its decisions that matter most,
   not only its defence.
+- **Built against Learning and deleted** (2026-10-09): worse against every
+  opponent. See "Evacuation in the price of a capture".
 
 **Not for this gate.** Remembering a person across games: the model forecasts
 people better than knower's guess ("Predicting people"), but learner's memory
@@ -945,5 +947,53 @@ never runs a Learning seat.
   actuary for that reason.
 
 **Not measured:** wide jitter (0.3), knower in a free-for-all at Predict, and
-play against a person. The proposed improvements in the last section (strike and no-strike priced apart, evacuation in the price of a
-capture) are untouched and would now be arms against Learning.
+play against a person. Of the proposed improvements in the last section, strike
+and no-strike priced apart is untouched and would now be an arm against
+Learning. Evacuation in the price of a capture was built and measured worse (next
+section).
+
+## Evacuation in the price of a capture (built, measured, deleted)
+
+Improvement 3's evacuation half, built 2026-10-09 as an arm of Learning behind a
+module flag. It is in the branch history (commit `2ee5191`, reverted). Nothing
+stored names it.
+
+- **The reading.** actuary's `Model` counted, for each rival, its doomed
+  garrisons (hostile ships inbound over the garrison times the advantage) that
+  left (launched half or more) or stayed, as `tools/learner_check.py` does, over
+  `PRIOR_EVAC` 0.531.
+- **The price.** In `_project`, a rival garrison that our landing dooms, on a
+  strike of two turns or more (so it sees the fleet first), lost its evacuation
+  rate times its ships before the fight. Those ships stayed on the ledger as
+  the rival's, so the strike no longer took credit for killing them. They joined
+  the rival's nearest system and counted in the risk to what we took.
+- **What it touched.** 27% of Learning's decisions changed (629 decisions, 18 and
+  40 systems, against marshal), at no extra cost per decide. Against actuary,
+  marshal read about 0.8, far above the prior.
+
+**The gate, set before the run:** better than Learning against marshal (z ≥ +2
+pooled), and not worse than z -2 against knower Off or actuary at Planned.
+Paired duels on fresh seeds 7001-7200, both seatings, 18 and 40 systems at 6
+ly/turn, 4,800 games. Flips are seeds the evac arm turned from loss to win and
+from win to loss:
+
+    against          18 systems             40 systems             pooled
+    marshal          +41 / -60  z -1.89     +24 / -63  z -4.18     +65 / -123  z -4.23
+    knower Off       +19 / -36  z -2.29     +17 / -22  z -0.80     +36 /  -58  z -2.27
+    actuary Planned  +44 / -75  z -2.84     +35 / -46  z -1.22     +79 / -121  z -2.97
+
+Win rates pooled, Learning then evac: 68.6% to 61.4% against marshal, 91.6% to
+88.9% against knower Off, 49.6% to 44.4% against Planned. Games were shorter
+with it (135 turns against 149 at 18 systems). **It failed every clause and was
+deleted.**
+
+**Why it could only lose.** The reading is conditioned on a doomed garrison, so
+the price applies only to a strike that already wins against the whole garrison.
+It cannot make any capture cheaper, which was the proposal's case for it. All it
+can do is take away the kill and add a threat, so every strike on an evacuator is
+worth less. That is Raise's flaw again: a reading that can only add caution, on
+the decisions that matter most. To use evacuation, a price would have to make
+something cheaper: a strike sized below the full fight against a rival whose
+garrisons leave even when the fight is not hopeless. The reading does not count
+that case, and nothing here measured it.
+
