@@ -43,6 +43,11 @@ WEB_SHARE_GAMES_KEY = "sc_share_games"
 # *drawn* can move a result.
 WEB_ANIMATE_TURNS_KEY = "sc_animate_turns"
 
+# Storage key for the player's UI size (`webstore.ui_size`), a whole percentage
+# applied on top of the fit to the window. A local preference like the two above:
+# it belongs to this screen, not to a game setup.
+WEB_UI_SIZE_KEY = "sc_ui_size"
+
 # Where a browser download parks its result for the game loop to collect
 # (`share.fetch_log`). localStorage rather than a `window` property because
 # reading one back is the one bridge call this build cannot take for granted:

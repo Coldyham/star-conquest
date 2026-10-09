@@ -26,7 +26,8 @@ are readable here and nowhere else.
 Five verdicts, stored in ``score_checks``:
 
     verified    the log replays and reproduces the score exactly
-    mismatch    it replays and produces something else, or is for another setup
+    mismatch    it replays and produces something else, or is for another setup,
+                or its dice are not what its orders roll
     outdated    it does not reproduce, and it was played under older *rules*;
                 or it reproduces, but against bots its setup no longer deals
     unreadable  the blob does not decode, or cannot be replayed
@@ -47,6 +48,19 @@ is dealt from ``settings.RANDOM_POOL``. A log dealt from another pool, by a buil
 from before the pool was fixed or before an edit to it, was played honestly
 against bots the map's other scores did not face. A log that records no bots
 cannot be checked, and is judged on its numbers alone.
+
+The dice are checked too, where they can be. Since dice were keyed per fight
+(``engine._Dice``), a turn's dice follow from its board and its orders, and a log
+marks each such turn ``keyed``. Every keyed turn is fought again with its
+recorded orders and fresh dice (``replay.dice_follow``), and a log whose recorded
+dice differ — hand-picked rolls, like ``tools/par_search.py``'s lucky lines — is
+a ``mismatch``. A turn from before keying drew its dice after its bots and cannot
+be re-rolled, so it passes unchecked, and the verdict's detail counts how many
+fighting turns did. Those can only come first: a game that was under way when
+keying arrived is keyed from then on, so an unkeyed turn after a keyed one is a
+``mismatch`` too. What this cannot check is a log with every flag stripped; that
+is told apart only by when it was played. Nor does anything check the bots'
+orders, which the board leaves free to move.
 
 ``missing`` is a fact, not an absence: a score posted before the game uploaded
 logs, or by someone whose upload was blocked, is unverified rather than suspect,
@@ -178,6 +192,7 @@ def same_setup(log: replay.GameLog, settings_json: dict | None) -> bool:
     seed = posted.seed if posted.seed is not None else log.seed
     if seed != log.seed:
         return False
+    posted.seed = played.seed = seed
     return bool(set(posted.challenge_keys()) & set(played.challenge_keys()))
 
 
@@ -187,7 +202,8 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
     The engine is never asked to *judge* anything: it replays the recorded orders
     and deals back the recorded dice (``replay.reconstruct``), and the position it
     lands on is simply read. A score matches when the same seat won on the same
-    turn having lost the same ships, with the same number of turns played by hand.
+    turn having lost the same ships, with the same number of turns played by hand,
+    and every keyed turn's dice are what its orders roll (``_DiceAudit``).
     """
     sid = int(score["id"])
     if not blob:
@@ -198,8 +214,9 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
         return Check(sid, "unreadable", str(err))
     if not same_setup(log, settings_json):
         return Check(sid, "mismatch", "the replay is of a different setup")
+    audit = _DiceAudit(log)
     try:
-        state, _ = replay.reconstruct(log)
+        state, _ = replay.reconstruct(log, on_turn=audit)
     except Exception as err:  # noqa: BLE001 — a log that won't replay is a verdict
         return Check(sid, "unreadable", f"replay failed: {err}")
 
@@ -215,10 +232,46 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
         detail = (f"posted {claimed[0]}/{claimed[1]}/{claimed[2]} turns/lost/hand, "
                   f"replay gives {actual[0]}/{actual[1]}/{actual[2]}")
         return Check(sid, *_disagreement(log, detail))
+    if audit.fault:
+        return Check(sid, *_disagreement(log, audit.fault))
     drift = _lineup_drift(log, human.id)
     if drift:
         return Check(sid, "outdated", f"dealt a different lineup: {drift}")
+    if audit.unchecked:
+        return Check(sid, "verified", f"dice unchecked on {audit.unchecked} fighting "
+                                      "turn(s) played before keyed dice")
     return Check(sid, "verified")
+
+
+class _DiceAudit:
+    """Checks each keyed turn's dice as ``replay.reconstruct`` reaches it.
+
+    Called with the board at the start of every turn (``on_turn``), which is the
+    board that turn was fought on, so re-rolling it costs one copy and one turn
+    rather than a second replay. Stops at the first fault: ``fault`` says what was
+    wrong and where, ``unchecked`` counts the fighting turns from before keying.
+    """
+
+    def __init__(self, log: replay.GameLog) -> None:
+        self._log = log
+        self._keyed_from: int | None = None
+        self.fault = ""
+        self.unchecked = 0
+
+    def __call__(self, board) -> None:
+        log, i = self._log, board.turn
+        if self.fault or board.winner is not None or i >= log.turn_count:
+            return
+        if log.keyed_for(i):
+            if self._keyed_from is None:
+                self._keyed_from = i
+            if not replay.dice_follow(board, log.script_for(i)):
+                self.fault = f"turn {i + 1}'s dice are not what its orders roll"
+        elif self._keyed_from is not None:
+            self.fault = (f"turn {i + 1} rolled unkeyed dice after keyed turn "
+                          f"{self._keyed_from + 1}")
+        elif log.dice_for(i):
+            self.unchecked += 1
 
 
 def _lineup_drift(log: replay.GameLog, human_id: int) -> str:

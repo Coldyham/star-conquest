@@ -380,10 +380,77 @@ deterministic), and snapshotting the Mersenne Twister state per turn (~5 KB a
 turn, and the whole file is rewritten after *every* turn, so a long game would
 spend tens of MB of writes on it).
 
-Deriving combat's dice from `(seed, turn)` instead would have been free, but a
-clone made by `knower._clone` shares both, so a rollout would meet the same
-jitter the real turn is about to — handing the search the actual dice. The
-recorded-draws route keeps rollouts rolling their own.
+Deriving combat's dice from `(seed, turn)` instead was first turned down
+because a clone made by `knower._clone` shares both, so a rollout would meet the
+jitter the real turn is about to roll. It is now how the dice are rolled
+(see "Two streams" below), and that consequence was accepted on purpose. The
+draws are still recorded: a record that holds what happened can't drift, and
+turns from before the change can only be rebuilt from their recorded dice.
+
+**A live turn's rng is derived, and a rewind is not a re-roll.** Until
+2026-10-07 the live game carried `state.rng` from turn to turn. A rebuilt board
+cannot carry it: `reconstruct` deals the recorded dice and asks no bot to
+decide, so a rebuilt board's rng sits exactly where map generation left it,
+whatever turn it was rebuilt to. Every "rewind to here" followed by End Turn
+therefore rolled that turn afresh. A player reported it (one fight left 6 ships
+played straight through and 7 after rewinding a turn), and the par search
+(`tools/par_search.py`, branch `par-search`) had found it was load-bearing: on `06a74fc834bdf656` every 16-turn win needed
+at least one rewind. `main.resolve_turn` now calls `replay.reseed`, which seeds
+the rng from `(seed, turn)` before anything draws, so a rewound turn ended with
+the same orders lands where the straight game did
+(`test_a_rewound_turn_rolls_what_the_straight_game_rolled`). At first,
+changing that turn's orders still changed all of its dice, since bots and
+fights drew in order from the one stream. The next section removed that.
+
+The shell derives the rng *before* calling the engine, exactly as `pbp.reseed`
+already did for a shared match. `RULES_VERSION` did not move: a stored game
+deals its recorded dice and never reads the rng. Scores posted before the change
+were set when a rewind re-rolled, and some (that 16/10 among them) may not be
+repeatable since.
+
+**Two streams: bots decide in parallel, and each fight rolls its own dice.**
+After `replay.reseed`, one stream still served the whole turn in series: each
+bot seat drew from it in ascending pid order, and combat drew its dice off the
+end in walk order. That left three faults, all reported on 2026-10-08:
+
+- *Seat order mattered.* knower copied `state.rng` to predict the seats after
+  it bit-exactly, but the seats before it had already drawn from a position it
+  could not recover, so it predicted them from a private rng (right on 99.6% of
+  turns). The same bot played differently in seat 2 than in seat 4.
+- *One bot's draws moved everyone.* A bot drawing one value more shifted every
+  later seat's tie-breaks and every die of the turn, so no bot's code could be
+  isolated from another's.
+- *An unrelated move re-rolled a fight.* After a rewind, launching one extra
+  back-line fleet, or starting a fight earlier in the walk, re-rolled a battle
+  on the far side of the map. A player could fish for a good roll that way.
+
+Now every bot seat decides from the same start of the turn's rng
+(`engine.decide_seat` saves it before each `decide` and restores it after,
+and `pbp.turn_orders` and the autoplayed seat in `main.resolve_turn` use it too).
+Combat never touches `state.rng`. `engine._Dice` rolls each fight from
+`Random(f"{seed}:{dice_salt}:{turn}:node:{id}")` for an arrival, or
+`...:lane:{lo}:{hi}` for a lane's crossings in crossing order. These are derived
+inside `end_turn` from the board alone. A fight's dice depend only on which fight
+it is, and a turn ended again with the same orders lands identically whatever
+any seat drew.
+
+Deriving inside `end_turn` hands a predicting bot the real dice: knower's
+rollouts on a clone meet the jitter the turn will really roll. That is
+deliberate. It sharpens knower's own choices and moves nothing for anyone else,
+since no seat's stream or dice depend on what knower does. The alternative, a
+dice seed handed in only by the shell, would have kept rollouts blind for no
+benefit to any other seat. `GameState.dice_salt` (`"dice"`; a shared match
+stamps `pbp.DICE_SALT`) keeps a match's dice from being rehearsed on its seed
+alone.
+
+The dice are still recorded and dealt back in walk order, so every older log
+rebuilds unchanged, whichever fight asks for them. Logs made by the old engine
+(including in-lane battles) were rebuilt under the new one to the same board
+digest, so `RULES_VERSION` did not move. A turn records `"keyed": true`
+(`TurnRecord.keyed`, `GameLog.keyed_for`): its dice follow from its board and
+orders, so they can be rolled again and compared. `pbp.verify_turn` does that,
+and the leaderboard verifier could (`docs/design/leaderboard.md`, "Checked
+scores"). Scores posted before this may not repeat with identical orders.
 
 Version-1 logs can no longer be replayed faithfully, so `latest_log` skips them
 rather than offering a resume that quietly rebuilds a different game.
@@ -393,7 +460,11 @@ meant to hand back the position as it was, and on a big map the standing routes
 *are* half the position. It is recorded before `main.resolve_turn`'s
 `prune_forward`, i.e. the rules the turn was actually played with, and
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
-was lost on that turn doesn't come back to life.
+was lost on that turn doesn't come back to life. Each rule is stored as
+`{"hold": n, "to": {dest: pct}}`, lanes in the order they were added (ties in
+`model.forward_split` go by it). Logs from before shares hold `[dest, keep]`, which
+`replay.rules_from_dict` reads as hold `keep` and 100% to `dest`; nothing moves in
+a replay either way, since the rules expand into recorded orders.
 
 The per-turn `"ai"` flag carries a second job now. It is still disclosure first
 (`GameLog.hand_turns`), but it is also the record of *when a person took the
@@ -453,7 +524,7 @@ serialized.
 Labels are laid out collision-first (`render._draw_node_names`): a second pass
 over the nodes, drawn after the circles, placing a name below its system and
 dropping any that would land on a node, on another name, or on a label that
-carries actual information (a lane's travel time, a rule's "keep N"; hence
+carries actual information (a lane's travel time, a rule's share or hold; hence
 `_pill_rect` being split out of `_label_pill`). The space *above* a system is
 held for the numbers a playback writes there — a fight's cost, a finished hull's
 `+N`, and the row the second of those stacks into (`render._mark_slot`) —
@@ -574,8 +645,8 @@ intact.
   to any turn after one keeps the seat claimed.
   - **`resolve_turn` must not compute `human_orders` for an unclaimed seat.**
     `_collect_orders` skips a seat only when `is_human`, so passing orders in
-    *and* leaving the seat unflagged runs its strategy twice — spare draws from
-    `state.rng` that desync every oracle's stream tracking. Pass `None` and let
+    *and* leaving the seat unflagged runs its strategy twice, and the seat's
+    first plan is applied as well as its second. Pass `None` and let
     the engine's own loop decide it, exactly as `sim.play`'s tournaments do.
   - **Resuming, rewinding or watching always lands paused** (`main.resume_game`
     builds its `Ui` with autoplay off regardless of what the log was doing).

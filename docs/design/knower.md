@@ -5,7 +5,7 @@ rival's real `decide`, then searches over candidate openings. This file covers
 why the oracle is possible, what it buys, the depth search and its horizon
 (Oracle: Off / Predict / Search), the borrowed candidates, and the cost of a
 decide, which drives the slow-setup warning. Roster-wide rules (margins,
-measurement method, leaderboard replays at `REPLAY_AUX`) are in
+measurement method, leaderboard replays at `replay_aux`) are in
 [`bots.md`](bots.md). marshal's results against knower are in
 [`marshal.md`](marshal.md), "Where marshal stands". Index:
 [`../README.md`](../README.md).
@@ -20,6 +20,18 @@ the engine asks for them: there's no fixed point to solve, one forward pass
 of their real code *is* the answer. knower folds those predictions into a
 "post-launch board" (predicted orders applied via `engine.apply_order` but
 not advanced) and runs thinker's phases against it.
+
+The rng is no obstacle either. Every bot seat decides from the same start of
+the turn's `state.rng` (`engine.decide_seat`), so each rival is predicted from
+its own copy of it and comes out bit-exact, whichever side of knower it sits.
+Until 2026-10-08 seats drew in series: the seats after knower were exact, but the
+seats before it had already drawn from a position it could not recover, so they
+were predicted from a private rng (right on 99.6% of turns, labelled `"likely"`).
+That is gone, and with it the "chain" a raising seat used to break. Since the
+same change, combat dice are keyed per fight from the board (`engine._Dice`),
+so a Search rollout on a clone meets the dice the real turn will roll. That is
+deliberate (`core.md`, "Two streams"): it sharpens knower's choices and moves
+nothing for any other seat.
 
 Forked from `models/thinker.py` at commit f94ff20; the four phases and the
 helpers below `_richness` are thinker's, changed only where the oracle changes
@@ -103,7 +115,7 @@ What it says:
   Over 100 seeds Predict reads 85%, and its 44% against marshal reads 38%. The
   ladder's knower is Predict (default `AiParams`), so the ladder ranks the
   default setting, not the bot at its best; `bot_replay` already runs it at
-  Search (`REPLAY_AUX`).
+  Search (`replay_aux`).
 - **Search ends games.** Off and Predict time out a lot against thinker on
   the symmetric map (74 and 41 of 100). Search times out once against thinker
   in all 400 of its games across the three cells. On the symmetric map the

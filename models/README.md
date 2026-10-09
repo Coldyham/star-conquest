@@ -216,11 +216,13 @@ their `ai_params` applied for free, because their own function reads them.
 
 - **Clone the state first.** `decide` is contractually read-only, but you cannot
   assume a rival honours that, and you need your own `rng` anyway (below).
-- **Draw nothing from `state.rng`.** Seats decide in ascending player id, so the
-  seats after you will find the stream exactly where you leave it. Leave it alone
-  and their orders are reproducible bit-for-bit; draw once and they aren't. Use a
-  private `random.Random` seeded from `state.seed`/`state.turn` — never the clock,
-  or a seed will stop reproducing its match.
+- **Draw nothing from `state.rng`.** Every seat decides from the same start of
+  the turn's stream (`engine.decide_seat`), and that start is where the rng stands
+  when you are asked, so a copy of it predicts any rival bit-for-bit. Draw from it
+  and you move the start you are predicting from. Use a private `random.Random`
+  seeded from `state.seed`/`state.turn` — never the clock, or a seed will stop
+  reproducing its match. Combat dice never come from `state.rng`: `end_turn` on a
+  copy of the board rolls the fights the real turn will roll.
 - **Read `ai.STRATEGIES` lazily, inside `decide`.** Model files are imported in
   sorted filename order, so at *your* import time the registry is still incomplete.
 - **Never call `ai.load_models()` from a model.** It imports every file in this
@@ -282,9 +284,13 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first
-contact when its side of the map is big enough to, which its *Opening* knob can
-turn off), `knower.py` (the oracle — it runs every rival's
-own `decide` before the engine asks for it).
+contact when its side of the map is big enough to; its *Style* knob runs
+Greedy, Planned, Learning), `knower.py` (the oracle — it runs every rival's
+own `decide` before the engine asks for it). At *Learning* actuary also keeps a
+model of each rival, read off the boards it has seen, and prices the threat
+next door by how often that rival strikes a garrison as thin as ours will be:
+the one seat here that remembers anything between turns, so knower models it
+rather than running it (`is_oracle_seat`).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
 leaves the seat's bot to the match seed, and `settings.build_state` resolves it to

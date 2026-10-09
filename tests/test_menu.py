@@ -600,7 +600,7 @@ def test_combat_knobs_are_gone_from_advanced():
 # about what counts as chrome or one of them starts policing the other's buttons.
 _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "filename_field", "get_link", "browse_configs", "seed_field",
-           "seed_random", "create_map", "clear_map"}
+           "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc"}
 
 
 def test_the_node_stepper_takes_big_steps_past_a_standard_board():
@@ -1168,6 +1168,34 @@ def test_animate_turns_toggles_the_stored_preference(monkeypatch, tmp_path):
         _click_key(screen, ms, settings, "animate_turns")
         assert menu.webstore.animate_turns() is True
         assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
+def test_ui_size_stepper_stores_the_preference_and_leaves_the_setup(monkeypatch, tmp_path):
+    """Like the two rows above, the UI size belongs to this screen: it writes the
+    local store and `MenuState.ui_size` (which `main` rescales from), never Settings."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert ms.ui_size == 100
+        _click_key(screen, ms, settings, "ui_size_inc")
+        assert ms.ui_size == menu.webstore.ui_size() == 110
+        _click_key(screen, ms, settings, "ui_size_dec")
+        _click_key(screen, ms, settings, "ui_size_dec")
+        assert ms.ui_size == menu.webstore.ui_size() == 90
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
+def test_ui_size_stepper_is_not_offered_on_touch(monkeypatch):
+    screen, ms, settings = _setup()
+    try:
+        monkeypatch.setattr(config, "touch_ui", True)
+        menu.draw(screen, ms, settings)
+        assert "ui_size_inc" not in ms.rects
     finally:
         pygame.quit()
 

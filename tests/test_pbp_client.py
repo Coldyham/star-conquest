@@ -14,6 +14,7 @@ Pure/headless: `main` imports pygame, but nothing here draws.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -24,9 +25,9 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 import pytest
 
-from starconquest import main as app
 from starconquest import ai, config, engine, pbp, replay, webstore
-from starconquest.model import Order
+from starconquest import main as app
+from starconquest.model import ForwardRule, Order
 from starconquest.paths import WEB_AUTH_KEY
 from starconquest.settings import Settings
 
@@ -168,7 +169,7 @@ def test_the_uploaded_log_carries_none_of_our_standing_rules():
     """Every other client opens from it, and a route plan is ours alone."""
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 0)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 0)}
     match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
@@ -182,7 +183,7 @@ def test_reopening_a_match_brings_back_our_standing_rules():
     ends, and opening the match again reads it back."""
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 1)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 1)}
     match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
@@ -194,15 +195,15 @@ def test_reopening_a_match_brings_back_our_standing_rules():
                {"turn": 0, "seat": 2, "orders_json": []}]))
     opened = app.open_match(reopened, _seat(), Settings())
     assert opened is not None
-    assert opened[1].auto_forward == {src: (dst, 1)}
+    assert opened[1].auto_forward == {src: ForwardRule({dst: 100}, 1)}
 
 
 def test_a_saved_rule_out_of_a_system_since_lost_does_not_come_back():
     _, state, ui, _ = _opened()
     src, dst = _lane(state, 1)
-    pbp.remember_rules(MATCH, {src: (dst, 0), dst: (src, 0)})   # dst was never ours
+    pbp.remember_rules(MATCH, {src: ForwardRule({dst: 100}, 0), dst: ForwardRule({src: 100}, 0)})   # dst was never ours
     _, _, ui2, _ = _opened()
-    assert ui2.auto_forward == {src: (dst, 0)}
+    assert ui2.auto_forward == {src: ForwardRule({dst: 100}, 0)}
 
 
 def test_submitting_saves_the_rules_it_sent(monkeypatch):
@@ -210,19 +211,19 @@ def test_submitting_saves_the_rules_it_sent(monkeypatch):
     monkeypatch.setattr(pbp, "call", lambda *a, **kw: None)
     _, state, ui, _ = _opened()
     src, dst = _lane(state, 1)
-    ui.auto_forward = {src: (dst, 0)}
+    ui.auto_forward = {src: ForwardRule({dst: 100}, 0)}
     app.pbp_send(state, ui, _seat())
-    assert pbp.remembered_rules(MATCH) == {src: (dst, 0)}
+    assert pbp.remembered_rules(MATCH) == {src: ForwardRule({dst: 100}, 0)}
 
 
 def test_forgetting_a_match_forgets_its_rules_too():
     pbp.remember(_seat())
-    pbp.remember_rules(MATCH, {3: (4, 0)})
+    pbp.remember_rules(MATCH, {3: ForwardRule({4: 100}, 0)})
     other = "ffeeddccbbaa0099"
-    pbp.remember_rules(other, {5: (6, 1)})
+    pbp.remember_rules(other, {5: ForwardRule({6: 100}, 1)})
     pbp.forget(MATCH)
     assert pbp.remembered_rules(MATCH) == {}
-    assert pbp.remembered_rules(other) == {5: (6, 1)}, "another match's are kept"
+    assert pbp.remembered_rules(other) == {5: ForwardRule({6: 100}, 1)}, "another match's are kept"
     pbp.remember_rules(other, {})
     assert pbp.remembered_rules(other) == {}
 
@@ -262,27 +263,51 @@ def _fought_turn():
         state, log = rebuilt
         _resolved, log, _ = pbp.resolve(match, ai.decide)
         if log.dice_for(turn):
-            return state, log.script_for(turn), 4
+            return state, log.script_for(turn), match
         log_blob = pbp.shareable(log).encoded()
     pytest.fail("no fight in sixty turns")
 
 
 def test_a_turn_rolled_honestly_checks_out():
-    state, record, seed = _fought_turn()
-    assert pbp.verify_turn(state, record, seed)
+    state, record, match = _fought_turn()
+    assert record.keyed and pbp.verify_turn(state, record, match)
 
 
 def test_a_turn_with_dice_its_orders_do_not_roll_is_caught():
     """The resolver writes the bots' orders, which nothing can check; it cannot
     also pick the dice."""
-    state, record, seed = _fought_turn()
+    state, record, match = _fought_turn()
     record.dice[0] = 0.0 if record.dice[0] else 0.5
-    assert not pbp.verify_turn(state, record, seed)
+    assert not pbp.verify_turn(state, record, match)
 
 
-def test_deciding_the_bots_leaves_the_turns_dice_alone():
+def test_a_shared_match_rolls_dice_of_its_own():
+    """Playing the match's seed alone must show nothing of the dice it will roll."""
+    state, record, match = _fought_turn()
+    assert state.dice_salt == pbp.DICE_SALT
+    solo = copy.deepcopy(state)
+    solo.dice_salt = "dice"
+    rolled = engine.end_turn(solo, script=engine.TurnRecord(list(record.orders), []))
+    assert rolled.dice != record.dice
+
+
+def test_an_unkeyed_turn_passes_only_until_the_match_has_a_keyed_one():
+    """A match under way when dice were keyed keeps moving on the turns its
+    pre-change clients resolved; once a turn is keyed, an unkeyed one is refused."""
+    state, record, match = _fought_turn()
+    older = engine.TurnRecord(list(record.orders), [0.5] * len(record.dice))
+    log = pbp.match_log(match)
+    assert log is not None and log.turn_count and log.keyed_for(0)
+    assert not pbp.verify_turn(state, older, match)
+    for entry in log.turns:
+        entry["keyed"] = False
+    match.log = log.encoded()
+    assert pbp.verify_turn(state, older, match)
+
+
+def test_deciding_the_bots_leaves_the_live_rng_alone():
     """The bots decide on a scratch copy, so the live rng still stands where the
-    turn's seed put it — which is the whole of what makes the dice checkable."""
+    turn's seed put it."""
     ai.load_models()
     settings = Settings(mode="random", players=3, nodes=14, seed=7)
     match = pbp.match_from_dict(_payload(seats=(1,), players=3,
@@ -409,7 +434,7 @@ def test_submitting_sends_queued_orders_and_standing_rules_together(monkeypatch)
     other = dst
     state.systems[other].owner_id, state.systems[other].ships = 1, 4
     ui.pending.append(Order(1, src, dst, 1))
-    ui.auto_forward[other] = (src, 0)
+    ui.auto_forward[other] = ForwardRule({src: 100}, 0)
 
     app.pbp_send(state, ui, _seat())
     assert {o["src"] for o in sent["orders"]} == {src, other}
@@ -831,7 +856,7 @@ def _tick(server: _Endpoint, client) -> None:
         client[0], client[1], client[2] = app.open_match(match, seat, Settings())
     elif verdict == app.PBP_STEP:
         script = pbp.settled_turn(match, state.turn)
-        assert script is not None and pbp.verify_turn(state, script, match.seed), \
+        assert script is not None and pbp.verify_turn(state, script, match), \
             "an honest resolver's turn must check out on every other client"
         app.resolve_turn(state, ui, log, Settings(), script=script)
         app.pbp_opened(ui)

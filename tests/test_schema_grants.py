@@ -107,6 +107,24 @@ def test_the_schema_grants_everything_the_worker_reads_and_writes():
 
 
 
+def _public_uses() -> set[str]:
+    """Relations the tools read with the publishable key, through
+    `config_census.public_rows`, which no worker grant covers."""
+    uses = set()
+    for path in sorted((ROOT / "tools").glob("*.py")):
+        uses.update(re.findall(r'public_rows\(\s*"([a-z_]+)"', path.read_text()))
+    return uses
+
+
+def test_the_schema_grants_anon_what_the_tools_read_publicly():
+    granted = _granted("anon")
+    missing = sorted(rel for rel in _public_uses() if "select" not in granted.get(rel, set()))
+    assert _public_uses(), "no public_rows reads found: has the helper moved?"
+    assert not missing, ("schema.sql does not grant anon select on: " + ", ".join(missing)
+                         + ". These tools read with the publishable key, so a missing "
+                         "grant fails them outright.")
+
+
 def _views() -> dict[str, tuple[bool, set[str]]]:
     """``{view: (security_invoker, {relation it reads, …})}``, out of schema.sql."""
     out = {}

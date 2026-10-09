@@ -18,7 +18,7 @@ import json
 import pytest
 
 from starconquest import ai, config, engine, replay
-from starconquest.model import Order
+from starconquest.model import ForwardRule, Order
 from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state
 
 
@@ -144,20 +144,35 @@ def test_record_turn_stores_every_seat_not_just_the_human():
 
 
 def test_record_turn_stores_standing_rules():
+    rules = {3: ForwardRule({7: 100}, 2), 4: ForwardRule({9: 34, 1: 33, 5: 33}, 0)}
     log = replay.new_log(Settings(seed=1), 1)
-    log.record_turn(_record([]), rules={3: (7, 2), 4: (1, 0)})
-    assert log.rules_for(0) == {3: (7, 2), 4: (1, 0)}
-    # ...and survives the JSON round trip, where the keys become strings
+    log.record_turn(_record([]), rules=rules)
+    assert log.rules_for(0) == rules
+    # ...and survives the JSON round trip, where the keys become strings, with a
+    # split's lanes still in the order they were added (ties are broken by it)
     clone = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
-    assert clone.rules_for(0) == {3: (7, 2), 4: (1, 0)}
+    assert clone.rules_for(0) == rules
+    assert list(clone.rules_for(0)[4].shares) == [9, 1, 5]
+
+
+def test_rules_for_reads_the_old_keep_form():
+    """Logs from before shares stored ``[dest, keep]``: hold ``keep``, send all."""
+    log = replay.GameLog.from_dict(
+        {"seed": 0, "settings": {}, "version": 2,
+         "turns": [{"orders": [], "rules": {"3": [7, 2]}}]}
+    )
+    assert log.rules_for(0) == {3: ForwardRule({7: 100}, 2)}
 
 
 def test_rules_for_drops_malformed_entries():
     log = replay.GameLog.from_dict(
         {"seed": 0, "settings": {}, "version": 2,
-         "turns": [{"orders": [], "rules": {"3": [7, 2], "4": "nonsense", "x": [1, 1]}}]}
+         "turns": [{"orders": [], "rules": {
+             "3": {"hold": 2, "to": {"7": 60}}, "4": "nonsense", "x": [1, 1],
+             "5": {"hold": 0, "to": {}}, "6": {"hold": 0, "to": {"1": 70, "2": 70}},
+             "8": {"to": {"1": "lots"}}}}]}
     )
-    assert log.rules_for(0) == {3: (7, 2)}
+    assert log.rules_for(0) == {3: ForwardRule({7: 60}, 2)}
 
 
 def test_to_from_dict_round_trip():
@@ -204,6 +219,29 @@ def test_reconstruct_matches_original(policy, seed):
         log2 = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
         rebuilt, _ = replay.reconstruct(log2)
     assert _snapshot(rebuilt) == before
+
+
+def test_a_turn_records_whether_its_dice_were_keyed():
+    with _preserve_config():
+        _, log = _play(777, policy="pass", max_turns=30)
+        again = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
+    assert log.turn_count and all(again.keyed_for(i) for i in range(again.turn_count))
+    assert again.script_for(0).keyed
+
+
+def test_a_log_from_before_keyed_dice_still_rebuilds():
+    """An older turn carries no ``keyed``, and its dice were drawn in walk order
+    off `state.rng`. Recorded dice are dealt back in that same walk order
+    whichever fight asks, so the board it rebuilds is the one that was played."""
+    with _preserve_config():
+        original, log = _play(54321, policy="mixed")
+        data = log.to_dict()
+        for entry in data["turns"]:
+            entry.pop("keyed")
+        older = replay.GameLog.from_dict(data)
+        rebuilt, _ = replay.reconstruct(older)
+    assert not any(older.keyed_for(i) for i in range(older.turn_count))
+    assert _snapshot(rebuilt) == _snapshot(original)
 
 
 @pytest.fixture

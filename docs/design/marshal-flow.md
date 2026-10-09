@@ -564,6 +564,10 @@ retries.
     attack landings that failed                      7%       20%
     launched ships that were own-to-own transfers   64%       42%
 
+Per frontier system-turn held, rather than per game, the person loses systems at
+the low end of a winning bot's rate. See [`learner.md`](learner.md), "Frontier
+losses".
+
 **Captures stick.** Call a rival capture *safe* when the ships that landed,
 plus our garrisons next to it, outnumber what can strike back — the adjacent
 rival stacks, rival fleets inbound, and the garrison that just fled. 76% of the

@@ -15,7 +15,7 @@ a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps` and `leaderboard` for the game and the board; `bots` for the roster
 as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
-`actuary` and `convoy`; `pbp` for play-by-post. Keep each design file under ~1000 lines, and split by
+`actuary`, `convoy` and `learner`; `pbp` for play-by-post; `par` for the par search, a local check. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
 Two docs point outward rather than inward: [`docs/bot-api.md`](docs/bot-api.md)
@@ -59,10 +59,18 @@ uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/bot_distance.py             # how differently each bot plays
                                                 # the same positions, by phase
+uv run python tools/learner_check.py             # how well actuary's model of each
+                                                # rival (Style: Learning) predicts
+                                                # the roster's launches;
+                                                # --logs public: posted human games
+uv run python tools/human_habits.py             # how the person plays (posted games)
+                                                # against roster self-play
 uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
                                                 # ranking moves on one of them
+uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # floor and
+                                                # best line found for one setup (local check)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
 ```
 
@@ -205,6 +213,14 @@ keeps it, `fork` mints a new one) and `strategies`, each seat's bot as built,
 which `reconstruct` stamps back so a random seat keeps the bot it was dealt
 whatever the roster does since. History mode is shell-only (`Ui.history`,
 `main.build_history`); rewind truncates mid-game and forks a finished game.
+**A live turn's rng is derived, never carried** (`replay.reseed`, called by
+`main.resolve_turn` and never inside `end_turn`), and every bot seat decides
+from that same start (`engine.decide_seat`), so no seat's draws reach another's.
+**Combat never draws from it**: each fight rolls a stream keyed by seed,
+`GameState.dice_salt`, turn and place (`engine._Dice`), derived inside
+`end_turn`, so a rewound turn ended with the same orders rolls the same dice and
+no move elsewhere re-rolls a fight. A copy rolls the real dice too, which knower's
+Search is welcome to. Turns record `keyed`; replays still deal recorded dice.
 Reasons and alternatives: `docs/design/core.md`.
 
 ### Play-by-post (pbp.py)
@@ -222,8 +238,10 @@ already resolve simultaneously. The rationale for each rule is in
   a turn uploads its log, and every other client applies it (`pbp.match_log`,
   `pbp.settled_turn`). Nobody decides that turn again, because the bots stop on
   a wall clock. The resolver's rng is derived (`pbp.reseed`), never carried.
-  Bots decide on a scratch copy (`pbp.turn_orders`), so the dice roll after every
-  order is fixed. Each stepping client re-rolls them (`pbp.verify_turn`).
+  Bots decide on a scratch copy (`pbp.turn_orders`). The match rolls its own
+  dice (`pbp.DICE_SALT`, stamped by `pbp.seat_people`), and each stepping client
+  re-rolls them (`pbp.verify_turn`; an unkeyed turn passes only until the match
+  has a keyed one).
   `match_log` refuses a log that files an order under a person's seat. The
   endpoint keeps the first upload, and a client that loses the race rebuilds
   from it. The uploaded log carries no forwarding rules (`pbp.shareable`), so
@@ -273,7 +291,8 @@ already resolve simultaneously. The rationale for each rule is in
   `settings.random_seed()`/`settings.fresh_rng()` (the web build's fixed
   interpreter image makes global `random` repeat across loads). The sanctioned
   exceptions derive a stream rather than draw one: `botio.decide_seed`, the
-  random-seat pick, `pbp.reseed`.
+  random-seat pick, `pbp.reseed`, `replay.reseed`, and the combat dice
+  (`engine._Dice`, one stream per fight, never `state.rng`).
 - **Everything is keyed by integer id.** Systems are `dict[int, System]`; lanes
   use `model.lane_key` (a `frozenset`). Neutral is a real player, `id == 0`.
   Star names (`System.name`, `starnames.py`, generated from
@@ -330,7 +349,7 @@ already resolve simultaneously. The rationale for each rule is in
   through the human's seat via `tests/sim.play_settings`, which goes through
   `build_state` so tuned knobs apply. The seat is handed over outright
   (`sim._hand_over` clears `is_human`), gets default `AiParams` except
-  `bot_replay.REPLAY_AUX`'s `aux`, and runs with wall-clock guards lifted 100x
+  `aux`, the top of its own slider (`bot_replay.replay_aux`), and runs with wall-clock guards lifted 100x
   (`ai.set_budget_scale`, a model's `BUDGET_SCALE`). `engine_rev` hashes the
   outcome modules, `models/` and `tests/sim.py`; `replay_rev` excludes `ai`,
   `models/` and the harness. `won`, never `turns`, decides a result. A win
@@ -339,8 +358,8 @@ already resolve simultaneously. The rationale for each rule is in
 - **The game uploads replays and the worker checks scores against them.**
   `share.post_log` sends; `tools/verify_scores.py` records `verified` /
   `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
-  rival lineup the setup no longer deals) in `score_checks`,
-  binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
+  rival lineup the setup no longer deals) in `score_checks`, re-rolling every
+  `keyed` turn's dice (`replay.dice_follow`) and binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
   never does. `game_logs` is unreadable and unwritable by the public (writes via
@@ -401,6 +420,12 @@ already resolve simultaneously. The rationale for each rule is in
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
   advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
   callers prefer.
+- **A bot that remembers between turns keys its memory by the game's path**
+  (`models/actuary.py`'s memo tree, used at Style: Learning: a board finds its
+  parent by content), never by "the current game": `decide` also runs on copies,
+  branches, rewinds and isolated positions, and `ai.load_models()` wipes module
+  state. Such a seat answers `is_oracle_seat`, so knower models it rather than
+  running it. Detail: `docs/design/learner.md`.
 - **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
   never a constant**, with the jitter half floored at its `TUNED_SWING`, and
   floors its ask at `target.ships + 1`. Margins compare against the *effective*
@@ -440,8 +465,9 @@ already resolve simultaneously. The rationale for each rule is in
   (`btn_w`, `btn`, `row_h`, `draw_modal`, `wrap`) and `config.s()`. `render`
   binds the kit to `_`-prefixed module globals so tests can swap them — keep
   that. `menu` deliberately does not use the kit: it lays out on a fixed
-  1440x960 canvas with unscaled fonts. `config.apply_ui_scale` runs once at boot;
-  key any font cache on `config.ui_scale`.
+  1440x960 canvas with unscaled fonts. `config.apply_ui_scale` runs at boot and
+  again whenever the window or the player's UI size moves (`main.ui_scale_for`,
+  `webstore.ui_size`); key any font cache on `config.ui_scale`.
 - **`config.touch_ui` is the input modality.** On touch, drop keyboard-only
   strings (`render._key_hint` and friends) and floor tappable controls at
   `config.TOUCH_MIN_TARGET`.
@@ -457,8 +483,12 @@ already resolve simultaneously. The rationale for each rule is in
   `edit_order`, `edit_forward`; `Ui.editing_existing`). A dormant rule never
   opens it (`Ui.rule_is_live`; `prune_forward` deletes rules whose source was
   taken). Its slider is hit-tested before the panel drag.
-- **The queued list is capped and scrolled** (`ui.order_scroll`), and each row
-  carries its own index into `pending` (`ui.order_hitboxes`).
+- **Orders and rules are reached from the map** (`input._pick_lane`, repeat
+  clicks cycle a shared lane); the side panel has no list of them.
+- **A forwarding rule is a system's hold plus a share per lane**
+  (`model.ForwardRule`); the share arithmetic lives in `model` only, and
+  `Ui.forward_this_turn` is the one formula behind both the orders and every
+  number shown. Detail: `docs/design/shell.md`, "Forwarding rules".
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:

@@ -890,21 +890,20 @@ def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     """Turn standing auto-forward rules into this turn's orders for the human.
 
-    A rule keeps ``keep`` ships at the source and forwards the surplus onward.
-    We subtract ships already promised by manually-queued orders from the same
-    source so a rule cooperates with (rather than double-counts) manual sends.
+    A rule holds back its ``hold`` and sends each lane its share of the rest
+    (`Ui.forward_this_turn`, the same figures the popup shows). Ships already
+    promised by manually-queued orders from the same source are not counted as
+    free, so a rule cooperates with (rather than double-counts) manual sends.
     """
     orders: list[Order] = []
-    for src, (dest, keep) in ui.auto_forward.items():
+    for src in ui.auto_forward:
         # the same test that decides whether the rule is drawn, pickable, editable
         # and (at the end of this turn, in `Ui.prune_forward`) kept at all
         if not ui.rule_is_live(state, src):
             continue
-        if not state.are_adjacent(src, dest):
-            continue
-        send = ui.available(state, src) - keep
-        if send > 0:
-            orders.append(Order(ui.human_id, src, dest, send))
+        for dest, send in ui.forward_this_turn(state, src).items():
+            if send > 0 and state.are_adjacent(src, dest):
+                orders.append(Order(ui.human_id, src, dest, send))
     return orders
 
 
@@ -948,17 +947,20 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     # are already in `seat_orders`, sent a turn ago.
     unclaimed = state.human() is None and seat_orders is None and script is None
     claim = ui.human_id if unclaimed and not ui.autoplay else None
+    if seat_orders is None and script is None:
+        # Before any seat decides, the human seat's own `ai.decide` under autoplay
+        # included. A shared match derives its own (`pbp.reseed`, at the caller).
+        replay.reseed(state)
     if seat_orders is not None or script is not None:
         human_orders = None
     elif unclaimed and ui.autoplay:
         # Nothing to attribute orders to, so pass none and let
         # `engine._collect_orders` decide this seat in its own loop, exactly as it
         # does every other. Computing them here *as well* would run the seat's
-        # strategy twice, and the spare draws from `state.rng` would desync every
-        # oracle's bit-exact stream tracking.
+        # strategy twice.
         human_orders = None
     elif ui.autoplay:
-        human_orders = ai.decide(state, ui.human_id)
+        human_orders = engine.decide_seat(state, ui.human_id, ai.decide)
     else:
         human_orders = list(ui.pending) + auto_forward_orders(state, ui)
     # Two gates, here rather than at the three call sites. `marking` is the wider
@@ -1191,6 +1193,28 @@ async def _kick_web_resize() -> None:
     webstore.trigger_resize()
 
 
+def ui_scale_for(size: tuple[int, int], touch: bool, pct: int) -> float:
+    """The UI scale for a surface of ``size``: the baseline design size fitted
+    into it (never below 1), then the touch boost or, off touch, the player's UI
+    size. Touch offers no UI size control, so a stored one is ignored there."""
+    sw, sh = size
+    fit = max(1.0, min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H))
+    return fit * config.TOUCH_UI_SCALE if touch else fit * pct / 100
+
+
+def ui_size_key(event, pct: int) -> int | None:
+    """The UI size a Ctrl +/−/0 press asks for, or None if ``event`` isn't one."""
+    if not event.mod & pygame.KMOD_CTRL:
+        return None
+    if event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+        return webstore.step_ui_size(pct, +1)
+    if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+        return webstore.step_ui_size(pct, -1)
+    if event.key in (pygame.K_0, pygame.K_KP_0):
+        return 100
+    return None
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser(description="Star Conquest")
     ap.add_argument("--seed", type=int, default=None, help="map seed (random if omitted)")
@@ -1249,19 +1273,18 @@ async def main() -> None:
     # framebuffer is now high-res (WEB_FB_*), so `fit` already scales the UI up for
     # crispness and only *touch* browsers need the extra boost — desktop browsers
     # report no touch points and stay compact. Fonts are built lazily from these
-    # sizes, so this must run before any draw. The same probe also tells the shell
-    # to drop keyboard-only labels/hints (config.touch_ui).
-    sw, sh = pygame.display.get_surface().get_size()
-    fit = min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H)
+    # sizes, so this must run before any draw (it runs again whenever the window
+    # or the player's UI size changes; see the reflow in the loop). The same probe
+    # also tells the shell to drop keyboard-only labels/hints (config.touch_ui).
     touch = paths.is_android() or softkeyboard.is_touch_web()
-    boost = config.TOUCH_UI_SCALE if touch else 1.0
-    config.apply_ui_scale(max(1.0, fit) * boost, touch=touch)
     clock = pygame.time.Clock()
 
     # Three scenes share the one window: the setup menu, the map creator and the
     # game board. The menu builds `state`/`ui` on "start"; pressing M in-game
     # drops back to it, and Create/Edit map opens the creator between the two.
     menu_state = MenuState()
+    config.apply_ui_scale(ui_scale_for(pygame.display.get_surface().get_size(), touch,
+                                       menu_state.ui_size), touch=touch)
     editor: mapmaker.Editor | None = None      # live only while scene == "maker"
     state: GameState | None = None
     ui: Ui | None = None
@@ -1558,7 +1581,7 @@ async def main() -> None:
                             pbp_stale = False
                     elif verdict == PBP_STEP and not (
                             (script := pbp.settled_turn(match, state.turn))
-                            and pbp.verify_turn(state, script, match.seed)):
+                            and pbp.verify_turn(state, script, match)):
                         # A record we cannot trust — missing, filing an order a
                         # person never sent, or rolling dice its orders do not
                         # roll. The board stays where it was, and says why.
@@ -1567,8 +1590,8 @@ async def main() -> None:
                         # One turn played onto the live board and watched like any
                         # other. Stepping applies the record the resolver stored,
                         # checked above, so no bot here decides again; resolving is
-                        # the one place one does, on a scratch copy, before the
-                        # turn's dice roll from an rng derived for it (`pbp.reseed`).
+                        # the one place one does, on a scratch copy, from an rng
+                        # derived for the turn (`pbp.reseed`).
                         turn = state.turn
                         if verdict == PBP_STEP:
                             reel = resolve_turn(state, ui, log, settings,
@@ -1610,10 +1633,12 @@ async def main() -> None:
                         and pbp_last.turn == state.turn else None)
                 pbp_poll = pbp.fetch_state(ui.pbp_match, have)
 
-        # Reflow to fill the window whenever its size changes.
+        # Reflow to fill the window whenever its size, or the UI size, changes.
         screen = pygame.display.get_surface()
-        if screen.get_size() != (config.SCREEN_W, config.SCREEN_H):
+        scale = ui_scale_for(screen.get_size(), touch, menu_state.ui_size)
+        if screen.get_size() != (config.SCREEN_W, config.SCREEN_H) or scale != config.ui_scale:
             config.SCREEN_W, config.SCREEN_H = screen.get_size()
+            config.apply_ui_scale(scale, touch=touch)
             if state is not None and ui is not None:
                 ui.view = build_view(state)
                 ui.reset_view(state)   # re-frame for the new size, not the whole map
@@ -1732,6 +1757,12 @@ async def main() -> None:
                 else:
                     pygame.display.set_mode(windowed_size, pygame.RESIZABLE)
                 continue
+
+            if event.type == pygame.KEYDOWN and not touch:
+                pct = ui_size_key(event, menu_state.ui_size)
+                if pct is not None:
+                    menu.set_ui_size(menu_state, pct)
+                    continue
 
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)

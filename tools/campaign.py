@@ -59,6 +59,13 @@ HOME_OFFSET = 110.0           # world units a home sits outside its edge node
 MYSTERY_MAX_NODES = config.STANDARD_MAX_NODES
 FAMILY_MAX_NODES = config.STANDARD_MAX_NODES   # a config past this is never a node
 SEED_TRIES = 50
+# Extra lanes past the MST, as a fraction of it: half again a game board's 0.4.
+# At 0.4 a 12-node field averaged 4.5 cut nodes (a node every route through it
+# must cross, so one par-tight score walls off what lies behind it) and a 36-node
+# one 13.4; 0.6 takes that to 1.9 and 7.1. Pushing on to 1.2 clears them almost
+# entirely but meshes a big week into a web, so the rest are made hard to lock
+# down instead: a cut node gets one of the week's biggest maps, never a "?".
+FIELD_EXTRA_EDGE_FRACTION = 0.6
 
 
 def week_start(now: dt.datetime) -> dt.date:
@@ -172,8 +179,12 @@ def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int
 def _layout(n_field: int, n_homes: int, rng: random.Random):
     """Field positions and lanes from the game's own planar mapgen, plus a ring of
     homes: one per edge node ``peripheral_starts`` picks, pushed outward from the
-    centre, each with a single lane to its edge node."""
-    apply_globals(Settings.defaults())   # mapgen reads the knobs live off config
+    centre, each with a single lane to its edge node. The field is meshed more
+    densely than a game board (``FIELD_EXTRA_EDGE_FRACTION``) so fewer nodes are
+    choke points that one well-defended score walls off."""
+    knobs = Settings.defaults()
+    knobs.extra_edge_fraction = FIELD_EXTRA_EDGE_FRACTION
+    apply_globals(knobs)   # mapgen reads the knobs live off config
     board = mapgen.generate(rng.randrange(config.SEED_MAX), "random", n_field, 2)
     pos = {sid: s.pos for sid, s in board.systems.items()}
     lanes = sorted(tuple(sorted((lane.a, lane.b))) for lane in board.lanes.values())
@@ -189,6 +200,39 @@ def _layout(n_field: int, n_homes: int, rng: random.Random):
     return pos, lanes, homes
 
 
+def cut_nodes(n_field: int, lanes) -> set[int]:
+    """Field nodes whose loss would split the field (articulation points of the
+    field-only graph). A home's edge node splits off its home whatever happens,
+    so homes are left out: this is about chokes inside the field."""
+    links: dict[int, set[int]] = {i: set() for i in range(n_field)}
+    for a, b in lanes:
+        if a < n_field and b < n_field:
+            links[a].add(b)
+            links[b].add(a)
+    disc: dict[int, int] = {}
+    low: dict[int, int] = {}
+    cuts: set[int] = set()
+
+    def visit(node: int, parent: int | None) -> None:
+        disc[node] = low[node] = len(disc)
+        children = 0
+        for nxt in sorted(links[node]):
+            if nxt not in disc:
+                children += 1
+                visit(nxt, node)
+                low[node] = min(low[node], low[nxt])
+                if parent is not None and low[nxt] >= disc[node]:
+                    cuts.add(node)
+            elif nxt != parent:
+                low[node] = min(low[node], disc[nxt])
+        if parent is None and children > 1:
+            cuts.add(node)
+
+    if n_field:
+        visit(0, None)
+    return cuts
+
+
 def build_campaign(start: dt.date, games: list[dict], active: int,
                    rng: random.Random) -> dict:
     """The week's graph, as stored in ``campaigns.graph``. Pure given its inputs."""
@@ -202,15 +246,31 @@ def build_campaign(start: dt.date, games: list[dict], active: int,
              for row in games}
     fallback = Family(setup=Settings.defaults().token_dict(), plays={})
     total = n_field + len(homes)
-    mystery = set(rng.sample(range(n_field), rng.randint(MYSTERY_MIN, MYSTERY_MAX)))
+    cuts = cut_nodes(n_field, lanes)
+    open_field = [i for i in range(n_field) if i not in cuts] or list(range(n_field))
+    count = min(rng.randint(MYSTERY_MIN, MYSTERY_MAX), len(open_field))
+    mystery = set(rng.sample(open_field, count))
+
+    built: dict[int, tuple[dict, int]] = {}
+    for index in range(total):
+        if index in mystery:
+            built[index] = _mystery(rng, taken)
+        else:
+            built[index] = _from_family(rng.choice(pool) if pool else fallback, rng, taken)
+    # The biggest field maps move onto the cut nodes, biggest first in id order;
+    # the rest keep the order they were drawn in.
+    plain = [i for i in range(n_field) if i not in mystery]
+    plain_cuts = [i for i in sorted(cuts) if i not in mystery]
+    by_size = sorted(plain, key=lambda i: -built[i][1])   # stable: ties keep draw order
+    biggest = by_size[:len(plain_cuts)]
+    setups = [built[i] for i in biggest] + [built[i] for i in plain if i not in biggest]
+    for index, setup in zip(plain_cuts + [i for i in plain if i not in cuts], setups):
+        built[index] = setup
 
     nodes = []
     for index in range(total):
         is_home = index >= n_field
-        if index in mystery:
-            setup, systems = _mystery(rng, taken)
-        else:
-            setup, systems = _from_family(rng.choice(pool) if pool else fallback, rng, taken)
+        setup, systems = built[index]
         x, y = homes[index - n_field][1] if is_home else pos[index]
         nodes.append({
             "id": index,

@@ -120,6 +120,19 @@ def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(post
         assert verify_scores.verify(score, blob, as_jsonb).verdict == "verified"
 
 
+def test_a_log_that_left_its_seed_to_the_log_is_still_the_same_setup(posted):
+    """A game started on a fresh seed records ``seed: None`` in the log's settings
+    and the concrete seed on the log itself, which is the board it was built
+    from. `challenge_key` hashes the seed, so the comparison has to fill it in,
+    or every such score reads as somebody else's map (score 67 on
+    ``4222d9e81bd86a17``, a real 25-turn win, was filed as a mismatch this way)."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    log.settings = {**log.settings, "seed": None}
+    with _preserve_config():
+        assert verify_scores.verify(score, log.encoded(), setup).verdict == "verified"
+
+
 def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monkeypatch):
     """The one thing that can legitimately break an old replay is the *engine*
     moving — never a bot. A score played under the old rules that no longer
@@ -151,6 +164,79 @@ def test_a_wrong_score_played_under_current_rules_is_still_a_mismatch(posted):
     score = {**score, "lost": score["lost"] + 7}
     with _preserve_config():
         assert verify_scores.verify(score, blob, setup).verdict == "mismatch"
+
+
+def _rewritten(blob, edit):
+    """``blob``'s log with ``edit(turn_entry, index)`` applied to every turn."""
+    log = replay.GameLog.decode(blob)
+    for i, entry in enumerate(log.turns):
+        edit(entry, i)
+    return log
+
+
+def _as_replayed(score, log):
+    """``score`` with the numbers ``log`` really replays to, so only its dice
+    can be wrong."""
+    state, _ = replay.reconstruct(log)
+    human = state.human()
+    assert human is not None and state.winner == human.id
+    return {**score, "turns": state.turn, "lost": human.ships_lost, "hand": log.hand_turns}
+
+
+def test_dice_its_orders_do_not_roll_are_a_mismatch(posted):
+    """A lucky line: hand-picked rolls, posted with the numbers they replay to.
+    Before dice were keyed this verified; now every keyed turn is fought again."""
+    score, blob, setup = posted
+    fought = [i for i, e in enumerate(replay.GameLog.decode(blob).turns) if e["dice"]]
+    assert fought
+
+    def nudge(entry, i):
+        if i == fought[-1]:
+            entry["dice"][0] += 1e-9          # changes nothing on the board
+
+    log = _rewritten(blob, nudge)
+    with _preserve_config():
+        check = verify_scores.verify(_as_replayed(score, log), log.encoded(), setup)
+    assert check.verdict == "mismatch"
+    assert f"turn {fought[-1] + 1}'s dice" in check.detail
+
+
+def test_every_honest_turn_is_keyed_and_rerolls(posted):
+    _, blob, _ = posted
+    log = replay.GameLog.decode(blob)
+    audit = verify_scores._DiceAudit(log)
+    with _preserve_config():
+        replay.reconstruct(log, on_turn=audit)
+    assert all(log.keyed_for(i) for i in range(log.turn_count))
+    assert not audit.fault and audit.unchecked == 0
+
+
+def test_a_log_from_before_keyed_dice_verifies_with_its_dice_unchecked(posted):
+    """Its dice were drawn after its bots and cannot be re-rolled, which is a
+    limit of the evidence, not a sign of forgery."""
+    score, blob, setup = posted
+    log = _rewritten(blob, lambda entry, _: entry.pop("keyed"))
+    fought = sum(1 for e in log.turns if e["dice"])
+    with _preserve_config():
+        check = verify_scores.verify(score, log.encoded(), setup)
+    assert check.verdict == "verified"
+    assert check.detail == f"dice unchecked on {fought} fighting turn(s) played before keyed dice"
+
+
+def test_an_unkeyed_turn_after_a_keyed_one_is_a_mismatch(posted):
+    """A game under way when keying arrived is keyed from then on, so dropping
+    the flag from one later turn — to slip a forged roll past — is caught."""
+    score, blob, setup = posted
+
+    def drop_late(entry, i):
+        if i >= 5:
+            entry["keyed"] = False
+
+    log = _rewritten(blob, drop_late)
+    with _preserve_config():
+        check = verify_scores.verify(score, log.encoded(), setup)
+    assert check.verdict == "mismatch"
+    assert check.detail == "turn 6 rolled unkeyed dice after keyed turn 1"
 
 
 def _with_strategies(blob, strategies):

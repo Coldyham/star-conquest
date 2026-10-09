@@ -27,8 +27,8 @@
 #
 # The default roster is just knower and marshal: the two still being tuned,
 # not the full lineup docs/design/bots.md ladders against each other. knower
-# also replays at tools.bot_replay.REPLAY_AUX (depth 12, its measured-best
-# profile — see position_suite.py --aux) rather than the untuned depth-1
+# also replays at tools.bot_replay.replay_aux (Oracle: Search, the top of its
+# own slider — see position_suite.py --aux) rather than the untuned Predict
 # default, matching what the leaderboard's bot column measures it at.
 name: Position suite
 

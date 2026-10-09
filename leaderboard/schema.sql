@@ -404,9 +404,10 @@ create table if not exists public.bot_scores (
   -- rather than presenting it as reproducible.
   bot_timeouts integer not null default 0 check (bot_timeouts >= 0),
   -- The bot-defined knob this answer belongs to (`AiParams.aux`), and what that
-  -- strategy calls it. 1.0 is the untuned default every bot is replayed at unless
-  -- `bot_replay.REPLAY_AUX` says otherwise — knower runs on Oracle: Search (2),
-  -- which is a materially stronger player than its default Predict. Recorded rather
+  -- strategy calls it. Every bot is replayed at the top of its own slider
+  -- (`bot_replay.replay_aux`), and at 1.0, the untuned default, if it declares
+  -- none — knower runs on Oracle: Search (2), a materially stronger player than its
+  -- default Predict, and actuary on Style: Learning (2). Recorded rather
   -- than implied, so a reader comparing the board against a game they played
   -- from the menu can see which version answered; `aux_label` is empty for a bot
   -- at its default or one that ignores aux entirely.

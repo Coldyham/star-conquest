@@ -68,6 +68,8 @@ def test_the_top_bar_label_says_what_a_win_here_would_do():
     assert campaign.label(status(), t) == "Node 3: open"
     assert campaign.label(status(why="home-open", kind="home", node=11), t) == "Home 11: open"
     assert campaign.label(status(why="own", can=False), t) == "Node 3: yours"
+    mine = {"turns": 25, "lost": 1, "name": "ann"}
+    assert campaign.label(status(why="own", can=False, beat=mine), t) == "Node 3: yours, beat 25t / 1 lost"
     assert campaign.label(status(why="no-name", can=False), t) == "Campaign node 3"
     assert campaign.label(status(why="not-adjacent", can=False), t) == "Node 3: not a move"
     grace = status(why="grace", graceUntil=NOW + 12 * MIN)

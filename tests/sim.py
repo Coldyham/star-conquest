@@ -321,6 +321,7 @@ def play(
     while state.winner is None and state.turn < max_turns:
         before = turnfilm.copy_board(state) if film else None
         events: list = []
+        replay.reseed(state)  # as a live game seeds each turn
         engine.end_turn(state, decide=decide, on_event=events.append if film else None)
         check_invariants(state)
         if before is not None:
@@ -403,6 +404,7 @@ def play_settings(
     timeouts = [0]
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     while state.winner is None and state.turn < max_turns:
+        replay.reseed(state)  # as a live game seeds each turn
         record = engine.end_turn(state, decide=decide)
         if log is not None:
             log.record_turn(record, human_ai=True)
@@ -479,6 +481,7 @@ def play_from(
     decide = _timed_decide(bot_timeout, timeouts) if bot_timeout > 0 else ai.decide
     limit = turn + max_turns
     while state.winner is None and state.turn < limit:
+        replay.reseed(state)  # as a live game seeds each turn
         engine.end_turn(state, decide=decide)
         check_invariants(state)
     won = state.winner == seat.id

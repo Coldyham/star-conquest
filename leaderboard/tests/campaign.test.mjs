@@ -205,6 +205,13 @@ test("which game is asking decides what the grace says", () => {
   assert.equal(attemptStatus(graph, state, 0, "ann", now, { starting: true }).why, "adjacent");
 });
 
+test("your own field node carries your best score, the bar you'd be raising", () => {
+  const state = fold(graph, [at(0, "ann", 10, 40), at(5, "ann", 0, 30, 2), at(9, "ann", 0, 25, 1)]);
+  assert.deepEqual(attemptStatus(graph, state, 0, "ann", T0 + 10 * MIN),
+    { can: false, why: "own", graceUntil: null, beat: { turns: 25, lost: 1, name: "ann" } });
+  assert.equal(attemptStatus(graph, state, 10, "ann", T0 + 10 * MIN).beat, null);   // a home is never raised
+});
+
 test("moves come as fast as they are posted", () => {
   const state = fold(graph, [at(0, "ann", 10, 40), at(5, "ann", 0, 30), at(6, "ann", 1, 30)]);
   assert.deepEqual(state.captures.map((c) => c.nodeId), [10, 0, 1]);

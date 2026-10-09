@@ -76,6 +76,14 @@ def anon_credentials() -> tuple[str, str]:
     return url, key
 
 
+def public_rows(table: str, query: str) -> list[dict]:
+    """Every row of a public query, read with the publishable key. The one door
+    for that from another tool, so tests/test_schema_grants.py checks these reads
+    against anon's grants rather than the worker's."""
+    url, key = anon_credentials()
+    return Supabase(url, key).select(table, query)
+
+
 def fetch(url: str, key: str) -> tuple[list[dict], list[dict]]:
     """Every public game row and score row. Ordered, because ``select`` pages."""
     api = Supabase(url, key)

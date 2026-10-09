@@ -323,11 +323,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
         pos = pygame.mouse.get_pos()
         if ui.count_adjust_active():
             ui.step_count(state, event.y)
-        elif _over_side_panel(pos):
-            # over the info panel the wheel belongs to the queued list, not the map
-            # (zooming the map from off-map was disorienting anyway)
-            ui.scroll_orders(-event.y)
-        else:
+        elif not _over_side_panel(pos):  # zooming the map from off-map is disorienting
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -486,7 +482,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
 
     if event.type == pygame.MOUSEWHEEL:
         pos = pygame.mouse.get_pos()
-        if not _over_side_panel(pos):  # the panel holds the route summary, not a list
+        if not _over_side_panel(pos):  # the panel holds the route summary, not the map
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -659,8 +655,8 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
         ui.step_count(state, 1)
         return None
 
-    # Send popup (CHOOSING): Send/Forward tabs pick the mode, Half/All retune the
-    # count, and Cancel discards the active send/forward rule.
+    # Send popup (CHOOSING): Send/Forward tabs pick the mode, the presets retune
+    # the count, and Cancel discards the active send or forwarding lane.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
         if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
             ui.set_forward_mode(state, False)
@@ -668,12 +664,34 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
         if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
             ui.set_forward_mode(state, True)
             return None
-        # the two preset buttons: Half/All (Send) or Keep-half/Keep-0 (Forward)
+        # the two preset buttons: Half/All (Send) or 50%/100% (Forward, one lane)
         if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
-            ui.keep_half(state) if ui.forward_armed else ui.send_half(state)
+            ui.set_share(50) if ui.forward_armed else ui.send_half(state)
             return None
         if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
-            ui.keep_none(state) if ui.forward_armed else ui.send_all(state)
+            ui.set_share(100) if ui.forward_armed else ui.send_all(state)
+            return None
+        if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
+            ui.step_hold(-1)
+            return None
+        if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
+            ui.step_hold(1)
+            return None
+        # a split system's lanes: −/+ retune that lane; anywhere else on its row
+        # makes it the lane the popup (and the map highlight) is about
+        for dest, row, minus, plus in ui.share_rows:
+            if _point_in_rect(pos, minus) or _point_in_rect(pos, plus):
+                ui.focus_lane(dest)
+                ui.step_share(-1 if _point_in_rect(pos, minus) else 1)
+                return None
+            if _point_in_rect(pos, row):
+                ui.focus_lane(dest)
+                return None
+        if ui.even_split_rect[2] and _point_in_rect(pos, ui.even_split_rect):
+            ui.even_split()
+            return None
+        if ui.delete_all_rect[2] and _point_in_rect(pos, ui.delete_all_rect):
+            ui.delete_all_forward()
             return None
         if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
             ui.cancel_send()
@@ -694,42 +712,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
             ui.popup_pos = (px, py)
             return None
 
-    # Scroll the queued list — the touch route to entries past the visible window
-    # (the wheel does it too, see handle_event). Tested before the rows below so a
-    # tap on a button never falls through to whatever row sits under it.
-    if ui.order_up_rect[2] and _point_in_rect(pos, ui.order_up_rect):
-        ui.scroll_orders(-1)
-        return None
-    if ui.order_down_rect[2] and _point_in_rect(pos, ui.order_down_rect):
-        ui.scroll_orders(1)
-        return None
-
-    # Clicks in the queued-orders panel take priority: a delete button removes
-    # its order, a row selects it for editing (scroll adjusts, X removes). Each row
-    # carries its own index into `pending`, since only a window of the list is drawn.
-    for idx, row, delete in ui.order_hitboxes:
-        if idx >= len(ui.pending):
-            continue
-        if _point_in_rect(pos, delete):
-            del ui.pending[idx]
-            ui.sel_order = None
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_order(state, idx)
-            return None
-
-    # Same panel, standing auto-forward rules: a delete button clears the
-    # rule, a row selects it for editing (scroll adjusts `keep`, X removes).
-    for src, row, delete in ui.forward_hitboxes:
-        if src not in ui.auto_forward:
-            continue
-        if _point_in_rect(pos, delete):
-            ui.clear_forward(src)
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_forward(state, src)
-            return None
-
     node = pick_node(state, ui, pos)
     if node is None:
         # Empty space near a lane selects the order or rule drawn there; repeat
@@ -741,7 +723,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
         elif hit[0] == "order":
             ui.edit_order(state, hit[1])
         else:
-            ui.edit_forward(state, hit[1])
+            ui.edit_forward(state, hit[1], hit[2])
         return None
 
     ui.sel_order = None  # selecting a system is composing, not editing an order/rule
@@ -776,34 +758,39 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
     return None
 
 
-def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int] | None:
-    """The queued order or standing rule whose lane is under ``pos``, tagged as
-    ``("order", index)`` / ``("rule", source_id)`` — or None.
+def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int, int] | None:
+    """The queued order or standing-rule lane under ``pos``, tagged as
+    ``("order", index, -1)`` / ``("rule", source_id, dest_id)`` — or None.
 
     Orders and rules can share one lane (including opposite directions), so when
     more than one is in range a repeat click cycles through them all rather than
-    always grabbing the same one — the list panel can still target any directly.
+    always grabbing the same one — this is the only way in to any of them.
     """
-    hits: list[tuple[float, tuple[str, int]]] = []
+    hits: list[tuple[float, tuple[str, int, int]]] = []
     for i, o in enumerate(ui.pending):
         a = ui.view.to_screen(state.systems[o.source_id].pos)
         b = ui.view.to_screen(state.systems[o.dest_id].pos)
         d = point_segment_dist(pos, a, b)
         if d <= config.LANE_PICK_DIST:
-            hits.append((d, ("order", i)))
-    for src, (dest, _keep) in ui.auto_forward.items():
+            hits.append((d, ("order", i, -1)))
+    for src, rule in ui.auto_forward.items():
         if not ui.rule_is_live(state, src):
             continue  # only the rules that render are pickable
-        s = state.systems[src]
-        a = ui.view.to_screen(s.pos)
-        b = ui.view.to_screen(state.systems[dest].pos)
-        d = point_segment_dist(pos, a, b)
-        if d <= config.LANE_PICK_DIST:
-            hits.append((d, ("rule", src)))
+        a = ui.view.to_screen(state.systems[src].pos)
+        for dest in rule.shares:
+            b = ui.view.to_screen(state.systems[dest].pos)
+            d = point_segment_dist(pos, a, b)
+            if d <= config.LANE_PICK_DIST:
+                hits.append((d, ("rule", src, dest)))
     if not hits:
         return None
-    order = [tag for _, tag in sorted(hits)]  # nearest first, then order-before-rule
-    current = ("order", ui.sel_order) if ui.sel_order is not None else (("rule", ui.sel_forward) if ui.sel_forward is not None else None)
+    order = [tag for _, tag in sorted(hits, key=lambda h: h[0])]  # nearest first, then order-before-rule
+    if ui.sel_order is not None:
+        current = ("order", ui.sel_order, -1)
+    elif ui.mode == CHOOSING and ui.forward_armed and ui.selected is not None and ui.dest is not None:
+        current = ("rule", ui.selected, ui.dest)
+    else:
+        current = None
     if current in order:  # cycle to the next item on this lane
         return order[(order.index(current) + 1) % len(order)]
     return order[0]

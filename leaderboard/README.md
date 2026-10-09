@@ -278,10 +278,10 @@ no insert policy, no insert grant, and the worker's secret key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that
 nobody bothers; these genuinely are.
 
-Each bot is replayed at its **best** profile, not its menu default: `REPLAY_AUX`
-in [`tools/bot_replay.py`](../tools/bot_replay.py) currently runs `knower` on
-Oracle: Search, the top of its own slider and a far stronger player than the
-Predict an untuned seat gets. The setting in force is stored on the row and shown
+Each bot is replayed at its **best** profile, not its menu default: `replay_aux`
+in [`tools/bot_replay.py`](../tools/bot_replay.py) runs every bot at the top of
+its own aux slider, which today puts `knower` on Oracle: Search (a far stronger
+player than the Predict an untuned seat gets) and `actuary` on Style: Learning. The setting in force is stored on the row and shown
 beside the name ("knower · oracle: search"), so the board never quietly compares
 two different versions of one bot — and changing it refills those rows on the next
 ordinary run.
@@ -392,6 +392,12 @@ The pieces, in the order a submission touches them:
 
 **The verifier binds the replay to the setup** (`same_setup`), or an easy map's
 log could be attached to a hard map's score and would verify perfectly.
+
+**It checks the dice too**, on every turn the log marks `keyed`: each fight's
+dice follow from the board, so the turn is fought again from its recorded orders
+and a log whose dice differ (hand-picked rolls) is a `mismatch`. Turns played
+before dice were keyed (2026-10-08) can't be re-rolled and pass unchecked, and
+the verdict's detail says how many.
 
 What this does *not* do: prove a human played the game. A bot driving the seat
 produces a log that verifies like any other — which is what `hand` discloses, and

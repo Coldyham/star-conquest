@@ -141,7 +141,7 @@ export function fold(graph, scores) {
  * `why` is one of "no-name", "home-open", "home-taken", "has-home", "own-home",
  * "own", "adjacent", "grace", "late-start", "no-home", "not-adjacent".
  * `graceUntil` is when a "grace" claim lapses; `beat` is the score to beat on
- * somebody else's node.
+ * a held field node, your own included, since bettering it raises the bar.
  *
  * Which game is asking decides the grace. `start` is the stamp of a game
  * already under way (its attemptStatus answer at Start); `starting` asks for a
@@ -163,8 +163,8 @@ export function attemptStatus(graph, state, nodeId, name, now = Date.now(), { st
     if (state.homes.has(key)) return { ...out, why: "has-home" };
     return { ...out, can: true, why: "home-open" };
   }
-  if (held && held.key === key) return { ...out, why: "own" };
   const beat = held ? { turns: held.turns, lost: held.lost, name: held.name } : null;
+  if (held && held.key === key) return { ...out, why: "own", beat };
   const others = [...neighbours(graph).get(nodeId)];
   if (others.some((other) => state.holders.get(other)?.key === key)) {
     return { ...out, can: true, why: "adjacent", beat };

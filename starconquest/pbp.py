@@ -27,15 +27,16 @@ That shape decides four things worth stating plainly:
   match; applying the resolver's record cannot.
 * **The live turn's rng is derived, never carried** (``reseed``). A rebuilt
   board cannot know where a continuously played one's rng would stand, so the
-  resolver seeds it from the seed and the turn instead.
+  resolver seeds it from the seed and the turn instead. The dice are not drawn
+  from it: each fight rolls its own, keyed from the board (``engine._Dice``),
+  under this module's ``DICE_SALT``.
 * **Fog is honest, not enforced**, and so is the resolver — but only as far as
   it has to be. A client holds the whole log and could reconstruct any seat's
   view, and the resolver writes the bots' orders everyone applies. It cannot
   write a person's orders (stored under their own seat's token; ``match_log``
   refuses a log that files one they did not send), and it cannot write the dice:
-  they are rolled after every order is fixed, from an rng derived for the turn,
-  so every client re-rolls them and refuses a turn that disagrees
-  (``verify_turn``).
+  they follow from the board and the orders alone, so every client re-rolls them
+  and refuses a turn that disagrees (``verify_turn``).
 
 ``board_digest`` (in ``replay``) is the resolver's report of the board it landed
 on, kept beside its order row — a record, and a tripwire for a log that does not
@@ -53,7 +54,7 @@ import json
 from dataclasses import dataclass, field, replace
 
 from . import engine, replay, webstore
-from .model import GameState, Order
+from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
     WEB_AUTH_KEY,
@@ -197,7 +198,7 @@ def _stored_rules() -> dict:
     return stored if isinstance(stored, dict) else {}
 
 
-def remember_rules(match_id: str, rules: dict[int, tuple[int, int]]) -> bool:
+def remember_rules(match_id: str, rules: dict[int, ForwardRule]) -> bool:
     """Keep our standing forwarding rules in ``match_id`` on this device.
 
     A solo game resumes them from its own log. A shared match's log is uploaded
@@ -215,7 +216,7 @@ def remember_rules(match_id: str, rules: dict[int, tuple[int, int]]) -> bool:
     return webstore.set(WEB_PBP_RULES_KEY, json.dumps(stored))
 
 
-def remembered_rules(match_id: str) -> dict[int, tuple[int, int]]:
+def remembered_rules(match_id: str) -> dict[int, ForwardRule]:
     """``remember_rules`` read back, shaped for ``Ui.auto_forward``; ``{}`` when
     there are none or the store is unreadable."""
     return replay.rules_from_dict(_stored_rules().get(match_id))
@@ -402,6 +403,11 @@ def with_brief(match: Match, data: dict) -> Match | None:
 # --------------------------------------------------------------------------- #
 # Rebuilding the board
 # --------------------------------------------------------------------------- #
+# The family of dice a shared match rolls (`GameState.dice_salt`). Its own, so
+# playing a match's seed alone shows nothing of the dice the match will roll.
+DICE_SALT = "pbp-dice"
+
+
 def seat_people(state: GameState, seats: list[int]) -> None:
     """Mark exactly ``seats`` as held by people, and every other seat as not.
 
@@ -418,7 +424,13 @@ def seat_people(state: GameState, seats: list[int]) -> None:
     match seated at 2 and 3 would otherwise carry a phantom person at 1 who held
     every turn forever. It is the same reason ``build_state`` clears that stamp
     for an all-bot game.
+
+    It also stamps the match's ``DICE_SALT``. Every path that makes a board this
+    match's board comes through here (``seat_board``, ``rebuild``,
+    ``main.open_match``), and a board that rolled solo dice would fail every
+    other client's ``verify_turn``.
     """
+    state.dice_salt = DICE_SALT
     roster = set(seats)
     for pid, player in state.players.items():
         if not player.is_neutral:
@@ -510,7 +522,7 @@ def rebuild(match: Match) -> tuple[GameState, replay.GameLog] | None:
 
 
 def reseed(state: GameState, seed: int) -> None:
-    """Put ``state.rng`` where the live turn's decisions and dice start from.
+    """Put ``state.rng`` where the live turn's decisions start from.
 
     Derived from the seed and the turn rather than carried over from the turn
     before, because a rebuilt board cannot carry it: ``reconstruct`` deals the
@@ -518,7 +530,8 @@ def reseed(state: GameState, seed: int) -> None:
     continuously played board's rng would stand depends on every draw every bot
     ever made. Deriving it makes that question go away — the rule
     ``botio.decide_seed`` and ``settings.resolve_strategy`` already follow.
-    Called by every path that *resolves* a turn, and by none that replay one.
+    Called by every path that has a bot decide for the live turn, and by none
+    that replay one.
     """
     state.rng.seed(f"{seed}:pbp:{state.turn}")
 
@@ -553,7 +566,9 @@ def lapse_orders(state: GameState, match: Match, decide=None,
             continue
         # A copy per seat rather than one for them all: `decide` is not promised
         # to leave a board alone, and a lapse is rare enough to pay for the doubt.
-        orders = decide(copy.deepcopy(state), seat)
+        board = copy.deepcopy(state)
+        reseed(board, match.seed)
+        orders = decide(board, seat)
         filing[seat] = [{"src": o.source_id, "dst": o.dest_id, "ships": o.ships}
                         for o in orders]
     return filing
@@ -586,13 +601,11 @@ def resolve(match: Match, decide=None, on_event=None
 def turn_orders(state: GameState, match: Match, decide=None) -> dict[int, list[Order]]:
     """Every seat's orders for the live turn: the stored rows, plus each bot's.
 
-    The bots decide on a **scratch copy**, in ascending seat order — the very
-    sequence ``engine._collect_orders`` would have asked them in, sharing one
-    board and one rng stream between them, so an oracle that models the draws
-    of the seats before it still models them right. What the copy spares is the
-    live rng, which is left exactly where ``reseed`` put it. The turn is then run
-    with every seat's orders already fixed, so its dice are a pure function of
-    the seed, the turn and the orders — which is what lets every other client
+    The bots decide on a **scratch copy**, each from the same start of the rng
+    (``engine.decide_seat``), exactly as ``engine._collect_orders`` would have
+    asked them, so the copy spares the live board rather than the dice. The turn
+    is then run with every seat's orders already fixed, and its dice are a pure
+    function of the board and the orders, which is what lets every other client
     check them (``verify_turn``). Only the bots' own orders stay unverifiable,
     and must while they decide on a clock.
     """
@@ -604,22 +617,29 @@ def turn_orders(state: GameState, match: Match, decide=None) -> dict[int, list[O
         player = scratch.players[pid]
         if player.is_neutral or player.is_human or not player.alive or pid in orders:
             continue
-        orders[pid] = decide(scratch, pid)
+        orders[pid] = engine.decide_seat(scratch, pid, decide)
     return orders
 
 
-def verify_turn(state: GameState, record: engine.TurnRecord, seed: int) -> bool:
+def verify_turn(state: GameState, record: engine.TurnRecord, match: Match) -> bool:
     """Whether ``record`` is what its orders really roll on ``state``.
 
-    Re-runs the turn on a copy with the recorded orders and freshly derived dice
-    and compares the dice. The resolver is trusted with the bots' orders — they
+    Re-runs the turn on a copy with the recorded orders and fresh dice and
+    compares the dice. The resolver is trusted with the bots' orders — they
     decide on a clock, so nothing could check them — but not with the dice: a
     log that rolled its own would stop here instead of being applied.
+
+    A turn rolled before dice were keyed per fight (``record.keyed`` false) drew
+    them after its bots, which nothing here can repeat, so it passes unchecked,
+    but only while no earlier turn of the match is keyed. A match that was under
+    way when keying arrived keeps moving, and once it has a keyed turn, an
+    unkeyed one can only be a stale client's or a forged one.
     """
-    scratch = copy.deepcopy(state)
-    reseed(scratch, seed)
-    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
-    return rolled.dice == list(record.dice)
+    if not record.keyed:
+        log = match_log(match)
+        return log is not None and not any(
+            log.keyed_for(i) for i in range(min(state.turn, log.turn_count)))
+    return replay.dice_follow(state, record)
 
 
 def settled_turn(match: Match, turn: int) -> engine.TurnRecord | None:

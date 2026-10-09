@@ -4,7 +4,7 @@ Why the board's two offline workers are shaped as they are: the bot column
 (`tools/bot_replay.py`, the `bot_scores` table) and checked scores (`share.py`
 uploads, `tools/verify_scores.py`, watching a replay). It also covers replay
 versioning. `CLAUDE.md` states the rules under "Challenge links carry a score to
-beat". The bot-side measurements behind the bot column (`REPLAY_AUX`,
+beat". The bot-side measurements behind the bot column (`replay_aux`,
 `BUDGET_SCALE`, the seat-flag incident) are in [`bots.md`](bots.md),
 "Replaying a bot for the leaderboard". The site's own setup is in
 `leaderboard/README.md`. Related: [`core.md`](core.md) (challenge keys, the
@@ -71,8 +71,10 @@ default `AiParams` — with one exception.
 That exception is `aux`, the one bot-defined knob. Every other field belongs to
 the built-in heuristic's own tuning and says nothing about a drop-in's identity,
 but `aux` is whatever that strategy decides it is, so "this bot at its best" is a
-statement only the caller can make. `bot_replay.REPLAY_AUX` is where the board
-makes it, and today it holds one entry: `knower` on Oracle: Search. Opponent
+statement only the caller can make. `bot_replay.replay_aux` is where the board
+makes it: every bot at the top of its own slider, since each strategy's slider
+runs from its cheapest stop to its strongest. Today that is `knower` on Oracle:
+Search and `actuary` on Style: Learning. Opponent
 seats keep both the strategy and the params the setup gave them — those *are* the
 map's difficulty, and changing them would answer a different question.
 
@@ -283,6 +285,30 @@ What none of this proves is that a *human* played the game. A bot driving the
 seat produces a log that verifies like any other. That is what `hand` is for, and
 the verifier recomputes it from the log's own per-turn autoplay flags rather than
 trusting the number in the link.
+
+Nor does it prove the game was played under the real rules of chance. The
+verifier replays recorded orders and recorded dice. It does not check that the
+dice came from the seed, or that the bots' orders are what those bots would
+have played. Until 2026-10-08 a log with hand-picked dice or doctored bot moves
+verified; `tools/par_search.py`'s lucky lines are one example. Since then each
+fight's dice are keyed from the board (`engine._Dice`), and the verifier rolls
+every turn marked `keyed` again from its recorded orders (`replay.dice_follow`,
+via `verify_scores._DiceAudit`) and calls a log whose dice differ a `mismatch`.
+A real lucky line is caught at its first hand-picked roll. Turns from before
+keying carry no marker and pass unchecked; the verdict's detail counts the
+fighting turns that did. An unkeyed turn after a keyed one is a `mismatch`,
+since a game is keyed from the moment keying arrived. Two gaps remain. A forged
+log with every marker stripped reads as an old game, and only when it was
+played could tell it apart. And the bot half stays open by design.
+
+*Open: a cutover for unkeyed logs.* Once keyed dice have been live long enough,
+a score submitted well after the deploy whose log is unkeyed could be treated as
+unverified. `submitted_at` is server-stamped, so the date can be trusted. No
+cutover is set yet, deliberately: the change may sit unpublished for a while,
+and the service worker serves the cached build first (stale-while-revalidate),
+so an honest player can run the old code for a session or two after a deploy.
+Any cutover needs the real deploy date plus a grace period. What was
+measured is in `docs/design/par.md`, "A gap this exposes in `verify_scores`".
 
 ### Watching one back
 
@@ -495,13 +521,18 @@ shared links come from the base.
 - **The weekly campaign stores its map and derives its state.**
   `tools/campaign.py` (the hourly worker; a no-op once the week's row exists)
   writes one `campaigns` row per Monday-to-Monday UTC week: field nodes laid
-  out by `mapgen`, each an unplayed seed on an existing non-hand-drawn config
+  out by `mapgen` with half again a game board's extra lanes
+  (`FIELD_EXTRA_EDGE_FRACTION`), each an unplayed seed on an existing non-hand-drawn config
   of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
   120-system test game was enough to put big maps in a week, and a big map is
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
   `settings.randomise_knobs`; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
-  nodes `mapgen.peripheral_starts` picks. A node's `settings` is stored in the
+  nodes `mapgen.peripheral_starts` picks. A *cut node* (`cut_nodes`: one whose
+  loss splits the field, so a single par-tight score there walls off what lies
+  behind it) gets one of the week's biggest maps and never a "?"; meshing the
+  field until there were none (1.2) cleared them but turned a big week into a
+  web, so the few left are made the hardest to lock down instead. A node's `settings` is stored in the
   pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
   matches it to its game by seed plus jsonb *equality* — never
   `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
@@ -826,8 +857,8 @@ The best-score rule settles a collision with what already exists.
   than `mapgen.generate` — a posted setup carries tuned knobs, and that is the
   only funnel that pushes them into `config`. The replayed seat gets default
   `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
-  `bot_replay.REPLAY_AUX` names each bot's best profile there (`knower` on
-  Oracle: Search) and the value in force is stored on the row; opponents keep
+  `bot_replay.replay_aux` puts each bot at the top of its own slider there
+  (`knower` on Oracle: Search, `actuary` on Style: Learning) and the value in force is stored on the row; opponents keep
   theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
   `is_human`, sets the strategy and params; plain `engine.end_turn(state,
   decide=decide)` then drives every seat, the replayed one included, just as

@@ -18,7 +18,7 @@ from starconquest import main
 from starconquest import config, engine, mapgen, replay, turnfilm
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
-from starconquest.model import Fleet
+from starconquest.model import Fleet, ForwardRule
 from starconquest.settings import Challenge, Settings
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
@@ -126,7 +126,7 @@ def test_popup_tabs_switch_between_send_and_forward():
         ui.forward_tab_rect = (100, 100, 60, 20)
         _click_pos(state, ui, (110, 110))       # -> Forward (keep 0)
         assert ui.forward_armed is True and ui.pending == []
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
 
         ui.send_tab_rect = (200, 100, 60, 20)
         _click_pos(state, ui, (210, 110))       # -> Send (restores the count)
@@ -136,8 +136,9 @@ def test_popup_tabs_switch_between_send_and_forward():
         pygame.quit()
 
 
-def test_forward_stepper_adjusts_keep():
-    """On the Forward tab the −/+ controls set how many ships to hold back."""
+def test_forward_steppers_adjust_the_share_and_the_hold():
+    """On the Forward tab the main −/+ move the lane's share a step at a time, and
+    the hold row's −/+ set how many ships the system keeps back."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -145,19 +146,32 @@ def test_forward_stepper_adjusts_keep():
         _click(state, ui, home)
         _click(state, ui, nbr)
         ui.forward_tab_rect = (100, 100, 60, 20)
-        _click_pos(state, ui, (110, 110))       # arm forwarding, keep 0
-        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
+        _click_pos(state, ui, (110, 110))       # arm forwarding: all of it, hold 0
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100}, 0)
+
+        ui.minus_rect = (200, 130, 20, 20)
+        _click_pos(state, ui, (210, 140))
+        _click_pos(state, ui, (210, 140))
+        step = config.FORWARD_STEP_PCT
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100 - 2 * step}, 0)
 
         ui.plus_rect = (100, 130, 20, 20)
-        _click_pos(state, ui, (110, 140))       # +1 -> keep 1
-        _click_pos(state, ui, (110, 140))       # +1 -> keep 2
-        assert ui.keep == 2 and ui.auto_forward[home] == (nbr, 2)
+        _click_pos(state, ui, (110, 140))
+        assert ui.auto_forward[home].shares == {nbr: 100 - step}
 
-        # keep never drops below 0
-        ui.minus_rect = (200, 130, 20, 20)
-        for _ in range(5):
+        ui.hold_plus_rect = (100, 160, 20, 20)
+        ui.hold_minus_rect = (200, 160, 20, 20)
+        _click_pos(state, ui, (110, 170))
+        _click_pos(state, ui, (110, 170))
+        assert ui.auto_forward[home].hold == 2
+        for _ in range(5):                      # never below 0
+            _click_pos(state, ui, (210, 170))
+        assert ui.auto_forward[home].hold == 0
+
+        # sending nothing is no rule at all: down to 0% deletes it
+        for _ in range(100 // step):
             _click_pos(state, ui, (210, 140))
-        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
+        assert home not in ui.auto_forward and not ui.forward_armed
     finally:
         pygame.quit()
 
@@ -207,8 +221,8 @@ def test_clear_all_forwarding_button():
         owned = [s.id for s in state.systems.values() if s.owner_id == 1]
         a = owned[0]
         b, c = state.systems[a].neighbors[0], state.systems[a].neighbors[-1]
-        ui.auto_forward[a] = (b, 0)
-        ui.auto_forward[b] = (c, 2)
+        ui.auto_forward[a] = ForwardRule({b: 100}, 0)
+        ui.auto_forward[b] = ForwardRule({c: 100}, 2)
 
         ui.clear_forward_rect = (100, 100, 120, 24)
         _click_pos(state, ui, (110, 110))
@@ -233,7 +247,7 @@ def test_shift_click_neighbour_arms_forward_rule():
             pygame.key.set_mods(0)
 
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)  # keep 0 == forward all
         assert ui.pending == []   # a rule, not a one-shot send
     finally:
         pygame.quit()
@@ -368,8 +382,9 @@ def test_slider_follows_a_dragged_popup():
 
 
 def test_slider_is_inert_with_nothing_to_size():
-    """An empty source gives the slider a zero-width range, and a popup closed
-    mid-drag gives it a zeroed rect. Neither may divide by zero."""
+    """An empty source still forwards a share of whatever it builds, so its slider
+    sizes a percentage rather than ships; and a popup closed mid-drag gives the
+    slider a zeroed rect, which must not divide by zero."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -378,11 +393,12 @@ def test_slider_is_inert_with_nothing_to_size():
         _click(state, ui, home)
         _click(state, ui, nbr)          # empty source -> arms Forward, garrison 0
         assert ui.mode == CHOOSING and ui.forward_armed
-        assert ui.slider_range(state) == (0, 0, 0)
+        assert ui.slider_range(state) == (0, 100, 100)
 
         ui.slider_rect = (100, 150, 100, 30)
         _click_pos(state, ui, (180, 160))
-        assert ui.keep == 0
+        share = ui.edited_share()
+        assert 0 < share < 100 and share % config.FORWARD_SNAP_PCT == 0
 
         # popup closed mid-drag: render zeroes the rect, motion must be a no-op
         ui.dragging_slider = True
@@ -390,7 +406,7 @@ def test_slider_is_inert_with_nothing_to_size():
         game_input.handle_event(
             pygame.event.Event(pygame.MOUSEMOTION, pos=(180, 160)), state, ui
         )
-        assert ui.keep == 0
+        assert ui.edited_share() == share
     finally:
         pygame.quit()
 
@@ -415,7 +431,7 @@ def test_shift_click_arms_forward_rule_from_empty_system():
             pygame.key.set_mods(0)
 
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
         assert ui.pending == []
 
         # switching to the Send tab on an empty source shows 0, not a phantom
@@ -441,7 +457,7 @@ def test_plain_click_from_empty_system_arms_forward():
         _click(state, ui, home)
         _click(state, ui, nbr)
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
         assert ui.pending == []
     finally:
         pygame.quit()
@@ -473,7 +489,7 @@ def test_drag_from_empty_source_arms_forward():
         state.systems[home].ships = 0
         _drag(state, ui, home, nbr)
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
     finally:
         pygame.quit()
 
@@ -712,7 +728,7 @@ def test_forward_rule_expands_into_order():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
 
-        ui.auto_forward[home] = (nbr, 4)   # keep 4, forward the surplus
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 4)   # keep 4, forward the surplus
         orders = main.auto_forward_orders(state, ui)
         assert len(orders) == 1
         o = orders[0]
@@ -720,7 +736,7 @@ def test_forward_rule_expands_into_order():
         assert o.ships == state.systems[home].ships - 4
 
         # keeping the whole garrison forwards nothing
-        ui.auto_forward[home] = (nbr, state.systems[home].ships)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, state.systems[home].ships)
         assert main.auto_forward_orders(state, ui) == []
     finally:
         pygame.quit()
@@ -735,14 +751,14 @@ def test_losing_a_system_deletes_its_forwarding_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         back = next(n for n in state.systems[nbr].neighbors if n != home)
-        ui.auto_forward[home] = (nbr, 2)
-        ui.auto_forward[nbr] = (back, 1)     # a rule aimed at a system we don't hold
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
+        ui.auto_forward[nbr] = ForwardRule({back: 100}, 1)     # a rule aimed at a system we don't hold
         state.systems[home].owner_id = 2     # ...and the rule's own source, captured
         state.systems[nbr].owner_id = 1
 
         main.resolve_turn(state, ui, log=None)
         assert home not in ui.auto_forward
-        assert ui.auto_forward.get(nbr) == (back, 1)
+        assert ui.auto_forward.get(nbr) == ForwardRule({back: 100}, 1)
     finally:
         pygame.quit()
 
@@ -751,7 +767,7 @@ def test_forward_rules_all_die_when_the_human_is_knocked_out():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
         for s in state.systems.values():
             if s.owner_id == 1:
                 s.owner_id = 0
@@ -782,7 +798,7 @@ def test_clear_button_click_clears_forward_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.selected = home
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         ui.clear_button_rect = (100, 100, 120, 24)
         assert _click_pos(state, ui, (110, 110)) is None
@@ -862,6 +878,43 @@ def test_leaderboard_is_only_a_game_over_action():
         assert state.winner is None
         key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_l, mod=0, unicode="l")
         assert game_input.handle_event(key, state, ui) != "leaderboard"
+    finally:
+        pygame.quit()
+
+
+def test_a_rewound_turn_rolls_what_the_straight_game_rolled(tmp_path, monkeypatch):
+    """Rewinding to a turn and ending it again with the same orders lands on the
+    board the game played straight through landed on: the turn's rng is derived
+    (`replay.reseed`), not carried, so a rewind is not a free re-roll."""
+    from starconquest.settings import build_state
+    from tests.test_replay import _preserve_config, _snapshot
+
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        with _preserve_config():
+            cfg = Settings(seed=3, nodes=12, players=3)
+            state = build_state(cfg, 3)
+            ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()),
+                    human_id=1, autoplay=True)
+            log = replay.new_log(cfg, 3, state)
+            log.path = tmp_path / "game.json"
+            boards = [_snapshot(state)]
+            while state.winner is None and state.turn < 40:
+                main.resolve_turn(state, ui, log)
+                boards.append(_snapshot(state))
+            fought = [i for i in range(log.turn_count) if log.script_for(i).dice]
+            assert fought
+            for turn in fought:
+                rewound = replay.GameLog.from_dict(log.to_dict())
+                rewound.truncate(turn)
+                again, _ = replay.reconstruct(rewound)
+                ui2 = Ui(view=WorldView(mapgen.map_bounds(again), config.play_rect()),
+                         human_id=1, autoplay=True)
+                main.resolve_turn(again, ui2, None)
+                assert _snapshot(again) == boards[turn + 1], f"turn {turn} re-rolled"
     finally:
         pygame.quit()
 
@@ -1086,7 +1139,7 @@ def test_x_key_clears_forward_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.selected = home
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         game_input.handle_event(
             pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui
@@ -1204,38 +1257,21 @@ def test_lane_click_cycles_orders_on_same_lane():
 # --------------------------------------------------------------------------- #
 # Editing standing auto-forward rules
 # --------------------------------------------------------------------------- #
-def test_click_rule_row_reopens_the_popup_on_the_forward_tab():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
-
-        _click_pos(state, ui, (110, 105))
-        assert ui.sel_forward == home
-        assert ui.sel_order is None
-        assert ui.mode == CHOOSING and ui.forward_armed
-        assert (ui.selected, ui.dest) == (home, nbr)
-        assert ui.keep == 2
-        assert ui.editing_existing
-    finally:
-        pygame.quit()
-
-
-def test_click_rule_lane_selects_it():
+def test_click_rule_lane_reopens_the_popup_on_the_forward_tab():
     """Clicking a rule's chevron lane reopens the popup on it, just like a queued
-    order's lane — the panel row is no longer the only way in."""
+    order's lane."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
         assert ui.sel_forward == home
         assert ui.sel_order is None
-        assert ui.mode == CHOOSING and ui.forward_armed and ui.keep == 2
+        assert ui.mode == CHOOSING and ui.forward_armed and ui.edited_share() == 100
+        assert (ui.selected, ui.dest) == (home, nbr)
+        assert ui.editing_existing
     finally:
         pygame.quit()
 
@@ -1248,7 +1284,7 @@ def test_popup_delete_removes_a_reopened_order_or_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.cancel_rect = (110, 260, 100, 20)   # normally recorded by render
 
         ui.edit_order(state, 0)
@@ -1281,7 +1317,7 @@ def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
         # same for a rule
         ui.close_send()
         ui.pending.clear()
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         _click_pos(state, ui, mid)
         ui.popup_pos = (300, 300)
         _click_pos(state, ui, mid)
@@ -1292,25 +1328,22 @@ def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
 
 
 def test_dormant_rule_is_highlighted_but_never_opens_the_popup():
-    """A rule whose source we no longer hold stays in the list, but the popup reads
-    that source's garrison and would let the Send tab queue an order out of enemy
-    territory — so it highlights only."""
+    """A rule whose source we no longer hold is still a rule until the turn prunes
+    it, but the popup reads that source's garrison and would let the Send tab queue
+    an order out of enemy territory — so it highlights only."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         state.systems[home].owner_id = 2          # captured
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
 
-        _click_pos(state, ui, (110, 105))
+        ui.edit_forward(state, home)
         assert ui.sel_forward == home
         assert ui.mode != CHOOSING
         assert ui.selected is None and ui.dest is None
 
-        # the wheel still reaches its keep, and X still clears it
-        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home][1] == 3
+        # X still clears it
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
         assert home not in ui.auto_forward
     finally:
@@ -1325,7 +1358,7 @@ def test_lane_click_cycles_order_and_rule_on_same_lane():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.auto_forward[home] = (nbr, 1)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 1)
         mid = _lane_mid(state, ui, home, nbr)
 
         def picked():
@@ -1342,59 +1375,46 @@ def test_lane_click_cycles_order_and_rule_on_same_lane():
         pygame.quit()
 
 
-def test_click_rule_delete_button_removes_it():
+def test_wheel_edits_reopened_rule_share_in_place():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
+        ui.auto_forward[home] = ForwardRule({nbr: 50}, 2)
+        ui.edit_forward(state, home)
 
-        _click_pos(state, ui, (145, 105))
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50 + config.FORWARD_STEP_PCT}, 2)
+
+        # a share stops at 100%, and the hold is left alone
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100}, 2)
+        # ...and wheeled down to nothing, the rule is gone
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
         assert home not in ui.auto_forward
     finally:
         pygame.quit()
 
 
-def test_wheel_edits_reopened_rule_keep_in_place():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.edit_forward(state, home)
-
-        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home] == (nbr, 3)
-
-        # keep is capped at the source's total garrison, and never drops below 0
-        for _ in range(50):
-            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home] == (nbr, state.systems[home].ships)
-        for _ in range(50):
-            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.auto_forward[home] == (nbr, 0)
-    finally:
-        pygame.quit()
-
-
-def test_popup_step_buttons_adjust_a_reopened_rule_keep():
-    """The popup's −/+ buttons adjust a reopened rule's keep, same as for a queued
-    order — one editor for both, reached the same way."""
+def test_popup_step_buttons_adjust_a_reopened_rule_share():
+    """The popup's −/+ buttons adjust a reopened rule's share, same as a queued
+    order's count — one editor for both, reached the same way."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         state.systems[home].ships = 10
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 50}, 2)
         ui.edit_forward(state, home)
         ui.minus_rect = (100, 100, 20, 20)   # normally recorded by render each frame
         ui.plus_rect = (140, 100, 20, 20)
 
         _click_pos(state, ui, (150, 110))    # + button
-        assert ui.auto_forward[home] == (nbr, 3)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50 + config.FORWARD_STEP_PCT}, 2)
         _click_pos(state, ui, (110, 110))    # − button
-        assert ui.auto_forward[home] == (nbr, 2)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50}, 2)
     finally:
         pygame.quit()
 
@@ -1404,7 +1424,7 @@ def test_x_key_removes_reopened_rule():
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.edit_forward(state, home)
 
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
@@ -1421,7 +1441,7 @@ def test_editing_an_order_and_a_rule_are_mutually_exclusive():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         ui.edit_order(state, 0)
         assert ui.sel_order == 0 and ui.sel_forward is None
@@ -1460,100 +1480,22 @@ def test_right_click_closes_the_edit_popup_then_selecting_system_clears_it():
 
 
 # --------------------------------------------------------------------------- #
-# Queued-list scrolling
+# The wheel over the side panel
 # --------------------------------------------------------------------------- #
-def _queue_many(state, ui, count):
-    """Queue ``count`` distinct orders and draw, so the list lays itself out."""
-    from starconquest import render
-    from starconquest.model import Order
-
-    ids = sorted(state.systems)
-    for i in range(count):
-        src, dst = ids[i % len(ids)], ids[(i + 1) % len(ids)]
-        ui.pending.append(Order(1, src, dst, i + 1))
-    screen = pygame.display.get_surface()
-    render._FONTS.clear()
-    render.draw(screen, state, ui)
-    return screen
-
-
-def test_long_queue_scrolls_instead_of_hiding_entries():
-    """A queue too long for its capped block becomes scrollable, and every entry is
-    reachable — a bare '+N more' line left the overflow unmanageable."""
+def test_wheel_over_the_panel_leaves_the_map_alone():
+    """The wheel zooms over the map only; from the info panel a stray flick would
+    throw the camera about."""
     state, ui = _setup()
     try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        assert ui.order_scroll_max > 0, "40 orders should overflow the capped block"
-        assert ui.order_up_rect[2] > 0 and ui.order_down_rect[2] > 0
-
-        seen = set()
-        for _ in range(ui.order_scroll_max + 1):
-            seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-            _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-            render.draw(screen, state, ui)
-        seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-        assert seen == set(range(40)), "scrolling must reach every queued order"
-    finally:
-        pygame.quit()
-
-
-def test_deleting_a_row_while_scrolled_removes_that_order():
-    """The regression guard for the hit-rect index: rows carry their own index into
-    `pending`, so the second visible row of a scrolled list is not order #1."""
-    state, ui = _setup()
-    try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-        render.draw(screen, state, ui)
-        assert ui.order_scroll > 0
-
-        idx, _row, delete = ui.order_hitboxes[0]
-        assert idx == ui.order_scroll, "the first drawn row is the scroll offset"
-        doomed = ui.pending[idx]
-        before = len(ui.pending)
-        _click_pos(state, ui, pygame.Rect(*delete).center)
-        assert len(ui.pending) == before - 1
-        assert doomed not in ui.pending, "deleted the wrong order"
-    finally:
-        pygame.quit()
-
-
-def test_scroll_offset_survives_orders_being_removed():
-    """A stale offset (orders resolved out from under it) snaps back into range on
-    the next scroll rather than needing one press per vanished row."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
-        ui.order_scroll = ui.order_scroll_max
-        del ui.pending[5:]                       # most of the list goes away
-        _queue_many(state, ui, 0)                # redraw with the short list
-        ui.scroll_orders(1)
-        assert ui.order_scroll <= ui.order_scroll_max
-    finally:
-        pygame.quit()
-
-
-def test_wheel_over_the_panel_scrolls_the_list_not_the_map():
-    """The wheel means 'scroll this list' over the info panel and 'zoom' over the
-    map, so a flick while reviewing orders doesn't throw the camera about."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
         zoom = ui.view.zoom
         panel = (config.SCREEN_W - config.HUD_RIGHT_W // 2, config.SCREEN_H // 2)
         pygame.mouse.set_pos(panel)
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.order_scroll == 1
         assert ui.view.zoom == zoom, "the wheel must not zoom the map from the panel"
 
         pygame.mouse.set_pos((config.SCREEN_W // 4, config.SCREEN_H // 2))
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.view.zoom > zoom, "over the map the wheel still zooms"
-        assert ui.order_scroll == 1
     finally:
         pygame.quit()
 
@@ -2467,5 +2409,101 @@ def test_the_invite_overlay_is_modal_and_names_the_seat_it_copies():
         assert ui.pbp_invite == ()
         assert ui.pbp_invite_rects == {}
         assert ui.pbp_invite_close_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# UI size: the fit to the window, and the player's own size on top of it
+# --------------------------------------------------------------------------- #
+def test_ui_scale_fits_the_window_like_the_menu_does():
+    """The board grows with the window, as the menu's canvas does, so the two
+    stay in proportion; a window smaller than the baseline never shrinks it."""
+    base = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    assert main.ui_scale_for(base, False, 100) == 1.0
+    assert main.ui_scale_for((base[0] * 2, base[1] * 2), False, 100) == 2.0
+    assert main.ui_scale_for((base[0] * 2, base[1]), False, 100) == 1.0
+    assert main.ui_scale_for((800, 600), False, 100) == 1.0
+
+
+def test_ui_size_multiplies_the_fit_except_on_touch():
+    big = (config.BASE_SCREEN_W * 3 // 2, config.BASE_SCREEN_H * 3 // 2)
+    assert main.ui_scale_for(big, False, 125) == 1.5 * 1.25
+    assert main.ui_scale_for(big, True, 125) == 1.5 * config.TOUCH_UI_SCALE
+
+
+def test_ctrl_plus_minus_and_zero_set_the_ui_size():
+    def key(k, mod=pygame.KMOD_CTRL):
+        return main.ui_size_key(pygame.event.Event(pygame.KEYDOWN, key=k, mod=mod), 100)
+
+    assert key(pygame.K_EQUALS) == key(pygame.K_KP_PLUS) == 110
+    assert key(pygame.K_MINUS) == key(pygame.K_KP_MINUS) == 90
+    assert key(pygame.K_0) == 100
+    assert key(pygame.K_EQUALS, mod=0) is None   # plain −/+ still zooms the map
+    assert key(pygame.K_z) is None
+
+
+# --------------------------------------------------------------------------- #
+# A system split down several lanes
+# --------------------------------------------------------------------------- #
+def _split_setup():
+    """A human system with two lanes in a 50/50 split, open in the popup on the
+    first lane, with the panel drawn so its rects are recorded."""
+    from starconquest import render
+
+    state, ui = _setup()
+    home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+    state.systems[home].owner_id = 1
+    a, b = state.systems[home].neighbors[:2]
+    ui.visible = ui.seen = set(state.systems)
+    ui.auto_forward[home] = ForwardRule({a: 50, b: 50})
+    ui.edit_forward(state, home, a)
+    render._FONTS.clear()
+    render.draw(pygame.display.get_surface(), state, ui)
+    return state, ui, home, a, b
+
+
+def test_a_split_lanes_own_buttons_retune_that_lane():
+    state, ui, home, a, b = _split_setup()
+    try:
+        rows = {dest: (row, minus, plus) for dest, row, minus, plus in ui.share_rows}
+        assert set(rows) == {a, b}
+        _click_pos(state, ui, pygame.Rect(*rows[b][2]).center)       # + on b
+        step = config.FORWARD_STEP_PCT
+        assert ui.auto_forward[home].shares == {a: 50 - step, b: 50 + step}
+        assert ui.dest == b, "pressing a lane's buttons makes it the lane in focus"
+    finally:
+        pygame.quit()
+
+
+def test_tapping_a_split_row_moves_the_focus():
+    state, ui, home, a, b = _split_setup()
+    try:
+        row = next(r for dest, r, _m, _p in ui.share_rows if dest == b)
+        _click_pos(state, ui, (row[0] + 4, row[1] + row[3] // 2))     # the name end
+        assert ui.dest == b and ui.auto_forward[home].shares == {a: 50, b: 50}
+    finally:
+        pygame.quit()
+
+
+def test_even_split_and_delete_all_buttons():
+    state, ui, home, a, b = _split_setup()
+    try:
+        ui.auto_forward[home].shares = {a: 80, b: 20}
+        _click_pos(state, ui, pygame.Rect(*ui.even_split_rect).center)
+        assert ui.auto_forward[home].shares == {a: 50, b: 50}
+        _click_pos(state, ui, pygame.Rect(*ui.delete_all_rect).center)
+        assert home not in ui.auto_forward and ui.mode != CHOOSING
+    finally:
+        pygame.quit()
+
+
+def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
+    state, ui, home, a, b = _split_setup()
+    try:
+        ui.close_send()
+        _click_pos(state, ui, _lane_mid(state, ui, home, b))
+        assert ui.mode == CHOOSING and ui.forward_armed
+        assert (ui.selected, ui.dest) == (home, b)
     finally:
         pygame.quit()

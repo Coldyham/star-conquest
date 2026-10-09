@@ -28,6 +28,7 @@ from .paths import (
     WEB_PBP_NAME_KEY,
     WEB_SHARE_GAMES_KEY,
     WEB_SHARED_SETTINGS_KEY,
+    WEB_UI_SIZE_KEY,
     data_dir,
     is_web,
 )
@@ -135,6 +136,35 @@ def set_animate_turns(on: bool) -> bool:
     """Store the preference. False if the store refused it, which the menu says out
     loud rather than letting a setting quietly forget itself."""
     return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
+
+
+# The sizes the UI-size control steps through, as percentages of the fitted scale.
+UI_SIZES = (75, 90, 100, 110, 125, 150, 175, 200)
+
+
+def ui_size() -> int:
+    """The player's UI size, a percentage from ``UI_SIZES``; 100 by default.
+
+    Anything stored that is not one of the steps (a hand-edited file, a step list
+    that has since changed) reads as the nearest step, so the control always has
+    a position to step from.
+    """
+    try:
+        pct = int(get(WEB_UI_SIZE_KEY))
+    except ValueError:
+        return 100
+    return min(UI_SIZES, key=lambda step: abs(step - pct))
+
+
+def set_ui_size(pct: int) -> bool:
+    """Store the preference. False if the store refused it."""
+    return set(WEB_UI_SIZE_KEY, str(pct))
+
+
+def step_ui_size(pct: int, by: int) -> int:
+    """The size ``by`` steps from ``pct`` (a ``UI_SIZES`` entry), clamped to the ends."""
+    i = UI_SIZES.index(pct) + by
+    return UI_SIZES[max(0, min(len(UI_SIZES) - 1, i))]
 
 
 def best(challenge_key: str, *legacy: str) -> tuple[int, int] | None:
