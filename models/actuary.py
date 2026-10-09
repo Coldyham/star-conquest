@@ -87,10 +87,8 @@ OPENING_SENDS = ("lean", "mass")
 OPENING_SKIPS = (True, False)
 
 # --- reading the rivals (Style: Learning) ------------------------------------ #
-LEARN_REACH = 8.0           # a rival's adjacent ships count in the risk at min(1, this
-                            # times its learned chance of striking a garrison that thin)
-LEARN_SPLIT = 0             # 1: each adjacent rival garrison strikes in full or not at all,
-                            # at that chance, and the risk is the expected shortfall
+LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
+                            # its learned chance of striking a garrison of ours that thin)
 NODE_CAP = 512              # boards remembered, least recently used dropped first
 RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
@@ -445,9 +443,10 @@ class _Ledger:
         Priced at the nominal roll with the advantage ours: a threat is ships that
         *could* come, and demanding the worst roll against all of them at once
         hoards every garrison when the jitter is wide.
-        Learning counts each rival garrison at min(1, `LEARN_REACH` times the
-        rival's learned chance of striking at the ratio of it to our garrison
-        then), so thinning ours raises the threat it sees again.
+        Learning prices each rival garrison next door as striking whole or not at
+        all, at min(1, `LEARN_REACH` times the rival's learned chance of striking
+        at the ratio of it to our garrison then), and takes the expected
+        shortfall, so thinning ours raises the threat it sees again.
         ``lines`` overrides some timelines (a launch being priced)."""
         lines = lines or {}
         owners, ships = lines.get(sid) or self.lines[sid]
@@ -457,8 +456,8 @@ class _Ledger:
         worst = 0.0
         for rival in self.rivals:
             curve = self.curves.get(rival) if self.curves is not None else None
-            if curve is not None and LEARN_SPLIT:
-                worst = max(worst, self._split_shortfall(sid, owners, ships, rival, curve, lines))
+            if curve is not None:
+                worst = max(worst, self._learned_shortfall(sid, owners, ships, rival, curve, lines))
                 continue
             reach = None
             for nbr, d in self.travel[sid].items():
@@ -469,11 +468,7 @@ class _Ledger:
                     reach = [0] * (H + 1)
                 for t in range(d, H + 1):
                     if n_owners[t - d] == rival:
-                        n = n_ships[t - d]
-                        if curve is not None:
-                            held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
-                            n *= min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
-                        reach[t] += n
+                        reach[t] += n_ships[t - d]
             if reach is None:
                 continue
             for t in range(1, H + 1):
@@ -487,7 +482,7 @@ class _Ledger:
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
         return RISK_WEIGHT * worst * stake
 
-    def _split_shortfall(self, sid, owners, ships, rival, curve, lines):
+    def _learned_shortfall(self, sid, owners, ships, rival, curve, lines):
         """The worst turn's expected shortfall share against ``rival``, with each
         of its garrisons next door striking whole or not at all, independently,
         at min(1, `LEARN_REACH` x its curve at the ratio to our garrison then)."""
