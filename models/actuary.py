@@ -89,9 +89,6 @@ OPENING_SKIPS = (True, False)
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival's adjacent ships count in the risk at min(1, this
                             # times its learned chance of striking a garrison that thin)
-LEARN_EVAC = 0              # 1: a rival garrison our strike dooms leaves at its learned
-                            # rate, so the strike kills fewer and the evacuees stay a threat
-PRIOR_EVAC = 0.531          # the roster's evacuation rate, fitted with PRIOR_STRIKE
 NODE_CAP = 512              # boards remembered, least recently used dropped first
 RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
@@ -134,17 +131,12 @@ def decide(state, pid):
     stop = _stop_of(state.players[pid])
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
-    curves = evac = None
-    if stop == LEARNING:
-        models = models_for(state)
-        curves = _curves(state, models)
-        if LEARN_EVAC:
-            evac = {q: evac_rate(models.get(q, EMPTY)) for q in sorted(state.players)}
+    curves = _curves(state) if stop == LEARNING else None
     if stop != GREEDY:
         orders = opening(state, pid)
         if orders is not None:
             return orders
-    return _Ledger(state, pid, curves, evac).plan()
+    return _Ledger(state, pid, curves).plan()
 
 
 def _stop_of(player) -> int:
@@ -184,10 +176,9 @@ def decide_ms(settings, seat) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None, evac=None):
+    def __init__(self, state, pid, curves=None):
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
-        self.evac = evac            # ...and, with LEARN_EVAC, its evacuation rate
         sysmap = state.systems
         self.ids = sorted(sysmap)
         # The two edges are adv * swing and swing / adv, so both halves come back
@@ -436,17 +427,15 @@ class _Ledger:
             self.version[dst] += 1
 
     def _worth(self, sid, line):
-        """What ``sid`` is worth to us at the horizon, in ships. A garrison that
-        fled our strike is still the rival's ships."""
-        owners, ships, fled = line
+        """What ``sid`` is worth to us at the horizon, in ships."""
+        owners, ships = line
         H, owner = self.horizon, owners[self.horizon]
-        lost = -fled[2] if fled is not None else 0.0
         if owner == 0:
-            return lost
+            return 0.0
         value = ships[H] + TAIL_TURNS * self.income[sid]
         if owner == self.pid:
-            return ships[H] * self.front_value[sid] + TAIL_TURNS * self.income[sid] + lost
-        return -value + lost
+            return ships[H] * self.front_value[sid] + TAIL_TURNS * self.income[sid]
+        return -value
 
     def _risk(self, sid, lines=None):
         """Expected loss at ``sid`` to the worst a single rival could land there:
@@ -459,7 +448,7 @@ class _Ledger:
         then), so thinning ours raises the threat it sees again.
         ``lines`` overrides some timelines (a launch being priced)."""
         lines = lines or {}
-        owners, ships, fled = lines.get(sid) or self.lines[sid]
+        owners, ships = lines.get(sid) or self.lines[sid]
         pid, H = self.pid, self.horizon
         if pid not in owners:
             return 0.0
@@ -468,18 +457,14 @@ class _Ledger:
             curve = self.curves.get(rival) if self.curves is not None else None
             reach = None
             for nbr, d in self.travel[sid].items():
-                n_owners, n_ships, _ = lines.get(nbr) or self.lines[nbr]
+                n_owners, n_ships = lines.get(nbr) or self.lines[nbr]
                 if rival not in n_owners:
                     continue
                 if reach is None:
                     reach = [0] * (H + 1)
-                # Evacuees from here join their nearest system and can come back.
-                back = (fled[2], fled[3]) if fled is not None and fled[:2] == (rival, nbr) else None
                 for t in range(d, H + 1):
                     if n_owners[t - d] == rival:
                         n = n_ships[t - d]
-                        if back is not None and t - d >= back[1]:
-                            n += back[0]
                         if curve is not None:
                             held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
                             n *= min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
@@ -499,16 +484,12 @@ class _Ledger:
 
     # --- the projection ---------------------------------------------------- #
     def _project(self, sid, garrison, arrivals):
-        """(owners, ships, fled) for ``sid`` at turns 0..horizon, under the engine's
-        phase order: production first, then whatever lands that turn. ``fled`` is
-        None, or (rival, system, ships, turn): with LEARN_EVAC, the expected share
-        of a rival garrison that left before our strike landed, where it went and
-        the turn it got there."""
+        """(owners, ships) for ``sid`` at turns 0..horizon, under the engine's phase
+        order: production first, then whatever lands that turn."""
         node = self.state.systems[sid]
         owner, ships, progress = node.owner_id, garrison, node.prod_progress
         rate, H = node.production, self.horizon
         owners, counts = [owner], [ships]
-        fled = None
         t = 0
         for land in sorted(arrivals):
             # Quiet turns up to and including the landing turn's production, in
@@ -521,12 +502,6 @@ class _Ledger:
             else:
                 counts.extend([ships] * k)
             owners.extend([owner] * k)
-            if fled is None and self.evac is not None and land >= 2 and ships > 0 \
-                    and owner in self.evac and owner != self.pid \
-                    and arrivals[land].get(self.pid, 0) > ships * config.DEFENDER_ADVANTAGE:
-                fled = self._flee(sid, owner, ships)
-                if fled is not None:
-                    ships -= fled[2]
             was = owner
             owner, ships = self._land(sid, land, owner, ships, arrivals[land])
             if owner != was:
@@ -539,22 +514,7 @@ class _Ledger:
         else:
             counts.extend([ships] * k)
         owners.extend([owner] * k)
-        return owners, counts, fled
-
-    def _flee(self, sid, rival, ships):
-        """What leaves a rival garrison of ``ships`` at ``sid`` once it sees our
-        strike that dooms it (next turn, so it is gone before a strike that takes
-        two turns or more lands), as ``_project``'s ``fled``. A garrison with none
-        of its own next door has nowhere to go and is left to fight."""
-        out = int(round(self.evac[rival] * ships))
-        if out <= 0:
-            return None
-        homes = [(d, nbr) for nbr, d in self.travel[sid].items()
-                 if self.state.systems[nbr].owner_id == rival]
-        if not homes:
-            return None
-        d, nbr = min(homes)
-        return rival, nbr, out, 1 + d
+        return owners, counts
 
     def _land(self, sid, t, owner, ships, landing):
         """The engine's pile-up fold: garrison pooled with its own side's arrivals,
@@ -687,13 +647,12 @@ def _with(arrivals, t, owner, ships):
 class Model:
     """What one rival has been seen to do: raw counts, the prior added on read."""
 
-    __slots__ = ("strikes", "passes", "evac", "turns")
+    __slots__ = ("strikes", "passes", "turns")
     COUNTS = __slots__[:-1]
 
-    def __init__(self, strikes, passes, evac, turns):
+    def __init__(self, strikes, passes, turns):
         self.strikes = strikes      # per (kind, pressed, target ratio bin): struck
         self.passes = passes        # ...and not struck
-        self.evac = evac            # doomed garrisons that left, and that stayed
         self.turns = turns
 
     def plus(self, other: Model) -> Model:
@@ -701,7 +660,7 @@ class Model:
                        for name in self.COUNTS), self.turns + other.turns)
 
 
-EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), (0.0, 0.0), 0)
+EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), 0)
 
 
 class _Snap:
@@ -792,11 +751,10 @@ def models_for(state) -> dict[int, Model]:
     return _node_for(state).models
 
 
-def _curves(state, models=None) -> dict[int, list[float]]:
+def _curves(state) -> dict[int, list[float]]:
     """Each player's strike curve on a player-held target, unpressed, as of this
     board."""
-    if models is None:
-        models = models_for(state)
+    models = models_for(state)
     return {q: strike_curve(models.get(q, EMPTY), PLAYER, 0) for q in sorted(state.players)}
 
 
@@ -948,25 +906,15 @@ def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
     is read for the map alone."""
     hostile = _hostile_inbound(prev)
     counts: dict[int, dict] = {}
-    for sid, (to, unknown) in launches(prev, cur, state).items():
-        q, garrison = prev.owner[sid], prev.ships[sid]
+    for sid, (to, _unknown) in launches(prev, cur, state).items():
+        q = prev.owner[sid]
         c = counts.setdefault(q, {name: list(getattr(EMPTY, name)) for name in Model.COUNTS})
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
         for option in _options(prev, state, sid):
             cell = (option.kind * 2 + pressed) * RATIO_BINS + _ratio_bin(option.ratio)
             c["strikes" if to.get(option.target, 0) > 0 else "passes"][cell] += 1
-        # Doomed: more hostile ships inbound than the garrison holds off. Leaving
-        # is sending half of it or more.
-        if hostile.get(sid, 0) > garrison * config.DEFENDER_ADVANTAGE:
-            c["evac"][0 if 2 * (sum(to.values()) + unknown) >= garrison else 1] += 1
     return {q: Model(*(tuple(c[name]) for name in Model.COUNTS), 1)
             for q, c in counts.items()}
-
-
-def evac_rate(model: Model) -> float:
-    """The chance a doomed garrison of this player's leaves, over the prior."""
-    left, stayed = model.evac
-    return (left + PRIOR_WEIGHT * PRIOR_EVAC) / (left + stayed + PRIOR_WEIGHT)
 
 
 def _monotone(values: list[float], weights: list[float]) -> list[float]:

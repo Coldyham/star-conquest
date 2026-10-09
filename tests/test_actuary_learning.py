@@ -29,11 +29,11 @@ def ac():
 
 @pytest.fixture(autouse=True)
 def _fresh(ac):
-    speed, cap, reach, evac = config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH, ac.LEARN_EVAC
+    speed, cap, reach = config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH
     ac.reset()
     yield
     ac.reset()
-    config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH, ac.LEARN_EVAC = speed, cap, reach, evac
+    config.SHIP_LY_PER_TURN, ac.NODE_CAP, ac.LEARN_REACH = speed, cap, reach
 
 
 def _game(seed=3, nodes=18, bots=("marshal", "rusherplus", "thinker")):
@@ -207,46 +207,6 @@ def test_a_one_turn_launch_is_recovered_from_the_garrison(ac):
     assert h["size"][ac._ratio_bin(8 / 3)] == 1
 
 
-def _doomed(ac):
-    """P1 has 20 ships two turns out from P2's 4 at system 2, which has P2's
-    empty system 3 one turn behind it."""
-    state = _board({1: (1, 20, 0), 2: (2, 4, 0), 3: (2, 0, 0)}, [(1, 2, 3), (2, 3, 1)])
-    engine.end_turn(state, decide=_scripted([Order(1, 1, 2, 20)]))
-    assert state.fleets and state.fleets[0].turns_remaining == 2
-    return state
-
-
-@pytest.mark.parametrize("leaves", [True, False])
-def test_a_doomed_garrison_is_read_as_leaving_or_staying(ac, leaves):
-    state = _doomed(ac)
-    before = copy.deepcopy(state)
-    engine.end_turn(state, decide=_scripted([Order(2, 2, 3, 4)] if leaves else []))
-    model = ac.observe(ac._Snap(before), ac._Snap(state), state)[2]
-    assert model.evac == ((1.0, 0.0) if leaves else (0.0, 1.0))
-    assert (ac.evac_rate(model) > ac.PRIOR_EVAC) == leaves
-    assert ac.evac_rate(ac.EMPTY) == pytest.approx(ac.PRIOR_EVAC)
-
-
-def test_a_strike_on_an_evacuator_kills_less_and_meets_its_ships_again(ac):
-    """With LEARN_EVAC, a garrison our strike dooms leaves for its nearest own
-    system before we land: the capture holds, but the ships are still the
-    rival's, and they count in the risk to what we took."""
-    state = _doomed(ac)
-    blind = ac._Ledger(state, 1)
-    read = ac._Ledger(state, 1, evac={2: 1.0})
-    assert blind.lines[2][2] is None
-    assert read.lines[2][2] == (2, 3, 4, 2)       # all 4, to system 3, there by turn 2
-    assert read.lines[2][0][-1] == blind.lines[2][0][-1] == 1
-    assert read.worth[2] < blind.worth[2]
-    owners, ships, _ = read.lines[2]
-    assert read._risk(2, {2: (owners, ships, None)}) == 0.0
-    assert read._risk(2, {2: (owners, ships, (2, 3, 100, 2))}) > 0.0
-    # A one-turn strike lands before the rival sees it, so nothing leaves.
-    state = _board({1: (1, 20, 0), 2: (2, 4, 0), 3: (2, 0, 0)}, [(1, 2, 1), (2, 3, 1)])
-    ledger = ac._Ledger(state, 1, evac={2: 1.0})
-    assert ledger._project(2, 4, {1: {1: 20}})[2] is None
-
-
 def test_the_production_mirror_matches_the_engine(ac):
     state = _game()
     _play(ac, state, 15)
@@ -350,7 +310,7 @@ def test_the_style_knob_has_three_stops(ac):
 def test_learning_counting_every_garrison_in_full_plays_as_planned(ac):
     """With every learned chance read as certain, the risk is actuary's own, so
     Learning plays exactly as Planned; only the reach in the risk differs."""
-    ac.LEARN_REACH, ac.LEARN_EVAC = 1e9, 0
+    ac.LEARN_REACH = 1e9
     for nodes in (12, 18):
         state = _seat(_game(nodes=nodes), 1, float(ac.LEARNING))
         for _ in range(60):
