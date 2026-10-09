@@ -54,7 +54,7 @@ import json
 from dataclasses import dataclass, field, replace
 
 from . import engine, replay, webstore
-from .model import GameState, Order
+from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
     WEB_PBP_BODY_KEY,
@@ -197,7 +197,7 @@ def _stored_rules() -> dict:
     return stored if isinstance(stored, dict) else {}
 
 
-def remember_rules(match_id: str, rules: dict[int, tuple[int, int]]) -> bool:
+def remember_rules(match_id: str, rules: dict[int, ForwardRule]) -> bool:
     """Keep our standing forwarding rules in ``match_id`` on this device.
 
     A solo game resumes them from its own log. A shared match's log is uploaded
@@ -215,7 +215,7 @@ def remember_rules(match_id: str, rules: dict[int, tuple[int, int]]) -> bool:
     return webstore.set(WEB_PBP_RULES_KEY, json.dumps(stored))
 
 
-def remembered_rules(match_id: str) -> dict[int, tuple[int, int]]:
+def remembered_rules(match_id: str) -> dict[int, ForwardRule]:
     """``remember_rules`` read back, shaped for ``Ui.auto_forward``; ``{}`` when
     there are none or the store is unreadable."""
     return replay.rules_from_dict(_stored_rules().get(match_id))

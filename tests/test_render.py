@@ -25,13 +25,14 @@ from starconquest import (
     fog,
     mapgen,
     matchnames,
+    model,
     render,
     starnames,
     turnfilm,
 )
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
-from starconquest.model import Fleet, Order
+from starconquest.model import Fleet, ForwardRule, Order
 from starconquest.viewstate import CHOOSING, SELECTED, Ui
 
 
@@ -64,7 +65,7 @@ def test_render_all_ui_states_no_crash():
         ui.chosen = 3
         ui.hover = nbr
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.auto_forward[home] = (nbr, 2)   # exercise the rule chevron flow + panel rule section
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)   # exercise the rule chevron flow + panel rule section
         render.draw(screen, state, ui)
 
         assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
@@ -87,7 +88,7 @@ def test_render_all_ui_states_no_crash():
 
         # route mode: every stage, plus a replaced rule, an unreachable pick, a
         # loop, and a live selection box — the whole preview in one frame
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.begin_route()
         render.draw(screen, state, ui)                  # empty group, "select"
         ui.route_sel = {sid for sid, s in state.systems.items() if s.owner_id == 1}
@@ -389,7 +390,7 @@ def test_selected_forward_rule_reports_its_lane():
         # no rule, nothing hovered or chosen: there is no lane to report
         assert render._panel_lane_target(state, ui, home) is None
 
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         assert render._panel_lane_target(state, ui, home) == nbr
         ui.sel_forward = home
         assert render._panel_lane_target(state, ui, home) == nbr
@@ -402,7 +403,7 @@ def test_selected_forward_rule_reports_its_lane():
 
         # and a rule whose destination has gone is not reported at all
         ui.selected = ui.hover = None
-        ui.auto_forward[home] = (max(state.systems) + 99, 2)
+        ui.auto_forward[home] = ForwardRule({max(state.systems) + 99: 100}, 2)
         assert render._panel_lane_target(state, ui, home) is None
         render.draw(screen, state, ui)      # still draws
     finally:
@@ -493,7 +494,7 @@ def test_only_the_selected_forward_rule_animates(monkeypatch):
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = _make_ui(state)
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 2)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 2)
 
         def frame(ms: int) -> bytes:
             monkeypatch.setattr(pygame.time, "get_ticks", lambda: ms)
@@ -510,10 +511,39 @@ def test_only_the_selected_forward_rule_animates(monkeypatch):
 
 
 def _popup_rects(ui):
-    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
+    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones).
+    A split lane's own −/+ are included; its row rect is not, since it holds them."""
     names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
-             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect")
-    return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect",
+             "hold_minus_rect", "hold_plus_rect", "even_split_rect", "delete_all_rect")
+    rects = {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+    for dest, _row, minus, plus in ui.share_rows:
+        rects[f"lane {dest} -"] = pygame.Rect(*minus)
+        rects[f"lane {dest} +"] = pygame.Rect(*plus)
+    return rects
+
+
+def _popup_shapes(state, ui, home):
+    """Put the popup through its three shapes in turn — the Send tab, a Forward tab
+    with one lane, and a system split down every lane it has (up to four) — yielding
+    a name for each once it is set up."""
+    nbrs = state.systems[home].neighbors[:4]
+    assert len(nbrs) >= 2, "pick a home that can split"
+    ui.pending.clear()
+    ui.auto_forward.clear()
+    ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbrs[0], 2
+    ui.forward_armed = False
+    ui.pending.append(Order(1, home, nbrs[0], 2))
+    yield "send"
+    ui.pending.clear()
+    ui.forward_armed = True
+    ui.auto_forward[home] = ForwardRule({nbrs[0]: 100}, 2)
+    yield "one lane"
+    shares: dict[int, int] = {}
+    for n in nbrs:
+        shares = model.shares_with(shares, n)
+    ui.auto_forward[home] = ForwardRule(shares, 2)
+    yield f"split {len(nbrs)} ways"
 
 
 def test_send_popup_stays_inside_the_map_viewport():
@@ -535,61 +565,64 @@ def test_send_popup_stays_inside_the_map_viewport():
             render._FONTS.clear()
             state = mapgen.generate_random(1, num_nodes=18, num_players=3)
             ui = _make_ui(state)
-            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-            nbr = state.systems[home].neighbors[0]
-            ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
-            ui.pending.append(Order(1, home, nbr, 2))
+            home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+            state.systems[home].owner_id = 1
 
-            for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
-                ui.popup_pos = corner       # auto-placed, then dragged hard each way
-                render.draw(screen, state, ui)
-                play = pygame.Rect(*config.play_rect())
-                assert play.contains(pygame.Rect(*ui.popup_rect)), (
-                    f"popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
-                rects = _popup_rects(ui)
-                assert len(rects) == 8, f"the popup drew only {sorted(rects)}"
-                for name, r in rects.items():
-                    assert play.contains(r), f"{name} is outside the viewport: {r}"
+            for shape in _popup_shapes(state, ui, home):
+                for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
+                    ui.popup_pos = corner       # auto-placed, then dragged hard each way
+                    render.draw(screen, state, ui)
+                    play = pygame.Rect(*config.play_rect())
+                    assert play.contains(pygame.Rect(*ui.popup_rect)), (
+                        f"{shape} popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
+                    rects = _popup_rects(ui)
+                    assert "cancel_rect" in rects, f"the {shape} popup drew only {sorted(rects)}"
+                    for name, r in rects.items():
+                        assert play.contains(r), f"{shape}: {name} is outside the viewport: {r}"
     finally:
         _desktop_scale()
         pygame.quit()
 
 
 def test_popup_rows_tile_without_overlapping():
-    """Seven rows laid out by hand from one running y — a slip in the arithmetic
-    would stack two controls, so one of them could never be pressed. The slider's
-    knob must also stay inside the panel at both ends of its travel."""
+    """Rows laid out by hand from one running y — a slip in the arithmetic would
+    stack two controls, so one of them could never be pressed. The slider's knob
+    must also stay inside the panel at both ends of its travel."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = _make_ui(state)
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
-        ui.pending.append(Order(1, home, nbr, 2))
+        home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+        state.systems[home].owner_id = 1
 
-        for armed in (False, True):
-            ui.forward_armed = armed
+        for shape in _popup_shapes(state, ui, home):
             render.draw(screen, state, ui)
             panel = pygame.Rect(*ui.popup_rect)
             rects = _popup_rects(ui)
             pairs = list(rects.items())
             for i, (na, ra) in enumerate(pairs):
-                assert panel.contains(ra), f"{na} sits outside the popup: {ra}"
+                assert panel.contains(ra), f"{shape}: {na} sits outside the popup: {ra}"
                 for nb, rb in pairs[i + 1:]:
-                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
-            knob = config.SLIDER_KNOB_R
-            sx, _sy, sw, _sh = ui.slider_rect
-            assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+                    assert not ra.colliderect(rb), f"{shape}: {na} overlaps {nb} ({ra} / {rb})"
+            rows = [pygame.Rect(*row) for _d, row, _m, _p in ui.share_rows]
+            for i, ra in enumerate(rows):
+                assert panel.contains(ra), f"{shape}: a lane row sits outside the popup"
+                assert not any(ra.colliderect(rb) for rb in rows[i + 1:]), f"{shape}: lane rows overlap"
+            if ui.slider_rect[2]:
+                knob = config.SLIDER_KNOB_R
+                sx, _sy, sw, _sh = ui.slider_rect
+                assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+        assert len(ui.share_rows) >= 2, "the last shape should be a split"
     finally:
         pygame.quit()
 
 
 def test_popup_slider_survives_a_source_with_nothing_to_send():
-    """`lo == hi` is the ordinary state on an empty system (a plain tap arms Forward
-    there), and the knob's value->position maths must not divide by it."""
+    """`lo == hi` is the Send tab's state on an empty system, and the knob's
+    value->position maths must not divide by it. The Forward tab sizes a share, so
+    an empty system's range is the whole 0-100%."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -601,9 +634,11 @@ def test_popup_slider_survives_a_source_with_nothing_to_send():
         state.systems[home].ships = 0
         ui.mode, ui.selected, ui.dest = CHOOSING, home, nbr
 
+        ui.auto_forward[home] = ForwardRule({nbr: 100})
         for armed in (True, False):
             ui.forward_armed = armed
-            assert ui.slider_range(state)[0] == ui.slider_range(state)[1]
+            lo, hi, _value = ui.slider_range(state)
+            assert (lo, hi) == ((0, 100) if armed else (0, 0))
             render.draw(screen, state, ui)
             assert ui.slider_rect[2] > 0
     finally:
@@ -836,7 +871,7 @@ def test_the_pbp_you_are_line_does_not_land_under_clear_forwarding():
         ui.pbp_match = "00112233445566ff"
         ui.pbp_title = "Friday night"
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
 
         render.draw(screen, state, ui)
         assert ui.clear_forward_rect != (0, 0, 0, 0)
@@ -867,7 +902,7 @@ def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
         state = mapgen.generate_random(4, num_nodes=14, num_players=3)
         ui = _make_ui(state)
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
 
         render.draw(screen, state, ui)
         assert ui.clear_forward_rect != (0, 0, 0, 0)   # offered during live play

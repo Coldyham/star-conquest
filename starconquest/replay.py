@@ -6,7 +6,7 @@ never snapshot a ``GameState``; we record those inputs:
 
     {settings, seed, strategies: {pid: name},
      turns: [{"ai": bool, "orders": [...], "dice": [...], "keyed": bool,
-              "rules": {src: [dest, keep]}}, ...], ...}
+              "rules": {src: {"hold": n, "to": {dest: pct}}}}, ...], ...}
 
 ``reconstruct`` feeds each turn straight back through ``engine.end_turn`` as a
 ``TurnRecord``, so the board is rebuilt without asking a single seat to decide
@@ -39,7 +39,8 @@ today's rules" instead of "wrong".
 ``rules`` is the human's standing auto-forward rules as they stood that turn —
 shell state (``Ui.auto_forward``), not simulation, and carried so that resuming
 or rewinding hands the player back the routes they set up rather than an empty
-board (``main.resume_game``).
+board (``main.resume_game``). Logs from before shares stored ``[dest, keep]``,
+read back as holding ``keep`` and sending 100% to ``dest``.
 
 Pure core (no pygame): like ``settings``, this serializes trivially and drives
 the headless engine. Replay needs no AI at all now, which is a stronger form of
@@ -64,7 +65,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import engine, turnfilm
-from .model import GameState, Order
+from .model import ForwardRule, GameState, Order
 from .paths import data_dir
 from .settings import Settings, build_state, fresh_rng
 
@@ -148,26 +149,38 @@ def _order_from_dict(d: dict) -> Order | None:
         return None
 
 
-def rules_to_dict(rules: dict[int, tuple[int, int]] | None) -> dict:
-    """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": [dest,
-    keep]}``. The one form they are stored in, by a log turn and by play-by-post's
-    local copy (``pbp.remember_rules``) alike."""
-    return {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()}
+def rules_to_dict(rules: dict[int, ForwardRule] | None) -> dict:
+    """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": {"hold":
+    n, "to": {"dest": pct}}}``, lanes in the order they were added. The one form
+    they are stored in, by a log turn and by play-by-post's local copy
+    (``pbp.remember_rules``) alike."""
+    return {
+        str(src): {"hold": rule.hold, "to": {str(dest): pct for dest, pct in rule.shares.items()}}
+        for src, rule in (rules or {}).items()
+    }
 
 
-def rules_from_dict(raw) -> dict[int, tuple[int, int]]:
-    """``rules_to_dict`` read back, shaped for ``Ui.auto_forward``. Malformed
-    entries are dropped rather than raising, in keeping with the rest of this
-    format."""
-    rules: dict[int, tuple[int, int]] = {}
+def rules_from_dict(raw) -> dict[int, ForwardRule]:
+    """``rules_to_dict`` read back, shaped for ``Ui.auto_forward``. The older
+    ``[dest, keep]`` form reads as holding ``keep`` and sending 100% to ``dest``.
+    Malformed entries are dropped rather than raising, in keeping with the rest of
+    this format."""
+    rules: dict[int, ForwardRule] = {}
     if not isinstance(raw, dict):
         return rules
     for src, rule in raw.items():
         try:
-            dest, keep = rule
-            rules[int(src)] = (int(dest), int(keep))
-        except (TypeError, ValueError):
+            sid = int(src)
+            if isinstance(rule, dict):
+                shares = {int(d): max(0, min(100, int(p))) for d, p in dict(rule["to"]).items()}
+                parsed = ForwardRule(shares, max(0, int(rule.get("hold", 0))))
+            else:
+                dest, keep = rule
+                parsed = ForwardRule({int(dest): 100}, max(0, int(keep)))
+        except (TypeError, ValueError, KeyError):
             continue
+        if parsed.shares and parsed.total() <= 100:
+            rules[sid] = parsed
     return rules
 
 
@@ -254,7 +267,7 @@ class GameLog:
         return sum(1 for i in range(self.turn_count) if not self.turn_is_ai(i))
 
     def record_turn(self, record: engine.TurnRecord, human_ai: bool = False,
-                    rules: dict[int, tuple[int, int]] | None = None) -> None:
+                    rules: dict[int, ForwardRule] | None = None) -> None:
         """Append one resolved turn exactly as ``engine.end_turn`` played it.
 
         ``human_ai`` records that the human seat was AI-driven this turn (autoplay)
@@ -345,7 +358,7 @@ class GameLog:
         return engine.TurnRecord(self.orders_for(turn_index), self.dice_for(turn_index),
                                  keyed=self.keyed_for(turn_index))
 
-    def rules_for(self, turn_index: int) -> dict[int, tuple[int, int]]:
+    def rules_for(self, turn_index: int) -> dict[int, ForwardRule]:
         """The human's standing auto-forward rules in force on ``turn_index``.
 
         Shaped for ``Ui.auto_forward``; malformed entries are dropped rather than

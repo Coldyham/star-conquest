@@ -460,7 +460,11 @@ meant to hand back the position as it was, and on a big map the standing routes
 *are* half the position. It is recorded before `main.resolve_turn`'s
 `prune_forward`, i.e. the rules the turn was actually played with, and
 `resume_game` re-prunes them against the rebuilt board so a rule whose system
-was lost on that turn doesn't come back to life.
+was lost on that turn doesn't come back to life. Each rule is stored as
+`{"hold": n, "to": {dest: pct}}`, lanes in the order they were added (ties in
+`model.forward_split` go by it). Logs from before shares hold `[dest, keep]`, which
+`replay.rules_from_dict` reads as hold `keep` and 100% to `dest`; nothing moves in
+a replay either way, since the rules expand into recorded orders.
 
 The per-turn `"ai"` flag carries a second job now. It is still disclosure first
 (`GameLog.hand_turns`), but it is also the record of *when a person took the
@@ -520,7 +524,7 @@ serialized.
 Labels are laid out collision-first (`render._draw_node_names`): a second pass
 over the nodes, drawn after the circles, placing a name below its system and
 dropping any that would land on a node, on another name, or on a label that
-carries actual information (a lane's travel time, a rule's "keep N"; hence
+carries actual information (a lane's travel time, a rule's share or hold; hence
 `_pill_rect` being split out of `_label_pill`). The space *above* a system is
 held for the numbers a playback writes there — a fight's cost, a finished hull's
 `+N`, and the row the second of those stacks into (`render._mark_slot`) —

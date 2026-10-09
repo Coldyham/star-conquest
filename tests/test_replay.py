@@ -18,7 +18,7 @@ import json
 import pytest
 
 from starconquest import ai, config, engine, replay
-from starconquest.model import Order
+from starconquest.model import ForwardRule, Order
 from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state
 
 
@@ -144,20 +144,35 @@ def test_record_turn_stores_every_seat_not_just_the_human():
 
 
 def test_record_turn_stores_standing_rules():
+    rules = {3: ForwardRule({7: 100}, 2), 4: ForwardRule({9: 34, 1: 33, 5: 33}, 0)}
     log = replay.new_log(Settings(seed=1), 1)
-    log.record_turn(_record([]), rules={3: (7, 2), 4: (1, 0)})
-    assert log.rules_for(0) == {3: (7, 2), 4: (1, 0)}
-    # ...and survives the JSON round trip, where the keys become strings
+    log.record_turn(_record([]), rules=rules)
+    assert log.rules_for(0) == rules
+    # ...and survives the JSON round trip, where the keys become strings, with a
+    # split's lanes still in the order they were added (ties are broken by it)
     clone = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
-    assert clone.rules_for(0) == {3: (7, 2), 4: (1, 0)}
+    assert clone.rules_for(0) == rules
+    assert list(clone.rules_for(0)[4].shares) == [9, 1, 5]
+
+
+def test_rules_for_reads_the_old_keep_form():
+    """Logs from before shares stored ``[dest, keep]``: hold ``keep``, send all."""
+    log = replay.GameLog.from_dict(
+        {"seed": 0, "settings": {}, "version": 2,
+         "turns": [{"orders": [], "rules": {"3": [7, 2]}}]}
+    )
+    assert log.rules_for(0) == {3: ForwardRule({7: 100}, 2)}
 
 
 def test_rules_for_drops_malformed_entries():
     log = replay.GameLog.from_dict(
         {"seed": 0, "settings": {}, "version": 2,
-         "turns": [{"orders": [], "rules": {"3": [7, 2], "4": "nonsense", "x": [1, 1]}}]}
+         "turns": [{"orders": [], "rules": {
+             "3": {"hold": 2, "to": {"7": 60}}, "4": "nonsense", "x": [1, 1],
+             "5": {"hold": 0, "to": {}}, "6": {"hold": 0, "to": {"1": 70, "2": 70}},
+             "8": {"to": {"1": "lots"}}}}]}
     )
-    assert log.rules_for(0) == {3: (7, 2)}
+    assert log.rules_for(0) == {3: ForwardRule({7: 60}, 2)}
 
 
 def test_to_from_dict_round_trip():

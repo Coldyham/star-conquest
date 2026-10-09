@@ -196,21 +196,6 @@ def step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
         pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), lw)
 
 
-def x_button(surface, rect, boxed: bool = False) -> None:
-    """A x delete glyph inside ``rect`` (x, y, w, h). ``boxed`` draws a framed
-    background so an enlarged (selected-row) delete target reads as a button."""
-    rx, ry, rw, rh = rect
-    if boxed:
-        radius = config.s(4)
-        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh), border_radius=radius)
-        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh), config.s(1), border_radius=radius)
-    pad = max(3, rw // 4)
-    lw = max(2, rw // 8)
-    col = config.COLOR_TEXT if boxed else config.COLOR_TEXT_DIM
-    pygame.draw.line(surface, col, (rx + pad, ry + pad), (rx + rw - pad, ry + rh - pad), lw)
-    pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), lw)
-
-
 # --------------------------------------------------------------------------- #
 # Map-look primitives
 #
