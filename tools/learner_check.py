@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""How well does learner's model predict the roster's launches?
+"""How well does actuary's model of each rival (Style: Learning) predict the
+roster's launches?
 
     uv run python tools/learner_check.py                       # every cell, seeds 1-60
     uv run python tools/learner_check.py --cells 18n6 --seeds 1-4   # a smoke run
@@ -12,8 +13,8 @@ predictors say which launches the rivals will make at that seat's systems:
 
 * **none** — nobody launches (actuary's projection).
 * **all** — every adjacent rival garrison comes, whole (actuary's risk reach).
-* **prior** — learner's model with no memory: the prior, the same for every rival.
-* **learner** — learner's model of each rival, from every turn it has watched.
+* **prior** — the model with no memory: the prior, the same for every rival.
+* **learner** — the model of each rival, from every turn it has watched.
 
 The turn is then played and the rivals' real orders scored against each:
 
@@ -27,9 +28,14 @@ The turn is then played and the rivals' real orders scored against each:
 * **waste** — ships predicted at a target nobody struck: guard held for nothing.
 * **miss** — ships that came beyond the prediction.
 
-Intervals are 95% bootstraps over games. learner never plays; it only watches.
-`--fit-prior` pools every rival's counts instead and prints the prior's
-constants for models/learner.py.
+Intervals are 95% bootstraps over games. The model never plays here; it only
+watches. `--fit-prior` pools every rival's counts instead and prints the prior's
+constants: `PRIOR_STRIKE` for models/actuary.py, the rest for this tool.
+
+The strike curve is the part actuary plays from (`actuary.strike_curve`, kept in
+actuary's memo tree). How big a strike is, what a frontier keeps home and
+whether a doomed system leaves are read here only: actuary does not count them,
+so `Watcher` counts them itself, turn by turn, from `actuary.launches`.
 
 `--logs` replays recorded games instead: the replays a posted score made public
 (read with the board's publishable key) or the local games/ dir. On every turn
@@ -58,6 +64,189 @@ from starconquest import ai, config, engine, mapgen, replay
 from tests import sim
 from tools.bot_distance import lineups
 
+
+# --------------------------------------------------------------------------- #
+# The readings actuary does not keep: strike sizes, guard and evacuation
+# --------------------------------------------------------------------------- #
+ALL_IN = 0.9                # a strike sending this share of its garrison is all-in
+GUARD_BINS = 21             # kept / largest adjacent enemy in tenths; the last is 2.0 and up
+HABITS = ("allin", "size", "guard", "evac")
+COUNTS = ("strikes", "passes", *HABITS)
+
+# Fitted with PRIOR_STRIKE (`--fit-prior`, seeds 1001-1040).
+PRIOR_ALLIN = 0.464
+PRIOR_SIZE = (0.032, 0.050, 0.058, 0.043, 0.031, 0.053, 0.034, 0.023, 0.024, 0.005, 0.076,
+              0.023, 0.059, 0.092, 0.061, 0.084, 0.039, 0.014, 0.013, 0.004, 0.073, 0.002,
+              0.005, 0.005, 0.001, 0.007, 0.004, 0.002, 0.001, 0.000, 0.081)
+PRIOR_GUARD = (0.517, 0.018, 0.019, 0.043, 0.036, 0.077, 0.068, 0.027, 0.017, 0.005, 0.059,
+               0.008, 0.009, 0.006, 0.003, 0.008, 0.004, 0.002, 0.002, 0.000, 0.071)
+PRIOR_EVAC = 0.531
+
+
+def _actuary():
+    return sys.modules["sc_model_actuary"]
+
+
+def _no_habits() -> dict[str, list[float]]:
+    return {"allin": [0.0, 0.0], "size": [0.0] * _actuary().RATIO_BINS,
+            "guard": [0.0] * GUARD_BINS, "evac": [0.0, 0.0]}
+
+
+class Full:
+    """One rival's model as this tool reads it: actuary's strike counts and the
+    habits counted here. `actuary.strike_curve` reads it like its own `Model`."""
+
+    def __init__(self, base, habits):
+        self.strikes, self.passes, self.turns = base.strikes, base.passes, base.turns
+        h = habits or _no_habits()
+        self.allin, self.size = tuple(h["allin"]), tuple(h["size"])
+        self.guard, self.evac = tuple(h["guard"]), tuple(h["evac"])
+
+
+class Watcher:
+    """One game, watched turn by turn in order. actuary's memo tree holds the
+    strike counts; this holds the habits, counted on the same turns, and only
+    when actuary's node for the board follows from the last board seen."""
+
+    def __init__(self):
+        _actuary().reset()
+        self.prev = None
+        self.habits: dict[int, dict[str, list[float]]] = {}
+
+    def see(self, state) -> None:
+        ac = _actuary()
+        node = ac._node_for(state)
+        if node.parent is not None and self.prev is not None and node.parent[1] == self.prev.key:
+            for q, seen in _observe_habits(self.prev, node.snap, state).items():
+                mine = self.habits.setdefault(q, _no_habits())
+                for name, xs in seen.items():
+                    mine[name] = [a + b for a, b in zip(mine[name], xs)]
+        self.prev = node.snap
+
+    def models(self, state) -> dict:
+        base = _actuary().models_for(state)
+        empty = _actuary().EMPTY
+        return {q: Full(base.get(q, empty), self.habits.get(q))
+                for q in sorted(set(base) | set(self.habits))}
+
+
+def _largest_enemy(snap, state, sid: int, q: int) -> int:
+    return max((snap.ships[n] for n in state.systems[sid].neighbors
+                if snap.owner[n] not in (0, q)), default=0)
+
+
+def _share_bin(share: float, bins: int) -> int:
+    return min(bins - 1, max(0, int(share * 10)))
+
+
+def _observe_habits(prev, cur, state) -> dict[int, dict[str, list[float]]]:
+    """What each player's launches on the turn from `prev` to `cur` say about
+    strike size, guard and evacuation, as counts."""
+    ac = _actuary()
+    hostile = ac._hostile_inbound(prev)
+    out: dict[int, dict[str, list[float]]] = {}
+    for sid, (to, unknown) in ac.launches(prev, cur, state).items():
+        q, garrison = prev.owner[sid], prev.ships[sid]
+        c = out.setdefault(q, _no_habits())
+        for option in ac._options(prev, state, sid):
+            ships = to.get(option.target, 0)
+            if ships <= 0:
+                continue
+            if ships >= ALL_IN * garrison:
+                c["allin"][0] += 1
+            else:
+                c["allin"][1] += 1
+                c["size"][ac._ratio_bin(ships / option.eff)] += 1
+        launched = sum(to.values()) + unknown
+        threat = _largest_enemy(prev, state, sid, q)
+        if threat > 0 and launched > 0:
+            c["guard"][_share_bin((garrison - launched) / threat, GUARD_BINS)] += 1
+        if hostile.get(sid, 0) > garrison * config.DEFENDER_ADVANTAGE:
+            c["evac"][0 if 2 * launched >= garrison else 1] += 1
+    return out
+
+
+def allin_rate(model: Full) -> float:
+    """The share of strikes that send all the garrison."""
+    allin, sized = model.allin
+    w = _actuary().PRIOR_WEIGHT
+    return (allin + w * PRIOR_ALLIN) / (allin + sized + w)
+
+
+def size_ratio(model: Full) -> float:
+    """What a strike that is not all-in sends, against its target, on average."""
+    w = _actuary().PRIOR_WEIGHT
+    weights = [model.size[b] + w * PRIOR_SIZE[b] for b in range(len(PRIOR_SIZE))]
+    return sum(w * (b + 0.5) / 10 for b, w in enumerate(weights)) / sum(weights)
+
+
+def strike_ships(model: Full, garrison: int, eff: float) -> float:
+    """The ships a strike from `garrison` at a target of effective `eff` sends,
+    on average."""
+    allin = allin_rate(model)
+    return allin * garrison + (1.0 - allin) * min(garrison, size_ratio(model) * eff)
+
+
+def guard_share(model: Full) -> float:
+    """What a frontier system that launched kept home, against its largest
+    adjacent enemy garrison, at the median."""
+    w = _actuary().PRIOR_WEIGHT
+    weights = [model.guard[b] + w * PRIOR_GUARD[b] for b in range(GUARD_BINS)]
+    half, run = sum(weights) / 2, 0.0
+    for b, w in enumerate(weights):
+        run += w
+        if run >= half:
+            return (b + 0.5) / 10
+    return (GUARD_BINS - 0.5) / 10
+
+
+def evac_rate(model: Full) -> float:
+    left, stayed = model.evac
+    w = _actuary().PRIOR_WEIGHT
+    return (left + w * PRIOR_EVAC) / (left + stayed + w)
+
+
+def _chances(model: Full, options: list, pressed: int, curves: dict) -> list[float]:
+    """Each option's chance of a strike from one source, scaled to sum to at most
+    one, since a source mostly strikes once."""
+    ac = _actuary()
+    chances = []
+    for option in options:
+        key = (id(model), option.kind, pressed)
+        if key not in curves:
+            curves[key] = ac.strike_curve(model, option.kind, pressed)
+        chances.append(curves[key][ac._ratio_bin(option.ratio)])
+    total = sum(chances)
+    return [p / total for p in chances] if total > 1.0 else chances
+
+
+def predict(state, pid: int, models: dict) -> list[tuple[int, int, int, float, float]]:
+    """(rival, source, target, chance, ships if it strikes) for every launch a
+    rival could make at `pid`'s systems this turn. `models` maps a rival to its
+    `Full` model; ``{}`` is the prior alone."""
+    ac = _actuary()
+    snap = ac._Snap(state)
+    mine = {sid for sid, owner in snap.owner.items() if owner == pid}
+    hostile = ac._hostile_inbound(snap)
+    empty = Full(ac.EMPTY, None)
+    curves: dict = {}
+    out = []
+    for sid in sorted(snap.owner):
+        q = snap.owner[sid]
+        garrison = snap.ships[sid]
+        if q in (0, pid) or garrison <= 0:
+            continue
+        if not any(n in mine for n in state.systems[sid].neighbors):
+            continue
+        model = models.get(q, empty)
+        pressed = 1 if hostile.get(sid, 0) > 0 else 0
+        options = ac._options(snap, state, sid)
+        for option, p in zip(options, _chances(model, options, pressed, curves)):
+            if option.target in mine:
+                out.append((q, sid, option.target, p,
+                            strike_ships(model, garrison, option.eff)))
+    return out
+
 CELLS = {"18n6": (18, 6.0), "24n3": (24, 3.0), "40n6": (40, 6.0), "18n18": (18, 18.0)}
 ROSTER = ("claudebot", "thinker", "marshal", "actuary", "knower", "rusherplus", "heuristic")
 PREDICTORS = ("none", "all", "prior", "learner")
@@ -69,10 +258,6 @@ SEPARATION_RATIOS = (1.0, 1.5, 2.0)
 HUMAN = "human"
 SMALL_MAP = 11              # --logs reports maps of this many systems or fewer apart
 EPS = 1e-3
-
-
-def _learner():
-    return sys.modules["sc_model_learner"]
 
 
 def _init() -> None:
@@ -94,7 +279,7 @@ def _contested(state, pid: int) -> bool:
                for s in systems.values() if s.owner_id == pid for n in s.neighbors)
 
 
-def _predictions(state, pid: int, learner, rival: int | None = None
+def _predictions(state, pid: int, watcher: Watcher, rival: int | None = None
                  ) -> dict[str, dict[tuple[int, int, int], tuple[float, float]]]:
     """{predictor: {(rival, source, target): (p, ships)}} over every contested pair,
     or only `rival`'s."""
@@ -109,11 +294,11 @@ def _predictions(state, pid: int, learner, rival: int | None = None
                 pairs[(q, s.id, n)] = s.ships
     out = {"none": {k: (0.0, 0.0) for k in pairs},
            "all": {k: (1.0, float(g)) for k, g in pairs.items()}}
-    for name, models in (("prior", {}), ("learner", None)):
+    for name, models in (("prior", {}), ("learner", watcher.models(state))):
         got = {k: (0.0, 0.0) for k in pairs}
-        for t in learner.predict(state, pid, models):
-            if (t.rival, t.source, t.target) in got:
-                got[(t.rival, t.source, t.target)] = (t.p, t.ships)
+        for q, src, dst, p, ships in predict(state, pid, models):
+            if (q, src, dst) in got:
+                got[(q, src, dst)] = (p, ships)
         out[name] = got
     return out
 
@@ -124,8 +309,7 @@ def play_game(job):
     seed, cell, lineup, max_turns = job
     nodes, speed = CELLS[cell]
     config.SHIP_LY_PER_TURN = speed
-    learner = _learner()
-    learner.reset()
+    watcher = Watcher()
     state = mapgen.generate(seed, "random", nodes, len(lineup))
     for p in state.players.values():
         p.is_human = False
@@ -136,15 +320,15 @@ def play_game(job):
     separation: list = []
 
     while state.winner is None and state.turn < max_turns:
-        learner.models_for(state)
+        watcher.see(state)
         preds = {}
         for pid in sorted(bot_of):
             if state.is_defeated(pid) or not _contested(state, pid):
                 continue
             first_contact.setdefault(pid, state.turn)
-            preds[pid] = _predictions(state, pid, learner)
+            preds[pid] = _predictions(state, pid, watcher)
         if state.turn == SEPARATION_TURN:
-            separation += _describe(learner.models_for(state), bot_of, learner)
+            separation += _describe(watcher.models(state), bot_of)
         owner_before = {sid: s.owner_id for sid, s in state.systems.items()}
         actual: dict[int, list] = {}
 
@@ -160,11 +344,12 @@ def play_game(job):
             came = _came(actual, owner_before, pid)
             _score(sums, by_predictor, came, bot_of, _bucket(turn - first_contact[pid]))
 
-    raw = [(bot_of[q], m) for q, m in learner.models_for(state).items() if q in bot_of]
+    watcher.see(state)
+    raw = [(bot_of[q], m) for q, m in watcher.models(state).items() if q in bot_of]
     return {"seed": seed, "cell": cell, "turns": state.turn,
             "sums": {k: dict(v) for k, v in sums.items()},
             "separation": separation,
-            "raw": [(bot, {name: getattr(m, name) for name in learner.Model.COUNTS})
+            "raw": [(bot, {name: getattr(m, name) for name in COUNTS})
                     for bot, m in raw]}
 
 
@@ -243,15 +428,14 @@ def _knower_guess(state, rival: int) -> dict[tuple[int, int, int], tuple[float, 
 def score_log(log: replay.GameLog):
     """One recorded game: on every turn the person played by hand, each bot seat
     next to them predicts their launches at it, scored against the log."""
-    learner = _learner()
-    learner.reset()
+    watcher = Watcher()
     human = replay.HUMAN_SEAT
     label_of = {human: HUMAN}
     first_contact: dict[int, int] = {}
     sums: dict = defaultdict(lambda: defaultdict(float))
 
     def on_turn(state):
-        learner.models_for(state)
+        watcher.see(state)
         i = state.turn
         if (state.winner is not None or i >= log.turn_count or log.turn_is_ai(i)
                 or human not in state.players or state.is_defeated(human)):
@@ -264,7 +448,7 @@ def score_log(log: replay.GameLog):
                     or not _borders(state, pid, human)):
                 continue
             first_contact.setdefault(pid, i)
-            preds = _predictions(state, pid, learner, rival=human)
+            preds = _predictions(state, pid, watcher, rival=human)
             if guess is None:
                 guess = _knower_guess(state, human)
             preds["knower"] = {k: guess.get(k, (0.0, 0.0)) for k in preds["none"]}
@@ -276,7 +460,7 @@ def score_log(log: replay.GameLog):
              for pid, p in state.players.items() if not p.is_neutral}
     return {"seed": log.match_id, "cell": "small" if settings.nodes <= SMALL_MAP else "large",
             "turns": state.turn, "sums": {k: dict(v) for k, v in sums.items()},
-            "separation": _describe(learner.models_for(state), seats, learner), "raw": []}
+            "separation": _describe(watcher.models(state), seats), "raw": []}
 
 
 def report_humans(games) -> None:
@@ -306,16 +490,16 @@ def report_humans(games) -> None:
                 for base in ("none", "all", "prior", "knower")))
 
 
-def _describe(models, bot_of, learner):
+def _describe(models, bot_of):
+    ac = _actuary()
     out = []
     for q, bot in sorted(bot_of.items()):
-        m = models.get(q, learner.EMPTY)
-        player = learner.strike_curve(m, learner.PLAYER, 0)
-        neutral = learner.strike_curve(m, learner.NEUTRAL, 0)
-        out.append((bot, m.turns, *(player[learner._ratio_bin(r)] for r in SEPARATION_RATIOS),
-                    neutral[learner._ratio_bin(1.5)],
-                    learner.allin_rate(m), learner.size_ratio(m),
-                    learner.guard_share(m), learner.evac_rate(m)))
+        m = models.get(q) or Full(ac.EMPTY, None)
+        player = ac.strike_curve(m, ac.PLAYER, 0)
+        neutral = ac.strike_curve(m, ac.NEUTRAL, 0)
+        out.append((bot, m.turns, *(player[ac._ratio_bin(r)] for r in SEPARATION_RATIOS),
+                    neutral[ac._ratio_bin(1.5)],
+                    allin_rate(m), size_ratio(m), guard_share(m), evac_rate(m)))
     return out
 
 
@@ -449,23 +633,27 @@ def _literal(name: str, values, indent: int = 0) -> str:
     return head + (",\n" + pad).join(lines) + ")"
 
 
-def fit_prior(games, learner) -> None:
-    total = {name: [0.0] * len(getattr(learner.EMPTY, name)) for name in learner.Model.COUNTS}
+def fit_prior(games) -> None:
+    ac = _actuary()
+    empty = Full(ac.EMPTY, None)
+    total = {name: [0.0] * len(getattr(empty, name)) for name in COUNTS}
     for g in games:
         for _bot, counts in g["raw"]:
             for name, xs in counts.items():
                 total[name] = [a + b for a, b in zip(total[name], xs)]
-    print("\nPRIOR_STRIKE = (")
-    for row in range(learner._ROWS):
-        base = row * learner.RATIO_BINS
-        hit = total["strikes"][base:base + learner.RATIO_BINS]
-        seen = [h + m for h, m in zip(hit, total["passes"][base:base + learner.RATIO_BINS])]
+    print("\n# models/actuary.py")
+    print("PRIOR_STRIKE = (")
+    for row in range(ac._ROWS):
+        base = row * ac.RATIO_BINS
+        hit = total["strikes"][base:base + ac.RATIO_BINS]
+        seen = [h + m for h, m in zip(hit, total["passes"][base:base + ac.RATIO_BINS])]
         rates = [(h + 0.5) / (n + 1.0) for h, n in zip(hit, seen)]
-        curve = learner._monotone(rates, [n + 1.0 for n in seen])
+        curve = ac._monotone(rates, [n + 1.0 for n in seen])
         print(f"    # {'player' if row // 2 else 'neutral'}, "
               f"{'pressed' if row % 2 else 'unpressed'}")
         print(_literal("", curve, 4) + ",")
     print(")")
+    print("# tools/learner_check.py")
     allin, sized = total["allin"]
     print(f"PRIOR_ALLIN = {(allin + 0.5) / (allin + sized + 1.0):.3f}")
     for name, xs in (("PRIOR_SIZE", total["size"]), ("PRIOR_GUARD", total["guard"])):
@@ -509,8 +697,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _init()
     missing = [b for b in args.bots if b not in ai.STRATEGIES]
-    if missing or "sc_model_learner" not in sys.modules:
-        print(f"not loaded: {', '.join(missing) or 'models/learner.py'}", file=sys.stderr)
+    if missing or "sc_model_actuary" not in sys.modules:
+        print(f"not loaded: {', '.join(missing) or 'models/actuary.py'}", file=sys.stderr)
         return 2
 
     seeds = _seeds(args.seeds)
@@ -527,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
           f"bots: {', '.join(args.bots)}")
 
     if args.fit_prior:
-        fit_prior(games, _learner())
+        fit_prior(games)
         return 0
     passed = sum(all(report(games, cell).values()) for cell in cells)
     separation(games)
@@ -538,8 +726,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def main_logs(args) -> int:
     _init()
-    if "sc_model_learner" not in sys.modules or "sc_model_knower" not in sys.modules:
-        print("not loaded: models/learner.py or models/knower.py", file=sys.stderr)
+    if "sc_model_actuary" not in sys.modules or "sc_model_knower" not in sys.modules:
+        print("not loaded: models/actuary.py or models/knower.py", file=sys.stderr)
         return 2
     logs = load_logs(args.logs, args.min_hand)
     started = time.time()

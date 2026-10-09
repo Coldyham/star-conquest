@@ -284,12 +284,13 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first
-contact when its side of the map is big enough to, which its *Opening* knob can
-turn off), `knower.py` (the oracle — it runs every rival's
-own `decide` before the engine asks for it). `learner.py` is actuary with a model
-of each rival read off the boards it has seen: it puts the launches it expects
-onto its own copy of the board before actuary plans (its *Trust* knob says how
-far), and it is the one bot here that remembers anything between turns.
+contact when its side of the map is big enough to; its *Style* knob runs
+Greedy, Planned, Learning), `knower.py` (the oracle — it runs every rival's
+own `decide` before the engine asks for it). At *Learning* actuary also keeps a
+model of each rival, read off the boards it has seen, and prices the threat
+next door by how often that rival strikes a garrison as thin as ours will be:
+the one seat here that remembers anything between turns, so knower models it
+rather than running it (`is_oracle_seat`).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
 leaves the seat's bot to the match seed, and `settings.build_state` resolves it to

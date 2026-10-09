@@ -5,7 +5,10 @@ shared skeleton. Every other bot from claudebot up walks the systems it owns in
 phases (budget, defend, strike, flow the rest forward). actuary has no phases.
 It projects the whole board forward, values it in ships, and commits whichever
 launch raises that value most until none does. By default the land-grab, up to
-first contact, is played by a planner instead; see "The planned opening". Roster-wide rules and the measurement checklist are in
+first contact, is played by a planner instead; see "The planned opening". A
+third stop, *Learning*, also prices the risk next door by a model of each rival
+kept from turn to turn; it is in [`learner.md`](learner.md), "Learning: the
+curve in the risk term". Roster-wide rules and the measurement checklist are in
 [`bots.md`](bots.md). Index: [`../README.md`](../README.md).
 
 ## The ledger and the greedy
@@ -374,9 +377,12 @@ with.
 
 ## The planned opening (Opening: Planned)
 
-The seat's `aux` knob (`AUX_LABEL` *Opening*) has two stops. *Planned* (1, the
-default, and anything above or unreadable) runs `opening(state, pid)` until the
-seat first borders a rival, and the ledger from then on. *Greedy* (0) is the
+The seat's `aux` knob (`AUX_LABEL` *Style*, *Opening* until 2026-10-09) has
+three stops. *Planned* (1, the default, and anything unreadable) runs
+`opening(state, pid)` until the seat first borders a rival, and the ledger from
+then on. *Learning* (2, and anything above) plays the same opening, and its
+ledger prices the risk with each rival's learned strike curve
+([`learner.md`](learner.md), "Learning: the curve in the risk term"). *Greedy* (0) is the
 ledger from the first turn, exactly as actuary played before the knob existed:
 0 of 930 decisions differed. Planned became the default before actuary was
 published, so no shared challenge link ever carried Greedy as actuary's

@@ -59,8 +59,9 @@ uv run python tools/position_suite.py           # rank bots on positions out of
                                                 # real games (local games/ dir)
 uv run python tools/bot_distance.py             # how differently each bot plays
                                                 # the same positions, by phase
-uv run python tools/learner_check.py             # how well learner's model predicts
-                                                # the roster's launches (stage 1);
+uv run python tools/learner_check.py             # how well actuary's model of each
+                                                # rival (Style: Learning) predicts
+                                                # the roster's launches;
                                                 # --logs public: posted human games
 uv run python tools/human_habits.py             # how the person plays (posted games)
                                                 # against roster self-play
@@ -407,11 +408,11 @@ already resolve simultaneously. The rationale for each rule is in
   advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
   callers prefer.
 - **A bot that remembers between turns keys its memory by the game's path**
-  (`models/learner.py`'s memo tree: a board finds its parent by content), never by
-  "the current game": `decide` also runs on copies, branches, rewinds and
-  isolated positions, and `ai.load_models()` wipes module state. It advertises
-  `IS_ORACLE`, so knower models it rather than running it. Detail:
-  `docs/design/learner.md`.
+  (`models/actuary.py`'s memo tree, used at Style: Learning: a board finds its
+  parent by content), never by "the current game": `decide` also runs on copies,
+  branches, rewinds and isolated positions, and `ai.load_models()` wipes module
+  state. Such a seat answers `is_oracle_seat`, so knower models it rather than
+  running it. Detail: `docs/design/learner.md`.
 - **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
   never a constant**, with the jitter half floored at its `TUNED_SWING`, and
   floors its ask at `target.ships + 1`. Margins compare against the *effective*
