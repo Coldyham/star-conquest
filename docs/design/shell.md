@@ -206,23 +206,20 @@ means "do this" is the wrong place to teach that distinction. One button naming 
 sub-mode it is *in*, which switches when pressed, says the same thing without asking
 anyone to infer a convention from a fill colour.
 
-**A tie is a free choice, so rally spends it on balance.** Equidistant means the ships
-arrive just as soon whichever point they go to, so an arbitrary-but-consistent
-tie-break is pure waste: it piles a whole region onto one rally point while its
-neighbour idles. `_plan_rally` sends a tied system to whichever point is drawing less.
+**A tie splits evenly.** Equidistant means the ships arrive just as soon whichever
+way they go, so there is nothing to choose: `_plan_rally` gives a tied system an even
+split down every hop that is one lane nearer on a shortest route (`shares_even`) —
+two rally points, or two equally quick routes to the same one. Before a rule could
+split, a tie had to send everything one way; an arbitrary tie-break piled a whole
+region onto one rally point while its neighbour idled, so the plan picked whichever
+point was drawing fewer ships per turn, tracking which point each tied system's ships
+really reached. Splitting makes all of that unnecessary.
 
-Load is **ships per turn**, not systems — `System.production` is turns *per* ship, so
-four barren systems are a thinner stream than one rich one and counting systems gets
-it backwards. It is inflow only; a rally point's own output was never something the
-plan directed anywhere.
-
-The greedy is exact rather than approximate because it assigns **nearest-first**. A
-node's chosen hop is always strictly nearer, so it has already been assigned, and
-`target` records which rally point that node's ships *actually* reach — not the one we
-aimed them at. Without that the accounting drifts, because a tied node can hand its
-ships to a neighbour that was itself tied and assigned elsewhere. The no-cycle
-guarantee is untouched: balancing only ever chooses among hops that each step strictly
-nearer, so the potential still decreases along every edge.
+Planning **nearest-first** is still what makes a hop's usefulness known: a hop is
+always strictly nearer, so it has already been planned, and only hops that lead
+somewhere (a rally point, or a planned system) get a share. The no-cycle guarantee is
+untouched: every lane of a split steps strictly nearer, so the potential still
+decreases along every edge.
 
 **Auto-route** picks every threatened system as a rally point in one press — the front
 line as one gesture, which is the shape rally is for. "Threatened" is the AI's own
@@ -345,6 +342,12 @@ inverse — an even split re-splits evenly, anything else hands the freed share 
 in proportion — so Cancel on a lane just added, or going back to the Send tab,
 leaves the others as they were. A rule sending nothing at all splits 100% when a
 lane joins, or the new lane would be born idle.
+
+**A lane taken to 0% is deleted.** A lane sending nothing is not a rule, so when the
+lane the popup is on reaches 0% — by −, the wheel or the slider — `Ui.set_share`
+deletes it exactly as the bottom button would, taking the rule (and closing the
+popup) with its last lane. A *different* lane emptied by another's rise stays, as a
+0% row: deleting it then would make a + on one lane silently remove another.
 
 **+ never hits a wall.** With adding defaulting to 100% split evenly, the shares
 nearly always total 100, so a + that stopped at 100 would be dead most of the
@@ -579,9 +582,8 @@ a bare "Alcyone").
     **travel turns**, not hops (`flow_field(by_turns=True)` / `flow_costs`) — the
     same `state.travel_turns` rule the rest of the game follows. The AI keeps the
     unweighted default, which is why the flag exists rather than a changed
-    default. Rally splits a genuine tie toward whichever point is drawing less,
-    measured in ships/turn (`1 / production`, as `fog.player_totals` reports),
-    assigning nearest-first so each node's real destination is already known.
+    default. Rally splits a genuine tie evenly down every equally quick hop,
+    planning nearest-first so a hop's own route is already known.
     `Ui.auto_rally` (rally's Auto-route button, `T`) picks every
     `threatened_systems` — the shell's own local copy of the AI's threat maths,
     per the render/input rule against importing `ai`. Every hop of every path gets

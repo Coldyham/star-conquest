@@ -154,13 +154,10 @@ def test_forward_steppers_adjust_the_share_and_the_hold():
         _click_pos(state, ui, (210, 140))
         step = config.FORWARD_STEP_PCT
         assert ui.auto_forward[home] == ForwardRule({nbr: 100 - 2 * step}, 0)
-        for _ in range(100 // step + 3):        # never below nothing
-            _click_pos(state, ui, (210, 140))
-        assert ui.auto_forward[home].shares == {nbr: 0}
 
         ui.plus_rect = (100, 130, 20, 20)
         _click_pos(state, ui, (110, 140))
-        assert ui.auto_forward[home].shares == {nbr: step}
+        assert ui.auto_forward[home].shares == {nbr: 100 - step}
 
         ui.hold_plus_rect = (100, 160, 20, 20)
         ui.hold_minus_rect = (200, 160, 20, 20)
@@ -170,6 +167,11 @@ def test_forward_steppers_adjust_the_share_and_the_hold():
         for _ in range(5):                      # never below 0
             _click_pos(state, ui, (210, 170))
         assert ui.auto_forward[home].hold == 0
+
+        # sending nothing is no rule at all: down to 0% deletes it
+        for _ in range(100 // step):
+            _click_pos(state, ui, (210, 140))
+        assert home not in ui.auto_forward and not ui.forward_armed
     finally:
         pygame.quit()
 
@@ -1384,13 +1386,14 @@ def test_wheel_edits_reopened_rule_share_in_place():
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.auto_forward[home] == ForwardRule({nbr: 50 + config.FORWARD_STEP_PCT}, 2)
 
-        # a share stays within 0-100%, and the hold is left alone
+        # a share stops at 100%, and the hold is left alone
         for _ in range(50):
             game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.auto_forward[home] == ForwardRule({nbr: 100}, 2)
+        # ...and wheeled down to nothing, the rule is gone
         for _ in range(50):
             game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.auto_forward[home] == ForwardRule({nbr: 0}, 2)
+        assert home not in ui.auto_forward
     finally:
         pygame.quit()
 

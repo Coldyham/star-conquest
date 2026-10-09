@@ -111,7 +111,7 @@ class Ui:
     #                      is skipped when building the plan instead, so re-aiming
     #                      somewhere else hands the system straight back as a
     #                      source rather than silently having dropped it.
-    #   route_plan       — source -> (next hop, hold): the rules a confirm writes.
+    #   route_plan       — source -> ForwardRule: the rules a confirm writes.
     #                      Covers the *whole* path, not just the selected systems,
     #                      so ships actually conveyor the full distance.
     #   route_replaces   — sources whose existing rule this would change (the old
@@ -131,7 +131,7 @@ class Ui:
     # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
     # it alone so re-entering the mode comes back where you left it.
     route_rally: bool = True
-    route_plan: dict[int, tuple[int, int]] = field(default_factory=dict)
+    route_plan: dict[int, ForwardRule] = field(default_factory=dict)
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
     route_cycles: set[int] = field(default_factory=set)
@@ -676,10 +676,15 @@ class Ui:
 
     def set_share(self, pct: int) -> None:
         """Move the edited lane's share toward ``pct`` (see `model.shares_set`: a rise
-        takes from what stays home first, then from the other lanes)."""
+        takes from what stays home first, then from the other lanes). Taking it to
+        nothing deletes the lane, as the bottom button would: a lane that sends
+        nothing is not a rule. A *different* lane emptied by a rise stays, at 0%,
+        so it can be raised again rather than vanishing under another lane's +."""
         rule = self.edited_rule()
         if rule is not None and self.dest in rule.shares:
             rule.shares = model.shares_set(rule.shares, self.dest, pct)
+            if rule.shares[self.dest] == 0:
+                self.cancel_send()
 
     def step_share(self, steps: int) -> None:
         self.set_share(self.edited_share() + steps * config.FORWARD_STEP_PCT)
@@ -1043,17 +1048,18 @@ class Ui:
         """The systems a rule could live on — the search space for both sub-modes."""
         return {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
 
-    def _add_hop(self, node: int, nxt: int) -> None:
-        """Record one planned rule: all of the system's surplus down one lane. The
-        hold of any existing rule is kept — it is about the system's own safety,
-        whichever way its ships go — so re-running a route over a conveyor that is
-        already correct is idempotent rather than quietly resetting tuning. An
-        existing rule is reported replaced only when its lanes change."""
+    def _add_hop(self, node: int, shares: dict[int, int]) -> None:
+        """Record one planned rule: the system's surplus down the lanes in
+        ``shares``. The hold of any existing rule is kept — it is about the
+        system's own safety, whichever way its ships go — so re-running a route over
+        a conveyor that is already correct is idempotent rather than quietly
+        resetting tuning. An existing rule is reported replaced only when its lanes
+        change."""
         old = self.auto_forward.get(node)
         hold = old.hold if old is not None else 0
-        if old is not None and old.shares != {nxt: 100}:
+        if old is not None and old.shares != shares:
             self.route_replaces.add(node)
-        self.route_plan[node] = (nxt, hold)
+        self.route_plan[node] = ForwardRule(shares, hold)
 
     def _plan_chain(self, state: GameState) -> None:
         """Chain routing: walk each selected system's path to the destination.
@@ -1085,64 +1091,45 @@ class Ui:
                 if nxt is None:
                     self.route_unroutable.add(sid)
                     break
-                self._add_hop(node, nxt)
+                self._add_hop(node, {nxt: 100})
                 node = nxt
 
     def _plan_rally(self, state: GameState) -> None:
         """Rally routing: every owned system forwards toward its nearest rally point,
-        with ties split to even out the load.
+        splitting evenly where more than one way is just as quick.
 
-        Nearest is `model.flow_costs` — travel turns, multi-source. Where a system is
-        genuinely equidistant from two rally points, sending it to whichever is
-        already drawing less is free: the ships arrive just as soon either way, and
-        the alternative (an arbitrary but consistent tie-break) piles a whole region
-        onto one point while its neighbour idles. Load is measured in **ships per
-        turn**, not systems, since that is the flow the rally point actually has to
-        absorb — four barren systems are less of a stream than one rich one. That is
-        `1 / production` (`System.production` is turns *per ship*, so lower is
-        richer), the same figure `fog.player_totals` reports. It counts inflow only:
-        a rally point's own output isn't something the plan directed anywhere.
+        Nearest is `model.flow_costs` — travel turns, multi-source. A system's hops
+        are the neighbours one lane nearer along a shortest route that themselves
+        lead somewhere (a rally point, or a system already planned); where there are
+        several, its rule splits evenly down all of them. Equally quick means the
+        ships arrive just as soon whichever way they go, so there is nothing for a
+        tie-break to decide — sharing them out is what keeps one rally point from
+        drawing a whole region while its neighbour idles.
 
-        Assigning nearest-first is what makes that exact rather than a guess: a
-        node's next hop is always strictly nearer, so it has already been assigned,
-        and `target` tells us which rally point this node's ships will really reach
-        rather than which one we aimed them at. Every hop of every path gets a rule,
-        so the plan covers the whole field; rally points get none, which is what
-        makes them sinks. Everything else we hold is unroutable — a pocket cut off
-        from every rally point — rather than silently left out.
+        Planning nearest-first is what makes "leads somewhere" known: a hop is
+        always strictly nearer, so it has already been planned. Every hop of every
+        path gets a rule, so the plan covers the whole field; rally points get none,
+        which is what makes them sinks. Everything else we hold is unroutable — a
+        pocket cut off from every rally point — rather than silently left out.
 
-        Since a chosen hop always steps to a strictly nearer node, the plan still
-        cannot loop, however the ties fall.
+        Since every hop steps to a strictly nearer node, the plan still cannot loop,
+        however many ways a system splits.
         """
         if not self.route_sel:
             return
         owned = self._owned(state)
         cost = model.flow_costs(state, owned, set(self.route_sel))
-        load = {sid: 0.0 for sid in self.route_sel}
-        target: dict[int, int] = {}   # node -> the rally point its ships end at
         for node in sorted(cost, key=lambda n: (cost[n], n)):
             if node in self.route_sel:
                 continue
-            best = None
-            for nbr in sorted(state.systems[node].neighbors):
-                if nbr not in cost:
-                    continue
-                step = state.travel_turns(node, nbr) or 1
-                if cost[nbr] + step != cost[node]:
-                    continue          # not a hop along a shortest route
-                dest = nbr if nbr in self.route_sel else target.get(nbr)
-                if dest is None:
-                    continue          # that neighbour leads nowhere we can reach
-                key = (load[dest], dest, nbr)
-                if best is None or key < best[0]:
-                    best = (key, nbr, dest)
-            if best is None:
-                continue
-            _key, nxt, dest = best
-            self._add_hop(node, nxt)
-            target[node] = dest
-            prod = state.systems[node].production
-            load[dest] += 1.0 / prod if prod > 0 else 0.0
+            hops = [
+                nbr for nbr in sorted(state.systems[node].neighbors)
+                if nbr in cost
+                and cost[nbr] + (state.travel_turns(node, nbr) or 1) == cost[node]
+                and (nbr in self.route_sel or nbr in self.route_plan)
+            ]
+            if hops:
+                self._add_hop(node, model.shares_even(dict.fromkeys(hops, 0)))
         self.route_unroutable = owned - set(self.route_plan) - self.route_sel
 
     def _detect_route_cycles(self, state: GameState) -> None:
@@ -1167,7 +1154,8 @@ class Ui:
             for src, rule in self.auto_forward.items()
             if self.rule_is_live(state, src)
         }
-        graph.update({src: [dest] for src, (dest, _hold) in self.route_plan.items()})
+        graph.update({src: [d for d, pct in rule.shares.items() if pct > 0]
+                      for src, rule in self.route_plan.items()})
         self.route_cycles = model.cycle_nodes(graph, set(self.route_plan))
 
     def confirm_route(self, state: GameState) -> None:
@@ -1185,8 +1173,8 @@ class Ui:
         for sid in self.route_cycles:
             if sid not in plan:
                 self.clear_forward(sid)
-        for src, (dest, hold) in plan.items():
-            self.auto_forward[src] = ForwardRule({dest: 100}, hold)
+        for src, rule in plan.items():
+            self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold)
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #

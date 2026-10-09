@@ -114,7 +114,7 @@ def test_whole_path_gets_a_rule_and_the_destination_does_not():
     ui = _ui(s)
     ui.route_sel = {0}
     ui.set_route_dest(s, 3)
-    assert ui.route_plan == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
     assert 3 not in ui.route_plan
 
 
@@ -128,7 +128,7 @@ def test_converging_routes_agree_on_the_shared_hop():
     ui = _ui(s)
     ui.route_sel = {0, 1}
     ui.set_route_dest(s, 4)
-    assert ui.route_plan == {0: (2, 0), 1: (2, 0), 2: (3, 0), 3: (4, 0)}
+    assert ui.route_plan == {0: ForwardRule({2: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0), 3: ForwardRule({4: 100}, 0)}
 
 
 def test_selected_system_adjacent_to_the_destination_gets_one_hop():
@@ -136,7 +136,7 @@ def test_selected_system_adjacent_to_the_destination_gets_one_hop():
     ui = _ui(s)
     ui.route_sel = {0}
     ui.set_route_dest(s, 1)
-    assert ui.route_plan == {0: (1, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0)}
 
 
 # --------------------------------------------------------------------------- #
@@ -161,7 +161,7 @@ def test_an_un_owned_destination_is_legal():
     ui = _ui(s)
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan == {0: (1, 0), 1: (2, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
 
 
 def test_no_destination_yet_means_nothing_is_unroutable():
@@ -194,7 +194,7 @@ def test_re_aiming_hands_the_old_destination_back_as_a_source():
         ui.set_route_dest(s, dest)
     assert ui.route_sel == {0, 1, 2}       # nothing was lost on the way
     assert ui.route_sources() == {0, 1, 2}
-    assert ui.route_plan == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
 
 
 def test_a_system_we_no_longer_hold_leaves_the_selection():
@@ -227,7 +227,7 @@ def test_hold_survives_a_replace_that_does_not_move_the_next_hop():
     ui.auto_forward[1] = ForwardRule({2: 100}, 4)    # already forwards the right way, keeping 4
     ui.route_sel = {0}
     ui.set_route_dest(s, 3)
-    assert ui.route_plan[1] == (2, 4)
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 4)
     assert 1 not in ui.route_replaces
 
 
@@ -237,7 +237,7 @@ def test_a_rule_pointing_elsewhere_is_replaced_and_reported():
     ui.auto_forward[1] = ForwardRule({3: 100}, 2)    # points the wrong way
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan[1] == (2, 2)      # re-aimed; the hold is the system's own
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 2)      # re-aimed; the hold is the system's own
     assert ui.route_replaces == {1}
 
 
@@ -247,7 +247,7 @@ def test_a_split_rule_is_replaced_even_when_one_lane_agrees():
     ui.auto_forward[1] = ForwardRule({2: 50, 3: 50}, 0)
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan[1] == (2, 0)
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0)
     assert ui.route_replaces == {1}
     ui.confirm_route(s)
     assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
@@ -764,10 +764,13 @@ def _rally(state, sel, human=1) -> Ui:
 
 
 def test_rally_flows_every_system_to_the_nearest_point():
-    """Two rally points at either end of a line split it down the middle."""
+    """Two rally points at either end of a line split it down the middle, and the
+    system exactly in the middle sends half each way."""
     s = _line(7, owned=range(7))
     ui = _rally(s, {0, 6})
-    assert ui.route_plan == {1: (0, 0), 2: (1, 0), 3: (2, 0), 4: (5, 0), 5: (6, 0)}
+    assert ui.route_plan == {1: ForwardRule({0: 100}, 0), 2: ForwardRule({1: 100}, 0),
+                             3: ForwardRule({2: 50, 4: 50}, 0),
+                             4: ForwardRule({5: 100}, 0), 5: ForwardRule({6: 100}, 0)}
 
 
 def test_a_rally_point_gets_no_rule_of_its_own():
@@ -775,7 +778,7 @@ def test_a_rally_point_gets_no_rule_of_its_own():
     s = _line(4, owned=range(4))
     ui = _rally(s, {0})
     assert 0 not in ui.route_plan
-    assert ui.route_plan == {1: (0, 0), 2: (1, 0), 3: (2, 0)}
+    assert ui.route_plan == {1: ForwardRule({0: 100}, 0), 2: ForwardRule({1: 100}, 0), 3: ForwardRule({2: 100}, 0)}
 
 
 def test_rally_covers_systems_the_player_never_picked():
@@ -793,7 +796,7 @@ def test_rally_ties_are_deterministic():
     picks = set()
     for _ in range(10):
         ui.recompute_route(s)
-        picks.add(ui.route_plan[2])
+        picks.add(tuple(ui.route_plan[2].shares.items()))
     assert len(picks) == 1
 
 
@@ -803,7 +806,7 @@ def test_an_un_owned_rally_point_is_legal():
     s = _line(4, owned={0, 1, 2})
     s.systems[3].owner_id = 2
     ui = _rally(s, {3})
-    assert ui.route_plan == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
     assert ui.route_unroutable == set()
 
 
@@ -836,7 +839,7 @@ def test_rally_keeps_a_rule_that_already_points_the_right_way():
     ui.auto_forward[2] = ForwardRule({1: 100}, 4)     # already flowing inward, keeping 4
     ui.route_sel = {0}
     ui.recompute_route(s)
-    assert ui.route_plan[2] == (1, 4)
+    assert ui.route_plan[2] == ForwardRule({1: 100}, 4)
     assert 2 not in ui.route_replaces
 
 
@@ -849,7 +852,7 @@ def test_a_rally_plan_reports_the_rules_it_replaces():
     ui.auto_forward[3] = ForwardRule({2: 100}, 4)     # points away from the rally point
     ui.route_sel = {0}
     ui.recompute_route(s)
-    assert ui.route_plan[3] == (1, 4)   # re-aimed, hold kept
+    assert ui.route_plan[3] == ForwardRule({1: 100}, 4)   # re-aimed, hold kept
     assert ui.route_replaces == {3}
 
 
@@ -1071,7 +1074,7 @@ def test_a_route_takes_the_fastest_path_not_the_fewest_jumps():
     ui = _ui(s)
     ui.route_sel = {2}
     ui.set_route_dest(s, 0)
-    assert ui.route_plan == {2: (1, 0), 1: (0, 0)}   # the long lane is left alone
+    assert ui.route_plan == {2: ForwardRule({1: 100}, 0), 1: ForwardRule({0: 100}, 0)}   # the long lane is left alone
 
 
 def test_the_nearest_rally_point_is_the_soonest_reached_one():
@@ -1079,12 +1082,12 @@ def test_the_nearest_rally_point_is_the_soonest_reached_one():
     s = _line(5, owned=range(5))
     _lengths(s, {(3, 4): 60.0})            # 10 turns to rally 4, 3 turns to rally 0
     ui = _rally(s, {0, 4})
-    assert ui.route_plan[3] == (2, 0)      # 3 turns back to 0 beats 10 turns on to 4
-    assert ui.route_plan[1] == (0, 0) and ui.route_plan[2] == (1, 0)
+    assert ui.route_plan[3] == ForwardRule({2: 100}, 0)      # 3 turns back to 0 beats 10 turns on to 4
+    assert ui.route_plan[1] == ForwardRule({0: 100}, 0) and ui.route_plan[2] == ForwardRule({1: 100}, 0)
 
 
 # --------------------------------------------------------------------------- #
-# Rally: ties are split to even out the load
+# Rally: a tie splits evenly
 # --------------------------------------------------------------------------- #
 def _star(feeders: dict[int, list[int]], tied: int, human=1) -> GameState:
     """Rally points (the keys) each with their own feeder systems, plus one extra
@@ -1095,65 +1098,59 @@ def _star(feeders: dict[int, list[int]], tied: int, human=1) -> GameState:
     return _graph(edges, {sid: human for sid in ids}, n=max(ids) + 1, human=human)
 
 
-def test_a_tie_goes_to_the_rally_point_drawing_less():
-    """Equidistant means the ships arrive just as soon either way, so the choice is
-    free — and spending it on the emptier point beats an arbitrary tie-break that
-    piles a whole region onto one while its neighbour idles."""
+def test_a_tied_system_splits_evenly_between_the_rally_points():
+    """Equidistant means the ships arrive just as soon either way, so there is
+    nothing to choose: the system sends half to each, however busy either is."""
     s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
     ui = _rally(s, {0, 1})
-    assert ui.route_plan[8] == (1, 0)      # 4 systems feed 0, only 2 feed 1
+    assert ui.route_plan[8] == ForwardRule({0: 50, 1: 50}, 0)
+    assert ui.route_plan[2] == ForwardRule({0: 100}, 0)
 
 
-def test_the_tie_flips_when_the_other_point_is_the_busier_one():
-    """The same board with the loads swapped picks the other way, so the test above
-    is measuring load and not just preferring the higher id."""
-    s = _star({0: [2, 3], 1: [4, 5, 6, 7]}, tied=8)
-    ui = _rally(s, {0, 1})
-    assert ui.route_plan[8] == (0, 0)
+def test_a_three_way_tie_splits_three_ways():
+    s = _star({0: [], 1: [], 2: []}, tied=3)
+    ui = _rally(s, {0, 1, 2})
+    assert ui.route_plan[3] == ForwardRule({0: 34, 1: 33, 2: 33}, 0)
 
 
-def test_load_is_ships_per_turn_not_systems():
-    """`System.production` is turns *per ship*, so four barren systems are a thinner
-    stream than one rich one — counting systems would get this backwards."""
-    s = _star({0: [2, 3, 4, 5], 1: [6]}, tied=8)
-    for sid in (2, 3, 4, 5):
-        s.systems[sid].production = 10     # 0.1 ships/turn each, 0.4 in total
-    s.systems[6].production = 1            # 1.0 ships/turn on its own
-    ui = _rally(s, {0, 1})
-    assert ui.route_plan[8] == (0, 0)      # 0 has more systems but far less inflow
+def test_a_tie_splits_down_equally_quick_routes_to_the_same_point():
+    """Two lanes that reach the same rally point just as soon are a tie too."""
+    s = _graph([(0, 1), (0, 2), (1, 3), (2, 3)], {sid: 1 for sid in range(4)})
+    ui = _rally(s, {0})
+    assert ui.route_plan[3] == ForwardRule({1: 50, 2: 50}, 0)
 
 
-def test_balancing_never_makes_a_slower_route():
-    """Load only ever picks between hops that are already equally quick — a rally
-    point that is genuinely further away is not an option however idle it is."""
+def test_splitting_never_takes_a_slower_route():
+    """Only equally quick hops share — a rally point that is genuinely further away
+    is not an option however idle it is."""
     s = _star({0: [2, 3, 4, 5], 1: []}, tied=8)
     _lengths(s, {(8, 1): 60.0})            # 10 turns to the idle point, 1 to the busy one
     ui = _rally(s, {0, 1})
-    assert ui.route_plan[8] == (0, 0)
+    assert ui.route_plan[8] == ForwardRule({0: 100}, 0)
 
 
-def test_balanced_ties_are_stable_across_recomputes():
+def test_a_confirmed_split_is_the_rule_written():
+    s = _star({0: [2], 1: [6]}, tied=8)
+    ui = _rally(s, {0, 1})
+    ui.confirm_route(s)
+    assert ui.auto_forward[8] == ForwardRule({0: 50, 1: 50}, 0)
+
+
+def test_a_split_plan_still_cannot_loop():
+    """Every hop of a split steps strictly nearer, so the no-cycle guarantee
+    survives however many ways a system splits."""
     s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
     ui = _rally(s, {0, 1})
-    picks = set()
-    for _ in range(10):
-        ui.recompute_route(s)
-        picks.add(ui.route_plan[8])
-    assert len(picks) == 1
-
-
-def test_a_balanced_plan_still_cannot_loop():
-    """Splitting ties chooses between hops that each step strictly nearer, so the
-    no-cycle guarantee survives however the ties fall."""
-    s = _star({0: [2, 3, 4, 5], 1: [6, 7]}, tied=8)
-    ui = _rally(s, {0, 1})
+    assert ui.route_cycles == set()
     for src in ui.route_plan:
-        node, seen = src, set()
-        while node in ui.route_plan:
-            assert node not in seen, f"cycle from {src}"
+        frontier, seen = [src], set()
+        while frontier:
+            node = frontier.pop()
+            if node in ui.route_sel:
+                continue                  # every walk ends at a rally point
+            assert node in ui.route_plan and node not in seen, f"cycle or dead end from {src}"
             seen.add(node)
-            node = ui.route_plan[node][0]
-        assert node in ui.route_sel     # every walk ends at a rally point
+            frontier.extend(ui.route_plan[node].shares)
 
 
 # --------------------------------------------------------------------------- #

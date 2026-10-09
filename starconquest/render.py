@@ -507,14 +507,20 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
                             _BTN_DANGER[1], config.s(2), animate=False)
 
     # 2. the planned chain
-    for src, (dest, _hold) in ui.route_plan.items():
-        if src not in state.systems or dest not in state.systems:
+    small = _fonts()["small"]
+    for src, rule in ui.route_plan.items():
+        if src not in state.systems:
             continue
         pa = ui.view.to_screen(state.systems[src].pos)
-        pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
-                        config.node_radius(state.systems[dest].production),
-                        accent, config.s(3), animate=True)
+        for dest, pct in rule.shares.items():
+            if dest not in state.systems:
+                continue
+            pb = ui.view.to_screen(state.systems[dest].pos)
+            _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
+                            config.node_radius(state.systems[dest].production),
+                            accent, config.s(3), animate=True)
+            if pct < 100:  # a tie split evenly — say so, as a committed rule would
+                _label_pill(surface, small, f"{pct}%", config.COLOR_TEXT, _rule_label_center(pa, pb, small))
 
     # 3. one ring per source pick, plus one on anything that can't be served. In
     #    chain mode the unservable are always picks, so that second loop is empty

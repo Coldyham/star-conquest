@@ -78,7 +78,7 @@ implemented, and the brief is kept for its reasoning.
 - **Combat rules page.** It teaches the square law from the real code (`preview_fight`): parameters rather than `config`, corners rather than samples, demo sliders on `MenuState`, hand-broken prose, the jitter matrix.
 - **Losing / spectator mode.** Keyed on defeat, plus how the reset view frames the map.
 - **Route mode.** A proposal plus a confirm. Owned-only paths are forced. A plan can't contradict itself, but it can loop with existing rules.
-  - *Two sub-modes.* Chain and rally share `flow_field`. Distance is travel turns, not hops. One Mode button. Ties balance by ships/turn. Auto-route. A tap always aims (two rejected shapes). A plan keeps a system's hold.
+  - *Two sub-modes.* Chain and rally share `flow_field`. Distance is travel turns, not hops. One Mode button. Ties split evenly. Auto-route. A tap always aims (two rejected shapes). A plan keeps a system's hold.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): measured layout and `touch_ui`; browser bridges (`softkeyboard`, `webstore`, `share`, quitting); send popup and spectating; viewport margins; the Combat tab; route mode.
 ### design/turnfilm.md
@@ -256,6 +256,7 @@ the measured result was indistinguishable from the baseline.
 ### Shell ([`design/shell.md`](design/shell.md))
 - Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected. *Combat rules page.*
 - A "keep N / send N%" switch on each forwarding rule: "keep N" means "send the rest", so only one lane per system could use it; replaced by a hold per system and a share per lane. Showing the hold on each lane's label: crowded a split's source. Disabling + once the shares reach 100%: dead in the default state. *Forwarding rules.*
+- Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*
 - A side-panel list of every queued order and rule (capped, scrolled, a × per row): built and removed once the popup opened on edit too. *Send popup and spectating.*
 - Unrestricted (enemy-crossing) routes: unrepresentable. Two-stage pick-then-aim; "tap a pick to remove, anything else to aim"; a Chain/Rally button pair; rally claiming only systems nearer than a front; weighting the AI's flow by turns: all rejected. *Route mode.*
 

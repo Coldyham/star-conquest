@@ -226,3 +226,25 @@ def test_a_zero_share_lane_sends_nothing():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 0, 2: 100})
     assert [(o.dest_id, o.ships) for o in main.auto_forward_orders(state, ui)] == [(2, 12)]
+
+
+def test_taking_a_split_lane_to_nothing_deletes_just_that_lane():
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 50, 2: 30}, 1)
+    ui.edit_forward(state, 0, 2)
+    ui.set_share(0)
+    assert ui.auto_forward[0] == ForwardRule({1: 50}, 1)
+    assert ui.mode != CHOOSING
+
+
+def test_a_lane_emptied_by_another_lanes_rise_stays_and_comes_back():
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 50, 2: 50})
+    ui.edit_forward(state, 0, 1)
+    ui.set_share(100)
+    assert ui.auto_forward[0].shares == {1: 100, 2: 0}
+    ui.set_share(50)
+    assert ui.auto_forward[0].shares == {1: 50, 2: 0}
+    ui.focus_lane(2)
+    ui.set_share(50)
+    assert ui.auto_forward[0].shares == {1: 50, 2: 50}
