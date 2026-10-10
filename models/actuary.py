@@ -90,6 +90,7 @@ OPENING_SKIPS = (True, False)
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
                             # its learned chance of striking a garrison of ours that thin)
 # Temporary arms of Learning (docs/design/learning.md, "Four more arms"); all off.
+LEARN_MEMORY = True         # False: every rival read at the prior, as if never watched
 LEARN_PRESSED = False       # a rival garrison under attack reads the pressed row
 LEARN_SIZE = False          # a strike is all-in or sized, at the prior's split
 LEARN_GUARD = False         # a rival keeps its learned guard home against our garrison
@@ -833,7 +834,7 @@ def models_for(state) -> dict[int, Model]:
 def _curves(state) -> dict[int, list[float]]:
     """Each player's strike curve on a player-held target, unpressed, as of this
     board."""
-    models = models_for(state)
+    models = models_for(state) if LEARN_MEMORY else {}
     return {q: strike_curve(models.get(q, EMPTY), PLAYER, 0) for q in sorted(state.players)}
 
 
@@ -843,7 +844,7 @@ def _extra(state) -> dict:
     out: dict = {}
     if not (LEARN_PRESSED or LEARN_GUARD):
         return out
-    models = models_for(state)
+    models = models_for(state) if LEARN_MEMORY else {}
     if LEARN_PRESSED:
         out["pressed"] = {q: strike_curve(models.get(q, EMPTY), PLAYER, 1)
                           for q in sorted(state.players)}
