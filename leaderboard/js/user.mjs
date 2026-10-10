@@ -203,8 +203,10 @@ function drawPlaystyle(rows, roster, readings) {
     return el("td", { class: column.bots ? "bots" : null, text: row.show(column.summary) });
   };
 
-  clear(playstyleBox).append(
-    el("h2", { class: "section-title", text: "Playstyle" }),
+  // Collapsed until asked for; a redraw (a rival added) keeps it as it was.
+  const open = playstyleBox.querySelector("details")?.open ? "" : null;
+  clear(playstyleBox).append(el("details", { class: "playstyle-panel", open }, [
+    el("summary", {}, [el("h2", { class: "section-title", text: "Playstyle" })]),
     el("p", {
       class: "playstyle-note",
       text:
@@ -235,7 +237,7 @@ function drawPlaystyle(rows, roster, readings) {
         ),
       ]),
     ]),
-  );
+  ]));
   playstyleBox.hidden = false;
 }
 

@@ -1005,6 +1005,19 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail .btn + .btn { margin-left: 0.5rem; }
 
 /* -- the Playstyle panel (user.html) -------------------------------------- */
+/* A native <details>, closed by default; the heading is its summary, with our
+ * own marker since the browsers' differ. */
+.playstyle-panel { margin: 2.5rem 0 1.5rem; }
+.playstyle-panel > summary { cursor: pointer; list-style: none; }
+.playstyle-panel > summary::-webkit-details-marker { display: none; }
+.playstyle-panel > summary .section-title { display: inline; margin: 0; }
+.playstyle-panel > summary .section-title::before {
+  content: "▸ ";
+  display: inline-block;
+  width: 1.2em;
+}
+.playstyle-panel[open] > summary .section-title::before { content: "▾ "; }
+.playstyle-panel[open] > summary { margin-bottom: 0.6rem; }
 .playstyle-note { margin: 0 0 0.8rem; color: var(--dim); }
 .playstyle-wrap { overflow-x: auto; margin: 0 0 2rem; }
 .playstyle {
