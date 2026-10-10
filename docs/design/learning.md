@@ -335,3 +335,57 @@ Search stops on a wall clock, as in "The stop", so its pairing is the noisiest
 here. **Kept.**
 
 **Not measured:** wide jitter (0.3) and play against a person.
+
+## Memory off: the prior alone (built, measured, flag removed)
+
+**The question.** "What the model can tell apart" ([`learner.md`](learner.md))
+shows the strike curve reads about the same for every bot: 0.16 at ratio 1.5,
+0.32 at 2.0. So Learning's gain over Planned might come from reading the
+*prior's* curve at the garrison we will hold, not from anything it learned
+about a rival.
+
+**The arm.** A temporary `LEARN_MEMORY` flag (commit `10df678`). Off, `_curves`
+gives every rival `strike_curve(EMPTY, PLAYER, 0)`, the prior alone, and the
+rest of Learning is unchanged, `is_oracle_seat` included. So knower models both
+arms blind, and only the memory differs.
+
+**How it was measured.** Paired duels on fresh seeds 9001-9400, both seatings,
+18 and 40 systems at 6 ly/turn: 9,600 games in all. Each game was played through
+`tools/sweep.py`'s `play_duel`, with four processes and the sweep's
+`BUDGET_SCALE`, and a repeat run matched every board digest. Each (cell,
+opponent, seed, seating) pairs Learning with memory-off. Flips are seeds that
+Learning won and memory-off lost, against the reverse. An undecided game at 600
+turns counts as a loss for both arms (337 of 9,600). **The gate, set before the
+run:** the memory earns its place if Learning beats memory-off at z ≥ +2 pooled
+against some opponent, with none at z ≤ -2.
+
+    Learning vs memory-off   18 systems             40 systems             pooled
+    marshal                  +32 / -41  z -1.05     +39 / -36  z +0.35     +71 / -77   z -0.49
+    knower Off               +14 / -19  z -0.87     +11 / -12  z -0.21     +25 / -31   z -0.80
+    actuary Planned          +28 / -47  z -2.19     +33 / -42  z -1.04     +61 / -89   z -2.29
+
+Win rates pooled, Learning then memory-off: 70.6% to 70.9% against marshal,
+92.0% to 92.4% against knower Off, 51.2% to 53.0% against Planned. 85 to 206
+games an opponent were identical move for move. The memory cost about 7% more
+per turn (7.67 ms to 7.19 ms, both seats together).
+
+**It failed.** Learning beats memory-off nowhere. Memory-off is level against
+marshal and knower Off, and better against Planned (z +2.29, mostly at 18
+systems). So what Learning adds over Planned is a fixed discount: the prior
+curve read at the garrison we will hold. A rival's own record does not help.
+That fits the prediction check: memory sharpens the forecast only a little,
+and the curve does not tell the bots apart. The flag is removed, and Learning
+still learns.
+
+**What it leaves open, for the author.** Learning could read the prior alone
+and keep no memory. Then `decide` reads only the board, so `is_oracle_seat`
+could go false, and knower at Predict and Search would run it. That gives back
+the 20-odd points the claim earns against knower ([`learner.md`](learner.md),
+"The roster ladder"), and moves the bot column. It would also cut the memo tree
+from the hot path. `tools/learner_check.py` and `tools/playstyle.py` still read
+the memo tree and the models through `models_for`. The memory reads a person a
+little better than the prior does ("Predicting people"), but play against a
+person is not measured.
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+and play against a person.
