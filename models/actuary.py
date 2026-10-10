@@ -89,6 +89,17 @@ OPENING_SKIPS = (True, False)
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
                             # its learned chance of striking a garrison of ours that thin)
+# Temporary arms of Learning (docs/design/learning.md, "Four more arms"); all off.
+LEARN_PRESSED = False       # a rival garrison under attack reads the pressed row
+LEARN_SIZE = False          # a strike is all-in or sized, at the prior's split
+LEARN_GUARD = False         # a rival keeps its learned guard home against our garrison
+LEARN_JOINT = False         # a rival's garrisons next door strike together or not at all
+ALL_IN = 0.9                # a launch sending this share of its garrison is all-in
+PRIOR_ALLIN = 0.464         # `tools/learner_check.py`'s priors (seeds 1001-1040)
+PRIOR_SIZE_RATIO = 1.254    # what a sized strike sends, against its target's effective
+GUARD_BINS = 21             # kept / largest adjacent enemy in tenths; the last 2.0 and up
+PRIOR_GUARD = (0.517, 0.018, 0.019, 0.043, 0.036, 0.077, 0.068, 0.027, 0.017, 0.005, 0.059,
+               0.008, 0.009, 0.006, 0.003, 0.008, 0.004, 0.002, 0.002, 0.000, 0.071)
 NODE_CAP = 512              # boards remembered, least recently used dropped first
 RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
@@ -132,11 +143,12 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
+    extra = _extra(state) if stop == LEARNING else None
     if stop != GREEDY:
         orders = opening(state, pid)
         if orders is not None:
             return orders
-    return _Ledger(state, pid, curves).plan()
+    return _Ledger(state, pid, curves, extra).plan()
 
 
 def _stop_of(player) -> int:
@@ -176,7 +188,8 @@ def decide_ms(settings, seat) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None):
+    def __init__(self, state, pid, curves=None, extra=None):
+        self.extra = extra or {}
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
         sysmap = state.systems
@@ -203,6 +216,9 @@ class _Ledger:
             slot[f.owner_id] = slot.get(f.owner_id, 0) + f.ships
 
         self.garrison = {sid: sysmap[sid].ships for sid in self.ids}
+        self.pressed = {sid for sid in self.ids
+                        if any(o != sysmap[sid].owner_id
+                               for slot in self.arrivals[sid].values() for o in slot)}
         self.front_value = self._front_values()
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
@@ -492,29 +508,49 @@ class _Ledger:
             n_owners, n_ships = (lines.get(nbr) or self.lines[nbr])[:2]
             if rival not in n_owners:
                 continue
-            sources.append((d, n_owners, n_ships))
+            sources.append((d, n_owners, n_ships, nbr))
+        pcurve = self.extra.get("pressed", {}).get(rival)
+        guard = self.extra.get("guard", {}).get(rival, 0.0)
         worst = 0.0
         for t in range(1, H + 1):
             if owners[t] != pid:
                 continue
             held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
             items = []
-            for d, n_owners, n_ships in sources:
+            for d, n_owners, n_ships, nbr in sources:
                 if t >= d and n_owners[t - d] == rival and n_ships[t - d] > 0:
                     n = n_ships[t - d]
-                    p = min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
+                    if LEARN_GUARD and guard > 0.0:
+                        n = max(0, n - int(round(guard * ships[t])))
+                        if n <= 0:
+                            continue
+                    row = pcurve if (LEARN_PRESSED and pcurve is not None
+                                     and nbr in self.pressed) else curve
+                    p = min(1.0, LEARN_REACH * row[_ratio_bin(n / held)])
                     if p > 0.0:
                         items.append((n, p))
             if not items or sum(n for n, _ in items) / self.advantage <= ships[t]:
                 continue
-            sums = {0: 1.0}
-            for n, p in items:
-                nxt: dict[int, float] = {}
-                for total, q in sums.items():
-                    nxt[total + n] = nxt.get(total + n, 0.0) + q * p
-                    if p < 1.0:
-                        nxt[total] = nxt.get(total, 0.0) + q * (1.0 - p)
-                sums = nxt
+            if LEARN_JOINT:
+                p = max(q for _, q in items)
+                sums = {sum(n for n, _ in items): p}
+                if p < 1.0:
+                    sums[0] = 1.0 - p
+            else:
+                sums = {0: 1.0}
+                for n, p in items:
+                    outcomes = [(n, p)]
+                    if LEARN_SIZE:
+                        sized = min(n, int(math.ceil(PRIOR_SIZE_RATIO * held)))
+                        if sized < n:
+                            outcomes = [(n, p * PRIOR_ALLIN), (sized, p * (1.0 - PRIOR_ALLIN))]
+                    nxt: dict[int, float] = {}
+                    for total, q in sums.items():
+                        for m, pm in outcomes:
+                            nxt[total + m] = nxt.get(total + m, 0.0) + q * pm
+                        if p < 1.0:
+                            nxt[total] = nxt.get(total, 0.0) + q * (1.0 - p)
+                    sums = nxt
             expected = 0.0
             for total, q in sums.items():
                 need = total / self.advantage
@@ -688,12 +724,13 @@ def _with(arrivals, t, owner, ships):
 class Model:
     """What one rival has been seen to do: raw counts, the prior added on read."""
 
-    __slots__ = ("strikes", "passes", "turns")
+    __slots__ = ("strikes", "passes", "guard", "turns")
     COUNTS = __slots__[:-1]
 
-    def __init__(self, strikes, passes, turns):
+    def __init__(self, strikes, passes, guard, turns):
         self.strikes = strikes      # per (kind, pressed, target ratio bin): struck
         self.passes = passes        # ...and not struck
+        self.guard = guard          # per bin of kept / largest adjacent enemy, on a launch
         self.turns = turns
 
     def plus(self, other: Model) -> Model:
@@ -701,7 +738,8 @@ class Model:
                        for name in self.COUNTS), self.turns + other.turns)
 
 
-EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), 0)
+EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS),
+              (0.0,) * GUARD_BINS, 0)
 
 
 class _Snap:
@@ -797,6 +835,33 @@ def _curves(state) -> dict[int, list[float]]:
     board."""
     models = models_for(state)
     return {q: strike_curve(models.get(q, EMPTY), PLAYER, 0) for q in sorted(state.players)}
+
+
+def _extra(state) -> dict:
+    """What the temporary arms read besides the curve: each player's pressed
+    curve and its learned guard share."""
+    out: dict = {}
+    if not (LEARN_PRESSED or LEARN_GUARD):
+        return out
+    models = models_for(state)
+    if LEARN_PRESSED:
+        out["pressed"] = {q: strike_curve(models.get(q, EMPTY), PLAYER, 1)
+                          for q in sorted(state.players)}
+    if LEARN_GUARD:
+        out["guard"] = {q: guard_share(models.get(q, EMPTY)) for q in sorted(state.players)}
+    return out
+
+
+def guard_share(model: Model) -> float:
+    """What a frontier system that launched kept home, against its largest
+    adjacent enemy garrison, at the median (`tools/learner_check.guard_share`)."""
+    weights = [model.guard[b] + PRIOR_WEIGHT * PRIOR_GUARD[b] for b in range(GUARD_BINS)]
+    half, run = sum(weights) / 2, 0.0
+    for b, w in enumerate(weights):
+        run += w
+        if run >= half:
+            return b / 10
+    return (GUARD_BINS - 1) / 10
 
 
 def _fold(models: dict[int, Model], seen: dict[int, Model]) -> dict[int, Model]:
@@ -951,6 +1016,12 @@ def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
         q = prev.owner[sid]
         c = counts.setdefault(q, {name: list(getattr(EMPTY, name)) for name in Model.COUNTS})
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
+        launched = sum(to.values()) + _unknown
+        threat = max((prev.ships[n] for n in state.systems[sid].neighbors
+                      if prev.owner[n] not in (0, q)), default=0)
+        if threat > 0 and launched > 0:
+            c["guard"][min(GUARD_BINS - 1, max(0, int((prev.ships[sid] - launched)
+                                                       / threat * 10)))] += 1
         for option in _options(prev, state, sid):
             cell = (option.kind * 2 + pressed) * RATIO_BINS + _ratio_bin(option.ratio)
             c["strikes" if to.get(option.target, 0) > 0 else "passes"][cell] += 1
