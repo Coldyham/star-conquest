@@ -1,11 +1,17 @@
-# The leaderboard's whole backend: fill in the "how would each bot have done?"
-# column, then check each posted score against the replay uploaded with it.
+# The leaderboard's whole backend, as four independent jobs:
+#   bot-scores   fill in the "how would each bot have done?" column (tools/bot_replay.py)
+#   verify       check each posted score against the replay uploaded with it
+#   playstyle    read each posted replay for the player page's Playstyle panel
+#   campaign     make this week's campaign map, if it hasn't been made yet
 #
-# Both answers are pure functions of the setup, the seed and the code, so each
-# only ever needs computing once and there is nothing to serve live — one
-# scheduled job that writes into Supabase leaves no service to keep up. They
-# share a runner because the second is nearly free beside the first: replaying a
-# log asks no seat to decide anything.
+# Every answer is a pure function of what is stored and the code, so each only
+# ever needs computing once and there is nothing to serve live: a scheduled
+# workflow that writes into Supabase leaves no service to keep up.
+#
+# The hourly schedule runs all four. *Run workflow* runs only the ones ticked,
+# with each job's own options below them. The jobs share nothing but the secrets
+# check, so a long bot replay never holds up the cheap three, and one failing
+# never stops the others.
 #
 # Setup (once):
 #   Settings -> Secrets and variables -> Actions -> New repository secret
@@ -14,7 +20,7 @@
 #                          settings. The older service_role JWT is under the
 #                          "Legacy API keys" tab and works too, as either name.
 #
-# A secret key bypasses row-level security, which is exactly why the worker needs
+# A secret key bypasses row-level security, which is exactly why the workers need
 # it and why it lives here rather than in leaderboard/js/config.mjs (that ships a
 # *publishable* key on purpose — see schema.sql for which is which).
 name: Leaderboard worker
@@ -35,44 +41,69 @@ on:
     - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
+      bot_scores:
+        description: "Bot scores: replay the roster on posted maps"
+        type: boolean
+        default: true
       game_key:
-        description: "Replay only this map (blank = every map still owing results)"
+        description: "Bot scores: only this map (blank = every map still owing results)"
         required: false
         default: ""
       mode:
-        description: "fill = only what's missing · stale = also rows from older code · recompute = everything"
-        required: false
-        default: fill
+        description: "Bot scores: fill = only what's missing · stale = also rows from older code · recompute = everything"
         type: choice
+        default: fill
         options: [fill, stale, recompute]
+      bots:
+        description: "Bot scores: only these bots, space-separated (blank = every bot)"
+        required: false
+        default: ""
+      verify:
+        description: "Verify posted scores against their replays"
+        type: boolean
+        default: true
+      verify_mode:
+        description: "Verify: fill = only undecided scores · stale = also rows from older code · recheck = every score"
+        type: choice
+        default: fill
+        options: [fill, stale, recheck]
+      playstyle:
+        description: "Playstyle readings for the player page"
+        type: boolean
+        default: true
+      campaign:
+        description: "Weekly campaign map"
+        type: boolean
+        default: true
+      campaign_week:
+        description: "Campaign: make this week's map, by its Monday YYYY-MM-DD (blank = this week)"
+        required: false
+        default: ""
 
-# One run at a time: an hourly schedule and a dispatch can otherwise overlap and
-# compute the same pairs twice. Queued rather than cancelled, so a manual run
-# never kills a scheduled one mid-batch.
-concurrency:
-  group: bot-replay
-  cancel-in-progress: false
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+# No dependency install in any job: the simulation core imports no pygame and
+# nothing off PyPI, and the workers talk to PostgREST over urllib. That is the
+# whole reason each job is a few seconds of setup rather than a build.
+#
+# Dispatch inputs reach the scripts through the environment, never interpolated
+# into a run script: `${{ inputs.… }}` is substituted before bash ever sees the
+# line, so an input containing shell syntax would run as code. Quoting the
+# expansion of an env var is safe in a way quoting the template is not. Tests are
+# plain `if`, not `[ -n "$X" ] && …`: that idiom evaluates to 1 when the test
+# fails, and a run step is `bash -e`, so a blank input would fail the step.
 
 jobs:
-  replay:
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
     steps:
-      - uses: actions/checkout@v4
-
-      # No dependency install: the simulation core imports no pygame and nothing
-      # off PyPI, and the worker talks to PostgREST over urllib. That is the
-      # whole reason this job is a few seconds of setup rather than a build.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Check the board is configured
         id: check
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -z "$SUPABASE_URL" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_KEY" ]; }; then
             echo "No Supabase secrets set — skipping (see this file's header)."
@@ -81,23 +112,29 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
+  bot-scores:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.bot_scores)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One replay at a time: an hourly run and a dispatch could otherwise compute
+    # the same pairs twice. Queued rather than cancelled, so a manual run never
+    # kills a scheduled one mid-batch. The other jobs have groups of their own.
+    concurrency:
+      group: leaderboard-bot-scores
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Replay the roster
-        if: steps.check.outputs.ready == 'true'
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          # Through the environment, never interpolated into the script below:
-          # `${{ inputs.… }}` is substituted before bash ever sees the line, so a
-          # dispatch input containing shell syntax would run as code. Quoting the
-          # expansion of an env var is safe in a way quoting the template is not.
           GAME_KEY: ${{ inputs.game_key }}
           MODE: ${{ inputs.mode }}
+          BOTS: ${{ inputs.bots }}
         run: |
           args=()
-          # Plain `if`, not `[ -n "$X" ] && …`: that idiom evaluates to 1 when the
-          # test fails, and a run step is `bash -e`, so an empty game_key — every
-          # scheduled run — would end the step as a failure.
           if [ -n "$GAME_KEY" ]; then
             args+=(--game-key "$GAME_KEY")
           fi
@@ -105,34 +142,85 @@ jobs:
             stale)     args+=(--stale) ;;
             recompute) args+=(--recompute) ;;
           esac
+          read -ra bots <<< "$BOTS"
+          if [ "${#bots[@]}" -gt 0 ]; then
+            args+=(--bots "${bots[@]}")
+          fi
           # Well under the job's own timeout, so the worker always gets to flush
           # and report rather than being killed mid-batch; whatever it doesn't
           # reach, the next run picks up.
           python tools/bot_replay.py --deadline-minutes 20 "${args[@]}"
 
-      # Check each posted score against the replay the game uploaded with it.
-      # Cheap next to the bot column — replaying a log asks no seat to decide
-      # anything — so it rides the same schedule and the same checkout rather
-      # than paying for a second job's setup.
-      #
-      # `if: always()` so a bot-replay batch that times out or fails still gets
-      # the scores checked: the two jobs share a runner, not a purpose.
+  # Cheap beside the bot column: replaying a log asks no seat to decide anything.
+  verify:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.verify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: leaderboard-verify
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Verify posted scores
-        if: always() && steps.check.outputs.ready == 'true'
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python tools/verify_scores.py --prune
+          MODE: ${{ inputs.verify_mode }}
+        run: |
+          args=(--prune)
+          case "$MODE" in
+            stale)   args+=(--stale) ;;
+            recheck) args+=(--recheck) ;;
+          esac
+          python tools/verify_scores.py "${args[@]}"
 
-      # Make this week's campaign map, if it hasn't been made yet. Hourly is what
-      # makes it robust: the first run after Monday 00:00 UTC writes the row and
-      # every later one that week finds it and does nothing, so a missed or
-      # failed hour can never skip a week.
+  # One row per match, from public_replays only (tools/playstyle_worker.py). A
+  # change to the readings' code moves `reading_rev`, and the next run re-reads
+  # every row on its own.
+  playstyle:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.playstyle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: leaderboard-playstyle
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Playstyle readings
+        run: python tools/playstyle_worker.py --prune --deadline-minutes 10
+
+  # Hourly is what makes the weekly map robust: the first run after Monday 00:00
+  # UTC writes the row and every later one that week finds it and does nothing,
+  # so a missed or failed hour can never skip a week.
+  campaign:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.campaign)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: leaderboard-campaign
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Weekly campaign map
-        if: always() && steps.check.outputs.ready == 'true'
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python tools/campaign.py
+          WEEK: ${{ inputs.campaign_week }}
+        run: |
+          args=()
+          if [ -n "$WEEK" ]; then
+            if ! [[ "$WEEK" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "campaign_week must be YYYY-MM-DD, got: $WEEK" >&2
+              exit 1
+            fi
+            args+=(--week "$WEEK")
+          fi
+          python tools/campaign.py "${args[@]}"

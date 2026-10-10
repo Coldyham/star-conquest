@@ -233,6 +233,26 @@ alter table public.score_checks add  constraint score_checks_verdict check (
   verdict in ('verified', 'mismatch', 'outdated', 'unreadable', 'missing'));
 
 -- ---------------------------------------------------------------------------
+-- playstyle_readings: how the person played one posted game, read off its
+-- replay by the worker (`tools/playstyle_worker.py`, `tools/playstyle.py`), for
+-- the Playstyle panel on user.html. One row per match, and only for a match in
+-- public_replays, so a row reveals nothing a visitor could not already work out
+-- from that replay. Keyed by match and never by name: the page finds a player's
+-- rows through their own `scores.match_id`, so a rename or a deleted score
+-- needs nothing here. Written by the worker alone, read by anyone, like
+-- score_checks.
+-- ---------------------------------------------------------------------------
+create table if not exists public.playstyle_readings (
+  match_id    text primary key check (match_id ~ '^[0-9a-f]{16}$'),
+  -- `playstyle.reading_rev()`: the code that read it. A row from other code is
+  -- read again while its log still replays under today's rules.
+  rev         text not null,
+  -- `playstyle.readings()`; `shape` inside says which layout.
+  readings    jsonb not null,
+  computed_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
 -- sc_config_key / sc_bots: derive a game's setup identity and opponent roster
 -- straight from settings_json, so grouping by "same setup, different seed"
 -- needs no new field on Settings and no change to Challenge.key (see
@@ -908,6 +928,7 @@ alter table public.bot_scores enable row level security;
 alter table public.game_logs enable row level security;
 alter table public.score_checks enable row level security;
 alter table public.campaigns enable row level security;
+alter table public.playstyle_readings enable row level security;
 
 drop policy if exists "users public read"    on public.users;
 drop policy if exists "users public insert"  on public.users;
@@ -923,6 +944,7 @@ drop policy if exists "bot_scores public read" on public.bot_scores;
 drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
 drop policy if exists "score_checks public read" on public.score_checks;
 drop policy if exists "campaigns public read" on public.campaigns;
+drop policy if exists "playstyle_readings public read" on public.playstyle_readings;
 
 create policy "users public read"    on public.users  for select using (true);
 create policy "users public insert"  on public.users  for insert with check (true);
@@ -945,6 +967,8 @@ create policy "bot_scores public read" on public.bot_scores for select using (tr
 -- bot_scores-shaped table again — the worker writes the verdicts, everyone reads.
 create policy "score_checks public read" on public.score_checks for select using (true);
 create policy "campaigns public read" on public.campaigns for select using (true);
+create policy "playstyle_readings public read" on public.playstyle_readings
+  for select using (true);
 
 -- No update or delete policy anywhere: that is what makes every row append-only
 -- — for configs, that's what makes the first name posted for a setup permanent,
@@ -966,7 +990,7 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.bot_scores, public.score_checks, public.public_replays,
   public.counted_scores, public.crown_holders, public.crown_steals,
   public.campaigns, public.campaign_games, public.campaign_scores,
-  public.game_embargoes
+  public.game_embargoes, public.playstyle_readings
   to anon, authenticated;
 -- game_logs is deliberately absent from that list: no select grant and no select
 -- policy is what keeps an uploaded replay readable only by the worker. The
@@ -1030,9 +1054,8 @@ grant select, insert, delete on public.game_logs to service_role;
 -- not security_invoker, so it reads game_logs and bot_scores with owner rights
 -- whoever asks — the caller still needs SELECT on the view itself, which grants
 -- nothing beyond the rows its own definition already allows anyone to read some
--- other way (public_replays directly, or a bot's own public row). public_replays
--- needs no grant of its own here any more: nothing under this key reads it
--- directly since replay.mjs switched to the union.
+-- other way (public_replays directly, or a bot's own public row). The worker's
+-- own grant on public_replays is below, with playstyle_readings.
 grant select on public.public_watchable_replays to service_role;
 -- ...and the security_invoker views that union reaches. Owner rights stop at the
 -- first view that sets security_invoker: Postgres checks what *that* view reads
@@ -1044,6 +1067,10 @@ grant select on public.public_watchable_replays to service_role;
 -- listed too, against the day public_replays turns security_invoker.
 -- test_schema_grants walks that chain.
 grant select on public.game_embargoes, public.campaign_games to service_role;
+-- tools/playstyle_worker.py: read the public replays, write one reading per
+-- match, and prune a reading whose replay is no longer public.
+grant select on public.public_replays to service_role;
+grant select, insert, update, delete on public.playstyle_readings to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Play-by-post: pbp_matches, pbp_orders

@@ -23,6 +23,11 @@ to serve live, and an always-on host would spend most of its life idle waiting t
 recompute answers it already had. What the feature actually needs is a cache and
 something to fill it, which is a scheduled job: `.github/workflows/bot-replay.yml`
 writes into `public.bot_scores` on a schedule and leaves no service to keep up.
+The same workflow runs the score checks, the Playstyle readings and the weekly
+campaign map as jobs of their own. They share nothing but the secrets check, so
+a long bot replay never holds up the cheap three and one failing never stops
+the others, and *Run workflow* runs any subset of them (2026-10-10; until then
+they were steps of one job).
 Netlify was never a candidate either way — its Functions run JavaScript and Go,
 and there is no Python runtime to put the engine in.
 
@@ -33,8 +38,10 @@ runs find nothing to do and cost a few seconds of setup — the job installs no
 dependencies, since the simulation core imports no pygame and nothing off PyPI.
 Only a *private* repository makes the schedule a budget question: runs there
 bill against the account's monthly allowance (2,000 minutes on the Free plan)
-and GitHub rounds each job up to the whole minute, so hourly would spend 730+
-minutes a month just asking whether there is work. Either way the cadence
+and GitHub rounds each job up to the whole minute. The workflow is five jobs
+(a secrets check, then bot scores, score checks, Playstyle readings and the
+campaign map), so hourly would spend some 3,600 minutes a month just asking
+whether there is work. Either way the cadence
 comfortably covers the other thing the schedule buys: a free Supabase project
 pauses after about a week idle, and any run touches the REST API.
 
@@ -415,6 +422,69 @@ counterfactual by construction, which is why `fork` mints a new `match_id`. Both
 rewinds re-stamp `rules_version`: the kept prefix has just been replayed under
 today's rules to find that turn, so the log would be describing itself as older
 than it is.
+
+## Playstyle readings (`tools/playstyle.py`, `tools/playstyle_worker.py`)
+
+The player page (`user.html`) has a Playstyle panel showing how a name plays
+next to the roster. It covers attack margin by ship share, how far into a game
+two-thirds of the income and of the ships were first held, voluntary frontier
+empties (how often covered, how often lost), and border losses. These are the
+readings `tools/human_habits.py` already printed. The code moved into
+`tools/playstyle.py`, and both tools now share it.
+
+**Where it comes from.** The worker reads `public_replays` and nothing else.
+Those are the logs a posted score already points at. Each one can already be
+joined to a public name through `scores.match_id`, so a reading reveals nothing
+a visitor couldn't already work out from the replay. Uploads that no score
+points at, which is what *Share replays* sends, stay unread. That is the
+consent boundary from "Checked scores".
+
+**Keyed by match, never by name.** `playstyle_readings` has one row per
+`match_id`, and nothing on the row identifies a person. The page finds a name's
+rows through that name's own scores. This has three consequences:
+- a rename carries over with nothing to update;
+- a deleted score drops its reading from view, and `--prune` later deletes the
+  row;
+- no stored profile can drift from the scores it describes.
+
+A per-name table would have needed every one of those cases written by hand.
+
+**Every field sums.** A reading is counts and lists. Wave ratios are binned in
+tenths, and a threshold that is never reached is counted, not left blank. So a
+player's record is their rows added together (`pool`, in both
+`playstyle.py` and `leaderboard/js/playstyle.mjs`), and the page does all the
+pooling. The roster column is that same shape, pooled once:
+`leaderboard/js/playstyle-baseline.mjs`. It comes from the winning seat of each
+roster self-play game, because every posted game is a win, and it is generated
+by `tools/playstyle.py --baseline`, never by hand. Game length is left off the
+panel because the baseline's setups are not the ones people play.
+
+**`rev` and `shape`.** `rev` is a digest of `playstyle.py` and
+`models/actuary.py`, since `waves` prices a garrison with actuary's
+`_effective`. A row stamped with another rev is read again while its log still
+replays. A log that no longer replays keeps the row it has. `shape` is the
+record's layout, and the page reads only the one it knows.
+
+**What it does not claim.**
+- Posted games are wins only, so this describes how a name wins, not how it
+  plays.
+- Names are typed, not owned, so anyone posting under a name adds to it.
+
+The panel says both. It appears only once a name has `MIN_GAMES` readings.
+
+### Decided against: warming actuary's learner from a profile
+
+The first idea was to feed this profile to actuary at Style: Learning, so its
+model of a person would not start cold. That was dropped before any of it was
+built.
+- The one curve actuary plays from (strike chance by ratio, player targets,
+  unpressed) reads the same for every bot and for the person: `learner.md`,
+  "The strike curve does not tell the bots apart" and "Predicting people".
+- The traits that do tell players apart (guard, evacuation, all-in share, and
+  the readings above) are not in actuary's model.
+- A prior seeded from a profile would therefore move little.
+- It would also make `decide` depend on a file or a fetch, not only on the
+  board, which bot replays and play-by-post both rely on.
 
 ## The game and the board are one site
 
