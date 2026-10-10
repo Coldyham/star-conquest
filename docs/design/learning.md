@@ -310,5 +310,28 @@ measurement is gone, and so is the chance-weighted reach. No stored game moves,
 since a stored game never re-runs a bot; the bot column recomputes, since it
 replays actuary at Learning.
 
-**Not measured:** knower at Predict and Search, wide jitter (0.3), the
-free-for-all, and play against a person.
+**knower and the free-for-all**, required only to be no worse (no pooled z at
+-2 or below). Plain Learning here is the reach form from commit `e1dcc68` with
+the flag off. Both arms are Learning seats, so both claim `is_oracle_seat` and
+knower models both blind: only the model differs. Duels on fresh seeds 8601-8800
+(Search 8601-8700, for cost), both seatings, 6 ly/turn. Free-for-alls on seeds
+8601-8800, the arm in every seat by rotation, the others in a fixed order. An
+undecided game at 600 turns counts as a loss for both arms (188 of 6,400, spread
+evenly but for 20 against 9 in the 4-seat lineup).
+
+    against             18 systems             40 systems             pooled
+    knower Predict      +12 / -10  z +0.43     +16 /  -6  z +2.13     +28 / -16  z +1.81
+    knower Search       +15 / -15  z +0.00     +13 / -20  z -1.22     +28 / -35  z -0.88
+
+    free-for-all                                    Learning -> split   paired
+    3 seats at 18, with marshal, knower Off         63.3% -> 62.5%      +57 / -62  z -0.46
+    3 seats at 18, with marshal, knower Predict     61.2% -> 62.7%      +61 / -52  z +0.85
+    4 seats at 24, with Planned, marshal, knower Off 45.4% -> 46.9%     +85 / -73  z +0.95
+
+Win rates against knower, Learning then split: Predict 89.2% to 90.8%, Search
+76.0% to 74.2%. Nowhere worse. Predict leans better (all of it at 40 systems),
+Search leans the other way inside the noise, and the free-for-alls are level.
+Search stops on a wall clock, as in "The stop", so its pairing is the noisiest
+here. **Kept.**
+
+**Not measured:** wide jitter (0.3) and play against a person.
