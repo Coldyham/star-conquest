@@ -23,6 +23,11 @@ to serve live, and an always-on host would spend most of its life idle waiting t
 recompute answers it already had. What the feature actually needs is a cache and
 something to fill it, which is a scheduled job: `.github/workflows/bot-replay.yml`
 writes into `public.bot_scores` on a schedule and leaves no service to keep up.
+The same workflow runs the score checks, the Playstyle readings and the weekly
+campaign map as jobs of their own. They share nothing but the secrets check, so
+a long bot replay never holds up the cheap three and one failing never stops
+the others, and *Run workflow* runs any subset of them (2026-10-10; until then
+they were steps of one job).
 Netlify was never a candidate either way — its Functions run JavaScript and Go,
 and there is no Python runtime to put the engine in.
 
@@ -33,8 +38,10 @@ runs find nothing to do and cost a few seconds of setup — the job installs no
 dependencies, since the simulation core imports no pygame and nothing off PyPI.
 Only a *private* repository makes the schedule a budget question: runs there
 bill against the account's monthly allowance (2,000 minutes on the Free plan)
-and GitHub rounds each job up to the whole minute, so hourly would spend 730+
-minutes a month just asking whether there is work. Either way the cadence
+and GitHub rounds each job up to the whole minute. The workflow is five jobs
+(a secrets check, then bot scores, score checks, Playstyle readings and the
+campaign map), so hourly would spend some 3,600 minutes a month just asking
+whether there is work. Either way the cadence
 comfortably covers the other thing the schedule buys: a free Supabase project
 pauses after about a week idle, and any run touches the REST API.
 
