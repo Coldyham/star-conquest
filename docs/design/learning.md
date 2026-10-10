@@ -389,3 +389,66 @@ person is not measured.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 and play against a person.
+
+## Five more arms, and three combinations (built, measured, deleted)
+
+These are the ideas still open after "Memory off", each built as an arm of
+Learning with memory on. Every arm was paired against Learning on the same
+games as "Memory off": seeds 9001-9400, both seatings, 18 and 40 systems at
+6 ly/turn, 4,800 games an arm, scored the same way. The flags (commits
+`ae60f84`, `be4ef7b`) are removed. **The gate** was the one used for "Memory
+off": better than Learning at z ≥ +2 pooled against some opponent, with none at
+z ≤ -2. A combination chosen after seeing the singles would have needed fresh
+seeds to confirm it. None came close.
+
+- **Pressed.** A rival garrison with hostile ships inbound reads the curve's
+  pressed row, which actuary already counts and never read. That row's prior
+  is higher at low ratios (0.08 against 0.04): a garrison under attack launches
+  more.
+- **Size.** A strike is all-in at `tools/learner_check.py`'s prior share
+  (0.464), or else sized at its prior ratio to our garrison (1.25 times what we
+  hold). Each source then has three outcomes in place of two.
+- **Guard.** learner's improvement 3, the half not built before. A rival keeps
+  its learned guard home: the median of what a launching frontier system kept
+  against its largest adjacent enemy, counted per rival in actuary's `Model` as
+  learner_check counts it. Its strike from a garrison of n is n less that
+  guard times our garrison. It reads true: marshal about 0.5 (its
+  `FRONTIER_GUARD` is 0.55), actuary 0.
+- **Joint.** A rival's garrisons next door strike together or not at all, at
+  the largest of their chances, in place of independently.
+- **Stronger memory.** `PRIOR_WEIGHT` 1 in place of 4, so a rival's own record
+  outweighs the roster's prior four times sooner.
+
+The table gives pooled z against Learning for each opponent, then the win rates
+against marshal, Learning then the arm:
+
+    arm                        marshal   knower Off   Planned    vs marshal
+    pressed                     +1.57      +0.49       +1.52     70.6% -> 71.8%
+    size                        -2.20      -1.15       -2.96     70.6% -> 68.3%
+    guard                       -2.08      -0.56       -0.14     70.6% -> 68.8%
+    joint                       -2.50      +0.59       -1.71     70.6% -> 68.2%
+    PRIOR_WEIGHT 1              -0.38      -0.13        0.00     70.6% -> 70.2%
+    pressed + guard             -2.30      -0.21       +0.75     70.6% -> 68.4%
+    pressed + guard + size      -3.32      -0.84       -2.74     69.6% -> 65.2%   (2,875 games, stopped)
+    pressed + guard + joint     -1.66      -0.59       -1.93     70.6% -> 68.9%
+
+A combination of joint and size would be joint alone, since joint replaces the
+independent sum that size splits. Pressed with memory off leans the same way
+as pressed alone, but it was dropped on purpose: Learning has to learn.
+
+**What they say.**
+- **Pressed is the one lean.** It is better against every opponent, but
+  nowhere near z +2, and adding guard wipes it out.
+- **Every arm that thins the threat is worse against marshal.** Guard, joint
+  and size each make a strike smaller or rarer than Learning does. marshal is
+  the rival that punishes a thin garrison, as in "Evacuation in the price of a
+  capture". Guard reads marshal's guard correctly and still loses. The guard is
+  counted on every launch, but when marshal strikes us it sends what wins, not
+  what is left over above its guard.
+- **The memory is not drowned by the prior.** Weighting the prior a quarter as
+  much changes nothing: 218 to 446 games an opponent were identical move for
+  move. Together with "Memory off", this says the strike curve, read in actuary's
+  risk, has nothing per rival to give.
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+and play against a person, for every arm here.
