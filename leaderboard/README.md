@@ -507,10 +507,13 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    keys" tab; it still works, under either that name or `SUPABASE_SERVICE_KEY`. The workflow skips itself cleanly while they are unset, so there is
    nothing to undo if you'd rather not. It runs hourly — Actions minutes are
    unmetered on a public repository, so the cadence answers to freshness, with
-   *Run workflow* for when you want it sooner. On a **private** fork every run
-   bills against the account's monthly allowance instead, so thin the schedule
-   there (`.github/workflows/bot-replay.yml`; daily is far sooner than a
-   leaderboard needs). Any run keeps a free Supabase project from idling into the
+   *Run workflow* for when you want it sooner. The workflow is four independent
+   jobs (bot scores, score checks, Playstyle readings, the weekly campaign map):
+   the schedule runs all four, and *Run workflow* runs only the ones ticked, each
+   with its own options. On a **private** fork every job bills against the
+   account's monthly allowance instead, each rounded up to a whole minute, so
+   thin the schedule there (`.github/workflows/bot-replay.yml`; daily is far
+   sooner than a leaderboard needs). Any run keeps a free Supabase project from idling into the
    pause noted under *Known limitations*.
 6. **Optional — accept replay uploads.** Set the *same two* values as
    environment variables on the game's Netlify site (*Site configuration →
