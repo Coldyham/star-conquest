@@ -89,6 +89,9 @@ OPENING_SKIPS = (True, False)
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
                             # its learned chance of striking a garrison of ours that thin)
+LEARN_MEMORY = True         # temporary control arm: False reads every rival at the prior
+                            # curve, as if never watched (docs/design/learning.md,
+                            # "Memory off: the prior alone")
 NODE_CAP = 512              # boards remembered, least recently used dropped first
 RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
@@ -795,6 +798,9 @@ def models_for(state) -> dict[int, Model]:
 def _curves(state) -> dict[int, list[float]]:
     """Each player's strike curve on a player-held target, unpressed, as of this
     board."""
+    if not LEARN_MEMORY:
+        prior = strike_curve(EMPTY, PLAYER, 0)
+        return {q: prior for q in sorted(state.players)}
     models = models_for(state)
     return {q: strike_curve(models.get(q, EMPTY), PLAYER, 0) for q in sorted(state.players)}
 
