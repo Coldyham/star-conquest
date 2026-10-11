@@ -89,12 +89,6 @@ OPENING_SKIPS = (True, False)
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
                             # its learned chance of striking a garrison of ours that thin)
-# Temporary arm of Learning: the counter-strike (docs/design/learning.md).
-LEARN_RIPOSTE = False       # value a reserve next to a rival that empties its frontier
-LEARN_MEMORY = True         # False: every rival read at the prior, as if never watched
-RIPOSTE_WEIGHT = 1.0        # share of the capture's swing the option is worth
-ALL_IN = 0.9                # a launch sending this share of its garrison empties it
-PRIOR_EMPTY = 0.088         # a frontier garrison's chance of emptying on a turn (roster self-play)
 NODE_CAP = 512              # boards remembered, least recently used dropped first
 RATIO_BINS = 31             # a ratio in tenths; the last bin is 3.0 and up
 PRIOR_WEIGHT = 4.0          # observations the prior is worth, per bin
@@ -138,12 +132,11 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    empties = _empty_rates(state) if stop == LEARNING and LEARN_RIPOSTE else None
     if stop != GREEDY:
         orders = opening(state, pid)
         if orders is not None:
             return orders
-    return _Ledger(state, pid, curves, empties).plan()
+    return _Ledger(state, pid, curves).plan()
 
 
 def _stop_of(player) -> int:
@@ -183,8 +176,7 @@ def decide_ms(settings, seat) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None, empties=None):
-        self.empties = empties      # the counter-strike arm: each rival's empty rate
+    def __init__(self, state, pid, curves=None):
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
         sysmap = state.systems
@@ -442,33 +434,8 @@ class _Ledger:
             return 0.0
         value = ships[H] + TAIL_TURNS * self.income[sid]
         if owner == self.pid:
-            return (ships[H] * self.front_value[sid] + TAIL_TURNS * self.income[sid]
-                    + (self._riposte(sid, line) if self.empties else 0.0))
+            return ships[H] * self.front_value[sid] + TAIL_TURNS * self.income[sid]
         return -value
-
-    def _riposte(self, sid, line):
-        """The counter-strike arm: what keeping ``sid``'s ships home is worth as a
-        reply to a rival system next door emptying itself next turn. The rival's
-        chance of emptying, times the capture's swing (its income tail, gained
-        and denied), when what ``sid`` holds then could take what it builds
-        before we land. The best such reply only: the ships can go once."""
-        owners, ships = line
-        if owners[1] != self.pid:
-            return 0.0
-        best = 0.0
-        for nbr, d in self.travel[sid].items():
-            n_owners = self.lines[nbr][0]
-            rival = n_owners[1]
-            if rival not in self.rivals:
-                continue
-            node = self.state.systems[nbr]
-            hulls = ((node.prod_progress + d + 1) // node.production
-                     if node.production > 0 else 0)
-            if ships[1] <= hulls * config.DEFENDER_ADVANTAGE + 1:
-                continue
-            p = self.empties.get(rival, PRIOR_EMPTY)
-            best = max(best, p * 2 * TAIL_TURNS * self.income[nbr])
-        return RIPOSTE_WEIGHT * best
 
     def _risk(self, sid, lines=None):
         """Expected loss at ``sid`` to the worst a single rival could land there:
@@ -721,13 +688,12 @@ def _with(arrivals, t, owner, ships):
 class Model:
     """What one rival has been seen to do: raw counts, the prior added on read."""
 
-    __slots__ = ("strikes", "passes", "empties", "turns")
+    __slots__ = ("strikes", "passes", "turns")
     COUNTS = __slots__[:-1]
 
-    def __init__(self, strikes, passes, empties, turns):
+    def __init__(self, strikes, passes, turns):
         self.strikes = strikes      # per (kind, pressed, target ratio bin): struck
         self.passes = passes        # ...and not struck
-        self.empties = empties      # frontier garrisons: (emptied voluntarily, did not)
         self.turns = turns
 
     def plus(self, other: Model) -> Model:
@@ -735,7 +701,7 @@ class Model:
                        for name in self.COUNTS), self.turns + other.turns)
 
 
-EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), (0.0, 0.0), 0)
+EMPTY = Model((0.0,) * (_ROWS * RATIO_BINS), (0.0,) * (_ROWS * RATIO_BINS), 0)
 
 
 class _Snap:
@@ -829,19 +795,8 @@ def models_for(state) -> dict[int, Model]:
 def _curves(state) -> dict[int, list[float]]:
     """Each player's strike curve on a player-held target, unpressed, as of this
     board."""
-    models = models_for(state) if LEARN_MEMORY else {}
+    models = models_for(state)
     return {q: strike_curve(models.get(q, EMPTY), PLAYER, 0) for q in sorted(state.players)}
-
-
-def empty_rate(model: Model) -> float:
-    """A frontier garrison's chance of emptying itself on a turn, by choice."""
-    emptied, held = model.empties
-    return (emptied + PRIOR_WEIGHT * PRIOR_EMPTY) / (emptied + held + PRIOR_WEIGHT)
-
-
-def _empty_rates(state) -> dict[int, float]:
-    models = models_for(state) if LEARN_MEMORY else {}
-    return {q: empty_rate(models.get(q, EMPTY)) for q in sorted(state.players)}
 
 
 def _fold(models: dict[int, Model], seen: dict[int, Model]) -> dict[int, Model]:
@@ -996,10 +951,6 @@ def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
         q = prev.owner[sid]
         c = counts.setdefault(q, {name: list(getattr(EMPTY, name)) for name in Model.COUNTS})
         pressed = 1 if hostile.get(sid, 0) > 0 else 0
-        frontier = any(prev.owner[n] not in (0, q) for n in state.systems[sid].neighbors)
-        if frontier and hostile.get(sid, 0) <= prev.ships[sid] * config.DEFENDER_ADVANTAGE:
-            launched = sum(to.values()) + _unknown
-            c["empties"][0 if launched >= ALL_IN * prev.ships[sid] else 1] += 1
         for option in _options(prev, state, sid):
             cell = (option.kind * 2 + pressed) * RATIO_BINS + _ratio_bin(option.ratio)
             c["strikes" if to.get(option.target, 0) > 0 else "passes"][cell] += 1

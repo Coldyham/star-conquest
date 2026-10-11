@@ -452,3 +452,69 @@ as pressed alone, but it was dropped on purpose: Learning has to learn.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 and play against a person, for every arm here.
+
+## The counter-strike (built, measured, deleted)
+
+**The idea.** In every arm above, the memory fed actuary's risk term, where it
+has nothing per rival to give. The trait that does tell players apart is the
+voluntary frontier empty: a frontier garrison launching 90% or more of itself
+with no hostile fleet big enough to make that an evacuation. This is the
+definition the Playstyle panel uses ([`leaderboard.md`](leaderboard.md),
+"Playstyle readings"). In the roster baseline an uncovered empty is lost within
+five turns 63% of the time. Counted per rival in actuary's memory, on 42
+two-seat games of the roster at 18 systems (seeds 1001-1002), the share of
+frontier turns that empty is:
+
+    actuary 0.243   knower 0.150   rusherplus 0.107   marshal 0.093
+    thinker 0.007   claudebot 0.002   heuristic 0.000   pooled 0.088
+
+The strike curve never separated the roster. This rate does.
+
+**The arm.** A temporary `LEARN_RIPOSTE` flag (commit `2386adb`). Each system
+of ours we hold next turn gets an option value in `_worth`. For each
+rival-held neighbour, the value is the rival's learned empty rate (prior 0.088,
+weight `PRIOR_WEIGHT`) times the capture's swing, twice `TAIL_TURNS` of its
+income, gained and denied. It counts only when what we hold next turn beats
+what that system builds before we land. The best such reply counts once, since
+the ships can only go once. `RIPOSTE_WEIGHT` scales it. Holding a reserve is
+then worth something against a rival that empties and nothing against one that
+does not.
+
+**Selection**, the same games as "Memory off" (seeds 9001-9400, 18 and 40
+systems, 4,800 games an arm, pooled z against Learning):
+
+    weight    marshal   knower Off   Planned
+    0.5        +1.28      +1.07       +2.86
+    1.0        +1.55      +1.34       +2.75
+
+Both passed the gate there. Weight 1 had the larger sum and went on.
+
+**Confirmation**, fresh seeds 9401-9800, with Learning and weight 1 with memory
+off played on the same games (14,400 games):
+
+    against          weight 1 vs Learning   weight 1, memory off, vs Learning   memory on vs off
+    marshal                +1.35                     +1.30                         -0.06
+    knower Off             -1.94                     +0.86                         -2.33
+    Planned                +0.61                     +0.38                         +0.20
+
+**It failed confirmation.** Its z +2.75 against Planned on the selection seeds
+was +0.61 on fresh ones, and it leaned worse against knower Off. Pooling all
+800 seeds gives about +2.0 against marshal and +2.4 against Planned, but half
+of those seeds chose the weight, so that pool does not count. The lean against
+marshal held on both seed sets.
+
+**Memory did not pay even here.** The memory-off twin played as well as the
+arm, and the head-to-head is level against marshal and Planned and worse
+against knower Off. The rate separates the roster when watched over many games,
+but within one game the counts that matter come too late or too few. A frontier
+garrison faces our reserve for a handful of turns before contact settles it, so
+the prior is what plays.
+
+**For a profile.** This was the one place a stored per-player profile could
+have earned a role: the voluntary empty is the Playstyle panel's own reading,
+and a profile would have warmed the rate a single game cannot learn. Since the
+learned rate does no better than the prior, a profile would not either. "Decided
+against: warming actuary's learner from a profile" stands.
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+other weights, and play against a person.

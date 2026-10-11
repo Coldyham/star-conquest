@@ -485,6 +485,11 @@ built.
 - A prior seeded from a profile would therefore move little.
 - It would also make `decide` depend on a file or a fetch, not only on the
   board, which bot replays and play-by-post both rely on.
+- Later measurement agreed (2026-10-11, [`learning.md`](learning.md), "Memory
+  off" and "The counter-strike"). Learning plays as well with no memory at all.
+  A counter-strike keyed to the voluntary frontier empty, the one Playstyle
+  reading that does separate players, did as well on the prior rate as on the
+  learned one. A profile would warm a number the game does not need warmed.
 
 ## The game and the board are one site
 
