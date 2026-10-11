@@ -525,8 +525,42 @@ rate a single game has to learn from nothing. That matters only if people sit
 far from the roster's 0.088, or vary a lot from one person to the next. The
 first check needs no live play: each person's empty rate in the posted games
 (`public_replays`) against the roster prior, and how many frontier turns one
-game gives. It has not been run: the cloud environment this was measured in
-could not reach the board's database.
+game gives.
+
+**People against the prior** (2026-10-11). The arm's definition was applied to
+the 148 posted games with ten or more hand turns, counting the person's hand
+turns only. Each game was joined to its score's name, and the names are left
+out here:
+
+    player              games   frontier turns   empty rate
+    the most active      137        13,820       0.164 ± 0.003
+    a second               5           515       0.157 ± 0.016
+    a third                5           491       0.041 ± 0.009
+    a fourth               1           226       0.018 ± 0.009
+    roster prior                                 0.088
+
+- **People sit far from the prior, on both sides.** It fits none of the four:
+  two empty about twice as often, and two a half to a fifth as often. The
+  spread across four people (0.02 to 0.16) is as wide as the roster's.
+- **One game gives about 66 frontier turns** (the median), and the prior is
+  worth 4. So in-game memory has most of a person's rate within the first
+  twenty or so. A profile would buy the turns before that, the early contact
+  where a counter-strike first applies.
+- **A person's own rate moves from game to game.** For the most active player
+  the variance between games is 0.0072, against 0.0022 that chance alone would
+  give, perhaps with the setup and the rival. A profile pins their average, not
+  this game's.
+- **Caveats.** Every posted game is a win. The bots in these games empty
+  differently from self-play (marshal 0.028 here, 0.093 in self-play), so a
+  bot's rate depends on the game it is in. One player is 93% of the sample.
+
+**What this does and does not settle.** People are not the roster on the one
+trait a profile holds, so "the prior already fits" does not carry over to them.
+But that alone does not show a profile would help. In self-play, actuary
+(0.24) and thinker (0.007) sat just as far from the prior, the counter-strike
+learned their rates within each game, and it did no better than the prior. The
+untested link is whether Learning, with or without a warm start, plays better
+against a person, and that needs people to play it.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 other weights, and play against a person.
