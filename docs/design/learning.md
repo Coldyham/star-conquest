@@ -562,5 +562,40 @@ learned their rates within each game, and it did no better than the prior. The
 untested link is whether Learning, with or without a warm start, plays better
 against a person, and that needs people to play it.
 
+**On the person's own positions** (2026-10-11). Bots cannot be re-simulated
+against a person, so the arm was scored on the posted games as played. Each
+game was replayed turn by turn. On every hand turn, each bot seat bordering
+the person was asked what it would order under four versions: Learning, the
+counter-strike learning the rate in-game, the counter-strike at the prior,
+and the counter-strike warm-started from the person's profile. The profile was
+the person's rate over their *other* posted games, worth 16 frontier turns,
+so no game was scored against itself. The person's next move comes from the
+log. An empty is *covered* when that version kept enough ships next door to
+beat what the emptied system builds before they land. The same measure on
+roster self-play is the control: a bot that empties often (knower, actuary at
+Planned, rusherplus) against marshal, seeds 9001-9050, 18 systems. The four
+versions decide for marshal's seat, as they do for a bot seat in a person's
+game.
+
+    opponent           games   empties   covered: Learning  prior  learned  warm   learned vs prior     warm vs learned
+    a person            148     2,617              31.9%    34.0%   35.3%  35.4%  +52 / -20  z +3.77  +8 / -4   z +1.15
+    knower               50     1,473              43.7%    48.9%   51.9%  52.0%  +70 / -25  z +4.62  +4 / -3   z +0.38
+    actuary Planned      50     2,589              37.6%    42.5%   47.5%  48.0%  +157 / -27 z +9.58  +13 / -2  z +2.84
+    rusherplus           50       410              53.9%    56.3%   58.3%  58.0%  +12 / -4   z +2.00  +0 / -1   z -1.00
+
+On quiet turns the counter-strike held 0.2 to 0.7 more ships on the person's
+border than Learning (10.92 to 11.39 with the rate learned in-game). Its orders
+differed from Learning's on 11% of positions.
+
+**What it says.** Against a person, the learned rate does what it was built to
+do: it covers more of the person's real empties than the prior, for a few
+tenths of a ship. A warm start adds a little more. But the control does the
+same, by a wider margin, and against those bots the learned rate won no more
+games ("The counter-strike", above). So covering an empty does not predict
+winning, and the human result shows the same mechanism, somewhat weaker. It is
+not evidence that Learning beats people more often. The memory reads the person
+and acts on it; whether acting on it wins still needs people to play it.
+
+
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 other weights, and play against a person.
