@@ -372,10 +372,17 @@ per turn (7.67 ms to 7.19 ms, both seats together).
 **It failed.** Learning beats memory-off nowhere. Memory-off is level against
 marshal and knower Off, and better against Planned (z +2.29, mostly at 18
 systems). So what Learning adds over Planned is a fixed discount: the prior
-curve read at the garrison we will hold. A rival's own record does not help.
-That fits the prediction check: memory sharpens the forecast only a little,
-and the curve does not tell the bots apart. The flag is removed, and Learning
-still learns.
+curve read at the garrison we will hold. Against the roster, a rival's own
+record does not help. That fits the prediction check: memory sharpens the
+forecast only a little, and the curve does not tell the bots apart. The flag is
+removed, and Learning still learns.
+
+**What this does not show.** Every opponent here is a roster bot, and the prior
+was fitted on roster self-play (`--fit-prior`, seeds 1001-1040). Against these
+opponents the prior is close to right by construction, so the memory has little
+to correct. A person who plays unlike the roster is the case where it could
+pay, and no person has played Learning. This result says nothing about play
+against people.
 
 **What it leaves open, for the author.** Learning could read the prior alone
 and keep no memory. Then `decide` reads only the board, so `is_oracle_seat`
@@ -448,7 +455,8 @@ as pressed alone, but it was dropped on purpose: Learning has to learn.
 - **The memory is not drowned by the prior.** Weighting the prior a quarter as
   much changes nothing: 218 to 446 games an opponent were identical move for
   move. Together with "Memory off", this says the strike curve, read in actuary's
-  risk, has nothing per rival to give.
+  risk, has nothing per rival to give against the roster. The caveat in "Memory
+  off" applies: the prior was fitted on these opponents.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 and play against a person, for every arm here.
@@ -503,18 +511,22 @@ was +0.61 on fresh ones, and it leaned worse against knower Off. Pooling all
 of those seeds chose the weight, so that pool does not count. The lean against
 marshal held on both seed sets.
 
-**Memory did not pay even here.** The memory-off twin played as well as the
-arm, and the head-to-head is level against marshal and Planned and worse
-against knower Off. The rate separates the roster when watched over many games,
-but within one game the counts that matter come too late or too few. A frontier
-garrison faces our reserve for a handful of turns before contact settles it, so
-the prior is what plays.
+**Memory did not pay against the roster.** The memory-off twin played as well
+as the arm, and the head-to-head is level against marshal and Planned and worse
+against knower Off. The rate separates the roster when watched over many games.
+Why one game's counts do not help is a guess, not a measurement. A frontier
+garrison faces our reserve for only a handful of turns, and the prior 0.088 is
+the roster's own average.
 
-**For a profile.** This was the one place a stored per-player profile could
-have earned a role: the voluntary empty is the Playstyle panel's own reading,
-and a profile would have warmed the rate a single game cannot learn. Since the
-learned rate does no better than the prior, a profile would not either. "Decided
-against: warming actuary's learner from a profile" stands.
+**For a profile: open.** People are the only players with Playstyle values,
+and no person has played this arm. The bot result cannot decide it. The
+voluntary empty is the Playstyle panel's own reading, so a profile would set the
+rate a single game has to learn from nothing. That matters only if people sit
+far from the roster's 0.088, or vary a lot from one person to the next. The
+first check needs no live play: each person's empty rate in the posted games
+(`public_replays`) against the roster prior, and how many frontier turns one
+game gives. It has not been run: the cloud environment this was measured in
+could not reach the board's database.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 other weights, and play against a person.
