@@ -146,7 +146,12 @@ So the duel result replicates and holds against knower. With knower as the
 third seat of a three-player game, every reading leans the other way, and most
 posted setups are three to five players. **Shipped gated to a duel:**
 `REMNANT = True` applies only while `REMNANT_MAX_PLAYERS = 2` players are
-alive, which covers every duel and the end of a larger game.
+alive, which covers every duel and the end of a larger game. In a larger game
+it is effectively inert: the same free-for-all harness reads every seed
+unchanged (900 seeds: 3p with knower at 24n/6 and 30n/3.5, 3p with thinker,
+4p with both), because by the time two players are left the neutrals are
+nearly gone (12 across 30 three-player games; 5 cheaper prices in 127
+lookups).
 
 **Raising `DEFENDER_ADVANTAGE` makes waiting *worse*, not better, and the knob's
 own range straddles the break-even.** The advantage lands on the survivor's side
