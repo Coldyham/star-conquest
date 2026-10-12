@@ -335,3 +335,267 @@ Search stops on a wall clock, as in "The stop", so its pairing is the noisiest
 here. **Kept.**
 
 **Not measured:** wide jitter (0.3) and play against a person.
+
+## Memory off: the prior alone (built, measured, flag removed)
+
+**The question.** "What the model can tell apart" ([`learner.md`](learner.md))
+shows the strike curve reads about the same for every bot: 0.16 at ratio 1.5,
+0.32 at 2.0. So Learning's gain over Planned might come from reading the
+*prior's* curve at the garrison we will hold, not from anything it learned
+about a rival.
+
+**The arm.** A temporary `LEARN_MEMORY` flag (commit `10df678`). Off, `_curves`
+gives every rival `strike_curve(EMPTY, PLAYER, 0)`, the prior alone, and the
+rest of Learning is unchanged, `is_oracle_seat` included. So knower models both
+arms blind, and only the memory differs.
+
+**How it was measured.** Paired duels on fresh seeds 9001-9400, both seatings,
+18 and 40 systems at 6 ly/turn: 9,600 games in all. Each game was played through
+`tools/sweep.py`'s `play_duel`, with four processes and the sweep's
+`BUDGET_SCALE`, and a repeat run matched every board digest. Each (cell,
+opponent, seed, seating) pairs Learning with memory-off. Flips are seeds that
+Learning won and memory-off lost, against the reverse. An undecided game at 600
+turns counts as a loss for both arms (337 of 9,600). **The gate, set before the
+run:** the memory earns its place if Learning beats memory-off at z ≥ +2 pooled
+against some opponent, with none at z ≤ -2.
+
+    Learning vs memory-off   18 systems             40 systems             pooled
+    marshal                  +32 / -41  z -1.05     +39 / -36  z +0.35     +71 / -77   z -0.49
+    knower Off               +14 / -19  z -0.87     +11 / -12  z -0.21     +25 / -31   z -0.80
+    actuary Planned          +28 / -47  z -2.19     +33 / -42  z -1.04     +61 / -89   z -2.29
+
+Win rates pooled, Learning then memory-off: 70.6% to 70.9% against marshal,
+92.0% to 92.4% against knower Off, 51.2% to 53.0% against Planned. 85 to 206
+games an opponent were identical move for move. The memory cost about 7% more
+per turn (7.67 ms to 7.19 ms, both seats together).
+
+**It failed.** Learning beats memory-off nowhere. Memory-off is level against
+marshal and knower Off, and better against Planned (z +2.29, mostly at 18
+systems). So what Learning adds over Planned is a fixed discount: the prior
+curve read at the garrison we will hold. Against the roster, a rival's own
+record does not help. That fits the prediction check: memory sharpens the
+forecast only a little, and the curve does not tell the bots apart. The flag is
+removed, and Learning still learns.
+
+**What this does not show.** Every opponent here is a roster bot, and the prior
+was fitted on roster self-play (`--fit-prior`, seeds 1001-1040). Against these
+opponents the prior is close to right by construction, so the memory has little
+to correct. A person who plays unlike the roster is the case where it could
+pay, and no person has played Learning. This result says nothing about play
+against people.
+
+**What it leaves open, for the author.** Learning could read the prior alone
+and keep no memory. Then `decide` reads only the board, so `is_oracle_seat`
+could go false, and knower at Predict and Search would run it. That gives back
+the 20-odd points the claim earns against knower ([`learner.md`](learner.md),
+"The roster ladder"), and moves the bot column. It would also cut the memo tree
+from the hot path. `tools/learner_check.py` and `tools/playstyle.py` still read
+the memo tree and the models through `models_for`. The memory reads a person a
+little better than the prior does ("Predicting people"), but play against a
+person is not measured.
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+and play against a person.
+
+## Five more arms, and three combinations (built, measured, deleted)
+
+These are the ideas still open after "Memory off", each built as an arm of
+Learning with memory on. Every arm was paired against Learning on the same
+games as "Memory off": seeds 9001-9400, both seatings, 18 and 40 systems at
+6 ly/turn, 4,800 games an arm, scored the same way. The flags (commits
+`ae60f84`, `be4ef7b`) are removed. **The gate** was the one used for "Memory
+off": better than Learning at z ≥ +2 pooled against some opponent, with none at
+z ≤ -2. A combination chosen after seeing the singles would have needed fresh
+seeds to confirm it. None came close.
+
+- **Pressed.** A rival garrison with hostile ships inbound reads the curve's
+  pressed row, which actuary already counts and never read. That row's prior
+  is higher at low ratios (0.08 against 0.04): a garrison under attack launches
+  more.
+- **Size.** A strike is all-in at `tools/learner_check.py`'s prior share
+  (0.464), or else sized at its prior ratio to our garrison (1.25 times what we
+  hold). Each source then has three outcomes in place of two.
+- **Guard.** learner's improvement 3, the half not built before. A rival keeps
+  its learned guard home: the median of what a launching frontier system kept
+  against its largest adjacent enemy, counted per rival in actuary's `Model` as
+  learner_check counts it. Its strike from a garrison of n is n less that
+  guard times our garrison. It reads true: marshal about 0.5 (its
+  `FRONTIER_GUARD` is 0.55), actuary 0.
+- **Joint.** A rival's garrisons next door strike together or not at all, at
+  the largest of their chances, in place of independently.
+- **Stronger memory.** `PRIOR_WEIGHT` 1 in place of 4, so a rival's own record
+  outweighs the roster's prior four times sooner.
+
+The table gives pooled z against Learning for each opponent, then the win rates
+against marshal, Learning then the arm:
+
+    arm                        marshal   knower Off   Planned    vs marshal
+    pressed                     +1.57      +0.49       +1.52     70.6% -> 71.8%
+    size                        -2.20      -1.15       -2.96     70.6% -> 68.3%
+    guard                       -2.08      -0.56       -0.14     70.6% -> 68.8%
+    joint                       -2.50      +0.59       -1.71     70.6% -> 68.2%
+    PRIOR_WEIGHT 1              -0.38      -0.13        0.00     70.6% -> 70.2%
+    pressed + guard             -2.30      -0.21       +0.75     70.6% -> 68.4%
+    pressed + guard + size      -3.32      -0.84       -2.74     69.6% -> 65.2%   (2,875 games, stopped)
+    pressed + guard + joint     -1.66      -0.59       -1.93     70.6% -> 68.9%
+
+A combination of joint and size would be joint alone, since joint replaces the
+independent sum that size splits. Pressed with memory off leans the same way
+as pressed alone, but it was dropped on purpose: Learning has to learn.
+
+**What they say.**
+- **Pressed is the one lean.** It is better against every opponent, but
+  nowhere near z +2, and adding guard wipes it out.
+- **Every arm that thins the threat is worse against marshal.** Guard, joint
+  and size each make a strike smaller or rarer than Learning does. marshal is
+  the rival that punishes a thin garrison, as in "Evacuation in the price of a
+  capture". Guard reads marshal's guard correctly and still loses. The guard is
+  counted on every launch, but when marshal strikes us it sends what wins, not
+  what is left over above its guard.
+- **The memory is not drowned by the prior.** Weighting the prior a quarter as
+  much changes nothing: 218 to 446 games an opponent were identical move for
+  move. Together with "Memory off", this says the strike curve, read in actuary's
+  risk, has nothing per rival to give against the roster. The caveat in "Memory
+  off" applies: the prior was fitted on these opponents.
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+and play against a person, for every arm here.
+
+## The counter-strike (built, measured, deleted)
+
+**The idea.** In every arm above, the memory fed actuary's risk term, where it
+has nothing per rival to give. The trait that does tell players apart is the
+voluntary frontier empty: a frontier garrison launching 90% or more of itself
+with no hostile fleet big enough to make that an evacuation. This is the
+definition the Playstyle panel uses ([`leaderboard.md`](leaderboard.md),
+"Playstyle readings"). In the roster baseline an uncovered empty is lost within
+five turns 63% of the time. Counted per rival in actuary's memory, on 42
+two-seat games of the roster at 18 systems (seeds 1001-1002), the share of
+frontier turns that empty is:
+
+    actuary 0.243   knower 0.150   rusherplus 0.107   marshal 0.093
+    thinker 0.007   claudebot 0.002   heuristic 0.000   pooled 0.088
+
+The strike curve never separated the roster. This rate does.
+
+**The arm.** A temporary `LEARN_RIPOSTE` flag (commit `2386adb`). Each system
+of ours we hold next turn gets an option value in `_worth`. For each
+rival-held neighbour, the value is the rival's learned empty rate (prior 0.088,
+weight `PRIOR_WEIGHT`) times the capture's swing, twice `TAIL_TURNS` of its
+income, gained and denied. It counts only when what we hold next turn beats
+what that system builds before we land. The best such reply counts once, since
+the ships can only go once. `RIPOSTE_WEIGHT` scales it. Holding a reserve is
+then worth something against a rival that empties and nothing against one that
+does not.
+
+**Selection**, the same games as "Memory off" (seeds 9001-9400, 18 and 40
+systems, 4,800 games an arm, pooled z against Learning):
+
+    weight    marshal   knower Off   Planned
+    0.5        +1.28      +1.07       +2.86
+    1.0        +1.55      +1.34       +2.75
+
+Both passed the gate there. Weight 1 had the larger sum and went on.
+
+**Confirmation**, fresh seeds 9401-9800, with Learning and weight 1 with memory
+off played on the same games (14,400 games):
+
+    against          weight 1 vs Learning   weight 1, memory off, vs Learning   memory on vs off
+    marshal                +1.35                     +1.30                         -0.06
+    knower Off             -1.94                     +0.86                         -2.33
+    Planned                +0.61                     +0.38                         +0.20
+
+**It failed confirmation.** Its z +2.75 against Planned on the selection seeds
+was +0.61 on fresh ones, and it leaned worse against knower Off. Pooling all
+800 seeds gives about +2.0 against marshal and +2.4 against Planned, but half
+of those seeds chose the weight, so that pool does not count. The lean against
+marshal held on both seed sets.
+
+**Memory did not pay against the roster.** The memory-off twin played as well
+as the arm, and the head-to-head is level against marshal and Planned and worse
+against knower Off. The rate separates the roster when watched over many games.
+Why one game's counts do not help is a guess, not a measurement. A frontier
+garrison faces our reserve for only a handful of turns, and the prior 0.088 is
+the roster's own average.
+
+**For a profile: open.** People are the only players with Playstyle values,
+and no person has played this arm. The bot result cannot decide it. The
+voluntary empty is the Playstyle panel's own reading, so a profile would set the
+rate a single game has to learn from nothing. That matters only if people sit
+far from the roster's 0.088, or vary a lot from one person to the next. The
+first check needs no live play: each person's empty rate in the posted games
+(`public_replays`) against the roster prior, and how many frontier turns one
+game gives.
+
+**People against the prior** (2026-10-11). The arm's definition was applied to
+the 148 posted games with ten or more hand turns, counting the person's hand
+turns only. Each game was joined to its score's name, and the names are left
+out here:
+
+    player              games   frontier turns   empty rate
+    the most active      137        13,820       0.164 ± 0.003
+    a second               5           515       0.157 ± 0.016
+    a third                5           491       0.041 ± 0.009
+    a fourth               1           226       0.018 ± 0.009
+    roster prior                                 0.088
+
+- **People sit far from the prior, on both sides.** It fits none of the four:
+  two empty about twice as often, and two a half to a fifth as often. The
+  spread across four people (0.02 to 0.16) is as wide as the roster's.
+- **One game gives about 66 frontier turns** (the median), and the prior is
+  worth 4. So in-game memory has most of a person's rate within the first
+  twenty or so. A profile would buy the turns before that, the early contact
+  where a counter-strike first applies.
+- **A person's own rate moves from game to game.** For the most active player
+  the variance between games is 0.0072, against 0.0022 that chance alone would
+  give, perhaps with the setup and the rival. A profile pins their average, not
+  this game's.
+- **Caveats.** Every posted game is a win. The bots in these games empty
+  differently from self-play (marshal 0.028 here, 0.093 in self-play), so a
+  bot's rate depends on the game it is in. One player is 93% of the sample.
+
+**What this does and does not settle.** People are not the roster on the one
+trait a profile holds, so "the prior already fits" does not carry over to them.
+But that alone does not show a profile would help. In self-play, actuary
+(0.24) and thinker (0.007) sat just as far from the prior, the counter-strike
+learned their rates within each game, and it did no better than the prior. The
+untested link is whether Learning, with or without a warm start, plays better
+against a person, and that needs people to play it.
+
+**On the person's own positions** (2026-10-11). Bots cannot be re-simulated
+against a person, so the arm was scored on the posted games as played. Each
+game was replayed turn by turn. On every hand turn, each bot seat bordering
+the person was asked what it would order under four versions: Learning, the
+counter-strike learning the rate in-game, the counter-strike at the prior,
+and the counter-strike warm-started from the person's profile. The profile was
+the person's rate over their *other* posted games, worth 16 frontier turns,
+so no game was scored against itself. The person's next move comes from the
+log. An empty is *covered* when that version kept enough ships next door to
+beat what the emptied system builds before they land. The same measure on
+roster self-play is the control: a bot that empties often (knower, actuary at
+Planned, rusherplus) against marshal, seeds 9001-9050, 18 systems. The four
+versions decide for marshal's seat, as they do for a bot seat in a person's
+game.
+
+    opponent           games   empties   covered: Learning  prior  learned  warm   learned vs prior     warm vs learned
+    a person            148     2,617              31.9%    34.0%   35.3%  35.4%  +52 / -20  z +3.77  +8 / -4   z +1.15
+    knower               50     1,473              43.7%    48.9%   51.9%  52.0%  +70 / -25  z +4.62  +4 / -3   z +0.38
+    actuary Planned      50     2,589              37.6%    42.5%   47.5%  48.0%  +157 / -27 z +9.58  +13 / -2  z +2.84
+    rusherplus           50       410              53.9%    56.3%   58.3%  58.0%  +12 / -4   z +2.00  +0 / -1   z -1.00
+
+On quiet turns the counter-strike held 0.2 to 0.7 more ships on the person's
+border than Learning (10.92 to 11.39 with the rate learned in-game). Its orders
+differed from Learning's on 11% of positions.
+
+**What it says.** Against a person, the learned rate does what it was built to
+do: it covers more of the person's real empties than the prior, for a few
+tenths of a ship. A warm start adds a little more. But the control does the
+same, by a wider margin, and against those bots the learned rate won no more
+games ("The counter-strike", above). So covering an empty does not predict
+winning, and the human result shows the same mechanism, somewhat weaker. It is
+not evidence that Learning beats people more often. The memory reads the person
+and acts on it; whether acting on it wins still needs people to play it.
+
+
+**Not measured:** knower at Predict and Search, the speed cells, wide jitter,
+other weights, and play against a person.
