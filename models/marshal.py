@@ -233,6 +233,10 @@ HOLD_FOLLOW = 0.0               # Phase 3c: while a strike is in flight, send a
                                  # of the largest rival stack next to the target;
                                  # 0 = off. See "Holding a capture before the
                                  # counter" in docs/design/marshal-flow.md
+REMNANT = False                 # _required: a neutral a rival breaks before we
+                                 # land is priced against the nominal remnant when
+                                 # that is cheaper. See "Racing a third player for
+                                 # the same system" in docs/design/marshal-pricing.md
 
 
 # --------------------------------------------------------------------------- #
@@ -562,7 +566,8 @@ def _required(state, pid, target, dist: int) -> int:
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
-        return max(ships + 1, math.ceil(ships * _neutral_margin()))
+        static = max(ships + 1, math.ceil(ships * _neutral_margin()))
+        return min(static, _remnant_price(state, pid, target, dist)) if REMNANT else static
     defence = (ships + _inbound(state, target.id, target.owner_id, dist)
                + _production_by(target, dist))
     if RELIEF_AWARE > 0:
@@ -575,6 +580,32 @@ def _required(state, pid, target, dist: int) -> int:
         defence = _after_clash(defence, _attacker_pileup(by_turn[turn]))
     need = max(defence + 1, math.ceil(defence * _enemy_margin()))
     return _through_pileup(need, alongside)
+
+
+def _remnant_price(state, pid, target, dist: int) -> float:
+    """What a neutral costs if rival blocs land on it before we do: each
+    earlier turn's pile-up fights the garrison at the *nominal* roll, and a
+    rival that takes it builds from the turn after. The pessimistic corner
+    (``_after_clash``) would price the same dice twice under ``_enemy_margin``
+    and erase the opportunity, so this one branch reads the middle of the
+    square. Infinite when nobody lands first."""
+    blocs: dict[int, list[int]] = defaultdict(list)
+    for turn, _owner, incoming in _rival_waves(state, pid, target.id, dist - 1):
+        blocs[turn].append(incoming)
+    if not blocs:
+        return math.inf
+    garrison, held_since = target.ships, None
+    for turn in sorted(blocs):
+        p = combat.preview_fight(_attacker_pileup(blocs[turn]), garrison,
+                                 config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+        garrison = p.nominal.survivors
+        if p.nominal.winner == combat.ATTACKER:
+            held_since = turn if held_since is None else held_since
+    if held_since is None:
+        return max(garrison + 1, math.ceil(garrison * _neutral_margin()))
+    if target.production > 0:
+        garrison += (dist - held_since - 1) // target.production
+    return max(garrison + 1, math.ceil(garrison * _enemy_margin()))
 
 
 def _shortfalls(state, pid, fronts, sends) -> dict[int, int]:

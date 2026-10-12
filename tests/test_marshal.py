@@ -47,7 +47,7 @@ def _restore_globals(ma):
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -488,6 +488,34 @@ def test_hold_follow_waits_for_a_sure_capture(ma):
     off = ai.decide(state, 2)
     ma.HOLD_FOLLOW = 1.0
     assert ai.decide(state, 2) == off
+
+
+def _remnant_board(rival_ships):
+    """Neutral 3 holds 9. Rival 1's fleet lands on it next turn; our 2 (10
+    ships) is three turns out, so we would fight whatever is left."""
+    state = _board({1: (1, 0, 3), 2: (2, 10, 3), 3: (0, 9, 3)},
+                   [(1, 3, 1), (2, 3, 3)])
+    state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=3, ships=rival_ships,
+                              turns_total=1, turns_remaining=1))
+    return state
+
+
+def test_remnant_prices_a_broken_neutral_cheaper(ma):
+    state = _remnant_board(10)              # 10 on 9 leaves about 4
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    assert static > 10
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) < static
+    assert _totals(ai.decide(state, 2)).get(3, 0) > 0, "the cheaper price opens the strike"
+
+
+def test_remnant_never_prices_a_neutral_dearer(ma):
+    state = _remnant_board(30)              # a big stack leaves a big remnant
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) == static
 
 
 def test_commitment_only_ever_adds(ma):
