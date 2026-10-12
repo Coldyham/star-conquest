@@ -71,6 +71,9 @@ uv run python tools/config_census.py            # which setups people actually
                                                 # play (public tables, no key)
 uv run python tools/setup_sweep.py              # ...and whether the roster's
                                                 # ranking moves on one of them
+uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by
+                                                # hand, a turn per call, through fog;
+                                                # writes a games/ log plus notes
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # floor and
                                                 # best line found for one setup (local check)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's own JS suite
