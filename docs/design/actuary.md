@@ -599,3 +599,42 @@ the rest of the roster it was level or worse than actuary, and on the board's
 maps it won 46 to actuary's 61. Waiting pays against a rival that races for
 neutrals (heuristic) and loses against one that does not, so whether to wait is
 a question about the rival.
+
+## Crossing transfers (measured, deleted)
+
+Found playing by hand (`seat-play.md`): the greedy sometimes commits A->B and
+then, the projection changed, B->A between two of our own systems on the same
+turn. Both stacks fly a lane's length and both garrisons sit thin meanwhile,
+where one launch of the difference reaches the same final split with more held
+on the way. Instrumented over 40 duels against marshal at 24 nodes: 273 crossings
+in 22,582 launches, about 7 a game, 3.4 ships a side over a 2.8-turn lane.
+
+`NET_CROSSINGS` netted each pair into one launch after the greedy finished.
+`tools/sweep.py`, actuary mirror, 150 seeds, three cells (18 and 24 nodes at 6
+ly/turn, 24 at 12):
+
+    arm   18n@6   24n@6   24n@12   pooled                 seed pairs
+    net   48.3%   48.1%   49.8%    48.7% (424-446)        +17/-28, z -1.64
+
+Null, leaning worse in both halves. A plausible reading is that a stack in flight
+cannot be struck and a crossing is the greedy rotating its front stack with the
+fresh one behind it. Either way it is not waste worth removing. Deleted.
+
+## Neutrals at less than the worst roll (measured, deleted)
+
+Also from hand play: actuary books a capture only if it wins at the worst roll
+(1.222x at the default jitter), and a static neutral can neither flee nor be
+relieved. In game 404 of `seat-play.md` it spent ten turns saving up 10 ships for
+an 8-ship neutral, and at 1.10x an attacker wins 86% of the time, at
+1.15x 95%. `NEUTRAL_SWING` priced a capture of a neutral at that swing instead, in
+the ledger's `_fight` and the opening's `need` alike. Same harness and cells as
+above:
+
+    arm             18n@6   24n@6   24n@12   pooled               seed pairs
+    swing 1.10      47.5%   47.5%   47.6%    47.5% (407-449)      +69/-96, z -2.10  REPRODUCED worse
+    swing 1.15      48.4%   48.9%   51.5%    49.6% (424-430)      +70/-73, z -0.25
+
+The same answer marshal got from `NEUTRAL_MARGIN` 1.2 (47.1%,
+[`marshal-flow.md`](marshal-flow.md)). The lost roll costs a whole fleet and the
+tempo with it, and over every neutral in a game that outweighs the turns saved.
+Deleted.

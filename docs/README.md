@@ -38,6 +38,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
+| [`design/seat-play.md`](design/seat-play.md) | Five games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
@@ -112,6 +113,11 @@ only for a fight; what is deliberately not animated.
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/par.md
 - **Par search (a local check).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings: it beat 5 of 6 recorded human wins, and on the live board (86 maps under 20 systems) lucky dice beat the best human score on 76 of 84; the rollout bot matters more than the beam; the `verify_scores` gap it exposed, whose dice half is closed for keyed turns.
+
+### design/seat-play.md
+- **What decided the games.** Both bots evacuate into the system you struck from; covering every exit (a pincer whose sources keep their garrisons, or relief timed onto an evacuee's landing) is what killed stacks; a dead end bottles a stack; actuary punishes a thinned garrison the next turn; opening tempo; a free-for-all goes to the swap war.
+- **Readings over the logs.** Strikes on a system emptied at launch succeed 43-47% against people and 67-76% against bots (public replays); marshal's price is for a garrison that runs; actuary crossing its own transfers; actuary waiting for the worst roll on neutrals. The last two were built and measured in `actuary.md`.
+- **What a person should do.** The brief version.
 
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
@@ -256,6 +262,8 @@ the measured result was indistinguishable from the baseline.
 - Handing the opening over 2 or 3 lanes from a rival: fixes small maps, gives back the 40-80 node gain. A side floor of 9-16: costs a little at 24-80 nodes. *A side too small to plan.*
 - Trying several `aux` values per map in the bot column and keeping the best: mostly picks the luckier dice (one board ranges 13-165 turns on dice alone); fix the bot instead. *Same section.*
 - `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
+- Netting same-turn crossing transfers between our own systems (`NET_CROSSINGS`): 48.7%, seed pairs z -1.64. Deleted. *Crossing transfers.*
+- Pricing a neutral capture below the worst roll (`NEUTRAL_SWING` 1.10 / 1.15): reproduced worse at 1.10 (seed pairs z -2.10), null at 1.15. Deleted. *Neutrals at less than the worst roll.*
 - **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
 - Pricing strikes at the nominal roll and dropping the risk weight while behind on income but ahead on ships: not built, since a real lead on a short clock arises 4 times in 84 games (2 across the posted human games) and a real lead is already converted 87% of the time. Variance-seeking while behind on both: unmeasured. *Behind on income, ahead on ships.*
 - `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*

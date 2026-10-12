@@ -745,6 +745,12 @@ re-flooding" above), because the trickle was supplying the jitter cushion
 `_enemy_margin` leaves out; if it reads the same way there, gate it off at high
 advantage rather than drop it, since that setting is rarely played.
 
+The person's side of it, from the public replays: marshal's strikes on a
+person's system that was empty (0-2 ships) at launch were captured 9 times in
+21, against 19 in 25 on a bot's. A person refills an emptied system and a bot
+does not. See "Strikes on a system emptied at launch" in
+[`seat-play.md`](seat-play.md).
+
 ## Holding a capture before the counter (2026-10-12): two arms, both deleted
 
 **Where the idea came from.** A hand-played game through `tools/seat_play.py`
