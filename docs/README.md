@@ -38,7 +38,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
-| [`design/seat-play.md`](design/seat-play.md) | Five games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
+| [`design/seat-play.md`](design/seat-play.md) | Six games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
@@ -117,7 +117,8 @@ only for a fight; what is deliberately not animated.
 ### design/seat-play.md
 - **What decided the games.** Both bots evacuate into the system you struck from; covering every exit (a pincer whose sources keep their garrisons, or relief timed onto an evacuee's landing) is what killed stacks; a dead end bottles a stack; actuary punishes a thinned garrison the next turn; opening tempo; a free-for-all goes to the swap war.
 - **Readings over the logs.** Strikes on a system emptied at launch succeed 43-47% against people and 67-76% against bots (public replays); marshal's price is for a garrison that runs; actuary crossing its own transfers; actuary waiting for the worst roll on neutrals. The last two were built and measured in `actuary.md`.
-- **What a person should do.** The brief version.
+- **What a person should do.** The brief version, including pinning actuary.
+- **What was built from these games.** Four marshal arms (all deleted) and actuary's `SELF_RELIEF`.
 
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
@@ -250,6 +251,7 @@ the measured result was indistinguishable from the baseline.
 - Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
 - A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`: deleted. *What the board's human wins say.*
 - A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`, kept off behind its flag): a faint lean seed by seed (z +1.36 on fresh seeds across marshal, knower and actuary) that no sample establishes. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
+- `CORNERED_EDGE` (full attack edge on a garrison with nowhere to run): 49.2%, null. `REFILL_SOURCE` (top up a struck-from source from its neighbours): 45.3%, reproduced worse; from rear systems only, 49.2%, null. `TRICKLE_GATE` (the "no lone trickles" candidate: pour on a rival target only with a same-turn wave): 50.9%, then exactly 50.0% on 300 fresh seeds including 3 ly/turn. All deleted. *See `seat-play.md`, "What was built from these games".*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
 
 ### actuary ([`design/actuary.md`](design/actuary.md))
@@ -262,6 +264,7 @@ the measured result was indistinguishable from the baseline.
 - Handing the opening over 2 or 3 lanes from a rival: fixes small maps, gives back the 40-80 node gain. A side floor of 9-16: costs a little at 24-80 nodes. *A side too small to plan.*
 - Trying several `aux` values per map in the bot column and keeping the best: mostly picks the luckier dice (one board ranges 13-165 turns on dice alone); fix the bot instead. *Same section.*
 - `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
+- `SELF_RELIEF` 1.0 (count all of our neighbouring garrisons as relief in the risk term): 44.6%, reproduced worse, and again on fresh seeds. 0.5 reproduced *better* (seed pairs z +2.38) and is pending confirmation, behind its flag. *A front stack pins the whole side.*
 - Netting same-turn crossing transfers between our own systems (`NET_CROSSINGS`): 48.7%, seed pairs z -1.64. Deleted. *Crossing transfers.*
 - Pricing a neutral capture below the worst roll (`NEUTRAL_SWING` 1.10 / 1.15): reproduced worse at 1.10 (seed pairs z -2.10), null at 1.15. Deleted. *Neutrals at less than the worst roll.*
 - **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*

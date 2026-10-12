@@ -1,6 +1,6 @@
 # Hand-played games against marshal and actuary (2026-10-12)
 
-Five games played seat by seat with `tools/seat_play.py`, every turn's reason in
+Six games played seat by seat with `tools/seat_play.py`, every turn's reason in
 the log's notes sidecar, then two readings over those logs and the board's
 public replays. The point was to find where a person can catch the two bots in
 active development out, and what that says about their skeletons. The play is
@@ -16,6 +16,7 @@ maps, the human in seat 1, both bots at their default stop (actuary: Planned).
     404   18     actuary             lost                         65
     505   18     marshal, actuary    lost (actuary won)          165
     606   13     marshal             lost                         61
+    707   13     actuary             lost                        163
 
 ## What decided the games
 
@@ -58,6 +59,20 @@ followed by an immediate refill of the source (3->6 in game 404, the turn after
 6 emptied), so my counter-swaps landed on a garrison already rebuilt. Against
 marshal, thinning was safer: it struck thin garrisons too, but late and at its
 fleeing-garrison price (below), so a stand often held.
+
+**A stack parked next door pins actuary.** In game 707 I opened with one stack,
+took every neutral on my side, then parked a stack beside each of actuary's two
+frontier systems and kept each above 1/1.22 of the garrison it faced. actuary
+held 3 systems from turn 7 to turn 59 while the neutrals behind it (9, 10, 1, 8)
+stayed untaken. By its own ledger, sending 7 ships from 3 to take neutral 10
+(5 ships) priced at -5.25, almost all of it the risk at 3 against my 12 next
+door. The risk term weighs a rival stack against the garrison alone, never
+against the relief actuary's other systems could send. The moment my stack moved
+(turn 59) actuary unfroze: in five turns it took two neutrals and threw 24 at my
+thinned 0. I then won the exchange (its 23 died landing on my 2 with my 20,
+turn 68) and led 73 ships to 38 by turn 70. From there it out-swapped me again
+and won on turn 163. See "A front stack pins the whole side" in `actuary.md`
+for the change this led to.
 
 **Opening tempo decided the losses to marshal.** In game 606 marshal chained its
 home stack neutral to neutral and had 6 systems to my 4 by turn 26. I split the
@@ -155,3 +170,29 @@ z -2.10), at 1.15x it is null. See "Neutrals at less than the worst roll
 - Against actuary, do not thin a frontier garrison below 1/1.22 of everything
   next to it. It notices on the next turn.
 - Bottle a stack in a dead end and leave it there.
+- Pin actuary: a stack beside each of its frontier systems, each above 1/1.22
+  of the garrison it faces, freezes its expansion. Out-expand it behind the pins
+  and do not break them to attack until you can win the exchange outright.
+
+## What was built from these games (2026-10-12, overnight)
+
+Measured with `tools/sweep.py` as a mirror against the stock bot, default cells
+(18 and 24 nodes at 6 ly/turn, 24 at 12) unless noted:
+
+    bot      arm                                       rate     seed pairs        verdict
+    marshal  CORNERED_EDGE (full edge on a garrison     49.2%    +18/-27 z-1.34    null
+             with nowhere to run)
+    marshal  REFILL_SOURCE (top up a struck-from        45.3%    +32/-83 z-4.76    worse, reproduced
+             source from neighbours)
+    marshal  ...from rear systems only                  49.2%    +25/-36 z-1.41    null
+    marshal  TRICKLE_GATE (pour on a rival target       50.9%    +62/-48 z+1.33    lean, then
+             only alongside a same-turn wave)                                     50.0% on 300 fresh
+                                                                                  seeds with 3 ly/turn
+    actuary  SELF_RELIEF 0.5                            53.1%    +58/-35 z+2.38    better, reproduced;
+                                                                                  see actuary.md
+    actuary  SELF_RELIEF 1.0                            44.6%    +37/-77 z-3.75    worse, reproduced
+
+Every marshal arm was deleted. Covering the swap from marshal's side costs more
+than the swap does, which is what `DENY_SWAP` found too ("Denying the swap" in
+`marshal-flow.md`). The trickle gate is the "no lone trickles into a rival"
+candidate from that file, now measured null.

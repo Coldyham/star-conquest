@@ -66,6 +66,12 @@ REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relie
 MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
                             # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
+SELF_RELIEF = 0.0           # share of our own neighbouring garrisons counted as
+                            # able to relieve a system the risk term reads (see
+                            # "A front stack pins the whole side" in actuary.md)
+SELF_RELIEF_REACTS = False  # ...counting a neighbour only if its lane is shorter than
+                            # the shortest rival lane into the system, so relief
+                            # launched after the strike is seen still lands first
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython,
 # fitted to a grid of 18-120 systems, 3-18 ly/turn and 2-5 seats (see "Cost, and
@@ -317,6 +323,8 @@ class _Ledger:
         was where it stood, and the source can only lose by it. (A garrison that
         will be attacked is never idle: by the square law a bigger stack keeps
         more than the ships added to it.)"""
+        if SELF_RELIEF > 0 and any(self.risk[n] for x in (src, dst) for n in self.travel[x]):
+            return False        # moving them changes the relief a neighbour counts on
         return (self.front_value[dst] <= self.front_value[src]
                 and self._quiet(src) and self._quiet(dst))
 
@@ -407,7 +415,8 @@ class _Ledger:
         exposed = set(touched)
         rivals = self.rivals
         for sid in touched:
-            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]):
+            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]) \
+                    or (SELF_RELIEF > 0 and self.pid in self.lines[sid][0]):
                 exposed.update(self.travel[sid])
         for sid in exposed:
             gain -= self._risk(sid, lines) - self.risk[sid]
@@ -471,16 +480,37 @@ class _Ledger:
                         reach[t] += n_ships[t - d]
             if reach is None:
                 continue
+            if SELF_RELIEF > 0:
+                quickest = min(d for nbr, d in self.travel[sid].items()
+                               if rival in (lines.get(nbr) or self.lines[nbr])[0])
+                own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
+            else:
+                own = None
             for t in range(1, H + 1):
                 if owners[t] != pid or reach[t] <= 0:
                     continue
                 need = reach[t] / self.advantage
-                if need > ships[t]:
-                    worst = max(worst, (need - ships[t]) / need)
+                held = ships[t] + (own[t] if own else 0.0)
+                if need > held:
+                    worst = max(worst, (need - held) / need)
         if worst <= 0.0:
             return 0.0
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
         return RISK_WEIGHT * worst * stake
+
+    def _own_relief(self, sid, lines, under=None):
+        """Per turn, ``SELF_RELIEF`` of what our garrisons next door could have
+        landed on ``sid`` by then."""
+        H, pid = self.horizon, self.pid
+        own = [0.0] * (H + 1)
+        for nbr, d in self.travel[sid].items():
+            if under is not None and d >= under:
+                continue
+            n_owners, n_ships = lines.get(nbr) or self.lines[nbr]
+            for t in range(d, H + 1):
+                if n_owners[t - d] == pid:
+                    own[t] += SELF_RELIEF * n_ships[t - d]
+        return own
 
     def _learned_shortfall(self, sid, owners, ships, rival, curve, lines):
         """The worst turn's expected shortfall share against ``rival``, with each

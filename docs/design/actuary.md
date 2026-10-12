@@ -638,3 +638,44 @@ The same answer marshal got from `NEUTRAL_MARGIN` 1.2 (47.1%,
 [`marshal-flow.md`](marshal-flow.md)). The lost roll costs a whole fleet and the
 tempo with it, and over every neutral in a game that outweighs the turns saved.
 Deleted.
+
+## A front stack pins the whole side (`SELF_RELIEF`, flag off, confirmation pending)
+
+Found playing by hand (game 707 in `seat-play.md`): with one of my stacks parked
+beside each of actuary's two frontier systems, actuary held 3 systems for 52
+turns and never took the neutrals behind it. Its ledger priced 3->10 (7 ships at
+a 5-ship neutral) at -5.25, nearly all of it the risk at 3. `_risk` sets
+everything a rival could land against the garrison alone. It never counts what
+our own neighbouring garrisons could send in time, so a rival stack next door
+reads as a shortfall even when two of our stacks stand one lane behind.
+
+`SELF_RELIEF` adds that share of our neighbouring garrisons to the garrison the
+risk term compares against, per turn, by when each could land (`_own_relief`).
+Two exactness costs come with it. A launch between our own systems now moves a
+neighbour's risk, so `_gain` re-reads the risk around any of ours it touches.
+And `_idle` no longer prunes a move next to a system with priced risk. The
+cache test passes with it on. Learning's per-rival path is untouched, so
+`test_learning_counting_every_garrison_in_full_plays_as_planned` fails with the
+flag on, as it should.
+
+Mirror against stock actuary, 120 seeds, three cells:
+
+    arm     18n@6        24n@6        24n@12       pooled               seed pairs
+    0.5     56.1%        56.5%        46.8%        53.1% (369-326)      +58/-35 z+2.38  REPRODUCED better
+    1.0     46.5%        48.5%        38.9%        44.6% (313-389)      +37/-77 z-3.75  REPRODUCED worse
+    1.0 on fresh seeds (9000+, 80):                44.3% (208-261)      +18/-44 z-3.30  REPRODUCED worse
+
+Seed pairs for 0.5 by cell: +27/-12 (z +2.40) and +25/-9 (+2.74) at 6 ly/turn,
++6/-14 (-1.79) at 12. Half the relief helps where lanes are 2-4 turns and hurts
+where they are 1-2. A plausible reason is that a strike across a 1-turn lane is
+never seen before it lands, so no relief answers it (marshal's
+`FAST_GUARD_WEIGHT` is the same observation). Counting all of it (1.0) is worse
+everywhere, and much worse at 12 ly/turn.
+
+Two follow-ups were running when this was written: 0.5 on fresh seeds (9500+)
+including 24 nodes at 3 ly/turn, and `SELF_RELIEF_REACTS`, which counts a
+neighbour only if its lane is shorter than the quickest rival lane into the
+system. Relief launched after a strike is seen can still land first only then,
+and that variant is meant to fix the 12 ly/turn cell. The ledgers are in the
+worktrees' `results/`. Nothing ships until the fresh-seed run reproduces. Against
+marshal, knower and the board's maps it is unmeasured.
