@@ -227,15 +227,6 @@ FEED_FRONT = True               # ...and a frontier system's own leftover tops u
 FEED_MAX_TURNS = 2              # ...only on a board whose median lane is at most
                                  # this many turns; 0 = on any board. See "Feed
                                  # what was just taken" in docs/design/marshal-flow.md
-HOLD_FOLLOW = 0.0               # Phase 3c: while a strike is in flight, send a
-                                 # follow-up timed to land between the capture and
-                                 # the earliest counter, sized to hold this fraction
-                                 # of the largest rival stack next to the target;
-                                 # 0 = off. See "Holding a capture before the
-                                 # counter" in docs/design/marshal-flow.md
-BACKFILL = False                # Phase 3: a frontier guard may join a strike when
-                                 # a neighbour that reaches it no slower than the
-                                 # nearest rival stack sends the same ships in behind
 
 
 # --------------------------------------------------------------------------- #
@@ -621,128 +612,6 @@ def _short_lanes(state) -> bool:
     return turns[len(turns) // 2] <= FEED_MAX_TURNS
 
 
-def _hold_follow(state, pid, budget, sends, threatened_set) -> None:
-    """Phase 3c: top up each capture still in flight so it holds the counter.
-
-    Phase 1 relieves only systems we own, against fleets already launched, so
-    its help lands in time only across a lane strictly shorter than the
-    attacker's. A capture is neither owned nor yet attacked while our strike is
-    in flight, and a counter launched the turn it lands is met by nothing. This
-    sends the follow-up ahead of the counter instead: from a neighbour whose
-    lane lands it no earlier than the strike (so it never arrives alone, ahead
-    of the strike) and no later than the earliest a rival stack next door could
-    land if it launched now, sized to ``HOLD_FOLLOW`` times the largest such
-    stack (or rival fleet already bound there), less what the strike is sure to
-    leave standing and what earlier follow-ups bring. Board facts only.
-    """
-    sysmap = state.systems
-    ours: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-    theirs: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-    for f in state.fleets:
-        if sysmap[f.dest_id].owner_id == pid:
-            continue
-        side = ours if f.owner_id == pid else theirs
-        side[f.dest_id][max(1, f.turns_remaining)] += f.ships
-    for tid in sorted(ours):
-        target = sysmap[tid]
-        land = min(ours[tid])
-        stacks = [(state.travel_turns(n, tid) or 99, sysmap[n].ships)
-                  for n in target.neighbors
-                  if sysmap[n].owner_id not in (pid, 0) and sysmap[n].ships > 0]
-        late = sum(n for t, n in theirs[tid].items() if t > land)
-        threat = max([late] + [ships for _, ships in stacks])
-        if threat <= 0:
-            continue
-        soonest = min((t for t, _ in stacks), default=land)
-        deadline = max(land, soonest)
-        # What the strike is sure to leave: the garrison it lands on is the
-        # current one, plus its production and every rival ship landing with or
-        # before it (pessimistic: a third party's would fight the owner first).
-        garrison = target.ships + sum(n for t, n in theirs[tid].items() if t <= land)
-        if target.owner_id != 0:
-            garrison += _production_by(target, land)
-        p = combat.preview_fight(ours[tid][land], garrison,
-                                 config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
-        if p.worst.winner != combat.ATTACKER:
-            continue  # not a sure capture yet: Phase 3 is still pricing it
-        held = p.worst.survivors + sum(n for t, n in ours[tid].items()
-                                       if land < t <= deadline)
-        need = math.ceil(HOLD_FOLLOW * threat * _defend_margin()) - held
-        for sid in sorted((s for s in target.neighbors
-                           if sysmap[s].owner_id == pid and s not in threatened_set
-                           and budget.get(s, 0) > 0
-                           and land <= (state.travel_turns(s, tid) or 99) <= deadline),
-                          key=lambda s: (-budget[s], s)):
-            if need <= 0:
-                break
-            send = min(budget[sid], need)
-            sends[(sid, tid)] += send
-            budget[sid] -= send
-            need -= send
-
-
-def _reserve_backfill(state, pid, frontier, budget, sends, skip) -> dict:
-    """Free each frontier guard that a neighbour can stand in for, reserving the
-    stand-in's ships first so nothing is promised twice.
-
-    The guard is held against the largest rival stack next door. Relief that
-    only *could* come (a lane of at most L-1 turns, so it sees the strike in
-    time) measured 46% and was deleted: it was out of range when it mattered.
-    Here the stand-in is not hypothetical. It leaves this turn, along a lane no
-    longer than the nearest rival stack's, and only for the part of the guard
-    the strike actually takes (`_settle_backfill`). Returns
-    ``{sid: (freed, [(helper, reserved), ...])}``.
-    """
-    sysmap = state.systems
-    out: dict[int, tuple[int, list[tuple[int, int]]]] = {}
-    standing_in: set[int] = set()   # one role a turn: a stand-in keeps its own guard
-    for sid in sorted(frontier):
-        if sid in skip or sid in standing_in:
-            continue
-        s = sysmap[sid]
-        committed = sum(n for (src, _dst), n in sends.items() if src == sid)
-        freed = s.ships - RESERVE_FLOOR - committed - budget.get(sid, 0)
-        rival_lanes = [state.travel_turns(n, sid) or 99 for n in s.neighbors
-                       if sysmap[n].owner_id not in (pid, 0) and sysmap[n].ships > 0]
-        if freed <= 0 or not rival_lanes:
-            continue
-        soonest = min(rival_lanes)
-        helpers = sorted((n for n in s.neighbors
-                          if sysmap[n].owner_id == pid and n not in skip
-                          and n not in out and budget.get(n, 0) > 0
-                          and (state.travel_turns(n, sid) or 99) <= soonest),
-                         key=lambda n: (state.travel_turns(n, sid) or 99, -budget[n], n))
-        reserved, need = [], freed
-        for h in helpers:
-            if need <= 0:
-                break
-            take = min(budget[h], need)
-            budget[h] -= take
-            reserved.append((h, take))
-            standing_in.add(h)
-            need -= take
-        got = freed - need
-        if got > 0:
-            budget[sid] = budget.get(sid, 0) + got
-            out[sid] = (got, reserved)
-    return out
-
-
-def _settle_backfill(backfill, budget, sends) -> None:
-    """Send in behind each guard the strikes spent, and hand the rest back: the
-    unspent part of a freed guard returns to standing, the unused reservation
-    to its helper's budget."""
-    for sid, (freed, reserved) in sorted(backfill.items()):
-        used = max(0, freed - budget.get(sid, 0))
-        budget[sid] = max(0, budget.get(sid, 0) - (freed - used))
-        for h, take in reserved:
-            send = min(take, used)
-            if send > 0:
-                sends[(h, sid)] += send
-            budget[h] += take - send
-            used -= send
-
-
 def _pileup_survivors(ours: int, rivals: list[int]) -> int:
     """Worst-case ships ``ours`` carries out of a same-turn attacker fold.
 
@@ -1080,10 +949,6 @@ def decide(state, pid):
                 sends[(order.source_id, order.dest_id)] += order.ships
         budget[sid] = 0  # retreat, hold to inflict casualties, or stand — don't drain it
 
-    backfill = (_reserve_backfill(state, pid, frontier, budget, sends,
-                                  threatened_set | giving_up)
-                if BACKFILL else {})
-
     # --- Phase 3: focus fire with staggered pincers -------------------------- #
     targets = [sysmap[n] for n in
                {n for sid in frontier for n in sysmap[sid].neighbors
@@ -1200,13 +1065,6 @@ def decide(state, pid):
                 send = spendable(sid, target, True)
                 sends[(sid, target.id)] += send
                 budget[sid] -= send
-
-    if backfill:
-        _settle_backfill(backfill, budget, sends)
-
-    # --- Phase 3c: hold what is about to be taken --------------------------- #
-    if HOLD_FOLLOW > 0:
-        _hold_follow(state, pid, budget, sends, threatened_set)
 
     # --- Phase 4: leapfrog / flow to the richest front ----------------------- #
     # A frontier system whose every non-owned neighbour is a `settled` neutral

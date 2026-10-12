@@ -202,6 +202,7 @@ only for a fight; what is deliberately not animated.
 - **Denying the swap.** Surplus-only, long lanes only (`DENY_SWAP_MIN_TURNS = 4`).
 - **When a doomed garrison leaves.** `EVAC_AT` was deleted.
 - **What the board's human wins say (2026-09-30).** The hold test on a capture was deleted. `FEED` was shipped, gated at `FEED_MAX_TURNS = 2`. *Open: no lone trickles into a rival (not yet measured).*
+- **Holding a capture before the counter (2026-10-12).** From a hand-played game (`tools/seat_play.py`): `HOLD_FOLLOW`, a follow-up timed to land between the capture and the earliest counter, and `BACKFILL`, a guard joining a strike when a stand-in on a no-slower lane replaces it. Why each fires as often as it does, the sweeps against marshal, knower and actuary. Both deleted.
 
 ## Decided against
 
@@ -239,6 +240,7 @@ the measured result was indistinguishable from the baseline.
 - `DENY_SWAP` on Phase 3's priced strike: a disaster. Shipped on the surplus only. *Denying the swap.*
 - Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
 - A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`: deleted. *What the board's human wins say.*
+- A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`): null against marshal, and its z +2.41 against knower did not replicate on fresh seeds. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
 
 ### actuary ([`design/actuary.md`](design/actuary.md))
