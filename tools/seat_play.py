@@ -157,7 +157,8 @@ def render(state: GameState, cfg: Settings, seen: set[int], intel: dict) -> str:
     # "?" sized by its production; a lane shows once both ends have been seen,
     # and its travel time only while one end is in sight.
     known = seen | visible | scouted
-    out.append("SYSTEMS  id owner ships every(progress)  lanes id:turns   (? = not in sight)")
+    out.append(f"SYSTEMS  id owner ships every(progress)  lanes id:turns, landing on turn "
+               f"{state.turn}+turns if sent now   (? = not in sight)")
     for sid in sorted(known):
         system = state.systems[sid]
         lanes = " ".join(
@@ -176,7 +177,7 @@ def render(state: GameState, cfg: Settings, seen: set[int], intel: dict) -> str:
     for fleet in sorted(shown, key=lambda f: (f.turns_remaining, f.dest_id)):
         who = "ME" if fleet.owner_id == me else f"P{fleet.owner_id}"
         out.append(f"  {who} {fleet.source_id}->{fleet.dest_id} x{fleet.ships} "
-                   f"lands in {fleet.turns_remaining}")
+                   f"lands on turn {state.turn + fleet.turns_remaining}")
     if not shown:
         out.append("  (none in sight)")
     return "\n".join(out)
