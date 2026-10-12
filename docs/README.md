@@ -186,7 +186,7 @@ only for a fight; what is deliberately not animated.
 - **The 2026-09 tuning sweep.** What was adopted (partly superseded since), the regime-bound `ENEMY_FAR`, cross-opponent checks, negative results, the empty-interior statistic, and the two methodological notes.
 
 ### design/marshal-pricing.md
-- **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps. The remnant tactic re-measured seed by seed (2026-10-12, `REMNANT`, off): significant in duels, leaning worse in three-player games with knower.
+- **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps. The remnant tactic re-measured seed by seed (2026-10-12): significant in duels, leaning worse in three-player games with knower, so `REMNANT` ships gated to two players alive (`REMNANT_MAX_PLAYERS`).
 - **Garrisons run away, so the jitter premium buys almost nothing.** 86.7% evacuate, so the attack margin is the advantage multiplier alone. Dropping the advantage half too is catastrophic.
 - **Two doomed neighbours, and what a retreat is worth.** `AVOID_ABANDONED`, `CONSOLIDATE`, `RETREAT_NEAREST`. Budget n in the thousands.
 - **Rushing the enemy.** marshal is already a rusher, and the target sort caps this whole channel at about 2 points.
@@ -227,7 +227,7 @@ the measured result was indistinguishable from the baseline.
 
 ### marshal: [`design/marshal-pricing.md`](design/marshal-pricing.md)
 - Repricing a contested neutral against the rival's survivor: worse in duels, because the price is a gate. *Racing a third player.*
-- Arriving after a rival breaks a neutral (the remnant tactic): null by game rate, and worse at high advantage. Re-scored seed by seed it is z +3.93 in duels against marshal and +1.72 against knower, but leans worse (z -1.94) in three-player games with knower, so it stays off. Distinguishing same-turn blocs, or dropping them: a wash. *Same section.*
+- Arriving after a rival breaks a neutral (the remnant tactic): null by game rate, and worse at high advantage. Re-scored seed by seed it is z +3.93 in duels against marshal and +1.72 against knower, but leans worse (z -1.94) in three-player games with knower, so it ships only while two players are alive. Distinguishing same-turn blocs, or dropping them: a wash. *Same section.*
 - Dropping the advantage half of the attack edge as well as the jitter half: 8.6% at advantage 1.5. *Garrisons run away.*
 - A bonus for enemy-held targets, or rushing the enemy outright: null, and the strong form is worse. *Rushing the enemy.*
 - Repricing 0-ship neutrals: null. *A 0-ship neutral.*

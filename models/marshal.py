@@ -233,10 +233,13 @@ HOLD_FOLLOW = 0.0               # Phase 3c: while a strike is in flight, send a
                                  # of the largest rival stack next to the target;
                                  # 0 = off. See "Holding a capture before the
                                  # counter" in docs/design/marshal-flow.md
-REMNANT = False                 # _required: a neutral a rival breaks before we
+REMNANT = True                  # _required: a neutral a rival breaks before we
                                  # land is priced against the nominal remnant when
-                                 # that is cheaper. See "Racing a third player for
-                                 # the same system" in docs/design/marshal-pricing.md
+                                 # that is cheaper...
+REMNANT_MAX_PLAYERS = 2         # ...while at most this many players are alive:
+                                 # significant in duels, leaning worse in 3-seat
+                                 # games with knower. See "Racing a third player
+                                 # for the same system" in docs/design/marshal-pricing.md
 
 
 # --------------------------------------------------------------------------- #
@@ -567,7 +570,9 @@ def _required(state, pid, target, dist: int) -> int:
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
         static = max(ships + 1, math.ceil(ships * _neutral_margin()))
-        return min(static, _remnant_price(state, pid, target, dist)) if REMNANT else static
+        if REMNANT and _alive_players(state) <= REMNANT_MAX_PLAYERS:
+            return min(static, _remnant_price(state, pid, target, dist))
+        return static
     defence = (ships + _inbound(state, target.id, target.owner_id, dist)
                + _production_by(target, dist))
     if RELIEF_AWARE > 0:
@@ -580,6 +585,10 @@ def _required(state, pid, target, dist: int) -> int:
         defence = _after_clash(defence, _attacker_pileup(by_turn[turn]))
     need = max(defence + 1, math.ceil(defence * _enemy_margin()))
     return _through_pileup(need, alongside)
+
+
+def _alive_players(state) -> int:
+    return sum(1 for p in state.players.values() if p.alive and not p.is_neutral)
 
 
 def _remnant_price(state, pid, target, dist: int) -> float:

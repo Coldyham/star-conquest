@@ -32,6 +32,10 @@ the section holding the evidence.
 - **Check against other opponents, not only a copy of the bot.** `ENEMY_NEAR`
   gained 5 points in self-play and lost 7 against thinker. See
   [`marshal.md`](marshal.md), "The 2026-09 tuning sweep".
+- **Score a rarely-firing change by seed, not by game.** An untouched seed splits
+  1-1, so `tools/sweep.py`'s SEED PAIRS and PAIRED ARMS count only what changed.
+  The remnant tactic read 51.3% by game and z +3.93 by seed. See
+  [`marshal-pricing.md`](marshal-pricing.md), "Racing a third player…".
 - **Small effects need n in the thousands. Re-run a surprising reading on fresh
   seeds before believing it.** Readings at n≈370-900 have looked real and then
   vanished at double the sample, several times. See

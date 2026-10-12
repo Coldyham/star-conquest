@@ -143,8 +143,10 @@ value reads all "same"):
       30n/3.5, 12n/18)
 
 So the duel result replicates and holds against knower. With knower as the
-third seat of a three-player game, every reading leans the other way. Not
-shipped while that stands: most posted setups are three to five players.
+third seat of a three-player game, every reading leans the other way, and most
+posted setups are three to five players. **Shipped gated to a duel:**
+`REMNANT = True` applies only while `REMNANT_MAX_PLAYERS = 2` players are
+alive, which covers every duel and the end of a larger game.
 
 **Raising `DEFENDER_ADVANTAGE` makes waiting *worse*, not better, and the knob's
 own range straddles the break-even.** The advantage lands on the survivor's side

@@ -47,7 +47,7 @@ def _restore_globals(ma):
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -490,11 +490,11 @@ def test_hold_follow_waits_for_a_sure_capture(ma):
     assert ai.decide(state, 2) == off
 
 
-def _remnant_board(rival_ships):
+def _remnant_board(rival_ships, seats=2):
     """Neutral 3 holds 9. Rival 1's fleet lands on it next turn; our 2 (10
     ships) is three turns out, so we would fight whatever is left."""
     state = _board({1: (1, 0, 3), 2: (2, 10, 3), 3: (0, 9, 3)},
-                   [(1, 3, 1), (2, 3, 3)])
+                   [(1, 3, 1), (2, 3, 3)], seats=seats)
     state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=3, ships=rival_ships,
                               turns_total=1, turns_remaining=1))
     return state
@@ -516,6 +516,17 @@ def test_remnant_never_prices_a_neutral_dearer(ma):
     static = ma._required(state, 2, state.systems[3], 3)
     ma.REMNANT = True
     assert ma._required(state, 2, state.systems[3], 3) == static
+
+
+def test_remnant_is_off_while_three_players_are_alive(ma):
+    """Leaning worse in three-seat games with knower, so it waits for a duel."""
+    state = _remnant_board(10, seats=3)
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) == static
+    state.players[3].alive = False          # down to two: it applies again
+    assert ma._required(state, 2, state.systems[3], 3) < static
 
 
 def test_commitment_only_ever_adds(ma):
