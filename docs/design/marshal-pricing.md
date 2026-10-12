@@ -111,6 +111,41 @@ the survivor's defender advantage and its production regrowth roughly cancel the
 ships saved by not racing. Held to the same bar that rejected `RIVAL_WEDGE = 2.0`
 at a replicated 51.2%, it is not worth having.
 
+**Re-measured seed by seed (2026-10-12): not null in duels.** Rebuilt as
+`REMNANT` (nominal remnant, opportunistic: only ever cheaper, and a rival
+that took the node builds from the turn after). It changes a price a few times
+a game: 2.9 cheaper lookups per game at 24n / 6 ly, 4.0 at 30n / 3.5, 0.8 at
+12n / 18, 5.3 in 3-player games. The rate over games still reads null, 51.3%
+(z +1.49) against stock marshal over 400 seeds and five cells. But with
+deterministic bots a seed the flag does not touch splits exactly 1-1 over its two
+seatings, so the informative count is seeds won in both seatings against seeds
+lost in both:
+
+    duel, paired over seeds                    better  worse      z
+    vs marshal, 5 cells, seeds 20000-20399        106     56  +3.93
+      ...first half / second half                41/24  65/32  +2.11 / +3.35
+      9n / 18 ly                                   25      6  +3.41
+      30n / 3.5 ly                                 27      8  +3.21
+      12n / 18 ly; 24n / 3 ly                   17/10  24/16  +1.35 / +1.26
+      24n / 6 ly                                   13     16  -0.56
+    vs knower (Predict), against stock marshal     85     64  +1.72
+      (30n/3.5, 12n/18, 24n/6, every cell positive)
+    vs actuary (Learning)                           5      5   0.00 (inert)
+
+Free-for-alls through a paired harness (every seating of [variant, stock,
+fillers], so swapping the two marshals is a bijection; the flag at its stock
+value reads all "same"):
+
+    3p with thinker, 24n / 6 ly                    53     44  +0.91
+    3p with thinker, 12n / 18 ly                   41     29  +1.43
+    4p with thinker + knower, 30n / 6 ly           41     24  +2.11
+    3p with knower, four runs (24n/6 twice,       104    134  -1.94
+      30n/3.5, 12n/18)
+
+So the duel result replicates and holds against knower. With knower as the
+third seat of a three-player game, every reading leans the other way. Not
+shipped while that stands: most posted setups are three to five players.
+
 **Raising `DEFENDER_ADVANTAGE` makes waiting *worse*, not better, and the knob's
 own range straddles the break-even.** The advantage lands on the survivor's side
 twice: it shrinks the remnant, because the rival's attack has to beat an

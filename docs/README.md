@@ -186,7 +186,7 @@ only for a fight; what is deliberately not animated.
 - **The 2026-09 tuning sweep.** What was adopted (partly superseded since), the regime-bound `ENEMY_FAR`, cross-opponent checks, negative results, the empty-interior statistic, and the two methodological notes.
 
 ### design/marshal-pricing.md
-- **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps.
+- **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps. The remnant tactic re-measured seed by seed (2026-10-12, `REMNANT`, off): significant in duels, leaning worse in three-player games with knower.
 - **Garrisons run away, so the jitter premium buys almost nothing.** 86.7% evacuate, so the attack margin is the advantage multiplier alone. Dropping the advantage half too is catastrophic.
 - **Two doomed neighbours, and what a retreat is worth.** `AVOID_ABANDONED`, `CONSOLIDATE`, `RETREAT_NEAREST`. Budget n in the thousands.
 - **Rushing the enemy.** marshal is already a rusher, and the target sort caps this whole channel at about 2 points.
@@ -202,7 +202,7 @@ only for a fight; what is deliberately not animated.
 - **Denying the swap.** Surplus-only, long lanes only (`DENY_SWAP_MIN_TURNS = 4`).
 - **When a doomed garrison leaves.** `EVAC_AT` was deleted.
 - **What the board's human wins say (2026-09-30).** The hold test on a capture was deleted. `FEED` was shipped, gated at `FEED_MAX_TURNS = 2`. *Open: no lone trickles into a rival (not yet measured).*
-- **Holding a capture before the counter (2026-10-12).** From a hand-played game (`tools/seat_play.py`): `HOLD_FOLLOW`, a follow-up timed to land between the capture and the earliest counter, and `BACKFILL`, a guard joining a strike when a stand-in on a no-slower lane replaces it. Why each fires as often as it does, the sweeps against marshal, knower and actuary. Both deleted.
+- **Holding a capture before the counter (2026-10-12).** From a hand-played game (`tools/seat_play.py`): `HOLD_FOLLOW`, a follow-up timed to land between the capture and the earliest counter, and `BACKFILL`, a guard joining a strike when a stand-in on a no-slower lane replaces it. Why each fires as often as it does, the sweeps against marshal, knower and actuary. `BACKFILL` deleted; `HOLD_FOLLOW` re-measured seed by seed (a faint lean, z +1.36 on fresh seeds) and kept off behind its flag.
 
 ## Decided against
 
@@ -227,7 +227,7 @@ the measured result was indistinguishable from the baseline.
 
 ### marshal: [`design/marshal-pricing.md`](design/marshal-pricing.md)
 - Repricing a contested neutral against the rival's survivor: worse in duels, because the price is a gate. *Racing a third player.*
-- Arriving after a rival breaks a neutral (the remnant tactic): null, and worse at high advantage. Distinguishing same-turn blocs, or dropping them: a wash. *Same section.*
+- Arriving after a rival breaks a neutral (the remnant tactic): null by game rate, and worse at high advantage. Re-scored seed by seed it is z +3.93 in duels against marshal and +1.72 against knower, but leans worse (z -1.94) in three-player games with knower, so it stays off. Distinguishing same-turn blocs, or dropping them: a wash. *Same section.*
 - Dropping the advantage half of the attack edge as well as the jitter half: 8.6% at advantage 1.5. *Garrisons run away.*
 - A bonus for enemy-held targets, or rushing the enemy outright: null, and the strong form is worse. *Rushing the enemy.*
 - Repricing 0-ship neutrals: null. *A 0-ship neutral.*
@@ -240,7 +240,7 @@ the measured result was indistinguishable from the baseline.
 - `DENY_SWAP` on Phase 3's priced strike: a disaster. Shipped on the surplus only. *Denying the swap.*
 - Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
 - A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`: deleted. *What the board's human wins say.*
-- A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`): null against marshal, and its z +2.41 against knower did not replicate on fresh seeds. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
+- A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`, kept off behind its flag): a faint lean seed by seed (z +1.36 on fresh seeds across marshal, knower and actuary) that no sample establishes. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
 
 ### actuary ([`design/actuary.md`](design/actuary.md))

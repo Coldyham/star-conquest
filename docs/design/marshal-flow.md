@@ -820,6 +820,26 @@ holds a capture. `HOLD_FOLLOW` with it recovers to null, a hint that the extra
 captures `BACKFILL` makes are the ones that get countered. Neither is a
 reason to bring it back.
 
+**Re-measured seed by seed, and `HOLD_FOLLOW` restored behind its flag for it
+(2026-10-12).** Scored as seeds won in both seatings against seeds lost in
+both, which is what a rarely-firing arm needs (see "Racing a third player",
+re-measured, in [`marshal-pricing.md`](marshal-pricing.md)):
+
+    HOLD_FOLLOW 1.0                             better  worse      z
+    vs marshal, seeds 0-199 (5 cells)               98     79  +1.43
+      30n / 3.5 ly, the hand-played regime          31     16  +2.19
+    vs marshal, seeds 10000-10399 (5 cells)        200    182  +0.92
+      30n / 3.5 ly                                  41     42  -0.11
+      24n / 3 ly; 30n / 3 ly                     59/38  31/53  +2.13 / -2.40
+    vs knower, seeds 2000-2299                      89     81  +0.61
+    vs knower, seeds 12000-12399                   125    125   0.00
+    vs actuary, seeds 14000-14099                   40     26  +1.72
+    fresh seeds only, every opponent               454    414  +1.36
+
+A faint, consistent lean that no fresh sample establishes, and its best cell
+did not replicate. `BACKFILL` re-scored the same way reads +1.39 against
+marshal, but it is worse against knower, so it stays deleted.
+
 What this leaves untested is the dodge as the hand-played game met it: a
 predicting rival's stack, not the target's garrison, landing on the system a
 strike emptied. Phase 1 handles it once it is visible, `DENY_SWAP` only
