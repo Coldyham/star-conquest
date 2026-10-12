@@ -47,7 +47,7 @@ def _restore_globals(ma):
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "BACKFILL")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -487,6 +487,34 @@ def test_hold_follow_waits_for_a_sure_capture(ma):
     ma.HOLD_FOLLOW = 0.0
     off = ai.decide(state, 2)
     ma.HOLD_FOLLOW = 1.0
+    assert ai.decide(state, 2) == off
+
+
+def _guard_board(helper_lane):
+    """Our 1 (10 ships) faces rival 4 (10) across 3 turns, so it guards ~6 and
+    can't afford rival 3 (7), also 3 turns away. Our 5 (10, interior) reaches 1
+    in ``helper_lane`` turns. The target counts as a rival stack too: its
+    garrison could step into 1 once 1 has emptied."""
+    return _board({1: (2, 10, 3), 3: (1, 7, 3), 4: (1, 10, 3), 5: (2, 10, 3)},
+                  [(1, 3, 3), (1, 4, 3), (1, 5, helper_lane)])
+
+
+def test_backfill_lets_the_guard_strike_and_sends_its_stand_in(ma):
+    state = _guard_board(helper_lane=3)          # equal to the rival's lane
+    ma.BACKFILL = False
+    assert (1, 3) not in {(o.source_id, o.dest_id) for o in ai.decide(state, 2)}
+    ma.BACKFILL = True
+    sent = {(o.source_id, o.dest_id): o.ships for o in ai.decide(state, 2)}
+    assert sent.get((1, 3), 0) >= ma._required(state, 2, state.systems[3], 3)
+    guard_spent = sent[(1, 3)] - (10 - math.ceil(ma.FRONTIER_GUARD * 10))
+    assert sent.get((5, 1), 0) >= guard_spent, "the guard spent comes in behind"
+
+
+def test_backfill_needs_a_stand_in_no_slower_than_the_rival(ma):
+    state = _guard_board(helper_lane=4)          # slower than the rival's 3
+    ma.BACKFILL = False
+    off = ai.decide(state, 2)
+    ma.BACKFILL = True
     assert ai.decide(state, 2) == off
 
 
