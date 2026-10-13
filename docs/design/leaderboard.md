@@ -7,8 +7,9 @@ versioning. `CLAUDE.md` states the rules under "Challenge links carry a score to
 beat". The bot-side measurements behind the bot column (`replay_aux`,
 `BUDGET_SCALE`, the seat-flag incident) are in [`bots.md`](bots.md),
 "Replaying a bot for the leaderboard". The site's own setup is in
-`leaderboard/README.md`. Related: [`core.md`](core.md) (challenge keys, the
-replay log). Index: [`../README.md`](../README.md).
+`leaderboard/README.md`, and why each table and view in `schema.sql` is shaped
+as it is in [`schema.md`](schema.md). Related: [`core.md`](core.md) (challenge
+keys, the replay log). Index: [`../README.md`](../README.md).
 
 ## Bot replays (`tools/bot_replay.py`)
 
