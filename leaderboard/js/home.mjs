@@ -4,7 +4,7 @@ import { GAME_URL } from "./config.mjs";
 import { weekParam, weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botLeadBadge, campaignBadge, clear, configBadge, el, embargoBadge, embargoNote, fogBadge,
+  botChips, botLeadBadge, campaignBadge, clear, configBadge, difficultyBadge, el, embargoBadge, embargoNote, fogBadge,
   leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
@@ -406,7 +406,7 @@ function row(game, campaigns, mine) {
   return el("div", { class: "card" }, [
     body,
     el("div", { class: "card-tags" }, [
-      configBadge(game), fogBadge(game), mineBadge(mine.get(game.game_key)),
+      difficultyBadge(game), configBadge(game), fogBadge(game), mineBadge(mine.get(game.game_key)),
       campaignBadge(campaigns.get(game.game_key)), botLeadBadge(game), embargoBadge(game),
       ...botChips(game),
     ]),
@@ -443,7 +443,9 @@ function configRow(config) {
   ]);
 
   return el("div", { class: "card" }, [
-    body, el("div", { class: "card-tags" }, [fogBadge(config, "config"), ...botChips(config)]),
+    body, el("div", { class: "card-tags" }, [
+      difficultyBadge(config, config.avg_difficulty), fogBadge(config, "config"), ...botChips(config),
+    ]),
   ]);
 }
 

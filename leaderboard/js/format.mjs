@@ -231,6 +231,41 @@ export function leaderCredit(game) {
   return others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
 }
 
+// The share of bots that lose a map (game_summary.difficulty) at or below which
+// each word applies, easiest first. Cut along the roster's classes, so on the
+// 7-bot roster: Hard is a map only the oracle pair (knower at Search, actuary at
+// Learning) take, 1-2 winning; Medium is one marshal and thinker take too, 3-4;
+// Easy is one claudebot, heuristic or rusherplus take too, 5+; Very hard is none.
+const DIFFICULTY_LEVELS = [
+  { most: 0.4, text: "Easy", cls: "easy" },
+  { most: 0.65, text: "Medium", cls: "medium" },
+  { most: 0.999, text: "Hard", cls: "hard" },
+  { most: 1, text: "Very hard", cls: "very-hard" },
+];
+
+/** The word for a difficulty share, or null for a map no bot has run on yet. */
+export function difficultyLevel(difficulty) {
+  if (difficulty === null || difficulty === undefined || difficulty === "") return null;
+  const share = Number(difficulty);
+  return DIFFICULTY_LEVELS.find((level) => share <= level.most) || DIFFICULTY_LEVELS.at(-1);
+}
+
+/**
+ * "Easy" … "Very hard": the estimated difficulty, from how many of the board's
+ * bots took the map from the human's seat (game_summary.bot_wins/bot_runs). A
+ * config card passes its average (config_summary.avg_difficulty) and no counts.
+ * Not a link, like .bot-lead: it states an estimate, the sort is the way to use it.
+ */
+export function difficultyBadge(game, difficulty = game.difficulty) {
+  const level = difficultyLevel(difficulty);
+  if (!level) return null;
+  const title = game.bot_runs
+    ? `Estimated difficulty: ${game.bot_wins} of ${game.bot_runs} bots won this map from your seat.`
+    : `Estimated difficulty: on average ${Math.round((1 - Number(difficulty)) * 100)}% of the bots ` +
+      "won this setup's maps from your seat.";
+  return el("span", { class: `badge difficulty ${level.cls}`, title, text: level.text });
+}
+
 /**
  * "Bot leads" / "Bot tied" — the marker a list card carries when nobody has
  * beaten this map's best bot yet, worded for whether the board's best trails

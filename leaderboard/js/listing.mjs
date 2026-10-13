@@ -17,6 +17,7 @@ export const GAME_COLUMNS = [
   "best_turns", "best_lost", "best_hand", "best_by_name", "best_user_name", "best_holders",
   "settings_json", "config_key", "bots", "config_name", "config_tags",
   "bot_turns", "bot_lost", "bot_name", "embargo_until", "contenders", "fog",
+  "bot_wins", "bot_runs", "difficulty",
 ].join(",");
 
 // config_summary's columns are already a curated, fixed set (schema.sql), so
@@ -32,6 +33,7 @@ const CONFIG_COLUMNS = "*";
 // is how the direction picker words each way.
 const COUNT = { desc: "Most first", asc: "Fewest first" };
 const DATE = { desc: "Newest first", asc: "Oldest first" };
+const EASE = { asc: "Easiest first", desc: "Hardest first" };
 export const SORTS = {
   game: [
     { value: "recent", label: "Recent activity", column: "last_activity", dir: "desc", arrows: DATE },
@@ -40,6 +42,7 @@ export const SORTS = {
     { value: "systems", label: "Systems", column: "nodes", dir: "desc", arrows: COUNT },
     { value: "turns", label: "Best turns", column: "best_turns", dir: "asc", arrows: COUNT },
     { value: "new", label: "Map added", column: "first_seen_at", dir: "desc", arrows: DATE },
+    { value: "difficulty", label: "Difficulty (estimated)", column: "difficulty", dir: "asc", arrows: EASE },
   ],
   config: [
     { value: "recent", label: "Recent activity", column: "last_activity", dir: "desc", arrows: DATE },
@@ -47,6 +50,7 @@ export const SORTS = {
     { value: "maps", label: "Maps", column: "game_count", dir: "desc", arrows: COUNT },
     { value: "systems", label: "Systems", column: "nodes", dir: "desc", arrows: COUNT },
     { value: "turns", label: "Avg best turns", column: "avg_best_turns", dir: "asc", arrows: COUNT },
+    { value: "difficulty", label: "Difficulty (estimated)", column: "avg_difficulty", dir: "asc", arrows: EASE },
   ],
 };
 export const DIRS = ["desc", "asc"];

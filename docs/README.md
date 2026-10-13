@@ -37,6 +37,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
+| [`design/schema.md`](design/schema.md) | The board's database (`leaderboard/schema.sql`): the trust model, upgrading by re-pasting, each table and view's shape, the grant trap, the play-by-post tables |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
@@ -102,7 +103,7 @@ only for a fight; what is deliberately not animated.
 - **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
-  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
+  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*; *estimated difficulty* (the share of bots that lose a map, as a sort and an Easy-to-Very-hard badge).
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **Playstyle readings.** The player page's panel, read by the worker from `public_replays` only, one row per match and never per name. Every field sums, so the page pools a name's rows, and the bots' column is the same shape, pooled from self-play winners (`playstyle-baseline.mjs`, generated). `rev` and `shape`. *Decided against: warming actuary's learner from a profile*.
@@ -110,6 +111,12 @@ only for a fight; what is deliberately not animated.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
+### design/schema.md
+- **The trust model** (append-only by the absence of policies; worker-only and closed tables) and **re-pasting upgrades a board** (added columns, drop/add checks, view columns go last, and the `public_replays.rules_version` incident).
+- Per relation: **games and its embargo** (first insert wins; the moves, never the score; why `game_embargoes` is derived); **scores**; **game_logs** (the size bound, claims stored as claims); **score_checks**; **playstyle_readings**; **sc_config_key and sc_bots** (the search_path lint); **configs and config_tags** (first name wins, distinct players, legacy tags at weight 1); **bot_scores**; **campaigns**; **public_replays and public_watchable_replays** (owner rights, joining the embargo through `scores.game_key`); **config_summary**; **counted_scores and the crowns**.
+- **The grant trap.** `service_role` skips policies, not grants; three incidents, the last through a `security_invoker` view chain; `tests/test_schema_grants.py`.
+- **Play-by-post tables.** Kept apart from the board; inputs, not a board; seat tokens; the deadline; `board_digest` as a tripwire.
+
 ### design/par.md
 - **Par search (a local check).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings: it beat 5 of 6 recorded human wins, and on the live board (86 maps under 20 systems) lucky dice beat the best human score on 76 of 84; the rollout bot matters more than the beam; the `verify_scores` gap it exposed, whose dice half is closed for keyed turns.
 

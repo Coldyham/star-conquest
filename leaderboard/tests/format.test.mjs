@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botLeadBadge, botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
+import {
+  botLeadBadge, botProfile, competitionRanks, difficultyBadge, difficultyLevel, embargoNote, leaderCredit,
+} from "../js/format.mjs";
 
 const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString();
 
@@ -116,4 +118,26 @@ test("a bot ahead of the board's best leads, a dead heat is a tie, and a beaten 
   assert.equal(botLeadBadge(game(20, 2)), null);
   assert.equal(botLeadBadge(game(19, 9)), null);
   assert.equal(botLeadBadge({ ...game(20, 3), bot_name: null }), null);
+});
+
+test("the difficulty word follows how many of the bots won, out of however many ran", () => {
+  globalThis.document ??= {
+    createElement: () => ({ setAttribute() {}, append() {} }),
+    createTextNode: (text) => text,
+  };
+  const word = (wins, runs) => difficultyLevel(Math.round((1 - wins / runs) * 1000) / 1000).text;
+  assert.deepEqual([7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 7)),
+    ["Easy", "Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Very hard"]);
+  // A newly added bot that loses a map the same five took still leaves it Easy.
+  assert.equal(word(5, 8), "Easy");
+  assert.equal(word(4, 8), "Medium");
+  // PostgREST may hand a numeric over as a string.
+  assert.equal(difficultyLevel("1.000").text, "Very hard");
+  assert.equal(difficultyLevel(null), null);
+  const badge = difficultyBadge({ bot_wins: 2, bot_runs: 7, difficulty: 0.714 });
+  assert.equal(badge.textContent, "Hard");
+  assert.match(badge.className, /\bdifficulty\b.*\bhard\b/);
+  assert.equal(difficultyBadge({ bot_wins: 0, bot_runs: 0, difficulty: null }), null);
+  // A config card passes its average and has no counts of its own.
+  assert.equal(difficultyBadge({ avg_difficulty: 0.6 }, 0.6).textContent, "Medium");
 });
