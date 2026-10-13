@@ -39,6 +39,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
 | [`design/schema.md`](design/schema.md) | The board's database (`leaderboard/schema.sql`): the trust model, upgrading by re-pasting, each table and view's shape, the grant trap, the play-by-post tables |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
+| [`design/seat-play.md`](design/seat-play.md) | Six games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
@@ -120,6 +121,12 @@ only for a fight; what is deliberately not animated.
 ### design/par.md
 - **Par search (a local check).** Why it is less random than it looks (bots are free to predict; two coupled sources of chance; a rewind resets the rng); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings: it beat 5 of 6 recorded human wins, and on the live board (86 maps under 20 systems) lucky dice beat the best human score on 76 of 84; the rollout bot matters more than the beam; the `verify_scores` gap it exposed, whose dice half is closed for keyed turns.
 
+### design/seat-play.md
+- **What decided the games.** Both bots evacuate into the system you struck from; covering every exit (a pincer whose sources keep their garrisons, or relief timed onto an evacuee's landing) is what killed stacks; a dead end bottles a stack; actuary punishes a thinned garrison the next turn; opening tempo; a free-for-all goes to the swap war.
+- **Readings over the logs.** Strikes on a system emptied at launch succeed 43-47% against people and 67-76% against bots (public replays); marshal's price is for a garrison that runs; actuary crossing its own transfers; actuary waiting for the worst roll on neutrals. The last two were built and measured in `actuary.md`.
+- **What a person should do.** The brief version, including pinning actuary.
+- **What was built from these games.** Four marshal arms (all deleted) and actuary's `SELF_RELIEF`.
+
 ### design/pbp.md
 - **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
 
@@ -156,7 +163,7 @@ only for a fight; what is deliberately not animated.
 - **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
 - **The 2026-10 sweep: off the plateau.** 58,400 duels against marshal: `MIN_GAIN` 0 (+7.4 pooled, +18.6 at 24 nodes 3 ly/turn) and `FRONT_DECAY` 0.75 (+5.6) win in every cell; risk and reinforce weights confirmed. Reproduced on fresh seeds, where the two do not stack and a horizon cap of 8 does nothing. `MIN_GAIN` 0 costs 7-13% a decide at default sizes, 51% at 80 nodes. It also wins against thinker, knower-Predict, across the advantage sliders and in free-for-all; level-to-better against knower at Search. Shipped as `MIN_GAIN` 1e-9 (exactly 0 commits float noise; level with 0 over 12,000 games), with `decide_ms` refitted to `6.4 * (nodes/40)^0.77`.
 - **Behind on income, ahead on ships (measured, not built).** A switch to recklessness while a ship lead runs out against an income gap. The standing is 7% of post-contact turns, mostly a 1-2 ship lead for 2 turns; a real lead on a short clock came up 4 times in 84 actuary games. Behind on both is where seats lose.
-- **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; a side too small to plan (under 7 systems held plus region) is left to the ledger; it costs marshal as a host; the deleted first attempt (rules about contested neutrals).
+- **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; a side too small to plan (under 7 systems held plus region) is left to the ledger; it costs marshal as a host; the deleted first attempt (rules about contested neutrals). *Planned against Greedy again (2026-10-13)*: on fresh seeds the ledger opening is level or better at 3 and 6 ly/turn at every size and at both stops (Learning pooled z +2.40), and the plan wins only at 12 ly/turn on 24-40 nodes; a gate on lane speed is proposed.
 
 ### design/learner.md
 - **Why the oracle flag does not make memory safe.** Every caller that runs a bot's `decide` on copies, branches, isolated positions or rewound boards, and `load_models` wiping module state.
@@ -251,6 +258,7 @@ the measured result was indistinguishable from the baseline.
 - Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
 - A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`: deleted. *What the board's human wins say.*
 - A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`, kept off behind its flag): a faint lean seed by seed (z +1.36 on fresh seeds across marshal, knower and actuary) that no sample establishes. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
+- `CORNERED_EDGE` (full attack edge on a garrison with nowhere to run): 49.2%, null. `REFILL_SOURCE` (top up a struck-from source from its neighbours): 45.3%, reproduced worse; from rear systems only, 49.2%, null. `TRICKLE_GATE` (the "no lone trickles" candidate: pour on a rival target only with a same-turn wave): 50.9%, then exactly 50.0% on 300 fresh seeds including 3 ly/turn. All deleted. *See `seat-play.md`, "What was built from these games".*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
 
 ### actuary ([`design/actuary.md`](design/actuary.md))
@@ -263,6 +271,9 @@ the measured result was indistinguishable from the baseline.
 - Handing the opening over 2 or 3 lanes from a rival: fixes small maps, gives back the 40-80 node gain. A side floor of 9-16: costs a little at 24-80 nodes. *A side too small to plan.*
 - Trying several `aux` values per map in the bot column and keeping the best: mostly picks the luckier dice (one board ranges 13-165 turns on dice alone); fix the bot instead. *Same section.*
 - `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
+- `SELF_RELIEF` 1.0 (count all of our neighbouring garrisons as relief in the risk term): 44.6%, reproduced worse, and again on fresh seeds. 0.5 reproduced *better* (seed pairs z +2.38, and z +3.64 on fresh seeds), and the lane-aware form (`SELF_RELIEF_REACTS`) was then measured in full (2026-10-13): 0.8 is better than stock against marshal in every cell on fresh seeds (z +7.0), at Greedy, Planned and Learning, against knower Predict (z +5.6), across the advantage sliders and in free-for-all, for 16-36% more CPU. Shipped 2026-10-13 with the gated opening (*The gate, shipped*: +226/-110 over the old bot against marshal). Not decided against. *A front stack pins the whole side.*
+- Netting same-turn crossing transfers between our own systems (`NET_CROSSINGS`): 48.7%, seed pairs z -1.64. Deleted. *Crossing transfers.*
+- Pricing a neutral capture below the worst roll (`NEUTRAL_SWING` 1.10 / 1.15): reproduced worse at 1.10 (seed pairs z -2.10), null at 1.15. Deleted. *Neutrals at less than the worst roll.*
 - **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
 - Pricing strikes at the nominal roll and dropping the risk weight while behind on income but ahead on ships: not built, since a real lead on a short clock arises 4 times in 84 games (2 across the posted human games) and a real lead is already converted 87% of the time. Variance-seeking while behind on both: unmeasured. *Behind on income, ahead on ships.*
 - `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*

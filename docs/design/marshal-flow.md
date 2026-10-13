@@ -730,7 +730,7 @@ Shipped with the two-turn cap: `FEED = 1.0`, `FEED_FRONT = True`,
 `FEED_MAX_TURNS = 2`. `FEED_LOCAL` was deleted rather than kept at zero. The
 constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
 
-### Not yet measured: no lone trickles into a rival
+### Measured null (2026-10-12): no lone trickles into a rival
 
 40% of marshal's failed attack landings are one or two ships landing alone
 (the person's: 33% of a much smaller number). Of 340 failures in the 42
@@ -744,6 +744,18 @@ rival re-flood measured 45.1% at `DEFENDER_ADVANTAGE 1.5` (see "Phase 3b
 re-flooding" above), because the trickle was supplying the jitter cushion
 `_enemy_margin` leaves out; if it reads the same way there, gate it off at high
 advantage rather than drop it, since that setting is rarely played.
+
+Built as `TRICKLE_GATE` (Phase 3b skips a rival target that Phase 3 sent no wave
+to this turn and that has none of ours landing on the same turn). Against stock
+marshal, 200 seeds: 50.9%, seed pairs +62/-48 (z +1.33). Then 300 fresh seeds
+in four cells including 3 ly/turn: 1074-1074, exactly 50.0%. Deleted. See
+[`seat-play.md`](seat-play.md), "What was built from these games".
+
+The person's side of it, from the public replays: marshal's strikes on a
+person's system that was empty (0-2 ships) at launch were captured 9 times in
+21, against 19 in 25 on a bot's. A person refills an emptied system and a bot
+does not. See "Strikes on a system emptied at launch" in
+[`seat-play.md`](seat-play.md).
 
 ## Holding a capture before the counter (2026-10-12): two arms, both deleted
 
