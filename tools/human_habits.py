@@ -29,7 +29,8 @@ bot that lost to the person is no baseline. Four readings:
 
 The person's turns on autoplay are a bot's, so they count only where a reading
 is about the person's own choices (waves, relief). docs/design/learner.md,
-"The person's habits", has the first reading.
+"The person's habits", has the first reading. The readings themselves live in
+`tools/playstyle.py`, which the board's Playstyle panel is read with too.
 """
 
 from __future__ import annotations
@@ -45,151 +46,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, config, engine, mapgen, replay, settings
+from starconquest import ai, engine, mapgen, replay, settings
 from tests import sim
 from tools.bot_distance import lineups
 from tools.learner_check import ROSTER, _init, _seeds, load_logs
+from tools.playstyle import (
+    COVER,
+    LOST_WITHIN,
+    MAX_TURNS,
+    MEASURES,
+    SELF_PLAY,
+    THRESHOLDS,
+    _first,
+    _frontier,
+    _outcomes,
+    _sent,
+    empties,
+    shares,
+    waves,
+)
 
 HUMAN = replay.HUMAN_SEAT
-THRESHOLDS = (0.5, 0.6, 0.67, 0.75, 0.9)
-MEASURES = ("players' income", "players' ships", "whole-board income")
-SELF_PLAY = ((7, 2), (11, 2), (11, 3), (18, 3))    # (systems, seats), like the posted games
-ALL_IN = 0.9            # a launch sending this share of a garrison empties it
-LOST_WITHIN = 5         # turns after an empty in which a loss counts against it
-COVER = ("inbound", "reachable", "short", "uncovered")
-MAX_TURNS = 400
-
-
-def _actuary():
-    return sys.modules["sc_model_actuary"]
-
-
-def shares(state) -> dict[int, tuple[float, float, float]]:
-    """{pid: (share of players' income, share of players' ships, share of the
-    whole board's income)}. A system's income is one over its production."""
-    income, ships = defaultdict(float), defaultdict(float)
-    board = 0.0
-    for s in state.systems.values():
-        if s.production > 0:
-            board += 1.0 / s.production
-        if s.owner_id == 0:
-            continue
-        ships[s.owner_id] += s.ships
-        if s.production > 0:
-            income[s.owner_id] += 1.0 / s.production
-    for f in state.fleets:
-        if f.owner_id != 0:
-            ships[f.owner_id] += f.ships
-    total_income, total_ships = sum(income.values()) or 1.0, sum(ships.values()) or 1.0
-    return {pid: (income[pid] / total_income, ships[pid] / total_ships, income[pid] / (board or 1.0))
-            for pid, p in state.players.items() if not p.is_neutral}
-
-
-def _sent(state, orders) -> dict[int, dict[int, int]]:
-    """Ships each source really launched at each destination, clamped as the
-    engine clamps them."""
-    sent: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-    for o in orders:
-        src = state.systems.get(o.source_id)
-        if src is not None and src.owner_id == o.owner_id and o.ships > 0:
-            sent[o.source_id][o.dest_id] += min(o.ships, src.ships)
-    return sent
-
-
-def waves(state, sent) -> list[tuple[int, float, float]]:
-    """(side, landing force / target's effective garrison, side's ship share) for
-    every wave launched this turn at a target the side does not hold."""
-    ac = _actuary()
-    snap = ac._Snap(state)
-    share = shares(state)
-    group: dict[tuple[int, int, int], int] = defaultdict(int)
-    for src, outs in sent.items():
-        me = state.systems[src].owner_id
-        for dst, ships in outs.items():
-            if state.systems[dst].owner_id != me:
-                group[(me, dst, state.travel_turns(src, dst) or 1)] += ships
-    out = []
-    for (me, dst, turns), ships in sorted(group.items()):
-        ships += sum(f.ships for f in state.fleets
-                     if f.owner_id == me and f.dest_id == dst and f.turns_remaining == turns)
-        out.append((me, ships / ac._effective(state, snap, dst, turns),
-                    share.get(me, (0.0, 0.0, 0.0))[1]))
-    return out
-
-
-def _enemy_eta(state, sid: int, me: int) -> int | None:
-    """The earliest turn an enemy can land on `sid`: a fleet already inbound, or
-    a launch now from an adjacent enemy system with ships."""
-    eta = None
-    for f in state.fleets:
-        if f.dest_id == sid and f.owner_id not in (0, me):
-            eta = f.turns_remaining if eta is None else min(eta, f.turns_remaining)
-    for n in state.systems[sid].neighbors:
-        o = state.systems[n]
-        if o.owner_id not in (0, me) and o.ships > 0:
-            d = state.travel_turns(n, sid) or 1
-            eta = d if eta is None else min(eta, d)
-    return eta
-
-
-def _cover(state, sid: int, me: int, eta: int, sources: set[int], kept: int, need: float) -> str:
-    """"inbound" when what stayed plus our fleets landing by `eta` beat `need`;
-    "reachable" when garrisons next door that can get there by then make it
-    enough; "short" when there is some cover but not enough; else "uncovered"."""
-    landing = kept + sum(f.ships for f in state.fleets
-                         if f.dest_id == sid and f.owner_id == me and f.turns_remaining <= eta)
-    if landing > need:
-        return "inbound"
-    reach = landing + sum(state.systems[n].ships for n in state.systems[sid].neighbors
-                          if state.systems[n].owner_id == me and n not in sources
-                          and (state.travel_turns(n, sid) or 1) <= eta)
-    if reach > need:
-        return "reachable"
-    return "short" if reach > kept else "uncovered"
-
-
-def empties(state, sent, skip=lambda pid: False) -> list[tuple[int, int, str]]:
-    """(side, system, cover) for each voluntary frontier empty on this board."""
-    adv = config.DEFENDER_ADVANTAGE
-    out = []
-    for sid, outs in sorted(sent.items()):
-        s = state.systems[sid]
-        me = s.owner_id
-        total = sum(outs.values())
-        if skip(me) or total < ALL_IN * s.ships:
-            continue
-        if not any(state.systems[n].owner_id not in (0, me) for n in s.neighbors):
-            continue
-        eta = _enemy_eta(state, sid, me)
-        if eta is None:
-            continue
-        inbound = sum(f.ships for f in state.fleets
-                      if f.dest_id == sid and f.owner_id not in (0, me))
-        if inbound > s.ships * adv:
-            continue                              # an evacuation, not a choice
-        near = max((state.systems[n].ships for n in s.neighbors
-                    if state.systems[n].owner_id not in (0, me)), default=0)
-        out.append((me, sid, _cover(state, sid, me, eta, set(sent), s.ships - total,
-                                    (inbound + near) / adv)))
-    return out
-
-
-def _outcomes(owners, events, label) -> list[tuple[str, str, bool]]:
-    return [(label[me], how, any(o.get(sid) != me for o in owners[t + 1: t + 1 + LOST_WITHIN]))
-            for t, me, sid, how in events]
-
-
-def _frontier(owners, adjacency, label) -> tuple[Counter, Counter]:
-    """Frontier system-turns held, and systems lost the next turn, by side."""
-    held, lost = Counter(), Counter()
-    for t in range(len(owners) - 1):
-        now, after = owners[t], owners[t + 1]
-        for sid, me in now.items():
-            if me == 0 or not any(now[n] not in (0, me) for n in adjacency[sid]):
-                continue
-            held[label[me]] += 1
-            lost[label[me]] += after.get(sid) != me
-    return held, lost
 
 
 def score_log(log):
@@ -259,10 +136,6 @@ def play_game(job):
 # --------------------------------------------------------------------------- #
 # Reading the results
 # --------------------------------------------------------------------------- #
-def _first(series, idx, x):
-    return next((t for t, share in series if share[idx] >= x), None)
-
-
 def markers(games, plays) -> None:
     print("\n== 1. the person's games: median turn each share first reaches x (as a share of "
           "the game), games where it later falls below half, games that never reach x")

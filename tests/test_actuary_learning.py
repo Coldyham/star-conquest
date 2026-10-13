@@ -341,6 +341,28 @@ def test_a_learned_rival_thins_the_risk_and_a_thin_garrison_brings_it_back(ac):
     assert ac._Ledger(state, 1, {2: from_thin}).risk[1] > 0.0
 
 
+def test_learning_prices_a_whole_strike_at_its_chance(ac):
+    """A garrison next door strikes whole or not at all: the risk is the chance
+    times the shortfall against all of it. A 9-ship garrison at a quarter is
+    not a 2-ship strike, which 4 ships would hold off."""
+    state = _board({1: (1, 4, 0), 2: (2, 9, 0)}, [(1, 2, 2)])
+    full = ac._Ledger(state, 1).risk[1]
+    chance = 0.25
+    curve = [chance / ac.LEARN_REACH] * ac.RATIO_BINS
+    assert full > 0.0
+    assert ac._Ledger(state, 1, {2: curve}).risk[1] == pytest.approx(chance * full)
+
+
+def test_learning_takes_each_source_whole_and_independent(ac):
+    """Two garrisons, either of which alone is held off and both together not:
+    only the both-strike outcome is short."""
+    state = _board({1: (1, 6, 0), 2: (2, 5, 0), 3: (2, 5, 0)}, [(1, 2, 2), (1, 3, 2)])
+    both = ac._Ledger(state, 1).risk[1]
+    assert both > 0.0
+    ledger = ac._Ledger(state, 1, {2: [0.5 / ac.LEARN_REACH] * ac.RATIO_BINS})
+    assert ledger.risk[1] == pytest.approx(0.25 * both)
+
+
 def test_decide_leaves_the_state_alone_and_draws_nothing(ac):
     state = _seat(_game(), 1, float(ac.LEARNING))
     _play(ac, state, 30)

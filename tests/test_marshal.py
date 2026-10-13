@@ -47,7 +47,7 @@ def _restore_globals(ma):
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -451,6 +451,82 @@ def test_deny_swap_is_off_below_its_lane_length(ma):
     off = ai.decide(state, 2)
     ma.DENY_SWAP = 1.0
     assert ai.decide(state, 2) == off
+
+
+def _capture_board():
+    """Our 12 are two turns out from rival 3 (4 ships). Rival 4 sits beside it
+    with 15, four turns away. Our 5 (20 ships) is three turns from 3, so a send
+    lands after the strike and before the counter; our 6 is one turn away, so a
+    send from there would land alone ahead of the strike."""
+    state = _board({1: (2, 0, 3), 3: (1, 4, 3), 4: (1, 15, 3), 5: (2, 20, 3),
+                    6: (2, 20, 3), 7: (1, 30, 3)},
+                   [(1, 3, 3), (3, 4, 4), (3, 5, 3), (3, 6, 1), (4, 7, 2)])
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=3, ships=12,
+                              turns_total=3, turns_remaining=2))
+    return state
+
+
+def test_hold_follow_lands_between_the_capture_and_the_counter(ma):
+    state = _capture_board()
+    ma.HOLD_FOLLOW = 0.0
+    off = {(o.source_id, o.dest_id): o.ships for o in ai.decide(state, 2)}
+    ma.HOLD_FOLLOW = 1.0
+    on = {(o.source_id, o.dest_id): o.ships for o in ai.decide(state, 2)}
+    assert on.get((5, 3), 0) > off.get((5, 3), 0), "the timed lane sends"
+    assert on.get((6, 3), 0) == off.get((6, 3), 0), "a lane that lands early does not"
+    p = combat.preview_fight(12, 4 + ma._production_by(state.systems[3], 2),
+                             config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+    hold = math.ceil(15 * ma._defend_margin()) - p.worst.survivors
+    assert on[(5, 3)] - off.get((5, 3), 0) <= hold, "sized to the counter, no more"
+
+
+def test_hold_follow_waits_for_a_sure_capture(ma):
+    """A strike that may still fail is Phase 3's to price, not a capture to hold."""
+    state = _capture_board()
+    state.systems[3].ships = 11
+    ma.HOLD_FOLLOW = 0.0
+    off = ai.decide(state, 2)
+    ma.HOLD_FOLLOW = 1.0
+    assert ai.decide(state, 2) == off
+
+
+def _remnant_board(rival_ships, seats=2):
+    """Neutral 3 holds 9. Rival 1's fleet lands on it next turn; our 2 (10
+    ships) is three turns out, so we would fight whatever is left."""
+    state = _board({1: (1, 0, 3), 2: (2, 10, 3), 3: (0, 9, 3)},
+                   [(1, 3, 1), (2, 3, 3)], seats=seats)
+    state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=3, ships=rival_ships,
+                              turns_total=1, turns_remaining=1))
+    return state
+
+
+def test_remnant_prices_a_broken_neutral_cheaper(ma):
+    state = _remnant_board(10)              # 10 on 9 leaves about 4
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    assert static > 10
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) < static
+    assert _totals(ai.decide(state, 2)).get(3, 0) > 0, "the cheaper price opens the strike"
+
+
+def test_remnant_never_prices_a_neutral_dearer(ma):
+    state = _remnant_board(30)              # a big stack leaves a big remnant
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) == static
+
+
+def test_remnant_is_off_while_three_players_are_alive(ma):
+    """Leaning worse in three-seat games with knower, so it waits for a duel."""
+    state = _remnant_board(10, seats=3)
+    ma.REMNANT = False
+    static = ma._required(state, 2, state.systems[3], 3)
+    ma.REMNANT = True
+    assert ma._required(state, 2, state.systems[3], 3) == static
+    state.players[3].alive = False          # down to two: it applies again
+    assert ma._required(state, 2, state.systems[3], 3) < static
 
 
 def test_commitment_only_ever_adds(ma):

@@ -744,3 +744,105 @@ rival re-flood measured 45.1% at `DEFENDER_ADVANTAGE 1.5` (see "Phase 3b
 re-flooding" above), because the trickle was supplying the jitter cushion
 `_enemy_margin` leaves out; if it reads the same way there, gate it off at high
 advantage rather than drop it, since that setting is rarely played.
+
+## Holding a capture before the counter (2026-10-12): two arms, both deleted
+
+**Where the idea came from.** A hand-played game through `tools/seat_play.py`
+(33 nodes, 5 seats, 3.5 ly/turn, against rusherplus, heuristic, marshal and
+knower) lost most of its systems the same way. knower and rusherplus left any
+system about to be struck and landed on the one the strike had just emptied.
+The counter that worked was to land on the dodge's destination the same turn
+it did, so those ships fought as defenders. marshal's Phase 1 already does
+this for a fleet it can see. A fleet launched down an L-turn lane is first
+visible with L-1 turns left, so the relief lands in time only across a lane
+strictly shorter than the attacker's. Two things fall outside that, and both
+were built behind flags.
+
+**`HOLD_FOLLOW` (Phase 3c, code at `e2608d2`).** While a strike is in flight
+and sure to land (worst roll, garrison plus production plus rival ships
+landing with it), a neighbour sends a follow-up. Its lane must land no earlier
+than the strike and no later than the earliest a rival stack next to the
+target could land if it launched now. The follow-up is sized to `HOLD_FOLLOW`
+times the largest such stack, less the strike's worst-roll survivors and
+earlier follow-ups. Phase 1 can't cover this, since the target is not yet
+owned and the counter not yet launched. It fires rarely: 1-4 times per 100
+turns, 3.5-6 ships each. Of the target-turns where a capture was pending, at
+30 nodes / 3.5 ly/turn against knower:
+
+    no rival stack next to the target              2328
+    strike not yet sure (Phase 3 still pricing)     552
+    no owned neighbour, or no lane lands in the     1122
+      window (374 of them a window of one turn)
+    already held: the Phase 3b pour left enough     498
+    a gap to fill                                   464 (176 with no ships to send)
+
+The surplus pour already makes most captures big enough to hold, so there is
+little left for a follow-up to do.
+
+**`BACKFILL` (Phase 3, code at `366b17c`).** A frontier guard may join a
+strike when a neighbour that reaches the system no slower than its nearest
+rival stack sends the same ships in behind. The struck target counts as a
+rival stack, since its garrison is what steps into the emptied system. The
+stand-in's budget is reserved first and released if unused, and a system
+plays one role a turn: the first build let a stand-in also free its own guard
+and over-committed. This differs from the reinforceability-scaled guard that
+measured 46% ([`marshal.md`](marshal.md)). That relaxed the guard where relief
+*could* come (R <= L-1), and the relief was out of range when it mattered.
+Here the stand-in leaves on the same turn, so an equal lane counts. It fires
+often: about one backfill send every two turns in the live check.
+
+**Measured.** `tools/sweep.py` duels, both seatings. Against an opponent the
+arms are a stock-marshal arm and a variant arm on the same seeds, compared
+game by game (a sign test on the pairs whose result differs).
+
+    vs stock marshal, 200 seeds, 5 cells          pooled    verdict
+    (18/3, 24/3, 30/3.5, 24/6, 18/12 ly/turn)
+    HOLD_FOLLOW 1.0                                 51.1%    null (30/3.5 leans 53.8%)
+    HOLD_FOLLOW 0.5                                 50.5%    null
+    BACKFILL                                        50.9%    null
+    BACKFILL + HOLD_FOLLOW                          50.9%    null
+
+    vs knower (Predict), paired against stock marshal; 30/3.5, 24/3, 24/6
+    HOLD_FOLLOW, seeds 0-199          +71 / -45    z +2.41
+    HOLD_FOLLOW, seeds 2000-2299      +89 / -81    z +0.61   did not replicate
+    BACKFILL, seeds 4000-4199         +97 / -133   z -2.37   worse (24/3: z -2.59)
+    both, seeds 4000-4199             +117 / -127  z -0.64   null
+
+    vs actuary (Learning), paired, seeds 6000-6099, same cells
+    BACKFILL                          +45 / -58    z -1.28
+    both                              +54 / -60    z -0.56
+
+Both arms were deleted rather than kept at zero. `BACKFILL` is worse against
+knower and leans worse against actuary. It moves a second-line system's ships
+forward, and a predicting rival plays into the thinner second line. That
+agrees with the guard findings in [`marshal.md`](marshal.md): the guard is what
+holds a capture. `HOLD_FOLLOW` with it recovers to null, a hint that the extra
+captures `BACKFILL` makes are the ones that get countered. Neither is a
+reason to bring it back.
+
+**Re-measured seed by seed, and `HOLD_FOLLOW` restored behind its flag for it
+(2026-10-12).** Scored as seeds won in both seatings against seeds lost in
+both, which is what a rarely-firing arm needs (see "Racing a third player",
+re-measured, in [`marshal-pricing.md`](marshal-pricing.md)):
+
+    HOLD_FOLLOW 1.0                             better  worse      z
+    vs marshal, seeds 0-199 (5 cells)               98     79  +1.43
+      30n / 3.5 ly, the hand-played regime          31     16  +2.19
+    vs marshal, seeds 10000-10399 (5 cells)        200    182  +0.92
+      30n / 3.5 ly                                  41     42  -0.11
+      24n / 3 ly; 30n / 3 ly                     59/38  31/53  +2.13 / -2.40
+    vs knower, seeds 2000-2299                      89     81  +0.61
+    vs knower, seeds 12000-12399                   125    125   0.00
+    vs actuary, seeds 14000-14099                   40     26  +1.72
+    fresh seeds only, every opponent               454    414  +1.36
+
+A faint, consistent lean that no fresh sample establishes, and its best cell
+did not replicate. `BACKFILL` re-scored the same way reads +1.39 against
+marshal, but it is worse against knower, so it stays deleted.
+
+What this leaves untested is the dodge as the hand-played game met it: a
+predicting rival's stack, not the target's garrison, landing on the system a
+strike emptied. Phase 1 handles it once it is visible, `DENY_SWAP` only
+against the target's own garrison. The 33-node game's log and notes are the
+place to measure how often a search bot does it before building anything
+(`position_suite`, `bot_distance`).

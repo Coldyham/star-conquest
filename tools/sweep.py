@@ -825,6 +825,7 @@ def report(rows: list[dict], arms: list[Arm], cells: list[Cell], baseline: Arm,
             print(_row(arm.name, tally(sub, arm=arm.name, cell=ckey)))
 
     _replication(rows, arms, seeds)
+    _pairs_report(rows, arms, cells, seeds)
 
 
 def _replication(rows: list[dict], arms: list[Arm], seeds: list[int]) -> None:
@@ -870,6 +871,133 @@ def _sign(rate: float) -> int:
 
 def _cell(t: Tally) -> str:
     return f"{t.rate * 100:5.1f}% ({t.wins}-{t.losses})" if t.decided else "     - (0-0)"
+
+
+# --------------------------------------------------------------------------- #
+# Seed pairs — the test a rarely-firing arm needs
+# --------------------------------------------------------------------------- #
+@dataclass
+class Pairs:
+    """Seeds (or games) an arm changed for the better, for the worse, or not at
+    all. With deterministic bots a seed the arm does not touch splits exactly 1-1
+    over its two seatings — the null control's whole premise — so those seeds
+    carry no information, and the game rate above dilutes the ones that do. A
+    change that fires a few times a game can read 51% there and be decisive here."""
+
+    better: int = 0
+    worse: int = 0
+    same: int = 0
+
+    @property
+    def z(self) -> float:
+        n = self.better + self.worse
+        return (self.better - self.worse) / math.sqrt(n) if n else 0.0
+
+
+def _score(row: dict) -> float:
+    """1 for an arm win, 0 for a loss, a half for a draw or a timeout."""
+    if row["timed_out"] or not row["decided"]:
+        return 0.5
+    return 1.0 if row["arm_won"] else 0.0
+
+
+def seed_pairs(rows: list[dict], arm: str, *, cell: str | None = None,
+               seeds: set[int] | None = None) -> Pairs:
+    """Seeds ``arm`` won in both seatings against the baseline, lost in both, or
+    split. A seed missing a seating is skipped."""
+    by: dict[tuple[str, int], dict[int, float]] = {}
+    for row in rows:
+        if row["arm"] != arm or (cell is not None and row["cell"] != cell):
+            continue
+        if seeds is not None and row["seed"] not in seeds:
+            continue
+        by.setdefault((row["cell"], row["seed"]), {})[row["mirror"]] = _score(row)
+    out = Pairs()
+    for seatings in by.values():
+        if len(seatings) < 2:
+            continue
+        total = sum(seatings.values())
+        if total > 1:
+            out.better += 1
+        elif total < 1:
+            out.worse += 1
+        else:
+            out.same += 1
+    return out
+
+
+def arm_pairs(rows: list[dict], a: str, b: str, *, cell: str | None = None) -> Pairs:
+    """Games where arm ``b`` did better than arm ``a`` on the same cell, seed and
+    seating against the same baseline. What compares two variants of one bot
+    measured against a third (a stock arm and a flagged arm against knower):
+    neither arm's own rate against the baseline can, at the size of a rare
+    change."""
+    score: dict[tuple[str, str, int, int], float] = {}
+    for row in rows:
+        if row["arm"] in (a, b) and (cell is None or row["cell"] == cell):
+            score[(row["arm"], row["cell"], row["seed"], row["mirror"])] = _score(row)
+    out = Pairs()
+    for (arm, ckey, seed, mirror), sa in score.items():
+        sb = score.get((b, ckey, seed, mirror))
+        if arm != a or sb is None:
+            continue
+        if sb > sa:
+            out.better += 1
+        elif sb < sa:
+            out.worse += 1
+        else:
+            out.same += 1
+    return out
+
+
+def _pairs_cell(p: Pairs) -> str:
+    return f"+{p.better}/-{p.worse} z{p.z:+.2f}"
+
+
+def _pairs_report(rows: list[dict], arms: list[Arm], cells: list[Cell],
+                  seeds: list[int]) -> None:
+    print("\nSEED PAIRS — seeds the arm won in both seatings (+) against lost in both (-);\n"
+          "             an untouched seed splits 1-1. The test for an arm that fires rarely.")
+    cut = len(seeds) // 2
+    halves = (set(seeds[:cut]), set(seeds[cut:])) if len(seeds) >= 4 else None
+    print(f"  {'arm':<20} {'pooled':>20} {'half A':>20} {'half B':>20}   status")
+    for arm in arms:
+        p = seed_pairs(rows, arm.name)
+        if halves is None:
+            status, ha, hb = "NOT ENOUGH SEEDS TO SPLIT", "", ""
+        else:
+            pa = seed_pairs(rows, arm.name, seeds=halves[0])
+            pb = seed_pairs(rows, arm.name, seeds=halves[1])
+            ha, hb = _pairs_cell(pa), _pairs_cell(pb)
+            if abs(p.z) < Z95:
+                status = "NOT SIGNIFICANT"
+            elif _sign_z(pa.z) != _sign_z(p.z) or _sign_z(pb.z) != _sign_z(p.z):
+                status = "NOT REPRODUCED (the halves disagree in direction)"
+            else:
+                status = "REPRODUCED " + ("better" if p.z > 0 else "worse")
+        print(f"  {arm.name:<20} {_pairs_cell(p):>20} {ha:>20} {hb:>20}   {status}")
+        for cell in cells:
+            pc = seed_pairs(rows, arm.name, cell=cell.key())
+            if pc.better + pc.worse + pc.same:
+                print(f"    {cell.key():<38} {_pairs_cell(pc):>20}   ({pc.same} untouched)")
+
+    if len(arms) < 2:
+        return
+    print("\nPAIRED ARMS — games the second arm did better than the first on the same\n"
+          "              cell, seed and seating (how two variants compare against one baseline)")
+    for a, b in itertools.combinations(arms, 2):
+        p = arm_pairs(rows, a.name, b.name)
+        verdict = "NOT SIGNIFICANT" if abs(p.z) < Z95 else (
+            f"{b.name} better" if p.z > 0 else f"{b.name} worse")
+        print(f"  {a.name} -> {b.name:<14} {_pairs_cell(p):>20}   ({p.same} the same)  {verdict}")
+        for cell in cells:
+            pc = arm_pairs(rows, a.name, b.name, cell=cell.key())
+            if pc.better + pc.worse + pc.same:
+                print(f"    {cell.key():<38} {_pairs_cell(pc):>20}")
+
+
+def _sign_z(z: float) -> int:
+    return 1 if z > 0 else -1 if z < 0 else 0
 
 
 # --------------------------------------------------------------------------- #
@@ -1104,6 +1232,26 @@ def self_test() -> int:
     order = jobs([Cell("random", 18), Cell("random", 24)], [a, c], [1, 2])
     check("jobs are seed-outermost", {j[2] for j in order[:8]} == {1})
     check("jobs cover every combination", len(order) == 2 * 2 * 2 * 2)
+
+    def game(arm, seed, mirror, won, cell="c", decided=True, timed_out=False):
+        return {"arm": arm, "cell": cell, "seed": seed, "mirror": mirror,
+                "arm_won": won, "decided": decided, "timed_out": timed_out}
+    rows = [game("v", 1, 0, True), game("v", 1, 1, True),      # changed: better
+            game("v", 2, 0, True), game("v", 2, 1, False),     # untouched
+            game("v", 3, 0, False), game("v", 3, 1, False),    # changed: worse
+            game("v", 4, 0, True), game("v", 4, 1, False, decided=False),  # 1.5
+            game("v", 5, 0, True)]                              # one seating only
+    p = seed_pairs(rows, "v")
+    check("seed pairs count both-won, both-lost and splits",
+          (p.better, p.worse, p.same) == (2, 1, 1), f"{p}")
+    check("a seed with one seating is skipped", p.better + p.worse + p.same == 4)
+    check("z of the pairs ignores the untouched", abs(p.z - 1 / math.sqrt(3)) < 1e-9)
+    rows = [game("a", 1, 0, False), game("b", 1, 0, True),
+            game("a", 1, 1, True), game("b", 1, 1, True),
+            game("a", 2, 0, True), game("b", 2, 0, False, timed_out=True)]
+    q = arm_pairs(rows, "a", "b")
+    check("arm pairs compare the same seed and seating",
+          (q.better, q.worse, q.same) == (1, 1, 1), f"{q}")
 
     width = 100
     print(f"\n{'=' * width}\nSELF-TEST (no games played)\n{'=' * width}")
