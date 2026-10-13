@@ -69,6 +69,9 @@ MAX_COMMITS = 64            # an iteration bound on the greedy
 SELF_RELIEF = 0.0           # share of our own neighbouring garrisons counted as
                             # able to relieve a system the risk term reads (see
                             # "A front stack pins the whole side" in actuary.md)
+LEARNING_PLANS = True       # Style: Learning opens with the plan, as Planned does;
+                            # False opens it with the ledger, as Greedy does (a
+                            # measurement flag, see "Where Planned stands")
 SELF_RELIEF_REACTS = False  # ...counting a neighbour only if its lane is shorter than
                             # the shortest rival lane into the system, so relief
                             # launched after the strike is seen still lands first
@@ -138,7 +141,7 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    if stop != GREEDY:
+    if stop == PLANNED or (stop == LEARNING and LEARNING_PLANS):
         orders = opening(state, pid)
         if orders is not None:
             return orders
