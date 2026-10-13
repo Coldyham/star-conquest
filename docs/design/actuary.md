@@ -379,7 +379,10 @@ with.
 The seat's `aux` knob (`AUX_LABEL` *Style*, *Opening* until 2026-10-09) has
 three stops. *Planned* (1, the default, and anything unreadable) runs
 `opening(state, pid)` until the seat first borders a rival, and the ledger from
-then on. *Learning* (2, and anything above) plays the same opening, and its
+then on. Since 2026-10-13 it does so only where `_plans` allows it: a map of
+`OPENING_GATE_SYSTEMS` (24) or more whose median lane is `OPENING_FAST_LANE` (2)
+turns or less. Elsewhere Planned opens with the ledger, so it plays exactly as
+Greedy does (see "Planned against Greedy again" and "The gate, shipped"). *Learning* (2, and anything above) plays the same gated opening, and its
 ledger prices the risk with each rival's learned strike curve
 ([`learning.md`](learning.md)). *Greedy* (0) is the
 ledger from the first turn, exactly as actuary played before the knob existed:
