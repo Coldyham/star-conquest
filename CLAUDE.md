@@ -511,8 +511,12 @@ the board it always did** (`test_symmetric.py` pins it; a change is a
 nothing past the sectors draws from `state.rng`. `layout` is inert off a
 generated symmetric map (`Settings.layout_inert`), and is then read as `hub` by
 the key and pruned from the link.
-`symmetric` can return **more nodes than asked** (41 at 40), hence
-`config.CUSTOM_MAX_NODES`. Past `config.STANDARD_MAX_NODES` (40) the box grows
+`symmetric` rarely returns the node count asked (41 at 40; 18 for a six-seat
+`core` asked 10), hence `config.CUSTOM_MAX_NODES`: show `Settings.system_count()`
+(board: `format.mjs` `systemCount`), never raw `nodes`. **Map generation never
+reads a screen size**: every pixel figure in `config` follows the UI scale, so
+it would build a different board per screen
+(`test_no_core_module_reads_a_screen_size`). Past `config.STANDARD_MAX_NODES` (40) the box grows
 (`config.world_side`); below it nothing moves. The Advanced tab's lane survey
 runs in `menu.pump`, never `draw`. Detail: `docs/design/core.md`.
 

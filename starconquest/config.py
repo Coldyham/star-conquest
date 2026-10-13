@@ -56,6 +56,10 @@ MAX_NODES = 120               # cap: edge build is O(n^2), keep map-gen responsi
 STANDARD_MAX_NODES = 40
 NODES_BIG_STEP = 5            # the Systems stepper moves this far at a time past it
 LANE_SURVEY_SEEDS = 3         # maps the menu's lane readout samples when the seed is random
+# World units a core layout keeps between neighbouring seam systems, and between
+# them and the sectors behind. A world figure, never a pixel one: a map must be a
+# function of its setup and seed alone, whatever screen it is generated on.
+CORE_GAP = 90.0
 
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST

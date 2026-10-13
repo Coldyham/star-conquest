@@ -500,7 +500,7 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
         return
 
     bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
-    bits = [f"seed {settings.seed}", f"{settings.nodes} nodes", settings.mode]
+    bits = [f"seed {settings.seed}", f"{settings.system_count()} nodes", settings.mode]
     if bots:
         bits.append("vs " + ", ".join(bots))
     mine = webstore.best(*settings.challenge_keys())
@@ -877,7 +877,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     if drawn:
         _derived(surface, f"{settings.nodes} (from the map)", right, y)
     else:
-        _stepper(surface, ms, "nodes", str(settings.nodes), right, y)
+        _stepper(surface, ms, "nodes", str(settings.system_count()), right, y)
     y += _ROW_H
 
     _row_label(surface, "Map type", left, y, _changed(settings, "mode"))
@@ -2027,9 +2027,9 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     elif hit == "players_inc":
         _set_players(settings, settings.players + 1)
     elif hit == "nodes_dec":
-        _set_nodes(settings, _node_step(settings.nodes, up=False))
+        _step_systems(settings, up=False)
     elif hit == "nodes_inc":
-        _set_nodes(settings, _node_step(settings.nodes, up=True))
+        _step_systems(settings, up=True)
     elif hit == "mode_random":
         settings.mode = "random"
     elif hit == "mode_symmetric":
@@ -2303,6 +2303,28 @@ def _set_nodes(settings: Settings, n: int) -> None:
     if settings.custom_map is not None:
         return _interlocked()
     settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, n))
+
+
+def _step_systems(settings: Settings, up: bool) -> None:
+    """Move the Systems row to the next map size this setup can actually build.
+
+    A generated symmetric map only comes in whole sectors (``Settings.system_count``),
+    so a plain step can land on a request that builds the board already shown.
+    Steps on past those to the next size that differs, and stores that size, which
+    builds itself. A press with no such size in its direction does nothing.
+    """
+    if settings.layout_inert():
+        return _set_nodes(settings, _node_step(settings.nodes, up))
+
+    def size(n: int) -> int:
+        return mapgen.symmetric_size(n, settings.players, settings.layout)
+
+    now = settings.system_count()
+    n = _node_step(now, up)
+    while size(n) == now and settings.min_nodes() < n < config.MAX_NODES:
+        n += 1 if up else -1
+    if size(n) != now:
+        _set_nodes(settings, size(n))
 
 
 def _interlocked() -> None:

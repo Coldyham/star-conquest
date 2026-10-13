@@ -691,9 +691,22 @@ light relaxation + a Euclidean MST for connectivity, which is planar so edges
 don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
 (one base sector rotated N times about a shared contested centre for a perfectly
 fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
-both. Note `symmetric` rounds the node count up to a whole number per sector and
-adds the shared centre, so it can return **more than it was asked for** (41 at 40
-nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+both. Note `symmetric` rounds the node count to a whole number per sector (at
+least two) and adds any shared systems, so it rarely returns what it was asked
+for: 41 at 40 nodes, and 18 for six seats on a `core` map asked for anything from
+9 to 21. That is why `config.CUSTOM_MAX_NODES` exists separately.
+
+**A setup shows the systems it builds, not the number it asked for.**
+`mapgen.symmetric_size` is the count (`generate_symmetric` takes its per-sector
+figure from the same helper), `Settings.system_count` applies it to a setup, and
+the menu's Systems row shows that and steps between sizes a symmetric map can
+actually have (`menu._step_systems`), storing the size it lands on, which builds
+itself. Stored `nodes` is never rewritten on read: an old link asking for 10
+still asks for 10, and its challenge key stays where it was. The board mirrors
+the count in `format.mjs` (`symmetricSize`, with Python's round-half-to-even,
+which `Math.round` is not), pinned by `leaderboard/tests/fixtures/symmetric-sizes.json`
+on both sides; it reads `layout` off `settings_json`, taking a row without one as
+the hub it predates.
 
 **A symmetric map's layout says what joins its sectors.** The original board ran
 every sector into one shared hub and nothing else, so every symmetric game was
@@ -726,10 +739,22 @@ The rules that keep it fair and keep old games replaying:
   it, so a lane clean on one seam is clean on all of them.
   `test_every_layout_turns_onto_itself` checks the result maps onto itself.
 - **`core` opens the middle up.** Core systems sit on the seams at
-  `max(0.6 * r_inner, gap / (2 sin(pi/N)))` with `gap = 2.5 * node_clearance()`,
-  so they stay a gap apart at six seats, and the sectors' inner radius moves out
-  to a gap behind them. At the old radius, six-seat core maps put systems on top
-  of each other in every seed.
+  `max(0.6 * r_inner, gap / (2 sin(pi/N)))` with `gap = config.CORE_GAP` (90
+  world units), so they stay a gap apart at six seats, and the sectors' inner
+  radius moves out to a gap behind them. At the old radius, six-seat core maps
+  put systems on top of each other in every seed.
+- **A map never depends on the screen.** The gap was first written as
+  `2.5 * node_clearance()`, a pixel figure that follows the UI scale. The
+  headless worker builds at scale 1.0 and the browser at whatever its window
+  gives, so the same seed laid out a different core board in each, and a bot's
+  winning replay played its orders onto the wrong map when watched (it ended
+  with the winner on 2 systems of 18). `CORE_GAP` is that figure at scale 1.0,
+  so every core map the worker, the verifier and the bot column ever built is
+  unchanged (`test_the_core_layout_is_the_board_the_worker_has_always_built`)
+  and `RULES_VERSION` did not move. A core game played in a browser at any other
+  scale was already unreproducible off it, and stays so.
+  `test_no_core_module_reads_a_screen_size` parses every core module and
+  `models/` for a read of a scaled `config` name.
 - **`layout` is inert off a generated symmetric map** (`Settings.layout_inert`:
   a random map, or any hand map). Then `challenge_keys` hashes it as `hub` and
   `token_dict` leaves it out, so a random map's key does not depend on what the

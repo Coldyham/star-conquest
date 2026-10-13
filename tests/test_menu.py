@@ -614,6 +614,26 @@ def test_the_node_stepper_takes_big_steps_past_a_standard_board():
     assert menu._node_step(big + 3, up=False) == big
 
 
+def test_the_node_stepper_moves_a_symmetric_map_between_sizes_it_can_build():
+    settings = Settings.defaults()
+    settings.mode, settings.layout, settings.players, settings.nodes = "symmetric", "core", 6, 10
+    assert settings.system_count() == 18          # what the row shows, not the 10 asked
+    menu._step_systems(settings, up=True)
+    assert (settings.nodes, settings.system_count()) == (24, 24)
+    menu._step_systems(settings, up=False)
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    menu._step_systems(settings, up=False)        # nothing smaller at six seats
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    for _ in range(100):
+        menu._step_systems(settings, up=True)
+    assert settings.nodes <= config.MAX_NODES
+    assert mapgen.symmetric_size(settings.nodes, 6, "core") == settings.system_count()
+    # a random map builds exactly what it is asked for, one system at a time
+    settings.mode, settings.nodes = "random", 10
+    menu._step_systems(settings, up=True)
+    assert settings.nodes == settings.system_count() == 11
+
+
 def test_the_lane_readout_describes_the_setup_being_shown():
     screen, ms, settings = _setup()
     try:

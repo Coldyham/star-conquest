@@ -11,6 +11,7 @@ import hashlib
 import itertools
 import json
 from collections import Counter
+from pathlib import Path
 
 from starconquest import config, mapgen
 from starconquest.geometry import point_segment_dist, segments_intersect
@@ -108,10 +109,10 @@ def _rotation(state, layout: str, players: int) -> dict[int, int]:
     return out
 
 
-def _fingerprint() -> str:
+def _fingerprint(layout: str = mapgen.SYMMETRIC_LAYOUTS[0]) -> str:
     rows = []
     for seed, nodes, players in ((3, 18, 2), (11, 24, 3), (7, 40, 6), (5, 60, 4)):
-        s = mapgen.generate_symmetric(seed, nodes, players)
+        s = mapgen.generate_symmetric(seed, nodes, players, layout)
         rows.append([[sid, round(v.pos[0], 6), round(v.pos[1], 6), v.production, v.ships, v.owner_id, v.name]
                      for sid, v in s.systems.items()])
         rows.append(sorted([l.a, l.b, l.length_ly, l.travel_turns] for l in s.lanes.values()))
@@ -124,6 +125,50 @@ def test_the_hub_layout_is_the_board_it_always_was():
     `RULES_VERSION` did not move when the other layouts joined — so if this
     fails, either restore the hub's draws or bump `RULES_VERSION`."""
     assert _fingerprint() == "75cad1b15cde46ad"
+
+
+def test_the_core_layout_is_the_board_the_worker_has_always_built():
+    """Pinned at UI scale 1.0, the scale `tools/bot_replay` and `verify_scores`
+    have built every core map at. Same rule as the hub: a change here re-deals
+    stored games, so it needs a `RULES_VERSION` bump."""
+    assert _fingerprint("core") == "448862aeb0b028e6"
+
+
+def test_a_map_does_not_depend_on_the_screen_it_is_built_on():
+    """A replay is rebuilt from its seed on whatever screen watches it, so the
+    UI scale (which every pixel size in `config` follows) must not reach mapgen."""
+    before = (config.ui_scale, config.touch_ui)
+    try:
+        prints = []
+        for scale in (1.0, 2.0, 0.75):
+            config.apply_ui_scale(scale)
+            prints.append([_fingerprint(layout) for layout in mapgen.SYMMETRIC_LAYOUTS])
+        assert prints[0] == prints[1] == prints[2]
+    finally:
+        config.apply_ui_scale(before[0], touch=before[1])
+
+
+def test_a_symmetric_map_has_the_size_symmetric_size_says():
+    for layout in mapgen.SYMMETRIC_LAYOUTS:
+        for players in range(config.MIN_PLAYERS, config.MAX_PLAYERS + 1):
+            for nodes in (players + 3, 10, 13, 21, 40, 41):
+                state = mapgen.generate_symmetric(1, nodes, players, layout)
+                assert len(state.systems) == mapgen.symmetric_size(nodes, players, layout), \
+                    (layout, players, nodes)
+
+
+def test_the_board_counts_systems_the_way_mapgen_builds_them():
+    """`leaderboard/js/format.mjs`'s `symmetricSize` is checked against this
+    table by `leaderboard/tests/format.test.mjs`; this checks the table against
+    mapgen. Regenerate it from `mapgen.symmetric_size` if this fails."""
+    path = Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures" / "symmetric-sizes.json"
+    table = json.loads(path.read_text())
+    assert table == {
+        layout: {str(players): [mapgen.symmetric_size(n, players, layout)
+                                for n in range(1, config.MAX_NODES + 1)]
+                 for players in range(config.MIN_PLAYERS, config.MAX_PLAYERS + 1)}
+        for layout in mapgen.SYMMETRIC_LAYOUTS
+    }
 
 
 def test_an_unknown_layout_is_the_hub():
