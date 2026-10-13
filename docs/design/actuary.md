@@ -689,7 +689,111 @@ removes the loss at 12, where plain 0.5 lost. Head to head the two are not
 separated (+48/-59 on the same games), so the case for the reacting form is the
 fast cell alone.
 
-**Proposed, not yet shipped:** `SELF_RELIEF = 0.5` with `SELF_RELIEF_REACTS =
-True`. Every row above is actuary against itself. Before the flag flips, measure
-it against marshal and knower, as "The 2026-10 sweep" did, and on the board's
-maps. Flipping it moves actuary's `engine_rev` and with it the bot column.
+### The full measurement (2026-10-13)
+
+Run as "The 2026-10 sweep" was: `tools/sweep.py`, every arm duelled against a
+fixed baseline in both seatings, with stock actuary as an arm so each variant is
+compared with it on the same (cell, seed, seating). "Paired" is PAIRED ARMS:
+games the variant did better than stock in, against games it did worse, on
+the same cell, seed and seating. "r" is the lane-aware form (`SELF_RELIEF_REACTS`).
+With both flags off the bot is bit-identical to the pre-flag actuary: 2,074
+positions over four cells, no order differs.
+
+**The dose, against marshal, Planned (seeds 1-200).**
+
+                     18@6    18@6 j0.3   40@6    24@3    24@12
+    stock            69.5    29.9        66.7    58.8    68.3
+    r 0.3            71.6    32.0        71.3     -       -
+    r 0.5            73.8    28.9        73.1    64.7    67.8
+    r 0.8            74.9    30.6        74.0     -       -
+    plain 0.5        74.6    30.0        70.5    69.7    64.5
+
+    paired against stock, pooled over the cells each ran in:
+    r 0.3 +107/-74 (z+2.45), r 0.8 +135/-79 (z+3.83), r 0.5 +204/-140 (z+3.45),
+    plain 0.5 +258/-198 (z+2.81) with 24@12 at +37/-54 (z-1.78)
+
+The lane-aware form gains in every cell but jitter 0.3 and 24@12, where it is
+level. Plain 0.5 is as good at 18 nodes and better at 24@3, but it costs at
+24@12, which is what the lane gate is for. 0.3 is weaker. 0.5 and 0.8 are not
+separated against marshal.
+
+**Confirmed on fresh seeds (5001-5150), against marshal, Planned.**
+
+                     18@6    18@6 j0.3   24@3    40@6    24@12   paired vs stock
+    stock            66.6    25.2        57.1    68.5    65.4
+    r 0.5            77.8    28.0        67.6    74.8    68.0    +187/-92  z+5.7
+    r 0.8            78.4    27.7        69.5    75.8    71.4    +203/-85  z+7.0
+
+Every cell is positive for 0.8, and only jitter 0.3 is short of significance
+(+30/-22). 0.8 against 0.5 is +134/-113.
+
+**Every Style stop** (against marshal, lane-aware, paired against that stop's stock):
+
+    Greedy   seeds 1-150    18@6 69.0 -> 75.9 / 78.6 (0.5 / 0.8), 40@6 70.6 -> 74.6 / 73.4,
+                            24@3 57.0 -> 68.9 / 67.4, 24@12 69.0 -> 72.5 / 72.5
+                            paired 0.5 +154/-78 (z+5.0), 0.8 +156/-76 (z+5.2)
+    Learning seeds 1-150    0.5: 18@6 73.7 -> 78.7, 24@3 70.4 -> 77.8, 40@6 71.5 -> 77.1,
+                            24@12 74.6 -> 73.4; paired +126/-75 (z+3.60)
+    Learning seeds 5001+    0.5: paired +74/-62 (z+1.03); 0.8: 76.6 -> 80.3, 71.8 -> 75.7,
+                            80.1 -> 83.0, 72.9 -> 77.2, paired +88/-59 (z+2.39)
+
+The opening plan never reads the risk term, so Planned and Learning change only
+from first contact on, and Greedy from the first turn. Learning prices risk
+through `_learned_shortfall`, which counts our relief the same way. On fresh
+seeds 0.5 is level at Learning while 0.8 holds. That and the advantage sliders
+below are where 0.8 separates from 0.5.
+
+**Against the rest of the roster** (Planned, seeds 3001-3120, four cells):
+
+                       18@6         24@3         40@6         24@12        paired vs stock
+    vs knower-1        72.4 -> 80.2 / 81.7   83.8 -> 91.5 / 91.0   72.6 -> 77.5 / 77.4   58.0 -> 67.2 / 65.4
+                                                                       0.5 +115/-43 z+5.73, 0.8 +116/-45 z+5.60
+    vs thinker         97.9-100 in every arm and cell (a ceiling)      0.5 +11/-8, 0.8 +13/-10
+    vs knower-2        18@6 only, 100 seeds: 22.6 -> 27.3 (0.5)        +28/-19 z+1.31
+
+**The advantage sliders** (against marshal, seeds 4001-4100):
+
+                       adv 0.75             adv 1.5
+    18@6               60.8 -> 62.0 / 65.8   65.0 -> 66.2 / 72.1
+    40@6               66.5 -> 65.5 / 68.5   60.3 -> 69.2 / 70.7
+    paired             0.5 +94/-78 (z+1.22), 0.8 +106/-65 (z+3.14); 0.8 over 0.5 +80/-56 (z+2.06)
+
+**Free-for-all** (actuary, marshal, thinker, every seat rotation, each position
+played once per arm in one process with the flags toggled, so it is paired):
+
+                       actuary's share of wins (stock / 0.5 / 0.8)   paired vs stock
+    18@6 seeds 301-450      62.9 / 67.1 / -                           0.5 +55/-36 (z+1.99)
+    18@6 seeds 601-750      60.0 / 64.2 / 64.0                        0.5 +50/-31 (z+2.11), 0.8 +50/-32 (z+1.99)
+    40@6 seeds 501-580      68.3 / 67.5 / 67.9                        level (+20/-22, +17/-18)
+
+The gain comes from marshal's and thinker's wins alike. Timeouts and game
+length do not move: in the 18-node runs 8-19 timeouts per 450 positions in every
+arm, and mean length 144-158 turns.
+
+**What it costs.** Thread CPU time per decide, every arm on the same positions
+(stock actuary against marshal, seeds 5001-5006, up to 250 turns), load under 1.
+p75 ms and mean orders:
+
+                  stock          r 0.5          r 0.8
+    18@6       2.58  2.2      3.05  2.2      3.00  2.1
+    24@3       6.14  4.1      7.50  4.2      7.44  4.1
+    40@6       6.99  6.1      9.36  6.1      9.25  6.0
+    24@12      2.63  3.1      3.56  3.2      3.62  3.2
+    80@6      19.93 17.4     24.88 17.4     24.95 17.4
+
+That is 16-36% more, about 1.3x at 40 systems, and it hardly grows with size
+(1.16 at 18, 1.25 at 80). The extra cost is the relief sum in every risk read
+and the `_idle` prune switched off next to a system with priced risk.
+`decide_ms` would need `COST_DECIDE_MS` taken from 6.4 to about 8.3 with the
+exponent left alone, so knower's `setup_warning` keeps counting it honestly.
+
+**Recommendation: ship `SELF_RELIEF = 0.8` with `SELF_RELIEF_REACTS = True`.** It
+is better than stock in every cell and against every opponent that is not at a
+ceiling, at every Style stop, and on fresh seeds. It is never worse anywhere
+measured, and it is at least as good as 0.5 everywhere, better at Learning and
+across the advantage sliders. Shipping it needs `decide_ms` refitted, moves
+actuary's `engine_rev` (so the bot column replays), and leaves
+`test_learning_counting_every_garrison_in_full_plays_as_planned` to be re-read
+with the flag on (it passes). Not measured: the board's own maps through
+`tools/setup_sweep.py`, knower at Search beyond 200 games, and the browser's
+timing.
