@@ -16,29 +16,31 @@ MATCH = "f7697d6f02fbc2e9"
 STAMP = "2026-09-24T10:14:14.123456+00:00"
 
 
-class FakeApi:
+class FakeApi(admin.AdminApi):
     """Answers each select with the first canned rows whose table matches and
-    whose marker appears in the query; records every write."""
+    whose marker appears in the query; records every write. Its blank url makes
+    anything not stood in for here fail rather than reach a network."""
 
     def __init__(self, answers: list[tuple[str, str, list[dict]]], *, stale: bool = False):
+        super().__init__(url="", key="")
         self.answers = answers
         self.stale = stale
         self.writes: list[tuple] = []
 
-    def select(self, table, query):
+    def select(self, table: str, query: str) -> list[dict]:
         for name, marker, rows in self.answers:
             if name == table and marker in query:
                 return [dict(r) for r in rows]
         return []
 
-    def insert(self, table, rows):
+    def insert(self, table: str, rows: list[dict]) -> None:
         self.writes.append(("insert", table, rows))
 
-    def update(self, table, query, patch):
+    def update(self, table: str, query: str, patch: dict) -> list[dict]:
         self.writes.append(("update", table, query, patch))
         return [] if self.stale else [patch]
 
-    def delete(self, table, query):
+    def delete(self, table: str, query: str) -> None:
         self.writes.append(("delete", table, query))
 
 
@@ -80,7 +82,9 @@ def test_a_new_link_replaces_the_seats_token_and_prints_one_that_opens_it(capsys
     assert table == "pbp_matches"
     assert "updated_at=eq.2026-09-24T10%3A14%3A14.123456%2B00%3A00" in query
     link = next(line for line in capsys.readouterr().out.splitlines() if "#pbp=" in line)
-    match_id, token = pbp.parse_link(link.split("#", 1)[1])
+    parsed = pbp.parse_link(link.split("#", 1)[1])
+    assert parsed is not None
+    match_id, token = parsed
     assert match_id == MATCH
     assert patch["seats"]["tokens"] == {"1": "h1", "2": admin.hash_token(token)}
     assert token not in str(audit), "the plaintext token must never be stored"
@@ -165,6 +169,212 @@ def test_deleting_a_score_that_does_not_exist_is_refused():
     with pytest.raises(admin.Refused, match="2"):
         admin.plan_delete_score(api, [1, 2])
 
+
+# --------------------------------------------------------------------------- #
+# Claimed names
+# --------------------------------------------------------------------------- #
+class AuthFakeApi(FakeApi):
+    """FakeApi plus Auth's account list, by email."""
+
+    def __init__(self, answers, accounts=None, **kw):
+        super().__init__(answers, **kw)
+        self.accounts = accounts or {}
+
+    def auth_user(self, email: str) -> dict | None:
+        uid = self.accounts.get(email.strip().lower())
+        return {"id": uid, "email": email} if uid else None
+
+
+ANN = "11111111-1111-1111-1111-111111111111"
+BOB = "22222222-2222-2222-2222-222222222222"
+
+
+def _named(owner=None, **over):
+    return {"id": 7, "name": "Ann", "name_key": "ann", "owner": owner,
+            "claimed": owner is not None, **over}
+
+
+def test_assigning_a_used_name_is_a_dry_run_until_yes(capsys):
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()]),
+                       ("scores", "user_id=eq.7", [{"id": 1}, {"id": 2}])],
+                      {"ann@example.com": ANN})
+    plan = admin.plan_assign_name(api, " ann ", "Ann@Example.com")
+    admin.apply(api, plan, yes=False, reason="")
+    assert api.writes == []
+    assert "2 score(s)" in capsys.readouterr().out
+
+
+def test_assigning_a_used_name_audits_first_and_sets_the_owner_conditionally():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])], {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"),
+                yes=True, reason="their old name")
+    audit, write = api.writes
+    assert audit[:2] == ("insert", "admin_actions")
+    assert audit[2][0]["detail"]["owner"] == ANN
+    assert "example.com" not in str(audit), "the audit row names the account by id only"
+    assert write == ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN})
+
+
+def test_assigning_a_name_nobody_has_used_creates_it_owned():
+    api = AuthFakeApi([], {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"), yes=True, reason="")
+    assert api.writes[-1] == ("insert", "users", [{"name": "Ann", "owner": ANN}])
+
+
+def test_assigning_to_an_account_that_never_signed_in_is_refused():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])])
+    with pytest.raises(admin.Refused, match="sign in"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_an_account_owns_one_name():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()]),
+                       ("users", f"owner=eq.{ANN}", [{"id": 9, "name": "Annie"}])],
+                      {"ann@example.com": ANN})
+    with pytest.raises(admin.Refused, match="Annie"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_a_name_someone_else_owns_must_be_released_first():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named(BOB)])], {"ann@example.com": ANN})
+    with pytest.raises(admin.Refused, match="release-name"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_assigning_a_name_its_owner_already_has_does_nothing(capsys):
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named(ANN)]),
+                       ("users", f"owner=eq.{ANN}", [{"id": 7, "name": "Ann"}])],
+                      {"ann@example.com": ANN})
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"), yes=True, reason="")
+    assert api.writes == []
+    assert "nothing to do" in capsys.readouterr().out
+
+
+def test_a_name_that_changed_hands_mid_assign_is_refused():
+    api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])], {"ann@example.com": ANN},
+                      stale=True)
+    with pytest.raises(admin.Refused, match="changed hands"):
+        admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com"),
+                    yes=True, reason="")
+
+
+def test_releasing_a_name_clears_its_owner():
+    api = FakeApi([("users", "name_key=eq.ann", [_named(ANN)])])
+    admin.apply(api, admin.plan_release_name(api, "ANN"), yes=True, reason="asked")
+    assert api.writes[-1] == ("update", "users", f"id=eq.7&owner=eq.{ANN}", {"owner": None})
+    with pytest.raises(admin.Refused, match="not claimed"):
+        admin.plan_release_name(FakeApi([("users", "", [_named()])]), "Ann")
+
+
+def test_a_rename_carries_the_owner_with_it():
+    """rename-user patches the name alone, so a claimed name stays claimed."""
+    api = FakeApi([("users", "name_key=eq.ann&", [_named(ANN)])])
+    admin.apply(api, admin.plan_rename_user(api, "Ann", "Annabel"), yes=True, reason="")
+    assert api.writes[-1] == ("update", "users", "id=eq.7", {"name": "Annabel"})
+
+
+# --------------------------------------------------------------------------- #
+# Folding several used names into the one claimed name
+# --------------------------------------------------------------------------- #
+def _andy(owner=None):
+    return {"id": 8, "name": "andy", "name_key": "andy", "owner": owner, "claimed": bool(owner)}
+
+
+def _fold_api(andy_owner=None, owned=(), kept=True, **kw):
+    answers = [
+        ("users", "name_key=eq.andy&", [_andy(andy_owner)]),
+        ("users", "name_key=eq.aj&", [{"id": 9, "name": "AJ", "name_key": "aj", "owner": None}]),
+        ("users", f"owner=eq.{ANN}", list(owned)),
+        ("scores", "user_id=eq.8", [{"id": 31}, {"id": 32}]),
+        ("scores", "user_id=eq.9", [{"id": 33}]),
+        ("config_tags", "user_id=eq.8", [{"id": 41}]),
+    ]
+    if kept:
+        answers.insert(0, ("users", "name_key=eq.ann&", [_named()]))
+    return AuthFakeApi(answers, {"ann@example.com": ANN}, **kw)
+
+
+def test_folding_moves_every_score_and_tag_then_frees_the_old_names():
+    api = _fold_api()
+    plan = admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy", "AJ", "ANDY"])
+    admin.apply(api, plan, yes=True, reason="one person")
+    audit, *writes = api.writes
+    detail = audit[2][0]["detail"]
+    assert [r["name"] for r in detail["folded"]] == ["andy", "AJ"], "a repeat folds once"
+    assert detail["moved"]["8"] == {"scores": [31, 32], "config_tags": [41]}
+    assert detail["moved"]["9"] == {"scores": [33], "config_tags": []}
+    assert writes == [
+        ("update", "scores", "user_id=in.(8,9)", {"user_id": 7}),
+        ("update", "config_tags", "user_id=in.(8,9)", {"user_id": 7}),
+        ("delete", "users", "id=in.(8,9)"),
+        ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN}),
+    ]
+
+
+def test_an_old_name_the_account_owns_lets_go_before_the_kept_one_is_claimed():
+    api = _fold_api(andy_owner=ANN, owned=[{"id": 8, "name": "andy"}])
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=True, reason="")
+    writes = api.writes[1:]
+    assert writes[0] == ("update", "users", f"id=eq.8&owner=eq.{ANN}", {"owner": None})
+    assert writes[-1] == ("update", "users", "id=eq.7&owner=is.null", {"owner": ANN})
+
+
+def test_the_one_name_refusal_points_at_fold():
+    api = _fold_api(owned=[{"id": 8, "name": "andy"}])
+    with pytest.raises(admin.Refused, match="--fold"):
+        admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_folding_someone_elses_name_or_a_missing_one_or_itself_is_refused():
+    with pytest.raises(admin.Refused, match="another account"):
+        admin.plan_assign_name(_fold_api(andy_owner=BOB), "Ann", "ann@example.com", ["andy"])
+    with pytest.raises(admin.Refused, match="no such user"):
+        admin.plan_assign_name(_fold_api(), "Ann", "ann@example.com", ["nobody"])
+    with pytest.raises(admin.Refused, match="itself"):
+        admin.plan_assign_name(_fold_api(), "Ann", "ann@example.com", [" ANN "])
+
+
+def test_a_fold_dry_run_writes_nothing_and_counts_what_would_move(capsys):
+    api = _fold_api()
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=False, reason="")
+    assert api.writes == []
+    out = capsys.readouterr().out
+    assert "fold 'andy' (2 score(s), 1 tag(s))" in out and "free for anyone" in out
+
+
+def test_folding_into_a_name_nobody_has_used_makes_it_first():
+    api = _fold_api(kept=False)
+    plan = admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"])
+    # The kept row exists once the insert has run: hand it back from then on.
+    real_insert = api.insert
+
+    def insert(table, rows):
+        real_insert(table, rows)
+        api.answers.insert(0, ("users", "name_key=eq.ann&", [_named(ANN)]))
+
+    api.insert = insert
+    admin.apply(api, plan, yes=True, reason="")
+    writes = api.writes[1:]
+    assert writes[0] == ("insert", "users", [{"name": "Ann", "owner": ANN}])
+    assert writes[1] == ("update", "scores", "user_id=in.(8)", {"user_id": 7})
+    assert writes[-1] == ("delete", "users", "id=in.(8)")
+
+
+def test_folding_into_a_name_already_theirs_still_folds():
+    api = _fold_api()
+    api.answers[0] = ("users", "name_key=eq.ann&", [_named(ANN)])
+    api.answers[3] = ("users", f"owner=eq.{ANN}", [{"id": 7, "name": "Ann"}])
+    admin.apply(api, admin.plan_assign_name(api, "Ann", "ann@example.com", ["andy"]),
+                yes=True, reason="")
+    assert api.writes[-1] == ("delete", "users", "id=in.(8)")
+
+
+def test_fold_takes_several_names_and_repeats():
+    args = admin.parse_args(["assign-name", "A", "a@x", "--fold", "b", "c", "--fold", "d"])
+    assert args.fold == ["b", "c", "d"]
+    assert admin.parse_args(["assign-name", "A", "a@x"]).fold == []
 
 def test_delete_campaign_keeps_the_graph_on_the_audit_row_and_drops_only_the_week():
     row = {"week_start": "2026-10-05", "graph": {"nodes": [{"id": 0}, {"id": 1}]}}

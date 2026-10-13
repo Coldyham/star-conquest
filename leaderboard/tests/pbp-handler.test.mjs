@@ -39,7 +39,11 @@ const DEFAULTS = {
                  turn_opened_at: () => new Date().toISOString(),
                  created_at: "", updated_at: "" },
   pbp_orders: { source: "human", board_digest: "", submitted_at: "", id: 0 },
+  users: { id: 0, name: "", name_key: "", owner: null, claimed: false, created_at: "" },
 };
+// Bearer tokens Auth would accept, and the account each one is. Anything else
+// answers 401, as `/auth/v1/user` does for a missing or revoked session.
+const SESSIONS = { "tok-ann": "uid-ann", "tok-bob": "uid-bob" };
 const UNIQUE = { pbp_orders: (r) => `${r.match_id}|${r.turn}|${r.seat}` };
 
 let TABLES;
@@ -53,9 +57,15 @@ function withDefaults(table, row) {
 }
 
 function install() {
-  TABLES = { pbp_matches: [], pbp_orders: [] };
+  TABLES = { pbp_matches: [], pbp_orders: [], users: [] };
   globalThis.fetch = async (url, init = {}) => {
     const parsed = new URL(url);
+    if (parsed.pathname === "/auth/v1/user") {
+      const bearer = (init.headers?.Authorization || "").replace(/^Bearer /, "");
+      const id = SESSIONS[bearer];
+      return id ? new Response(JSON.stringify({ id }), { status: 200 })
+        : new Response('{"msg":"invalid JWT"}', { status: 401 });
+    }
     const table = parsed.pathname.replace(/^\/rest\/v1\//, "");
     assert.ok(table in TABLES, `stub: no table ${table}`);
     const filters = [];
@@ -119,12 +129,13 @@ function install() {
 }
 
 /** Call the handler the way Netlify would, and hand back `[status, body]`. */
-async function call(action, body, method = "POST") {
+async function call(action, body, method = "POST", bearer = "") {
   const url = `http://localhost/api/pbp?action=${action}`
     + (body && method === "GET" ? `&${new URLSearchParams(body)}` : "");
   const reply = await handler(new Request(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json",
+               ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
     ...(method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}),
   }));
   return [reply.status, JSON.parse(await reply.text())];
@@ -603,4 +614,52 @@ test("the winner is stored only on the resolve that finishes the match", async (
   const [, after] = await state();
   assert.equal(after.winner, 2);
   assert.equal(after.finished, true);
+});
+
+// --------------------------------------------------------------------------
+// Claimed names: a seat may only be named after a claimed name by its owner
+// --------------------------------------------------------------------------
+function claim(name, owner) {
+  TABLES.users.push(withDefaults("users", {
+    name, name_key: name.toLowerCase(), owner, claimed: owner !== null }));
+}
+
+const createAs = (name, bearer) => call("create", {
+  match_id: MATCH, settings_json: { mode: "random", players: 2 },
+  seed: 7, seats: [1, 2], claimed: [1], rules_version: 2, public: true, name,
+}, "POST", bearer);
+
+test("a claimed name opens a match only for its owner", async () => {
+  install();
+  claim("Ann", "uid-ann");
+  const [anonymous, body] = await createAs("ann", "");
+  assert.equal(anonymous, 403, "signed out, under someone's claimed name");
+  assert.match(body.error, /claimed/);
+  assert.equal(TABLES.pbp_matches.length, 0, "a refusal writes nothing");
+  assert.equal((await createAs("Ann", "tok-bob"))[0], 403, "signed in as somebody else");
+  assert.equal((await createAs("Ann", "forged"))[0], 403, "a token Auth refuses");
+  const [owner, created] = await createAs("Ann", "tok-ann");
+  assert.equal(owner, 201, JSON.stringify(created));
+  assert.equal(TABLES.pbp_matches[0].names[1], "Ann");
+});
+
+test("an unclaimed or unused name needs nobody signed in", async () => {
+  install();
+  claim("Cat", null);
+  assert.equal((await createAs("Cat", ""))[0], 201, "a name with a row but no owner");
+  install();
+  assert.equal((await createAs("Dot", ""))[0], 201, "a name with no row at all");
+});
+
+test("claiming a seat under a claimed name is the owner's alone", async () => {
+  install();
+  claim("Ann", "uid-ann");
+  assert.equal((await createAs("", ""))[0], 201);
+  const seat = (name, bearer) => call("claim", { match_id: MATCH, seat: 2, name }, "POST", bearer);
+  const [refused] = await seat("ANN", "tok-bob");
+  assert.equal(refused, 403);
+  assert.deepEqual(TABLES.pbp_matches[0].names, {}, "a refused claim names no seat");
+  const [status, body] = await seat("Ann", "tok-ann");
+  assert.equal(status, 201, JSON.stringify(body));
+  assert.equal(TABLES.pbp_matches[0].names[2], "Ann");
 });

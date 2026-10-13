@@ -1,0 +1,155 @@
+{% extends "templates/base.html" %}
+{% set title = "Privacy" %}
+{% set main_class = "notice" %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Privacy</h1>
+  <p class="lede">
+    Star Conquest collects as little as it can. You can play, post scores and
+    watch replays without an account. This page says what is kept, where it is
+    kept, and how to have it removed.
+  </p>
+  <p class="updated">Last updated 5 October 2026.</p>
+
+  <h2 class="section-title">Who runs this site</h2>
+  <p>
+    Star Conquest, the game and this leaderboard, is run by
+    <a href="https://github.com/Coldyham">Coldyham</a>, who is responsible for
+    the data described here. To ask about it, or to exercise any of the rights
+    below, contact <a href="https://github.com/Coldyham">Coldyham on GitHub</a>.
+  </p>
+
+  <h2 class="section-title">No tracking</h2>
+  <p>
+    There are no ads, no analytics, no tracking pixels and no third-party
+    scripts. The pages, scripts and fonts are all served from this site.
+  </p>
+
+  <h2 class="section-title">If you sign in with Google</h2>
+  <p>
+    Signing in is optional, and it does one thing: it lets you claim a name so
+    nobody else can post under it.
+  </p>
+  <ul>
+    <li>
+      When you sign in, Google passes your <strong>email address, name, profile
+      picture link and Google account ID</strong> to Supabase, the service that
+      runs sign-in for this site. Google always sends the name and picture as
+      part of a standard sign-in, but this site never uses or shows them.
+    </li>
+    <li>
+      Supabase also records each sign-in: <strong>when it happened, your IP
+      address and your browser's user agent</strong>.
+    </li>
+    <li>
+      The leaderboard links your claimed name to your account's ID number. That
+      link is not public. The board shows only that a name is claimed, never
+      who claimed it.
+    </li>
+    <li>
+      Your email is used to show you who you are signed in as. If you ask for a
+      name you have already been posting under, the site's owner also uses it
+      to find your account so the name can be assigned to you. It is never
+      shown to anyone else, and nobody is ever emailed.
+    </li>
+  </ul>
+  <p>
+    <strong>Why:</strong> a claimed name needs an account to belong to.
+    <strong>How long:</strong> until you ask for your account to be deleted.
+  </p>
+
+  <h2 class="section-title">Scores, names and replays</h2>
+  <p>
+    Everything you post to the board is public. That means the name you enter,
+    the map, your turns, ships lost, how many turns you played yourself, the
+    name of whoever challenged you, and when you posted. Anyone can watch the
+    replay of a posted score. A replay holds the moves of the game and no name
+    or account. If you tick <em>Share replays</em> in the game, it also uploads
+    checkpoints of your games, and those stay private unless a posted score
+    points at them.
+  </p>
+  <p>
+    For a shared (play-by-post) match, the server keeps the match setup, every
+    seat's orders, the match title and the name each player gives their seat.
+    Your seat's link holds a secret token, and the server stores only a hash
+    of it, never the token itself. A public match is listed in the lobby along
+    with its seat names.
+  </p>
+  <p>
+    Any name you type is public, so choose one you are happy for anyone to see.
+  </p>
+  <p>
+    <strong>Why:</strong> posting a score or joining a match is what you came to
+    do, and a fair public leaderboard needs its scores to be checkable.
+    <strong>How long:</strong> until removed. Ask, and the scores under your
+    name will be deleted.
+  </p>
+
+  <h2 class="section-title">Your IP address</h2>
+  <p>
+    Netlify hosts this site. Like any web host, it sees your IP address on every
+    request and keeps standard request logs under its own policy. The site's
+    upload and shared-match endpoints also check your IP address, in memory
+    only, to limit how fast one visitor can send. It is never written to the
+    database.
+  </p>
+  <p>
+    <strong>Why:</strong> to keep the site running and stop it being flooded.
+  </p>
+
+  <h2 class="section-title">On your device</h2>
+  <p>
+    The game and the board keep some things in your browser's local storage:
+    your settings, your best scores, the game in progress and saved replays,
+    your shared-match seat links, your preferences (such as animated turns and
+    <em>Share replays</em>) and, if you sign in, your sign-in session and email.
+    None of this is a tracking cookie. Each item leaves your device only when you
+    use the feature it belongs to. Signing out removes the session, and clearing
+    this site's data in your browser removes the rest.
+  </p>
+
+  <h2 class="section-title">Who else handles it</h2>
+  <ul>
+    <li><strong>Supabase</strong> runs the database and sign-in. Its servers for this site are in eu-west-2 (London).</li>
+    <li><strong>Netlify</strong> hosts the site and its server functions.</li>
+    <li>
+      <strong>Google</strong> handles the sign-in step itself. What Google does
+      with your account is covered by
+      <a href="https://policies.google.com/privacy">Google's own privacy policy</a>.
+    </li>
+  </ul>
+  <p>
+    Supabase and Netlify handle this data only on the site's behalf, under their
+    data processing terms. Those terms include the standard safeguards for data
+    held outside the UK.
+  </p>
+
+  <h2 class="section-title">Children</h2>
+  <p>
+    Signing in is for people aged 13 and over. The rest of the site needs no
+    account and collects nothing about who you are.
+  </p>
+
+  <h2 class="section-title">Your rights</h2>
+  <p>
+    Under UK data protection law you can ask to see the data held about you,
+    have it corrected or deleted, limit or object to how it is used, or take a
+    copy of it. Contact <a href="https://github.com/Coldyham">Coldyham on GitHub</a>.
+    Deleting your account also frees your claimed name. To give up a name and
+    keep your account, use <a href="account.html">Your name</a>.
+  </p>
+  <p>
+    If you are unhappy with how a request was handled, you can complain to the
+    Information Commissioner's Office at
+    <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk</a>.
+  </p>
+
+  <h2 class="section-title">Changes</h2>
+  <p>
+    If anything here changes, this page and its date change with it.
+  </p>
+{% endblock %}
+
+{% block footer %}No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>{% endblock %}

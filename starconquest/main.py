@@ -488,6 +488,11 @@ PBP_BAD_LOG_MSG = "The match's record doesn't match its orders — can't play it
 # exact `error` string `pbp.mjs` sends; anything not here is relayed with a
 # prefix saying it was a refusal, so it still reads as an answer rather than as
 # a connection problem.
+# `pbp.mjs`'s CLAIMED_NAME: the "Your name" typed for seat 1 is somebody's
+# claimed name. A 403 like a bad token, so it is matched before that one.
+PBP_CLAIMED_ERROR = "name is claimed: sign in on the board as its owner, or pick another"
+PBP_CLAIMED_MSG = ("That name is claimed — sign in on the leaderboard's Your name"
+                   " page as its owner, or pick another")
 PBP_ENDPOINT_MSGS = {
     "stale turn": "The match has moved past this turn — catching up",
     "already submitted": "Your orders for this turn are already in",
@@ -612,11 +617,13 @@ def pbp_trouble(status: str, body: str) -> str:
     refusal, and only a call that came back with nothing at all falls through to
     a line about the connection.
     """
+    error = (pbp.parse_body(body) or {}).get("error") if body else None
+    if error == PBP_CLAIMED_ERROR:
+        return PBP_CLAIMED_MSG
     if status == pbp.MISSING:
         return PBP_MISSING_MSG
     if status == pbp.REFUSED:
         return PBP_REFUSED_MSG
-    error = (pbp.parse_body(body) or {}).get("error") if body else None
     if not isinstance(error, str) or not error:
         return PBP_UNREACHABLE_MSG
     return PBP_ENDPOINT_MSGS.get(error) or PBP_REFUSAL_MSG.format(error)

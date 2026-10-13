@@ -57,6 +57,7 @@ from . import engine, replay, webstore
 from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
+    WEB_AUTH_KEY,
     WEB_PBP_BODY_KEY,
     WEB_PBP_RULES_KEY,
     WEB_PBP_SEATS_KEY,
@@ -745,11 +746,13 @@ def _clear_web_slot(slot: int) -> None:
         webstore.set(key, "")
 
 
-def call(action: str, payload: dict | None = None, **params) -> Request | None:
+def call(action: str, payload: dict | None = None, signed: bool = False,
+         **params) -> Request | None:
     """Start a call to ``action``. None if it cannot be attempted at all.
 
-    ``payload`` makes it a POST. Nothing is awaited and nothing blocks; the
-    caller polls the returned ``Request`` once a frame.
+    ``payload`` makes it a POST. ``signed`` sends the board's sign-in session
+    along, when there is one (web only; see ``_call_web``). Nothing is awaited
+    and nothing blocks; the caller polls the returned ``Request`` once a frame.
     """
     url = endpoint(action)
     if not url:
@@ -757,20 +760,30 @@ def call(action: str, payload: dict | None = None, **params) -> Request | None:
     for key, value in params.items():
         url += f"&{key}={value}"
     body = json.dumps(payload) if payload is not None else None
-    return request(url, body)
+    return request(url, body, signed)
 
 
-def request(url: str, body: str | None = None) -> Request | None:
+def request(url: str, body: str | None = None, signed: bool = False) -> Request | None:
     """Start a call to any of the site's endpoints: a GET, or a POST of ``body``.
 
     The transport behind ``call``, public because it is the one non-blocking,
     mailbox-per-call request the game has, and ``campaign`` needs the same
     thing for a different endpoint rather than a third copy of it.
     """
-    return _call_web(url, body) if is_web() else _call_desktop(url, body)
+    return _call_web(url, body, signed) if is_web() else _call_desktop(url, body)
 
 
-def _call_web(url: str, body: str | None) -> Request | None:
+def _auth_js() -> str:
+    """JS adding ``Authorization`` to a headers object ``h`` from the board's
+    stored session, if any. Read in JS at fetch time rather than passed in, so
+    the token never passes through Python, and a missing, blocked or malformed
+    store simply sends nothing — the endpoint then treats the call as signed
+    out, which only matters for a claimed name."""
+    return (f"try{{var a=JSON.parse(localStorage.getItem({json.dumps(WEB_AUTH_KEY)})||'null');"
+            "if(a&&a.access_token)h.Authorization='Bearer '+a.access_token}catch(e){}")
+
+
+def _call_web(url: str, body: str | None, signed: bool = False) -> Request | None:
     """A ``fetch`` that parks its own result where the poll can collect it.
 
     The handlers leave the slot in exactly one of the three states whatever
@@ -785,12 +798,13 @@ def _call_web(url: str, body: str | None) -> Request | None:
     mailbox = _web_calls % _WEB_SLOTS
     _web_calls += 1
     state, slot = (json.dumps(key) for key in _web_keys(mailbox))
-    init = ("{method:'POST',headers:{'Content-Type':'application/json'},body:"
+    init = ("{method:'POST',headers:h,body:"
             f"{json.dumps(body)}}}") if body is not None else "{}"
+    headers = "var h={'Content-Type':'application/json'};" + (_auth_js() if signed else "")
     try:
         _platform.window.eval(
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
-            f"fetch({json.dumps(url)},{init}).then(function(r)"
+            f"{headers}fetch({json.dumps(url)},{init}).then(function(r)"
             "{return r.text().then(function(t){"
             f"localStorage.setItem({slot},t);"
             f"localStorage.setItem({state},r.ok?'{OK}':r.status===404?'{MISSING}'"
@@ -888,7 +902,7 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
         "claimed": [1] if public else sorted(set(seats)),
         "title": title.strip()[:TITLE_MAX],
         "name": name.strip()[:NAME_MAX],
-    })
+    }, signed=bool(name.strip()))
 
 
 def tokens_from(body: dict, match_id: str) -> dict[int, str]:

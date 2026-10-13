@@ -45,7 +45,10 @@ def _granted(role: str) -> dict[str, set[str]]:
             continue
         if "function" in rels:                      # `grant execute on function …`
             continue
-        wanted = {p.strip() for p in privs.split(",")}
+        # A column grant (`grant select (id, name) on users`) counts as the
+        # privilege on the relation: users is granted that way to keep its owner
+        # column private, and what this file checks is reachability, not columns.
+        wanted = {p.strip() for p in re.sub(r"\([^)]*\)", "", privs).split(",")}
         for rel in (r.strip() for r in rels.split(",")):
             out.setdefault(rel.removeprefix("public."), set()).update(wanted)
     return out

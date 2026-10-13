@@ -84,3 +84,4 @@ def test_the_board_reads_the_same_storage_keys_the_game_writes():
     js = ROOT / "leaderboard" / "js"
     assert _js_string_constant(js / "pbp.mjs", "SEATS_KEY") == paths.WEB_PBP_SEATS_KEY
     assert _js_string_constant(js / "me.mjs", "NAME_KEY") == paths.WEB_PBP_NAME_KEY
+    assert _js_string_constant(js / "auth.mjs", "SESSION_KEY") == paths.WEB_AUTH_KEY
