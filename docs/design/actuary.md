@@ -560,6 +560,34 @@ stored value under 2 as the gated opening plus ledger. That narrows the knob on
 read, without rewriting a stored `aux`, so no challenge key moves. The gate's
 threshold is unmeasured.
 
+### The gate, shipped (2026-10-13)
+
+Shipped together with `SELF_RELIEF` 0.8 lane-aware: Planned and Learning open
+with the plan only where `_plans` allows (24+ systems, median lane of 2 turns or
+less), and with the ledger elsewhere. At the default 6 ly/turn no map under 24
+systems qualifies, nor most 40- and 80-node maps, so there Planned plays exactly
+as Greedy. The three stops stay, so no stored `aux` reads differently. Measured
+against marshal on fresh seeds 8001-8100, both seatings. "old" is the bot as it
+shipped before (`SELF_RELIEF` 0, gate off: 687 positions checked identical).
+
+                     shipped  ungated  Greedy   old      Learning  Learning old
+    12@6              77.4     76.3     77.4    72.3      82.1      77.0
+    18@6              78.7     74.3     78.7    67.7      78.6      78.0
+    24@3              71.1     65.6     71.1    58.9      81.5      66.7
+    40@6              74.2     72.5     70.9    62.5      73.5      69.3
+    18@12             73.8     77.3     73.8    72.2      78.5      74.0
+    24@12             67.7     67.7     70.4    66.7      72.2      67.0
+    40@12             67.5     67.5     64.0    55.6      62.6      56.3
+
+    paired, shipped over old:          +226/-110  z+6.3  (every cell positive)
+    paired, Learning over Learning old: +201/-120 z+4.5
+    paired, shipped over ungated:       +116/-95  z+1.45
+    paired, shipped against Greedy:     identical where the gate is shut; +57/-52 where it opens
+
+Nearly all of the gain is `SELF_RELIEF`. The gate is a small, consistent lean
+over running the plan everywhere, worth having mainly because it makes the
+default play what measured best on the maps people play.
+
 ### A side too small to plan
 
 Found on a 7-system board (key `7e42b0d745b15833`, two seats, claudebot), where
@@ -701,7 +729,7 @@ The same answer marshal got from `NEUTRAL_MARGIN` 1.2 (47.1%,
 tempo with it, and over every neutral in a game that outweighs the turns saved.
 Deleted.
 
-## A front stack pins the whole side (`SELF_RELIEF`, flag off, confirmation pending)
+## A front stack pins the whole side (`SELF_RELIEF`, shipped 2026-10-13)
 
 Found playing by hand (game 707 in `seat-play.md`): with one of my stacks parked
 beside each of actuary's two frontier systems, actuary held 3 systems for 52
@@ -849,7 +877,8 @@ and the `_idle` prune switched off next to a system with priced risk.
 `decide_ms` would need `COST_DECIDE_MS` taken from 6.4 to about 8.3 with the
 exponent left alone, so knower's `setup_warning` keeps counting it honestly.
 
-**Recommendation: ship `SELF_RELIEF = 0.8` with `SELF_RELIEF_REACTS = True`.** It
+**Shipped (2026-10-13): `SELF_RELIEF = 0.8` with `SELF_RELIEF_REACTS = True`,** with
+`COST_DECIDE_MS` 8.3 and the gated opening (see "The gate, shipped"). It
 is better than stock in every cell and against every opponent that is not at a
 ceiling, at every Style stop, and on fresh seeds. It is never worse anywhere
 measured, and it is at least as good as 0.5 everywhere, better at Learning and
