@@ -523,11 +523,16 @@ class _Ledger:
             if rival not in n_owners:
                 continue
             sources.append((d, n_owners, n_ships))
+        own = None
+        if SELF_RELIEF > 0 and sources:
+            quickest = min(d for d, _, _ in sources)
+            own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
         worst = 0.0
         for t in range(1, H + 1):
             if owners[t] != pid:
                 continue
             held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
+            stands = ships[t] + (own[t] if own else 0.0)
             items = []
             for d, n_owners, n_ships in sources:
                 if t >= d and n_owners[t - d] == rival and n_ships[t - d] > 0:
@@ -535,7 +540,7 @@ class _Ledger:
                     p = min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
                     if p > 0.0:
                         items.append((n, p))
-            if not items or sum(n for n, _ in items) / self.advantage <= ships[t]:
+            if not items or sum(n for n, _ in items) / self.advantage <= stands:
                 continue
             sums = {0: 1.0}
             for n, p in items:
@@ -548,8 +553,8 @@ class _Ledger:
             expected = 0.0
             for total, q in sums.items():
                 need = total / self.advantage
-                if need > ships[t]:
-                    expected += q * (need - ships[t]) / need
+                if need > stands:
+                    expected += q * (need - stands) / need
             worst = max(worst, expected)
         return worst
 
