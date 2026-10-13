@@ -672,10 +672,24 @@ never seen before it lands, so no relief answers it (marshal's
 `FAST_GUARD_WEIGHT` is the same observation). Counting all of it (1.0) is worse
 everywhere, and much worse at 12 ly/turn.
 
-Two follow-ups were running when this was written: 0.5 on fresh seeds (9500+)
-including 24 nodes at 3 ly/turn, and `SELF_RELIEF_REACTS`, which counts a
-neighbour only if its lane is shorter than the quickest rival lane into the
-system. Relief launched after a strike is seen can still land first only then,
-and that variant is meant to fix the 12 ly/turn cell. The ledgers are in the
-worktrees' `results/`. Nothing ships until the fresh-seed run reproduces. Against
-marshal, knower and the board's maps it is unmeasured.
+Two follow-ups, both on fresh seeds (9500+, 80 each):
+
+    arm                     cells                      pooled              seed pairs
+    0.5                     18n@6, 24n@6, 24n@3        57.0% (258-195)     +49/-19 z+3.64  REPRODUCED better
+                            by cell: 58.6% / 53.2% / 59.2% (3 ly/turn: +18/-4, z +2.98)
+    0.5, REACTS             18n@6, 24n@6, 24n@12       55.8% (251-199)     +39/-12 z+3.78  REPRODUCED better
+                            by cell: 56.8% / 57.0% / 53.6% (12 ly/turn: +9/-3, z +1.73)
+    0.5 (same run)          18n@6, 24n@6, 24n@12       53.2% (244-215)     +40/-27 z+1.59
+                            12 ly/turn: 47.7%, +9/-12
+
+`SELF_RELIEF_REACTS` counts a neighbour only if its lane is shorter than the
+quickest rival lane into the system, because only then can relief launched after
+a strike is seen still land first. It keeps the gain at 6 and 3 ly/turn and
+removes the loss at 12, where plain 0.5 lost. Head to head the two are not
+separated (+48/-59 on the same games), so the case for the reacting form is the
+fast cell alone.
+
+**Proposed, not yet shipped:** `SELF_RELIEF = 0.5` with `SELF_RELIEF_REACTS =
+True`. Every row above is actuary against itself. Before the flag flips, measure
+it against marshal and knower, as "The 2026-10 sweep" did, and on the board's
+maps. Flipping it moves actuary's `engine_rev` and with it the bot column.

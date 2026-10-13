@@ -189,7 +189,9 @@ Measured with `tools/sweep.py` as a mirror against the stock bot, default cells
              only alongside a same-turn wave)                                     50.0% on 300 fresh
                                                                                   seeds with 3 ly/turn
     actuary  SELF_RELIEF 0.5                            53.1%    +58/-35 z+2.38    better, reproduced;
-                                                                                  see actuary.md
+                                                                                  57.0% on fresh seeds
+    actuary  ...lane-aware (SELF_RELIEF_REACTS)         55.8%    +39/-12 z+3.78    better in every cell;
+                                                                                  proposed, see actuary.md
     actuary  SELF_RELIEF 1.0                            44.6%    +37/-77 z-3.75    worse, reproduced
 
 Every marshal arm was deleted. Covering the swap from marshal's side costs more
