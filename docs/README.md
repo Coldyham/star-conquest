@@ -102,7 +102,7 @@ only for a fight; what is deliberately not animated.
 - **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
 ### design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
-  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*.
+  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*; *estimated difficulty* (the share of bots that lose a map, as a sort and an Easy-to-Very-hard badge).
 - **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
   - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - **Playstyle readings.** The player page's panel, read by the worker from `public_replays` only, one row per match and never per name. Every field sums, so the page pools a name's rows, and the bots' column is the same shape, pooled from self-play winners (`playstyle-baseline.mjs`, generated). `rev` and `shape`. *Decided against: warming actuary's learner from a profile*.

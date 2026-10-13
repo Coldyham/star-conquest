@@ -719,7 +719,16 @@ select
     and (best.turns is null or (bot.turns, bot.lost) <= (best.turns, best.lost))) as bot_leads,
   -- fog: settings_json is pruned to non-defaults and the default is fog off,
   -- so either range being present at all means fog is on (setup.mjs's hasFog).
-  (g.settings_json ?| array['fog_sight', 'fog_scout']) as fog
+  (g.settings_json ?| array['fog_sight', 'fog_scout']) as fog,
+  -- The estimated difficulty: how many of the replayed bots took this map from
+  -- the human's seat, and the share that didn't (the "Difficulty" sort and the
+  -- card's badge, format.mjs's difficultyBadge). A share rather than the count,
+  -- so a map still waiting on a newly added bot ranks with the rest. Null
+  -- before any bot has run.
+  runs.bot_wins,
+  runs.bot_runs,
+  case when runs.bot_runs > 0
+    then round(1 - runs.bot_wins::numeric / runs.bot_runs, 3) end as difficulty
 from public.games g
 join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
@@ -744,6 +753,11 @@ left join lateral (
   order by bs.turns asc, bs.lost asc
   limit 1
 ) bot on true
+left join lateral (
+  select count(*) filter (where bs.won)::integer as bot_wins, count(*)::integer as bot_runs
+  from public.bot_scores bs
+  where bs.game_key = g.game_key
+) runs on true
 left join public.configs cfg
   on cfg.config_key = public.sc_config_key(g.settings_json)
 left join lateral (
@@ -786,7 +800,9 @@ with agg as (
     max(last_activity)        as last_activity,
     -- The "Avg best turns" sort's column: each map's best, averaged over the
     -- group, so one lucky seed doesn't stand for the whole setup.
-    round(avg(best_turns), 1) as avg_best_turns
+    round(avg(best_turns), 1) as avg_best_turns,
+    -- The "Difficulty" sort's column: each map's estimate, averaged the same way.
+    round(avg(difficulty), 3) as avg_difficulty
   from public.game_summary
   where score_count > 0
   group by config_key
@@ -813,7 +829,8 @@ select
   -- New columns go last. fog is part of sc_config_key, so every game in the
   -- group shares it; see game_summary.fog.
   (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog,
-  agg.avg_best_turns
+  agg.avg_best_turns,
+  agg.avg_difficulty
 from agg
 join rep on rep.config_key = agg.config_key
 left join public.configs cfg on cfg.config_key = agg.config_key

@@ -1,5 +1,6 @@
 """The home page's filter columns on `game_summary` (leaderboard/schema.sql)
-against a real Postgres: `contenders`, `bot_leads` and `fog`.
+against a real Postgres: `contenders`, `bot_leads`, `fog` and the difficulty
+estimate.
 
 Opt-in, like test_crowns_sql: set ``SC_TEST_PG``.
 """
@@ -30,7 +31,7 @@ def board():
     # solo: one player twice. pair: two players, but bob's score is a mismatch.
     # duel: two counted players. fog/scout: fog on via either range. Bots: on
     # `pair` a bot ties the human best, on `duel` a bot loses to it, on `solo`
-    # only a losing (won = false) bot row exists.
+    # only a losing (won = false) bot row exists; a second, losing bot on `pair`.
     _psql("""
       insert into users (name) values ('alice'), ('bob');
       insert into games (game_key, mode, players, nodes, seed, settings_json)
@@ -49,6 +50,7 @@ def board():
       insert into bot_scores (game_key, bot, turns, lost, won, engine_rev) values
         ('pair', 'marshal', 20, 0, true, 'e'),
         ('duel', 'marshal', 26, 0, true, 'e'),
+        ('pair', 'heuristic', 50, 1, false, 'e'),
         ('solo', 'marshal', 99, 0, false, 'e');
     """, DB)
     yield DB
@@ -91,3 +93,14 @@ def test_a_config_sorts_on_its_maps_average_best(board):
     pair 20, duel 25), not every score posted on the setup."""
     rows = _psql("select avg_best_turns from config_summary order by avg_best_turns", board)
     assert rows.splitlines() == ["24.3", "30.0", "30.0"]
+
+
+def test_difficulty_is_the_share_of_bots_that_lost(board):
+    """Out of the bots that ran on the map, null where none has; a config
+    averages its maps' (solo, pair and duel share one setup)."""
+    assert _column(board, "bot_wins || '/' || bot_runs") == {
+        "duel": "1/1", "fog": "0/0", "pair": "1/2", "scout": "0/0", "solo": "0/1"}
+    assert _column(board, "difficulty") == {
+        "duel": "0.000", "fog": "", "pair": "0.500", "scout": "", "solo": "1.000"}
+    rows = _psql("select avg_difficulty from config_summary order by avg_difficulty", board)
+    assert rows.splitlines() == ["0.500", "", ""]

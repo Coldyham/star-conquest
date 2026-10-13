@@ -337,6 +337,18 @@ h1::after {
 .badge.bot-lead:hover { background: #08232a; }
 .badge.bot-lead.tied { border-style: dashed; }
 
+/* The estimated difficulty (format.mjs's difficultyBadge), in ski-piste
+ * colours: green, blue, red, black. Black is a filled badge with a light
+ * outline, since a black outline vanishes on the board. Not a link, same as
+ * .bot-lead. */
+.badge.difficulty { cursor: help; }
+.badge.difficulty.easy { border-color: var(--green); color: var(--green); }
+.badge.difficulty.medium { border-color: #4f8dff; color: #4f8dff; }
+.badge.difficulty.hard { border-color: var(--bad); color: var(--bad); }
+.badge.difficulty.very-hard { border-color: var(--ink); color: var(--ink); background: #000; }
+.badge.difficulty:hover { background: transparent; }
+.badge.difficulty.very-hard:hover { background: #000; }
+
 /* This map's replays are still embargoed (games.embargo_until) — gold for
  * "wait", the same tone .play already uses for the door back into the game.
  * Not a link, same reasoning as .bot-lead: it states a fact, it filters
