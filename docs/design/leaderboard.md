@@ -7,8 +7,9 @@ versioning. `CLAUDE.md` states the rules under "Challenge links carry a score to
 beat". The bot-side measurements behind the bot column (`replay_aux`,
 `BUDGET_SCALE`, the seat-flag incident) are in [`bots.md`](bots.md),
 "Replaying a bot for the leaderboard". The site's own setup is in
-`leaderboard/README.md`. Related: [`core.md`](core.md) (challenge keys, the
-replay log). Index: [`../README.md`](../README.md).
+`leaderboard/README.md`, and why each table and view in `schema.sql` is shaped
+as it is in [`schema.md`](schema.md). Related: [`core.md`](core.md) (challenge
+keys, the replay log). Index: [`../README.md`](../README.md).
 
 ## Bot replays (`tools/bot_replay.py`)
 
@@ -176,6 +177,39 @@ blown budget forfeits that turn's orders and the result would then depend on how
 fast the runner was that day. Where one is used, the count lands in
 `bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
 reproducible alongside the others.
+
+### Estimated difficulty
+
+The column already says, per map, which bots took it from the human's seat, so the
+share that *didn't* is a difficulty estimate at no extra compute
+(`game_summary.difficulty`, the "Difficulty (estimated)" sort and an Easy / Medium /
+Hard / Very hard badge). It is for a new player looking for a ramp. They should not
+need to know what the bot names mean or start on the latest fogged marshal map.
+That is why it carries a plain word rather than "3 of 7 bots win", which goes in
+the tooltip instead.
+
+On the live board (2026-10-13, 137 maps, all 7 bots on each) maps spread out
+rather than lumping at the ends: 0 to 7 bots winning covers 18, 31, 36, 26, 13,
+9, 3 and 1 maps. The estimate follows the opponents. Maps against heuristic alone
+average 4.2 bots winning, heuristic and rusherplus 4.6. Maps against knower,
+marshal and thinker average 1.4, and actuary and marshal 1.2. It reads close to a
+ladder: when two bots split on a map, the weaker one is the winner about 10% of
+the time.
+
+It is a **share, not a count**, so a newly added bot that has not reached every
+map yet doesn't move the maps it has reached. It is **one game per bot**, so one
+bot's difference is dice. And it measures the map *against the bots*: people have
+won nearly every map that no bot wins. A config averages its maps' shares.
+
+The levels (`format.mjs`'s `DIFFICULTY_LEVELS`) follow the roster's classes
+rather than even steps. The oracle pair (knower at Search, actuary at
+Learning) is the top. Next come marshal and plain actuary (only marshal is
+replayed), then a gap to thinker, a similar gap to claudebot, and heuristic and
+rusherplus at the bottom ("Where marshal stands" in [`marshal.md`](marshal.md)).
+So on 7 bots, Hard is 1-2 winning, Medium 3-4 and Easy 5+. That makes the live
+board 13 Easy, 39 Medium, 67 Hard and 18 Very hard. Tiering on the weakest
+class that won instead agrees on 119 of 137 maps. The rest are one weaker bot
+winning against the trend, which a count is less swayed by.
 
 ## Checked scores (`share.py`, `tools/verify_scores.py`)
 

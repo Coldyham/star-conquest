@@ -4,8 +4,8 @@ import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, el, fogBadge,
-  embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, difficultyBadge, el,
+  embargoNote, fogBadge, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -449,7 +449,8 @@ async function load() {
     const note = campaignNote(nodes[0], campaign);
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(
-      ...[configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean), ...botChips(game));
+      ...[difficultyBadge(game), configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean),
+      ...botChips(game));
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {

@@ -293,6 +293,13 @@ lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
 
+The same rows give every map an estimated difficulty: the share of bots that
+didn't take it (`game_summary.difficulty`, from `bot_wins`/`bot_runs`;
+`config_summary.avg_difficulty` for a setup). The main list sorts on it as
+"Difficulty (estimated)", easiest first, and `format.mjs`'s `difficultyBadge` shows
+it as Easy / Medium / Hard / Very hard on cards and the map page. See
+`docs/design/leaderboard.md`, "Estimated difficulty".
+
 ### Watching a bot's replay
 
 A winning bot row carries a **Watch** link, and since the underlying change

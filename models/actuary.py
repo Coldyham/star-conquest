@@ -33,7 +33,10 @@ land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival
 and scores a dozen expansion plans by the ships and income they would hold when a
 rival could first strike. It plays the first turn of the best plan, and the
 ledger takes over at contact, or from the first turn when our side of the map is
-too small to plan. *Greedy* is the ledger from the first turn.
+too small to plan. The plan only pays on fast lanes, so it runs only on a map of
+`OPENING_GATE_SYSTEMS` or more whose median lane is `OPENING_FAST_LANE` turns or
+less; everywhere else Planned opens with the ledger, exactly as *Greedy* does
+from the first turn. *Learning* opens the same way as Planned.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -66,6 +69,12 @@ REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relie
 MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
                             # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
+SELF_RELIEF = 0.8           # share of our own neighbouring garrisons counted as
+                            # able to relieve a system the risk term reads (see
+                            # "A front stack pins the whole side" in actuary.md)
+SELF_RELIEF_REACTS = True   # ...counting a neighbour only if its lane is shorter than
+                            # the shortest rival lane into the system, so relief
+                            # launched after the strike is seen still lands first
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython,
 # fitted to a grid of 18-120 systems, 3-18 ly/turn and 2-5 seats (see "Cost, and
@@ -73,7 +82,7 @@ MAX_COMMITS = 64            # an iteration bound on the greedy
 # speed barely move it, so only the system count is in the fit. Refitted for
 # MIN_GAIN 0, which commits more launches on big maps ("What it costs").
 COST_REF_NODES = 40
-COST_DECIDE_MS = 6.4
+COST_DECIDE_MS = 8.3
 COST_NODES_EXP = 0.77
 
 # --- the opening ------------------------------------------------------------ #
@@ -81,6 +90,9 @@ GREEDY, PLANNED, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreada
 OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
 OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
 OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
+OPENING_GATE_SYSTEMS = 24       # the plan runs only on a map at least this big...
+OPENING_FAST_LANE = 2           # ...whose median lane is at most this many turns
+                                # (see "Planned against Greedy again" in actuary.md)
 OPENING_MIN_SIDE = 7            # a side (held + region) smaller than this is left to the ledger
 OPENING_ORDERS = ("value", "near", "cheap")
 OPENING_SENDS = ("lean", "mass")
@@ -132,11 +144,26 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    if stop != GREEDY:
+    if stop != GREEDY and _plans(state):
         orders = opening(state, pid)
         if orders is not None:
             return orders
     return _Ledger(state, pid, curves).plan()
+
+
+def _plans(state) -> bool:
+    """Whether Planned and Learning open with the plan on this map: only where
+    lanes are fast and the map is big. Everywhere else the ledger opens, which
+    measured level or better than the plan at 3 and 6 ly/turn at every size."""
+    if len(state.systems) < OPENING_GATE_SYSTEMS:
+        return False
+    lanes = sorted(state.travel_turns(a, b) for a, s in state.systems.items()
+                   for b in s.neighbors if a < b)
+    if not lanes:
+        return False
+    mid = len(lanes) // 2
+    median = lanes[mid] if len(lanes) % 2 else (lanes[mid - 1] + lanes[mid]) / 2
+    return median <= OPENING_FAST_LANE
 
 
 def _stop_of(player) -> int:
@@ -317,6 +344,8 @@ class _Ledger:
         was where it stood, and the source can only lose by it. (A garrison that
         will be attacked is never idle: by the square law a bigger stack keeps
         more than the ships added to it.)"""
+        if SELF_RELIEF > 0 and any(self.risk[n] for x in (src, dst) for n in self.travel[x]):
+            return False        # moving them changes the relief a neighbour counts on
         return (self.front_value[dst] <= self.front_value[src]
                 and self._quiet(src) and self._quiet(dst))
 
@@ -407,7 +436,8 @@ class _Ledger:
         exposed = set(touched)
         rivals = self.rivals
         for sid in touched:
-            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]):
+            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]) \
+                    or (SELF_RELIEF > 0 and self.pid in self.lines[sid][0]):
                 exposed.update(self.travel[sid])
         for sid in exposed:
             gain -= self._risk(sid, lines) - self.risk[sid]
@@ -471,16 +501,37 @@ class _Ledger:
                         reach[t] += n_ships[t - d]
             if reach is None:
                 continue
+            if SELF_RELIEF > 0:
+                quickest = min(d for nbr, d in self.travel[sid].items()
+                               if rival in (lines.get(nbr) or self.lines[nbr])[0])
+                own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
+            else:
+                own = None
             for t in range(1, H + 1):
                 if owners[t] != pid or reach[t] <= 0:
                     continue
                 need = reach[t] / self.advantage
-                if need > ships[t]:
-                    worst = max(worst, (need - ships[t]) / need)
+                held = ships[t] + (own[t] if own else 0.0)
+                if need > held:
+                    worst = max(worst, (need - held) / need)
         if worst <= 0.0:
             return 0.0
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
         return RISK_WEIGHT * worst * stake
+
+    def _own_relief(self, sid, lines, under=None):
+        """Per turn, ``SELF_RELIEF`` of what our garrisons next door could have
+        landed on ``sid`` by then."""
+        H, pid = self.horizon, self.pid
+        own = [0.0] * (H + 1)
+        for nbr, d in self.travel[sid].items():
+            if under is not None and d >= under:
+                continue
+            n_owners, n_ships = lines.get(nbr) or self.lines[nbr]
+            for t in range(d, H + 1):
+                if n_owners[t - d] == pid:
+                    own[t] += SELF_RELIEF * n_ships[t - d]
+        return own
 
     def _learned_shortfall(self, sid, owners, ships, rival, curve, lines):
         """The worst turn's expected shortfall share against ``rival``, with each
@@ -493,11 +544,16 @@ class _Ledger:
             if rival not in n_owners:
                 continue
             sources.append((d, n_owners, n_ships))
+        own = None
+        if SELF_RELIEF > 0 and sources:
+            quickest = min(d for d, _, _ in sources)
+            own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
         worst = 0.0
         for t in range(1, H + 1):
             if owners[t] != pid:
                 continue
             held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
+            stands = ships[t] + (own[t] if own else 0.0)
             items = []
             for d, n_owners, n_ships in sources:
                 if t >= d and n_owners[t - d] == rival and n_ships[t - d] > 0:
@@ -505,7 +561,7 @@ class _Ledger:
                     p = min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
                     if p > 0.0:
                         items.append((n, p))
-            if not items or sum(n for n, _ in items) / self.advantage <= ships[t]:
+            if not items or sum(n for n, _ in items) / self.advantage <= stands:
                 continue
             sums = {0: 1.0}
             for n, p in items:
@@ -518,8 +574,8 @@ class _Ledger:
             expected = 0.0
             for total, q in sums.items():
                 need = total / self.advantage
-                if need > ships[t]:
-                    expected += q * (need - ships[t]) / need
+                if need > stands:
+                    expected += q * (need - stands) / need
             worst = max(worst, expected)
         return worst
 

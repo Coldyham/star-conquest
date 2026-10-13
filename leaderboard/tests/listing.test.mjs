@@ -92,6 +92,15 @@ test("systems and best turns sort on their own columns, turns fewest first", () 
     "nodes.desc.nullslast,last_activity.desc.nullslast,config_key");
 });
 
+test("difficulty sorts easiest first on the share of bots that lose, averaged when grouped", () => {
+  const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
+  assert.equal(order("sort=difficulty"), "difficulty.asc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("sort=difficulty&dir=desc"), "difficulty.desc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("group=config&sort=difficulty"),
+    "avg_difficulty.asc.nullslast,last_activity.desc.nullslast,config_key");
+  assert.match(listQuery(parse("")).query, /select=[^&]*\bbot_wins,bot_runs,difficulty\b/);
+});
+
 test("dir flips only the sorted column, and its default stays out of the URL", () => {
   const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
   assert.equal(order("dir=asc"), "last_activity.asc.nullslast,game_key");
