@@ -309,6 +309,14 @@ class Settings:
         """Fewest systems this player count allows (mapgen enforces the same floor)."""
         return self.players + 3
 
+    def system_count(self) -> int:
+        """How many systems this setup's map has. ``nodes`` is only what was asked
+        for: a generated symmetric map builds whole sectors around it
+        (``mapgen.symmetric_size``). Shown wherever the setup's size is."""
+        if self.layout_inert():
+            return self.nodes
+        return mapgen.symmetric_size(self.nodes, self.players, self.layout)
+
     def seat_params(self, seat: int) -> AiParams:
         """The AiParams for a 1-based seat id (defaults if out of range)."""
         idx = seat - 1

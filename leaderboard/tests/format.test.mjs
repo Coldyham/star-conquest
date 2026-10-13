@@ -3,7 +3,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botLeadBadge, botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
+import { readFileSync } from "node:fs";
+
+import {
+  botLeadBadge, botProfile, competitionRanks, embargoNote, leaderCredit, mapSummary, symmetricSize,
+} from "../js/format.mjs";
 
 const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString();
 
@@ -116,4 +120,28 @@ test("a bot ahead of the board's best leads, a dead heat is a tie, and a beaten 
   assert.equal(botLeadBadge(game(20, 2)), null);
   assert.equal(botLeadBadge(game(19, 9)), null);
   assert.equal(botLeadBadge({ ...game(20, 3), bot_name: null }), null);
+});
+
+const SIZES = JSON.parse(readFileSync(new URL("./fixtures/symmetric-sizes.json", import.meta.url)));
+
+test("a symmetric map's size matches the game's for every layout, seat count and request", () => {
+  for (const [layout, rows] of Object.entries(SIZES)) {
+    for (const [players, sizes] of Object.entries(rows)) {
+      sizes.forEach((size, i) => {
+        assert.equal(symmetricSize(i + 1, Number(players), layout), size, `${layout} ${players}p ${i + 1}`);
+      });
+    }
+  }
+});
+
+test("a map's summary names the systems it has, not the number asked for", () => {
+  const core = { mode: "symmetric", players: 6, nodes: 10, seed: 603346, settings_json: { layout: "core" } };
+  assert.equal(mapSummary(core), "Symmetric · 6 players · 18 systems · seed 603346");
+  // a row with no layout to hand was made before layouts: the hub
+  assert.equal(mapSummary({ mode: "symmetric", players: 6, nodes: 10, seed: 1 }),
+    "Symmetric · 6 players · 13 systems · seed 1");
+  assert.equal(mapSummary({ mode: "random", players: 6, nodes: 10, seed: 1 }),
+    "Random · 6 players · 10 systems · seed 1");
+  const drawn = { ...core, settings_json: { layout: "core", custom_map: { nodes: [] } } };
+  assert.equal(mapSummary(drawn), "Symmetric · 6 players · 10 systems · seed 603346");
 });

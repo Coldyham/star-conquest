@@ -50,6 +50,7 @@ export function setupLine(match) {
     players: settings.players ?? match.players ?? match.seats.length,
     nodes: settings.nodes ?? "?",
     seed: match.seed,
+    settings_json: settings,
   });
   return settings.custom_map ? `${line} · custom map` : line;
 }

@@ -40,9 +40,44 @@ export function mapSummary(game) {
   return [
     mode,
     `${game.players} players`,
-    `${game.nodes} systems`,
+    `${systemCount(game)} systems`,
     `seed ${game.seed ?? "random"}`,
   ].join(" · ");
+}
+
+const SYMMETRIC_LAYOUTS = ["hub", "ring", "wheel", "core"];
+
+/** Python's round(): halves go to the even neighbour, where Math.round goes up. */
+function roundHalfEven(x) {
+  const down = Math.floor(x);
+  const frac = x - down;
+  if (frac !== 0.5) return Math.round(x);
+  return down % 2 === 0 ? down : down + 1;
+}
+
+/**
+ * How many systems the game's `mapgen.symmetric_size` builds for a symmetric
+ * map asked for `nodes`: whole sectors of at least two, plus any shared systems.
+ * Pinned against the game by leaderboard/tests/fixtures/symmetric-sizes.json.
+ */
+export function symmetricSize(nodes, players, layout) {
+  const shape = SYMMETRIC_LAYOUTS.includes(layout) ? layout : "hub";
+  const seats = Math.max(2, players);
+  const shared = shape === "hub" || shape === "wheel" ? 1 : shape === "core" ? seats : 0;
+  return seats * Math.max(2, roundHalfEven((nodes - shared) / seats)) + shared;
+}
+
+/**
+ * A row's real system count, as `Settings.system_count` gives it: `nodes` is
+ * what was asked for, which a generated symmetric map rounds to whole sectors.
+ * Reads `layout` and `custom_map` off the row or its `settings_json`; with
+ * neither to hand, a symmetric map is taken to be the hub it was before layouts.
+ */
+export function systemCount(game) {
+  const settings = game.settings_json || {};
+  const custom = game.custom_map ?? settings.custom_map;
+  if (game.mode !== "symmetric" || custom || typeof game.nodes !== "number") return game.nodes;
+  return symmetricSize(game.nodes, game.players, game.layout ?? settings.layout);
 }
 
 /**

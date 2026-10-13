@@ -797,6 +797,34 @@ def test_no_core_module_imports_pygame():
                 f"{name}.py is core and must not import pygame"
 
 
+def test_no_core_module_reads_a_screen_size():
+    """Every pixel figure in `config` follows the UI scale, which differs between
+    the browser, the desktop and the headless worker. A core module reading one
+    makes the same seed build a different board on a different screen, and a
+    replay then plays its orders onto the wrong map."""
+    import ast
+    import pathlib
+
+    from starconquest import config
+
+    scaled = set(config._BASE_VALUES) | {
+        "ui_scale", "touch_ui", "s", "apply_ui_scale", "node_clearance",
+        "map_fit_padding", "map_pan_padding", "play_rect", "node_radius", "SCREEN_W", "SCREEN_H",
+    }
+    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
+            "campaign")
+    root = pathlib.Path(__file__).resolve().parent.parent
+    paths = [root / "starconquest" / f"{name}.py" for name in core]
+    paths += sorted((root / "models").glob("*.py"))
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id == "config"):
+                assert node.attr not in scaled, \
+                    f"{path.name} reads config.{node.attr}, which follows the screen"
+
+
 def test_the_lane_survey_leaves_config_as_it_found_it():
     from starconquest import settings as settings_mod
     s = Settings.defaults()
@@ -950,3 +978,10 @@ def test_the_layout_reaches_the_board():
     ring = build_state(Settings(mode="symmetric", players=3, nodes=18, layout="ring"), 5)
     hub = build_state(Settings(mode="symmetric", players=3, nodes=18), 5)
     assert set(ring.lanes) != set(hub.lanes)
+
+
+def test_system_count_is_the_map_that_gets_built():
+    s = Settings(mode="symmetric", layout="core", players=6, nodes=10, seed=603346)
+    assert s.system_count() == 18 == len(build_state(s, 603346).systems)
+    s.mode = "random"
+    assert s.system_count() == 10 == len(build_state(s, 603346).systems)
