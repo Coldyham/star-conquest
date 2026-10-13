@@ -498,6 +498,65 @@ each other. More of what it launches goes between its own systems (60% against
 Greedy's 44%): ships with nothing to take move towards the edge of the
 expansion.
 
+### Planned against Greedy again (2026-10-13)
+
+Re-measured after `MIN_GAIN` 1e-9 shipped and with `SELF_RELIEF` in hand, because
+Greedy gained more from it than Planned at first sight. `tools/sweep.py`, fresh
+seeds 6001 on (7001 on where marked), four arms against one baseline in both
+seatings: Planned and Greedy, each stock and with `SELF_RELIEF` 0.8 lane-aware
+("+0.8"). Paired is games Greedy did better than Planned in, against worse, on
+the same cell, seed and seating, so a positive z favours Greedy.
+
+    against marshal         Planned  Greedy   paired        Planned+0.8  Greedy+0.8  paired
+    12@6   (6001+)            68.8    72.3   z+1.98          73.6        78.8      z+2.92
+    12@6   (7001+)            64.6    68.6   z+2.06          71.5        73.8      z+1.04
+    18@6   (6001+)            66.3    77.3   z+2.89          79.3        83.2      z+1.77
+    18@6   (7001+)            67.2    68.6   z+0.69          74.0        73.8      z-0.25
+    24@3                      61.9    63.8   z+0.74          73.4        73.4      z-0.48
+    40@6                      67.5    66.7   z 0.00          72.5        77.5      z+1.60
+    80@6                      77.9    76.7   z-1.18          78.5        81.0      z+0.46
+    18@12                     71.8    72.5   z+0.12          75.8        75.9      z 0.00
+    24@12  (6001+)            65.1    65.8   z+0.23          74.1        68.7      z-2.46
+    24@12  (7001+)            68.0    67.4   z-0.20          71.3        68.3      z-1.22
+    40@12                     65.0    60.3   z-1.69          67.9        59.4      z-2.71
+    against knower-1
+    12@6, 18@6 pooled         80.7/76.8  84.9/78.8  z+2.12   83.9/82.6   85.9/86.6  z+1.50
+    40@6, 80@6 pooled         64.5/74.8  63.5/72.5  z-0.63   80.3/84.4   78.0/81.6  z-1.00
+
+Style: Learning opens with the plan too. `LEARNING_PLANS` (a measurement flag,
+on) lets it open with the ledger instead. Same seeds, against marshal, paired
+favouring the ledger opening:
+
+    Learning                 plan    ledger   paired        plan+0.8    ledger+0.8  paired
+    12@6                     74.1     77.4   +19/-14        80.9        82.1      +15/-9
+    18@6                     70.0     77.2   +40/-22        81.0        81.5      +29/-22
+    24@3                     70.5     70.5   +33/-29        75.9        80.3      +34/-26
+    40@6                     68.4     70.5   +32/-24        73.9        79.8      +31/-15
+      pooled                                 z+2.40                               z+2.75
+    24@12                    72.1     65.0   z-2.19         74.4        67.0      z-1.91
+    40@12                    64.8     60.4   z-1.54         66.3        62.8      z-1.09
+
+**The plan pays only when lanes are fast.** At 6 and 3 ly/turn the ledger opening
+is level or better at every size, at both stops and against both opponents. On
+small maps it is better outright (12 and 18 nodes against marshal and knower), and at
+Learning it is better pooled. At 12 ly/turn on 24 and 40 nodes the plan is better
+at both stops, by 5-8 points, and most clearly with `SELF_RELIEF` on. At 18
+nodes and 12 ly/turn they are level. The earlier table above, which credited
+the plan at 40 and 80 nodes, was 30 seeds before `MIN_GAIN` shipped and does not
+reproduce. Why fast lanes favour the plan is not established. One guess, not
+tested: with 1-2 turn lanes the ledger's horizon is only 4-5 turns, too short to
+see an expansion pay, while the plan scores a whole land-grab.
+
+**So deleting the plan would cost actuary at fast speeds.** Gating it would
+not. The proposal: open with the plan only where lanes are fast (the median lane
+of 2 turns or less, which is what 12 ly/turn gives on 24-40 nodes) and the side
+is big enough to plan, at either stop, and with the ledger everywhere else. With
+the gate, Planned and Greedy differ only by that one rule, so the stop between
+them could go: `AUX_RANGE` (1, 2, 1) with two names, and `_stop_of` reading any
+stored value under 2 as the gated opening plus ledger. That narrows the knob on
+read, without rewriting a stored `aux`, so no challenge key moves. The gate's
+threshold is unmeasured.
+
 ### A side too small to plan
 
 Found on a 7-system board (key `7e42b0d745b15833`, two seats, claudebot), where
