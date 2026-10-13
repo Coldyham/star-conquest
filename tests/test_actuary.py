@@ -311,8 +311,38 @@ def test_greedy_never_consults_the_plan(ac, monkeypatch):
     ac.decide(state, 1)
 
 
-def test_planned_orders_are_legal_and_reproducible(ac):
+def test_the_plan_runs_only_on_a_big_map_with_fast_lanes(ac):
+    """The gate: 24+ systems and a median lane of 2 turns or less. Everywhere
+    else Planned opens with the ledger, as Greedy does."""
+    def lanes(turns, systems):
+        ids = list(range(1, systems + 1))
+        return _board({sid: (1 if sid == 1 else 0, 5, 3) for sid in ids},
+                      [(a, a + 1, turns) for a in ids[:-1]])
+
+    assert ac._plans(lanes(2, ac.OPENING_GATE_SYSTEMS))
+    assert ac._plans(lanes(1, 40))
+    assert not ac._plans(lanes(3, 40))
+    assert not ac._plans(lanes(2, ac.OPENING_GATE_SYSTEMS - 1))
+
+
+def test_planned_opens_with_the_ledger_off_the_gate(ac, monkeypatch):
+    def boom(state, pid):
+        raise AssertionError("the plan ran on a map the gate refuses")
+
+    monkeypatch.setattr(ac, "opening", boom)
+    state = _state(nodes=18, players=2, seat=2)
+    state.players[2].ai_params = AiParams()
+    assert not ac._plans(state)
+    ac.decide(state, 2)
+
+
+def test_planned_orders_are_legal_and_reproducible(ac, monkeypatch):
+    # Let the plan run here, in the module `ai.decide` dispatches to as well:
+    # another test file may have reloaded the models since `ac` was taken.
+    for module in {ac, sys.modules[ai.STRATEGIES["actuary"].__module__]}:
+        monkeypatch.setattr(module, "OPENING_FAST_LANE", 99)
     state = _state(nodes=40, players=2, seat=2)
+    assert ac._plans(state)
     state.players[2].ai_params = AiParams()
     for _ in range(40):
         if state.winner is not None:

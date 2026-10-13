@@ -33,7 +33,10 @@ land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival
 and scores a dozen expansion plans by the ships and income they would hold when a
 rival could first strike. It plays the first turn of the best plan, and the
 ledger takes over at contact, or from the first turn when our side of the map is
-too small to plan. *Greedy* is the ledger from the first turn.
+too small to plan. The plan only pays on fast lanes, so it runs only on a map of
+`OPENING_GATE_SYSTEMS` or more whose median lane is `OPENING_FAST_LANE` turns or
+less; everywhere else Planned opens with the ledger, exactly as *Greedy* does
+from the first turn. *Learning* opens the same way as Planned.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -66,13 +69,10 @@ REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relie
 MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
                             # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
-SELF_RELIEF = 0.0           # share of our own neighbouring garrisons counted as
+SELF_RELIEF = 0.8           # share of our own neighbouring garrisons counted as
                             # able to relieve a system the risk term reads (see
                             # "A front stack pins the whole side" in actuary.md)
-LEARNING_PLANS = True       # Style: Learning opens with the plan, as Planned does;
-                            # False opens it with the ledger, as Greedy does (a
-                            # measurement flag, see "Where Planned stands")
-SELF_RELIEF_REACTS = False  # ...counting a neighbour only if its lane is shorter than
+SELF_RELIEF_REACTS = True   # ...counting a neighbour only if its lane is shorter than
                             # the shortest rival lane into the system, so relief
                             # launched after the strike is seen still lands first
 
@@ -82,7 +82,7 @@ SELF_RELIEF_REACTS = False  # ...counting a neighbour only if its lane is shorte
 # speed barely move it, so only the system count is in the fit. Refitted for
 # MIN_GAIN 0, which commits more launches on big maps ("What it costs").
 COST_REF_NODES = 40
-COST_DECIDE_MS = 6.4
+COST_DECIDE_MS = 8.3
 COST_NODES_EXP = 0.77
 
 # --- the opening ------------------------------------------------------------ #
@@ -90,6 +90,9 @@ GREEDY, PLANNED, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreada
 OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
 OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
 OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
+OPENING_GATE_SYSTEMS = 24       # the plan runs only on a map at least this big...
+OPENING_FAST_LANE = 2           # ...whose median lane is at most this many turns
+                                # (see "Planned against Greedy again" in actuary.md)
 OPENING_MIN_SIDE = 7            # a side (held + region) smaller than this is left to the ledger
 OPENING_ORDERS = ("value", "near", "cheap")
 OPENING_SENDS = ("lean", "mass")
@@ -141,11 +144,26 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    if stop == PLANNED or (stop == LEARNING and LEARNING_PLANS):
+    if stop != GREEDY and _plans(state):
         orders = opening(state, pid)
         if orders is not None:
             return orders
     return _Ledger(state, pid, curves).plan()
+
+
+def _plans(state) -> bool:
+    """Whether Planned and Learning open with the plan on this map: only where
+    lanes are fast and the map is big. Everywhere else the ledger opens, which
+    measured level or better than the plan at 3 and 6 ly/turn at every size."""
+    if len(state.systems) < OPENING_GATE_SYSTEMS:
+        return False
+    lanes = sorted(state.travel_turns(a, b) for a, s in state.systems.items()
+                   for b in s.neighbors if a < b)
+    if not lanes:
+        return False
+    mid = len(lanes) // 2
+    median = lanes[mid] if len(lanes) % 2 else (lanes[mid - 1] + lanes[mid]) / 2
+    return median <= OPENING_FAST_LANE
 
 
 def _stop_of(player) -> int:
