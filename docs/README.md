@@ -37,6 +37,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
+| [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board (proposed): opponents folded, the family tree, rulesets, pace |
 | [`design/schema.md`](design/schema.md) | The board's database (`leaderboard/schema.sql`): the trust model, upgrading by re-pasting, each table and view's shape, the grant trap, the play-by-post tables |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
 | [`design/seat-play.md`](design/seat-play.md) | Six games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
@@ -112,6 +113,9 @@ only for a fight; what is deliberately not animated.
 - **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
+### design/setup-families.md
+- **Setup families (proposed, not built).** The problem, with the 2026-10-14 reading (62 configs, 53 setups once opponents fold, 24 families, 16 rulesets); four lenses (*opponents fold in*, *the family tree*: parent = nearest older setup, *rulesets*, *pace*: median lane in turns); a four-phase plan; *decided against*: a 2-D map, clustering, a family id on `Settings`, grouping on `sc_config_key` text.
+
 ### design/schema.md
 - **The trust model** (append-only by the absence of policies; worker-only and closed tables) and **re-pasting upgrades a board** (added columns, drop/add checks, view columns go last, and the `public_replays.rules_version` incident).
 - Per relation: **games and its embargo** (first insert wins; the moves, never the score; why `game_embargoes` is derived); **scores**; **game_logs** (the size bound, claims stored as claims); **score_checks**; **playstyle_readings**; **sc_config_key and sc_bots** (the search_path lint); **configs and config_tags** (first name wins, distinct players, legacy tags at weight 1); **bot_scores**; **campaigns**; **public_replays and public_watchable_replays** (owner rights, joining the embargo through `scores.game_key`); **config_summary**; **counted_scores and the crowns**.
@@ -225,6 +229,9 @@ only for a fight; what is deliberately not animated.
 
 Each entry gives the idea, the outcome and where it is recorded. "Null" means
 the measured result was indistinguishable from the baseline.
+
+### setup families ([`design/setup-families.md`](design/setup-families.md))
+- A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. *Decided against.*
 
 ### knower ([`design/knower.md`](design/knower.md))
 - Pricing three-way pile-ups with the oracle: a wash, possibly worse. *Built, measured, removed.*
