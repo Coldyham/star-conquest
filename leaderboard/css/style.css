@@ -370,6 +370,21 @@ h1::after {
 .badge.mine { border-color: var(--green); color: var(--green); cursor: help; }
 .badge.mine:hover { background: #0a2412; }
 
+/* A title read out by a tap (js/tip.mjs): touch screens show no hover
+ * tooltip, so a tap on a titled badge that isn't a link opens this instead. */
+.tip {
+  position: absolute;
+  z-index: 50;
+  max-width: min(20rem, calc(100vw - 16px));
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--cyan);
+  background: var(--cabinet);
+  color: var(--ink);
+  font: 0.8rem/1.45 var(--mono);
+  box-shadow: 0 3px 0 #1b2036;
+  pointer-events: none;
+}
+
 /* -- the main list's search, sort and filters (js/home.mjs's controls) ------ */
 .list-controls {
   display: flex;
