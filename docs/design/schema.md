@@ -291,11 +291,37 @@ stops one lucky seed standing for the whole setup.
 
 Crowns reward taking first place from somebody else on a contested map, not
 volume, which a count of wins or maps would pay out for grinding easy setups.
-`counted_scores` counts everything but a `mismatch` because the game uploads a
-log once, with no retry, so a score posted offline or pasted as a hand-made
-link can never become `verified`, and shutting those out would shut out whole
-ways of playing. See [`leaderboard.md`](leaderboard.md), "Crowns, the weekly
+`counted_scores` counts a score once its replay is `verified`, `outdated` or
+not. A score that names a replay and is still unchecked or `missing` counts for
+its first 24 hours. A score posted before `sc_legacy_cutoff()` (2026-10-15)
+counts under the rule it was posted under. Only the first score posted for a
+`match_id` counts. See [`leaderboard.md`](leaderboard.md), "Crowns, the weekly
 campaign and embargoes".
+
+It used to count everything but a `mismatch`, so that a score whose one upload
+failed could still count. But `scores` takes inserts from anyone, so a single
+request with no replay behind it took a crown and a campaign node. What the
+change costs: a score whose upload failed counts only if the player posts again
+from the finished game, which uploads again. When it changed, 3 of the 195
+scores carrying a `match_id` had no log.
+
+- **Only `verified` counts, `outdated` or not.** `outdated` says the score
+  isn't comparable with today's, not that it isn't real. `mismatch` and
+  `unreadable` never count, `outdated` or not: a log claiming an older
+  `rules_version` that fails to reproduce reads as an `outdated` mismatch, so
+  that pairing is forgeable.
+- **Old scores keep the rule they were posted under.** Everything posted before
+  the cutoff counts unless it is a `mismatch` under current rules, as before.
+  The early scores predate uploads, or were played on code that has moved, and
+  this change shouldn't wipe them. A cutoff in the view rather than a verdict
+  written onto each row: the stored verdicts stay what the replays showed, and
+  re-checking can't overwrite it. On the live board it moved no crown.
+- **24 hours** is the worker's slack. The cron is hourly, but runs landed 5 to
+  10 hours apart, and 2 of 10 failed. A crown or campaign move taken in that
+  window disappears if the score never verifies.
+- **First post per match**, because a verified `match_id` is public and a copy
+  under a second name inherited its check. A clause in the view rather than a
+  unique index: nothing to migrate, and a player posting twice is harmless.
 
 ## The grant trap
 

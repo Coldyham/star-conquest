@@ -461,11 +461,20 @@ from (
 group by config_key, tag;
 
 -- ---------------------------------------------------------------------------
--- counted_scores: the one place the crowns' eligibility rule lives. Every posted
--- score counts unless its replay was checked and found wrong (a `mismatch`
--- under current rules).
--- Nothing is stored, so deleting a score recomputes everything that reads this.
+-- counted_scores: the one place the crowns' eligibility rule lives. A score
+-- counts once its replay is `verified`, outdated or not. One that names a
+-- replay and is still unchecked or `missing` counts for its first 24 hours,
+-- the worker's slack. One posted before sc_legacy_cutoff() counts under the
+-- rule it was posted under: anything but a mismatch under current rules.
+-- Only the first score posted for a match_id counts. Nothing is stored, so
+-- deleting a score recomputes everything that reads this.
 -- ---------------------------------------------------------------------------
+create or replace function public.sc_legacy_cutoff()
+returns timestamptz
+language sql immutable parallel safe as $$
+  select timestamptz '2026-10-15 00:00Z'
+$$;
+
 create or replace view public.counted_scores
   with (security_invoker = true) as
 select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
@@ -475,7 +484,16 @@ select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.subm
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
-where not coalesce(c.verdict = 'mismatch' and not c.outdated, false);
+where (c.verdict = 'verified'
+       or (coalesce(c.verdict, 'missing') = 'missing'
+           and s.match_id <> ''
+           and s.submitted_at > now() - interval '24 hours')
+       or (s.submitted_at < public.sc_legacy_cutoff()
+           and not coalesce(c.verdict = 'mismatch' and not c.outdated, false)))
+  and not exists (
+    select 1 from public.scores e
+    where s.match_id <> '' and e.match_id = s.match_id
+      and (e.submitted_at, e.id) < (s.submitted_at, s.id));
 
 -- ---------------------------------------------------------------------------
 -- game_summary: the home page in one select: every game with its best score,
@@ -695,7 +713,9 @@ where prior.user_id <> s.user_id
 
 -- ---------------------------------------------------------------------------
 -- campaign_scores: every counted score posted during a campaign's week on one
--- of its nodes, with at least one turn played by hand.
+-- of its nodes, with at least one turn played by hand. A score still in its
+-- 24 hours unverified drops out if the worker never verifies it, and the
+-- campaign's fold changes with it.
 -- ---------------------------------------------------------------------------
 create or replace view public.campaign_scores
   with (security_invoker = true) as

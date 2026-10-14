@@ -153,6 +153,74 @@ def test_campaign_scores_carry_the_stamp_from_the_start_of_the_game(board):
     assert refused.returncode != 0 and "campaign_start" in refused.stderr
 
 
+def test_a_score_counts_once_verified_or_for_a_day_while_its_replay_is_awaited(board):
+    """Posting a score is a public insert, so one the worker has not vouched for
+    counts only while the worker may not have reached it yet, and only if it
+    names a replay that could vouch for it. A score from before the cutoff
+    counts as it did when posted. Only the first post of a match counts, so a
+    verified replay can't be posted again under a second name."""
+    _psql("""
+      create or replace function sc_legacy_cutoff() returns timestamptz
+        language sql immutable as $$ select timestamptz '2026-10-01 00:00Z' $$;
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        select k, 'random', 2, 18, 0, '{}' from unnest(array[
+          'fresh', 'stale', 'blank', 'gone', 'forged', 'copied', 'lineup',
+          'legacy', 'rules']) k;
+      with v(g, u, t, at, m, verdict, outdated) as (values
+        -- alice's verified score, then bob's unchecked one from an hour ago
+        ('fresh', 1, 40, now() - interval '3 days', 'a000000000000001', 'verified', false),
+        ('fresh', 2, 30, now() - interval '1 hour', 'a000000000000002', null, null),
+        -- more than a day on, an unchecked score no longer counts
+        ('stale', 1, 40, now() - interval '3 days', 'a000000000000003', 'verified', false),
+        ('stale', 2, 30, now() - interval '25 hours', 'a000000000000004', null, null),
+        -- a score that names no replay never counts, however fresh
+        ('blank', 1, 40, now() - interval '3 days', 'a000000000000005', 'verified', false),
+        ('blank', 2, 30, now() - interval '1 hour', '', null, null),
+        -- `missing` is retried, so it gets its day like an unchecked one
+        ('gone', 1, 40, now() - interval '3 days', 'a000000000000006', 'verified', false),
+        ('gone', 2, 30, now() - interval '1 hour', 'a000000000000007', 'missing', false),
+        -- a log claiming older rules is excused, not counted
+        ('forged', 1, 40, now() - interval '3 days', 'a000000000000008', 'verified', false),
+        ('forged', 2, 30, now() - interval '1 hour', 'a000000000000009', 'mismatch', true),
+        ('forged', 3, 20, now() - interval '1 hour', 'a00000000000000a', 'unreadable', false),
+        -- bob re-posts alice's verified match under his own name
+        ('copied', 1, 30, now() - interval '3 days', 'a00000000000000b', 'verified', false),
+        ('copied', 2, 30, now() - interval '2 days', 'a00000000000000b', 'verified', false),
+        -- verified against an older lineup: still a real score
+        ('lineup', 1, 40, now() - interval '3 days', 'a00000000000000c', 'verified', false),
+        ('lineup', 2, 30, now() - interval '3 days', 'a00000000000000d', 'verified', true),
+        -- before the cutoff, anything but a mismatch under current rules
+        ('legacy', 1, 40, timestamptz '2026-09-01', 'a00000000000000e', 'missing', false),
+        ('legacy', 2, 30, timestamptz '2026-09-02', '', null, null),
+        ('legacy', 3, 20, timestamptz '2026-09-03', 'a00000000000000f', 'mismatch', false),
+        ('rules', 1, 40, timestamptz '2026-09-01', 'a000000000000010', 'mismatch', true),
+        ('rules', 2, 30, now() - interval '1 hour', 'a000000000000011', 'mismatch', true)
+      ), posted as (
+        insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        select g, u, t, 0, t, '', at, m from v
+        returning id, game_key, user_id
+      )
+      insert into score_checks (score_id, verdict, outdated)
+      select p.id, v.verdict, v.outdated from posted p
+      join v on v.g = p.game_key and v.u = p.user_id
+      where v.verdict is not null;
+    """, board)
+    rows = _psql("select game_key, user_name from counted_scores where game_key in"
+                 " ('fresh', 'stale', 'blank', 'gone', 'forged', 'copied', 'lineup',"
+                 " 'legacy', 'rules') order by game_key, user_name", board)
+    assert rows.splitlines() == [
+        "blank|alice",
+        "copied|alice",
+        "forged|alice",
+        "fresh|alice", "fresh|bob",
+        "gone|alice", "gone|bob",
+        "legacy|alice", "legacy|bob",
+        "lineup|alice", "lineup|bob",
+        "rules|alice",
+        "stale|alice",
+    ]
+
+
 def test_a_replay_is_the_log_its_matchs_first_score_was_checked_on(board):
     """Anyone can upload under a public match_id, so the longest upload is not
     evidence. The Watch link serves the log the match's first score verified

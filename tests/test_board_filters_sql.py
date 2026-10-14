@@ -52,6 +52,9 @@ def board():
         ('duel', 'marshal', 26, 0, true, 'e'),
         ('pair', 'heuristic', 50, 1, false, 'e'),
         ('solo', 'marshal', 99, 0, false, 'e');
+      -- Posted now, so past any legacy cutoff: a score counts once verified.
+      insert into score_checks (score_id, verdict)
+        select id, 'verified' from scores where id not in (select score_id from score_checks);
     """, DB)
     yield DB
     _psql(f"drop database if exists {DB}")

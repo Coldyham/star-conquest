@@ -676,10 +676,10 @@ own record is just an improvement. Steals count in the week they were posted,
 Monday 00:00 UTC to the next; `?week=` browses back.
 
 All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
-is the eligibility rule (every score except a replay the worker found to be a
-`mismatch` — the game uploads a log once with no retry, so an offline or
-hand-pasted score can never become `verified`, and requiring that would shut
-those ways of playing out), `crown_holders` and `crown_steals` read it. Deleting
+is the eligibility rule (a verified score; one still waiting on its replay, for
+its first 24 hours; anything posted before 2026-10-15 but a mismatch; and only
+the first score posted for a match),
+`crown_holders` and `crown_steals` read it. Deleting
 a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
 maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.
 It is as cheesable as any identity here — a second name can make a map
@@ -736,7 +736,8 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
   real one is. What answers that is the replay the game now uploads when you post
   (see "Checked scores" above) — but only for scores that carry one. Anything
   posted by hand, or before that existed, checks as `missing`: unverified rather
-  than suspect, and shown as such.
+  than suspect, and shown as such. From 2026-10-15 such a score holds no crown
+  and moves no campaign node once its first 24 hours are out.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
