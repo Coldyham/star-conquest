@@ -50,7 +50,7 @@ from starconquest.model import GameState, Order  # noqa: E402
 from starconquest.settings import Settings, build_state  # noqa: E402
 
 CANDIDATES = ("marshal", "actuary", "thinker", "heuristic", "rusherplus", "claudebot")
-ROLLOUT_POLICY = "marshal"
+ROLLOUT_POLICIES = ("marshal", "actuary")
 DROP_ONE_CAP = 3          # drop-one-strike variants per node, from the first candidate
 MAX_TURNS = 400
 
@@ -301,7 +301,8 @@ def step(board: GameState, orders: list[Order]) -> engine.TurnRecord:
 
 class Search:
     def __init__(self, cfg: Settings, seed: int, dice: str = "lucky", width: int = 6,
-                 names: tuple[str, ...] = CANDIDATES, policy: str = ROLLOUT_POLICY,
+                 names: tuple[str, ...] = CANDIDATES,
+                 policies: tuple[str, ...] = ROLLOUT_POLICIES,
                  budget: float = 600.0, max_turns: int = MAX_TURNS,
                  verbose: bool = False,
                  strategies: dict[int, str] | None = None) -> None:
@@ -315,7 +316,7 @@ class Search:
         if human is None:
             raise ValueError("this setup has no human seat to search for")
         self.me = human.id
-        self.dice, self.width, self.names, self.policy = dice, width, names, policy
+        self.dice, self.width, self.names, self.policies = dice, width, names, policies
         self.budget, self.max_turns, self.verbose = budget, max_turns, verbose
         self.best = Best()
         self.stats = Stats()
@@ -337,11 +338,10 @@ class Search:
             if self.verbose:
                 print(f"  best -> turn {board.turn}, lost {self.lost(board)} ({source})")
 
-    def rollout(self, board: GameState, policy: str | None = None,
+    def rollout(self, board: GameState, policy: str,
                 cutoff: bool = True) -> tuple[GameState, list[engine.TurnRecord]]:
         """Play ``board`` on with ``policy`` in the human seat until it is decided,
         hits ``max_turns``, or (with ``cutoff``) can no longer beat the best."""
-        policy = policy or self.policy
         board = clone(board)
         records: list[engine.TurnRecord] = []
         self.stats.rollouts += 1
@@ -359,7 +359,23 @@ class Search:
             record = step(board, orders)
             yield Node(board, node, record)
 
+    def score(self, child: Node) -> tuple:
+        """Roll ``child`` out once per rollout bot and rank it by the best: a win
+        by (turn, lost), else by `_evaluate`."""
+        ranks = []
+        for policy in self.policies:
+            end, records = self.rollout(child.board, policy)
+            self._consider(end, child.records() + records, f"search+{policy}")
+            if end.winner == self.me:
+                ranks.append((0, end.turn, self.lost(end)))
+            else:
+                ranks.append((1, -_evaluate(end, self.me), self.lost(child.board)))
+        return min(ranks)
+
     def run(self) -> Best:
+        unknown = [p for p in self.policies if p not in ai.STRATEGIES]
+        if unknown:
+            raise ValueError(f"unknown rollout bot: {' '.join(unknown)}")
         self.started = time.perf_counter()
         with self._dice():
             root = Node(clone(self.root))
@@ -395,11 +411,7 @@ class Search:
                             self.stats.merged += 1
                             continue
                         seen[key] = lost
-                        end, records = self.rollout(board)
-                        self._consider(end, child.records() + records, "search+rollout")
-                        won = end.winner == self.me
-                        rank = (0, end.turn, self.lost(end)) if won else (1, -_evaluate(end, self.me), lost)
-                        scored.append((rank, len(scored), child))
+                        scored.append((self.score(child), len(scored), child))
                 scored.sort(key=lambda item: item[:2])
                 layer = [child for _, _, child in scored[: self.width]]
                 if self.verbose:
@@ -511,7 +523,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--dice", choices=("lucky", "honest"), default="lucky")
     ap.add_argument("--width", type=int, default=6, help="beam width")
     ap.add_argument("--candidates", nargs="*", default=list(CANDIDATES))
-    ap.add_argument("--policy", default=ROLLOUT_POLICY, help="rollout bot for the human seat")
+    ap.add_argument("--policy", nargs="+", default=list(ROLLOUT_POLICIES),
+                    help="rollout bots for the human seat; a child keeps its best")
     ap.add_argument("--budget", type=float, default=600.0, help="seconds")
     ap.add_argument("--max-turns", type=int, default=MAX_TURNS)
     ap.add_argument("--out", help="save the best line as a game log here")
@@ -525,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
     ai.set_budget_scale(math.inf)
     cfg, seed, played, strategies = _setup(args)
     search = Search(cfg, seed, dice=args.dice, width=args.width,
-                    names=tuple(args.candidates), policy=args.policy, budget=args.budget,
+                    names=tuple(args.candidates), policies=tuple(args.policy), budget=args.budget,
                     max_turns=args.max_turns, verbose=args.verbose,
                     strategies=strategies)
     rivals = [search.root.players[p].ai_strategy for p in sorted(rivals_of(search.root, search.me))]
