@@ -131,6 +131,7 @@ BUDGET_SCALE = 100.0
 PAGE = 1000          # PostgREST's own default ceiling; page rather than assume
 POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
+CLOCK_SKEW = "PGRST303"   # "JWT issued at future": transient, so retried
 
 
 def credentials() -> tuple[str, str]:
@@ -262,7 +263,11 @@ class Supabase:
                 # PostgREST explains itself in the body; surface that, not "400".
                 detail = err.read().decode("utf-8", "replace")[:500]
                 last = f"HTTP {err.code}: {detail}"
-                if err.code < 500:  # a 4xx will fail identically on a retry
+                # A 4xx will fail identically on a retry, except PGRST303: the
+                # gateway mints the request's JWT on a clock that can run a
+                # moment ahead of PostgREST's. It is refused before the query
+                # runs, so a retry can't apply a write twice.
+                if err.code < 500 and CLOCK_SKEW not in detail:
                     break
             except (urllib.error.URLError, TimeoutError, OSError) as err:
                 # Safe to retry a POST here: the only one is the upsert, and it
