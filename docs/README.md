@@ -337,6 +337,7 @@ the measured result was indistinguishable from the baseline.
 - Warming actuary's learner (Style: Learning) from a stored per-player profile: dropped unbuilt. The strike curve it plays from reads the same for every bot and the person, and `decide` would come to depend on more than the board. The profile became the player page's Playstyle panel instead. *Playstyle readings.*
 - A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
+- `outdated` as a fifth verdict: split into a column, since a score can be verified and outdated at once. `schema.md`, *score_checks*.
 - A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
 
 ### Par search ([`design/par.md`](design/par.md))

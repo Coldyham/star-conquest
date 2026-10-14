@@ -45,6 +45,7 @@ the shapes it repeats:
 - A check that may later be tightened or widened is a `drop constraint if
   exists` / `add constraint` pair rather than a check inside `create table`.
   `score_checks_verdict` widened that way when `outdated` arrived, and
+  narrowed again when it became a column, and
   `configs_tags_shape` was written so it could tighten.
 - `create or replace view` accepts an existing view's columns unchanged in name,
   order and type, with new ones appended at the end. Insert one in the middle
@@ -137,6 +138,21 @@ which leaves out `ai` and `models/`: a log records orders and dice, so a bot
 changing cannot move it. An engine rule changing can, and that is what
 `outdated` is for. Both are argued in [`leaderboard.md`](leaderboard.md),
 "Versioning: bots are free to move, the engine is not".
+
+`outdated` is a column beside the verdict, not a verdict. It started as a fifth
+verdict, but whether a replay reproduces and whether the score is still
+comparable with one posted today are separate questions, and every pairing
+happens. A game dealt a lineup the setup no longer deals reproduces but isn't
+comparable. A game from before a rules change that no longer reproduces is a
+`mismatch` that is `outdated`: unverifiable, not wrong. The schema migrates
+any stored `outdated` verdict by its detail.
+
+A stored `verified` is never taken back (`verify_scores.settle`). A re-check
+that no longer reproduces it marks it `outdated` instead. Scores from early
+development were played against other bots, other rng rules and another
+resolution order, and `RULES_VERSION` was not always bumped, so "it reproduced
+under the code it was played under" is the only claim that survives. To judge
+one afresh, delete its row.
 
 `log_id` names the upload a verdict was reached on. A row without one is
 decided again, which is how rows from before the column get one.

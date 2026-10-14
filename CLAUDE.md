@@ -362,8 +362,9 @@ already resolve simultaneously. The rationale for each rule is in
   (`standings.botWatchKind`). `bot_scores` has no public insert path.
 - **The game uploads replays and the worker checks scores against them.**
   `share.post_log` sends; `tools/verify_scores.py` records `verified` /
-  `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
-  rival lineup the setup no longer deals) in `score_checks`, re-rolling every
+  `mismatch` / `unreadable` / `missing` in `score_checks`, with an `outdated`
+  flag beside it (older rules, or a rival lineup the setup no longer deals;
+  a stored `verified` is never taken back), re-rolling every
   `keyed` turn's dice (`replay.dice_follow`) and binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). A score is judged on the upload that verifies
   (`verify_scores.judge`, `score_checks.log_id`), never the longest: anyone

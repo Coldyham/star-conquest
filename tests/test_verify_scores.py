@@ -145,7 +145,7 @@ def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monke
                         verify_scores.engine.RULES_VERSION + 1)
     with _preserve_config():
         check = verify_scores.verify(score, blob, setup)
-    assert check.verdict == "outdated"
+    assert (check.verdict, check.outdated) == ("mismatch", True)
     assert "rules v" in check.detail and "replay gives" in check.detail
 
 
@@ -248,7 +248,7 @@ def _with_strategies(blob, strategies):
 def test_a_score_dealt_a_different_lineup_is_set_aside(posted):
     """A build dealing from another pool (one from before it was fixed, or before
     an edit to it) played honestly against bots this map's other scores did not
-    face: unverifiable against them, not wrong."""
+    face: it reproduces, but is not comparable with them."""
     score, blob, setup = posted
     log = replay.GameLog.decode(blob)
     assert log.strategies, "the fixture records its lineup"
@@ -256,7 +256,7 @@ def test_a_score_dealt_a_different_lineup_is_set_aside(posted):
     drifted = _with_strategies(blob, {**log.strategies, rival: "rusherplus"})
     with _preserve_config():
         check = verify_scores.verify(score, drifted, setup)
-    assert check.verdict == "outdated"
+    assert (check.verdict, check.outdated) == ("verified", True)
     assert f"seat {rival} faced rusherplus" in check.detail
 
 
@@ -276,7 +276,8 @@ def test_a_random_seat_is_checked_against_the_pool(posted, monkeypatch):
         assert verify_scores.verify(score, blob, setup).verdict == "verified"
         monkeypatch.setattr(settings_module, "RANDOM_POOL", ("alpha",))
         check = verify_scores.verify(score, blob, setup)
-    assert check.verdict == "outdated" and "the setup deals alpha" in check.detail
+    assert (check.verdict, check.outdated) == ("verified", True)
+    assert "the setup deals alpha" in check.detail
 
 
 def test_the_human_seat_and_an_unrecorded_lineup_are_not_checked(posted):
@@ -430,6 +431,19 @@ def test_a_flood_of_later_uploads_cannot_crowd_out_the_players_own():
     assert tried[0]["id"] == 7
     assert len(tried) == verify_scores.MAX_TRIES
     assert all(row["match_id"] == match for row in tried)
+
+
+def test_a_verified_score_stays_verified_and_becomes_outdated():
+    """It reproduced under the code it was played under. If the engine has moved
+    since and it no longer does, that says nothing about the score."""
+    later = verify_scores.Check(1, "mismatch", "replay gives 30", log_id=11)
+    kept = verify_scores.settle(later, {"verdict": "verified", "log_id": 10})
+    assert (kept.verdict, kept.outdated, kept.log_id) == ("verified", True, 10)
+    assert verify_scores.settle(later, {"verdict": "verified", "log_id": None}).log_id == 11
+    again = verify_scores.Check(1, "verified", log_id=10)
+    assert verify_scores.settle(again, {"verdict": "verified", "log_id": 10}) is again
+    assert verify_scores.settle(later, {"verdict": "missing"}) is later
+    assert verify_scores.settle(later, None) is later
 
 
 def test_the_prune_keeps_every_log_a_verdict_names():

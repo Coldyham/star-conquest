@@ -134,13 +134,18 @@ create index if not exists game_logs_match_idx
 -- score_checks: what tools/verify_scores.py found replaying a score's log. One
 -- row per score. Written by the worker, read by anyone.
 --
---   verified    the log replays and reproduces the posted turns, lost and hand
---   mismatch    it replays and produces something else: the score is wrong
---   outdated    it does not reproduce, and was played under older rules
---               (engine.RULES_VERSION) or a rival lineup the setup no longer
---               deals: unverifiable, not wrong
+--   verified    the log replays and reproduces the posted turns, lost and hand.
+--               Once verified, always verified: it reproduced under the rules
+--               it was played under.
+--   mismatch    it replays and produces something else
 --   unreadable  the blob does not decode, or does not replay at all
 --   missing     no log was ever uploaded for this score's match_id
+--
+-- outdated is a second question: is the score still comparable with one
+-- posted today? True when it was dealt a rival lineup the setup no longer
+-- deals, or no longer reproduces under rules that have moved since
+-- (engine.RULES_VERSION). So `mismatch` + outdated reads "didn't reproduce,
+-- but under older rules: unverifiable, not wrong".
 -- ---------------------------------------------------------------------------
 create table if not exists public.score_checks (
   score_id   bigint primary key references public.scores(id) on delete cascade,
@@ -153,14 +158,23 @@ create table if not exists public.score_checks (
   -- The game_logs row the verdict was reached on: the first upload that
   -- verified, else the best evidence there was. Null on `missing`. No foreign
   -- key: --prune keeps every log a verdict names, and nothing else may delete one.
-  log_id     bigint
+  log_id     bigint,
+  outdated   boolean not null default false
 );
 
 alter table public.score_checks add column if not exists log_id bigint;
+alter table public.score_checks add column if not exists outdated boolean not null default false;
 
+-- `outdated` was a verdict before it was a column. A lineup row reproduced; a
+-- rules row didn't.
 alter table public.score_checks drop constraint if exists score_checks_verdict;
+update public.score_checks
+  set verdict = case when detail like 'dealt a different lineup%' then 'verified'
+                     else 'mismatch' end,
+      outdated = true
+  where verdict = 'outdated';
 alter table public.score_checks add  constraint score_checks_verdict check (
-  verdict in ('verified', 'mismatch', 'outdated', 'unreadable', 'missing'));
+  verdict in ('verified', 'mismatch', 'unreadable', 'missing'));
 
 -- ---------------------------------------------------------------------------
 -- playstyle_readings: how the person played one game in public_replays, for the
@@ -448,7 +462,8 @@ group by config_key, tag;
 
 -- ---------------------------------------------------------------------------
 -- counted_scores: the one place the crowns' eligibility rule lives. Every posted
--- score counts unless its replay was checked and found wrong (`mismatch`).
+-- score counts unless its replay was checked and found wrong (a `mismatch`
+-- under current rules).
 -- Nothing is stored, so deleting a score recomputes everything that reads this.
 -- ---------------------------------------------------------------------------
 create or replace view public.counted_scores
@@ -460,7 +475,7 @@ select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.subm
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
-where c.verdict is distinct from 'mismatch';
+where not coalesce(c.verdict = 'mismatch' and not c.outdated, false);
 
 -- ---------------------------------------------------------------------------
 -- game_summary: the home page in one select: every game with its best score,

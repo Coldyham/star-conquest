@@ -286,7 +286,7 @@ delete path the public does not have.
 **A rules change had never actually moved `RULES_VERSION` until the production/
 combat reorder, so "the engine outran an old replay" had never been a real case
 to handle — only a documented possibility.** The verifier already had the right
-shape for it (`outdated` versus `mismatch`, decided *after* the replay so a
+shape for it (an `outdated` flag on a `mismatch`, decided *after* the replay so a
 change that leaves most games alone does not flag them anyway), but nothing
 outside `tools/verify_scores.py` ever asked the question: the game's own
 `main.open_replay`/`resume_game` and `tools/position_suite.local_logs` would
@@ -435,19 +435,19 @@ nothing. `bot_replay.replay_rev` is the same statement in code: `engine_rev` min
 hand. `engine.RULES_VERSION` is bumped in the same commit as a change to the phase
 order, to how a fight resolves or how a map is drawn from a seed, and every log
 carries the version it was played under. When a replay then fails to reproduce its
-score, `verify_scores` reports `outdated` rather than `mismatch` — unverifiable,
+score, `verify_scores` reports a `mismatch` flagged `outdated` — unverifiable,
 not wrong. The check happens *after* the replay, so the many old games a bump does
 not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
-**The random pool is the other axis, and it gets the same verdict.** A seat left
+**The random pool is the other axis, and it gets the same flag.** A seat left
 to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
 dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
 A score whose numbers reproduce but whose rival seats faced bots other than the
-ones its setup deals today is `outdated`: played honestly, by a build from before
-the pool was fixed or before an edit to it, against a lineup the map's other
-scores did not face. It stays counted, without the verified tick. `outdated`
-rather than `mismatch` because an edit to the pool would otherwise drop every
+ones its setup deals today is `verified` and `outdated`: played honestly, by a
+build from before the pool was fixed or before an edit to it, against a lineup
+the map's other scores did not face. It stays counted and keeps the verified
+tick. Not a `mismatch`, because an edit to the pool would otherwise drop every
 honest earlier score on a random map, and a tampered lineup gains nothing a
 tampered score would not. `settings` is in `replay_rev`, so a pool edit makes
 `--stale` re-decide. A log that records no lineup is judged on its numbers.

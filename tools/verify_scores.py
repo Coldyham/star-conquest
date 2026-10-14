@@ -23,26 +23,28 @@ replay never consults a bot and so a retuned one cannot change a verdict. The se
 possible at all — ``game_logs`` has no public read at all, so the uploaded replays
 are readable here and nowhere else.
 
-Five verdicts, stored in ``score_checks``:
+Four verdicts, stored in ``score_checks``:
 
     verified    the log replays and reproduces the score exactly
     mismatch    it replays and produces something else, or is for another setup,
                 or its dice are not what its orders roll
-    outdated    it does not reproduce, and it was played under older *rules*;
-                or it reproduces, but against bots its setup no longer deals
     unreadable  the blob does not decode, or cannot be replayed
     missing     nothing was ever uploaded for this score's match_id
 
-``outdated`` is the one that keeps this honest across a rules change. A stored log
+A stored ``verified`` is never taken back (``settle``): the score reproduced
+under the code it was played under.
+
+Beside the verdict, ``outdated`` says whether the score is still comparable with
+one posted today. It is what keeps this honest across a rules change. A stored log
 never consults a bot (see ``replay_rev``), but a change to the engine itself — the
 phase order, how a fight resolves, how a map is drawn from a seed — really can
 make an old game replay to a different board. ``engine.RULES_VERSION`` is stamped
 on every log when it is played, and a score that fails to reproduce having been
-played under an older stamp is reported as unverifiable rather than as wrong. The
-check is made *after* the replay, not before, so the many old games a rules change
-does not actually disturb still verify normally.
+played under an older stamp is a ``mismatch`` flagged ``outdated``: unverifiable
+rather than wrong. The check is made *after* the replay, not before, so the many
+old games a rules change does not actually disturb still verify normally.
 
-A lineup that disagrees is ``outdated`` for the same reason. A log records the
+A lineup that disagrees is ``verified`` and ``outdated``. A log records the
 bot each seat was built with (``GameLog.strategies``), and a seat left to chance
 is dealt from ``settings.RANDOM_POOL``. A log dealt from another pool, by a build
 from before the pool was fixed or before an edit to it, was played honestly
@@ -91,7 +93,7 @@ from tools.bot_replay import (
     replay_rev,
 )
 
-VERDICTS = ("verified", "mismatch", "outdated", "unreadable", "missing")
+VERDICTS = ("verified", "mismatch", "unreadable", "missing")
 
 
 @dataclass
@@ -101,6 +103,9 @@ class Check:
     score_id: int
     verdict: str
     detail: str = ""
+    # No longer comparable with a score posted today: older rules, or a lineup
+    # the setup no longer deals. A separate question from the verdict.
+    outdated: bool = False
     # The game_logs row the verdict was reached on; None when there was none.
     log_id: int | None = None
 
@@ -111,6 +116,7 @@ class Check:
             "detail": self.detail[:500],
             "engine_rev": rev,
             "log_id": self.log_id,
+            "outdated": self.outdated,
         }
 
 
@@ -141,9 +147,9 @@ def pending(scores: list[dict], done: dict[int, dict], rev: str, *,
     for score in scores:
         previous = done.get(score["id"])
         if previous is not None and not recheck:
-            outdated = stale and previous.get("engine_rev", "") != rev
+            older = stale and previous.get("engine_rev", "") != rev
             unnamed = previous.get("log_id") is None
-            if not outdated and not unnamed and previous.get("verdict") != "missing":
+            if not older and not unnamed and previous.get("verdict") != "missing":
                 continue
         out.append(score)
     return out
@@ -191,6 +197,23 @@ def judge(score: dict, uploads: list[dict], settings_json: dict | None) -> Check
             return check
         first = first or check
     return first or Check(int(score["id"]), "missing")
+
+
+def settle(check: Check, previous: dict | None) -> Check:
+    """``check``, except that a stored ``verified`` is never taken back.
+
+    A verified score reproduced under the code it was played under. If it no
+    longer does, the engine has moved since (``RULES_VERSION`` has not always
+    been bumped while the game was being built), which says nothing about the
+    score: it stays verified and becomes ``outdated``. To have one judged afresh,
+    delete its ``score_checks`` row.
+    """
+    if (not previous or previous.get("verdict") != "verified"
+            or check.verdict == "verified"):
+        return check
+    log_id = previous.get("log_id")
+    return Check(check.score_id, "verified", f"verified before; now {check.detail}",
+                 outdated=True, log_id=check.log_id if log_id is None else int(log_id))
 
 
 def keepers(uploads: list[dict], scores: list[dict], checks: dict[int, dict]) -> set[int]:
@@ -304,7 +327,7 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
         return Check(sid, *_disagreement(log, audit.fault))
     drift = _lineup_drift(log, human.id)
     if drift:
-        return Check(sid, "outdated", f"dealt a different lineup: {drift}")
+        return Check(sid, "verified", f"dealt a different lineup: {drift}", outdated=True)
     if audit.unchecked:
         return Check(sid, "verified", f"dice unchecked on {audit.unchecked} fighting "
                                       "turn(s) played before keyed dice")
@@ -357,9 +380,9 @@ def _lineup_drift(log: replay.GameLog, human_id: int) -> str:
     return "; ".join(drift)
 
 
-def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
-    """Whether a replay that did not reproduce its score is a *wrong score* or an
-    *unverifiable* one.
+def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str, bool]:
+    """A ``mismatch``, and whether it is a *wrong score* or an *unverifiable* one
+    (``outdated``).
 
     Asked only once the replay has already disagreed, which is what keeps a rules
     change from wiping the board: a change to the engine disturbs some games and
@@ -369,9 +392,9 @@ def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
     under, and nothing here can now tell.
     """
     if log.rules_version != engine.RULES_VERSION:
-        return "outdated", (f"played under rules v{log.rules_version}, now on "
-                            f"v{engine.RULES_VERSION} — {detail}")
-    return "mismatch", detail
+        return "mismatch", (f"played under rules v{log.rules_version}, now on "
+                            f"v{engine.RULES_VERSION} — {detail}"), True
+    return "mismatch", detail, False
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -421,13 +444,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(todo)} of {len(scores)} scores to check against {len(uploads)} uploads")
     results: list[Check] = []
     for score in todo:
-        check = judge(score, uploads, games.get(score["game_key"]))
+        check = settle(judge(score, uploads, games.get(score["game_key"])),
+                       checked.get(int(score["id"])))
         results.append(check)
         note = f" — {check.detail}" if check.detail else ""
         print(f"  score {check.score_id}: {check.verdict}{note}")
 
     tally = {v: sum(1 for c in results if c.verdict == v) for v in VERDICTS}
-    print("  " + " · ".join(f"{v} {tally[v]}" for v in VERDICTS))
+    print("  " + " · ".join(f"{v} {tally[v]}" for v in VERDICTS)
+          + f" · of which outdated {sum(1 for c in results if c.outdated)}")
 
     if args.dry_run:
         print("dry run — nothing written")
