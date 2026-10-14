@@ -94,8 +94,9 @@ It is a beam search over turns:
 - **Candidates for the human's orders**: each roster bot's orders for the
   seat, decided on a private copy with an rng of its own; the same orders sent
   all-in; holding; and the first bot's orders with one strike dropped.
-- **Scoring**: each child is ranked by a rollout to the end with `--policy`
-  (marshal) in the seat.
+- **Scoring**: each child is rolled out to the end once per `--policy` bot in
+  the seat (marshal and actuary by default) and ranked by the best of them
+  (`Search.score`). Before 2026-10-14 there was one rollout, with marshal.
 - **Pruning and merging**: a child whose floor can't beat the best (turns,
   then lost) is pruned, and transpositions are merged on the board. That merge
   is exact, since each turn's rng follows from the turn.
@@ -248,6 +249,19 @@ picked because marshal did badly on them, so this does not show actuary is the
 better default everywhere. It does show that rolling out with more than one bot
 and keeping the best would fix the worst readings.
 
+**So the default is now both** (`ROLLOUT_POLICIES`, marshal and actuary). Each
+child is rolled out with each and ranked by the best. Rerun on honest dice
+against the marshal-only results above (the 12 grid setups, the 9 recorded
+games, the 5 non-knower maps in the table, and 10 other non-knower board maps
+drawn at random), it was better on 28 of 36, the same on 1 and worse on 7. The
+median was 6.5 turns sooner, and it took a median 2.4x the time. All 7 losses
+were small (1-9 turns, or the same turn with more ships lost), from the beam
+following other children. The search now beats 8 of the 9 recorded human wins
+on honest dice, all but the 18-system game against two heuristics (48/29
+against 42/20), and `7a81e11e6a977b74` falls to 12/7. In 10 of the 28 gains the
+winning line came from a marshal rollout: actuary's ranking had steered the beam
+somewhere better.
+
 ## Exhaustive on a tiny map (`06a74fc834bdf656`, 2026-10-07)
 
 > The first half of this section models the old rewind rule on purpose. The
@@ -310,11 +324,9 @@ board shows.
 
 ## Next, if it goes further
 
-- **Search quality.** The first lever is rolling out with more than one bot
-  and keeping the best. The default marshal rollout hides whole maps from the
-  search, and actuary rollouts fixed 5 of the 6 worst it was tried on ("The
-  rollout bot"). After that: wider beams, and candidates that aren't some bot's
-  idea (the maps where people still win sooner suggest these exist). Throwaway
+- **Search quality.** Rolling out with more than one bot is built ("The
+  rollout bot"). Next: wider beams, and candidates that aren't some bot's idea
+  (the maps where people still win sooner suggest these exist). Throwaway
   orders no longer re-roll anything, so they are not worth searching.
 - **Cost.** Anything with knower as a rival wants its own time budget.
 

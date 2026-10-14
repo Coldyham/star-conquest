@@ -6,6 +6,8 @@ from __future__ import annotations
 import math
 import random
 
+import pytest
+
 from starconquest import ai, combat, config, engine
 from starconquest.settings import Settings, build_state
 from tests.test_replay import _preserve_config
@@ -94,3 +96,33 @@ def test_an_honest_line_replays():
             assert par_search.check_line(search.log(), search.me) == (True, best.turn, best.lost)
     finally:
         ai.set_budget_scale(1.0)
+
+
+def test_a_child_keeps_its_best_rollout(monkeypatch):
+    """Each rollout bot plays the child on, and the child ranks by the best of them."""
+    ai.load_models()
+    with _preserve_config():
+        search = par_search.Search(Settings(players=2, nodes=8, seed=3), 3,
+                                   policies=("marshal", "actuary"))
+        child = par_search.Node(par_search.clone(search.root))
+        ends = {"marshal": (None, 0), "actuary": (search.me, 30)}
+        played = []
+
+        def rollout(board, policy, cutoff=True):
+            played.append(policy)
+            end = par_search.clone(board)
+            end.winner, end.turn = ends[policy]
+            return end, []
+
+        monkeypatch.setattr(search, "rollout", rollout)
+        assert search.score(child)[:2] == (0, 30)
+        assert played == ["marshal", "actuary"]
+
+
+def test_an_unknown_rollout_bot_is_refused():
+    ai.load_models()
+    with _preserve_config():
+        search = par_search.Search(Settings(players=2, nodes=8, seed=3), 3,
+                                   policies=("marshal", "no-such-bot"), budget=1)
+        with pytest.raises(ValueError, match="no-such-bot"):
+            search.run()
