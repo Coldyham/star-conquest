@@ -102,5 +102,6 @@ def test_difficulty_is_the_share_of_bots_that_lost(board):
         "duel": "1/1", "fog": "0/0", "pair": "1/2", "scout": "0/0", "solo": "0/1"}
     assert _column(board, "difficulty") == {
         "duel": "0.000", "fog": "", "pair": "0.500", "scout": "", "solo": "1.000"}
-    rows = _psql("select avg_difficulty from config_summary order by avg_difficulty", board)
-    assert rows.splitlines() == ["0.500", "", ""]
+    rows = _psql("select coalesce(avg_difficulty::text, 'null') from config_summary"
+                 " order by avg_difficulty", board)
+    assert rows.splitlines() == ["0.500", "null", "null"]
