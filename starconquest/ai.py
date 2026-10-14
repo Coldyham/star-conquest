@@ -91,9 +91,12 @@ def decide(state: GameState, pid: int) -> list[Order]:
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
 # aux=12), not its default seat. actuary tops that same ladder at the defaults
 # but loses to knower at Search (37%), so it sits second (docs/design/actuary.md).
+# council, knower's Search with a learned judge, beats knower at Search by 40
+# points above the fair share on untouched seeds, so it heads the list
+# (docs/design/council.md).
 # A strategy missing from this list — a fresh drop-in with no measured ladder
 # placement — sorts alphabetically after it.
-LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
+LADDER_ORDER = ["council", "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
 
 
 def available_strategies() -> list[str]:

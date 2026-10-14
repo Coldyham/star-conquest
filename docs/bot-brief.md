@@ -291,7 +291,7 @@ uv run python -m tests.sim --ladder --trials 20    # against the whole roster
 result is not merely a report on which corner of the map is stronger. Beating
 `heuristic` is the first bar. The roster above it, weakest to strongest, is
 `rusherplus`, `claudebot`, `thinker`, `marshal`, `actuary`, `knower` (`knower`
-on its Search setting; at its default, `actuary` beats it).
+on its Search setting; at its default, `actuary` beats it), `council`.
 
 **Read the head-to-head grid, not just the ranking.** `--ladder` prints who beat
 whom, and a bot that finishes fifth overall while taking games off `marshal` is a
