@@ -43,6 +43,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
+| [`design/council.md`](design/council.md) | council: knower's Search with a learned judge, actuary as an adviser, and each adviser playing its own line; the measurements, the cost, what was dropped |
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
@@ -155,6 +156,13 @@ only for a fight; what is deliberately not animated.
 - **How far to look.** The horizon is the longest lane plus `LANE_CUSHION`, which replaced a fixed depth, so Oracle is now Off / Predict / Search. Also the old depth curve.
 - **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`, which also counts rival bots that declare `decide_ms`. The browser is unmeasured; never measure on a loaded machine.
 
+### design/council.md
+- **What council changes, and what each change bought.** actuary as an adviser, the learned judge, each adviser playing its own line (the biggest gain). The judge's features and fit. `aux` 0 is knower at Search.
+- **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
+- **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
+- **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
+- **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
+
 ### design/actuary.md
 - **The ledger and the greedy.** A timeline per system, fights priced so only the verdict is worst-case, one value in ships, risk as an expected loss, greedy commits. It is not an oracle.
 - **Cost, and the caches that make it affordable.** Version-stamped caches and the `_idle` prune, both checked exact. 1.6-3.9 ms a decide, and what that does to a knower Search seat.
@@ -233,6 +241,14 @@ the measured result was indistinguishable from the baseline.
 - Rolling every line on until its fleets land: lost head-to-head. *The depth search.*
 - The all-in and push-for-depth postures inside the search width: stopped paying once real rushers were candidates. *Borrowed candidates.*
 - Any fixed search depth: replaced by longest lane + 5. Depth past 5 was noise. *How far to look.*
+
+### council ([`design/council.md`](design/council.md))
+- Synchronised strike openings: a gain that did not replicate on fresh seeds. Staggered strikes, decoys, double strikes: null or worse. *Built, measured, dropped.*
+- Melee guard, denial weighting, relative melee scoring: null or worse in three-player games. *Same section.*
+- Predicting a knower rival with its real Search: null at double the cost. More openings (all postures, Greedy actuary, a hold): null. *Same section.*
+- Hybrids (−4.9 points) and dice shopping against the real keyed dice (−8.7). *Same section.*
+- NTBEA tuning, root crossover, successive halving: null on confirmation. *Same section.*
+- Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Same section.*
 
 ### marshal: [`design/marshal.md`](design/marshal.md)
 - Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*
