@@ -365,7 +365,9 @@ already resolve simultaneously. The rationale for each rule is in
   `mismatch` / `unreadable` / `missing` (and `outdated`: older rules, or a
   rival lineup the setup no longer deals) in `score_checks`, re-rolling every
   `keyed` turn's dice (`replay.dice_follow`) and binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
-  never the live `Settings`). Only two things send: *Post to leaderboard*, and
+  never the live `Settings`). A score is judged on the upload that verifies
+  (`verify_scores.judge`, `score_checks.log_id`), never the longest: anyone
+  can upload under a public `match_id`. Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
   never does. `game_logs` is unreadable and unwritable by the public (writes via
   `netlify/functions/log.mjs`), rows carry no identity, and `public_replays`

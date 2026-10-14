@@ -119,9 +119,14 @@ to the schema:
   `tools/verify_scores.py` does before a score is called verified.
 - **`rules_version` defaults to 1 as a fact, not a guess.** Every row before the
   column existed was played under rules 1, the only version there had been.
-- **Append-only shapes the key.** A checkpointing game lands several times, the
-  longest row is the current one, and the index is `(match_id, turns desc)` so
-  the verifier's lookup and its choice of row are one scan.
+- **Append-only shapes the key.** A checkpointing game lands several times,
+  the longest row is the latest, and the index is `(match_id, turns desc)`.
+- **The longest row is not evidence.** Anyone can upload under a `match_id` once
+  a score makes it public, so the verifier tries the uploads from before the
+  score first and records the one that verifies (`score_checks.log_id`).
+  `public_replays` serves the log named for the match's first score, and
+  `--prune` never deletes a named log. Before, an upload claiming more turns
+  replaced a player's Watch link at once and got their own log pruned.
 
 ## score_checks
 
@@ -132,6 +137,9 @@ which leaves out `ai` and `models/`: a log records orders and dice, so a bot
 changing cannot move it. An engine rule changing can, and that is what
 `outdated` is for. Both are argued in [`leaderboard.md`](leaderboard.md),
 "Versioning: bots are free to move, the engine is not".
+
+`log_id` names the upload a verdict was reached on. A row without one is
+decided again, which is how rows from before the column get one.
 
 ## playstyle_readings
 
@@ -239,6 +247,11 @@ necessarily the key the site filed the map under (`findTwin` in `submit.mjs`
 can fold it onto an older one). A score's `game_key` is guaranteed by its
 foreign key to name a real `games` row. It is a left join so a log whose key
 has no `games` row yet reads as "no embargo" rather than vanishing.
+
+One upload per match: the log the match's *first* score was checked on
+(`score_checks.log_id`), else the longest. The first, not any verified score,
+because a later poster can upload a real game of their own under the same
+public `match_id`, post a score for it, and have that verify too.
 
 `public_watchable_replays` exists because `netlify/functions/replay.mjs` reads
 exactly one relation on purpose: what may be served is decided in SQL, and the

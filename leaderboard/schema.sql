@@ -99,8 +99,9 @@ alter table public.scores add column if not exists campaign_start text not null 
 --
 -- Closed to the public: no policies and no anon grants. netlify/functions/log.mjs
 -- writes it, the workers read it, and visitors see only public_replays. An
--- upload is a new row, so the longest row per match is current; the worker
--- prunes the rest. The size cap is what stops a blob filling the database
+-- upload is a new row. Anyone may upload under a match_id, so the longest row
+-- is not evidence: the worker records the one a score verified on
+-- (score_checks.log_id) and prunes the rest. The size cap is what stops a blob filling the database
 -- (whole games run 5-14 KiB).
 -- ---------------------------------------------------------------------------
 create table if not exists public.game_logs (
@@ -125,7 +126,7 @@ alter table public.game_logs add column if not exists won      boolean not null 
 alter table public.game_logs add column if not exists hand     integer not null default 0;
 alter table public.game_logs add column if not exists rules_version integer not null default 1;
 
--- Longest first, which is the row a verifier wants.
+-- Longest first within a match.
 create index if not exists game_logs_match_idx
   on public.game_logs (match_id, turns desc);
 
@@ -148,8 +149,14 @@ create table if not exists public.score_checks (
   detail     text not null default '',
   -- bot_replay.replay_rev of the code that checked it.
   engine_rev text not null default '',
-  checked_at timestamptz not null default now()
+  checked_at timestamptz not null default now(),
+  -- The game_logs row the verdict was reached on: the first upload that
+  -- verified, else the best evidence there was. Null on `missing`. No foreign
+  -- key: --prune keeps every log a verdict names, and nothing else may delete one.
+  log_id     bigint
 );
+
+alter table public.score_checks add column if not exists log_id bigint;
 
 alter table public.score_checks drop constraint if exists score_checks_verdict;
 alter table public.score_checks add  constraint score_checks_verdict check (
@@ -370,8 +377,10 @@ left join lateral (
 
 -- ---------------------------------------------------------------------------
 -- public_replays: the only game_logs rows a visitor can read. A replay is public
--- when a posted score points at it and its map is not embargoed; the longest
--- upload per match.
+-- when a posted score points at it and its map is not embargoed. One upload per
+-- match: the log the match's first score was checked on, else the longest.
+-- Anyone can upload under a public match_id, so the longest alone could be
+-- anybody's.
 --
 -- Deliberately NOT security_invoker: it lends out part of a table nobody may
 -- read, which needs owner rights. The where clause is the whole consent
@@ -390,10 +399,17 @@ create or replace view public.public_replays as
 select distinct on (l.match_id)
   l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
-join public.scores s on s.match_id = l.match_id
+join lateral (
+  select s.game_key, c.log_id
+  from public.scores s
+  left join public.score_checks c on c.score_id = s.id
+  where s.match_id = l.match_id
+  order by s.submitted_at, s.id
+  limit 1
+) s on true
 left join public.game_embargoes e on e.game_key = s.game_key
 where e.embargo_until is null or e.embargo_until <= now()
-order by l.match_id, l.turns desc, l.id desc;
+order by l.match_id, (l.id = s.log_id) desc nulls last, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
 -- public_watchable_replays: everything netlify/functions/replay.mjs may serve,

@@ -447,8 +447,9 @@ moves. Grouping one person's games would need a durable client id, which is a
 tracking identifier by any other name.
 
 Uploads are append-only like everything else here, so a game that checkpoints
-repeatedly leaves several rows and the longest is the current one;
-`tools/verify_scores.py --prune` clears the rest.
+repeatedly leaves several rows. A score is judged on the upload that verifies,
+never just the longest, because anyone can upload under a match id once a score
+makes it public. `tools/verify_scores.py --prune` clears the rest.
 
 ### Watching one back
 

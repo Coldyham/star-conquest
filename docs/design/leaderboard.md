@@ -277,8 +277,10 @@ moves. Grouping one person's games across sessions would need a durable client
 id — a tracking identifier by any other name, and it buys nothing here.
 
 Rows are append-only like the rest of the board, so a game that checkpoints
-repeatedly lands several times and the *longest* row is the current one
-(`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
+repeatedly lands several times. A score is judged on the upload that verifies,
+not the longest, since anyone can upload under a public `match_id`
+(`verify_scores.judge`, `score_checks.log_id`; see
+[`schema.md`](schema.md), "game_logs"). `--prune` clears the rest, using the one
 delete path the public does not have.
 
 **A rules change had never actually moved `RULES_VERSION` until the production/
@@ -385,8 +387,8 @@ and one press. `open_replay` marks the `Ui` (`Ui.watched`), `Ui.can_post` is the
 one predicate render draws both buttons from and main fires both actions from,
 and it also stops a watched game being filed as a personal best or checkpointed
 back up under its original `match_id` — where, rows being keyed by that id and
-the longest winning, our continuation would replace the very replay their score
-is checked against.
+the longest winning until their score is checked, our continuation would replace
+the very replay their score is checked against.
 
 It is a lock on the button, not a proof of authorship, and deliberately so:
 rewinding a watched replay to a turn from its end and playing that turn out

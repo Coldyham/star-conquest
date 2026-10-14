@@ -74,6 +74,7 @@ job (same as ``bot_replay``).
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,8 @@ class Check:
     score_id: int
     verdict: str
     detail: str = ""
+    # The game_logs row the verdict was reached on; None when there was none.
+    log_id: int | None = None
 
     def row(self, rev: str) -> dict:
         return {
@@ -107,6 +110,7 @@ class Check:
             "verdict": self.verdict,
             "detail": self.detail[:500],
             "engine_rev": rev,
+            "log_id": self.log_id,
         }
 
 
@@ -128,16 +132,80 @@ def pending(scores: list[dict], done: dict[int, dict], rev: str, *,
     had been *uploaded* by the time we looked, and that changes on its own. So a
     missing row is always retried, with no flag — an upload that arrived late, or
     was retried by the player, is exactly the case worth picking up.
+
+    A row that names no ``log_id`` is retried too: it was decided before verdicts
+    recorded their log, and until it names one ``--prune`` cannot tell which
+    upload to keep and ``public_replays`` cannot tell which to serve.
     """
     out = []
     for score in scores:
         previous = done.get(score["id"])
         if previous is not None and not recheck:
             outdated = stale and previous.get("engine_rev", "") != rev
-            if not outdated and previous.get("verdict") != "missing":
+            unnamed = previous.get("log_id") is None
+            if not outdated and not unnamed and previous.get("verdict") != "missing":
                 continue
         out.append(score)
     return out
+
+
+# The most uploads one score is replayed against. Anyone can upload under a
+# public match_id, so this bounds what a flood of them costs a run; the uploads
+# that arrived before the score are tried first, so a flood can't push them out.
+MAX_TRIES = 8
+
+
+def candidates(score: dict, uploads: list[dict]) -> list[dict]:
+    """The uploads to try for ``score``, best evidence first.
+
+    A ``match_id`` is public once a score names it, so an upload from before the
+    score was posted is almost always the player's own. Those come first, longest
+    first. Later ones follow, earliest first: a player whose upload failed can
+    resend it by posting again, and anybody else's arrive after. Only a log that
+    verifies is ever chosen, so the order bounds cost, not trust.
+    """
+    posted = str(score.get("submitted_at", ""))
+    match = str(score.get("match_id", ""))
+    mine = [r for r in uploads if r.get("match_id") == match]
+    before = [r for r in mine if _when(r) <= _when(score)] if posted else []
+    early = {int(r["id"]) for r in before}
+    after = [r for r in mine if int(r["id"]) not in early]
+    before.sort(key=lambda r: (-int(r.get("turns", 0)), -int(r["id"])))
+    after.sort(key=lambda r: (_when(r), int(r["id"])))
+    return (before + after)[:MAX_TRIES]
+
+
+def _when(row: dict) -> dt.datetime:
+    """A row's ``submitted_at``. PostgREST writes ``+00:00``; ``Z`` is read too."""
+    return dt.datetime.fromisoformat(str(row["submitted_at"]).replace("Z", "+00:00"))
+
+
+def judge(score: dict, uploads: list[dict], settings_json: dict | None) -> Check:
+    """``score``'s verdict on the first of its candidates that verifies, or else
+    on the first candidate, the best evidence there was."""
+    first: Check | None = None
+    for row in candidates(score, uploads):
+        check = verify(score, row.get("log"), settings_json)
+        check.log_id = int(row["id"])
+        if check.verdict == "verified":
+            return check
+        first = first or check
+    return first or Check(int(score["id"]), "missing")
+
+
+def keepers(uploads: list[dict], scores: list[dict], checks: dict[int, dict]) -> set[int]:
+    """The ``game_logs`` ids ``--prune`` must keep.
+
+    Every log a verdict names; the longest of every match, which is all an
+    unposted game has; and every upload of a match some score has no named log
+    for yet, since which of them it needs is not known.
+    """
+    keep = {int(r["id"]) for r in best_logs(uploads).values()}
+    keep |= {int(c["log_id"]) for c in checks.values() if c.get("log_id") is not None}
+    unnamed = {str(s.get("match_id", "")) for s in scores
+               if (checks.get(int(s["id"])) or {}).get("log_id") is None}
+    keep |= {int(r["id"]) for r in uploads if r.get("match_id") in unnamed}
+    return keep
 
 
 def best_logs(rows: list[dict]) -> dict[str, dict]:
@@ -334,9 +402,11 @@ def main(argv: list[str] | None = None) -> int:
     rev = replay_rev()
     print(f"replay_rev {rev}")
 
-    scores = api.select("scores", "select=id,game_key,turns,lost,hand,match_id&order=id.asc")
+    scores = api.select("scores", "select=id,game_key,turns,lost,hand,match_id,submitted_at"
+                                  "&order=id.asc")
     checked = {int(r["score_id"]): r for r in
-               api.select("score_checks", "select=score_id,verdict,engine_rev&order=score_id.asc")}
+               api.select("score_checks",
+                          "select=score_id,verdict,engine_rev,log_id&order=score_id.asc")}
     todo = pending(scores, checked, rev, recheck=args.recheck, stale=args.stale)
     if args.limit > 0:
         todo = todo[: args.limit]
@@ -344,16 +414,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(scores)} scores, all checked — nothing to do.")
         return 0
 
-    logs = best_logs(api.select("game_logs", "select=id,match_id,turns,log&order=id.asc"))
+    uploads = api.select("game_logs", "select=id,match_id,turns,submitted_at,log&order=id.asc")
     games = {r["game_key"]: r.get("settings_json") for r in
              api.select("games", "select=game_key,settings_json&order=game_key.asc")}
 
-    print(f"{len(todo)} of {len(scores)} scores to check against {len(logs)} replays")
+    print(f"{len(todo)} of {len(scores)} scores to check against {len(uploads)} uploads")
     results: list[Check] = []
     for score in todo:
-        entry = logs.get(str(score.get("match_id", "")))
-        check = verify(score, entry.get("log") if entry else None,
-                       games.get(score["game_key"]))
+        check = judge(score, uploads, games.get(score["game_key"]))
         results.append(check)
         note = f" — {check.detail}" if check.detail else ""
         print(f"  score {check.score_id}: {check.verdict}{note}")
@@ -367,9 +435,9 @@ def main(argv: list[str] | None = None) -> int:
     api.upsert("score_checks", [c.row(rev) for c in results])
 
     if args.prune:
-        keep = {int(entry["id"]) for entry in logs.values()}
-        extra = [r for r in api.select("game_logs", "select=id,match_id&order=id.asc")
-                 if int(r["id"]) not in keep]
+        checked.update({c.score_id: c.row(rev) for c in results})
+        keep = keepers(uploads, scores, checked)
+        extra = [r for r in uploads if int(r["id"]) not in keep]
         for row in extra:
             api.delete("game_logs", f"id=eq.{int(row['id'])}")
         print(f"pruned {len(extra)} superseded upload(s)")

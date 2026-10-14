@@ -151,3 +151,32 @@ def test_campaign_scores_carry_the_stamp_from_the_start_of_the_game(board):
          " values ('stamped', 3, 30, 0, 30, '', 'Adjacent; drop')"],
         capture_output=True, text=True)
     assert refused.returncode != 0 and "campaign_start" in refused.stderr
+
+
+def test_a_replay_is_the_log_its_matchs_first_score_was_checked_on(board):
+    """Anyone can upload under a public match_id, so the longest upload is not
+    evidence. The Watch link serves the log the match's first score verified
+    on, even past a later poster's own verified copy; before any check, the
+    longest."""
+    _psql("""
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('watch', 'random', 2, 18, 0, '{}');
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        values ('watch', 1, 30, 0, 30, '', now() - interval '3 days', 'b000000000000001'),
+               ('watch', 2, 50, 0, 50, '', now() - interval '2 days', 'b000000000000001'),
+               ('watch', 1, 30, 0, 30, '', now() - interval '1 hour', 'b000000000000002');
+      insert into game_logs (match_id, game_key, turns, log) values
+        ('b000000000000001', 'watch', 30, 'real'),
+        ('b000000000000001', 'watch', 99, 'forged'),
+        ('b000000000000001', 'watch', 50, 'copy'),
+        ('b000000000000002', 'watch', 10, 'checkpoint'),
+        ('b000000000000002', 'watch', 30, 'final');
+      insert into score_checks (score_id, verdict, log_id)
+        select s.id, 'verified', l.id from scores s
+        join game_logs l on l.match_id = s.match_id
+          and l.log = case s.user_id when 1 then 'real' else 'copy' end
+        where s.match_id = 'b000000000000001';
+    """, board)
+    rows = _psql("select match_id, log from public_replays where game_key = 'watch'"
+                 " order by match_id", board)
+    assert rows.splitlines() == ["b000000000000001|real", "b000000000000002|final"]

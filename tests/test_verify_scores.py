@@ -333,7 +333,7 @@ def _scores(*ids):
 
 
 def test_a_decided_score_is_not_rechecked():
-    done = {1: {"verdict": "verified", "engine_rev": "abc"}}
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5}}
     assert verify_scores.pending(_scores(1, 2), done, "abc") == [{"id": 2}]
 
 
@@ -344,9 +344,17 @@ def test_missing_is_always_retried_without_a_flag():
 
 
 def test_stale_picks_up_rows_decided_by_older_code():
-    done = {1: {"verdict": "verified", "engine_rev": "old"}}
+    done = {1: {"verdict": "verified", "engine_rev": "old", "log_id": 5}}
     assert verify_scores.pending(_scores(1), done, "new") == []
     assert verify_scores.pending(_scores(1), done, "new", stale=True) == [{"id": 1}]
+
+
+def test_a_verdict_that_names_no_log_is_decided_again():
+    """Rows from before verdicts named their log: until one is named, the prune
+    can't tell which upload to keep."""
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": None},
+            2: {"verdict": "mismatch", "engine_rev": "abc"}}
+    assert verify_scores.pending(_scores(1, 2), done, "abc") == [{"id": 1}, {"id": 2}]
 
 
 def test_recheck_takes_everything():
@@ -365,3 +373,77 @@ def test_the_longest_upload_of_a_match_is_the_current_one():
     assert best["aa" * 8]["id"] == 2
     assert best["bb" * 8]["id"] == 3
     assert "" not in best
+
+
+# --------------------------------------------------------------------------- #
+# Which upload a score is judged on
+# --------------------------------------------------------------------------- #
+POSTED_AT = "2026-10-14T10:00:00+00:00"
+
+
+def _upload(i, blob, turns, at, match):
+    return {"id": i, "match_id": match, "turns": turns, "submitted_at": at, "log": blob}
+
+
+def test_a_longer_upload_after_the_score_cannot_displace_its_replay(posted):
+    """Anyone can upload under a match_id once a score makes it public, and the
+    longest upload used to be the one judged. Now the score is judged on the
+    upload that verifies, and the verdict names it."""
+    score, blob, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(10, blob, score["turns"], "2026-10-14T09:59:58Z", score["match_id"]),
+               _upload(11, "bogus", 99999, "2026-10-14T11:00:00Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("verified", 10)
+
+
+def test_an_upload_resent_after_the_score_still_backs_it(posted):
+    """A player whose first upload failed resends it by posting again, after
+    the score: it is tried, even behind somebody else's longer one."""
+    score, blob, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(11, blob, score["turns"], "2026-10-14T10:05:00Z", score["match_id"]),
+               _upload(12, "bogus", 99999, "2026-10-14T11:00:00Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("verified", 11)
+
+
+def test_with_nothing_that_verifies_the_first_candidate_is_the_verdict(posted):
+    score, _, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(10, "bogus", 5, "2026-10-14T09:59:58Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("unreadable", 10)
+    assert verify_scores.judge(score, [], setup).verdict == "missing"
+
+
+def test_a_flood_of_later_uploads_cannot_crowd_out_the_players_own():
+    match = "aa" * 8
+    score = {"id": 1, "match_id": match, "submitted_at": POSTED_AT}
+    flood = [_upload(100 + i, "x", 1000 + i, "2026-10-14T11:00:00Z", match) for i in range(50)]
+    own = _upload(7, "x", 30, "2026-10-14T09:59:00Z", match)
+    other = _upload(8, "x", 40, "2026-10-14T09:00:00Z", "bb" * 8)
+    tried = verify_scores.candidates(score, flood + [other, own])
+    assert tried[0]["id"] == 7
+    assert len(tried) == verify_scores.MAX_TRIES
+    assert all(row["match_id"] == match for row in tried)
+
+
+def test_the_prune_keeps_every_log_a_verdict_names():
+    a, b, c = "aa" * 8, "bb" * 8, "cc" * 8
+    uploads = [
+        {"id": 1, "match_id": a, "turns": 30},   # verified for score 1
+        {"id": 2, "match_id": a, "turns": 99},   # somebody's longer upload
+        {"id": 3, "match_id": a, "turns": 10},   # a checkpoint: goes
+        {"id": 4, "match_id": b, "turns": 10},   # score 2 has no named log yet
+        {"id": 5, "match_id": b, "turns": 20},
+        {"id": 6, "match_id": c, "turns": 25},   # no score: an unposted game
+        {"id": 7, "match_id": c, "turns": 50},
+    ]
+    scores = [{"id": 1, "match_id": a}, {"id": 2, "match_id": b}]
+    checks = {1: {"verdict": "verified", "log_id": 1},
+              2: {"verdict": "verified", "log_id": None}}
+    assert verify_scores.keepers(uploads, scores, checks) == {1, 2, 4, 5, 7}
