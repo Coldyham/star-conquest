@@ -29,6 +29,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from starconquest import config
+
 IS_ORACLE = True
 
 AUX_LABEL = "Council"
@@ -47,8 +49,8 @@ _ADVISERS = ("actuary",)       # on top of knower's own `EXTERNAL_CANDIDATES`
 _SALT_POLICY = 51              # an adviser's line i plays on from salt _SALT_POLICY + i
 
 
-def _load(stem: str, name: str):
-    module = sys.modules.get(name)
+def _load(stem: str, name: str, fresh: bool = False):
+    module = None if fresh else sys.modules.get(name)
     if module is not None:
         return module
     spec = importlib.util.spec_from_file_location(name, _HERE / f"{stem}.py")
@@ -59,7 +61,9 @@ def _load(stem: str, name: str):
 
 
 _ev = _load("_council_eval", "sc_council_eval")
-_kn = _load("knower", "sc_council_knower")
+# Fresh on every import: `decide` patches this copy, and `ai.load_models` re-runs
+# this file, so a cached copy would hand the lines below last game's patches.
+_kn = _load("knower", "sc_council_knower", fresh=True)
 _material_evaluate = _kn._evaluate
 _knower_advance = _kn._advance
 _knower_external_plan = _kn._external_plan
@@ -121,7 +125,7 @@ def _adviser_plan(state, pid, name, salt):
     if fn is None or _kn._is_oracle(fn):
         return None
     probe = _kn._clone(state, _kn._priv(state, pid, salt))
-    probe.players[pid].ai_params.aux = 1.0
+    probe.players[pid].ai_params.aux = config.AI_AUX
     try:
         orders = fn(probe, pid) or []
         return [o for o in orders if getattr(o, "owner_id", None) == pid]
@@ -152,10 +156,57 @@ def is_oracle_seat(player) -> bool:
     return True
 
 
+# A ply against knower's Search on the same setup, from the top of council's
+# measured range, until a cost model is fitted to council's own lines.
+COST_VS_KNOWER = 2.5
+
+
+def setup_warning(settings, seats, people=()) -> list[str]:
+    """knower's Search warning (`knower.setup_warning`), priced for council: every
+    council seat searches, an Off seat at knower's cost and an On seat at
+    ``COST_VS_KNOWER`` times it."""
+    if not seats:
+        return []
+    drawn = settings.custom_map is not None
+    nodes = len(settings.custom_map.nodes) if drawn else settings.nodes
+    longest = _kn._longest_lane(settings)
+    plies = max(1, min(_kn.HORIZON_MAX, longest + _kn.LANE_CUSHION))
+    rival_ms = sum(ms for _, ms in _kn._rivals(settings, set(seats), set(people)).values())
+    lines_searched = _kn.SEARCH_WIDTH + len(_KNOWER_EXTERNALS)
+    knower_ply = (_kn.ply_ms(nodes, settings.players, settings.ship_ly_per_turn)
+                  + lines_searched * rival_ms)
+    plys = [knower_ply * (COST_VS_KNOWER if _on_params(settings.seat_params(seat)) else 1.0)
+            for seat in seats]
+    runs = [_kn._search_run(ply, plies, rival_ms) for ply in plys]
+    reach = min(r for r, _ in runs)
+    turn_ms = sum(ms for _, ms in runs)
+    clipped = reach < longest
+    if not clipped and turn_ms < _kn.WARN_TURN_MS:
+        return []
+    need = max(plys) * (plies - 1 + _kn.COST_ROOT_PLIES) + rival_ms
+    out = [f"Council searching {plies} turns ahead on {nodes} systems would need "
+           f"~{_kn._secs(need)} a turn"]
+    if clipped:
+        out.append(f"It stops thinking at {_kn._secs(_kn.SEARCH_BUDGET_S * 1000)}, so it "
+                   f"will look about {reach} turn{'' if reach == 1 else 's'} ahead, "
+                   f"short of its {longest}-turn lanes")
+    if turn_ms >= _kn.WARN_TURN_MS or len(seats) > 1:
+        who = "1 Council seat" if len(seats) == 1 else f"{len(seats)} Council seats"
+        out.append(f"{who}: about {_kn._secs(turn_ms)} per turn to resolve, "
+                   "longer in a browser")
+    smaller = "use a smaller map" if drawn else "reduce System count"
+    out.append(f'Use Knower at "Predict", {smaller} or increase ship speed to avoid this')
+    return out
+
+
 def _on(player) -> bool:
     """Stop 1 unless the seat asks for 0; clamped on read, never rewritten."""
+    return _on_params(getattr(player, "ai_params", None))
+
+
+def _on_params(params) -> bool:
     try:
-        return round(float(player.ai_params.aux)) >= 1
+        return round(float(params.aux)) >= 1
     except (AttributeError, TypeError, ValueError):
         return True
 

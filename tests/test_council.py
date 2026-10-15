@@ -135,6 +135,74 @@ def test_a_game_is_legal_and_reproducible(co, fixed_work):
     assert play() == play()
 
 
+def test_a_reload_starts_from_an_unpatched_knower(fixed_work):
+    """`main._begin_game` reloads the roster on every start, after council's last
+    decide has patched its private knower."""
+    assert "council" in ai.load_models()
+    first = sys.modules["sc_model_council"]
+    ai.decide(_state(), 2)
+    assert first._kn._evaluate is first._learned_evaluate
+    assert "council" in ai.load_models()
+    co = sys.modules["sc_model_council"]
+    assert co._KNOWER_EXTERNALS == sys.modules["sc_model_knower"].EXTERNAL_CANDIDATES
+    assert co._material_evaluate.__name__ == "_evaluate"
+    assert co._knower_advance.__name__ == "_advance"
+    assert co._knower_external_plan.__name__ == "_external_plan"
+    council = _state(aux=0.0)
+    knower = _state(aux=2.0, strategy="knower")
+    assert _orders(ai.decide(council, 2)) == _orders(ai.decide(knower, 2))
+
+
+def _setup(strategy, aux, **kw):
+    from starconquest.model import AiParams
+    from starconquest.settings import Settings
+    s = Settings(**kw)
+    s.ai_strategy = [strategy] * len(s.ai_strategy)
+    s.ai = [AiParams(aux=aux) for _ in s.ai]
+    return s
+
+
+def test_the_default_setup_never_warns(co):
+    for aux in (0, 1):
+        s = _setup("council", aux)
+        assert co.setup_warning(s, list(range(2, s.players + 1))) == []
+
+
+def test_off_warns_where_knower_searching_does(co):
+    kn = sys.modules["sc_model_knower"]
+    for kw in ({"nodes": 24, "ship_ly_per_turn": 1.0}, {"nodes": 40, "ship_ly_per_turn": 2.0}):
+        assert (bool(co.setup_warning(_setup("council", 0, players=2, **kw), [2]))
+                == bool(kn.setup_warning(_setup("knower", 2, players=2, **kw), [2]))), kw
+
+
+def test_on_warns_where_its_extra_cost_cuts_it_short_of_its_lanes(co):
+    kw = {"nodes": 40, "players": 2, "ship_ly_per_turn": 2.0}
+    assert co.setup_warning(_setup("council", 0, **kw), [2]) == []
+    lines = co.setup_warning(_setup("council", 1, **kw), [2])
+    assert lines[0].startswith("Council searching ") and " would need ~" in lines[0]
+    assert any("turns ahead, short of its" in line for line in lines)
+    assert lines[-1].startswith('Use Knower at "Predict"')
+
+
+@pytest.fixture
+def keep_config(monkeypatch):
+    """Rebuilding a logged board writes its setup's knobs into `config`."""
+    from starconquest import config, settings
+    for _, const in settings._GLOBAL_KNOBS:
+        monkeypatch.setattr(config, const, getattr(config, const))
+
+
+def test_the_traps_rebuild_the_strikes_council_really_sent(co, keep_config):
+    from tests import council_traps
+    assert [sent for *_, sent in council_traps.probe()] == [7, 11, 9, 8, 15, 10]
+
+
+@pytest.mark.xfail(strict=True, reason="council's rollouts do not foresee a person's relief")
+def test_council_walks_into_none_of_the_traps(co, keep_config):
+    from tests import council_traps
+    assert all(outcome != "lost" for *_, outcome, _ in council_traps.probe())
+
+
 def test_council_never_reloads_the_roster():
     """An oracle that called `ai.load_models` would wipe every bot's memory mid-game."""
     text = Path(__file__).resolve().parent.parent.joinpath("models", "council.py").read_text()

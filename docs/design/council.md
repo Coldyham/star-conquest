@@ -30,8 +30,10 @@ rivals, and picks the one that wins from here.
 **The judge** is a 29 → 16 → 1 network (tanh, logistic output) on 29
 board-size-free features: production, ship and system shares and gaps against
 the strongest rival, fleets in flight by arrival time, threat and exposure,
-neutral production in reach, and the setup (seats, nodes, lane length, turn,
-`DEFENDER_ADVANTAGE`, jitter). It was fitted on 3,000 games of roster self-play,
+neutral production in reach, and the setup (seats, nodes, lane length, turn).
+`DEFENDER_ADVANTAGE` and jitter are inputs too, but every training game used one
+value of each, so their weights are zero and the judge cannot react to a tuned
+fight. It was fitted on 3,000 games of roster self-play,
 every second turn of every seat, labelled with whether that seat won. It ships
 as constant tables in pure Python, a few hundred multiply-adds per board, and is
 evaluated lazily: only the boards the search actually compares are scored.
@@ -104,15 +106,18 @@ handicap:
 | random:18:6:2 | 86.0% | 86.0% | 86.0% | 96.0% |
 | random:31:6:5 (fair 20%) | — | 56.0% | 58.0% | 42.0% |
 
-**Known gap:** council declares no `setup_warning`. It searches on every setup
-and costs about 1.5× knower's Search, so the big setups knower warns about would
-deserve a warning here too, from a cost model fitted to council's own lines.
+**The setup warning** (`council.setup_warning`) is knower's, priced for
+council: every council seat searches, an Off seat at knower's cost and an On
+seat at `COST_VS_KNOWER` (2.5) times it, the top of the 1.4–2.5× range in the
+table above. A cost model fitted to council's own lines would replace the
+factor.
 
 **The gentler-jitter test** (`tests/test_ai.py`) skips council
 (`_ROLLS_OUT_FIGHTS`): its rollouts play fights at the real jitter, so its plan
 follows the jitter by design, as knower's does at Search (the test only checks
-knower at Predict). The judge's own jitter input is floored at the tuned 0.10
-(`TUNED_JITTER`), so a gentler jitter never moves the score.
+knower at Predict). The judge's own jitter input has a zero weight, so a
+gentler jitter never moves the score; it is also floored at the tuned 0.10
+(`TUNED_JITTER`) in case a retrained judge learns to read it.
 
 ## Built, measured, dropped
 
@@ -145,3 +150,14 @@ screen.
   the end. The shipped judge picks a losing opening in about a third of the
   positions where the choice matters, so there is headroom, but labels built
   from council's own view do not reach it.
+- **actuary as the stand-in for a person** in the rollouts, in place of
+  knower's `_blind`, on the first rolled turn or on every one. Against a rival
+  council was told is a person (20 seeds, both seatings, random:11:11:2 and
+  random:13:6:2), every-turn actuary won 73/80 against marshal where `_blind`
+  won 75/80. Its 78/80 against actuary itself (`_blind` 53/80) is an exact
+  model, not a better guess. On the six traps from real games
+  (`tests/council_traps.py`) it avoided one strike and shrank two, at about 3×
+  the rollout cost. In two of the four it still lost, actuary sent the relief
+  inside the rollouts and safer openings were offered, but the judge picked the
+  strike anyway: the ranking, not the stand-in, is most of the gap. Worth
+  revisiting only if posted human games show people relieve like actuary.

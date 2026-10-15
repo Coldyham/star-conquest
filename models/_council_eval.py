@@ -95,6 +95,7 @@ def _seats(state) -> dict[int, _Seat]:
 # knower's TUNED_SWING (1.1 / 0.9). A gentler jitter must not move the plan.
 TUNED_JITTER = 0.10
 
+
 def features(state, pid: int) -> list[float]:
     """The board as ``pid`` should weigh it, in `FEATURES` order."""
     seats = _seats(state)
@@ -128,10 +129,11 @@ def features(state, pid: int) -> list[float]:
         neutral_inc / (tot_inc + neutral_inc),
         1.0 if me.contact else 0.0,
         len(alive) / 4.0,
-        (len(seats)) / 5.0,
+        len(seats) / 5.0,
         len(state.systems) / 40.0,
         lane_turns / 10.0,
         min(state.turn, 200) / 100.0,
+        # Trained at one value each, so the shipped weights ignore these two.
         config.DEFENDER_ADVANTAGE,
         max(config.COMBAT_JITTER, TUNED_JITTER) * 10.0,
         me.pipeline / (tot_inc * 3.0), riv.pipeline / (tot_inc * 3.0),
@@ -170,7 +172,6 @@ LAYERS: list[tuple[list[list[float]], list[float]]] = [
     ], [-0.308621]),
 ]
 # END WEIGHTS
-
 
 
 def value(state, pid: int) -> float:
