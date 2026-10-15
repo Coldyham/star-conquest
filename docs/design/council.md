@@ -106,6 +106,18 @@ handicap:
 | random:18:6:2 | 86.0% | 86.0% | 86.0% | 96.0% |
 | random:31:6:5 (fair 20%) | — | 56.0% | 58.0% | 42.0% |
 
+**The leaderboard's bot column** (`tools/bot_replay.py`, guards lifted 100×).
+On 24 of the 142 posted maps, sampled at random and replayed as the worker
+does, council took a median 3.4 s of CPU a map against knower's 1.6 s (1.5×,
+3.8× at worst) and 33 s on the slowest, a five-seat 31-node map at 3 ly. All
+142 come to about 16 CPU minutes on a desktop, so the first fill takes one or
+two of the worker's 40-minute runs. Council won 23 of the 24; knower won 19.
+
+**A whole turn in the browser build** (headless Firefox on a desktop, 12 turns,
+every bot seat included, guards on): 73 ms median on a 40-node duel, 163 ms on
+the same at 2 ly (a setup the warning flags), 323 ms on 31 nodes with four
+council seats of five.
+
 **The setup warning** (`council.setup_warning`) is knower's, priced for
 council: every council seat searches, an Off seat at knower's cost and an On
 seat at `COST_VS_KNOWER` (2.5) times it, the top of the 1.4–2.5× range in the
