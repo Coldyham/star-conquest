@@ -349,6 +349,74 @@ h1::after {
 .badge.difficulty:hover { background: transparent; }
 .badge.difficulty.very-hard:hover { background: #000; }
 
+/* A setup's pace (home.mjs's paceBadge): an estimate, so dashed, and in the
+ * dim ink — it describes the setup rather than ranking it. Not a link. */
+.badge.pace { border-color: var(--dim); border-style: dashed; color: var(--ink); cursor: help; }
+.badge.pace:hover { background: transparent; }
+
+/* "By family" (home.mjs's familyCard): one card per family, a row per config
+ * indented by its depth in the tree, with a rail down the indent. Edit chips
+ * say what changed from the parent, coloured by kind of change. */
+.card.family { padding: 0; }
+.card.family:hover { background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%); }
+.family-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.9rem 1.1rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+.family-head .card-meta { margin-top: 0; }
+.family-name {
+  font-family: var(--pixel);
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--cyan);
+}
+.family-member {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.7rem 1.1rem 0.7rem calc(1.1rem + var(--depth, 0) * 1.4rem);
+  background-image: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 1.4rem);
+  background-size: calc(var(--depth, 0) * 1.4rem) 100%;
+  background-position: 1.1rem 0;
+  background-repeat: no-repeat;
+}
+.family-member + .family-member { border-top: 1px dashed #1c1838; }
+.family-member.dim { opacity: 0.4; }
+.family-member-main { min-width: 0; display: grid; gap: 0.35rem; }
+.family-member-main .card-tags { margin-top: 0.1rem; }
+.family-link { display: grid; color: var(--ink); text-decoration: none; }
+.family-link:hover .setup { color: var(--cyan); }
+.family-link .credit { margin-top: 0; font-size: 0.8rem; }
+.family-maps {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  line-height: 1.9;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+.edits { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.3rem; }
+.edit {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid currentColor;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.edit-size { color: var(--cyan); }
+.edit-tempo { color: var(--gold); }
+.edit-shape { color: var(--magenta); }
+.edit-rules { color: var(--green); }
+.edit-fog { color: #b18cff; }
+.edit-bots { color: var(--ink); }
+.edit-rescale { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+
 /* This map's replays are still embargoed (games.embargo_until) — gold for
  * "wait", the same tone .play already uses for the door back into the game.
  * Not a link, same reasoning as .bot-lead: it states a fact, it filters

@@ -8,9 +8,10 @@ import {
   leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
-  filtersFromParams, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
+  familyQueries, filtersFromParams, FIRST_SEEN_QUERY, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
   urlFor, viewKind,
 } from "./listing.mjs";
+import { families, familyForest, paceLabel, withFirstSeen } from "./families.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { configTitle } from "./setup.mjs";
@@ -61,7 +62,7 @@ function showMore(list, { kind, query }, render, offset, { keep, prepare }) {
   return wrap;
 }
 
-/** By-game vs. by-config, styled like game.mjs's turns/lost ranking toggle.
+/** By game, by config or by family, styled like game.mjs's turns/lost ranking toggle.
  * Hidden once already narrowed to one config — there is nothing left to
  * group there. Every other filter rides along. */
 function groupToggle(filters) {
@@ -71,7 +72,7 @@ function groupToggle(filters) {
     href: urlFor({ ...filters, group: value }),
     text: label,
   });
-  const children = [linkFor("game", "By game"), linkFor("config", "By config")];
+  const children = [linkFor("game", "By game"), linkFor("config", "By config"), linkFor("family", "By family")];
   if (filters.group === "config") children.push(randomSetupButton(filters));
   return el("div", { class: "sorts" }, children);
 }
@@ -371,6 +372,16 @@ async function campaignMarks() {
   return new Map(rows.map((entry) => [entry.game_key, campaignMark(entry, thisWeek)]));
 }
 
+/**
+ * The setup's pace, "Standard · ~3t": the estimated median lane in turns, which
+ * systems and ship speed set between them (families.mjs's paceOf). Not a link:
+ * it states a fact, like .difficulty. None on a hand-drawn map.
+ */
+function paceBadge(game) {
+  const pace = paceLabel(game);
+  return pace ? el("span", { class: "badge pace", title: pace.title, text: pace.text }) : null;
+}
+
 function row(game, campaigns, mine) {
   const holder = leaderCredit(game);
   const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
@@ -406,7 +417,7 @@ function row(game, campaigns, mine) {
   return el("div", { class: "card" }, [
     body,
     el("div", { class: "card-tags" }, [
-      difficultyBadge(game), configBadge(game), fogBadge(game), mineBadge(mine.get(game.game_key)),
+      difficultyBadge(game), paceBadge(game), configBadge(game), fogBadge(game), mineBadge(mine.get(game.game_key)),
       campaignBadge(campaigns.get(game.game_key)), botLeadBadge(game), embargoBadge(game),
       ...botChips(game),
     ]),
@@ -444,9 +455,72 @@ function configRow(config) {
 
   return el("div", { class: "card" }, [
     body, el("div", { class: "card-tags" }, [
-      difficultyBadge(config, config.avg_difficulty), fogBadge(config, "config"), ...botChips(config),
+      difficultyBadge(config, config.avg_difficulty), paceBadge(config), fogBadge(config, "config"), ...botChips(config),
     ]),
   ]);
+}
+
+/**
+ * One family (families.mjs): a card headed by its name and totals, then one row
+ * per config in tree order, indented by depth, each saying what changed from
+ * its parent and linking to that config's own list — where a config card goes.
+ * A member the filters would hide stays, dimmed, so the tree reads whole.
+ */
+function familyCard(family, matches) {
+  const configs = family.members.length;
+  const maps = family.members.reduce((sum, m) => sum + (m.config.game_count || 0), 0);
+  const meta = [
+    `${configs} ${configs === 1 ? "config" : "configs"}`,
+    `${maps} ${maps === 1 ? "map" : "maps"}`,
+    relativeTime(family.lastActivity),
+  ].join(" · ");
+  const rows = family.members.map((member) => {
+    const { config } = member;
+    const dim = matches && !matches.has(config.config_key);
+    const link = el("a", { class: "family-link", href: `index.html?config=${encodeURIComponent(config.config_key)}` }, [
+      el("span", { class: "setup", text: setupSummary(config) }),
+      el("span", { class: "credit config-name", text: configTitle(config) }),
+    ]);
+    const edits = member.edits.map((edit) => el("span", { class: `edit edit-${edit.kind}`, text: edit.text }));
+    return el("div", {
+      class: `family-member${dim ? " dim" : ""}`,
+      style: `--depth: ${Math.min(member.depth, 6)}`,
+    }, [
+      el("div", { class: "family-member-main" }, [
+        link,
+        edits.length ? el("div", { class: "edits" }, edits) : null,
+        el("div", { class: "card-tags" }, [paceBadge(config), fogBadge(config, "config"), ...botChips(config)]),
+      ]),
+      el("span", { class: "family-maps", text: `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}` }),
+    ]);
+  });
+  return el("div", { class: "card family" }, [
+    el("div", { class: "family-head" }, [
+      el("span", { class: "family-name", text: family.name }),
+      el("span", { class: "card-meta", text: meta }),
+    ]),
+    ...rows,
+  ]);
+}
+
+/** "By family": every config fetched at once, built into trees on the page. */
+async function loadFamilies(filters) {
+  const { all, match } = familyQueries(filters);
+  let [configs, matched] = await Promise.all([select(all), match ? select(match) : null]);
+  // A board not yet re-pasted with config_summary.first_seen: derive it.
+  if (configs.length && !("first_seen" in configs[0])) configs = withFirstSeen(configs, await select(FIRST_SEEN_QUERY));
+  const matches = matched ? new Set(matched.map((r) => r.config_key)) : null;
+  let shown = families(familyForest(configs));
+  if (matches) shown = shown.filter((f) => f.members.some((m) => matches.has(m.config.config_key)));
+  if (filters.dir === "asc") shown.reverse();
+  target.classList.remove("loading");
+  if (!shown.length) {
+    clear(target).append(el("p", { class: "empty" }, isFiltered(filters)
+      ? ["No setups match this filter. ", el("a", { href: urlFor({ group: filters.group }), text: "Clear filters" }), "."]
+      : ["No scores posted yet. ", el("a", { href: "submit.html", text: "Be the first" }), "."]));
+    return;
+  }
+  clear(target).append(...shown.map((family) => familyCard(family, matches)));
 }
 
 async function load() {
@@ -457,6 +531,19 @@ async function load() {
     return;
   }
   const filters = filtersFromParams(new URLSearchParams(location.search));
+  if (viewKind(filters) === "family") {
+    clear(groupTarget).append(groupToggle(filters));
+    clear(filterTarget).append(controls(filters));
+    const bar = filterBar(filters);
+    if (bar) filterTarget.append(bar);
+    try {
+      await loadFamilies(filters);
+    } catch (err) {
+      target.classList.remove("loading");
+      showError(target, err.message);
+    }
+    return;
+  }
   try {
     // Your own maps and the week's campaign nodes are only on the critical
     // path when they shape the query.

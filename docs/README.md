@@ -37,7 +37,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
-| [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board (proposed): opponents folded, the family tree, rulesets, pace |
+| [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board: pace on every card, and the "By family" view above By game and By config |
 | [`design/schema.md`](design/schema.md) | The board's database (`leaderboard/schema.sql`): the trust model, upgrading by re-pasting, each table and view's shape, the grant trap, the play-by-post tables |
 | [`design/par.md`](design/par.md) | The par search, a local check: the floor, lucky and honest dice, what a rewind does to the rng, readings against human wins |
 | [`design/seat-play.md`](design/seat-play.md) | Six games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
@@ -114,7 +114,7 @@ only for a fight; what is deliberately not animated.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
 ### design/setup-families.md
-- **Setup families (proposed, not built).** The problem, with the 2026-10-14 reading (62 configs, 53 setups once opponents fold, 24 families, 16 rulesets); four lenses (*opponents fold in*, *the family tree*: parent = nearest older setup, *rulesets*, *pace*: median lane in turns); a four-phase plan; *decided against*: a 2-D map, clustering, a family id on `Settings`, grouping on `sc_config_key` text.
+- **Setup families.** The problem (62 configs, 28 families on 2026-10-14); **Pace** (the median lane estimate, `PACE_LY` and how it was fitted, why about 81% exact is the ceiling, the bands); **The family tree** (parent = nearest older config within a cost of 3, the cost table, opponents as a light edit, rescales, why not clustering, what it shows on live data; *data and fallback*; *the view*); *proposed, not built*: a "made from" stamp on the score; *decided against*: folding opponents, a By ruleset view, a 2-D map, clustering, a family id on `Settings`, grouping on `sc_config_key` text, storing the exact median lane.
 
 ### design/schema.md
 - **The trust model** (append-only by the absence of policies; worker-only and closed tables) and **re-pasting upgrades a board** (added columns, drop/add checks, view columns go last, and the `public_replays.rules_version` incident).
@@ -231,7 +231,8 @@ Each entry gives the idea, the outcome and where it is recorded. "Null" means
 the measured result was indistinguishable from the baseline.
 
 ### setup families ([`design/setup-families.md`](design/setup-families.md))
-- A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. *Decided against.*
+- Folding opponents into one setup, and a By ruleset view: the existing views stay as they are; opponents are a light edit in the family tree. *Decided against.*
+- A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. Storing the exact median lane per game: a column, and blank until the job runs. *Decided against.*
 
 ### knower ([`design/knower.md`](design/knower.md))
 - Pricing three-way pile-ups with the oracle: a wash, possibly worse. *Built, measured, removed.*

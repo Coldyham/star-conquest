@@ -197,6 +197,17 @@ There's no bot dropdown any more: a bot chip on a card *is* the filter, linking 
 `index.html?bot=…` — clicking one narrows either list, by-game or by-config, to
 setups/maps that included that opponent.
 
+Above both sits **By family** (`?group=family`): configs linked into trees,
+each config's parent being the nearest older config at most a few edits away,
+with chips saying what changed (a slider, fog, the mode, a new opponent, a
+"Rescaled" systems-and-speed change that kept the lanes the same length). It is
+computed on the page from every config at once (`js/families.mjs`), so nothing
+about a family is stored. It reads `config_summary.first_seen`, and on a board
+not yet re-pasted derives the same thing from `game_summary`. Every card, on all
+three views, also carries a **pace** chip (`Standard · ~3t`): the median lane
+in turns, estimated from systems and ship speed. See
+`docs/design/setup-families.md`.
+
 A config's page offers **Play a new seed**: the same setup handed back to the
 game with its seed emptied, so the game rolls a fresh map from it
 (`Settings.seed = None`) instead of replaying one of the maps already on the
