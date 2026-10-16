@@ -334,7 +334,7 @@ def _scores(*ids):
 
 
 def test_a_decided_score_is_not_rechecked():
-    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5}}
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5, "game_digest": "ff"}}
     assert verify_scores.pending(_scores(1, 2), done, "abc") == [{"id": 2}]
 
 
@@ -345,7 +345,7 @@ def test_missing_is_always_retried_without_a_flag():
 
 
 def test_stale_picks_up_rows_decided_by_older_code():
-    done = {1: {"verdict": "verified", "engine_rev": "old", "log_id": 5}}
+    done = {1: {"verdict": "verified", "engine_rev": "old", "log_id": 5, "game_digest": "ff"}}
     assert verify_scores.pending(_scores(1), done, "new") == []
     assert verify_scores.pending(_scores(1), done, "new", stale=True) == [{"id": 1}]
 
@@ -431,6 +431,32 @@ def test_a_flood_of_later_uploads_cannot_crowd_out_the_players_own():
     assert tried[0]["id"] == 7
     assert len(tried) == verify_scores.MAX_TRIES
     assert all(row["match_id"] == match for row in tried)
+
+
+def test_a_game_reposted_under_another_match_id_digests_the_same(posted):
+    """counted_scores counts a game once by its digest, so a public replay
+    uploaded again under a fresh match_id has to digest as the original does,
+    and a game that went differently must not."""
+    score, blob, setup = posted
+    copy = replay.GameLog.decode(blob)
+    copy.match_id = "ab" * 8
+    cut = replay.GameLog.decode(blob)
+    cut.truncate(cut.turn_count - 1)
+    with _preserve_config():
+        first = verify_scores.verify(score, blob, setup)
+        again = verify_scores.verify({**score, "match_id": copy.match_id}, copy.encoded(), setup)
+        short = verify_scores.verify(score, cut.encoded(), setup)
+    assert first.verdict == again.verdict == "verified"
+    assert first.game_digest and first.game_digest == again.game_digest
+    assert short.verdict == "mismatch" and short.game_digest not in ("", first.game_digest)
+    assert verify_scores.verify(score, "bogus", setup).game_digest == ""
+
+
+def test_a_verified_row_without_a_digest_is_decided_again():
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5, "game_digest": ""},
+            2: {"verdict": "verified", "engine_rev": "abc", "log_id": 6, "game_digest": "ff"},
+            3: {"verdict": "unreadable", "engine_rev": "abc", "log_id": 7, "game_digest": ""}}
+    assert verify_scores.pending(_scores(1, 2, 3), done, "abc") == [{"id": 1}]
 
 
 def test_a_verified_score_stays_verified_and_becomes_outdated():

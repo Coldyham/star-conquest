@@ -250,6 +250,30 @@ def test_a_replay_is_the_log_its_matchs_first_score_was_checked_on(board):
     assert rows.splitlines() == ["b000000000000001|real", "b000000000000002|final"]
 
 
+def test_a_game_counts_once_whatever_match_it_is_posted_under(board):
+    """A verified replay is public, so it can be uploaded again under a fresh
+    match_id and posted under another name. It replays through the same boards
+    (score_checks.game_digest), so only its first post counts."""
+    _psql("""
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('twin', 'random', 2, 18, 0, '{}');
+      with v(u, t, at, m, digest) as (values
+        (1, 30, now() - interval '3 days', 'c000000000000001', 'aaaa'),
+        (2, 30, now() - interval '2 days', 'c000000000000002', 'aaaa'),
+        (3, 31, now() - interval '1 day', 'c000000000000003', 'bbbb')
+      ), posted as (
+        insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        select 'twin', u, t, 0, t, '', at, m from v
+        returning id, user_id
+      )
+      insert into score_checks (score_id, verdict, game_digest)
+      select p.id, 'verified', v.digest from posted p join v on v.u = p.user_id;
+    """, board)
+    rows = _psql("select user_name from counted_scores where game_key = 'twin'"
+                 " order by user_name", board)
+    assert rows.splitlines() == ["alice", "cara"]
+
+
 def test_the_public_cannot_choose_when_a_score_was_posted(board):
     """counted_scores trusts submitted_at, so the public's insert leaves it to
     the server: a backdated score is refused, and one without it is stamped now."""

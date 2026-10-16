@@ -34,6 +34,12 @@ Four verdicts, stored in ``score_checks``:
 A stored ``verified`` is never taken back (``settle``): the score reproduced
 under the code it was played under.
 
+A log that replays also leaves a ``game_digest``: a hash of every board the
+replay passed through. ``counted_scores`` counts one game once by it, since a
+public replay can be uploaded again under a fresh ``match_id`` and posted under
+another name. Anything that leaves every board the same, an order the engine
+drops or a flipped ``"ai"`` flag, leaves the digest the same too.
+
 Beside the verdict, ``outdated`` says whether the score is still comparable with
 one posted today. It is what keeps this honest across a rules change. A stored log
 never consults a bot (see ``replay_rev``), but a change to the engine itself — the
@@ -77,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import sys
 import time
 from dataclasses import dataclass
@@ -109,6 +116,8 @@ class Check:
     outdated: bool = False
     # The game_logs row the verdict was reached on; None when there was none.
     log_id: int | None = None
+    # Every board the replay passed through, hashed; "" when it didn't replay.
+    game_digest: str = ""
 
     def row(self, rev: str) -> dict:
         return {
@@ -118,6 +127,7 @@ class Check:
             "engine_rev": rev,
             "log_id": self.log_id,
             "outdated": self.outdated,
+            "game_digest": self.game_digest,
         }
 
 
@@ -142,14 +152,17 @@ def pending(scores: list[dict], done: dict[int, dict], rev: str, *,
 
     A row that names no ``log_id`` is retried too: it was decided before verdicts
     recorded their log, and until it names one ``--prune`` cannot tell which
-    upload to keep and ``public_replays`` cannot tell which to serve.
+    upload to keep and ``public_replays`` cannot tell which to serve. So is a
+    ``verified`` row with no ``game_digest``, which ``counted_scores`` needs to
+    count its game once.
     """
     out = []
     for score in scores:
         previous = done.get(score["id"])
         if previous is not None and not recheck:
             older = stale and previous.get("engine_rev", "") != rev
-            unnamed = previous.get("log_id") is None
+            unnamed = previous.get("log_id") is None or (
+                previous.get("verdict") == "verified" and not previous.get("game_digest"))
             if not older and not unnamed and previous.get("verdict") != "missing":
                 continue
         out.append(score)
@@ -214,7 +227,8 @@ def settle(check: Check, previous: dict | None) -> Check:
         return check
     log_id = previous.get("log_id")
     return Check(check.score_id, "verified", f"verified before; now {check.detail}",
-                 outdated=True, log_id=check.log_id if log_id is None else int(log_id))
+                 outdated=True, log_id=check.log_id if log_id is None else int(log_id),
+                 game_digest=check.game_digest)
 
 
 def keepers(uploads: list[dict], scores: list[dict], checks: dict[int, dict]) -> set[int]:
@@ -307,11 +321,24 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
     if not same_setup(log, settings_json):
         return Check(sid, "mismatch", "the replay is of a different setup")
     audit = _DiceAudit(log)
+    trail = hashlib.blake2s(digest_size=16)
+
+    def on_turn(board) -> None:
+        audit(board)
+        trail.update(replay.digest_hex(board).encode())
+
     try:
-        state, _ = replay.reconstruct(log, on_turn=audit)
+        state, _ = replay.reconstruct(log, on_turn=on_turn)
     except Exception as err:  # noqa: BLE001 — a log that won't replay is a verdict
         return Check(sid, "unreadable", f"replay failed: {err}")
+    check = _outcome(score, log, state, audit)
+    check.game_digest = trail.hexdigest()
+    return check
 
+
+def _outcome(score: dict, log: replay.GameLog, state, audit: _DiceAudit) -> Check:
+    """``verify``'s verdict on a log that replayed to ``state``."""
+    sid = int(score["id"])
     human = state.human()
     if human is None:
         return Check(sid, "unreadable", "the replay has no human seat")
@@ -433,7 +460,8 @@ def main(argv: list[str] | None = None) -> int:
                                   "&order=id.asc")
     checked = {int(r["score_id"]): r for r in
                api.select("score_checks",
-                          "select=score_id,verdict,engine_rev,log_id&order=score_id.asc")}
+                          "select=score_id,verdict,engine_rev,log_id,game_digest"
+                          "&order=score_id.asc")}
     todo = pending(scores, checked, rev, recheck=args.recheck, stale=args.stale)
     if args.limit > 0:
         todo = todo[: args.limit]

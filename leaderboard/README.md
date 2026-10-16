@@ -678,7 +678,8 @@ Monday 00:00 UTC to the next; `?week=` browses back.
 All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
 is the eligibility rule (a verified score; one still waiting on its replay, for
 its first 24 hours; anything posted before 2026-10-15 but a mismatch; and only
-the first score posted for a match),
+the first score posted for a match, or for the same game re-uploaded under
+another match),
 `crown_holders` and `crown_steals` read it. Deleting
 a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
 maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.

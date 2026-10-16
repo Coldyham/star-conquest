@@ -167,6 +167,12 @@ one afresh, delete its row.
 `log_id` names the upload a verdict was reached on. A row without one is
 decided again, which is how rows from before the column get one.
 
+`game_digest` hashes every board the replay passed through (`replay.digest_hex`
+per turn), so it names the game rather than the upload. A copy re-encoded with
+a fresh `match_id`, a flipped `"ai"` flag or an order the engine drops passes
+through the same boards and digests the same. It is `''` when the log didn't
+replay. A `verified` row without one is decided again.
+
 ## playstyle_readings
 
 Keyed by match, never by name, so a rename or a deleted score needs nothing
@@ -305,7 +311,8 @@ volume, which a count of wins or maps would pay out for grinding easy setups.
 not. A score that names a replay and is still unchecked or `missing` counts for
 its first 24 hours. A score posted before `sc_legacy_cutoff()` (2026-10-15)
 counts under the rule it was posted under. Only the first score posted for a
-`match_id` counts. See [`leaderboard.md`](leaderboard.md), "Crowns, the weekly
+`match_id` counts, and only the first for a game (`game_digest`). See
+[`leaderboard.md`](leaderboard.md), "Crowns, the weekly
 campaign and embargoes".
 
 It used to count everything but a `mismatch`, so that a score whose one upload
@@ -332,6 +339,11 @@ scores carrying a `match_id` had no log.
 - **First post per match**, because a verified `match_id` is public and a copy
   under a second name inherited its check. A clause in the view rather than a
   unique index: nothing to migrate, and a player posting twice is harmless.
+- **First post per game**, by `score_checks.game_digest`, because a public
+  replay can be uploaded again under a fresh `match_id`. That copy is the
+  first post of its "match" and verifies on its own, so the `match_id` rule
+  alone doesn't catch it. Two honest games pass through the same boards only
+  if every order in them is the same, so an identical game counts once.
 
 ## The grant trap
 

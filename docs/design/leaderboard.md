@@ -578,8 +578,8 @@ built.
   lives: a `verified` score counts, an unchecked or `missing` one that names a
   replay counts for its first 24 hours, one posted before 2026-10-15 counts
   unless it is a `mismatch` under current rules, and only the first post of a
-  match counts (reasons: [`schema.md`](schema.md), "counted_scores and the
-  crowns").
+  match, or of a game however it is re-uploaded, counts (reasons:
+  [`schema.md`](schema.md), "counted_scores and the crowns").
   Nothing is stored, so moderation recomputes them for free.
   `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
   against a real Postgres when `SC_TEST_PG` is set.

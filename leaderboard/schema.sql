@@ -159,11 +159,15 @@ create table if not exists public.score_checks (
   -- verified, else the best evidence there was. Null on `missing`. No foreign
   -- key: --prune keeps every log a verdict names, and nothing else may delete one.
   log_id     bigint,
-  outdated   boolean not null default false
+  outdated   boolean not null default false,
+  -- A hash of every board the replay passed through, '' when it didn't replay.
+  -- counted_scores counts one game once by it, whatever match_id it is posted under.
+  game_digest text not null default ''
 );
 
 alter table public.score_checks add column if not exists log_id bigint;
 alter table public.score_checks add column if not exists outdated boolean not null default false;
+alter table public.score_checks add column if not exists game_digest text not null default '';
 
 -- `outdated` was a verdict before it was a column. A lineup row reproduced; a
 -- rules row didn't.
@@ -466,8 +470,10 @@ group by config_key, tag;
 -- replay and is still unchecked or `missing` counts for its first 24 hours,
 -- the worker's slack. One posted before sc_legacy_cutoff() counts under the
 -- rule it was posted under: anything but a mismatch under current rules.
--- Only the first score posted for a match_id counts. Nothing is stored, so
--- deleting a score recomputes everything that reads this.
+-- Only the first score posted for a match_id counts, and only the first for a
+-- game (score_checks.game_digest), since a public replay can be uploaded again
+-- under a fresh match_id. Nothing is stored, so deleting a score recomputes
+-- everything that reads this.
 -- ---------------------------------------------------------------------------
 create or replace function public.sc_legacy_cutoff()
 returns timestamptz
@@ -493,6 +499,11 @@ where (c.verdict = 'verified'
   and not exists (
     select 1 from public.scores e
     where s.match_id <> '' and e.match_id = s.match_id
+      and (e.submitted_at, e.id) < (s.submitted_at, s.id))
+  and not exists (
+    select 1 from public.scores e
+    join public.score_checks ec on ec.score_id = e.id
+    where c.game_digest <> '' and ec.game_digest = c.game_digest
       and (e.submitted_at, e.id) < (s.submitted_at, s.id));
 
 -- ---------------------------------------------------------------------------

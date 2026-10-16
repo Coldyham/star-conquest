@@ -368,7 +368,8 @@ already resolve simultaneously. The rationale for each rule is in
   `keyed` turn's dice (`replay.dice_follow`) and binding the log to the setup (`same_setup`, keyed by `GameLog.setup_key()`,
   never the live `Settings`). A score is judged on the upload that verifies
   (`verify_scores.judge`, `score_checks.log_id`), never the longest: anyone
-  can upload under a public `match_id`. The public's insert on `scores` is
+  can upload under a public `match_id`. A game counts once however it is
+  re-uploaded (`score_checks.game_digest`). The public's insert on `scores` is
   granted by column and never `submitted_at`, which `counted_scores` trusts: a
   new column the board posts joins that grant (`test_schema_grants`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
