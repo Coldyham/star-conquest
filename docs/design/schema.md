@@ -97,6 +97,16 @@ and the score by the *site*, so either can arrive first, and a score whose
 upload was blocked must still post. It is blank for every score from before the
 game uploaded logs and for any hand-written link.
 
+`submitted_at` is the one column the public may not write: its insert grant
+is by column and leaves it out, so it is always the server's `now()`.
+`counted_scores` trusts it for the legacy cutoff, the 24 hours' grace and
+which post of a match or game came first, and `public_replays` trusts it to
+tell the player's own upload from a later one. With a table grant, a backdated
+score fell under the legacy rule and counted with no replay. A copy of someone
+else's match backdated before theirs became the first post, and their score
+stopped counting. The table grant is revoked before the column grant, because
+revoking a table privilege drops its column grants as well.
+
 `campaign_start` is a claim, like `hand`, and safe as one: the grace still runs
 from the loss, so a stamp can only narrow it, and a forged one gets no more
 than a blank. A blank is what every score before the column, every desktop game

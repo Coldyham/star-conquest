@@ -248,3 +248,21 @@ def test_a_replay_is_the_log_its_matchs_first_score_was_checked_on(board):
     rows = _psql("select match_id, log from public_replays where game_key = 'watch'"
                  " order by match_id", board)
     assert rows.splitlines() == ["b000000000000001|real", "b000000000000002|final"]
+
+
+def test_the_public_cannot_choose_when_a_score_was_posted(board):
+    """counted_scores trusts submitted_at, so the public's insert leaves it to
+    the server: a backdated score is refused, and one without it is stamped now."""
+    _psql("insert into games (game_key, mode, players, nodes, seed, settings_json)"
+          " values ('stamp', 'random', 2, 18, 0, '{}')", board)
+    backdated = subprocess.run(
+        ["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+         "set role anon; insert into scores"
+         " (game_key, user_id, turns, lost, hand, raw_token, submitted_at)"
+         " values ('stamp', 1, 30, 0, 30, '', '2026-09-01 00:00Z')"],
+        capture_output=True, text=True)
+    assert backdated.returncode != 0 and "permission denied" in backdated.stderr
+    _psql("set role anon; insert into scores (game_key, user_id, turns, lost, hand, raw_token)"
+          " values ('stamp', 1, 30, 0, 30, '')", board)
+    assert _psql("select count(*) from scores where game_key = 'stamp'"
+                 " and submitted_at > now() - interval '1 minute'", board) == "1"

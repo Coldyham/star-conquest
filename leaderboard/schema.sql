@@ -805,8 +805,13 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.game_embargoes, public.playstyle_readings
   to anon, authenticated;
 grant select on public.config_tag_counts to anon, authenticated;
-grant insert on public.users, public.games, public.scores, public.configs,
+grant insert on public.users, public.games, public.configs,
   public.config_tags to anon, authenticated;
+-- scores by column, leaving submitted_at to its default: counted_scores and
+-- public_replays trust it. Revoking the table grant also drops column grants.
+revoke insert on public.scores from anon, authenticated;
+grant insert (game_key, user_id, turns, lost, hand, by_name, raw_token, match_id,
+  campaign_start) on public.scores to anon, authenticated;
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
 
