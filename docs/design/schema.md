@@ -45,6 +45,7 @@ the shapes it repeats:
 - A check that may later be tightened or widened is a `drop constraint if
   exists` / `add constraint` pair rather than a check inside `create table`.
   `score_checks_verdict` widened that way when `outdated` arrived, and
+  narrowed again when it became a column, and
   `configs_tags_shape` was written so it could tighten.
 - `create or replace view` accepts an existing view's columns unchanged in name,
   order and type, with new ones appended at the end. Insert one in the middle
@@ -96,6 +97,16 @@ and the score by the *site*, so either can arrive first, and a score whose
 upload was blocked must still post. It is blank for every score from before the
 game uploaded logs and for any hand-written link.
 
+`submitted_at` is the one column the public may not write: its insert grant
+is by column and leaves it out, so it is always the server's `now()`.
+`counted_scores` trusts it for the legacy cutoff, the 24 hours' grace and
+which post of a match or game came first, and `public_replays` trusts it to
+tell the player's own upload from a later one. With a table grant, a backdated
+score fell under the legacy rule and counted with no replay. A copy of someone
+else's match backdated before theirs became the first post, and their score
+stopped counting. The table grant is revoked before the column grant, because
+revoking a table privilege drops its column grants as well.
+
 `campaign_start` is a claim, like `hand`, and safe as one: the grace still runs
 from the loss, so a stamp can only narrow it, and a forged one gets no more
 than a blank. A blank is what every score before the column, every desktop game
@@ -119,9 +130,14 @@ to the schema:
   `tools/verify_scores.py` does before a score is called verified.
 - **`rules_version` defaults to 1 as a fact, not a guess.** Every row before the
   column existed was played under rules 1, the only version there had been.
-- **Append-only shapes the key.** A checkpointing game lands several times, the
-  longest row is the current one, and the index is `(match_id, turns desc)` so
-  the verifier's lookup and its choice of row are one scan.
+- **Append-only shapes the key.** A checkpointing game lands several times,
+  the longest row is the latest, and the index is `(match_id, turns desc)`.
+- **The longest row is not evidence.** Anyone can upload under a `match_id` once
+  a score makes it public, so the verifier tries the uploads from before the
+  score first and records the one that verifies (`score_checks.log_id`).
+  `public_replays` serves the log named for the match's first score, and
+  `--prune` never deletes a named log. Before, an upload claiming more turns
+  replaced a player's Watch link at once and got their own log pruned.
 
 ## score_checks
 
@@ -132,6 +148,30 @@ which leaves out `ai` and `models/`: a log records orders and dice, so a bot
 changing cannot move it. An engine rule changing can, and that is what
 `outdated` is for. Both are argued in [`leaderboard.md`](leaderboard.md),
 "Versioning: bots are free to move, the engine is not".
+
+`outdated` is a column beside the verdict, not a verdict. It started as a fifth
+verdict, but whether a replay reproduces and whether the score is still
+comparable with one posted today are separate questions, and every pairing
+happens. A game dealt a lineup the setup no longer deals reproduces but isn't
+comparable. A game from before a rules change that no longer reproduces is a
+`mismatch` that is `outdated`: unverifiable, not wrong. The schema migrates
+any stored `outdated` verdict by its detail.
+
+A stored `verified` is never taken back (`verify_scores.settle`). A re-check
+that no longer reproduces it marks it `outdated` instead. Scores from early
+development were played against other bots, other rng rules and another
+resolution order, and `RULES_VERSION` was not always bumped, so "it reproduced
+under the code it was played under" is the only claim that survives. To judge
+one afresh, delete its row.
+
+`log_id` names the upload a verdict was reached on. A row without one is
+decided again, which is how rows from before the column get one.
+
+`game_digest` hashes every board the replay passed through (`replay.digest_hex`
+per turn), so it names the game rather than the upload. A copy re-encoded with
+a fresh `match_id`, a flipped `"ai"` flag or an order the engine drops passes
+through the same boards and digests the same. It is `''` when the log didn't
+replay. A `verified` row without one is decided again.
 
 ## playstyle_readings
 
@@ -240,6 +280,15 @@ can fold it onto an older one). A score's `game_key` is guaranteed by its
 foreign key to name a real `games` row. It is a left join so a log whose key
 has no `games` row yet reads as "no embargo" rather than vanishing.
 
+One upload per match: the log the match's *first* score was checked on
+(`score_checks.log_id`). Before any check, it is the longest uploaded before
+that score was posted, else the longest. The first score, not any verified
+one, because a later poster can upload a real game of their own under the same
+public `match_id`, post a score for it, and have that verify too. Uploads from
+before the post come first because the game uploads as Post opens the form, so
+the player's own log is there before a `match_id` is public. Without that, a
+bogus longer upload took over the Watch link until the worker's next run.
+
 `public_watchable_replays` exists because `netlify/functions/replay.mjs` reads
 exactly one relation on purpose: what may be served is decided in SQL, and the
 function has no `if` that could drift from that. Its two halves are gated by
@@ -262,11 +311,45 @@ stops one lucky seed standing for the whole setup.
 
 Crowns reward taking first place from somebody else on a contested map, not
 volume, which a count of wins or maps would pay out for grinding easy setups.
-`counted_scores` counts everything but a `mismatch` because the game uploads a
-log once, with no retry, so a score posted offline or pasted as a hand-made
-link can never become `verified`, and shutting those out would shut out whole
-ways of playing. See [`leaderboard.md`](leaderboard.md), "Crowns, the weekly
+`counted_scores` counts a score once its replay is `verified`, `outdated` or
+not. A score that names a replay and is still unchecked or `missing` counts for
+its first 24 hours. A score posted before `sc_legacy_cutoff()` (2026-10-15)
+counts under the rule it was posted under. Only the first score posted for a
+`match_id` counts, and only the first for a game (`game_digest`).
+`game_summary`'s best reads it too: a score that can't hold a crown isn't a
+map's record either, so a map can have scores and no best. See
+[`leaderboard.md`](leaderboard.md), "Crowns, the weekly
 campaign and embargoes".
+
+It used to count everything but a `mismatch`, so that a score whose one upload
+failed could still count. But `scores` takes inserts from anyone, so a single
+request with no replay behind it took a crown and a campaign node. What the
+change costs: a score whose upload failed counts only if the player posts again
+from the finished game, which uploads again. When it changed, 3 of the 195
+scores carrying a `match_id` had no log.
+
+- **Only `verified` counts, `outdated` or not.** `outdated` says the score
+  isn't comparable with today's, not that it isn't real. `mismatch` and
+  `unreadable` never count, `outdated` or not: a log claiming an older
+  `rules_version` that fails to reproduce reads as an `outdated` mismatch, so
+  that pairing is forgeable.
+- **Old scores keep the rule they were posted under.** Everything posted before
+  the cutoff counts unless it is a `mismatch` under current rules, as before.
+  The early scores predate uploads, or were played on code that has moved, and
+  this change shouldn't wipe them. A cutoff in the view rather than a verdict
+  written onto each row: the stored verdicts stay what the replays showed, and
+  re-checking can't overwrite it. On the live board it moved no crown.
+- **24 hours** is the worker's slack. The cron is hourly, but runs landed 5 to
+  10 hours apart, and 2 of 10 failed. A crown or campaign move taken in that
+  window disappears if the score never verifies.
+- **First post per match**, because a verified `match_id` is public and a copy
+  under a second name inherited its check. A clause in the view rather than a
+  unique index: nothing to migrate, and a player posting twice is harmless.
+- **First post per game**, by `score_checks.game_digest`, because a public
+  replay can be uploaded again under a fresh `match_id`. That copy is the
+  first post of its "match" and verifies on its own, so the `match_id` rule
+  alone doesn't catch it. Two honest games pass through the same boards only
+  if every order in them is the same, so an identical game counts once.
 
 ## The grant trap
 

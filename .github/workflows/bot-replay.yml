@@ -174,7 +174,9 @@ jobs:
             stale)   args+=(--stale) ;;
             recheck) args+=(--recheck) ;;
           esac
-          python tools/verify_scores.py "${args[@]}"
+          # Well under the job's own timeout, as for bot_replay above: the
+          # worker writes once, at the end, so it must always get there.
+          python tools/verify_scores.py --deadline-minutes 10 "${args[@]}"
 
   # One row per match, from public_replays only (tools/playstyle_worker.py). A
   # change to the readings' code moves `reading_rev`, and the next run re-reads

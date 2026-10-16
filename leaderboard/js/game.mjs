@@ -372,19 +372,22 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note) {
   ].filter(Boolean).join(" · ");
   clear(sortTarget);
 
-  const lede = game.score_count
+  const ranked = game.best_turns != null;
+  const lede = ranked
     ? el("p", { class: "lede" }, [
         "Currently ahead: ",
         el("strong", { text: leaderCredit(game) }),
         ` — ${game.best_turns} turns. `,
         "Every other score, and every replay, stays hidden until the embargo lifts.",
       ])
-    : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
+    : game.score_count
+      ? el("p", { class: "lede", text: "No verified score yet. Every score, and every replay, stays hidden until the embargo lifts." })
+      : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
   const link = await freshPlayLink(game);
   clear(target).append(lede, ...mapActions(link, campaign, await note));
 
-  const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
+  const best = ranked ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
 }
 
@@ -458,23 +461,29 @@ async function load() {
       return;
     }
 
-    const scores = await select(
-      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),score_checks(verdict)` +
-        `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
-    );
+    const [scores, counted] = await Promise.all([
+      select(
+        `scores?select=id,turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),` +
+          `score_checks(verdict)&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
+      ),
+      select(`counted_scores?select=id&game_key=${eq(gameKey)}`),
+    ]);
+    const countedIds = new Set(counted.map((row) => row.id));
 
     subtitle.textContent = scores.length
       ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
       : "No scores posted yet.";
     clear(sortTarget).append(sortToggle());
 
-    // The server order above (turns then lost then earliest submission) is
-    // exactly how the turns-leader is found, regardless of which ranking is
-    // on screen — "Play this map" always hands back that target, since the
-    // game itself compares turns first. A map with no scores yet (registered
-    // as a bare setup, never played through to a challenge) has no such token
-    // to reuse, so it falls back to the setup itself.
-    const link = scores.length ? playLink(scores[0].raw_token) : await freshPlayLink(game);
+    // The turns-leader is the first counted score in the server order above
+    // (turns then lost then earliest submission), game_summary's best,
+    // regardless of which ranking is on screen — "Play this map" always hands
+    // back that target, since the game itself compares turns first. A score
+    // that doesn't count for a crown isn't a target either. A map with no
+    // counted score (a bare setup, or nothing verified) has no such token to
+    // reuse, so it falls back to the setup itself.
+    const leader = scores.find((score) => countedIds.has(score.id)) || null;
+    const link = leader ? playLink(leader.raw_token) : await freshPlayLink(game);
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
@@ -485,9 +494,9 @@ async function load() {
     );
 
     // After the human table, and off the same fetch: the bots are context for
-    // the board above, not a board of their own. `scores[0]` is the turns-leader
+    // the board above, not a board of their own. `leader` is the turns-leader
     // whatever ranking is on screen, which is the one the verdict compares.
-    await renderBots(bots, scores.length ? scores[0] : null, game.settings_json);
+    await renderBots(bots, leader, game.settings_json);
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);
