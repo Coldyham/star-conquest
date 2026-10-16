@@ -591,31 +591,30 @@ released guard goes to whatever Phase 1 to 3 find worth doing, and relief is
 only one of those.
 
 *Step 1* is `tools/guard_census.py`, 1,800 games (six cells, three opponents,
-100 seeds; marshal's seat alternates with seed parity). It counts 84,267 seen
-strikes on targets that held a guard the turn before the launch:
+100 seeds; marshal's seat alternates with seed parity), with `RELIEF_IN_FLIGHT`
+in. It counts 92,115 seen strikes on targets that held a guard the turn before
+the launch:
 
-    released guard sent into the target, first decide     1.6%  (25% would read as a pool)
-    ...any relief before landing, released or not         4.1%
-    a neighbour's guard fell at all                       28.1%; of those, relieved 5.5%
-    a pooled neighbour's guard fell                        7.2%; of those, relieved 13.6%,
-                                                                 evacuated 60.0%, held 16.1%
-    released-guard ships that went into relief             3.1% of 325,072
-    target evacuated / stood / relieved                   64.2% / 30.8% / 4.4%
-    frontier system-turns with a pooled neighbour         15.2% (8.6% at 24:12, 19.8% at 13:3)
+    released guard sent into the target, first decide     1.4%  (25% would read as a pool)
+    ...any relief before landing, released or not         3.3%
+    a neighbour's guard fell at all                       28.5%; of those, relieved 4.8%
+    a pooled neighbour's guard fell                        7.2%; of those, relieved 11.2%,
+                                                                 evacuated 61.6%, held 14.7%
+    released-guard ships that went into relief             2.8% of 403,758
+    target evacuated / stood / relieved                   64.9% / 30.8% / 3.8%
+    frontier system-turns with a pooled neighbour         15.9% (7.0% at 24:12, 20.1% at 13:3)
 
-Hold rate does rise with released relief (none 5.9%, some 68.2%, enough 81.5%),
+Hold rate does rise with released relief (none 5.7%, some 74.7%, enough 80.9%),
 but relief is sent only where Phase 1 has already judged the target savable, so
 the rise is selection rather than a pool at work. No cell or opponent comes near
-the threshold: released relief is 0.9% to 3.4% of guarded strikes in every row,
-and 1.0% to 2.0% at every lane length from 2 to 7. Of the ships landing on a
-retake turn, 40% come from where the target's garrison evacuated to, 3% from
+the threshold: released relief is 0.6% to 3.4% of guarded strikes in every row,
+and 1.0% to 1.8% at every lane length from 2 to 7. Of the ships landing on a
+retake turn, 37% come from where the target's garrison evacuated to, 2% from
 pooled neighbours and the rest from elsewhere. What the guard is for is the
 earlier finding, a retake reserve and a deterrent. A strike outnumbers the
-garrison it is aimed at 76.7% of the time, and the target is mostly gone by the
-time it lands. The census did not follow guard ships into flow.
+garrison it is aimed at 76.6% of the time, and the target is mostly gone by the
+time it lands. The census did not follow guard ships into flow. A first run
+without `RELIEF_IN_FLIGHT` read the same (released relief 1.6%, 64.2%
+evacuated).
 
 `STICKY_GUARD`, `ISOLATED_GUARD` and the explicit pooled guard stay unbuilt.
-Two of the cross-references above point at nothing in the repo:
-`marshal-pricing.md` has no "A fleet landing next door is relief too" (nor any
-`RELIEF_IN_FLIGHT`), and `actuary.md` has no "Relief only the same stack can
-pin".
