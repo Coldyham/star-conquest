@@ -481,3 +481,100 @@ much less than a 55% against a null pinned at 50%. Second, **cell choice can
 erase a result**: symmetric two-player duels time out in 64 of 80 games and
 1 ly/turn in 56 of 60, so both are unusable as measurement cells however
 interesting they are to play.
+
+## Is the guard a pool? (proposed 2026-10-16, not run)
+
+**The question.** `FRONTIER_GUARD` holds 0.55 of the largest rival garrison next
+door on each frontier system separately. Pooled defence says that systems of ours
+nearer each other than the rival need only their total to cover a stack. Take a
+triangle with lanes of 4, 3 and 3, with the rival at one end of the 4. The corner
+of the two 3s can answer a strike on our end of the 4 in time, and it is safe
+while it does, because the ships that would take it are in that strike. The
+question is whether 0.55 works because it approximates that pool without saying
+so.
+
+**Why it might.** Two things in the code make a pool. The guard is sized against
+the rival's garrison as it stands (`_max_adjacent_enemy`), and `apply_order`
+takes a fleet off the board at launch, so when a stack launches, the guard on
+every system of ours beside it falls with it. And Phase 1 draws relief from
+neighbours' `budget`, the ships above their own guard, so the released guard is
+exactly what it can send. In the triangle, with 10 ships at the rival's end, our
+two systems hold 6 each. When the 10 launch at the 4-end, the corner's guard at
+the next decide is 0, and its 6 are budget. It is not threatened, and its 3-turn
+lane is inside the deadline, so Phase 1 can send them. A system that another
+stack also borders keeps its guard against that one. That is the condition the
+deleted actuary arm tested (`actuary.md`, "Relief only the same stack can pin").
+Two guards make 1.1 of the stack. Phase 1 asks for `_defend_margin()` of it,
+1.27 at the default sliders, so the pair holds only if production over the lane
+makes up the difference. A pool read literally would want about 0.64 on each of
+a pair.
+
+**Why it might not.** 86.7% of struck garrisons evacuate (`marshal-pricing.md`,
+"Garrisons run away"). Dropping the guard against a system already falling
+(*More ideas measured and deleted*) showed that the guard holds and retakes
+captures. So the guard may be a retake reserve and a deterrent that only looks
+like a pool. Stage 0's guard sweep (`marshal-flow.md`, "A non-oracle successor to
+marshal") found no regime dependence for 0.3 or 0.7 across 3, 6 and 12 ly/turn.
+That counts mildly against a pool: relief in time needs a lane shorter than the
+strike's, which should be rarer at 12 ly/turn, so the best guard should be
+higher there. But at about 190 games a cell, Stage 0 could not have seen an
+effect of a few points.
+
+**Step 0: the mechanism on a hand board.** A check in `tests/test_marshal.py` on
+the triangle. The rival launches 10 at the 4-end, and at marshal's next decide
+the corner sends its released guard to the 4-end. Run it with and without
+production enough to close the margin. If the corner never sends, the pool does
+not exist in the code and the rest is moot.
+
+**Step 1: a census, with no change to behaviour.** Stock marshal plays marshal,
+actuary (Planned) and knower (Predict) in cells 11:11, 13:3, 18:6, 24:3, 24:12
+and 18:18, 100 seeds each. A script outside `models/` steps the games. For each
+rival fleet that will land on a marshal frontier system down a lane of 2 turns
+or more, it records the following at the first marshal decide that sees it:
+
+- the strike's size, the stack it left and the lane `L`;
+- the target's ships and guard, and the guard it had the turn before the launch;
+- the released guard: how far each marshal neighbour's guard fell between those
+  two turns;
+- pooled neighbours: marshal systems next to the target on a lane shorter than
+  `L` whose rival neighbours are all that rival's stacks next to the target, and
+  what they hold;
+- what marshal ordered: relief into the target (and how much of it was released
+  guard), or the target doomed, consolidated or evacuated;
+- the result when the strike landed, and whether the target was retaken within 4
+  turns, and by which ships.
+
+Per cell, it reports the share of frontier system-turns with a pooled neighbour,
+and the hold rate by released relief (none, some, or enough to cover the strike).
+It reads as a pool if released guard is in the relief for a quarter or more of
+the seen strikes on guarded targets, and the hold rate rises with it. It reads as
+a reserve if most struck targets are evacuated whatever relief there is, and
+guard ships mostly end in retakes and flow.
+
+**Step 2: two arms, only if Step 1 reads as a pool.** These are paired as
+`RELIEF_IN_FLIGHT` was (`marshal-pricing.md`, "A fleet landing next door is
+relief too"): the same six cells, 500 seeds, both seatings, against stock
+marshal, actuary (Planned) and knower (Predict). Anything at |z| > 2 is re-run on
+fresh seeds.
+
+- `STICKY_GUARD`, an ablation. Size the guard against the stack's garrison plus
+  its fleets launched this turn or last (board facts: `Fleet.source_id` and
+  `turns_total - turns_remaining`), so the guard no longer falls at launch. A
+  pool predicts this is worse. A reserve predicts null.
+- `ISOLATED_GUARD`, the corollary. Keep 0.55 on a frontier system with a pooled
+  neighbour against that stack, and raise it to 0.8 or 1.0 on one with none. A
+  pool predicts a gain, since a system nothing can relieve is under-guarded, or
+  at worst null. A reserve predicts null or worse: more ships idle on systems
+  that evacuate anyway.
+
+If both arms read as a pool, the next arm is an explicit pooled guard: a stack's
+guard placed once, at a system that covers every system of ours beside it. That
+frees ships where three or more systems face one stack. If neither does, record
+the census and stop.
+
+**Cost.** Step 1 is 1,800 games plus the census script. Step 2 is the base arm,
+`STICKY_GUARD` and `ISOLATED_GUARD` at two settings, so 24,000 games per
+opponent. That is about 20 minutes each against marshal and actuary on 22
+workers, and longer against knower. The paired runner from the
+`RELIEF_IN_FLIGHT` measurement is not in the repo. It is a thin parallel loop
+over `tools/sweep.py`'s `parse_arm` and `play_duel`.
