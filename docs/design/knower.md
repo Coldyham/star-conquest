@@ -463,3 +463,79 @@ ply: 299 ms loaded, 159 ms quiet). The warning fitted to it fired on 40-system
 maps. Run one job at a time and record `os.getloadavg()` beside the numbers. The
 ratio grid ran three at a time, which is safe for a ratio only because both
 searches were timed back to back on the same position under the same load.
+
+## Seats it cannot run: stand-ins and people
+
+knower cannot run two kinds of seat: one that predicts (it would recurse) and a
+person's (there is no code). Until 2026-10-16 both were modelled with `_blind`,
+knower's own plan with the oracle off, and neither was trusted. That is right for
+another knower, since Off is the nearest version of it that does not predict. It is
+wrong for actuary at Learning, the one other oracle seat on the roster: `_blind`
+guessed at an actuary with a thinker-strength plan.
+
+**The stand-in.** A predicting module may export `stand_in_params(player)`, the
+params of its nearest version that does not predict (actuary's: Planned for a
+Learning seat; knower's: Off). `_stand_in` runs that module's own `decide` at
+those params on the probe, swapping the seat's params in and back out
+(`_run`), in the one-turn forecast and in Search rollouts alike
+(`_rollout_decide`). Params that still answer `is_oracle_seat`, `None` or a
+raise fall back to `_blind`. knower's own seats keep `_blind`, which is the same
+thing for them. A stand-in is trusted (`TRUST_STAND_INS`), a `_blind` fallback
+never. `_rivals` counts an oracle seat at its bot's `decide_ms` when the module
+has the hook; it already did for actuary, which has no module-level flag, so the
+setup warning priced the Learning seat correctly before knower ran it.
+
+**What it changed**, knower against actuary-Learning, fresh seeds 10001-10200
+(Search 10001-10100), both seatings, 6 ly/turn, paired by game. Learning's win
+share:
+
+                         blind      stand-in,    stand-in,
+                                    untrusted    trusted
+    Predict  18          96.0%      95.8%        90.5%
+             40          93.2%      92.0%        82.0%
+    Search   18          78.5%      52.5%        46.0%
+             40          79.5%      55.0%        47.0%
+
+- **Predict gains only from trust.** Untrusted, pooled +23 / -17 (z +0.95):
+  the stand-in can only add threat, and knower already kept thinker's guard
+  against the seat. Trusted against untrusted: +74 / -13 (z +6.54). The ~20
+  points [`learner.md`](learner.md) puts on the flag ("As a bot") were knower
+  believing an exact read of Planned (it won 20% / 32% against an unflagged
+  Planned there), and a trusted stand-in gives back a third to a half of that.
+- **Search gains from the rollouts.** Untrusted already moves Search +107 / -6
+  (z +9.50): rolled turns now play the seat as actuary rather than thinker, so
+  each line is priced against something like the real opponent. Trusted, against
+  an untrusted run repeated at the same load: +67 / -29 (z +3.88). The two
+  untrusted runs, identical code, differ by +34 / -43 (z -1.03), which is the
+  wall-clock noise in a Search pairing.
+- **The free-for-all** (knower, actuary-Learning, marshal, seeds 11001-11100,
+  every rotation, 300 games): Predict knower 9% -> 11%, actuary 70% -> 66%,
+  marshal 20% -> 23%, timeouts 9 -> 6. Search (34 seeds, 102 games): knower
+  22% -> 53%, actuary 65% -> 36%, marshal 14% -> 11%, timeouts 0 -> 2. The
+  after arm ran partly beside other work, which slows Search, so the gain is not
+  flattered by load.
+
+Trusting a stand-in believes that a Learning seat which vacates a system under
+Planned vacates it for real. It is wrong exactly where the memory moves a launch,
+which on these numbers is rare enough to pay. A module could name params far from
+how it plays and be believed. A module can also leave the hook out and keep the
+flag's protection. That is the same choice a module had before, now visible as one
+function.
+
+**People stay on `_blind`.** Two alternatives, both measured and both rejected:
+
+- *A stronger bot.* marshal and actuary at Planned both beat knower at Off, but
+  as forecasts of a person they are worse than its blind plan
+  ([`learner.md`](learner.md), "Predicting people"): Brier +0.021 and +0.025
+  over 176 posted games, both clear of zero.
+- *Assume they hold.* The blind guess has a Brier of 0.180 against 0.107 for "no
+  launches", and in play its only job is the phantom launches it adds to the board
+  knower defends. `_garrison` already prices a person's systems as if they
+  hold, and `_pessimistic_owners` keeps the standing guard. Dropping the guess
+  (built as `GUESS_HUMAN`, removed) was tested against bots, with the bot's seat
+  flagged a person to knower only, at Predict, seeds 12001-12200, both seatings:
+  against marshal 14.2% -> 14.2% (18 systems), 15.0% -> 12.0% (40); against
+  actuary at Planned 4.5% -> 2.5%, 5.8% -> 2.2%. Pooled +35 / -69, z -3.33. A bot
+  is nearer knower's blind plan than a person is, so this test favours the guess
+  and does not settle it for people. It is the only test of play there is, and it
+  says the phantoms catch more than the guard they waste.

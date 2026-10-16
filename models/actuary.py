@@ -45,6 +45,7 @@ Measurements behind the constants: docs/design/actuary.md.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import heapq
 import itertools
@@ -190,11 +191,20 @@ def is_oracle_seat(player) -> bool:
     return _stop_of(player) == LEARNING
 
 
+def stand_in_params(player):
+    """The params an oracle runs a Learning seat at instead: Planned, the same bot
+    with no memory. Greedy and Planned are their own."""
+    params = copy.copy(player.ai_params)
+    params.aux = float(PLANNED) if _stop_of(player) == LEARNING else params.aux
+    return params
+
+
 def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us. knower never runs a Learning seat (`is_oracle_seat`),
-    so this prices Greedy and Planned."""
+    but runs Planned in its place (`stand_in_params`), so this prices Greedy and
+    Planned."""
     drawn = getattr(settings, "custom_map", None)
     nodes = len(drawn.nodes) if drawn is not None else settings.nodes
     return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP

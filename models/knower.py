@@ -72,9 +72,10 @@ the root only, and four things keep that sound:
   * **Common random numbers.** Every line on a ply gets the same state-derived
     rng, so a score gap reflects the plan rather than the dice, and the real stream
     is left untouched.
-  * **Rolled turns use the blind planner for every oracle seat**, ours included
-    (``_rollout_decide``), rather than a full prediction sweep per rolled turn.
-    Our own future play is understated, but identically for every candidate.
+  * **Rolled turns play every oracle seat by its stand-in**, ours included
+    (``_rollout_decide``): its module's ``stand_in_params``, else the blind
+    planner, rather than a full prediction sweep per rolled turn. Our own future
+    play is understated, but identically for every candidate.
 
 ``EXTERNAL_CANDIDATES`` names bots whose ``decide`` is run *for our own seat* and
 offered as an opening (`_external_plan`), so the search compares moves knower's
@@ -108,7 +109,7 @@ from starconquest import ai, combat, config, engine
 from starconquest.model import Order
 
 # Lets a sibling oracle bot recognise us (and us it) so two of them proxy each
-# other with the blind planner instead of recursing. See `_surrogate`.
+# other with a stand-in instead of recursing. See `_surrogate`.
 IS_ORACLE = True
 
 # --- tunables vendored unchanged from thinker ------------------------------- #
@@ -147,6 +148,9 @@ BEYOND_DECAY = 0.35
 TRUST_HUMAN = False             # True lets a human-seat prediction relax guards and
                                 # justify snipes, as if they were a bot. Off by
                                 # default: a real human is not obliged to comply.
+TRUST_STAND_INS = True          # Believe an oracle seat's `stand_in_params` as if
+                                # it were the seat itself. Off: it may only raise a
+                                # threat, as for a person.
 
 # --- search ----------------------------------------------------------------- #
 # The mode comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
@@ -415,12 +419,12 @@ def _predict_seat(state, orc, me, q, rng, label):
     if player.is_neutral or not player.alive:
         return True                       # the engine skips it too — no draws, no orders
 
-    fn, trustworthy = _surrogate(player)
+    fn, params, trustworthy = _surrogate(player)
     probe = _clone(state, rng)
     fingerprint = _fingerprint(probe)
 
     try:
-        orders = fn(probe, q) or []
+        orders = _run(fn, params, probe, q) or []
     except Exception:                     # noqa: BLE001 — a broken rival is their problem
         orc.seats[q] = "raised"
         return False
@@ -433,7 +437,7 @@ def _predict_seat(state, orc, me, q, rng, label):
 
     if trustworthy:
         orc.trusted.add(q)
-        orc.seats[q] = label
+        orc.seats[q] = "stand-in" if params is not None else label
     else:
         orc.seats[q] = "mutated" if mutated else "modelled"
     orc.orders[q] = list(orders)
@@ -442,13 +446,19 @@ def _predict_seat(state, orc, me, q, rng, label):
     return bool(trustworthy)
 
 
-def _surrogate(player):
-    """(fn, trustworthy) — what will really decide this seat, and can we believe it.
+def _surrogate(player, human=None):
+    """(fn, params, trustworthy) — what will really decide this seat, the params to
+    run it at (None: the seat's own), and can we believe it.
 
     A human seat is decided by a person, not by code, so it is modelled as another
-    knower one level shallower and never trusted. Our own strategy gets the same
-    treatment — under whatever filename it was registered as, and likewise any
-    sibling oracle — which is what keeps two knower seats from recursing.
+    knower one level shallower and trusted only under `TRUST_HUMAN`. ``human``
+    overrides ``player.is_human``, which a rollout board has cleared.
+
+    A seat that predicts is played by its nearest version that doesn't
+    (`_stand_in`), trusted under `TRUST_STAND_INS` when its module named one, and
+    never when it falls back to `_blind`. Our own strategy is played by `_blind` —
+    under whatever filename it was registered as — which is what keeps two knower
+    seats from recursing.
 
     The one case where the model is *exact* is a **depth-0** seat of our own module:
     its whole algorithm is `_plan(state, pid, None)`, which is precisely what
@@ -457,16 +467,56 @@ def _surrogate(player):
     `_garrison` price its vacated systems honestly. A depth-0 seat of a *different*
     oracle module cannot get that, because its blind planner is not ours.
     """
-    if player.is_human:
-        return _blind, (_TRUSTED if TRUST_HUMAN else _UNTRUSTED)
+    if player.is_human if human is None else human:
+        return _blind, None, (_TRUSTED if TRUST_HUMAN else _UNTRUSTED)
     # Resolve exactly as ai.decide does (ai.py:84), so even a stale strategy name
     # is predicted correctly: the engine will fall back to the heuristic too.
     fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
     if fn is decide:
-        return _blind, (_TRUSTED if _seat_depth(player) == 0 else _UNTRUSTED)
+        return _blind, None, (_TRUSTED if _seat_depth(player) == 0 else _UNTRUSTED)
     if _is_oracle(fn, player):
-        return _blind, _UNTRUSTED
-    return fn, _TRUSTED
+        fn, params = _stand_in(fn, player)
+        return fn, params, (TRUST_STAND_INS and fn is not _blind)
+    return fn, None, _TRUSTED
+
+
+def _stand_in(fn, player):
+    """(fn, params) to play a seat that predicts: its own module at the params its
+    ``stand_in_params(player)`` names, or `_blind` when it names none, names
+    params that still predict (which would recurse), or raises."""
+    if fn is decide:
+        return _blind, None
+    if not _has_stand_in(fn):
+        return _blind, None
+    try:
+        params = sys.modules[fn.__module__].stand_in_params(player)
+        if params is None:
+            return _blind, None
+        proxy = copy.copy(player)
+        proxy.ai_params = copy.copy(params)
+        if _is_oracle(fn, proxy):
+            return _blind, None
+    except Exception:                     # noqa: BLE001 — a broken hook is their bug
+        return _blind, None
+    return fn, proxy.ai_params
+
+
+def _has_stand_in(fn) -> bool:
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    return callable(getattr(module, "stand_in_params", None))
+
+
+def _run(fn, params, state, q):
+    """``fn`` deciding seat ``q`` of ``state``, a board of ours, as if the seat held
+    ``params`` (None: as it is)."""
+    if params is None:
+        return fn(state, q)
+    seat = state.players[q]
+    held, seat.ai_params = seat.ai_params, copy.copy(params)
+    try:
+        return fn(state, q)
+    finally:
+        seat.ai_params = held
 
 
 def _is_oracle(fn, player=None):
@@ -573,10 +623,12 @@ def _rivals(settings, seats, people) -> dict[str, tuple[int, float]]:
     `ply_ms` was fitted against bots that answer in microseconds, so it holds
     nothing for a rival that thinks. Every rolled turn of every line runs each
     rival bot's `decide` (`_rollout_decide`), and the forecast runs it once more,
-    so a slow rival is paid for `_lines()` times a ply. Not counted: a person
-    (modelled with `_blind`), an oracle or another knower seat (proxied with
-    `_blind` too, which `ply_ms` already holds), a bot that declares no cost, and
-    a ``random`` seat whose seed is not fixed yet, since nobody knows its bot.
+    so a slow rival is paid for `_lines()` times a ply. An oracle seat is run at its
+    `_stand_in` params, so it is counted at what its bot declares. Not counted: a
+    person (modelled with `_blind`), another knower seat or an oracle with no
+    ``stand_in_params`` (proxied with `_blind` too, which `ply_ms` already holds), a
+    bot that declares no cost, and a ``random`` seat whose seed is not fixed yet,
+    since nobody knows its bot.
     """
     from starconquest.settings import RANDOM_STRATEGY, resolve_strategy   # core; import on use
     out: dict[str, tuple[int, float]] = {}
@@ -589,7 +641,7 @@ def _rivals(settings, seats, people) -> dict[str, tuple[int, float]]:
                 continue
             name = resolve_strategy(name, settings.seed, seat)
         fn = ai.STRATEGIES.get(name)
-        if fn is None or fn is decide or _is_oracle(fn):
+        if fn is None or fn is decide or (_is_oracle(fn) and not _has_stand_in(fn)):
             continue
         ms = ai.decide_ms(name, settings, seat)
         if ms > 0:
@@ -701,6 +753,13 @@ def is_oracle_seat(player) -> bool:
     models/README.md.
     """
     return _seat_depth(player) >= 1
+
+
+def stand_in_params(player):
+    """Public: the params of this seat's nearest version that doesn't predict, which
+    is Oracle: Off. A sibling oracle runs us at these rather than at our own. Part
+    of the drop-in contract — see models/README.md."""
+    return replace(player.ai_params, aux=0.0)
 
 
 def _blind(state, pid):
@@ -823,22 +882,18 @@ def _evaluate(state, pid) -> float:
 def _rollout_decide(state, q, humans=frozenset()):
     """The `decide` a rollout runs its seats with.
 
-    Oracle seats — ours included — are played by the cheap blind planner. Letting
-    them build real oracles would mean a full prediction sweep on *every* rolled
-    turn, which is where the cost would run away. Understating our own future play is
-    fine: it is understated identically for every candidate, and a search only needs
-    the comparison to be fair.
+    Each seat is played by what the oracle predicts it with (`_surrogate`), so an
+    oracle seat — ours included — is played by its nearest version that doesn't
+    predict. Letting them build real oracles would mean a full prediction sweep on
+    *every* rolled turn, which is where the cost would run away. Understating our own
+    future play is fine: it is understated identically for every candidate, and a
+    search only needs the comparison to be fair.
 
-    ``humans`` are the seats a person really holds, modelled with `_blind` for the
-    same reason the oracle does it — there is no code to run for them.
+    ``humans`` are the seats a person really holds, whose flag the rollout board has
+    cleared; they are modelled as the oracle models them.
     """
-    if q in humans:
-        return _blind(state, q)
-    player = state.players[q]
-    fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
-    if fn is decide or _is_oracle(fn, player):
-        return _blind(state, q)
-    return fn(state, q)
+    fn, params, _ = _surrogate(state.players[q], human=q in humans)
+    return _run(fn, params, state, q)
 
 
 def _rollout(state, pid, plan, humans, rng):
