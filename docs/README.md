@@ -206,6 +206,7 @@ only for a fight; what is deliberately not animated.
 - **More ideas measured and deleted.**
 - **`FRONTIER_GUARD`.** How it came to be 0.40 while documented as 0.3; now 0.55.
 - **The 2026-09 tuning sweep.** What was adopted (partly superseded since), the regime-bound `ENEMY_FAR`, cross-opponent checks, negative results, the empty-interior statistic, and the two methodological notes.
+- **Is the guard a pool? (proposed, not run).** Whether 0.55 per system stands in for a pooled guard: a stack's launch shrinks the guards beside it, and Phase 1 sends what that frees. Step 0 is a hand-board check, Step 1 a census of seen strikes (released guard, pooled neighbours, hold or evacuate, retakes), and Step 2 the arms `STICKY_GUARD` (an ablation) and `ISOLATED_GUARD` (0.8 or 1.0 where no neighbour can relieve), with what each reading predicts.
 
 ### design/marshal-pricing.md
 - **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps. The remnant tactic re-measured seed by seed (2026-10-12): significant in duels, leaning worse in three-player games with knower, so `REMNANT` ships gated to two players alive (`REMNANT_MAX_PLAYERS`).
