@@ -281,9 +281,13 @@ foreign key to name a real `games` row. It is a left join so a log whose key
 has no `games` row yet reads as "no embargo" rather than vanishing.
 
 One upload per match: the log the match's *first* score was checked on
-(`score_checks.log_id`), else the longest. The first, not any verified score,
-because a later poster can upload a real game of their own under the same
-public `match_id`, post a score for it, and have that verify too.
+(`score_checks.log_id`). Before any check, it is the longest uploaded before
+that score was posted, else the longest. The first score, not any verified
+one, because a later poster can upload a real game of their own under the same
+public `match_id`, post a score for it, and have that verify too. Uploads from
+before the post come first because the game uploads as Post opens the form, so
+the player's own log is there before a `match_id` is public. Without that, a
+bogus longer upload took over the Watch link until the worker's next run.
 
 `public_watchable_replays` exists because `netlify/functions/replay.mjs` reads
 exactly one relation on purpose: what may be served is decided in SQL, and the

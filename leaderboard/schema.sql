@@ -396,9 +396,9 @@ left join lateral (
 -- ---------------------------------------------------------------------------
 -- public_replays: the only game_logs rows a visitor can read. A replay is public
 -- when a posted score points at it and its map is not embargoed. One upload per
--- match: the log the match's first score was checked on, else the longest.
--- Anyone can upload under a public match_id, so the longest alone could be
--- anybody's.
+-- match: the log the match's first score was checked on; before any check, the
+-- longest uploaded before that score was posted; else the longest. Anyone can
+-- upload under a public match_id, so the longest alone could be anybody's.
 --
 -- Deliberately NOT security_invoker: it lends out part of a table nobody may
 -- read, which needs owner rights. The where clause is the whole consent
@@ -418,7 +418,7 @@ select distinct on (l.match_id)
   l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
 join lateral (
-  select s.game_key, c.log_id
+  select s.game_key, s.submitted_at, c.log_id
   from public.scores s
   left join public.score_checks c on c.score_id = s.id
   where s.match_id = l.match_id
@@ -427,7 +427,8 @@ join lateral (
 ) s on true
 left join public.game_embargoes e on e.game_key = s.game_key
 where e.embargo_until is null or e.embargo_until <= now()
-order by l.match_id, (l.id = s.log_id) desc nulls last, l.turns desc, l.id desc;
+order by l.match_id, (l.id = s.log_id) desc nulls last,
+  (l.submitted_at <= s.submitted_at) desc, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
 -- public_watchable_replays: everything netlify/functions/replay.mjs may serve,
