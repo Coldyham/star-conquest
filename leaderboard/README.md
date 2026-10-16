@@ -737,8 +737,10 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
   real one is. What answers that is the replay the game now uploads when you post
   (see "Checked scores" above) — but only for scores that carry one. Anything
   posted by hand, or before that existed, checks as `missing`: unverified rather
-  than suspect, and shown as such. From 2026-10-15 such a score holds no crown
-  and moves no campaign node once its first 24 hours are out.
+  than suspect, and shown as such. From 2026-10-15 such a score holds no crown,
+  moves no campaign node, and is neither a map's record (`game_summary`'s best,
+  the card's headline, "Bot leads") nor its "Play this map" target once its
+  first 24 hours are out. It still appears in the map's list, without a ✓.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.

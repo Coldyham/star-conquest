@@ -372,7 +372,10 @@ async function campaignMarks() {
 }
 
 function row(game, campaigns, mine) {
-  const holder = leaderCredit(game);
+  // game_summary's best is the best *counted* score, so a map whose scores
+  // all wait on a check (or failed one) has scores but no record.
+  const ranked = game.best_turns != null;
+  const holder = ranked ? leaderCredit(game) : "No verified score yet";
   const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
   // While embargoed, the card keeps the leader and the turn count next to
   // them (the headline figure below) — a target to chase — but drops every
@@ -384,8 +387,8 @@ function row(game, campaigns, mine) {
   const detail = embargoNote(game.embargo_until)
     ? scoreCount
     : [
-        `${game.best_lost} lost`,
-        game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
+        ranked ? `${game.best_lost} lost` : null,
+        ranked && game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
         scoreCount,
         relativeTime(game.last_activity),
       ].filter(Boolean).join(" · ");
@@ -398,7 +401,7 @@ function row(game, campaigns, mine) {
     ]),
     // The headline figure, cabinet-style: the score alone, big.
     el("div", { class: "card-score" }, [
-      el("strong", { text: `${game.best_turns}` }),
+      el("strong", { text: ranked ? `${game.best_turns}` : "—" }),
       el("span", { class: "card-score-label", text: "turns" }),
     ]),
   ]);

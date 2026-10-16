@@ -279,6 +279,29 @@ def test_a_game_counts_once_whatever_match_it_is_posted_under(board):
     assert rows.splitlines() == ["alice", "cara"]
 
 
+def test_a_maps_record_is_its_best_counted_score(board):
+    """game_summary's best is what the home card and "Bot leads" show, so a
+    score that doesn't count for a crown isn't the record either; with nothing
+    counted there is no record, though the scores are still there."""
+    _psql("""
+      create or replace function sc_legacy_cutoff() returns timestamptz
+        language sql immutable as $$ select timestamptz '2026-10-01 00:00Z' $$;
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('record', 'random', 2, 18, 0, '{}'), ('nothing', 'random', 2, 18, 0, '{}');
+      insert into scores (game_key, user_id, turns, lost, hand, by_name, raw_token, submitted_at, match_id)
+        values ('record', 1, 40, 0, 40, 'Al', '', now() - interval '3 days', 'd000000000000001'),
+               ('record', 2, 40, 0, 40, '', '', now() - interval '2 days', 'd000000000000002'),
+               ('record', 3, 10, 0, 10, '', '', now() - interval '2 days', ''),
+               ('nothing', 3, 10, 0, 10, '', '', now() - interval '2 days', '');
+      insert into score_checks (score_id, verdict)
+        select id, 'verified' from scores where match_id in ('d000000000000001', 'd000000000000002');
+    """, board)
+    rows = _psql("select game_key, best_turns, best_by_name, best_user_name, best_holders,"
+                 " score_count from game_summary where game_key in ('record', 'nothing')"
+                 " order by game_key", board)
+    assert rows.splitlines() == ["nothing||||0|1", "record|40|Al|alice|2|3"]
+
+
 def test_the_public_cannot_choose_when_a_score_was_posted(board):
     """counted_scores trusts submitted_at, so the public's insert leaves it to
     the server: a backdated score is refused, and one without it is stamped now."""

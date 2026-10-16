@@ -77,9 +77,9 @@ def test_contenders_counts_players_the_crowns_count(board):
 
 
 def test_a_bot_leads_until_a_human_strictly_beats_it(board):
-    """game_summary.best counts every score (a mismatch included), as the
-    card's headline does; a tie is still the bot's, and a losing bot row leads
-    nothing."""
+    """game_summary.best is the best counted score, as the card's headline is
+    (on `pair`, alice's 30 rather than bob's mismatched 20); a tie is still the
+    bot's, and a losing bot row leads nothing."""
     assert _column(board, "bot_leads") == {
         "duel": "f", "fog": "f", "pair": "t", "scout": "f", "solo": "f"}
 
@@ -92,10 +92,11 @@ def test_fog_is_on_when_either_range_is_stored(board):
 
 
 def test_a_config_sorts_on_its_maps_average_best(board):
-    """config_summary.avg_best_turns averages each map's own best (solo 28,
-    pair 20, duel 25), not every score posted on the setup."""
+    """config_summary.avg_best_turns averages each map's own best counted score
+    (solo 28, pair 30 with bob's mismatch left out, duel 25), not every score
+    posted on the setup."""
     rows = _psql("select avg_best_turns from config_summary order by avg_best_turns", board)
-    assert rows.splitlines() == ["24.3", "30.0", "30.0"]
+    assert rows.splitlines() == ["27.7", "30.0", "30.0"]
 
 
 def test_difficulty_is_the_share_of_bots_that_lost(board):

@@ -575,7 +575,8 @@ built.
   Monday-to-Monday UTC week, scores that strictly beat somebody else's record
   (`crown_steals`); a tie never steals, the earliest holder keeps it, as
   `game_summary` credits. Both read `counted_scores`, the one place the rule
-  lives: a `verified` score counts, an unchecked or `missing` one that names a
+  lives, and so does `game_summary`'s best (the card's record, "Bot leads",
+  the average best turns) and the map page's "Play this map" target: a `verified` score counts, an unchecked or `missing` one that names a
   replay counts for its first 24 hours, one posted before 2026-10-15 counts
   unless it is a `mismatch` under current rules, and only the first post of a
   match, or of a game however it is re-uploaded, counts (reasons:

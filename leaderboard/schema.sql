@@ -487,7 +487,8 @@ create or replace view public.counted_scores
 select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
   -- New columns go last.
   s.hand,
-  s.campaign_start
+  s.campaign_start,
+  s.by_name
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
@@ -563,17 +564,18 @@ select
 from public.games g
 join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
-  select s.turns, s.lost, s.hand, s.by_name, u.name as user_name
-  from public.scores s
-  join public.users u on u.id = s.user_id
+  -- The best counted score: one that doesn't count for a crown isn't the record
+  -- either. Null when a map has scores but none counts.
+  select s.turns, s.lost, s.hand, s.by_name, s.user_name
+  from public.counted_scores s
   where s.game_key = g.game_key
   order by s.turns asc, s.lost asc, s.submitted_at asc
   limit 1
 ) best on true
 left join lateral (
-  -- Submissions tied with the best on turns and lost: 2+ is a shared record.
+  -- Counted scores tied with the best on turns and lost: 2+ is a shared record.
   select count(*) as holders
-  from public.scores s
+  from public.counted_scores s
   where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
 ) tied on true
 left join lateral (

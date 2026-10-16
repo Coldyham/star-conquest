@@ -315,7 +315,9 @@ volume, which a count of wins or maps would pay out for grinding easy setups.
 not. A score that names a replay and is still unchecked or `missing` counts for
 its first 24 hours. A score posted before `sc_legacy_cutoff()` (2026-10-15)
 counts under the rule it was posted under. Only the first score posted for a
-`match_id` counts, and only the first for a game (`game_digest`). See
+`match_id` counts, and only the first for a game (`game_digest`).
+`game_summary`'s best reads it too: a score that can't hold a crown isn't a
+map's record either, so a map can have scores and no best. See
 [`leaderboard.md`](leaderboard.md), "Crowns, the weekly
 campaign and embargoes".
 
