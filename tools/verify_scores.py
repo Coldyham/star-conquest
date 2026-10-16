@@ -78,6 +78,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -407,6 +408,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="delete uploaded logs superseded by a longer one")
     parser.add_argument("--limit", type=int, default=0,
                         help="check at most this many scores (0 = no limit)")
+    parser.add_argument("--deadline-minutes", type=float, default=10.0,
+                        help="stop starting new checks after this long, so a run "
+                             "always writes what it reached and the next one resumes")
     parser.add_argument("--dry-run", action="store_true",
                         help="decide and report, but write nothing")
     return parser.parse_args(argv)
@@ -442,8 +446,12 @@ def main(argv: list[str] | None = None) -> int:
              api.select("games", "select=game_key,settings_json&order=game_key.asc")}
 
     print(f"{len(todo)} of {len(scores)} scores to check against {len(uploads)} uploads")
+    deadline = time.monotonic() + args.deadline_minutes * 60
     results: list[Check] = []
     for score in todo:
+        if time.monotonic() > deadline:
+            print(f"  deadline reached after {len(results)} scores; the next run resumes")
+            break
         check = settle(judge(score, uploads, games.get(score["game_key"])),
                        checked.get(int(score["id"])))
         results.append(check)
