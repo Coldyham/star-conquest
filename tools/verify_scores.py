@@ -23,26 +23,34 @@ replay never consults a bot and so a retuned one cannot change a verdict. The se
 possible at all — ``game_logs`` has no public read at all, so the uploaded replays
 are readable here and nowhere else.
 
-Five verdicts, stored in ``score_checks``:
+Four verdicts, stored in ``score_checks``:
 
     verified    the log replays and reproduces the score exactly
     mismatch    it replays and produces something else, or is for another setup,
                 or its dice are not what its orders roll
-    outdated    it does not reproduce, and it was played under older *rules*;
-                or it reproduces, but against bots its setup no longer deals
     unreadable  the blob does not decode, or cannot be replayed
     missing     nothing was ever uploaded for this score's match_id
 
-``outdated`` is the one that keeps this honest across a rules change. A stored log
+A stored ``verified`` is never taken back (``settle``): the score reproduced
+under the code it was played under.
+
+A log that replays also leaves a ``game_digest``: a hash of every board the
+replay passed through. ``counted_scores`` counts one game once by it, since a
+public replay can be uploaded again under a fresh ``match_id`` and posted under
+another name. Anything that leaves every board the same, an order the engine
+drops or a flipped ``"ai"`` flag, leaves the digest the same too.
+
+Beside the verdict, ``outdated`` says whether the score is still comparable with
+one posted today. It is what keeps this honest across a rules change. A stored log
 never consults a bot (see ``replay_rev``), but a change to the engine itself — the
 phase order, how a fight resolves, how a map is drawn from a seed — really can
 make an old game replay to a different board. ``engine.RULES_VERSION`` is stamped
 on every log when it is played, and a score that fails to reproduce having been
-played under an older stamp is reported as unverifiable rather than as wrong. The
-check is made *after* the replay, not before, so the many old games a rules change
-does not actually disturb still verify normally.
+played under an older stamp is a ``mismatch`` flagged ``outdated``: unverifiable
+rather than wrong. The check is made *after* the replay, not before, so the many
+old games a rules change does not actually disturb still verify normally.
 
-A lineup that disagrees is ``outdated`` for the same reason. A log records the
+A lineup that disagrees is ``verified`` and ``outdated``. A log records the
 bot each seat was built with (``GameLog.strategies``), and a seat left to chance
 is dealt from ``settings.RANDOM_POOL``. A log dealt from another pool, by a build
 from before the pool was fixed or before an edit to it, was played honestly
@@ -74,7 +82,10 @@ job (same as ``bot_replay``).
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,7 +101,7 @@ from tools.bot_replay import (
     replay_rev,
 )
 
-VERDICTS = ("verified", "mismatch", "outdated", "unreadable", "missing")
+VERDICTS = ("verified", "mismatch", "unreadable", "missing")
 
 
 @dataclass
@@ -100,6 +111,13 @@ class Check:
     score_id: int
     verdict: str
     detail: str = ""
+    # No longer comparable with a score posted today: older rules, or a lineup
+    # the setup no longer deals. A separate question from the verdict.
+    outdated: bool = False
+    # The game_logs row the verdict was reached on; None when there was none.
+    log_id: int | None = None
+    # Every board the replay passed through, hashed; "" when it didn't replay.
+    game_digest: str = ""
 
     def row(self, rev: str) -> dict:
         return {
@@ -107,6 +125,9 @@ class Check:
             "verdict": self.verdict,
             "detail": self.detail[:500],
             "engine_rev": rev,
+            "log_id": self.log_id,
+            "outdated": self.outdated,
+            "game_digest": self.game_digest,
         }
 
 
@@ -128,16 +149,101 @@ def pending(scores: list[dict], done: dict[int, dict], rev: str, *,
     had been *uploaded* by the time we looked, and that changes on its own. So a
     missing row is always retried, with no flag — an upload that arrived late, or
     was retried by the player, is exactly the case worth picking up.
+
+    A row that names no ``log_id`` is retried too: it was decided before verdicts
+    recorded their log, and until it names one ``--prune`` cannot tell which
+    upload to keep and ``public_replays`` cannot tell which to serve. So is a
+    ``verified`` row with no ``game_digest``, which ``counted_scores`` needs to
+    count its game once.
     """
     out = []
     for score in scores:
         previous = done.get(score["id"])
         if previous is not None and not recheck:
-            outdated = stale and previous.get("engine_rev", "") != rev
-            if not outdated and previous.get("verdict") != "missing":
+            older = stale and previous.get("engine_rev", "") != rev
+            unnamed = previous.get("log_id") is None or (
+                previous.get("verdict") == "verified" and not previous.get("game_digest"))
+            if not older and not unnamed and previous.get("verdict") != "missing":
                 continue
         out.append(score)
     return out
+
+
+# The most uploads one score is replayed against. Anyone can upload under a
+# public match_id, so this bounds what a flood of them costs a run; the uploads
+# that arrived before the score are tried first, so a flood can't push them out.
+MAX_TRIES = 8
+
+
+def candidates(score: dict, uploads: list[dict]) -> list[dict]:
+    """The uploads to try for ``score``, best evidence first.
+
+    A ``match_id`` is public once a score names it, so an upload from before the
+    score was posted is almost always the player's own. Those come first, longest
+    first. Later ones follow, earliest first: a player whose upload failed can
+    resend it by posting again, and anybody else's arrive after. Only a log that
+    verifies is ever chosen, so the order bounds cost, not trust.
+    """
+    posted = str(score.get("submitted_at", ""))
+    match = str(score.get("match_id", ""))
+    mine = [r for r in uploads if r.get("match_id") == match]
+    before = [r for r in mine if _when(r) <= _when(score)] if posted else []
+    early = {int(r["id"]) for r in before}
+    after = [r for r in mine if int(r["id"]) not in early]
+    before.sort(key=lambda r: (-int(r.get("turns", 0)), -int(r["id"])))
+    after.sort(key=lambda r: (_when(r), int(r["id"])))
+    return (before + after)[:MAX_TRIES]
+
+
+def _when(row: dict) -> dt.datetime:
+    """A row's ``submitted_at``. PostgREST writes ``+00:00``; ``Z`` is read too."""
+    return dt.datetime.fromisoformat(str(row["submitted_at"]).replace("Z", "+00:00"))
+
+
+def judge(score: dict, uploads: list[dict], settings_json: dict | None) -> Check:
+    """``score``'s verdict on the first of its candidates that verifies, or else
+    on the first candidate, the best evidence there was."""
+    first: Check | None = None
+    for row in candidates(score, uploads):
+        check = verify(score, row.get("log"), settings_json)
+        check.log_id = int(row["id"])
+        if check.verdict == "verified":
+            return check
+        first = first or check
+    return first or Check(int(score["id"]), "missing")
+
+
+def settle(check: Check, previous: dict | None) -> Check:
+    """``check``, except that a stored ``verified`` is never taken back.
+
+    A verified score reproduced under the code it was played under. If it no
+    longer does, the engine has moved since (``RULES_VERSION`` has not always
+    been bumped while the game was being built), which says nothing about the
+    score: it stays verified and becomes ``outdated``. To have one judged afresh,
+    delete its ``score_checks`` row.
+    """
+    if (not previous or previous.get("verdict") != "verified"
+            or check.verdict == "verified"):
+        return check
+    log_id = previous.get("log_id")
+    return Check(check.score_id, "verified", f"verified before; now {check.detail}",
+                 outdated=True, log_id=check.log_id if log_id is None else int(log_id),
+                 game_digest=check.game_digest)
+
+
+def keepers(uploads: list[dict], scores: list[dict], checks: dict[int, dict]) -> set[int]:
+    """The ``game_logs`` ids ``--prune`` must keep.
+
+    Every log a verdict names; the longest of every match, which is all an
+    unposted game has; and every upload of a match some score has no named log
+    for yet, since which of them it needs is not known.
+    """
+    keep = {int(r["id"]) for r in best_logs(uploads).values()}
+    keep |= {int(c["log_id"]) for c in checks.values() if c.get("log_id") is not None}
+    unnamed = {str(s.get("match_id", "")) for s in scores
+               if (checks.get(int(s["id"])) or {}).get("log_id") is None}
+    keep |= {int(r["id"]) for r in uploads if r.get("match_id") in unnamed}
+    return keep
 
 
 def best_logs(rows: list[dict]) -> dict[str, dict]:
@@ -215,11 +321,24 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
     if not same_setup(log, settings_json):
         return Check(sid, "mismatch", "the replay is of a different setup")
     audit = _DiceAudit(log)
+    trail = hashlib.blake2s(digest_size=16)
+
+    def on_turn(board) -> None:
+        audit(board)
+        trail.update(replay.digest_hex(board).encode())
+
     try:
-        state, _ = replay.reconstruct(log, on_turn=audit)
+        state, _ = replay.reconstruct(log, on_turn=on_turn)
     except Exception as err:  # noqa: BLE001 — a log that won't replay is a verdict
         return Check(sid, "unreadable", f"replay failed: {err}")
+    check = _outcome(score, log, state, audit)
+    check.game_digest = trail.hexdigest()
+    return check
 
+
+def _outcome(score: dict, log: replay.GameLog, state, audit: _DiceAudit) -> Check:
+    """``verify``'s verdict on a log that replayed to ``state``."""
+    sid = int(score["id"])
     human = state.human()
     if human is None:
         return Check(sid, "unreadable", "the replay has no human seat")
@@ -236,7 +355,7 @@ def verify(score: dict, blob: str | None, settings_json: dict | None) -> Check:
         return Check(sid, *_disagreement(log, audit.fault))
     drift = _lineup_drift(log, human.id)
     if drift:
-        return Check(sid, "outdated", f"dealt a different lineup: {drift}")
+        return Check(sid, "verified", f"dealt a different lineup: {drift}", outdated=True)
     if audit.unchecked:
         return Check(sid, "verified", f"dice unchecked on {audit.unchecked} fighting "
                                       "turn(s) played before keyed dice")
@@ -289,9 +408,9 @@ def _lineup_drift(log: replay.GameLog, human_id: int) -> str:
     return "; ".join(drift)
 
 
-def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
-    """Whether a replay that did not reproduce its score is a *wrong score* or an
-    *unverifiable* one.
+def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str, bool]:
+    """A ``mismatch``, and whether it is a *wrong score* or an *unverifiable* one
+    (``outdated``).
 
     Asked only once the replay has already disagreed, which is what keeps a rules
     change from wiping the board: a change to the engine disturbs some games and
@@ -301,9 +420,9 @@ def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str]:
     under, and nothing here can now tell.
     """
     if log.rules_version != engine.RULES_VERSION:
-        return "outdated", (f"played under rules v{log.rules_version}, now on "
-                            f"v{engine.RULES_VERSION} — {detail}")
-    return "mismatch", detail
+        return "mismatch", (f"played under rules v{log.rules_version}, now on "
+                            f"v{engine.RULES_VERSION} — {detail}"), True
+    return "mismatch", detail, False
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -316,6 +435,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="delete uploaded logs superseded by a longer one")
     parser.add_argument("--limit", type=int, default=0,
                         help="check at most this many scores (0 = no limit)")
+    parser.add_argument("--deadline-minutes", type=float, default=10.0,
+                        help="stop starting new checks after this long, so a run "
+                             "always writes what it reached and the next one resumes")
     parser.add_argument("--dry-run", action="store_true",
                         help="decide and report, but write nothing")
     return parser.parse_args(argv)
@@ -334,9 +456,12 @@ def main(argv: list[str] | None = None) -> int:
     rev = replay_rev()
     print(f"replay_rev {rev}")
 
-    scores = api.select("scores", "select=id,game_key,turns,lost,hand,match_id&order=id.asc")
+    scores = api.select("scores", "select=id,game_key,turns,lost,hand,match_id,submitted_at"
+                                  "&order=id.asc")
     checked = {int(r["score_id"]): r for r in
-               api.select("score_checks", "select=score_id,verdict,engine_rev&order=score_id.asc")}
+               api.select("score_checks",
+                          "select=score_id,verdict,engine_rev,log_id,game_digest"
+                          "&order=score_id.asc")}
     todo = pending(scores, checked, rev, recheck=args.recheck, stale=args.stale)
     if args.limit > 0:
         todo = todo[: args.limit]
@@ -344,22 +469,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(scores)} scores, all checked — nothing to do.")
         return 0
 
-    logs = best_logs(api.select("game_logs", "select=id,match_id,turns,log&order=id.asc"))
+    uploads = api.select("game_logs", "select=id,match_id,turns,submitted_at,log&order=id.asc")
     games = {r["game_key"]: r.get("settings_json") for r in
              api.select("games", "select=game_key,settings_json&order=game_key.asc")}
 
-    print(f"{len(todo)} of {len(scores)} scores to check against {len(logs)} replays")
+    print(f"{len(todo)} of {len(scores)} scores to check against {len(uploads)} uploads")
+    deadline = time.monotonic() + args.deadline_minutes * 60
     results: list[Check] = []
     for score in todo:
-        entry = logs.get(str(score.get("match_id", "")))
-        check = verify(score, entry.get("log") if entry else None,
-                       games.get(score["game_key"]))
+        if time.monotonic() > deadline:
+            print(f"  deadline reached after {len(results)} scores; the next run resumes")
+            break
+        check = settle(judge(score, uploads, games.get(score["game_key"])),
+                       checked.get(int(score["id"])))
         results.append(check)
         note = f" — {check.detail}" if check.detail else ""
         print(f"  score {check.score_id}: {check.verdict}{note}")
 
     tally = {v: sum(1 for c in results if c.verdict == v) for v in VERDICTS}
-    print("  " + " · ".join(f"{v} {tally[v]}" for v in VERDICTS))
+    print("  " + " · ".join(f"{v} {tally[v]}" for v in VERDICTS)
+          + f" · of which outdated {sum(1 for c in results if c.outdated)}")
 
     if args.dry_run:
         print("dry run — nothing written")
@@ -367,9 +496,9 @@ def main(argv: list[str] | None = None) -> int:
     api.upsert("score_checks", [c.row(rev) for c in results])
 
     if args.prune:
-        keep = {int(entry["id"]) for entry in logs.values()}
-        extra = [r for r in api.select("game_logs", "select=id,match_id&order=id.asc")
-                 if int(r["id"]) not in keep]
+        checked.update({c.score_id: c.row(rev) for c in results})
+        keep = keepers(uploads, scores, checked)
+        extra = [r for r in uploads if int(r["id"]) not in keep]
         for row in extra:
             api.delete("game_logs", f"id=eq.{int(row['id'])}")
         print(f"pruned {len(extra)} superseded upload(s)")

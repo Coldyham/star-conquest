@@ -277,14 +277,16 @@ moves. Grouping one person's games across sessions would need a durable client
 id — a tracking identifier by any other name, and it buys nothing here.
 
 Rows are append-only like the rest of the board, so a game that checkpoints
-repeatedly lands several times and the *longest* row is the current one
-(`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
+repeatedly lands several times. A score is judged on the upload that verifies,
+not the longest, since anyone can upload under a public `match_id`
+(`verify_scores.judge`, `score_checks.log_id`; see
+[`schema.md`](schema.md), "game_logs"). `--prune` clears the rest, using the one
 delete path the public does not have.
 
 **A rules change had never actually moved `RULES_VERSION` until the production/
 combat reorder, so "the engine outran an old replay" had never been a real case
 to handle — only a documented possibility.** The verifier already had the right
-shape for it (`outdated` versus `mismatch`, decided *after* the replay so a
+shape for it (an `outdated` flag on a `mismatch`, decided *after* the replay so a
 change that leaves most games alone does not flag them anyway), but nothing
 outside `tools/verify_scores.py` ever asked the question: the game's own
 `main.open_replay`/`resume_game` and `tools/position_suite.local_logs` would
@@ -385,8 +387,8 @@ and one press. `open_replay` marks the `Ui` (`Ui.watched`), `Ui.can_post` is the
 one predicate render draws both buttons from and main fires both actions from,
 and it also stops a watched game being filed as a personal best or checkpointed
 back up under its original `match_id` — where, rows being keyed by that id and
-the longest winning, our continuation would replace the very replay their score
-is checked against.
+the longest winning until their score is checked, our continuation would replace
+the very replay their score is checked against.
 
 It is a lock on the button, not a proof of authorship, and deliberately so:
 rewinding a watched replay to a turn from its end and playing that turn out
@@ -433,19 +435,19 @@ nothing. `bot_replay.replay_rev` is the same statement in code: `engine_rev` min
 hand. `engine.RULES_VERSION` is bumped in the same commit as a change to the phase
 order, to how a fight resolves or how a map is drawn from a seed, and every log
 carries the version it was played under. When a replay then fails to reproduce its
-score, `verify_scores` reports `outdated` rather than `mismatch` — unverifiable,
+score, `verify_scores` reports a `mismatch` flagged `outdated` — unverifiable,
 not wrong. The check happens *after* the replay, so the many old games a bump does
 not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
-**The random pool is the other axis, and it gets the same verdict.** A seat left
+**The random pool is the other axis, and it gets the same flag.** A seat left
 to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
 dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
 A score whose numbers reproduce but whose rival seats faced bots other than the
-ones its setup deals today is `outdated`: played honestly, by a build from before
-the pool was fixed or before an edit to it, against a lineup the map's other
-scores did not face. It stays counted, without the verified tick. `outdated`
-rather than `mismatch` because an edit to the pool would otherwise drop every
+ones its setup deals today is `verified` and `outdated`: played honestly, by a
+build from before the pool was fixed or before an edit to it, against a lineup
+the map's other scores did not face. It stays counted and keeps the verified
+tick. Not a `mismatch`, because an edit to the pool would otherwise drop every
 honest earlier score on a random map, and a tampered lineup gains nothing a
 tampered score would not. `settings` is in `replay_rev`, so a pool edit makes
 `--stale` re-decide. A log that records no lineup is judged on its numbers.
@@ -573,9 +575,13 @@ built.
   Monday-to-Monday UTC week, scores that strictly beat somebody else's record
   (`crown_steals`); a tie never steals, the earliest holder keeps it, as
   `game_summary` credits. Both read `counted_scores`, the one place the rule
-  lives: every score but a `mismatch` replay counts, since the game uploads a
-  log once with no retry and an offline or hand-pasted score could otherwise
-  never count. Nothing is stored, so moderation recomputes them for free.
+  lives, and so does `game_summary`'s best (the card's record, "Bot leads",
+  the average best turns) and the map page's "Play this map" target: a `verified` score counts, an unchecked or `missing` one that names a
+  replay counts for its first 24 hours, one posted before 2026-10-15 counts
+  unless it is a `mismatch` under current rules, and only the first post of a
+  match, or of a game however it is re-uploaded, counts (reasons:
+  [`schema.md`](schema.md), "counted_scores and the crowns").
+  Nothing is stored, so moderation recomputes them for free.
   `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
   against a real Postgres when `SC_TEST_PG` is set.
 - **The weekly campaign stores its map and derives its state.**
