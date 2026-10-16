@@ -1011,3 +1011,36 @@ def test_fast_guard_weight_half_scales_the_one_turn_rival(ma):
     state = _guard_state(lane_turns=1)
     ma.FAST_GUARD_WEIGHT = 0.5
     assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 10.0
+
+
+# --------------------------------------------------------------------------- #
+# Is the guard a pool? — docs/design/marshal.md, Step 0
+# --------------------------------------------------------------------------- #
+def _triangle(prod, launched):
+    """Rival 1's 10-ship stack at one end of a 4-lane; our 2 at the other, our
+    corner 3 on two 3-lanes. Both of ours hold the 0.55 guard, 6 each."""
+    state = _board({1: (1, 0 if launched else 10, 0), 2: (2, 6, prod), 3: (2, 6, 0)},
+                   [(1, 2, 4), (2, 3, 3), (1, 3, 3)], seats=2)
+    if launched:
+        state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=2, ships=10,
+                                  turns_total=4, turns_remaining=3))
+    return state
+
+
+def test_a_launch_releases_the_corner_guard_into_relief(ma):
+    """The stack's launch takes its garrison off the board, so the corner's guard
+    falls to 0 at the next decide and Phase 1 sends what that frees. Two guards
+    are 1.1 of the stack against a 1.27 ask: the pair holds only where the 4-end's
+    production over the 3 turns left closes the gap."""
+    assert ma.FRONTIER_GUARD == 0.55 and math.ceil(0.55 * 10) == 6
+    for prod in (0, 1, 2, 3):
+        assert ai.decide(_triangle(prod, launched=False), 2) == [], "guard not held"
+    # Production closes the gap: the corner's whole released guard goes in.
+    for prod in (2, 3):                 # (0 + 3) // prod == 1 built by the strike
+        sends = {(o.source_id, o.dest_id): o.ships
+                 for o in ai.decide(_triangle(prod, launched=True), 2)}
+        assert sends == {(3, 2): 6}, (prod, sends)
+    # It doesn't: nothing relieves, and both guards counter-strike the empty home.
+    sends = {(o.source_id, o.dest_id): o.ships
+             for o in ai.decide(_triangle(0, launched=True), 2)}
+    assert sends == {(2, 1): 6, (3, 1): 6}, sends

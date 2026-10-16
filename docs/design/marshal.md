@@ -482,7 +482,7 @@ erase a result**: symmetric two-player duels time out in 64 of 80 games and
 1 ly/turn in 56 of 60, so both are unusable as measurement cells however
 interesting they are to play.
 
-## Is the guard a pool? (proposed 2026-10-16, not run)
+## Is the guard a pool? (proposed and run 2026-10-16: a reserve, not a pool)
 
 **The question.** `FRONTIER_GUARD` holds 0.55 of the largest rival garrison next
 door on each frontier system separately. Pooled defence says that systems of ours
@@ -578,3 +578,44 @@ opponent. That is about 20 minutes each against marshal and actuary on 22
 workers, and longer against knower. The paired runner from the
 `RELIEF_IN_FLIGHT` measurement is not in the repo. It is a thin parallel loop
 over `tools/sweep.py`'s `parse_arm` and `play_duel`.
+
+**Result (2026-10-16): the pool exists in the code and almost never runs.**
+Step 0 passes; Step 1 reads as a reserve, so Step 2 was not run.
+
+*Step 0* is `test_a_launch_releases_the_corner_guard_into_relief`. On the
+triangle the corner's guard falls from 6 to 0 at the decide after the launch,
+and where the 4-end builds one ship before the strike lands (production 2 or 3)
+the corner sends all 6 into it. With no production the gap stays open. Then
+nothing is relieved: both guards counter-strike the rival's emptied home. So the
+released guard goes to whatever Phase 1 to 3 find worth doing, and relief is
+only one of those.
+
+*Step 1* is `tools/guard_census.py`, 1,800 games (six cells, three opponents,
+100 seeds; marshal's seat alternates with seed parity). It counts 84,267 seen
+strikes on targets that held a guard the turn before the launch:
+
+    released guard sent into the target, first decide     1.6%  (25% would read as a pool)
+    ...any relief before landing, released or not         4.1%
+    a neighbour's guard fell at all                       28.1%; of those, relieved 5.5%
+    a pooled neighbour's guard fell                        7.2%; of those, relieved 13.6%,
+                                                                 evacuated 60.0%, held 16.1%
+    released-guard ships that went into relief             3.1% of 325,072
+    target evacuated / stood / relieved                   64.2% / 30.8% / 4.4%
+    frontier system-turns with a pooled neighbour         15.2% (8.6% at 24:12, 19.8% at 13:3)
+
+Hold rate does rise with released relief (none 5.9%, some 68.2%, enough 81.5%),
+but relief is sent only where Phase 1 has already judged the target savable, so
+the rise is selection rather than a pool at work. No cell or opponent comes near
+the threshold: released relief is 0.9% to 3.4% of guarded strikes in every row,
+and 1.0% to 2.0% at every lane length from 2 to 7. Of the ships landing on a
+retake turn, 40% come from where the target's garrison evacuated to, 3% from
+pooled neighbours and the rest from elsewhere. What the guard is for is the
+earlier finding, a retake reserve and a deterrent. A strike outnumbers the
+garrison it is aimed at 76.7% of the time, and the target is mostly gone by the
+time it lands. The census did not follow guard ships into flow.
+
+`STICKY_GUARD`, `ISOLATED_GUARD` and the explicit pooled guard stay unbuilt.
+Two of the cross-references above point at nothing in the repo:
+`marshal-pricing.md` has no "A fleet landing next door is relief too" (nor any
+`RELIEF_IN_FLIGHT`), and `actuary.md` has no "Relief only the same stack can
+pin".
