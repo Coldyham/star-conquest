@@ -280,6 +280,13 @@ class Download:
         self._web = web
         self._result: list[tuple[str, str]] = []   # a one-slot mailbox for the thread
 
+    @classmethod
+    def ready(cls, body: str) -> Download:
+        """A download that has already arrived: a replay read off disk."""
+        download = cls(web=False)
+        download._result.append((OK, body))
+        return download
+
     def poll(self) -> tuple[str, str]:
         if self._web:
             return self._poll_web()
