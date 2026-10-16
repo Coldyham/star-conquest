@@ -888,3 +888,19 @@ actuary's `engine_rev` (so the bot column replays), and leaves
 with the flag on (it passes). Not measured: the board's own maps through
 `tools/setup_sweep.py`, knower at Search beyond 200 games, and the browser's
 timing.
+
+## A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, shipped 2026-10-16)
+
+The relief a struck rival can call on (`_relief`, weighted by `REINFORCE_WEIGHT`)
+counted only garrisons on its neighbouring systems. A fleet of its on a lane into
+a neighbour, which can land, take the system if it must, and turn round onto the
+target before our strike lands, counted for nothing, and a person used exactly
+that to lure every bot on the roster into a losing strike. `_relief_in_flight`
+now adds such fleets from the turn they could land on the target, thinned by
+`_fight` against the landing system's garrison, at weight `RELIEF_IN_FLIGHT`
+0.3. `_relief` returns the two sums apart, so weight 0 is bit-identical to the
+old bot. +1.2 points against old actuary (z +3.86), +1.4 against old marshal on
+fresh seeds (z +4.20), +1.1 at Learning (z +2.06), null against knower Predict;
+no cell worse, and no measurable cost. The full write-up, the marshal half and
+what it does not fix are in [`marshal-pricing.md`](marshal-pricing.md), "A fleet
+landing next door is relief too".

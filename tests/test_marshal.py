@@ -45,7 +45,7 @@ def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
-             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "RELIEF_IN_FLIGHT", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
              "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
     before = {n: getattr(ma, n) for n in names}
@@ -939,6 +939,48 @@ def test_relief_capacity_ignores_a_neighbour_too_far_to_help(ma):
     target = state.systems[20]
     assert ma._relief_capacity(state, target, warning=0) == 0
     assert ma._relief_capacity(state, target, warning=1) == 6
+
+
+def _bait_state(neighbour=(0, 5, 3), sent=11):
+    """T (rival, 1) emptied onto N: the rival's ``sent`` ships land on N next
+    turn, and the lane back to T is 2 turns. Our 12 at S are 3 turns from T."""
+    state = _board({20: (2, 1, 3), 21: neighbour, 22: (1, 12, 3)},
+                   [(20, 21, 2), (22, 20, 3)], seats=2, seat=1)
+    state.fleets.append(Fleet(owner_id=2, source_id=20, dest_id=21, ships=sent,
+                              turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_relief_in_flight_counts_a_fleet_that_can_turn_round_in_time(ma):
+    """Landing in 1 and 2 turns back is 3: in time for a 3-turn strike
+    (warning 2), too late for a 2-turn one."""
+    state = _bait_state(neighbour=(0, 8, 3))
+    target = state.systems[20]
+    expected = combat.preview_fight(11, 8, config.COMBAT_JITTER,
+                                    config.DEFENDER_ADVANTAGE).best.attacker_survivors
+    assert 0 < expected < 11
+    assert ma._relief_in_flight(state, target, warning=2) == expected
+    assert ma._relief_in_flight(state, target, warning=1) == 0
+
+
+def test_relief_in_flight_needs_to_win_where_it_lands(ma):
+    state = _bait_state(neighbour=(0, 20, 3), sent=5)
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 0
+
+
+def test_relief_in_flight_counts_in_full_onto_its_own_system(ma):
+    state = _bait_state(neighbour=(2, 0, 3))
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 11
+
+
+def test_relief_in_flight_prices_the_strike_by_weight(ma):
+    state = _bait_state()
+    target = state.systems[20]
+    ma.RELIEF_IN_FLIGHT = 0.0
+    base = ma._required(state, 1, target, dist=3)
+    ma.RELIEF_IN_FLIGHT = 1.0
+    full = ma._required(state, 1, target, dist=3)
+    assert full - base >= ma._relief_in_flight(state, target, warning=2)
 
 
 def _guard_state(lane_turns):

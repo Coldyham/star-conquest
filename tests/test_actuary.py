@@ -66,6 +66,40 @@ def _board(systems, lanes, seats=2, seat=1):
     return state
 
 
+def _bait_state(neighbour=(0, 5, 3), sent=11):
+    """T (rival, 1) emptied onto N: the rival's ``sent`` ships land on N next
+    turn, and the lane back to T is 2 turns. Our 12 at S are 3 turns from T."""
+    state = _board({20: (2, 1, 3), 21: neighbour, 22: (1, 12, 3)},
+                   [(20, 21, 2), (22, 20, 3)])
+    state.fleets.append(Fleet(owner_id=2, source_id=20, dest_id=21, ships=sent,
+                              turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_relief_in_flight_lands_from_the_turn_it_could_turn_round(ac):
+    ledger = ac._Ledger(_bait_state(), 1)
+    by_t, flying = ledger.relief[20]
+    assert flying.get(2, 0) == 0
+    assert 0 < flying[3] < 11, "the landing fight thins the relief"
+    assert flying[ledger.horizon] == flying[3]
+
+
+def test_relief_in_flight_needs_to_win_where_it_lands(ac):
+    _, flying = ac._Ledger(_bait_state(neighbour=(0, 20, 3), sent=5), 1).relief[20]
+    assert not flying
+
+
+def test_relief_in_flight_counts_in_full_onto_its_own_system(ac):
+    _, flying = ac._Ledger(_bait_state(neighbour=(2, 0, 3)), 1).relief[20]
+    assert flying[3] == 11
+
+
+def test_relief_in_flight_off_reads_nothing(ac, monkeypatch):
+    monkeypatch.setattr(ac, "RELIEF_IN_FLIGHT", 0.0)
+    _, flying = ac._Ledger(_bait_state(), 1).relief[20]
+    assert not flying
+
+
 def _boards(count=40):
     """Positions out of games the rest of the roster played, for actuary to
     decide on as seat 1 (so the set does not move when actuary does)."""

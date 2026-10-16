@@ -97,7 +97,9 @@ What it changes, in descending order of measured value:
     met a garrison grown since launch. ``_relief_capacity`` sums the garrisons
     of the target owner's systems that could reach it inside the strike's
     visibility window (``dist - 1`` turns; a 1-turn strike is never visible at
-    all), weighted by ``RELIEF_AWARE`` against a rival target only. Board
+    all), weighted by ``RELIEF_AWARE`` against a rival target only, and
+    ``_relief_in_flight`` adds the owner's fleets landing next door that could
+    turn round and land first, weighted by ``RELIEF_IN_FLIGHT``. Board
     facts only — never a rival's decision rule — so the bot still commits to
     a strict non-oracle contract.
 
@@ -206,6 +208,8 @@ FLOW_AVOIDS_ABANDONED = True    # Phase 4: don't flow surplus into a system
                                  # Phase 2 is giving up this same turn
 RELIEF_AWARE = 0.5              # _required: price a rival target against a
                                  # calm neighbour's garrison too, weighted by this
+RELIEF_IN_FLIGHT = 0.5          # ...and a fleet landing next door that could
+                                 # turn round and land first, weighted by this
 FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
                                  # rival by this — a strike across it is never
                                  # visible, so 0.0 ignores it entirely
@@ -509,6 +513,36 @@ def _relief_capacity(state, target, warning: int) -> int:
     return total
 
 
+def _relief_in_flight(state, target, warning: int) -> int:
+    """Ships the target's owner has on a lane into a neighbour that could land
+    there, take it if it must, and still come back before we land.
+
+    A fleet landing in ``r`` turns relaunches on turn ``r``, so it reaches the
+    target ``r + d`` turns out over a ``d``-turn lane back; our strike lands
+    ``warning + 1`` turns out. Fleets landing on one system on one turn pool, as
+    the engine pools them, and a neighbour the owner does not hold costs the
+    pool the fight it has there, read at ``_after_clash``'s corner (the one that
+    leaves the relief the most).
+    """
+    owner = target.owner_id
+    pools: dict[tuple[int, int], int] = defaultdict(int)
+    for f in state.fleets:
+        if f.owner_id == owner and f.dest_id != target.id and f.dest_id in target.neighbors:
+            back = state.travel_turns(f.dest_id, target.id) or 99
+            if f.turns_remaining + back <= warning + 1:
+                pools[(f.dest_id, f.turns_remaining)] += f.ships
+    total = 0
+    for (n, r), ships in pools.items():
+        held = state.systems[n]
+        if held.owner_id == owner:
+            total += ships
+            continue
+        garrison = held.ships + (_production_by(held, r) if held.owner_id != 0 else 0)
+        p = combat.preview_fight(ships, garrison, config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+        total += p.best.attacker_survivors
+    return total
+
+
 def _required(state, pid, target, dist: int) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
 
@@ -577,6 +611,8 @@ def _required(state, pid, target, dist: int) -> int:
                + _production_by(target, dist))
     if RELIEF_AWARE > 0:
         defence += math.ceil(RELIEF_AWARE * _relief_capacity(state, target, dist - 1))
+    if RELIEF_IN_FLIGHT > 0:
+        defence += math.ceil(RELIEF_IN_FLIGHT * _relief_in_flight(state, target, dist - 1))
     by_turn: dict[int, list[int]] = defaultdict(list)
     for turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
         by_turn[turn].append(incoming)

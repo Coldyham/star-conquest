@@ -6,8 +6,8 @@ The second of marshal's three files (overview and current standing:
 `_enemy_margin` and Phase 1/2: third-party fleets racing for a target,
 garrisons that evacuate rather than fight (and why the attack margin has no
 jitter premium), doomed neighbours and retreat distance, pile-ups under the
-garrison-fights-last rule, and four tactics that each measured null, alone and
-combined. Roster-wide rules are in [`bots.md`](bots.md). Index:
+garrison-fights-last rule, four tactics that each measured null, alone and
+combined, and relief from a fleet landing next door (`RELIEF_IN_FLIGHT`). Roster-wide rules are in [`bots.md`](bots.md). Index:
 [`../README.md`](../README.md).
 
 ## Racing a third player for the same system
@@ -834,3 +834,78 @@ fold were *choices* about what to do, and a null there still means delete. The
 legacy fold was removed rather than kept behind a flag, and duels are untouched
 by construction, so the `--ladder` table under "Where marshal stands" ([`marshal.md`](marshal.md)) stays
 current.
+
+## A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, shipped 2026-10-16)
+
+**Where it came from.** A hand-played 11-node duel against council (seed 95207,
+11 ly/turn) was won with a trap that every bot on the roster walked into. On turn
+6 the person sent 11 ships from system 5 to a neutral 3 two turns away, leaving 1
+at 5. On turn 7 every bot in the rival seat struck 5 from 8, a 3-turn lane (council
+and actuary with 11, marshal 10, heuristic 8). The 11 took 3 at the end of turn 7,
+relaunched on turn 8 and landed on 5 alongside the strike, so they fought as
+defenders. In the person's seat at turn 8, heuristic, actuary and council all
+bring the fleet back, so it is a hole in how a strike is priced, not a move only a
+person finds.
+
+`RELIEF_AWARE` (`marshal-flow.md`) counts only garrisons on the target owner's
+neighbouring systems. On turn 7, 3 was neutral and the 11 were on the lane, so
+nothing counted. actuary's `_relief` had the same shape.
+
+**The rule.** An owner's fleet landing on a neighbour of the target in `r` turns,
+with a `d`-turn lane back, can land on the target `r + d` turns out (it relaunches
+on the turn it lands). It counts if that is no later than our strike. Fleets
+landing on one system on one turn are pooled, as the engine pools them. If the
+owner does not hold the landing system, the pool first has to take it, and only
+its survivors count (marshal: `combat.preview_fight` at the corner that leaves the
+relief the most, as `_after_clash` reads it; actuary: its own `_fight`). Board
+facts only: no rival's decision rule is read, so marshal stays a non-oracle.
+`_relief_in_flight` is in both files; marshal adds `ceil(RELIEF_IN_FLIGHT * relief)`
+to the defence beside `RELIEF_AWARE`'s term, and actuary keeps the two sums apart
+so each carries its own weight. At weight 0 both bots are bit-identical to the
+pre-flag versions (2,783 positions each over six setups, no order differs).
+
+**Measured.** A paired runner on `tools/sweep.py`'s own `parse_arm`/`play_duel`
+(parallel; every arm plays the same opponent on the same cell, seed and seating).
+Points are the variant's win rate minus the weight-0 arm's, z over seeds; a
+timeout counts as a loss for both arms. Cells `random:` 11:11, 13:3, 18:6, 24:3,
+24:12, 18:18 at 500 seeds; the knower and Learning rows use 11:11, 18:6, 24:3,
+24:12 at 300.
+
+    marshal                       weight   pooled          worst cell
+    vs old marshal (seeds 500k)   0.25     +0.5  z +1.55   13:3   z -1.43
+                                  0.5      +1.0  z +2.94   13:3   z -0.10
+                                  1.0      +0.5  z +1.29   13:3   z -1.88
+    vs old actuary (fresh, 600k)  0.5      +2.5  z +6.39   24:12  z  0.00
+    vs knower Predict (700k)      0.5      +1.2  z +1.95   24:12  z -0.67
+
+    actuary (Planned unless noted)
+    vs old actuary (500k)         0.3      +1.2  z +3.86   18:18  z  0.00
+                                  0.6      +1.4  z +4.00   24:3   z +0.56
+                                  1.0      +1.2  z +3.15   24:3   z -0.32
+    vs old marshal (fresh, 600k)  0.3      +1.4  z +4.20   13:3   z  0.00
+                                  0.6      +1.2  z +3.18   13:3   z -1.87
+    Learning vs old marshal (700k) 0.3     +1.1  z +2.06   24:3   z  0.00
+    vs knower Predict (700k)      0.3      +0.2  z +0.61   11:11  z -1.42
+
+Against the other bot, on fresh seeds, both reproduce with no cell worse. The
+largest gains are at 11:11 and 24:3 for marshal (z +4.11, +4.92) and 11:11 and
+18:6 for actuary. Against knower marshal leans better and actuary is null.
+Thread CPU per decide does not move (p75 within noise for both bots at 18, 24, 40
+and 80 nodes), so actuary's `decide_ms` fit stands.
+
+**Shipped at marshal 0.5 and actuary 0.3**, the weights each bot already gives a
+neighbouring garrison (`RELIEF_AWARE`, `REINFORCE_WEIGHT`). Both are the best or
+level-best weight measured and are never worse in a cell; 0.6 and 1.0 lean worse
+at 13:3.
+
+**What it does not do.** At these weights the motivating position is still
+struck: marshal's price for 5 rises from 4 to 10 and it still has 11 to send, and
+actuary prices the returning 11 at 3. Both decline at weight 1.0 (they strike
+neutral 4 instead), but 1.0 measures weaker against bots, which mostly do not
+bring a fleet straight back. The weight is a prior on how often a fleet next
+door turns round, and a person laying this trap on purpose sets it to 1. That
+cannot be measured offline, since no bot lays the trap. *Open:* whether the
+person's posted games show bots losing strikes this way often enough to justify
+a higher weight, and council/knower, which miss the trap for a different reason
+(their rollouts model a person with `_blind`, which does not turn round here).
+The ladder under "Where marshal stands" was not re-run.
