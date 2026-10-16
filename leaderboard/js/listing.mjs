@@ -52,7 +52,13 @@ export const SORTS = {
     { value: "turns", label: "Avg best turns", column: "avg_best_turns", dir: "asc", arrows: COUNT },
     { value: "difficulty", label: "Difficulty (estimated)", column: "avg_difficulty", dir: "asc", arrows: EASE },
   ],
+  // Families are built in the page from every config at once (families.mjs),
+  // so the one sort is applied there too: by a family's latest member activity.
+  family: [
+    { value: "recent", label: "Recent activity", column: "last_activity", dir: "desc", arrows: DATE },
+  ],
 };
+export const GROUPS = ["game", "config", "family"];
 export const DIRS = ["desc", "asc"];
 
 /** The sort a view's filters ask for, falling back to its first. */
@@ -81,18 +87,19 @@ const MAX_QUERY = 40;
 export const MAX_EXCLUDED = 300;
 
 /**
- * "group=config" only means something above a single config's own game list,
- * so a `config` filter always falls back to the per-game view, whatever
- * `?group=` says — that keeps a hand-edited URL from landing on a grouped view
- * of one group.
+ * "group=config" and "group=family" only mean something above a single
+ * config's own game list, so a `config` filter always falls back to the
+ * per-game view, whatever `?group=` says — that keeps a hand-edited URL from
+ * landing on a grouped view of one group.
  */
 export function viewKind(filters) {
-  return filters.group === "config" && !filters.config ? "config" : "game";
+  if (filters.config) return "game";
+  return filters.group === "config" || filters.group === "family" ? filters.group : "game";
 }
 
 /** The filter state a query string asks for, with anything unknown dropped. */
 export function filtersFromParams(params) {
-  const group = params.get("group") === "config" ? "config" : "game";
+  const group = GROUPS.includes(params.get("group")) ? params.get("group") : "game";
   const players = Number(params.get("players"));
   const mode = params.get("mode");
   const fog = params.get("fog");
@@ -127,7 +134,7 @@ export function urlFor(filters) {
   const params = new URLSearchParams();
   if (filters.config) params.set("config", filters.config);
   if (filters.bot) params.set("bot", filters.bot);
-  if (filters.group === "config") params.set("group", "config");
+  if (filters.group === "config" || filters.group === "family") params.set("group", filters.group);
   if (filters.q) params.set("q", filters.q);
   if (filters.sort && filters.sort !== "recent") params.set("sort", filters.sort);
   if (filters.dir) params.set("dir", filters.dir);
@@ -235,3 +242,22 @@ export function pickRandom(rows, random = Math.random) {
   if (!rows.length) return null;
   return rows[Math.min(rows.length - 1, Math.floor(random() * rows.length))];
 }
+
+/**
+ * The two queries "By family" needs: `all`, every config, unfiltered — a family
+ * tree needs every member even when a filter hides some — and `match`, the
+ * keys of the configs the grouped view's filters would show, or null when
+ * nothing narrows the list. The page dims a member outside `match` and drops
+ * a family with no member in it. `select=*` on both because `first_seen` is
+ * appended to config_summary and a board not yet re-pasted lacks it.
+ */
+export function familyQueries(filters) {
+  const all = `config_summary?select=${CONFIG_COLUMNS}&order=config_key.asc`;
+  if (!isFiltered(filters)) return { all, match: null };
+  const { query } = listQuery({ ...filters, config: "", group: "config", sort: "recent", dir: "" });
+  return { all, match: query.replace(`config_summary?select=${CONFIG_COLUMNS}`, "config_summary?select=config_key") };
+}
+
+/** Every scored map's config and first sighting, for families.mjs's
+ * withFirstSeen on a board whose config_summary has no `first_seen` yet. */
+export const FIRST_SEEN_QUERY = "game_summary?select=config_key,first_seen_at&score_count=gt.0&order=game_key.asc";

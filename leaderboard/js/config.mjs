@@ -54,3 +54,37 @@ export const PLAYER_COLORS = ["#7a808c", "#56aaff", "#f05a5a", "#5fd282", "#f0aa
 // Pinned by `tests/test_leaderboard_sync.py`.
 export const FOG_ON_SIGHT = 1;
 export const FOG_ON_SCOUT = 3;
+
+// Pace: the board can't run mapgen, so families.mjs estimates the median lane in
+// turns as ceil(PACE_LY / sqrt(min(systems, STANDARD_MAX_NODES)) / speed).
+// PACE_LY is fitted on real maps (docs/design/setup-families.md, "Pace"), and
+// `tests/test_leaderboard_sync.py` checks the formula against mapgen.
+// SHIP_LY_PER_TURN and STANDARD_MAX_NODES mirror `starconquest.config`.
+export const PACE_LY = 77;
+export const SHIP_LY_PER_TURN = 6;
+export const STANDARD_MAX_NODES = 40;
+
+// Mirrors `Settings()`'s defaults for the fields families.mjs compares.
+// settings_json is pruned to non-defaults, so a missing key means this value.
+// Pinned by `tests/test_leaderboard_sync.py`.
+export const SETUP_DEFAULTS = {
+  layout: "hub",
+  node_jitter: 0.85,
+  relax_min_sep_frac: 0.6,
+  lloyd_passes: 1,
+  extra_edge_fraction: 0.4,
+  max_edge_length_frac: 0.5,
+  ship_ly_per_turn: 6,
+  ship_speed_growth_pct: 0,
+  home_start_ships: 12,
+  home_production: 3,
+  garrison_base: 2,
+  garrison_k: 12,
+  garrison_jitter: 3,
+  combat_jitter: 0.1,
+  defender_advantage: 1,
+  neutral_produces: false,
+  in_lane_battles: false,
+  fog_sight: 8,
+  fog_scout: 8,
+};

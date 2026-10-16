@@ -626,7 +626,10 @@ with agg as (
     -- The "Avg best turns" sort: each map's best, averaged over the group.
     round(avg(best_turns), 1) as avg_best_turns,
     -- The "Difficulty" sort: each map's estimate, averaged the same way.
-    round(avg(difficulty), 3) as avg_difficulty
+    round(avg(difficulty), 3) as avg_difficulty,
+    -- When the setup was first played: orders "By family" (js/families.mjs),
+    -- where a config's parent is always an older config.
+    min(first_seen_at)        as first_seen
   from public.game_summary
   where score_count > 0
   group by config_key
@@ -653,7 +656,8 @@ select
   -- New columns go last. fog is part of sc_config_key, so the group shares it.
   (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog,
   agg.avg_best_turns,
-  agg.avg_difficulty
+  agg.avg_difficulty,
+  agg.first_seen
 from agg
 join rep on rep.config_key = agg.config_key
 left join public.configs cfg on cfg.config_key = agg.config_key
