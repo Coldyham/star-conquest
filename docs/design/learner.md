@@ -318,6 +318,22 @@ learner minus each, 95% interval over games:
   (0.146 in the first 5 turns after contact, 0.199 from 30 on). So keeping
   `TRUST_HUMAN` off is right, and a calibrated forecast of a person is
   something knower does not have.
+- **A stronger bot is a worse guess at a person** (2026-10-16, 176 logs, 29,310
+  pairs). knower could model a person with marshal or actuary (Planned) rather
+  than its blind plan, since both beat knower at Off. `GUESSES` scores each as
+  certain, beside knower's blind plan:
+
+                    knower   marshal   actuary
+      Brier         0.180    0.201     0.205
+      ship error    195.9    249.8     517.4
+
+  Minus knower's, over games: marshal Brier +0.021 [+0.012, +0.030], actuary
+  +0.025 [+0.013, +0.037], both clear of zero, and worse on ship error. On 11
+  systems or fewer marshal's interval touches zero (+0.010 [-0.001, +0.020]).
+  marshal starts better in the first 5 turns after contact (0.135 against 0.149)
+  and falls behind from turn 5 on. They guess more strikes, so they miss
+  less and waste more. A person stays on `_blind` (`knower._surrogate`). The
+  corpus is almost all one player.
 - **On small maps the ship error does not separate from "none".** Of the 141
   games, 87 are on 11 systems or fewer. There learner's Brier still clears every
   baseline, but its ship error against "none" is -2.4 [-6.0, +3.3]. On the 54
@@ -599,8 +615,11 @@ Deleted, with Trust.
 ### The roster ladder
 
 `uv run python -m tests.sim --ladder --trials 30` (18 systems, 6 ly/turn,
-default settings, 1680 games, 72 timed out). learner is first, 357 wins to
-actuary's 343. The full grid is in [`marshal.md`](marshal.md), "Full roster
+default settings, 1680 games, 72 timed out), read 2026-10-08 while learner was
+its own file. learner is first, 357 wins to actuary's 343. The 2026-10-16
+re-run, with learner as actuary's Learning stop and knower running it as
+Planned, is in [`marshal.md`](marshal.md): Learning against knower 95% -> 91%,
+level with Planned. The full grid is in [`marshal.md`](marshal.md), "Full roster
 ladder". learner against each:
 
                knower  actuary  marshal  thinker  claudebot  heuristic  rusherplus
@@ -623,7 +642,10 @@ against actuary. So the ranking says more about knower than about learner.
 20 points**, since the flag is a claim knower takes on trust. The contract is
 in `models/README.md`, "Predicting the other seats". learner's own claim rests on
 its memory (`is_oracle_seat`), which is real, but nothing stops a bot claiming
-it falsely.
+it falsely. Since 2026-10-16 knower runs a Learning seat as Planned and believes
+it (`stand_in_params`), which takes back a third to a half of those points at
+Predict and most of the Search row ([`knower.md`](knower.md), "Seats it cannot
+run"). A bot that claims the flag without the hook still gets the whole 20.
 
 **It plays actuary's moves.** `tools/bot_distance.py --bots actuary learner
 marshal --every 1 --phase contested` gives 21 two-seat games at 18 nodes and

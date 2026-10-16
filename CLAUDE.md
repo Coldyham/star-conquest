@@ -422,13 +422,14 @@ already resolve simultaneously. The rationale for each rule is in
   `ai.load_models()`, must read `ai.STRATEGIES` lazily inside `decide`, and must
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
   advertises `IS_ORACLE = True` and optionally `is_oracle_seat(player)`, which
-  callers prefer.
+  callers prefer, and `stand_in_params(player)`, the params of its nearest
+  version that doesn't predict, which knower runs in its place.
 - **A bot that remembers between turns keys its memory by the game's path**
   (`models/actuary.py`'s memo tree, used at Style: Learning: a board finds its
   parent by content), never by "the current game": `decide` also runs on copies,
   branches, rewinds and isolated positions, and `ai.load_models()` wipes module
-  state. Such a seat answers `is_oracle_seat`, so knower models it rather than
-  running it. Detail: `docs/design/learner.md`.
+  state. Such a seat answers `is_oracle_seat`, so knower runs its stand-in rather
+  than it. Detail: `docs/design/learner.md`.
 - **A bot prices a fight with `combat.edge_attacking()`/`edge_defending()`,
   never a constant**, with the jitter half floored at its `TUNED_SWING`, and
   floors its ask at `target.ships + 1`. Margins compare against the *effective*

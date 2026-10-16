@@ -13,6 +13,7 @@ Internals are reached through `sys.modules["sc_model_knower"]`, the synthetic na
 from __future__ import annotations
 
 import copy
+import dataclasses
 import sys
 
 import pytest
@@ -198,6 +199,98 @@ def test_sibling_oracle_is_proxied_not_recursed(kn):
         assert 3 not in kn.LAST_ORACLE.trusted
     finally:
         del sys.modules["sc_model_fake_oracle"]
+
+
+def _fake_oracle(calls, stand_in=None):
+    """Register a fake oracle module's bot as ``fake_oracle``; it records the aux
+    it was called at. ``stand_in`` becomes the module's ``stand_in_params``."""
+    def other(state, pid):
+        calls.append(state.players[pid].ai_params.aux)
+        return []
+
+    other.__module__ = "sc_model_fake_oracle"
+    fake = type(sys)("sc_model_fake_oracle")
+    fake.is_oracle_seat = lambda player: player.ai_params.aux >= 1
+    if stand_in is not None:
+        fake.stand_in_params = stand_in
+    sys.modules["sc_model_fake_oracle"] = fake
+    ai.register("fake_oracle", other)
+
+
+def test_an_oracle_with_a_stand_in_is_run_at_it(kn):
+    """An oracle seat whose module names a version of itself that doesn't predict
+    is run at those params, on our copy, and believed under `TRUST_STAND_INS`."""
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == [0.0]
+        assert state.players[3].ai_params.aux == 2.0, "the real seat's params moved"
+        assert kn.LAST_ORACLE.seats[3] == "stand-in"
+        assert (3 in kn.LAST_ORACLE.trusted) == kn.TRUST_STAND_INS
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+@pytest.mark.parametrize("hook", [
+    lambda player: player.ai_params,                    # still predicts: would recurse
+    lambda player: None,
+    lambda player: 1 / 0,
+])
+def test_a_stand_in_that_cannot_be_used_falls_back_to_blind(kn, hook):
+    calls = []
+    _fake_oracle(calls, hook)
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == []
+        assert 3 not in kn.LAST_ORACLE.trusted
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_a_learning_actuary_is_predicted_as_planned():
+    """actuary at Learning claims the oracle flag; knower runs it at Planned."""
+    assert "actuary" in ai.load_models()
+    kn = sys.modules["sc_model_knower"]          # load_models re-imported it
+    state = _state(knower_seat=2)
+    state.players[3].ai_strategy = "actuary"
+    state.players[3].ai_params.aux = 2.0
+    for _ in range(12):
+        planned = copy.deepcopy(state)
+        planned.players[3].ai_params.aux = 1.0
+        expected = ai.STRATEGIES["actuary"](planned, 3)
+        ai.decide(state, 2)
+        assert kn.LAST_ORACLE.seats[3] == "stand-in" and 3 in kn.LAST_ORACLE.trusted
+        assert kn.LAST_ORACLE.orders[3] == expected
+        engine.end_turn(state, decide=ai.decide)
+
+
+def test_a_search_rolls_an_oracle_out_at_its_stand_in(kn):
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        kn._rollout_decide(state, 3)
+        assert calls == [0.0] and state.players[3].ai_params.aux == 2.0
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_knower_names_depth_zero_as_its_stand_in(kn):
+    player = Player(1, "P1", (0, 0, 0))
+    player.ai_params.aux = 2.0
+    stand_in = kn.stand_in_params(player)
+    assert stand_in.aux == 0.0 and player.ai_params.aux == 2.0
+    player.ai_params = stand_in
+    assert kn.is_oracle_seat(player) is False
 
 
 def test_raising_opponent_does_not_crash(kn):

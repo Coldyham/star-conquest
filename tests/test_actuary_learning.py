@@ -304,6 +304,9 @@ def test_the_style_knob_has_three_stops(ac):
         seat = Player(1, "P1", (0, 0, 0), ai_params=AiParams(aux=aux))
         assert ac._stop_of(seat) == stop, aux
         assert ac.is_oracle_seat(seat) == (stop == ac.LEARNING)
+        stand_in = ac.stand_in_params(seat)
+        assert stand_in is not seat.ai_params
+        assert stand_in.aux == (float(ac.PLANNED) if stop == ac.LEARNING else aux)
     assert not getattr(ac, "IS_ORACLE", False), "only a Learning seat is an oracle's"
 
 
@@ -377,8 +380,9 @@ def test_decide_leaves_the_state_alone_and_draws_nothing(ac):
 
 
 def test_knower_never_runs_a_learning_seat(ac, monkeypatch):
-    """An oracle models a Learning seat instead of running it, so nothing it does
-    on its copies of the board reaches the memo."""
+    """An oracle models a Learning seat instead of running it (as Planned, which
+    keeps no memory), so nothing it does on its copies of the board reaches the
+    memo."""
     calls = []
     real = ac._node_for
     monkeypatch.setattr(ac, "_node_for", lambda state: calls.append(state.turn) or real(state))

@@ -137,6 +137,9 @@ them for cost):
 
 The claim alone took Planned from 80.1 / 68.0% to 92.6 / 94.2% against Predict.
 The model adds a lean on top, against both knower stops, that is not significant.
+knower now runs a Learning seat as Planned and believes it (`stand_in_params`,
+[`knower.md`](knower.md), "Seats it cannot run"), so these rows were read before
+that, and the claim is worth less now.
 Search stops on a wall clock, so its moves shift with CPU load and its pairing is
 noisier than the rest.
 
@@ -183,9 +186,9 @@ never runs a Learning seat.
   The bot column first left actuary at 1 (Planned); it now replays every bot at
   the top of its slider (`bot_replay.replay_aux`), so it plays Learning.
 - **The oracle claim is per seat.** `is_oracle_seat` is true at Learning only, so
-  knower still runs actuary's `decide` at Greedy and Planned and models a
-  Learning seat blind. actuary has no module-level `IS_ORACLE`. `decide_ms`
-  prices Greedy and Planned, the stops knower runs.
+  knower still runs actuary's `decide` at Greedy and Planned, and runs a Learning
+  seat at Planned (`stand_in_params`). actuary has no module-level `IS_ORACLE`.
+  `decide_ms` prices Greedy and Planned, the stops knower runs.
 - **The tools.** `tools/learner_check.py` keeps `predict` and the strike-size,
   guard and evacuation readings with their priors, counted by `Watcher` from
   `actuary.launches` on the turns actuary's memo links. On `--cells 18n6 --seeds
@@ -387,8 +390,9 @@ against people.
 **What it leaves open, for the author.** Learning could read the prior alone
 and keep no memory. Then `decide` reads only the board, so `is_oracle_seat`
 could go false, and knower at Predict and Search would run it. That gives back
-the 20-odd points the claim earns against knower ([`learner.md`](learner.md),
-"The roster ladder"), and moves the bot column. It would also cut the memo tree
+the 20-odd points the claim earned against knower ([`learner.md`](learner.md),
+"The roster ladder"), less what `stand_in_params` already took back
+([`knower.md`](knower.md), "Seats it cannot run"), and moves the bot column. It would also cut the memo tree
 from the hot path. `tools/learner_check.py` and `tools/playstyle.py` still read
 the memo tree and the models through `models_for`. The memory reads a person a
 little better than the prior does ("Predicting people"), but play against a
