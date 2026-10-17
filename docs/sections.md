@@ -154,6 +154,15 @@ only for a fight; what is deliberately not animated.
 - **Where it loses to actuary.** Level at contact, out-traded after it.
 - **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
 
+## design/evolved.md
+- **What it is for, and its constraints.** Blind, browser-sized, deterministic, no foresight of the dice.
+- **The policy.** A menu of priced moves per system, each naming its principle; a linear scorer plus a small residual head over size-free features.
+- **The look-ahead.** Variants of the policy's move played six turns at the expected roll; rivals hold (most likely) or strike all-out (most dangerous); the gain is the veto. Timed in the web build at native speed.
+- **Where it stands.** Marshal level in duels, behind actuary, short in multi-seat; plays unlike the roster.
+- **Training it.** CMA-ES over paired seatings, the turn-40 share, the noise fix, how the shipped weights came about.
+- **Measuring it.** The paired bench, the +4 bar, loss diagnosis against a control.
+- **Why multi-seat is short.** Three diagnoses against a control; no blind remedy found.
+
 ## design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
 - **Where marshal stands.** **The current full roster ladder (re-run 2026-10-17, after the pour floor and `FEED` re-tune shipped, with the bot before it as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.

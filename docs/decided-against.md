@@ -101,6 +101,15 @@ the measured result was indistinguishable from the baseline.
 - Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
 - Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
 
+## evolved ([`design/evolved.md`](design/evolved.md))
+- The first look-ahead, rivals modelled by evolved's own policy (7 arms), and a learned value: null; the self-model imagined 2-4x the attacks real rivals make. *Decided against.*
+- Full-genome retrains, the head trained longer (-2.15), more expansion, relief retuned: level or worse; the linear policy is at its ceiling for its inputs. *Same section.*
+- Two-turn moves (`stage`, `converge`), defeat in detail / cutting / culmination / miai (-2.07), beyond defeat and honte (never confirmed), the opening as its own game (-1.28): removed. *Same section.*
+- Opponent learning from the board: no blind model predicts roster launches better than "the rival holds". *Same section.*
+- A deeper, wider look-ahead with no guard: -0.5 against actuary; dice averaged per plan: below expected dice. *Same section.*
+- Fewer own-to-own moves (-1.2 to -3.1) and pricing a third seat's fleet into the ask (-0.18), the two remedies the multi-seat diagnoses named. *Why multi-seat is short.*
+- Retraining the move-kind biases with the look-ahead on (-0.92), and a separate multi-seat weight set (+0.67, null). *Decided against.*
+
 ## The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
 - A `simulate` callback or oracle parity for external bots: ruled out, and rival strategy names are masked. *Bots that aren't Python.*

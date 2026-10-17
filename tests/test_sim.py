@@ -460,7 +460,8 @@ def test_set_budget_scale_only_touches_bots_that_declare_one():
     # nothing to scale and must be left alone.
     ai.load_models()
     try:
-        assert ai.set_budget_scale(50) == ["council", "knower"]
+        # evolved declares one for its look-ahead's 50 ms guard.
+        assert ai.set_budget_scale(50) == ["council", "evolved", "knower"]
     finally:
         ai.set_budget_scale(1)
 
