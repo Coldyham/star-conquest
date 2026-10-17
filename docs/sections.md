@@ -125,6 +125,19 @@ only for a fight; what is deliberately not animated.
 - **A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, 2026-10-16).** A struck rival's fleet landing next door that can turn round in time counts as relief at 0.3. Bit-identical at 0; the measurements are in `marshal-pricing.md`.
 - **Relief only the same stack can pin (`SELF_RELIEF_SHARED`, built, measured, deleted 2026-10-16).** Pooled defence, from the author's triangle: a neighbour that only the threatening stacks border, counted in full, and the rest at 0.8 or less. Null to worse against actuary and marshal in every form, the front-only one included. The double count is not why `SELF_RELIEF` 1.0 lost.
 
+## design/hunter.md
+- **How it was measured.** `tools/hunt_bench.py`: paired duels with seats swapped, guards lifted, the seed blocks and what each was for; the unchanged fork read exactly 50%.
+- **Which strikes actuary launches.** `tools/hunt_predict.py`: a worst-roll rule catches 98-100% of actuary's strikes on rival systems; the roster's strike ratios (claudebot and marshal strike in the 1.0-1.22 band, knower snipes below 1.0).
+- **Edge risk (`EDGE_RISK`).** A threat counts only if a rival would launch it; not the rejected "threats at the worst roll". 55.5% and 55.3% on confirm blocks.
+- **Gathering on fast boards (`EDGE_GATHER_LANE`).** Rival ships one hop back, on median lanes of 2 or less only.
+- **Softer strikes on slow boards (`CAPTURE_SWING`, `CAPTURE_LANE`).** The nominal-roll strike, on median lanes of 6 or more only.
+- **REINFORCE_WEIGHT.** 0.45-0.7 a plateau of about +2; the 43-variant single-constant sweep.
+- **Look-ahead (`LOOKAHEAD`, on by default).** Postures rolled six turns, rivals on hunter's own plan, own dice; bounded by work, not time; 68.2% against actuary, +11.4; +3.5 against marshal.
+- **Where it stands.** The headline by cell; against marshal, thinker, knower at Predict and at Search.
+- **What it costs.** Plain and look-ahead decide times by size; `decide_ms` peaks on mid-sized boards.
+- **Built, measured, removed.** Predicted counter-punch, per-rival thresholds, a start-of-turn trigger, fast-board tuning, the stalemate breaker and endgame closer, Style: Learning.
+- **Open.** Fast boards and knower at Search.
+
 ## design/learner.md
 - **Why the oracle flag does not make memory safe.** Every caller that runs a bot's `decide` on copies, branches, isolated positions or rewound boards, and `load_models` wiping module state.
 - **The memo tree.** A board is a node found by content; its parent is a stored board it provably follows (`_follows`). What a cold start costs.

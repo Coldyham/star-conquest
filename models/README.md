@@ -291,7 +291,10 @@ commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first
 contact on a big map with fast lanes, where that pays, and opens with the
-ledger everywhere else; its *Style* knob runs Greedy, Planned, Learning), `knower.py` (the oracle — it runs every rival's
+ledger everywhere else; its *Style* knob runs Greedy, Planned, Learning),
+`hunter.py` (actuary's ledger, but a threat counts only if a rival would launch
+it: a system next door, or several landing on the same turn, that wins the
+worst roll; built to beat actuary, and stronger against the rest too), `knower.py` (the oracle — it runs every rival's
 own `decide` before the engine asks for it), `council.py` (knower's Search with a
 learned judge: actuary joins the openings it compares, each borrowed opening is
 played forward by the bot that proposed it, and the boards it lands on are

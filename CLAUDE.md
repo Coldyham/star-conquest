@@ -18,7 +18,7 @@ re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
 `hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `knower`,
 `council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`,
-`actuary`, `convoy`, `learner`, `learning`; `pbp`; `par`; `seat-play`. Keep
+`actuary`, `hunter`, `convoy`, `learner`, `learning`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
 `docs/sections.md` when one grows past that). Keep this file to rules and
 pointers. `docs/bot-api.md` (wire protocol for non-Python bots) and
@@ -53,6 +53,7 @@ uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots 
 uv run python tools/config_census.py            # which setups people play
 uv run python tools/setup_sweep.py              # ...and whether the ranking moves there
 uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by hand
+uv run python tools/hunt_bench.py --seeds 50     # hunter (or a --variant) vs actuary, paired
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 ```

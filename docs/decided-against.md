@@ -79,6 +79,16 @@ the measured result was indistinguishable from the baseline.
 - Pricing strikes at the nominal roll and dropping the risk weight while behind on income but ahead on ships: not built, since a real lead on a short clock arises 4 times in 84 games (2 across the posted human games) and a real lead is already converted 87% of the time. Variance-seeking while behind on both: unmeasured. *Behind on income, ahead on ships.*
 - `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*
 
+## hunter ([`design/hunter.md`](design/hunter.md))
+- A counter-punch on systems actuary is about to empty: predicted at precision 0.32, recall 0.28. Not built. *Built, measured, removed.*
+- Learning each rival's strike threshold (`EDGE_SWING` 1.0 / 1.1): within noise against four bots. *Same section.*
+- A strike this turn decided on our start-of-turn garrisons: null to -2.8 against three bots. Deleted. *Same section.*
+- A stalemate breaker (nominal-roll strikes once the board banks enough income) and an endgame closer: deadlocks became chases; -0.2 to +0.5. Deleted. *Same section.*
+- Gathering on every board: -3.2 pooled; shipped on median lanes of 2 or less. *Gathering on fast boards.*
+- The nominal-roll strike on every board: 7:6 -7 to -13; shipped on median lanes of 6 or more. *Softer strikes on slow boards.*
+- A one-turn look for edge risk: 39.6%. *Edge risk.*
+- A look-ahead stopped by the wall clock: up to 0.99 s a decide with the guard live, and play that depends on the machine; bounded by work instead. *Look-ahead.*
+
 ## learner ([`design/learner.md`](design/learner.md))
 - Thinning a rival's source by its expected launch (Trust): 44% against actuary, worse than Raise; a source sends nearly all or nothing, so an expected value is the wrong thing to deduct. *Trusting a prediction.*
 - Trusting confident calls (p 0.5+) against a rival once 70% have come true (Sure): indistinguishable from Raise; the gate stays shut against actuary and opening it against marshal buys nothing. *Same section.*
