@@ -14,7 +14,7 @@ decided against. **Check that list before proposing a mechanism, a bot tactic or
 a re-tune**, and read the relevant design file when you're actually touching
 that code, not as background reading. The files: `core`, `shell`, `turnfilm`,
 `hand-maps`, `leaderboard`, `setup-families` and `schema` for the game and the board; `bots` for the roster
-as a whole, then `knower`, `marshal`, `marshal-pricing`, `marshal-flow`,
+as a whole, then `knower`, `council`, `marshal`, `marshal-pricing`, `marshal-flow`,
 `marshal-joint`, `actuary`, `convoy`, `learner` and `learning`; `pbp` for play-by-post; `par` for the par search, a local check; `seat-play` for games played by hand against the bots. Keep each design file under ~1000 lines, and split by
 topic and update the index when one grows past that. Keep this file to rules and
 pointers: when a rule needs its reasoning, the reasoning goes in a design file.
