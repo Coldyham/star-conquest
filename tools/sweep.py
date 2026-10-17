@@ -35,6 +35,10 @@ Results append to ``results/ledger.jsonl``, one line per finished game, written
 with a single ``os.write`` to an ``O_APPEND`` descriptor and fsynced. A kill at
 any moment loses nothing and a rerun resumes rather than restarts.
 
+A game that hits the turn cap records who was ahead (``leader``: systems held,
+then ships), and the seed pairs score it as ``TIMEOUT_LEAD`` of a win or a loss
+for that side rather than as a flat draw.
+
 Process control is by PID file (``results/sweep.pid``), never by matching process
 names: a name pattern can match the harness itself, or the shell that launched
 it. ``--stop`` reads the recorded pid *and* its kernel start time, so a recycled
@@ -95,6 +99,12 @@ _OUTCOME_MODULES = (
 # for the browser, and tripping one is the only thing that makes its output
 # depend on the clock.
 BUDGET_SCALE = 100.0
+
+# A timeout is not quite a draw: the side ahead when the turn cap stops a game
+# (see `leader`) usually goes on to win it. The seed pairs score a timeout as this
+# fraction of a win for the side ahead and of a loss for the side behind, so
+# 0.5 +/- TIMEOUT_LEAD / 2 where a draw scores 0.5.
+TIMEOUT_LEAD = 0.1
 
 _STOPPING = False
 
@@ -586,9 +596,27 @@ def play_duel(cell: Cell, seed: int, seats: tuple[Seat, Seat], max_turns: int) -
         "winner": state.winner,
         "turns": state.turn,
         "timed_out": state.winner is None,
+        "ahead": leader(state) if state.winner is None else None,
         "digest": hashlib.blake2s(repr(sim.board_digest(state)).encode(),
                                   digest_size=8).hexdigest(),
     }
+
+
+def leader(state) -> int:
+    """The player ahead in an undecided game: most systems held, then most ships
+    (garrisons and fleets in flight). 0 when the top two are level."""
+    standing = []
+    for pid, player in state.players.items():
+        if player.is_neutral:
+            continue
+        held = [s for s in state.systems.values() if s.owner_id == pid]
+        ships = (sum(s.ships for s in held)
+                 + sum(f.ships for f in state.fleets if f.owner_id == pid))
+        standing.append(((len(held), ships), pid))
+    standing.sort(reverse=True)
+    if not standing or (len(standing) > 1 and standing[0][0] == standing[1][0]):
+        return 0
+    return standing[0][1]
 
 
 NULL = "__null__"
@@ -652,6 +680,7 @@ def run(jobs_list: list[tuple], ledger: Ledger, done: set, *, sweep: str, stage:
             "decided": winner is not None and winner != 0,
             "turns": result["turns"],
             "timed_out": result["timed_out"],
+            "ahead": result["ahead"],
             "digest": result["digest"],
             "ts": round(time.time(), 3),
         })
@@ -691,6 +720,8 @@ class Tally:
     losses: int = 0
     draws: int = 0
     timeouts: int = 0
+    ahead: int = 0          # timeouts the arm was ahead in (see `leader`)
+    behind: int = 0
     turns: list[int] = field(default_factory=list)
 
     @property
@@ -711,6 +742,11 @@ class Tally:
     def add(self, row: dict) -> None:
         if row["timed_out"]:
             self.timeouts += 1
+            if row.get("ahead"):
+                if row["ahead"] == row.get("arm_seat"):
+                    self.ahead += 1
+                else:
+                    self.behind += 1
             return
         self.turns.append(row["turns"])
         if not row["decided"]:
@@ -763,12 +799,12 @@ def _row(label: str, t: Tally) -> str:
             f"{t.rate * 100:>6.1f}%  [{lo * 100:>5.1f}, {hi * 100:>5.1f}]  "
             f"{z_against(t.wins, t.decided):>6.2f}  "
             f"{t.wins / total * 100:>5.1f}/{t.losses / total * 100:<5.1f} "
-            f"{t.timeouts:>4}  {_verdict(t)}")
+            f"{t.timeouts:>4} {t.ahead:>4}/{t.behind:<4}  {_verdict(t)}")
 
 
 def _header() -> str:
     return (f"  {'arm':<44} {'W-L':>9} {'n':>5} {'rate':>7}  {'95% CI':>14}  "
-            f"{'z':>6}  {'share a/b':>11} {'t/o':>4}  verdict")
+            f"{'z':>6}  {'share a/b':>11} {'t/o':>4} {'ahead/back':>9}  verdict")
 
 
 def report(rows: list[dict], arms: list[Arm], cells: list[Cell], baseline: Arm,
@@ -887,16 +923,40 @@ class Pairs:
     better: int = 0
     worse: int = 0
     same: int = 0
+    diffs: list[float] = field(default_factory=list)   # per game, for `points`
 
     @property
     def z(self) -> float:
         n = self.better + self.worse
         return (self.better - self.worse) / math.sqrt(n) if n else 0.0
 
+    @property
+    def points(self) -> float:
+        """The mean change, in win-rate points. Unlike the sign test above it
+        weighs a change by its size, so a timeout counts at its tilt."""
+        return 100.0 * sum(self.diffs) / len(self.diffs) if self.diffs else 0.0
+
+    @property
+    def points_z(self) -> float:
+        n = len(self.diffs)
+        if n < 2:
+            return 0.0
+        mean = sum(self.diffs) / n
+        var = sum((d - mean) ** 2 for d in self.diffs) / (n - 1)
+        return mean / math.sqrt(var / n) if var > 0 else 0.0
+
 
 def _score(row: dict) -> float:
-    """1 for an arm win, 0 for a loss, a half for a draw or a timeout."""
-    if row["timed_out"] or not row["decided"]:
+    """1 for an arm win, 0 for a loss, a half for a draw. A timeout is a half
+    moved ``TIMEOUT_LEAD / 2`` toward whoever was ahead; level, or a row written
+    before the lead was recorded, stays a half."""
+    if row["timed_out"]:
+        ahead = row.get("ahead")
+        if not ahead:
+            return 0.5
+        tilt = TIMEOUT_LEAD / 2
+        return 0.5 + tilt if ahead == row["arm_seat"] else 0.5 - tilt
+    if not row["decided"]:
         return 0.5
     return 1.0 if row["arm_won"] else 0.0
 
@@ -917,6 +977,7 @@ def seed_pairs(rows: list[dict], arm: str, *, cell: str | None = None,
         if len(seatings) < 2:
             continue
         total = sum(seatings.values())
+        out.diffs.append((total - 1) / 2)
         if total > 1:
             out.better += 1
         elif total < 1:
@@ -941,6 +1002,7 @@ def arm_pairs(rows: list[dict], a: str, b: str, *, cell: str | None = None) -> P
         sb = score.get((b, ckey, seed, mirror))
         if arm != a or sb is None:
             continue
+        out.diffs.append(sb - sa)
         if sb > sa:
             out.better += 1
         elif sb < sa:
@@ -951,16 +1013,18 @@ def arm_pairs(rows: list[dict], a: str, b: str, *, cell: str | None = None) -> P
 
 
 def _pairs_cell(p: Pairs) -> str:
-    return f"+{p.better}/-{p.worse} z{p.z:+.2f}"
+    return f"+{p.better}/-{p.worse} z{p.z:+.2f} {p.points:+.1f}pt"
 
 
 def _pairs_report(rows: list[dict], arms: list[Arm], cells: list[Cell],
                   seeds: list[int]) -> None:
     print("\nSEED PAIRS — seeds the arm won in both seatings (+) against lost in both (-);\n"
-          "             an untouched seed splits 1-1. The test for an arm that fires rarely.")
+          "             an untouched seed splits 1-1. The test for an arm that fires rarely.\n"
+          "             pt: the mean change in win-rate points, a timeout counting as\n"
+          f"             {TIMEOUT_LEAD:g} of a win or a loss for whoever was ahead.")
     cut = len(seeds) // 2
     halves = (set(seeds[:cut]), set(seeds[cut:])) if len(seeds) >= 4 else None
-    print(f"  {'arm':<20} {'pooled':>20} {'half A':>20} {'half B':>20}   status")
+    print(f"  {'arm':<20} {'pooled':>28} {'half A':>28} {'half B':>28}   status")
     for arm in arms:
         p = seed_pairs(rows, arm.name)
         if halves is None:
@@ -975,11 +1039,11 @@ def _pairs_report(rows: list[dict], arms: list[Arm], cells: list[Cell],
                 status = "NOT REPRODUCED (the halves disagree in direction)"
             else:
                 status = "REPRODUCED " + ("better" if p.z > 0 else "worse")
-        print(f"  {arm.name:<20} {_pairs_cell(p):>20} {ha:>20} {hb:>20}   {status}")
+        print(f"  {arm.name:<20} {_pairs_cell(p):>28} {ha:>28} {hb:>28}   {status}")
         for cell in cells:
             pc = seed_pairs(rows, arm.name, cell=cell.key())
             if pc.better + pc.worse + pc.same:
-                print(f"    {cell.key():<38} {_pairs_cell(pc):>20}   ({pc.same} untouched)")
+                print(f"    {cell.key():<38} {_pairs_cell(pc):>28}   ({pc.same} untouched)")
 
     if len(arms) < 2:
         return
@@ -989,11 +1053,11 @@ def _pairs_report(rows: list[dict], arms: list[Arm], cells: list[Cell],
         p = arm_pairs(rows, a.name, b.name)
         verdict = "NOT SIGNIFICANT" if abs(p.z) < Z95 else (
             f"{b.name} better" if p.z > 0 else f"{b.name} worse")
-        print(f"  {a.name} -> {b.name:<14} {_pairs_cell(p):>20}   ({p.same} the same)  {verdict}")
+        print(f"  {a.name} -> {b.name:<14} {_pairs_cell(p):>28}   ({p.same} the same)  {verdict}")
         for cell in cells:
             pc = arm_pairs(rows, a.name, b.name, cell=cell.key())
             if pc.better + pc.worse + pc.same:
-                print(f"    {cell.key():<38} {_pairs_cell(pc):>20}")
+                print(f"    {cell.key():<38} {_pairs_cell(pc):>28}")
 
 
 def _sign_z(z: float) -> int:
@@ -1252,6 +1316,32 @@ def self_test() -> int:
     q = arm_pairs(rows, "a", "b")
     check("arm pairs compare the same seed and seating",
           (q.better, q.worse, q.same) == (1, 1, 1), f"{q}")
+
+    def timeout(seat, ahead, mirror=0, seed=7):
+        return {"arm": "t", "cell": "c", "seed": seed, "mirror": mirror,
+                "arm_seat": seat, "arm_won": False, "decided": False,
+                "timed_out": True, "ahead": ahead}
+    tilt = TIMEOUT_LEAD / 2
+    check("a timeout tilts toward the side ahead",
+          _score(timeout(1, 1)) == 0.5 + tilt and _score(timeout(1, 2)) == 0.5 - tilt)
+    check("a level timeout, or one with no lead recorded, is a half",
+          _score(timeout(1, 0)) == 0.5 and _score(timeout(1, None)) == 0.5)
+    mirrored = seed_pairs([timeout(1, 2, 0), timeout(2, 2, 1)], "t")
+    check("a mirrored timeout still splits the seed 1-1",
+          (mirrored.better, mirrored.worse, mirrored.same) == (0, 0, 1))
+    led = seed_pairs([timeout(1, 1, 0), timeout(2, 2, 1)], "t")
+    check("leading both timed-out seatings is worth the tilt in points",
+          led.better == 1 and abs(led.points - 100 * tilt) < 1e-9, f"{led.points}")
+
+    board = mapgen.generate(1, "random", 12, 2)
+    check("two fresh homes are level", leader(board) == 0)
+    spare = next(s for s in board.systems.values() if s.owner_id == 0)
+    spare.owner_id = 2
+    check("an extra system puts its owner ahead", leader(board) == 2)
+    spare.owner_id = 0
+    home = next(s for s in board.systems.values() if s.owner_id == 1)
+    home.ships += 1
+    check("level on systems, ships decide", leader(board) == 1)
 
     width = 100
     print(f"\n{'=' * width}\nSELF-TEST (no games played)\n{'=' * width}")
