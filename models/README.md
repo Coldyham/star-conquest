@@ -243,6 +243,12 @@ To make that last one detectable, a predicting bot should advertise itself:
   knower defines it as "depth ≥ 1", so its depth-0 seats correctly report `False`
   and get predicted for real rather than approximated. Keep the flag as well, for
   anything that only checks it.
+- **`stand_in_params(player) -> AiParams`** — optional: the params of this seat's
+  nearest version that *doesn't* predict (knower's is Oracle: Off, actuary's is
+  Planned for a Learning seat). An oracle then runs your `decide` at those params
+  on its copy of the board, rather than guessing at you with a planner of its own.
+  Return a copy, never the seat's own params. Params that still answer
+  `is_oracle_seat` true, `None`, or a raise all mean "no stand-in".
 
 Recursion is still your own responsibility: guard re-entry into your `decide` (a
 module-level depth counter is enough in this single-threaded codebase) rather than
@@ -293,7 +299,7 @@ scored by a small network fitted on roster self-play). At *Learning* actuary als
 model of each rival, read off the boards it has seen, and prices the threat
 next door by how often that rival strikes a garrison as thin as ours will be:
 the one seat here that remembers anything between turns, so knower models it
-rather than running it (`is_oracle_seat`).
+rather than running it (`is_oracle_seat`), as Planned (`stand_in_params`).
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
 leaves the seat's bot to the match seed, and `settings.build_state` resolves it to

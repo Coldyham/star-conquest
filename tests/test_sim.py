@@ -267,11 +267,13 @@ def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
     cfg.ai_strategy = ["marshal", "knower", "heuristic"]
 
     # The app's own autoplay path: no human seat at all, every seat decided by
-    # the engine's own loop (`main.resolve_turn` passes no `human_orders`).
+    # the engine's own loop (`main.resolve_turn` passes no `human_orders`), each
+    # turn's rng derived as `main.resolve_turn` derives it.
     state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
     assert state.human() is None
     turns = 0
     while state.winner is None and turns < 600:
+        replay.reseed(state)
         engine.end_turn(state, decide=ai.decide)
         turns += 1
 

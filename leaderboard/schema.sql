@@ -99,8 +99,9 @@ alter table public.scores add column if not exists campaign_start text not null 
 --
 -- Closed to the public: no policies and no anon grants. netlify/functions/log.mjs
 -- writes it, the workers read it, and visitors see only public_replays. An
--- upload is a new row, so the longest row per match is current; the worker
--- prunes the rest. The size cap is what stops a blob filling the database
+-- upload is a new row. Anyone may upload under a match_id, so the longest row
+-- is not evidence: the worker records the one a score verified on
+-- (score_checks.log_id) and prunes the rest. The size cap is what stops a blob filling the database
 -- (whole games run 5-14 KiB).
 -- ---------------------------------------------------------------------------
 create table if not exists public.game_logs (
@@ -125,7 +126,7 @@ alter table public.game_logs add column if not exists won      boolean not null 
 alter table public.game_logs add column if not exists hand     integer not null default 0;
 alter table public.game_logs add column if not exists rules_version integer not null default 1;
 
--- Longest first, which is the row a verifier wants.
+-- Longest first within a match.
 create index if not exists game_logs_match_idx
   on public.game_logs (match_id, turns desc);
 
@@ -133,13 +134,18 @@ create index if not exists game_logs_match_idx
 -- score_checks: what tools/verify_scores.py found replaying a score's log. One
 -- row per score. Written by the worker, read by anyone.
 --
---   verified    the log replays and reproduces the posted turns, lost and hand
---   mismatch    it replays and produces something else: the score is wrong
---   outdated    it does not reproduce, and was played under older rules
---               (engine.RULES_VERSION) or a rival lineup the setup no longer
---               deals: unverifiable, not wrong
+--   verified    the log replays and reproduces the posted turns, lost and hand.
+--               Once verified, always verified: it reproduced under the rules
+--               it was played under.
+--   mismatch    it replays and produces something else
 --   unreadable  the blob does not decode, or does not replay at all
 --   missing     no log was ever uploaded for this score's match_id
+--
+-- outdated is a second question: is the score still comparable with one
+-- posted today? True when it was dealt a rival lineup the setup no longer
+-- deals, or no longer reproduces under rules that have moved since
+-- (engine.RULES_VERSION). So `mismatch` + outdated reads "didn't reproduce,
+-- but under older rules: unverifiable, not wrong".
 -- ---------------------------------------------------------------------------
 create table if not exists public.score_checks (
   score_id   bigint primary key references public.scores(id) on delete cascade,
@@ -148,12 +154,31 @@ create table if not exists public.score_checks (
   detail     text not null default '',
   -- bot_replay.replay_rev of the code that checked it.
   engine_rev text not null default '',
-  checked_at timestamptz not null default now()
+  checked_at timestamptz not null default now(),
+  -- The game_logs row the verdict was reached on: the first upload that
+  -- verified, else the best evidence there was. Null on `missing`. No foreign
+  -- key: --prune keeps every log a verdict names, and nothing else may delete one.
+  log_id     bigint,
+  outdated   boolean not null default false,
+  -- A hash of every board the replay passed through, '' when it didn't replay.
+  -- counted_scores counts one game once by it, whatever match_id it is posted under.
+  game_digest text not null default ''
 );
 
+alter table public.score_checks add column if not exists log_id bigint;
+alter table public.score_checks add column if not exists outdated boolean not null default false;
+alter table public.score_checks add column if not exists game_digest text not null default '';
+
+-- `outdated` was a verdict before it was a column. A lineup row reproduced; a
+-- rules row didn't.
 alter table public.score_checks drop constraint if exists score_checks_verdict;
+update public.score_checks
+  set verdict = case when detail like 'dealt a different lineup%' then 'verified'
+                     else 'mismatch' end,
+      outdated = true
+  where verdict = 'outdated';
 alter table public.score_checks add  constraint score_checks_verdict check (
-  verdict in ('verified', 'mismatch', 'outdated', 'unreadable', 'missing'));
+  verdict in ('verified', 'mismatch', 'unreadable', 'missing'));
 
 -- ---------------------------------------------------------------------------
 -- playstyle_readings: how the person played one game in public_replays, for the
@@ -370,8 +395,10 @@ left join lateral (
 
 -- ---------------------------------------------------------------------------
 -- public_replays: the only game_logs rows a visitor can read. A replay is public
--- when a posted score points at it and its map is not embargoed; the longest
--- upload per match.
+-- when a posted score points at it and its map is not embargoed. One upload per
+-- match: the log the match's first score was checked on; before any check, the
+-- longest uploaded before that score was posted; else the longest. Anyone can
+-- upload under a public match_id, so the longest alone could be anybody's.
 --
 -- Deliberately NOT security_invoker: it lends out part of a table nobody may
 -- read, which needs owner rights. The where clause is the whole consent
@@ -390,10 +417,18 @@ create or replace view public.public_replays as
 select distinct on (l.match_id)
   l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
 from public.game_logs l
-join public.scores s on s.match_id = l.match_id
+join lateral (
+  select s.game_key, s.submitted_at, c.log_id
+  from public.scores s
+  left join public.score_checks c on c.score_id = s.id
+  where s.match_id = l.match_id
+  order by s.submitted_at, s.id
+  limit 1
+) s on true
 left join public.game_embargoes e on e.game_key = s.game_key
 where e.embargo_until is null or e.embargo_until <= now()
-order by l.match_id, l.turns desc, l.id desc;
+order by l.match_id, (l.id = s.log_id) desc nulls last,
+  (l.submitted_at <= s.submitted_at) desc, l.turns desc, l.id desc;
 
 -- ---------------------------------------------------------------------------
 -- public_watchable_replays: everything netlify/functions/replay.mjs may serve,
@@ -431,20 +466,47 @@ from (
 group by config_key, tag;
 
 -- ---------------------------------------------------------------------------
--- counted_scores: the one place the crowns' eligibility rule lives. Every posted
--- score counts unless its replay was checked and found wrong (`mismatch`).
--- Nothing is stored, so deleting a score recomputes everything that reads this.
+-- counted_scores: the one place the crowns' eligibility rule lives. A score
+-- counts once its replay is `verified`, outdated or not. One that names a
+-- replay and is still unchecked or `missing` counts for its first 24 hours,
+-- the worker's slack. One posted before sc_legacy_cutoff() counts under the
+-- rule it was posted under: anything but a mismatch under current rules.
+-- Only the first score posted for a match_id counts, and only the first for a
+-- game (score_checks.game_digest), since a public replay can be uploaded again
+-- under a fresh match_id. Nothing is stored, so deleting a score recomputes
+-- everything that reads this.
 -- ---------------------------------------------------------------------------
+create or replace function public.sc_legacy_cutoff()
+returns timestamptz
+language sql immutable parallel safe as $$
+  select timestamptz '2026-10-15 00:00Z'
+$$;
+
 create or replace view public.counted_scores
   with (security_invoker = true) as
 select s.id, s.game_key, s.user_id, u.name as user_name, s.turns, s.lost, s.submitted_at,
   -- New columns go last.
   s.hand,
-  s.campaign_start
+  s.campaign_start,
+  s.by_name
 from public.scores s
 join public.users u on u.id = s.user_id
 left join public.score_checks c on c.score_id = s.id
-where c.verdict is distinct from 'mismatch';
+where (c.verdict = 'verified'
+       or (coalesce(c.verdict, 'missing') = 'missing'
+           and s.match_id <> ''
+           and s.submitted_at > now() - interval '24 hours')
+       or (s.submitted_at < public.sc_legacy_cutoff()
+           and not coalesce(c.verdict = 'mismatch' and not c.outdated, false)))
+  and not exists (
+    select 1 from public.scores e
+    where s.match_id <> '' and e.match_id = s.match_id
+      and (e.submitted_at, e.id) < (s.submitted_at, s.id))
+  and not exists (
+    select 1 from public.scores e
+    join public.score_checks ec on ec.score_id = e.id
+    where c.game_digest <> '' and ec.game_digest = c.game_digest
+      and (e.submitted_at, e.id) < (s.submitted_at, s.id));
 
 -- ---------------------------------------------------------------------------
 -- game_summary: the home page in one select: every game with its best score,
@@ -502,17 +564,18 @@ select
 from public.games g
 join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
-  select s.turns, s.lost, s.hand, s.by_name, u.name as user_name
-  from public.scores s
-  join public.users u on u.id = s.user_id
+  -- The best counted score: one that doesn't count for a crown isn't the record
+  -- either. Null when a map has scores but none counts.
+  select s.turns, s.lost, s.hand, s.by_name, s.user_name
+  from public.counted_scores s
   where s.game_key = g.game_key
   order by s.turns asc, s.lost asc, s.submitted_at asc
   limit 1
 ) best on true
 left join lateral (
-  -- Submissions tied with the best on turns and lost: 2+ is a shared record.
+  -- Counted scores tied with the best on turns and lost: 2+ is a shared record.
   select count(*) as holders
-  from public.scores s
+  from public.counted_scores s
   where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
 ) tied on true
 left join lateral (
@@ -563,7 +626,10 @@ with agg as (
     -- The "Avg best turns" sort: each map's best, averaged over the group.
     round(avg(best_turns), 1) as avg_best_turns,
     -- The "Difficulty" sort: each map's estimate, averaged the same way.
-    round(avg(difficulty), 3) as avg_difficulty
+    round(avg(difficulty), 3) as avg_difficulty,
+    -- When the setup was first played: orders "By family" (js/families.mjs),
+    -- where a config's parent is always an older config.
+    min(first_seen_at)        as first_seen
   from public.game_summary
   where score_count > 0
   group by config_key
@@ -590,7 +656,8 @@ select
   -- New columns go last. fog is part of sc_config_key, so the group shares it.
   (rep.settings_json ?| array['fog_sight', 'fog_scout']) as fog,
   agg.avg_best_turns,
-  agg.avg_difficulty
+  agg.avg_difficulty,
+  agg.first_seen
 from agg
 join rep on rep.config_key = agg.config_key
 left join public.configs cfg on cfg.config_key = agg.config_key
@@ -664,7 +731,9 @@ where prior.user_id <> s.user_id
 
 -- ---------------------------------------------------------------------------
 -- campaign_scores: every counted score posted during a campaign's week on one
--- of its nodes, with at least one turn played by hand.
+-- of its nodes, with at least one turn played by hand. A score still in its
+-- 24 hours unverified drops out if the worker never verifies it, and the
+-- campaign's fold changes with it.
 -- ---------------------------------------------------------------------------
 create or replace view public.campaign_scores
   with (security_invoker = true) as
@@ -754,8 +823,13 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.game_embargoes, public.playstyle_readings
   to anon, authenticated;
 grant select on public.config_tag_counts to anon, authenticated;
-grant insert on public.users, public.games, public.scores, public.configs,
+grant insert on public.users, public.games, public.configs,
   public.config_tags to anon, authenticated;
+-- scores by column, leaving submitted_at to its default: counted_scores and
+-- public_replays trust it. Revoking the table grant also drops column grants.
+revoke insert on public.scores from anon, authenticated;
+grant insert (game_key, user_id, turns, lost, hand, by_name, raw_token, match_id,
+  campaign_start) on public.scores to anon, authenticated;
 grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
   to anon, authenticated;
 

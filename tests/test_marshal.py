@@ -45,7 +45,7 @@ def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
-             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "RELIEF_IN_FLIGHT", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
              "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
     before = {n: getattr(ma, n) for n in names}
@@ -941,6 +941,48 @@ def test_relief_capacity_ignores_a_neighbour_too_far_to_help(ma):
     assert ma._relief_capacity(state, target, warning=1) == 6
 
 
+def _bait_state(neighbour=(0, 5, 3), sent=11):
+    """T (rival, 1) emptied onto N: the rival's ``sent`` ships land on N next
+    turn, and the lane back to T is 2 turns. Our 12 at S are 3 turns from T."""
+    state = _board({20: (2, 1, 3), 21: neighbour, 22: (1, 12, 3)},
+                   [(20, 21, 2), (22, 20, 3)], seats=2, seat=1)
+    state.fleets.append(Fleet(owner_id=2, source_id=20, dest_id=21, ships=sent,
+                              turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_relief_in_flight_counts_a_fleet_that_can_turn_round_in_time(ma):
+    """Landing in 1 and 2 turns back is 3: in time for a 3-turn strike
+    (warning 2), too late for a 2-turn one."""
+    state = _bait_state(neighbour=(0, 8, 3))
+    target = state.systems[20]
+    expected = combat.preview_fight(11, 8, config.COMBAT_JITTER,
+                                    config.DEFENDER_ADVANTAGE).best.attacker_survivors
+    assert 0 < expected < 11
+    assert ma._relief_in_flight(state, target, warning=2) == expected
+    assert ma._relief_in_flight(state, target, warning=1) == 0
+
+
+def test_relief_in_flight_needs_to_win_where_it_lands(ma):
+    state = _bait_state(neighbour=(0, 20, 3), sent=5)
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 0
+
+
+def test_relief_in_flight_counts_in_full_onto_its_own_system(ma):
+    state = _bait_state(neighbour=(2, 0, 3))
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 11
+
+
+def test_relief_in_flight_prices_the_strike_by_weight(ma):
+    state = _bait_state()
+    target = state.systems[20]
+    ma.RELIEF_IN_FLIGHT = 0.0
+    base = ma._required(state, 1, target, dist=3)
+    ma.RELIEF_IN_FLIGHT = 1.0
+    full = ma._required(state, 1, target, dist=3)
+    assert full - base >= ma._relief_in_flight(state, target, warning=2)
+
+
 def _guard_state(lane_turns):
     return _board({30: (1, 5, 3), 31: (2, 20, 3)}, [(30, 31, lane_turns)], seat=1)
 
@@ -969,3 +1011,36 @@ def test_fast_guard_weight_half_scales_the_one_turn_rival(ma):
     state = _guard_state(lane_turns=1)
     ma.FAST_GUARD_WEIGHT = 0.5
     assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 10.0
+
+
+# --------------------------------------------------------------------------- #
+# Is the guard a pool? — docs/design/marshal.md, Step 0
+# --------------------------------------------------------------------------- #
+def _triangle(prod, launched):
+    """Rival 1's 10-ship stack at one end of a 4-lane; our 2 at the other, our
+    corner 3 on two 3-lanes. Both of ours hold the 0.55 guard, 6 each."""
+    state = _board({1: (1, 0 if launched else 10, 0), 2: (2, 6, prod), 3: (2, 6, 0)},
+                   [(1, 2, 4), (2, 3, 3), (1, 3, 3)], seats=2)
+    if launched:
+        state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=2, ships=10,
+                                  turns_total=4, turns_remaining=3))
+    return state
+
+
+def test_a_launch_releases_the_corner_guard_into_relief(ma):
+    """The stack's launch takes its garrison off the board, so the corner's guard
+    falls to 0 at the next decide and Phase 1 sends what that frees. Two guards
+    are 1.1 of the stack against a 1.27 ask: the pair holds only where the 4-end's
+    production over the 3 turns left closes the gap."""
+    assert ma.FRONTIER_GUARD == 0.55 and math.ceil(0.55 * 10) == 6
+    for prod in (0, 1, 2, 3):
+        assert ai.decide(_triangle(prod, launched=False), 2) == [], "guard not held"
+    # Production closes the gap: the corner's whole released guard goes in.
+    for prod in (2, 3):                 # (0 + 3) // prod == 1 built by the strike
+        sends = {(o.source_id, o.dest_id): o.ships
+                 for o in ai.decide(_triangle(prod, launched=True), 2)}
+        assert sends == {(3, 2): 6}, (prod, sends)
+    # It doesn't: nothing relieves, and both guards counter-strike the empty home.
+    sends = {(o.source_id, o.dest_id): o.ships
+             for o in ai.decide(_triangle(0, launched=True), 2)}
+    assert sends == {(2, 1): 6, (3, 1): 6}, sends

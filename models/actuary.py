@@ -45,6 +45,7 @@ Measurements behind the constants: docs/design/actuary.md.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import heapq
 import itertools
@@ -66,6 +67,8 @@ FRONT_DECAY = 0.5           # ...falling by this factor per turn of travel back
 RISK_WEIGHT = 0.6           # share of a system's worth lost to a full shortfall
 REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relieve
                             # a system we strike, if they can land in time
+RELIEF_IN_FLIGHT = 0.3      # ...and of a rival's fleet landing next door that
+                            # could turn round and land in time
 MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
                             # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
@@ -190,11 +193,20 @@ def is_oracle_seat(player) -> bool:
     return _stop_of(player) == LEARNING
 
 
+def stand_in_params(player):
+    """The params an oracle runs a Learning seat at instead: Planned, the same bot
+    with no memory. Greedy and Planned are their own."""
+    params = copy.copy(player.ai_params)
+    params.aux = float(PLANNED) if _stop_of(player) == LEARNING else params.aux
+    return params
+
+
 def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us. knower never runs a Learning seat (`is_oracle_seat`),
-    so this prices Greedy and Planned."""
+    but runs Planned in its place (`stand_in_params`), so this prices Greedy and
+    Planned."""
     drawn = getattr(settings, "custom_map", None)
     nodes = len(drawn.nodes) if drawn is not None else settings.nodes
     return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
@@ -621,7 +633,9 @@ class _Ledger:
             forces[who] = forces.get(who, 0) + n
         if owner not in (0, self.pid) and self.pid in landing:
             # A rival we strike may be relieved before we land.
-            forces[owner] += int(REINFORCE_WEIGHT * self.relief[sid].get(t, 0))
+            by_t, flying = self.relief[sid]
+            forces[owner] += int(REINFORCE_WEIGHT * by_t.get(t, 0)
+                                 + RELIEF_IN_FLIGHT * flying.get(t, 0))
         sides = [(o, n) for o, n in forces.items() if n > 0]
         if not sides:
             return 0, 0
@@ -696,19 +710,49 @@ class _Ledger:
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
 
     def _relief(self):
-        """relief[sid][t]: ships the holder of ``sid`` has next door that could land
-        there by turn t, launching no sooner than next turn."""
+        """relief[sid][t]: ships the holder of ``sid`` could land there by turn t,
+        launching no sooner than next turn, as (from garrisons next door, from
+        fleets landing next door) so each can carry its own weight."""
         sysmap = self.state.systems
         out = {}
         for sid in self.ids:
             owner = sysmap[sid].owner_id
-            by_t = {}
+            by_t, flying = {}, {}
             if owner not in (0, self.pid):
                 for nbr, d in self.travel[sid].items():
                     if sysmap[nbr].owner_id == owner:
                         for t in range(d + 1, self.horizon + 1):
                             by_t[t] = by_t.get(t, 0) + sysmap[nbr].ships
-            out[sid] = by_t
+                if RELIEF_IN_FLIGHT > 0:
+                    for t0, ships in self._relief_in_flight(sid, owner):
+                        for t in range(t0, self.horizon + 1):
+                            flying[t] = flying.get(t, 0) + ships
+            out[sid] = (by_t, flying)
+        return out
+
+    def _relief_in_flight(self, sid, owner):
+        """(turn, ships) for each of ``owner``'s pools landing next door to
+        ``sid`` that could take its landing system if it must and come back: a
+        pool landing on turn r relaunches then and reaches ``sid`` at r + d. A
+        neighbour ``owner`` does not hold costs the pool its fight there, priced
+        by `_fight` against its garrison now."""
+        sysmap = self.state.systems
+        pools = defaultdict(int)
+        for f in self.state.fleets:
+            if f.owner_id == owner and f.dest_id != sid and f.dest_id in self.travel[sid]:
+                pools[(f.dest_id, max(1, f.turns_remaining))] += f.ships
+        out = []
+        for (nbr, r), ships in sorted(pools.items()):
+            t0 = r + self.travel[sid][nbr]
+            if t0 > self.horizon:
+                continue
+            held = sysmap[nbr]
+            if held.owner_id != owner:
+                won, ships = self._fight((owner, ships), (held.owner_id, held.ships),
+                                         defender=held.owner_id)
+                if won != owner:
+                    continue
+            out.append((t0, ships))
         return out
 
 

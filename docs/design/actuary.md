@@ -888,3 +888,72 @@ actuary's `engine_rev` (so the bot column replays), and leaves
 with the flag on (it passes). Not measured: the board's own maps through
 `tools/setup_sweep.py`, knower at Search beyond 200 games, and the browser's
 timing.
+
+## A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, shipped 2026-10-16)
+
+The relief a struck rival can call on (`_relief`, weighted by `REINFORCE_WEIGHT`)
+counted only garrisons on its neighbouring systems. A fleet of its on a lane into
+a neighbour, which can land, take the system if it must, and turn round onto the
+target before our strike lands, counted for nothing, and a person used exactly
+that to lure every bot on the roster into a losing strike. `_relief_in_flight`
+now adds such fleets from the turn they could land on the target, thinned by
+`_fight` against the landing system's garrison, at weight `RELIEF_IN_FLIGHT`
+0.3. `_relief` returns the two sums apart, so weight 0 is bit-identical to the
+old bot. +1.2 points against old actuary (z +3.86), +1.4 against old marshal on
+fresh seeds (z +4.20), +1.1 at Learning (z +2.06), null against knower Predict;
+no cell worse, and no measurable cost. The full write-up, the marshal half and
+what it does not fix are in [`marshal-pricing.md`](marshal-pricing.md), "A fleet
+landing next door is relief too".
+
+## Relief only the same stack can pin (`SELF_RELIEF_SHARED`, built, measured, deleted 2026-10-16)
+
+From a position the author described. Take a triangle with lanes of 4, 3 and 3:
+we hold one end of the 4 and the corner of the two 3s, and the rival holds the
+other end of the 4. Only the corner needs to match the rival. A strike on the
+4-end is seen with 3 turns to spare, and relief from the corner takes 3. The
+corner is safe once it is empty, because the ships that would take it are the
+ones already on their way to the 4-end. A launch cannot be recalled, and a split
+strike is answered by a matching split. In general, systems of ours that are
+nearer each other than the rival need their total to cover the threat, not each
+one.
+
+`SELF_RELIEF_REACTS` already prices the triangle: the corner's 3-turn lane is
+shorter than the rival's 4, so the 4-end counts 0.8 of the corner. What it does
+not check is the second half, whether another stack could take the corner once
+it leaves. That double count was a guess at why `SELF_RELIEF` 1.0 lost (*A front
+stack pins the whole side*).
+
+The arm: `_own_relief` counted a neighbour at `SELF_RELIEF_SHARED` when every
+rival-held system it borders is one of the threatening rival's stacks next to
+the target and no rival fleet is landing on it, and at `SELF_RELIEF` otherwise.
+Both tests read start-of-turn facts, so the caches stayed exact. At 0.8/0.8 it
+was bit-identical (968 positions over six setups and all three Style stops, no
+order differs). It held on 56% of neighbour reads, mostly interior systems with
+no rival next door, and the arms changed 4-8% of decides.
+
+Measured with the paired runner from *A fleet landing next door is relief too*
+(`marshal-pricing.md`), in six cells (11:11, 13:3, 18:6, 24:3, 24:12, 18:18), 500
+seeds each, both seatings, actuary at Planned. Points are against the 0.8/0.8
+arm on the same games:
+
+    shared / rest           vs actuary (500k)     vs marshal (600k)
+    1.0 / 0.8               -0.6  z -1.64          -0.6  z -1.24
+    1.0 / 0.5               -0.8  z -2.09          -1.4  z -2.99
+    0.8 / 0.5               -0.1  z -0.53          -0.6  z -1.66
+    1.0 / 0                 -1.2  z -3.08          -2.6  z -5.15
+    1.0, front only         +0.4  z +1.13          -0.2  z -0.51
+
+"Front only" kept interior neighbours at 0.8, so the only neighbour counted in
+full was the author's case: one that borders the rival, and only the stacks
+threatening the target. No arm gains pooled, and no front-only cell is
+significant (24:12 is the best against actuary, z +1.27, and the worst against
+marshal, z -1.44).
+
+What it says: the double count is not why 1.0 lost. Counting the neighbours
+another stack could pin for less is worse, and worse the less they count, so
+0.8 for them is right or too low. A neighbour only the same stacks can pin is not
+worth more than 0.8 either. Two possible reasons, neither tested: the ledger can
+spend the reliever on a strike in a later turn, before the relief is needed; and
+the rival's stack can be reinforced from behind during the warning window. Not
+run against knower or at Learning, since neither opponent measured hinted at a
+gain. Deleted.

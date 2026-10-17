@@ -13,7 +13,7 @@ import { FOG_ON_SCOUT, FOG_ON_SIGHT } from "./config.mjs";
 // settings_json to non-defaults (starconquest/settings.py), so whatever is
 // left over *is* the diff — nothing here needs to know the defaults
 // themselves, only how to name each field.
-const KNOB_LABELS = {
+export const KNOB_LABELS = {
   node_jitter: "Node jitter",
   relax_min_sep_frac: "Min sep",
   lloyd_passes: "Lloyd passes",
