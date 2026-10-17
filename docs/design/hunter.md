@@ -145,6 +145,11 @@ up:
 |---|---|---|---|---|
 | 67.5% (+7.8) | 71.0% (+12.2) | 64.8% (+16.2) | 73.0% (+7.5) | 64.5% (+13.2) |
 
+Against marshal (9.2M, 100 seeds): 81.2%, +3.5 over plain hunter (z +2.71),
+every cell up. Under a browser-sized guard (`BUDGET_SCALE` 0.5 on the Mac, so
+wall-clock dependent): 65.7% against actuary, +8.9 (z +7.23), about 80% of the
+unlimited gain; 24:3, where rollouts cost most, kept only +1.8.
+
 Stalemates fell to 5.7% of games (plain hunter about 10%). Cost with the guard
 lifted: median 1-12 ms per decide (most turns roll nothing), 95th percentile 23
 ms at 7:6 and 127 ms at 18:6.
@@ -169,7 +174,7 @@ seeds, five cells):
 | marshal | 77.4% | 71.7% | +5.7 (z +4.04) |
 | knower, Predict | 86.8% | 83.1% | +3.6 (z +3.29) |
 | thinker | 97.2% | 97.0% | +0.1 |
-| knower, Search | 40.5% | 27.0% | 10 seeds only |
+| knower, Search | 38.3% | 27.0% (10 seeds) | 60 seeds for hunter (24:3 52.9%, 18:18 23.3%) |
 
 ## What it costs
 
