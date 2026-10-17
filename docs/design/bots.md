@@ -30,8 +30,9 @@ the section holding the evidence.
   keyed off travel time is live in one regime of three. See "Lane length across
   the parameter space" below.
 - **Check against other opponents, not only a copy of the bot.** `ENEMY_NEAR`
-  gained 5 points in self-play and lost 7 against thinker. See
-  [`marshal.md`](marshal.md), "The 2026-09 tuning sweep".
+  gained 5 points in self-play and lost 7 against thinker ([`marshal.md`](marshal.md),
+  "The 2026-09 tuning sweep"); a split guard gained 6 in self-play and lost 6
+  against actuary ([`marshal-joint.md`](marshal-joint.md), "Against the roster").
 - **Score a rarely-firing change by seed, not by game.** An untouched seed splits
   1-1, so `tools/sweep.py`'s SEED PAIRS and PAIRED ARMS count only what changed.
   The remnant tactic read 51.3% by game and z +3.93 by seed. See
@@ -51,12 +52,13 @@ the section holding the evidence.
   game.** An unknown name silently falls back to heuristic, so a z of +17 is a
   bug, not a discovery. See [`marshal-pricing.md`](marshal-pricing.md), "Racing
   a third player for the same system".
-- **Ablating one mechanism at a time hides interactions.** `FRONTIER_GUARD` read
-  as dead weight until Phase 3b spent the ships it was hoarding. See
-  [`marshal.md`](marshal.md), first section.
-- **Win rate is not the whole objective.** Watch timeouts and game length too: a
-  variant can hold its win rate while games stretch into stalemates. See
-  [`marshal.md`](marshal.md), first section.
+- **Ablating one mechanism, or tuning one constant, at a time hides interactions.**
+  `FRONTIER_GUARD` read as dead weight until Phase 3b spent what it hoarded
+  ([`marshal.md`](marshal.md), first section), and one guard was two floors
+  ([`marshal-joint.md`](marshal-joint.md); `tools/coupling_census.py`).
+- **Win rate is not the whole objective.** Watch timeouts and game length, and
+  score a timeout both as a draw and as a board not taken. See
+  [`marshal.md`](marshal.md), first section, and [`marshal-joint.md`](marshal-joint.md).
 - **Check, rather than assume, that a variant with every new flag off is
   bit-identical to the base.** See [`marshal-pricing.md`](marshal-pricing.md),
   "Two doomed neighbours…", and [`marshal-flow.md`](marshal-flow.md), "The empty

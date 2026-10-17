@@ -1,7 +1,7 @@
 # marshal design notes: overview and standing
 
 `models/marshal.py` is the strongest bot that predicts nobody. Its notes span
-three files, in the order the work happened:
+four files, in the order the work happened:
 
 - **This file:** what marshal was built on, what the first measurements
   deleted, the current ladder ("Where marshal stands", which is the table to
@@ -13,6 +13,11 @@ three files, in the order the work happened:
   re-flooding, the successor fixes folded back in (A-C), the empty interior,
   denying the swap, when to evacuate, and feeding captures (from the board's
   human wins).
+- [`marshal-joint.md`](marshal-joint.md): which constants should be tuned
+  together. Covers how the phase order couples them, the coupling census, joint
+  sweeps of each group, `FRONTIER_GUARD` split into a floor for the priced strike
+  and one for the surplus pour, and how far a joint optimum moves between
+  opponents. Read it before re-tuning any constant here.
 
 Later sections often supersede earlier ones. Look for a **Superseded** note
 before relying on a constant's history. Roster-wide rules and the measurement
@@ -339,6 +344,12 @@ Resolved by measurement rather than by restoring 0.3 — the guard is now `0.55`
 on the sweep below, and the attributability argument is formally dropped: three
 of marshal's margins are its own figures now, not thinker's, and the reason to
 prefer any of them is the measurement rather than its provenance.
+
+> **Revisited (2026-10-16).** Every guard row in this file moved the guard as one
+> number, and it is the floor for several phases. Against stock marshal they want
+> different floors (the priced strike none, the surplus pour about 0.55); against
+> actuary the whole guard wants raising. See "One guard, two floors" and "Against
+> the roster, the optimum moves" in [`marshal-joint.md`](marshal-joint.md).
 
 ## The 2026-09 tuning sweep
 

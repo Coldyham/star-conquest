@@ -47,6 +47,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |
+| [`design/marshal-joint.md`](design/marshal-joint.md) | marshal: which constants move together, how the phase order couples them, the coupling census, joint sweeps, and the guard split into a strike floor and a pour floor |
 | [`design/actuary.md`](design/actuary.md) | actuary: the projected ledger instead of phases, its cost, where it stands, what the measurements changed; the planned opening (Opening: Planned) |
 | [`design/learner.md`](design/learner.md) | learner: each rival's habits read off the board and kept turn to turn, memory keyed by the game's path, how well it predicts the roster's launches and a person's, the gate it did not pass, the bot built on actuary anyway, and the improvements proposed for it |
 | [`design/learning.md`](design/learning.md) | actuary's third stop (Style: Learning): the learned strike curve in the risk term, each garrison next door priced as striking whole or not at all, and the arms tried on it |
@@ -230,6 +231,9 @@ only for a fight; what is deliberately not animated.
 - **What the board's human wins say (2026-09-30).** The hold test on a capture was deleted. `FEED` was shipped, gated at `FEED_MAX_TURNS = 2`. *Open: no lone trickles into a rival (not yet measured).*
 - **Holding a capture before the counter (2026-10-12).** From a hand-played game (`tools/seat_play.py`): `HOLD_FOLLOW`, a follow-up timed to land between the capture and the earliest counter, and `BACKFILL`, a guard joining a strike when a stand-in on a no-slower lane replaces it. Why each fires as often as it does, the sweeps against marshal, knower and actuary. `BACKFILL` deleted; `HOLD_FOLLOW` re-measured seed by seed (a faint lean, z +1.36 on fresh seeds) and kept off behind its flag.
 
+### design/marshal-joint.md
+- **Which constants move together (2026-10-16).** *The decision order is what couples them*: one floor spent in order, the price as a gate with the pour setting the size, one reading used twice; when each constant was last swept and with what missing; the regime gates. *The census* (`tools/coupling_census.py`): the guard is the hub, three groups share decisions (the strike gate, the long-lane pour, the short-lane front), most constants are separable, and decision-level coupling is necessary but not sufficient. *One guard, two floors*: against stock marshal the guard's two floors want different values (the priced strike none, the pour 0.55), a joint move worth 6.0 points on fresh seeds that no sweep of `FRONTIER_GUARD` alone can reach; the relief weight stays put. *Against the roster, the optimum moves*: the same split is level against knower and loses 6.2 (z -8.5) against actuary, where every lower guard loses and the whole guard wants raising (1.0: +3.0 scored as draws, +0.7 as losses), so the split is a best response to stock marshal's stalemates, not a better bot. *The long-lane pour*: `DENY_SWAP` and the reflood gate are substitutes. *The short-lane front*: `FEED` 1.5 is better there and was never tried above 1.0; `FAST_GUARD_WEIGHT` 0 confirmed. *The price*: the two relief weights add. *A timeout is a board not taken*. *What to tune together*, and how to sweep a group (against the roster, not a copy of the bot).
+
 ## Decided against
 
 Each entry gives the idea, the outcome and where it is recorded. "Null" means
@@ -274,6 +278,12 @@ the measured result was indistinguishable from the baseline.
 - A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`, kept off behind its flag): a faint lean seed by seed (z +1.36 on fresh seeds across marshal, knower and actuary) that no sample establishes. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
 - `CORNERED_EDGE` (full attack edge on a garrison with nowhere to run): 49.2%, null. `REFILL_SOURCE` (top up a struck-from source from its neighbours): 45.3%, reproduced worse; from rear systems only, 49.2%, null. `TRICKLE_GATE` (the "no lone trickles" candidate: pour on a rival target only with a same-turn wave): 50.9%, then exactly 50.0% on 300 fresh seeds including 3 ly/turn. All deleted. *See `seat-play.md`, "What was built from these games".*
 - **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
+
+### marshal: [`design/marshal-joint.md`](design/marshal-joint.md)
+- The guard split into a strike floor of 0 and a pour floor of 0.55: +6.0 against stock marshal on fresh seeds, level against knower, -6.2 (z -8.5) against actuary. A best response to stock marshal's stalemates, not a better bot. Not shipped. *Against the roster, the optimum moves*.
+- Feeding before the pour (Phase 3b stops at `FEED`'s own level, read raw, on boards `FEED` runs on): -1.4 points (z -4.7) against marshal, up to -5 on short lanes. The shipped order, pour then feed, stays. *One guard, two floors*.
+- A higher pour floor on its own (0.75, 1.0) at the shipped guard against marshal: null to worse. A lower floor for relief alone: null; for the front top-ups alone: +0.7. *Same section*.
+- **Open, not rejected:** a higher guard against actuary (1.0: +3.0 scored as draws, +0.7 as losses, more stalemates), which costs against marshal (0.70: -2.2) and is untried against knower; `FEED` above 1.0 on short lanes; a pour floor shaped by lane length. *Against the roster*, *The short-lane front*.
 
 ### actuary ([`design/actuary.md`](design/actuary.md))
 - Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
