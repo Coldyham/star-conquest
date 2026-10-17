@@ -1020,4 +1020,7 @@ def configure(overrides: dict) -> None:
     for name, value in overrides.items():
         if name not in g:
             raise KeyError(name)
-        g[name] = type(g[name])(value) if isinstance(g[name], (int, float, bool)) else value
+        if isinstance(g[name], tuple):
+            g[name] = tuple(value) if isinstance(value, (tuple, list)) else (value,)
+        else:
+            g[name] = type(g[name])(value) if isinstance(g[name], (int, float, bool)) else value

@@ -39,7 +39,10 @@ def _variant(spec: list[str]) -> dict[str, float]:
     out = {}
     for item in spec:
         name, _, value = item.partition("=")
-        out[name] = float(value)
+        if "," in value or value == "none":       # a tuple: "0.4,2.5", or "none" for ()
+            out[name] = tuple(float(x) for x in value.split(",") if x) if value != "none" else ()
+        else:
+            out[name] = float(value)
     return out
 
 
