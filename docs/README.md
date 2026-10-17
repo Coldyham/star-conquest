@@ -2,36 +2,43 @@
 
 The design notes in `design/` hold the *why* behind the rules in `CLAUDE.md`:
 the reasoning, the measurements, and the alternatives that lost. This page says
-which file holds which section and lists everything that was decided against,
-so a new session can check an idea before rebuilding it.
+which file covers what. Two companion pages are for grepping, not reading whole:
+[`sections.md`](sections.md) lists every design file's sections, one line
+apiece, and [`decided-against.md`](decided-against.md) lists every idea that was
+built or proposed and then dropped, so a new session can check an idea before
+rebuilding it.
 
 ## Using these docs
 
-- **Before proposing a mechanism, a bot tactic or a re-tune, check
-  [Decided against](#decided-against) below**, then grep `design/` for the
-  constant or function you would touch. Most ideas that look obvious have
+- **Before proposing a mechanism, a bot tactic or a re-tune, grep
+  [`decided-against.md`](decided-against.md)** and `design/` for the
+  constant, function or idea you would touch. Most ideas that look obvious have
   already been built and measured, and many measured null or worse.
 - **Before running a bot measurement, read "Measuring a bot" in
   [`design/bots.md`](design/bots.md).** It lists the method mistakes earlier
   sweeps made.
 - `CLAUDE.md` states *what* each rule is. A design file's headings match the
   `CLAUDE.md` bullet they explain, so the heading text is the key to search for.
-- Read a design file when you are changing that code, not as background.
+- Read a design file when you are changing that code, not as background, and
+  prefer the section you need (find its heading in [`sections.md`](sections.md))
+  to the whole file.
 
 **Adding to them.** Put a section in the file for its area, under a heading that
 matches the `CLAUDE.md` bullet. Record a negative result as carefully as a win:
-what was built, the numbers, why it lost. Then add its line to the section list
-below, and to [Decided against](#decided-against) if it lost. Point to another
+what was built, the numbers, why it lost. Then add its line to
+[`sections.md`](sections.md), and to [`decided-against.md`](decided-against.md)
+if it lost. Point to another
 file's section by file and heading (`marshal-pricing.md, "Garrisons run
 away"`), never with "above"/"below". Code comments do the same
 (`see "Denying the swap" in docs/design/marshal-flow.md`). Keep each file under
-~1000 lines. When one grows past that, split it by topic and update this page and
-`CLAUDE.md`'s list of files.
+~1000 lines. When one grows past that, split it by topic and update this page,
+`sections.md` and `CLAUDE.md`'s list of files.
 
 ## Files
 
 | File | Covers |
 | --- | --- |
+| [`design/rules.md`](design/rules.md) | Every `CLAUDE.md` rule in full, under the same headings, with the functions and tests it names (grep it; don't read it whole) |
 | [`design/core.md`](design/core.md) | Settings tokens, the random seat, challenge links and keeping digests stable, ship-speed growth, in-lane battles, the replay log, star names |
 | [`design/shell.md`](design/shell.md) | Text sizing, touch targets, viewport margins, the send popup, forwarding rules, the menu's Combat page, spectating, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
@@ -61,332 +68,3 @@ are written for outside developers building their own bots, and
 published documents, not working notes. [`site-merge-plan.md`](site-merge-plan.md)
 is the planning brief for merging the game and board sites. That merge is
 implemented, and the brief is kept for its reasoning.
-
-## Sections, by file
-
-### design/core.md
-- **Settings tokens.** Pruned, then deflated. Mode, players, nodes and seed are always emitted.
-- **A seat left to the seed.** Why `random` resolves in `build_state` rather than in a dispatcher bot (the oracle contract). The pick is derived, never drawn. The pool is a fixed list (`RANDOM_POOL`) and the log records what it dealt. The win overlay reveals it, and `Settings` keeps the placeholder.
-- **Challenge links.** Score and tie rules. Links travel by clipboard only. Editing a challenge asks first rather than locking the widgets.
-  - *Keys outlive the schema that made them.* `_LEGACY_KEY_DROPS`, `findTwin` folding, newest key wins, the `sc_config_key` trade-off, the int/float `aux` digest leak.
-- **Ship-speed growth.** Applies at launch only, and compounds rather than growing linearly (with the reason). Re-times from `length_ly`.
-- **In-lane battles.** A fight is a geometric meeting, fought pairwise; the winner is only thinned. Growth mostly switches the feature off.
-- **Persistence, replay & history.** Format v2 records orders plus dice, and the alternatives that lost. Rules live in the log. The `"ai"` flag doubles as the seat claim. A resume always lands paused. A live turn's rng is derived (`replay.reseed`), so a rewind is not a re-roll. *Two streams*: bots decide in parallel from the turn's start (`engine.decide_seat`), and each fight rolls dice keyed to its place (`engine._Dice`), so seat order and unrelated moves can't move a roll; why knower seeing the real dice is fine; the `keyed` marker.
-  - *`match_id`.*
-- **Star names.** Generated at build time; named last so seeds don't move. Labels are placed collision-first, with a reserved slot for marks.
-- **Symmetric layouts** (under "Past a standard board the box grows"). Hub, ring, wheel and core; why `hub` is pinned rather than a `RULES_VERSION` bump; added lanes chosen on one seam and rotated; why `core` opens the middle up; where `layout` is inert.
-
-- **Rules in full** (detail kept out of `CLAUDE.md`): in-lane battles; pile-up resolution; replay and history; an all-bot game has no human seat; whole-number floats don't survive the browser; past a standard board the box grows; settings, challenge links and keys; star names.
-### design/shell.md
-- **Text sizing** and **`config.touch_ui`.** Measured layout. The send popup is the one place the tap floor gives way.
-- **Map viewport margins.** The `node_clearance` floor, and clamping against the fit-padded span.
-- **Send popup / `Ui.editing_existing`.** Unwinding to IDLE on an edit; the slider is hit-tested before the panel drag.
-- **Forwarding rules.** A hold per system and a share per lane. Adding a lane splits evenly and removing one undoes it; + takes from home, then the other lanes. One rounding formula behind orders and every number shown. The popup's three shapes, and what a split sheds on a short screen. The hold badge under the system. Names fit in three steps.
-- **Combat rules page.** It teaches the square law from the real code (`preview_fight`): parameters rather than `config`, corners rather than samples, demo sliders on `MenuState`, hand-broken prose, the jitter matrix.
-- **Losing / spectator mode.** Keyed on defeat, plus how the reset view frames the map.
-- **Route mode.** A proposal plus a confirm. Owned-only paths are forced. A plan can't contradict itself, but it can loop with existing rules.
-  - *Two sub-modes.* Chain and rally share `flow_field`. Distance is travel turns, not hops. One Mode button. Ties split evenly. Auto-route. A tap always aims (two rejected shapes). A plan keeps a system's hold.
-
-- **Rules in full** (detail kept out of `CLAUDE.md`): measured layout and `touch_ui`; browser bridges (`softkeyboard`, `webstore`, `share`, quitting); send popup and spectating; viewport margins; the Combat tab; route mode.
-### design/turnfilm.md
-**Animated end of turn** is the reasoning, organised by bold lead sentences. In
-order: why it exists (legibility); it plays back the past; events carry results;
-why it is its own module; the crossing sort key; the launch tick; leads rather
-than dwells; production as a mark; combat's two speeds (`linger`); marks outlive
-their film; marks with no film at all; fog as the union of both turns; the
-deferred camera snap; pause freezes; chaining runs of turns; `_primed`; carrying
-the overrun and the frame cap; the camera and autoplay exemptions from "any
-press skips"; the loss label; the shared mark slot; one mark per system;
-scrubber timing; no in-game toggle; the rim clamp; stored lane tracks; a burst
-only for a fight; what is deliberately not animated.
-
-- **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
-### design/hand-maps.md
-- **Hand-authored maps**, with subsections: the recipe on `Settings` (and its `_LEGACY_KEY_DROPS` cost); a recipe rather than a `GameState` as the editor's model; the geometric rules as hard blocks (mapgen's own figures); `CUSTOM_MAX_NODES` versus `MAX_NODES`; Auto-lanes replaces rather than merges; a crossing warns while a graze blocks; two gestures, one commit path; no deselect gesture in Systems; the seat rows as one control; auto-relane skips a drag; seats gap-free without forced renumbering; what the menu hides; the wider box; opening on a blank canvas.
-
-- **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
-### design/leaderboard.md
-- **Bot replays.** A scheduled job rather than a service.
-  - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*; *estimated difficulty* (the share of bots that lose a map, as a sort and an Easy-to-Very-hard badge).
-- **Checked scores.** The id rides on `Challenge`. Two consented senders. `game_logs` is private. No identity on a row. `is_current` and `rules_version`. The verifier binds a log to its setup, and re-rolls every keyed turn's dice (hand-picked rolls are a `mismatch`; turns from before keying pass unchecked).
-  - *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
-- **Playstyle readings.** The player page's panel, read by the worker from `public_replays` only, one row per match and never per name. Every field sums, so the page pools a name's rows, and the bots' column is the same shape, pooled from self-play winners (`playstyle-baseline.mjs`, generated). `rev` and `shape`. *Decided against: warming actuary's learner from a profile*.
-- **The grace period.** Half an hour's grace after losing a node or its neighbour, derived in `fold`, for a game started while you still had access (stamped at Start, `scores.campaign_start`). *Decided against: a cooldown between moves; an "able to capture" flag on its own*. *In the game*: a confirm before Start and a top-bar countdown, from `/api/campaign` running the same JS.
-- **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim, so a neighbour stolen mid-game no longer voids it. Holders see inbound fleets, and one fleet per player paces the week. Collisions go to the better score. Identity is the open problem.
-
-- **Rules in full** (detail kept out of `CLAUDE.md`): the game and the board are one site; crowns, the weekly campaign and embargoes; the bot column; a replay is never shown as if it still reproduced the game.
-### design/setup-families.md
-- **Setup families.** The problem (62 configs, 28 families on 2026-10-14); **Pace** (the median lane estimate, `PACE_LY` and how it was fitted, why about 81% exact is the ceiling, the bands); **The family tree** (parent = nearest older config within a cost of 3, the cost table, opponents as a light edit, rescales, why not clustering, what it shows on live data; *data and fallback*; *the view*); *proposed, not built*: a "made from" stamp on the score; *decided against*: folding opponents, a By ruleset view, a 2-D map, clustering, a family id on `Settings`, grouping on `sc_config_key` text, storing the exact median lane.
-
-### design/schema.md
-- **The trust model** (append-only by the absence of policies; worker-only and closed tables) and **re-pasting upgrades a board** (added columns, drop/add checks, view columns go last, and the `public_replays.rules_version` incident).
-- Per relation: **games and its embargo** (first insert wins; the moves, never the score; why `game_embargoes` is derived); **scores**; **game_logs** (the size bound, claims stored as claims); **score_checks**; **playstyle_readings**; **sc_config_key and sc_bots** (the search_path lint); **configs and config_tags** (first name wins, distinct players, legacy tags at weight 1); **bot_scores**; **campaigns**; **public_replays and public_watchable_replays** (owner rights, joining the embargo through `scores.game_key`); **config_summary**; **counted_scores and the crowns**.
-- **The grant trap.** `service_role` skips policies, not grants; three incidents, the last through a `security_invoker` view chain; `tests/test_schema_grants.py`.
-- **Play-by-post tables.** Kept apart from the board; inputs, not a board; seat tokens; the deadline; `board_digest` as a tripwire.
-
-### design/par.md
-- **Par search (a local check).** Why it is less random than it looks (bots are free to predict; two sources of chance, uncoupled since keyed dice; a rewind is not a re-roll, and what it was before); the floor and its one inadmissible case; lucky versus honest dice (lucky is not a ceiling); the beam search; readings retaken 2026-10-14 under keyed dice: it beat 7 of 9 recorded human wins on honest dice, and on the live board (103 maps under 20 systems) honest dice match the best human score (median 1 turn sooner) but beat 6 of 7 wins played on keyed dice by a median 18 turns; the rollout bot matters more than the beam, so each child now rolls out with marshal and actuary and keeps the best (better on 28 of 36, at 2.4x the time); the `verify_scores` gap it exposed, whose dice half is closed for keyed turns.
-
-### design/seat-play.md
-- **What decided the games.** Both bots evacuate into the system you struck from; covering every exit (a pincer whose sources keep their garrisons, or relief timed onto an evacuee's landing) is what killed stacks; a dead end bottles a stack; actuary punishes a thinned garrison the next turn; opening tempo; a free-for-all goes to the swap war.
-- **Readings over the logs.** Strikes on a system emptied at launch succeed 43-47% against people and 67-76% against bots (public replays); marshal's price is for a garrison that runs; actuary crossing its own transfers; actuary waiting for the worst roll on neutrals. The last two were built and measured in `actuary.md`.
-- **What a person should do.** The brief version, including pinning actuary.
-- **What was built from these games.** Four marshal arms (all deleted) and actuary's `SELF_RELIEF`.
-
-### design/pbp.md
-- **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
-
-### design/bots.md
-- **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.
-- **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
-- **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built, and learner's model (stage 1, `learner.md`); duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Also two measurement ideas not yet built.
-- **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
-- **The person's habits.** A pointer to `learner.md`.
-- **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
-- **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime. The first position-suite numbers.
-- **Replaying a bot for the leaderboard.** Best profile, not menu default. Guards lifted 100x (`inf` in tests). The seat-flag incident, and how a stored replay and the autoplay fix resolved it.
-- **Break-even margins and the roster back-port.** `min_swing` floors; clearing the edge is not a capture; the honest margin costs something at high jitter, and that cost is correct.
-- **Defender advantage and the AI.** Margins are priced against the effective garrison; the slider caps at 1.5 because of stalemates.
-- **The in-app bot maker: built, measured, not merged.** Branch `bot-maker`, PR #20.
-- **Bots that aren't Python.** Why the wire protocol is shaped as it is.
-
-- **Rules in full** (detail kept out of `CLAUDE.md`): external bots' four rules; `AiParams.aux`; the `tests/sim` harness; per-seat AI and pricing a fight.
-### design/knower.md
-- **Simultaneous resolution.** Why an oracle is possible at all.
-- **What the oracle buys, and where.** A turn of warning, worth more the faster ships are. Depth 0 is not thinker.
-- **Each Oracle setting against thinker and marshal.** Off / Predict / Search head to head in three cells. Only Search beats marshal; the ladder's 93% over thinker was a lucky 30 seeds.
-- **Built, measured, removed.** Two ideas.
-- **The depth search: branch the root, play the rest on.** Why branching deeper did nothing, and why more openings beat more turns. Most of the result against marshal comes from borrowing marshal.
-- **Borrowed candidates (`EXTERNAL_CANDIDATES`).** Candidate win shares, contested decisions only, and why `SEARCH_WIDTH` is 2.
-- **How far to look.** The horizon is the longest lane plus `LANE_CUSHION`, which replaced a fixed depth, so Oracle is now Off / Predict / Search. Also the old depth curve.
-- **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`, which also counts rival bots that declare `decide_ms`. The browser is unmeasured; never measure on a loaded machine.
-- **Seats it cannot run: stand-ins and people.** A predicting module's `stand_in_params` (actuary: Learning runs as Planned), run in the forecast and the rollouts and trusted. Against actuary-Learning, untrusted is null at Predict (z +0.95) and large at Search (z +9.50); trust adds z +6.54 / +3.88. People stay on `_blind`: a stronger bot is a worse forecast of them, and assuming they hold loses to bots flagged as people (z -3.33).
-
-### design/council.md
-- **What council changes, and what each change bought.** actuary as an adviser, the learned judge, each adviser playing its own line (the biggest gain). The judge's features and fit. `aux` 0 is knower at Search.
-- **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
-- **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
-- **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
-- **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
-
-### design/actuary.md
-- **The ledger and the greedy.** A timeline per system, fights priced so only the verdict is worst-case, one value in ships, risk as an expected loss, greedy commits. It is not an oracle.
-- **Cost, and the caches that make it affordable.** Version-stamped caches and the `_idle` prune, both checked exact. 1.6-3.9 ms a decide, and what that does to a knower Search seat.
-- **Where actuary stands.** Four map cells, free-for-all, the combat sliders. Weak at 24 nodes 3 ly/turn and at jitter 0.3.
-- **As one of knower's borrowed candidates (measured, not shipped).** 10.4% of contested picks, distinct from the default 91% of the time.
-- **What the measurements changed.** Survivors and threats at the nominal roll; the constants' plateau; `FRONT_BONUS` 0.5.
-- **The 2026-10 sweep: off the plateau.** 58,400 duels against marshal: `MIN_GAIN` 0 (+7.4 pooled, +18.6 at 24 nodes 3 ly/turn) and `FRONT_DECAY` 0.75 (+5.6) win in every cell; risk and reinforce weights confirmed. Reproduced on fresh seeds, where the two do not stack and a horizon cap of 8 does nothing. `MIN_GAIN` 0 costs 7-13% a decide at default sizes, 51% at 80 nodes. It also wins against thinker, knower-Predict, across the advantage sliders and in free-for-all; level-to-better against knower at Search. Shipped as `MIN_GAIN` 1e-9 (exactly 0 commits float noise; level with 0 over 12,000 games), with `decide_ms` refitted to `6.4 * (nodes/40)^0.77`.
-- **Behind on income, ahead on ships (measured, not built).** A switch to recklessness while a ship lead runs out against an income gap. The standing is 7% of post-contact turns, mostly a 1-2 ship lead for 2 turns; a real lead on a short clock came up 4 times in 84 actuary games. Behind on both is where seats lose.
-- **The planned opening (Opening: Planned).** The default `aux` stop: it plans the land-grab as a one-player puzzle until first contact (Greedy is the ledger throughout); the clock is about twice the earliest strike; a gain on 40 and 80 nodes against marshal and knower, noise below; a side too small to plan (under 7 systems held plus region) is left to the ledger; it costs marshal as a host; the deleted first attempt (rules about contested neutrals). *Planned against Greedy again (2026-10-13)*: on fresh seeds the ledger opening is level or better at 3 and 6 ly/turn at every size and at both stops (Learning pooled z +2.40), and the plan wins only at 12 ly/turn on 24-40 nodes; a gate on lane speed is proposed.
-- **A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, 2026-10-16).** A struck rival's fleet landing next door that can turn round in time counts as relief at 0.3. Bit-identical at 0; the measurements are in `marshal-pricing.md`.
-- **Relief only the same stack can pin (`SELF_RELIEF_SHARED`, built, measured, deleted 2026-10-16).** Pooled defence, from the author's triangle: a neighbour that only the threatening stacks border, counted in full, and the rest at 0.8 or less. Null to worse against actuary and marshal in every form, the front-only one included. The double count is not why `SELF_RELIEF` 1.0 lost.
-
-### design/learner.md
-- **Why the oracle flag does not make memory safe.** Every caller that runs a bot's `decide` on copies, branches, isolated positions or rewound boards, and `load_models` wiping module state.
-- **The memo tree.** A board is a node found by content; its parent is a stored board it provably follows (`_follows`). What a cold start costs.
-- **What a turn shows** and **the model and the prior.** Fresh fleets, one-turn launches from the garrison residual, strike records by ratio, send share, guard, evacuation; the prior fitted from roster self-play.
-- **The prediction check (`tools/learner_check.py`).** Four predictors (none, all, prior, learner), Brier and squared ship error; the two plan measures replaced before the first reading. Results in four cells on two seed ranges; what the model can tell apart (guard and evacuation, not the strike curve).
-- **Sizing a strike to its target, and splitting the strike from the target.** Re-read under actuary's `MIN_GAIN` 1e-9. Sizing kept: ship error down in 5 of 8 cell-runs, most at 24 and 40 nodes. The split deleted. The all-in share separates the roster.
-- **Predicting people (`--logs public`).** Posted human games scored offline. Memory beats the prior on people by 3.6% of Brier; knower's blind guess at a person, read as a forecast, is worse than assuming they hold, which backs `TRUST_HUMAN` off. marshal and actuary (Planned) are worse guesses still. What the model reads off people.
-- **The person's habits (`tools/human_habits.py`).** Posted games against roster self-play. 2/3 of players' ships marks a won game, and players' income crosses earlier but less reliably. The overkill is the endgame. The person empties frontier systems with relief covered 45% of the time (winning actuary 22%); a replayed log rewrites `config`. Frontier losses per system-turn.
-- **As a bot.** actuary's ledger on a board with the expected launches added; the Trust knob (Off = actuary exactly, Raise); against actuary Raise is level; first on the 2026-10-08 roster ladder, mostly because the oracle flag stopped knower reading it (worth ~20 points against knower to any bot that claims it without `stand_in_params`; knower now runs Learning as Planned). 0.08 from actuary on contested positions, closer than any two roster bots.
-- **Trusting a prediction (built, measured, deleted).** Thinning a source by its expected launch (Trust) and trusting confident calls once proven per rival (Sure). The model's calibration: confident calls are rare and not sharper late in a game.
-- **The gate.** Still not passed: memory wins on whether a strike comes, and the ship-error failures left are mostly intervals that cross zero. *Open:* whether that is power (a gate decision), and a strike curve that tells the bots apart.
-- **Joining actuary as a stop: the gate (written, not run).** Superseded by the next section. Raise against Off (both flagged, so the model alone) through `tools/sweep.py`: against stock actuary as a null control, marshal, and knower at Predict and Search, in actuary's five 2026-10 cells, fresh seeds from 6001. What passing means (a third stop on actuary's knob, above Planned) and failing (stays on the branch). Proposed improvements, each an extra arm: the prediction as the risk term's reach (Raise charges a threat twice), the strike and no-strike outcomes priced separately in place of an expected fleet, and evacuation and guard fed into the price of a capture.
-
-### design/learning.md
-- **Why the curve goes in the risk term**, **what was measured, and what failed first**, **the stop** and **what else it changed.** Built 2026-10-09 as actuary's third Style stop. Assuming a rival will not strike is close to right, and a launch cannot be recalled, so Raise (threat only) was the wrong use. Learning scales each rival garrison in actuary's risk by min(1, `LEARN_REACH` x the rival's strike curve at the ratio to the garrison we will hold). Raise, and Raise kept to unanswerable strikes: level with actuary. A flat reach scaled by `predict`'s call: better against marshal only. The curve read at the projected garrison: `LEARN_REACH` 8, plateau 8-13; on fresh seeds better against marshal (z +2.46, all at 18 systems), a lean against knower Off, level with actuary; against knower Predict and Search, with the oracle claim held equal (Planned flagged too), a lean of z +1.5 / +0.8, not significant; the rest of that row is the claim. Slow, fast and jitter 0.06: better against marshal in all three (z +2.0 to +3.0), better against actuary in the slow cell, nowhere worse; the free-for-all leans better (3 and 4 seats). 15-20% more per decide. The knob, the per-seat oracle claim, and the readings moved to `tools/learner_check.py`.
-- **Evacuation in the price of a capture (built, measured, deleted).** learner's improvement 3's evacuation half as an arm of Learning: a doomed rival garrison that sees the strike leaves at its learned rate. Worse against marshal, knower Off and Planned on 4,800 paired games; it can only take credit away from a strike that already wins.
-- **Strike and no-strike priced apart (built 2026-10-09, kept).** learner's improvement 2: each rival garrison next door strikes whole or not at all at its chance, and the risk is the expected shortfall, in place of a chance-weighted fleet that never flies. `LEARN_REACH` re-selected (8 of 4, 8, 16); on fresh seeds better than Learning against marshal (z +2.26), a lean against Planned (+1.64) and knower Off (+0.41); slow and fast speed cells, knower Predict and Search, and three free-for-all lineups no worse (knower Search leans worse, z -0.88). 18% of decisions changed, ~18% more per decide. Now Learning's risk term.
-- **Memory off: the prior alone (built, measured, flag removed).** Every rival read at the prior strike curve, the oracle claim held equal. On 9,600 paired games (fresh seeds 9001-9400, 18 and 40 systems) Learning beats memory-off nowhere: level against marshal (z -0.49) and knower Off (z -0.80), worse against Planned (z -2.29). Against the roster (on whom the prior was fitted), Learning's gain over Planned is the prior curve read at the projected garrison, not the memory. Against people it is untested. Whether to drop the memory, and with it the oracle claim, is left to the author.
-- **Five more arms, and three combinations (built, measured, deleted).** All with memory on, 4,800 paired games each on the same seeds: the pressed row (leans better everywhere, z +1.6 / +0.5 / +1.5, does not pass); strike size at the prior's all-in split, the learned guard (learner's improvement 3's other half), strikes that move together, and `PRIOR_WEIGHT` 1 (null). Every arm that thins the threat is worse against marshal. Pressed + guard, + size, + joint: all worse.
-- **The counter-strike (built, measured, deleted).** An option value on a reserve next to a rival, by that rival's learned rate of voluntary frontier empties (Playstyle's reading, which does separate the roster: actuary 0.24 to heuristic 0). Passed on the selection seeds (z +2.75 against Planned), failed on fresh ones (+1.35 marshal, +0.61 Planned, -1.94 knower Off). The memory-off twin did as well, so against the roster the learned rate adds nothing. People sit far from the prior on that trait (posted games: four players at 0.02 to 0.16 against the roster's 0.088), On the person's own positions the learned rate covers more of their real empties than the prior (z +3.77), but it does the same against bots by a wider margin, where it won no more games. So it is not evidence of winning, and the profile question stays open.
-
-### design/convoy.md
-- **The plan.** Supply per system and turn, objectives as N ships by turn t, defences then guard reservations then strikes by value per ship, launch at the last moment.
-- **Where convoy stands.** Five cells against the roster: above thinker everywhere, level with knower-Predict, below marshal and actuary.
-- **How differently it plays.** Distinct in the opening, close to the phase bots when contested; few strikes converge from more than one source.
-- **Its opening in front of another bot.** Costs in front of marshal, no gain over actuary's Planned; not borrowed.
-- **Where it loses to actuary.** Level at contact, out-traded after it.
-- **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
-
-### design/marshal.md
-- **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
-- **Where marshal stands.** **The current full roster ladder (re-run 2026-10-17, after the pour floor and `FEED` re-tune shipped, with the bot before it as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
-- **A stagger's nearer wave is reserved.**
-- **More ideas measured and deleted.**
-- **`FRONTIER_GUARD`.** How it came to be 0.40 while documented as 0.3; now 0.55.
-- **The 2026-09 tuning sweep.** What was adopted (partly superseded since), the regime-bound `ENEMY_FAR`, cross-opponent checks, negative results, the empty-interior statistic, and the two methodological notes.
-- **Is the guard a pool? (run 2026-10-16: a reserve).** Whether 0.55 per system stands in for a pooled guard: a stack's launch shrinks the guards beside it, and Phase 1 sends what that frees. Step 0 (a hand-board test) shows the mechanism exists. The Step 1 census (`tools/guard_census.py`, 1,800 games) finds released guard in the relief for 1.4% of seen strikes on guarded targets, against a 25% bar, with 65% evacuated. So `STICKY_GUARD` and `ISOLATED_GUARD` were not run.
-
-### design/marshal-pricing.md
-- **Racing a third player for the same system.** `_rival_waves` and `_after_clash`. The contested-neutral and remnant variants, why a high defender advantage makes waiting worse, and the harness traps. The remnant tactic re-measured seed by seed (2026-10-12): significant in duels, leaning worse in three-player games with knower, so `REMNANT` ships gated to two players alive (`REMNANT_MAX_PLAYERS`).
-- **Garrisons run away, so the jitter premium buys almost nothing.** 86.7% evacuate, so the attack margin is the advantage multiplier alone. Dropping the advantage half too is catastrophic.
-- **Two doomed neighbours, and what a retreat is worth.** `AVOID_ABANDONED`, `CONSOLIDATE`, `RETREAT_NEAREST`. Budget n in the thousands.
-- **Rushing the enemy.** marshal is already a rusher, and the target sort caps this whole channel at about 2 points.
-- **A 0-ship neutral.** Real waste, bounded by simultaneity and by fleets already in flight. Null.
-- **Holding a doomed system to sacrifice-and-retake.** A real mechanism, null result.
-- **Re-tuned for production-before-combat and the garrison-fights-last pile-up.** `_attacker_pileup` and `RISK_PARITY`. The four null tactics don't combine, and the theory that Phase 3b masks them is false.
-- **The attack side of the pile-up.** Shipped for correctness at a null result.
-- **A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, 2026-10-16).** From a trap every bot walked into: a fleet that lands next door and turns round onto the target before the strike. Counted in marshal and actuary at their garrison-relief weights (0.5, 0.3): +1.0 to +2.5 points against each other and themselves, reproduced on fresh seeds, null to better against knower, no cost. The motivating position is still struck at those weights; 1.0 refuses it but measures weaker against bots. *Open:* a higher weight against people, and council/knower's `_blind` model of a person.
-
-### design/marshal-flow.md
-- **Phase 3b re-flooding an already-covered target.** Neutral-only at first, because of the regression at high advantage; rival sieges are now gated at `RIVAL_REFLOOD_MIN_TURNS = 5`. Symmetric maps can't measure it. How it overlaps `DENY_SWAP`.
-- **A non-oracle successor to marshal.** A: `FLOW_AVOIDS_ABANDONED`. B: `RELIEF_AWARE`. C: `FAST_GUARD_WEIGHT`. Then the measurements (60.6% combined) and the `tools/sweep.py` smoke-gate quirk.
-- **The empty interior is the retreat.** The concentrating probe (spearhead) loses. `DEEP_RELIEF` is inert.
-- **Denying the swap.** Surplus-only, long lanes only (`DENY_SWAP_MIN_TURNS = 4`).
-- **When a doomed garrison leaves.** `EVAC_AT` was deleted.
-- **What the board's human wins say (2026-09-30).** The hold test on a capture was deleted. `FEED` was shipped, gated at `FEED_MAX_TURNS = 2` (re-tuned to `FEED` 3.0 at three turns on 2026-10-17, in `marshal-joint.md`). *Open: no lone trickles into a rival (not yet measured).*
-- **Holding a capture before the counter (2026-10-12).** From a hand-played game (`tools/seat_play.py`): `HOLD_FOLLOW`, a follow-up timed to land between the capture and the earliest counter, and `BACKFILL`, a guard joining a strike when a stand-in on a no-slower lane replaces it. Why each fires as often as it does, the sweeps against marshal, knower and actuary. `BACKFILL` deleted; `HOLD_FOLLOW` re-measured seed by seed (a faint lean, z +1.36 on fresh seeds) and kept off behind its flag.
-
-### design/marshal-joint.md
-- **Which constants move together (2026-10-16).** *The decision order is what couples them*: one floor spent in order, the price as a gate with the pour setting the size, one reading used twice; when each constant was last swept and with what missing; the regime gates. *The census* (`tools/coupling_census.py`): the guard is the hub, three groups share decisions (the strike gate, the long-lane pour, the short-lane front), most constants are separable, and decision-level coupling is necessary but not sufficient. *One guard, two floors*: against stock marshal the guard's two floors want different values (the priced strike none, the pour 0.55), a joint move worth 6.0 points on fresh seeds that no sweep of `FRONTIER_GUARD` alone can reach; the relief weight stays put. *Against the roster, the optimum moves*: the same split is level against knower and loses 6.2 (z -8.5) against actuary, where every lower guard loses and the whole guard wants raising (1.0: +3.0 scored as draws, +0.7 as losses), so the split is a best response to stock marshal's stalemates, not a better bot. *The long-lane pour*: `DENY_SWAP` and the reflood gate are substitutes. *The short-lane front*: `FEED` 1.5 is better there and was never tried above 1.0; `FAST_GUARD_WEIGHT` 0 confirmed. *The price*: the two relief weights add. *A timeout is a board not taken*. *What to tune together*, and how to sweep a group (against the roster, not a copy of the bot).
-- **Screening against the roster (2026-10-17).** *The objective*: points against marshal, knower and actuary, weighted 1 / 1 / 1.25 with a veto at -4 against any one, a timeout scored 0.1 toward whoever was ahead. *Five quick passes* (138,240 games): the guard's level only trades one opponent for another; what survives acts once the guard is set. *The factorial*: the pour floor, the relief weight, `FEED` and `FEED_MAX_TURNS` mostly add; `FEED` and `FEED_MAX_TURNS` are complements (three turns is null at `FEED` 1.0, the level it was deleted at, and pays at 2.0); the pour floor and the relief weight are substitutes; the relief weight depends on the opponent (+3.7 against actuary, -1.8 against marshal). *Levels around the corner*: `FEED` rises to 3 and is flat to 6, relief 0.65, `FEED_FRONT` worth 3.4, the long-lane pour group unmoved. *`FEED` is a ratio that stops binding*: past 2 nearly every front facing a rival is short. *Confirmation* (pre-registered; 57,600 duels and two free-for-alls): D, the pour floor 0.85 with `FEED` 3.0, `FEED_MAX_TURNS` 3 and `RELIEF_AWARE` 0.65, is +4.7 weighted (z +15.1; marshal +2.9, knower +3.8, actuary +6.8; +3.7 scored as losses), and better in a three-seat field at the default setup (+4.5) and a four-seat one (+3.7); the three constants alone are +3.8 in duels, and the pour floor is worth +2.2 in each field. *Shipped (2026-10-17)*: D, board for board as measured.
-
-## Decided against
-
-Each entry gives the idea, the outcome and where it is recorded. "Null" means
-the measured result was indistinguishable from the baseline.
-
-### setup families ([`design/setup-families.md`](design/setup-families.md))
-- Folding opponents into one setup, and a By ruleset view: the existing views stay as they are; opponents are a light edit in the family tree. *Decided against.*
-- A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. Storing the exact median lane per game: a column, and blank until the job runs. *Decided against.*
-
-### knower ([`design/knower.md`](design/knower.md))
-- Pricing three-way pile-ups with the oracle: a wash, possibly worse. *Built, measured, removed.*
-- Striking perishable (vacating) targets first: no change. *Built, measured, removed.*
-- Branching every ply of the search, cut per opening: replaced by root-only branching, which is even at a quarter of the cost. *The depth search.*
-- Rolling every line on until its fleets land: lost head-to-head. *The depth search.*
-- The all-in and push-for-depth postures inside the search width: stopped paying once real rushers were candidates. *Borrowed candidates.*
-- Any fixed search depth: replaced by longest lane + 5. Depth past 5 was noise. *How far to look.*
-- Modelling a person with marshal or actuary (Planned) instead of `_blind`: worse forecasts (Brier +0.021, +0.025). Assuming a person holds (`GUESS_HUMAN`, built, removed): worse against bots flagged as people (z -3.33), a test that favours the guess. *Seats it cannot run.*
-
-### council ([`design/council.md`](design/council.md))
-- Synchronised strike openings: a gain that did not replicate on fresh seeds. Staggered strikes, decoys, double strikes: null or worse. *Built, measured, dropped.*
-- Melee guard, denial weighting, relative melee scoring: null or worse in three-player games. *Same section.*
-- Predicting a knower rival with its real Search: null at double the cost. More openings (all postures, Greedy actuary, a hold): null. *Same section.*
-- Hybrids (−4.9 points) and dice shopping against the real keyed dice (−8.7). *Same section.*
-- NTBEA tuning, root crossover, successive halving: null on confirmation. *Same section.*
-- Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Same section.*
-
-### marshal: [`design/marshal.md`](design/marshal.md)
-- Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*
-- Chokepoint value (betweenness): loses at every weight. Pocket-sealing: a constant offset. *Same section.*
-- `FRONTIER_GUARD = 0` (ablated alone): wrong, because of its interaction with Phase 3b. *Same section.*
-- Reinforceability-scaled guards: 46%. Splitting a breakthrough's surplus: null. Dropping the guard against a neighbour our fleets take this turn: 48.4-49.5%, since a capture is often retaken and the guard is what holds it. *More ideas measured and deleted.*
-- A flat garrison floor (`RESERVE_FLOOR` 1 or 2): catastrophic. Opening the wedge gate at 3 players: a wash. Raising `RIVAL_WEDGE`: on its plateau. Propagating threat through neutral buffers: 26.7% in slow cells. *The 2026-09 tuning sweep.*
-- `ENEMY_NEAR`/`ENEMY_FAR`/`NEAR_PAD` and the distance ramp: removed later (see *Garrisons run away*).
-
-### marshal: [`design/marshal-pricing.md`](design/marshal-pricing.md)
-- Repricing a contested neutral against the rival's survivor: worse in duels, because the price is a gate. *Racing a third player.*
-- Arriving after a rival breaks a neutral (the remnant tactic): null by game rate, and worse at high advantage. Re-scored seed by seed it is z +3.93 in duels against marshal and +1.72 against knower, but leans worse (z -1.94) in three-player games with knower, so it ships only while two players are alive. Distinguishing same-turn blocs, or dropping them: a wash. *Same section.*
-- Dropping the advantage half of the attack edge as well as the jitter half: 8.6% at advantage 1.5. *Garrisons run away.*
-- A bonus for enemy-held targets, or rushing the enemy outright: null, and the strong form is worse. *Rushing the enemy.*
-- Repricing 0-ship neutrals: null. *A 0-ship neutral.*
-- Holding a doomed garrison to sacrifice and retake: null. *Holding a doomed system.*
-- The four null tactics combined, or with `COMMIT_SURPLUS` off: still null; the masking theory is false. *Re-tuned for production-before-combat.*
-
-### marshal: [`design/marshal-flow.md`](design/marshal-flow.md)
-- Gating Phase 3b re-flooding of rival targets at every lane length: regressed at high advantage. Kept for lanes of 5+ turns only. *Phase 3b re-flooding.*
-- Concentrating on one hammer stack (spearhead): 23-42%. `DEEP_RELIEF`: inert. *The empty interior is the retreat.*
-- `DENY_SWAP` on Phase 3's priced strike: a disaster. Shipped on the surplus only. *Denying the swap.*
-- Evacuating at the last moment (`EVAC_AT`): did not replicate. *When a doomed garrison leaves.*
-- A hold test on captures: worse the harder it bites. `FEED_LOCAL` and `FEED_MAX_TURNS = 3`, at `FEED` 1.0: deleted. Three turns pays at `FEED` 2-3 (see `marshal-joint.md`, *Screening against the roster*). *What the board's human wins say.*
-- A follow-up timed to hold a capture before the counter (`HOLD_FOLLOW`, kept off behind its flag): a faint lean seed by seed (z +1.36 on fresh seeds across marshal, knower and actuary) that no sample establishes. Freeing a guard when a stand-in on a no-slower lane backfills it (`BACKFILL`): null against marshal, worse against knower (z -2.37). *Holding a capture before the counter.*
-- `CORNERED_EDGE` (full attack edge on a garrison with nowhere to run): 49.2%, null. `REFILL_SOURCE` (top up a struck-from source from its neighbours): 45.3%, reproduced worse; from rear systems only, 49.2%, null. `TRICKLE_GATE` (the "no lone trickles" candidate: pour on a rival target only with a same-turn wave): 50.9%, then exactly 50.0% on 300 fresh seeds including 3 ly/turn. All deleted. *See `seat-play.md`, "What was built from these games".*
-- **Open, not rejected:** porting `_evacuate`'s defensive fixes to thinker and knower (unmeasured; see *Two doomed neighbours*), and no lone trickles into a rival (unmeasured).
-
-### marshal: [`design/marshal-joint.md`](design/marshal-joint.md)
-- The guard split into a strike floor of 0 and a pour floor of 0.55: +6.0 against stock marshal on fresh seeds, level against knower, -6.2 (z -8.5) against actuary. A best response to stock marshal's stalemates, not a better bot. Not shipped. *Against the roster, the optimum moves*.
-- Feeding before the pour (Phase 3b stops at `FEED`'s own level, read raw, on boards `FEED` runs on): -1.4 points (z -4.7) against marshal, up to -5 on short lanes. The shipped order, pour then feed, stays. *One guard, two floors*.
-- A higher pour floor on its own (0.75, 1.0) at the shipped guard against marshal: null to worse. A lower floor for relief alone: null; for the front top-ups alone: +0.7. *Same section*. Against the roster 0.85 adds: +1.65 weighted in the factorial, +0.85 at D. *Screening against the roster*.
-- The guard moved as one number, up or down (0.40-1.0, every floor): it trades actuary against marshal and knower (1.0: +4.3 against actuary, -8.1 against marshal, -5.8 against knower), so no level survives the weighted screen. A strike floor above the pour (0.85 / 0.55): -7.6 against marshal. A long-lane guard weight (0.5, 1.5): worse. `RELIEF_AWARE` 0.35 (-3.0 against actuary) or 1.0 (-3.2 against marshal). `FEED_FRONT` off at `FEED` 3: -3.4. *Screening against the roster*.
-- **Open, not rejected:** the guard at 0.45 under the shipped 0.85 pour floor (ends a quarter of the stalemates against marshal, mixed against knower); D at defender advantage 1.5, its one losing cell (-2.0 against knower); a pour floor shaped by lane length. *Screening against the roster*, *Against the roster*.
-
-### actuary ([`design/actuary.md`](design/actuary.md))
-- Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
-- Pricing threats at the worst roll: hoarded garrisons; worse in both cells measured. *Same section.*
-- Shipping it as a knower `EXTERNAL_CANDIDATES` entry: not done (cost on every Search root, effect on knower unmeasured), not rejected. *As one of knower's borrowed candidates.*
-- Rules about contested neutrals (land after a rival racing for one, veto an unholdable capture and guard beside it, veto a capture that does not repay before the earliest possible arrival): worse than Greedy in every cell. *The first attempt.*
-- A planned opening reaching 2 turns past the halfway line: worse at every size. *The clock is about twice the earliest strike.*
-- The planned opening in front of marshal: worse in every cell. *In front of marshal it costs.*
-- Handing the opening over 2 or 3 lanes from a rival: fixes small maps, gives back the 40-80 node gain. A side floor of 9-16: costs a little at 24-80 nodes. *A side too small to plan.*
-- Trying several `aux` values per map in the bot column and keeping the best: mostly picks the luckier dice (one board ranges 13-165 turns on dice alone); fix the bot instead. *Same section.*
-- `RISK_WEIGHT` 0.3 / 1.0, `MIN_GAIN` 0.5, `FRONT_DECAY` 0.25, `TAIL_TURNS` 14, `REINFORCE_WEIGHT` 0: all worse pooled against marshal. *The 2026-10 sweep.*
-- `SELF_RELIEF` 1.0 (count all of our neighbouring garrisons as relief in the risk term): 44.6%, reproduced worse, and again on fresh seeds. 0.5 reproduced *better* (seed pairs z +2.38, and z +3.64 on fresh seeds), and the lane-aware form (`SELF_RELIEF_REACTS`) was then measured in full (2026-10-13): 0.8 is better than stock against marshal in every cell on fresh seeds (z +7.0), at Greedy, Planned and Learning, against knower Predict (z +5.6), across the advantage sliders and in free-for-all, for 16-36% more CPU. Shipped 2026-10-13 with the gated opening (*The gate, shipped*: +226/-110 over the old bot against marshal). Not decided against. *A front stack pins the whole side.*
-- `SELF_RELIEF_SHARED` (a neighbour that only the threatening stacks can pin counted at 1.0, the rest at 0.8, 0.5 or 0; also neighbours on the front only): null to worse against actuary and marshal (best +0.4 points, z +1.13; worst -2.6, z -5.15). *Relief only the same stack can pin.*
-- Netting same-turn crossing transfers between our own systems (`NET_CROSSINGS`): 48.7%, seed pairs z -1.64. Deleted. *Crossing transfers.*
-- Pricing a neutral capture below the worst roll (`NEUTRAL_SWING` 1.10 / 1.15): reproduced worse at 1.10 (seed pairs z -2.10), null at 1.15. Deleted. *Neutrals at less than the worst roll.*
-- **Open, not rejected:** clock 3 for the slow regime (+1.5 there in the 2026-10 sweep, not significant). Planned trailing Greedy a little with two seats on 10-18 nodes. *A side too small to plan.*
-- Pricing strikes at the nominal roll and dropping the risk weight while behind on income but ahead on ships: not built, since a real lead on a short clock arises 4 times in 84 games (2 across the posted human games) and a real lead is already converted 87% of the time. Variance-seeking while behind on both: unmeasured. *Behind on income, ahead on ships.*
-- `MIN_GAIN` 0 with `FRONT_DECAY` 0.75 or 0.85: no better than `MIN_GAIN` 0 alone. `HORIZON_MAX` 8: inert outside the slow cell, null in it. *The 2026-10 sweep.*
-
-### learner ([`design/learner.md`](design/learner.md))
-- Thinning a rival's source by its expected launch (Trust): 44% against actuary, worse than Raise; a source sends nearly all or nothing, so an expected value is the wrong thing to deduct. *Trusting a prediction.*
-- Trusting confident calls (p 0.5+) against a rival once 70% have come true (Sure): indistinguishable from Raise; the gate stays shut against actuary and opening it against marshal buys nothing. *Same section.*
-- Splitting a strike into "does this source strike at all" and "which target": behind the per-target curve on strike chance in all 8 cell-runs, its prior too; did not separate the bots. Deleted. *Sizing a strike to its target, and splitting the strike from the target.*
-
-### Learning ([`design/learning.md`](design/learning.md))
-- Raise (each predicted strike added as a fleet), with or without keeping only the strikes we could not answer after seeing them: level with actuary; a prediction that can only add threat only adds caution. Its file was deleted when the model joined actuary. *What was measured, and what failed first.*
-- Scaling actuary's risk by `predict`'s call at today's garrison (flat K, 1-64): better against marshal, worse against knower Off and actuary; relaxing thins the garrison the call was made at. A per-rival calibration correction points the wrong way (knower's low calls strike less than predicted). *Same section.*
-- A rival garrison next door counted at its chance-weighted share (n x min(1, `LEARN_REACH` x p)), Learning as first built: replaced by pricing a whole strike at its chance, better against marshal (z +2.26). *Strike and no-strike priced apart.*
-- Evacuation in the price of a capture (a doomed rival garrison leaves at its learned rate, so the strike kills fewer and the evacuees threaten the capture): worse than Learning against marshal (z -4.2), knower Off (z -2.3) and Planned (z -3.0). Conditioned on a doomed garrison, it can only make strikes worth less, never cheaper. *Evacuation in the price of a capture.*
-- Learning's memory of each rival, as against the prior curve alone: never better (9,600 paired games), worse against Planned (z -2.29). The flag is removed and the memory still ships, pending the author's call on the oracle claim. *Memory off: the prior alone.*
-- In Learning's risk: a rival garrison's learned guard kept home (z -2.08 against marshal), a strike all-in or sized at the prior's split (-2.20, and -2.96 against Planned), a rival's garrisons next door striking together (-2.50), `PRIOR_WEIGHT` 1 (null), and pressed with guard, with guard and size, and with guard and joint (all worse). The pressed row alone leans better, but not significantly. *Five more arms, and three combinations.*
-- The counter-strike: a reserve next to a rival valued by that rival's learned empty rate. It failed confirmation on fresh seeds and did no better than the prior rate against the roster. Against people it is untested. *The counter-strike.*
-
-### convoy ([`design/convoy.md`](design/convoy.md))
-- Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*
-- `STRIKE_PAD` 1.5 and 2.0: worse, 2.0 catastrophic. A doomed garrison staying to fight: 38%. *Same section.*
-- Filling short frontier guards from the interior, staging ships at the last system before the target, spending existing ships before future hulls: all null, deleted. *Same section.*
-- Defence at the nominal roll: a lean (54.8%, z ~1.5), not adopted; worth re-running. *Same section.*
-- Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
-- Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
-
-### The roster ([`design/bots.md`](design/bots.md))
-- A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
-- A `simulate` callback or oracle parity for external bots: ruled out, and rival strategy names are masked. *Bots that aren't Python.*
-- Raw-count attack margins: the AI stops expanding. A defender-advantage ceiling of 2.0: hard stalemates. *Defender advantage and the AI.*
-- Capping the break-even edge to win back high-jitter results: that would reintroduce the bug. *Break-even margins.*
-- A shallower search for the offline bot column instead of a bigger budget: not reproducible. *Replaying a bot for the leaderboard.*
-- Leaving the replayed seat flagged human to match the Watch link: a handicap. Superseded by stored replays. *Same section.*
-
-### Core ([`design/core.md`](design/core.md))
-- A `models/` dispatcher bot for the random seat: breaks the oracle contract. Drawing the pick from `state.rng`: would shift the dice. *A seat left to the seed.*
-- Dealing random seats from the loaded roster: re-deals every random map whenever a bot is added, and differs between builds. A roster fingerprint in the challenge key: splits the board on every new bot. *A seat left to the seed.*
-- Hashing only non-default fields for the challenge key: aliases old keys onto a different balance. Enumerating int/float `aux` subsets: unbounded. *Keys outlive the schema.*
-- Challenge links in the address bar or `localStorage`: no. Locking a challenge's widgets: no. *Challenge links.*
-- Re-timing fleets in flight under growth, linear growth, rescaling the baked `travel_turns`: all rejected. *Ship-speed growth.*
-- Pooled lane battles and merging the survivors: produced wrong results and visible teleports. *In-lane battles.*
-- Replaying by re-running the AI (format v1), re-running `decide` just to advance the rng, and snapshotting the Mersenne Twister state per turn: all rejected. Deriving the dice from `(seed, turn)` was rejected too, then built per fight on 2026-10-08 (the dice are still recorded). *Persistence, replay & history.*
-- Reading star names from a data file at runtime: no, they are generated. *Star names.*
-
-### Shell ([`design/shell.md`](design/shell.md))
-- Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected. *Combat rules page.*
-- A "keep N / send N%" switch on each forwarding rule: "keep N" means "send the rest", so only one lane per system could use it; replaced by a hold per system and a share per lane. Showing the hold on each lane's label: crowded a split's source. Disabling + once the shares reach 100%: dead in the default state. *Forwarding rules.*
-- Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*
-- A side-panel list of every queued order and rule (capped, scrolled, a × per row): built and removed once the popup opened on edit too. *Send popup and spectating.*
-- Unrestricted (enemy-crossing) routes: unrepresentable. Two-stage pick-then-aim; "tap a pick to remove, anything else to aim"; a Chain/Rally button pair; rally claiming only systems nearer than a front; weighting the AI's flow by turns: all rejected. *Route mode.*
-
-### Turn playback ([`design/turnfilm.md`](design/turnfilm.md))
-- Pausing the engine between phases; an applier that re-derives outcomes; widening the crossing sort tuple (it would move stored replays); per-beat dwells summed into the film; `FILM_LAUNCH_MS` 220; flat-expiry marks, then marks fading over the film's length; an in-game animation toggle; a loss label summing both sides (or a per-side pair); lane tracks ranked by position or derived from launch turn; camera moves toward the action; a burst on every arrival: all rejected.
-
-### Hand-drawn maps ([`design/hand-maps.md`](design/hand-maps.md))
-- A map file referenced by name; a live `GameState` as the editor's model; clamping a drag to the nearest legal point; Auto-lanes merging into hand-drawn lanes; a crossing as a blocker; silent seat compaction; a palette press that only selects; relaning on every drag frame; widening `WORLD_SIZE`; scaling an adopted map to fill the box; opening on a generated board; a deselect gesture in Systems: all rejected.
-
-### Leaderboard ([`design/leaderboard.md`](design/leaderboard.md))
-- An always-on service for the bot column; honouring slot 0's `AiParams`; ranking losses by turns; a Watch link that re-decides the match live; a git SHA as `engine_rev`: all rejected. *Bot replays.*
-- A JS replay viewer; a durable client id; a durable IP-based rate limit; a per-model replay floor; sealing forks of a watched replay: all rejected. A full board snapshot per turn: **set aside for now, not ruled out.** *Checked scores.*
-- Warming actuary's learner (Style: Learning) from a stored per-player profile: dropped unbuilt. The strike curve it plays from reads the same for every bot and the person, and `decide` would come to depend on more than the board. The profile became the player page's Playstyle panel instead. *Playstyle readings.*
-- A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
-- An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
-- Counting every score but a `mismatch` toward crowns and the campaign: replaced from 2026-10-15 by verified only, with 24 hours' grace, since anyone can insert a score; older scores keep the old rule. `schema.md`, *counted_scores and the crowns*.
-- `outdated` as a fifth verdict: split into a column, since a score can be verified and outdated at once. `schema.md`, *score_checks*.
-- A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
-
-### Par search ([`design/par.md`](design/par.md))
-- A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*
-- Lucky dice as a ceiling: withdrawn, since rival fights still roll and honest dice beat lucky in 2 of 18 pairs. *Dice modes.*
-
-### Play-by-post ([`design/pbp.md`](design/pbp.md))
-- Every client re-running every bot from the stored orders: forked matches. Replaced by "the stored log is the record". Enforced fog: not attempted; fog is convenience. Resolving a turn on a clock: never. *The one idea everything follows from*, *Traps*.
