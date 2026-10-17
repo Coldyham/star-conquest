@@ -75,8 +75,9 @@ _TABS = (
 )
 
 _CH = 34  # control height
-_ROW_H = 52  # vertical pitch between Basic-tab rows (nine of them fit the
-             # fixed panel at 52; at 54 the last one hangs 4px out of it)
+_ROW_H = 52  # vertical pitch between Basic-tab rows (eight now, the checkboxes in
+             # two columns; nine fit the fixed panel at 52, at 54 the ninth hangs
+             # 4px out of it)
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
@@ -912,28 +913,40 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     _seed_control(surface, ms, settings, right, y)
     y += _ROW_H
 
+    # The checkboxes sit in two columns. Left: this game's setup. Right: the rows
+    # that are *not* Settings fields — they belong to this installation, never
+    # travel in a save file or a shared link, and never show a changed-dot
+    # (`_changed` reads Settings).
+    mid = (left + right) // 2
+    col_r = mid - 17    # left column's checkboxes end here...
+    col_l = mid + 17    # ...and the right column's labels start here
+    top = y
+
     _row_label(surface, "Autoplay", left, y, _changed(settings, "autoplay"))
-    _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
+    _checkbox(surface, ms, "autoplay", settings.autoplay, col_r, y)
     y += _ROW_H
 
     # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
     # State is derived from the sliders, so it tracks Advanced edits automatically.
     fog_changed = _changed(settings, "fog_sight") or _changed(settings, "fog_scout")
     _row_label(surface, "Fog of war", left, y, fog_changed)
-    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
-    y += _ROW_H
+    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), col_r, y)
 
-    # The one row here that is *not* a Settings field: it belongs to this
-    # installation rather than to a game setup, so it never travels in a save file
-    # or a shared link, and never shows a changed-dot (`_changed` reads Settings).
+    y = top
     # Off until switched on — see `webstore.share_games` and `share`.
-    _row_label(surface, "Share replays", left, y, False)
+    _row_label(surface, "Share replays", col_l, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
     y += _ROW_H
 
-    # ...and nor is this one: how a turn is *drawn* cannot move a result.
-    _row_label(surface, "Animate turns", left, y, False)
+    # How a turn is *drawn* cannot move a result.
+    _row_label(surface, "Animate turns", col_l, y, False)
     _checkbox(surface, ms, "animate_turns", webstore.animate_turns(), right, y)
+    y += _ROW_H
+
+    # An honour code kept by this installation. It hides History (and so
+    # rewind) until a game is decided (`Ui.can_review`).
+    _row_label(surface, "Ironman", col_l, y, False)
+    _checkbox(surface, ms, "ironman", webstore.ironman(), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -2061,6 +2074,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         want = not webstore.animate_turns()
         if not webstore.set_animate_turns(want) and want:
             set_status(ms, "Couldn't save that here — turns stay instant", False)
+    elif hit == "ironman":
+        want = not webstore.ironman()
+        if not webstore.set_ironman(want) and want:
+            set_status(ms, "Couldn't save that here — History stays available", False)
     elif hit == "fog_of_war":
         if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT

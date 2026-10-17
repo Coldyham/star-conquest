@@ -40,7 +40,7 @@ away"`), never with "above"/"below". Code comments do the same
 | --- | --- |
 | [`design/rules.md`](design/rules.md) | Every `CLAUDE.md` rule in full, under the same headings, with the functions and tests it names (grep it; don't read it whole) |
 | [`design/core.md`](design/core.md) | Settings tokens, the random seat, challenge links and keeping digests stable, ship-speed growth, in-lane battles, the replay log, star names |
-| [`design/shell.md`](design/shell.md) | Text sizing, touch targets, viewport margins, the send popup, forwarding rules, the menu's Combat page, spectating, route mode |
+| [`design/shell.md`](design/shell.md) | Text sizing, touch targets, viewport margins, the send popup, forwarding rules, the menu's Combat page, spectating, ironman, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |

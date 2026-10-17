@@ -1163,6 +1163,23 @@ def test_share_replays_toggles_the_stored_preference(monkeypatch, tmp_path):
         pygame.quit()
 
 
+def test_ironman_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """Off until switched on, and like the other local rows it never touches the
+    setup, so it cannot move `challenge_key()`."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.ironman() is False
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is True
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is False
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
 def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_path):
     monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "no" / "kv.json")
     screen, ms, settings = _setup()
@@ -1250,7 +1267,7 @@ def test_a_custom_map_hides_the_controls_it_decides():
             assert key not in ms.rects, key
         # ...and the rows that still mean something are untouched.
         for key in ("seed_field", "autoplay", "fog_of_war", "share_games",
-                    "animate_turns"):
+                    "animate_turns", "ironman"):
             assert key in ms.rects, key
     finally:
         pygame.quit()

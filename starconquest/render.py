@@ -1410,6 +1410,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
+    turn = _draw_ships_lost(surface, state, ui, turn)
     scoreboard_right = _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w))
     _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
@@ -1548,7 +1549,8 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # (ui attribute, label, fill, edge, how long it survives a squeeze, which
     # cluster it's pinned to), in visual order within its cluster — left to right.
     # play/pause is hidden under autoplay, which drives turns on its own timer and
-    # would make it a no-op; history needs a recorded turn to scrub through.
+    # would make it a no-op; history needs a recorded turn to scrub through, and
+    # under ironman a decided game (`Ui.can_review`).
     specs: list[tuple[str, str, tuple, tuple, int, str]] = []
 
     # Route mode replaces the strip wholesale rather than adding to it: the shared
@@ -1584,7 +1586,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # matching the N key exactly. (R is reset-view, and has no button here: the
     # on-map zoom cluster carries it.)
     specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
-    if state.turn > 0:
+    if ui.can_review(state):
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
@@ -1665,6 +1667,23 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
 
 _DEAD_COLOR = (92, 96, 110)
+
+
+def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> pygame.Rect:
+    """Our seat's ships lost so far, just right of the turn counter: the score's
+    tie-break (`Player.ships_lost`, the number the win overlay and a posted score
+    report), so someone chasing a posted result can see where they stand on it
+    without waiting for the end. Our own losses are never fogged.
+
+    Returns the rect the scoreboard must start clear of, in place of the turn
+    counter's.
+    """
+    player = state.players.get(ui.human_id)
+    if player is None:
+        return turn
+    label = _text(surface, _fonts()["small"], f"{player.ships_lost} lost", config.COLOR_TEXT_DIM,
+                  midleft=(turn.right + config.HUD_PAD, config.HUD_TOP_H // 2))
+    return turn.union(label)
 
 
 def _draw_challenge_target(surface, ui: Ui, w: int) -> int:

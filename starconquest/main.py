@@ -116,7 +116,8 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     the games where a person sits somewhere else: a play-by-post client holds one
     seat, and which one is decided by the link they opened.
     """
-    ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay)
+    ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay,
+            ironman=webstore.ironman())
     challenge = settings.challenge if settings is not None else None
     if challenge is not None and challenge.matches(settings):
         # Carry the target onto the Ui as plain numbers so the win overlay can say
@@ -1897,7 +1898,7 @@ async def main() -> None:
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
-                elif log is not None and log.turn_count > 0:
+                elif log is not None and log.turn_count > 0 and ui.can_review(state):
                     ui.clear_fading_marks()   # entering fresh: nothing from live play carries in
                     history_states, history_fog, history_events, entered = open_history(state, ui, log)
                     if entered is not None:
