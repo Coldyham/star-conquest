@@ -169,6 +169,15 @@ actuary in the same games: 7:6 0.5/2.2 ms (actuary 0.2/0.8), 40:6 3.1/20.2
   edge weight 1.5 -3.8, FRONT_BONUS 1.0 -6.0, FRONT_DECAY 0.9 and gathering
   at lanes up to 4 level; CAPTURE_SWING 1.1 everywhere +2.2 and REINFORCE 0.6
   +2.0, both under the bar.
+- **A stalemate breaker and an endgame closer.** About 10% of games against
+  actuary reach turn 600 undecided (18% at 7:6). 47 of 48 sampled were
+  deadlocks: two stacks within 1.5x of each other on one chokepoint, neither
+  winning the worst roll. Pricing strikes at the nominal roll once the board
+  banks 80-300 turns of income (`STALE_BANK`) broke the deadlock, but the
+  beaten side's stack then escaped into thin systems and the game became a
+  chase; weighting edge risk 4-8x once 2x ahead on ships (`ENDGAME_RATIO`)
+  did not close it. 206 of 400 games changed, stalemates fell 57 to 49, and
+  the pooled score moved -0.2 to +0.5 (4 cells, 50 seeds). Deleted.
 - **actuary's Style: Learning** is not carried over: its learned risk would have
   replaced edge risk rather than combined with it, and without it hunter keeps
   no memory between turns and is no seat an oracle has to model.
