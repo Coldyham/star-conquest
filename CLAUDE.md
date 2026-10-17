@@ -329,7 +329,7 @@ already resolve simultaneously. The rationale for each rule is in
   shared.** Append a `settings._LEGACY_KEY_DROPS` entry whenever one joins
   (`test_challenge_key_is_stable` fails until you do); only
   `challenge_keys()[0]` is written. Local preferences (`animate_turns`,
-  `share_games`) and per-score metadata (`Challenge`, which `challenge_keys()`
+  `share_games`, `ironman`) and per-score metadata (`Challenge`, which `challenge_keys()`
   drops) exist to avoid this. The leaderboard folds splits by lookup
   (`KEY_ALIASES`, `fold-game-key.sql`, `submit.findTwin`; the newest key wins).
   Detail: `docs/design/core.md`, "Keys outlive the schema that made them".

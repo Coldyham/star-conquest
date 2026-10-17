@@ -75,8 +75,8 @@ _TABS = (
 )
 
 _CH = 34  # control height
-_ROW_H = 52  # vertical pitch between Basic-tab rows (nine of them fit the
-             # fixed panel at 52; at 54 the last one hangs 4px out of it)
+_ROW_H = 47  # vertical pitch between Basic-tab rows (ten of them fit the
+             # fixed panel at 47; at 48 the last one hangs out of it)
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
@@ -934,6 +934,12 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     # ...and nor is this one: how a turn is *drawn* cannot move a result.
     _row_label(surface, "Animate turns", left, y, False)
     _checkbox(surface, ms, "animate_turns", webstore.animate_turns(), right, y)
+    y += _ROW_H
+
+    # ...nor this: an honour code kept by this installation. It hides History
+    # (and so rewind) until a game is decided (`Ui.can_review`).
+    _row_label(surface, "Ironman", left, y, False)
+    _checkbox(surface, ms, "ironman", webstore.ironman(), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -2061,6 +2067,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         want = not webstore.animate_turns()
         if not webstore.set_animate_turns(want) and want:
             set_status(ms, "Couldn't save that here — turns stay instant", False)
+    elif hit == "ironman":
+        want = not webstore.ironman()
+        if not webstore.set_ironman(want) and want:
+            set_status(ms, "Couldn't save that here — History stays available", False)
     elif hit == "fog_of_war":
         if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT

@@ -25,6 +25,7 @@ from . import paths
 from .paths import (
     WEB_ANIMATE_TURNS_KEY,
     WEB_BESTS_KEY,
+    WEB_IRONMAN_KEY,
     WEB_PBP_NAME_KEY,
     WEB_SHARE_GAMES_KEY,
     WEB_SHARED_SETTINGS_KEY,
@@ -136,6 +137,18 @@ def set_animate_turns(on: bool) -> bool:
     """Store the preference. False if the store refused it, which the menu says out
     loud rather than letting a setting quietly forget itself."""
     return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
+
+
+def ironman() -> bool:
+    """Whether the player has ironman mode on: no History button while a game is
+    undecided, so no rewinding a turn that went badly. Honour-based (nothing is
+    recorded or posted about it) and off unless switched on, like `share_games`."""
+    return get(WEB_IRONMAN_KEY) == "1"
+
+
+def set_ironman(on: bool) -> bool:
+    """Store the preference. False if the store refused it."""
+    return set(WEB_IRONMAN_KEY, "1" if on else "")
 
 
 # The sizes the UI-size control steps through, as percentages of the fitted scale.
