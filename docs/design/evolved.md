@@ -17,7 +17,7 @@ roster. It was held to four constraints:
 | Constraint | What it means here |
 | --- | --- |
 | **Blind** | It reads only the board. It never reads or runs another seat's code: no `IS_ORACLE`, no `ai.STRATEGIES`, no imports from other bots, no borrowed openings, no rollouts that call a rival's strategy. `tests/test_evolved.py` parses for it. Offline, the roster served as sparring partners; what ships is the weights plus a board-reading policy. |
-| **Browser** | Pure Python, no numpy at runtime; the look-ahead stops at a 50 ms wall-clock guard (`LOOK_BUDGET_S`, scaled by `BUDGET_SCALE`). |
+| **Browser** | Pure Python, no numpy at runtime; the look-ahead stops at a 50 ms wall-clock guard (`LOOK_BUDGET_S`, scaled by `BUDGET_SCALE`); timed in the web build ("The look-ahead", "Cost"). |
 | **Deterministic and stateless** | Nothing drawn from `state.rng` or the global `random`; ties break on ids; no memory between turns. |
 | **No foresight of the dice** | The look-ahead's copies never roll the game's own dice (see "The look-ahead"), even though a copy of the board would. |
 
@@ -92,9 +92,14 @@ three quarters of it foresight; void).
 
 **Cost.** Native CPython, 75th percentile of a decide, the worse of two and
 five seats: 8 ms at 11 systems, 12 at 18, 21 at 31, 34 at 40 (`decide_ms`,
-fitted `34 × (nodes / 40) ** 1.1`; 0 when Off). At the browser's speed (guard
-scale 0.5, about twice as slow) the guard trims the largest decides and costs
-nothing measurable: +2.51 pts over Off against +2.69 unguarded.
+fitted `34 × (nodes / 40) ** 1.1`; 0 when Off). **In the browser** (the pygbag
+WebAssembly build, Apple-silicon Mac, 2026-10-17) it ran at native speed on the
+same positions: 11:6:2 p50 5.7 ms, p95 17.6 (native 6.0, 17.8); 31:6:5 p50
+10.6, p95 40.3 (native 11.3, 40.6). With the guard on, 2 decides in 300 went
+past 50 ms, the largest 53.6: the guard is checked between plans, so the plan
+in hand finishes. A slower device meets the guard more often, which only
+shortens the look-ahead. Simulating a browser at half speed (guard scale 0.5)
+cost nothing measurable either: +2.51 pts over Off against +2.69 unguarded.
 
 ## Where it stands
 
