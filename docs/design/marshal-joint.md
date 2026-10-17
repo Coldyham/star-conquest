@@ -153,7 +153,10 @@ its two single changes, `s11 - s10 - s01 + s00 != 0` over ships sent per (source
 destination). No game is played twice and nothing is random, so the census is
 exact for the positions it sees. Run with the tool's defaults: the six
 cells (`random:` 11:11, 13:3, 18:6, 24:3, 24:12, 18:18), stock marshal against
-marshal and actuary (Planned), 8 seeds each, 2,409 contested positions.
+marshal and actuary (Planned), 8 seeds each, 2,409 contested positions. (That
+was the bot of 2026-10-16. Since the 2026-10-17 ship the tool steps around the
+new values, and `POUR_GUARD` joins its table at 0.55 and 1.0, so a re-run reads
+a different bot.)
 
 **What changes the orders alone.** Share of contested positions, pooled, with
 the ships moved per position:
@@ -776,34 +779,41 @@ seed (z +1.65 and +1.68). D passes on every count it was registered against:
 weighted z +15.1, no opponent below +2.8, both halves of the seeds ahead against
 every opponent, and better in both fields (z +3.4 and +2.7).
 
-### What would ship
+### Shipped (2026-10-17)
 
-Nothing in `models/` has changed. D, as measured, is two pieces.
+D shipped whole: `POUR_GUARD` 0.85 beside `FRONTIER_GUARD` (Phase 0 records each
+frontier source's pour floor, `ceil(POUR_GUARD * _max_adjacent_enemy(...))`, and
+Phase 3b's `spendable` stops the surplus pour there, less what the source has
+already sent; at or below the guard it changes nothing), `FEED` 3.0,
+`FEED_MAX_TURNS` 3 and `RELIEF_AWARE` 0.65. The shipped bot plays board for
+board as the copy measured here (672 of 672 games against marshal, knower and
+actuary in seven cells), and with the old constants as the bot before it (336 of
+336). Its two pieces, as measured:
 
 - **Three constants, no code:** `FEED` 1.0 to 3.0, `FEED_MAX_TURNS` 2 to 3 and
   `RELIEF_AWARE` 0.5 to 0.65. Alone they are "D without the pour floor" above:
   +3.8 weighted, ahead against every opponent under both scorings, and in both
   fields (+2.3, z +2.2; +1.5, z +1.3).
-- **The pour floor:** a `POUR_GUARD` of 0.85 beside `FRONTIER_GUARD`, so that
-  Phase 3b's pour from a frontier source stops at
-  `ceil(POUR_GUARD * _max_adjacent_enemy(...))` less what the source has already
-  sent, as sketched in *A floor per phase, for the next sweep*: about ten lines.
-  It adds +0.85 weighted at D in duels (z +3.05; +0.4 scored as losses, z +1.3),
-  most of it against knower and actuary, and +2.2 in each free-for-all.
+- **The pour floor:** about ten lines. It adds +0.85 weighted at D in duels
+  (z +3.05; +0.4 scored as losses, z +1.3), most of it against knower and
+  actuary, and +2.2 in each free-for-all.
 
 The relief change is the opponent-dependent part: +3.8 against actuary and +1.1
 against knower, but more stalemates against marshal itself (-1.2 scored as
 losses). The weighting here favours it; a tuning against marshal alone would
 not.
 
-Shipping either moves the bot column's `engine_rev`, and knower borrows marshal
-for its rollouts and as one of its `EXTERNAL_CANDIDATES` ([`knower.md`](knower.md),
-"Borrowed candidates"), so knower moves too: re-run the ladder in
-[`marshal.md`](marshal.md), "Where marshal stands", update the constants'
-comments and the docstring's `FEED_MAX_TURNS` paragraph in `models/marshal.py`
-(at `FEED` 3 the boards three turns admits gain against all three opponents),
-and run `tests/test_marshal.py`. Still open: the guard at 0.45 under the 0.85 pour
-floor (a quarter fewer stalemates against marshal, mixed against knower); D's one
-losing cell, defender advantage 1.5 against knower (-2.0, z -1.3); and `FEED`
-as a rule rather than a ratio ("feed every front facing a rival"), which the
-plateau suggests but which was not measured.
+The ship moved the bot column's `engine_rev`, and knower borrows marshal for its
+rollouts and as one of its `EXTERNAL_CANDIDATES` ([`knower.md`](knower.md),
+"Borrowed candidates"), so knower moved too. The roster ladder was re-run the
+same day with the bot before the ship beside it on the same seeds
+([`marshal.md`](marshal.md), "Where marshal stands"): marshal 290 wins to 282,
+35% against actuary from 24% and 70% against knower from 66%. The symmetric cell
+and both `--aux` variants moved its total by a win or less, and its head-to-head
+against actuary by 2 to 11 points.
+
+Still open: the guard at 0.45 under the 0.85 pour floor (a quarter fewer
+stalemates against marshal, mixed against knower); D's one losing cell, defender
+advantage 1.5 against knower (-2.0, z -1.3); and `FEED` as a rule rather than a
+ratio ("feed every front facing a rival"), which the plateau suggests but which
+was not measured.

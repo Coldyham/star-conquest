@@ -27,10 +27,12 @@ def _front_board():
     """One marshal front (system 1, 20 ships) between a rival stack of 15 and a
     neutral of 2, both two turns away.
 
-    Stock marshal strikes the neutral at its price (3) and pours the rest above
-    its guard, ceil(0.55 * 15) = 9, after it: 11 ships. The rival costs 16 and is
-    never affordable. A guard of 0.35 keeps 6 and pours 14; with the pour off the
-    strike is the price alone, 3, whatever the guard.
+    Stock marshal strikes the neutral at its price (3) and pours after it what
+    its pour floor leaves, 20 - 3 - ceil(0.85 * 15) = 4: 7 ships. The rival costs
+    16 and is never affordable. A pour floor at the guard's 0.55 keeps
+    ceil(0.55 * 15) = 9 instead and pours 8, 11 in all, and a lower guard alone
+    changes nothing, since the pour floor sits above it; with the pour off the
+    strike is the price alone, 3, whatever the floor.
     """
     state = GameState.new(1)
     for sid, owner, ships in ((1, 2, 20), (2, 1, 15), (3, 0, 2)):
@@ -48,19 +50,20 @@ def _front_board():
 
 def test_the_board_plays_as_worked_out(ma):
     state = _front_board()
-    assert cc._decide(ma, state, 2, {}) == {(1, 3): 11}
-    assert cc._decide(ma, state, 2, {"FRONTIER_GUARD": 0.35}) == {(1, 3): 14}
+    assert cc._decide(ma, state, 2, {}) == {(1, 3): 7}
+    assert cc._decide(ma, state, 2, {"POUR_GUARD": 0.55}) == {(1, 3): 11}
+    assert cc._decide(ma, state, 2, {"FRONTIER_GUARD": 0.35}) == {(1, 3): 7}
     assert cc._decide(ma, state, 2, {"COMMIT_SURPLUS": False}) == {(1, 3): 3}
 
 
 def test_a_pair_that_shares_the_pour_interacts_and_masks(ma):
-    """Lowering the guard frees ships only the pour spends, so with the pour off
-    the guard changes nothing: 3 - 14 - 3 + 11 = -3, and the pour masks it."""
-    perturb = (("FRONTIER_GUARD", 0.35), ("COMMIT_SURPLUS", False))
+    """Lowering the pour floor frees ships only the pour spends, so with the pour
+    off the floor changes nothing: 3 - 11 - 3 + 7 = -4, and the pour masks it."""
+    perturb = (("POUR_GUARD", 0.55), ("COMMIT_SURPLUS", False))
     singles, pairs = cc.census_position(ma, _front_board(), 2, perturb)
-    assert singles == [(True, 3), (True, 8)]
+    assert singles == [(True, 4), (True, 4)]
     interacts, ships, j_masks_i, j_enables_i, i_masks_j, i_enables_j, both = pairs[(0, 1)]
-    assert interacts and ships == 3
+    assert interacts and ships == 4
     assert j_masks_i and not j_enables_i
     assert not i_masks_j and not i_enables_j
     assert both
