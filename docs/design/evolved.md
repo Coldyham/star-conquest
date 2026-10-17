@@ -148,7 +148,9 @@ in `results/evolved/<run>/` (`es.pkl`, `log.jsonl`) and resumes anywhere;
 seeds, the turn-40 share and the panel above bring it to about 0.012 (measured
 with `tools/evo_probe.py noise`). Everything below was trained that way.
 
-**How the shipped weights came about.** The first trained policies (p1–p4)
+**How the shipped weights came about.** (Labels name training runs: p1–p4
+the first policies, k1 onward the later ones; the weights file names the run
+it ships.) The first trained policies (p1–p4)
 beat thinker about 75–80% of the time but marshal only 21–36% and actuary
 10–21%. The first gains were the moves and principles, not the
 tuning: ending stalled games (p1), "don't strip the front" and the relief
