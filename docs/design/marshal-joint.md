@@ -454,8 +454,9 @@ the other held.
 
 The bot column counts only `won` ([`leaderboard.md`](leaderboard.md), "Bot
 replays"), so a stalemate there is a board not taken. `tools/sweep.py`'s rate and
-most tables in marshal's files read decided games only (its seed pairs count a
-timeout as a draw; the `RELIEF_IN_FLIGHT` measurement, as a loss). The first
+most tables in marshal's files read decided games only (its seed pairs counted a
+timeout as a draw, and since 2026-10-17 tilt it 0.1 toward whoever was ahead; the
+`RELIEF_IN_FLIGHT` measurement counted it as a loss). The first
 guard table ([`marshal.md`](marshal.md), first section) held the guard at 0.3
 because higher guards doubled timeouts; the 2026-09 sweep then moved it to 0.55 on
 decided games (its own timeout column rose from 22 to 39). Mirror games of stock
@@ -484,16 +485,20 @@ treat each as a starting point to re-sweep against the roster.
 - **The strike gate: the strike floor and `RELIEF_AWARE`.** Every cell.
   Substitutes (twist z -2.9 at stock). At a lower strike floor the relief weight
   stays at 0.5 against marshal, but the two still lean on each other (loss twist
-  z -2.2).
+  z -2.2). Against actuary the relief weight wants 0.65-0.75, about 4 points
+  (*Screening against the roster*).
 - **The long-lane pour: the pour floor, `DENY_SWAP` and
   `RIVAL_REFLOOD_MIN_TURNS`**, with `DENY_SWAP_MIN_TURNS`. Cells of 3 ly/turn.
   Three restraints on one pour that cover for each other (twist z +3.3 between
   the last two). Whenever the guard or a pour floor moves, re-sweep these two
   with it.
 - **The short-lane front: the pour floor and `FEED`, with `FEED_MAX_TURNS`.**
-  Cells of 11 ly/turn and up. `FEED` refills what the pour leaves, and its own
-  curve was never followed above 1.0 (1.5 is better there against marshal, and
-  adds to the split; unmeasured against the roster).
+  Boards whose median lane is two turns or less (24/12, 18/18), and three once
+  the gate is at three (91% of 11/11 boards, 31% of 18/6). `FEED` refills what
+  the pour leaves. Against the roster its curve rises to about 3
+  and is flat to 6, and `FEED_MAX_TURNS` is its complement (three turns: null at
+  `FEED` 1.0, +0.9 at 2.0, +1.7 at 3.0), so move the two together
+  (*Screening against the roster*).
 - **`DEFEND_PAD` with `DENY_SWAP`** (and `HOLD_FOLLOW`, if it is switched on). A
   product rather than a pair: both holds are multiples of `_defend_margin()`, so
   a move of the pad re-tunes them. Hold the product when one moves.
@@ -522,4 +527,283 @@ board the same as the per-phase scratch copy at 0.40 / 0.55 (120 games) and 0 /
 and knower borrows marshal for its rollouts and candidates
 ([`knower.md`](knower.md), "Borrowed candidates"), so a shipped change moves
 knower too and wants the ladder in [`marshal.md`](marshal.md) re-run.
-Free-for-alls, where `_wedge` and the pile-up rules are live, were not measured.
+Free-for-alls, where `_wedge` and the pile-up rules are live, were not measured
+for the split; the screen's candidate was (*Confirmation*, below).
+
+## Screening against the roster (2026-10-17)
+
+The grids above mostly played stock marshal, and the last of them showed the best
+point moving with the opponent. This section looks for joint moves against all
+three opponents at once: quick passes on small samples, each built from the last
+one's survivors and their combinations, then one confirmation on fresh seeds,
+pre-registered.
+
+### The objective
+
+Every arm plays stock marshal, knower (Predict) and actuary (Planned), and stock
+marshal plays the same opponent on the same cell, seed and seating as its
+baseline; every seed is played in both seatings. A win scores 1 and a loss 0. A
+timeout scores 0.55 if the arm's seat was ahead when the clock ran out (most
+systems, then most ships including fleets in flight), 0.45 if it was behind and
+0.5 if level: 0.1 of a win or a loss on the ±1 scale (`tools/sweep.py`'s `leader`
+and `TIMEOUT_LEAD`). Winning sooner mostly comes with winning, so game length is
+reported, not scored. Points are win-rate points against the baseline, seed by
+seed. An arm's rank is its points against the three opponents averaged with
+actuary weighted 1.25 and the others 1, and an arm 4 or more points worse against
+any one opponent is vetoed: a lean toward the rival that punishes marshal's
+mistakes hardest, without letting a gain there buy a loss elsewhere. The
+confirmation also scores a timeout as a loss, the bot column's reading. The games
+ran on `tools/sweep.py`'s own primitives (its arm and cell specs, `play_duel`,
+`leader`) in a parallel scratch runner, and the pour floor from a copy of marshal
+with a floor per phase, which at stock values played board for board as marshal
+(64 of 64 games).
+
+### Five quick passes
+
+Each pass played its own fresh seeds in four cells, one in each lane regime where
+marshal's gates switch (13 nodes at 3 ly/turn, 18 at 6, 11 at 11, 24 at 12),
+against all three opponents: 138,240 games in all.
+
+    pass  seeds         arms  games    asked
+    1     50000-50039    20   19,200   single constants, the guard's floors, two pairs
+    2     51000-51079    16   30,720   pass 1's survivors, their neighbours and combinations
+    3     52000-52079    16   30,720   pass 2's four best changes as a full 2x2x2x2 factorial
+    4     53000-53079    15   28,800   one step each way from the factorial's best corner
+    5     54000-54079    15   28,800   one step each way from pass 4's two best moves combined
+
+Pass 1, weighted, then against marshal, knower and actuary (standard error
+0.5-1.2 weighted and 1-1.5 against each opponent):
+
+    relief weight 0.75             +0.98     -1.6   +0.8   +3.2
+    FEED 2.0                       +0.96     -0.6   +1.4   +1.9
+    FEED 1.5                       +0.87     +0.3   +0.1   +1.9
+    pour floor 0.85                +0.82     +0.6   +0.6   +1.2
+    DENY_SWAP 1.25                 +0.30     +0.4   +0.6    0.0
+    reflood gate 4                 -0.38     +0.5   -0.5   -0.9
+    relief weight 0.35             -1.11     +0.2    0.0   -3.0
+    split 0.25 / 0.55              -1.37     +3.0   -2.8   -3.8
+    guard 0.85, every floor        -0.26     -4.1   -3.0   +5.0   vetoed
+    guard 1.0, every floor         -2.63     -8.1   -5.8   +4.3   vetoed
+    strike floor 0.85, pour 0.55   -2.31     -7.6   -0.4   +0.4   vetoed
+
+The guard's level trades one opponent for another in both directions (up for
+actuary, down for marshal), and no level of it survives the weighting. What
+survives changes where ships go once the guard is set: what a pour leaves home
+(the pour floor), which strikes go at all (the relief weight), and where the
+leftover flows (`FEED`). Pass 2:
+
+    pour 0.85, relief 0.75, FEED 2.0   +3.10     +0.3   +3.8   +4.8
+    pour 0.85, FEED 2.0                +2.44     +2.6   +2.4   +2.4
+    FEED 2.0, FEED_MAX_TURNS 3         +2.36     +2.8   +4.2   +0.6
+    pour 0.85, relief 0.75             +2.22     +0.0   +1.6   +4.5
+    pour 0.85                          +1.97     +1.8   +1.3   +2.7
+    pour 1.0                           +1.87     +1.1   +1.8   +2.6
+    relief 0.75, FEED 2.0              +1.65     -1.1   +2.7   +3.0
+    pour 0.70                          +0.96     +1.0   +1.3   +0.7
+    relief 0.75                        +0.91     -1.2   +1.2   +2.3
+    FEED 3.0                           +0.58      0.0   +2.1   -0.2
+    FEED 2.0                           +0.46     +0.3   +2.2   -0.8
+    relief 1.0                         +0.35     -3.2   +0.5   +3.0
+
+### The factorial: what adds, and what interacts
+
+Pass 3 played all sixteen combinations of four changes: P, the pour floor at 0.85
+(stock: the guard's 0.55); R, `RELIEF_AWARE` 0.75 (0.5); F, `FEED` 2.0 (1.0); K,
+`FEED_MAX_TURNS` 3 (2). An effect is, seed by seed, the mean of the eight arms at
+its high level less the mean of the other eight, so every game counts in every
+estimate; an interaction is half the difference between one change's effect at
+the other's two levels. Points (z):
+
+    effect     weighted        marshal         knower          actuary
+    P          +1.65 (+3.20)   +1.25 (+1.65)   +2.27 (+2.53)   +1.47 (+1.53)
+    R          +0.97 (+2.37)   -1.75 (-2.63)   +0.26 (+0.42)   +3.71 (+4.76)
+    F          +0.96 (+2.44)   +0.98 (+1.76)   +2.32 (+3.28)   -0.15 (-0.21)
+    K          +0.42 (+1.11)   +0.64 (+1.12)   +0.25 (+0.33)   +0.38 (+0.61)
+    P x R      -0.64 (-2.06)   -0.58 (-1.30)   -0.44 (-0.88)   -0.85 (-1.40)
+    F x K      +0.46 (+2.54)   +0.37 (+1.08)   +0.59 (+1.69)   +0.42 (+1.66)
+    R x K      +0.20 (+1.41)   +0.59 (+2.77)   +0.04 (+0.18)   +0.01 (+0.02)
+    P x F, P x K, R x F: 0.26 or less weighted; three- and four-way: 0.07 or less
+
+Mostly additive: the interactions that clear |z| 2 anywhere are under 0.7 points,
+against main effects of up to 3.7. Two of them matter.
+
+- **`FEED` and `FEED_MAX_TURNS` are complements.** K is worth -0.04 at `FEED`
+  1.0 and +0.88 at 2.0. Three turns was measured at `FEED` 1.0 and deleted,
+  correctly for that `FEED` ([`marshal-flow.md`](marshal-flow.md), "Shipped:
+  feed what was just taken"); at a stronger `FEED` the same gate pays. The gate
+  decides where `FEED` runs, so its value is in proportion to what `FEED` does
+  there: the census's short-lane front group, now in outcomes, and a constant
+  that one-at-a-time tuning deleted at the wrong level of its partner.
+- **The pour floor and the relief weight are substitutes.** Both hold ships back
+  from a rival target, one by what a pour leaves home and one by which strikes
+  are priced in at all; with either in place the other is worth less.
+
+And one change depends on the opponent: R gains 3.7 against actuary and loses 1.8
+against marshal (z -2.6). The grid that confirmed 0.5 (*The price*, above)
+played only marshal, and the weight was first chosen against thinker and
+claudebot.
+
+The best corners, raw (weighted; marshal, knower, actuary): PRFK +4.03 (+0.6,
++4.9, +6.1); PFK +3.57 (+3.2, +5.7, +2.2); PRF +2.82; PF +2.67.
+
+### Levels around the corner
+
+Pass 4 moved one constant at a time from C = PFK; pass 5 from D = C with `FEED`
+3.0 and relief 0.65, pass 4's two best moves (0.65 rather than 0.75 for its
+smaller cost against marshal), which pass 3 says add. "guard" is
+the stock guard, the floor for every phase but the pour, which stays at 0.85.
+Standard error about 0.85 weighted.
+
+    pass 4, from C                 weighted   marshal  knower  actuary
+    C                              +1.88      +2.8     +2.6    +0.6
+    relief 0.75                    +3.75      +2.1     +3.9    +5.0
+    relief 0.65                    +3.62      +2.7     +3.6    +4.4
+    FEED 3.0                       +3.07      +4.6     +4.9    +0.4
+    reflood gate 4                 +2.03      +3.0     +2.9    +0.6
+    guard 0.65                     +1.88      +0.4     +3.6    +1.7
+    FEED 1.5                       +1.83      +2.6     +1.1    +1.8
+    reflood gate 7, DENY_SWAP 0.75 or 1.25, pour 0.70 or 1.0,
+      guard 0.45                   +1.45 to +1.70
+    FEED on every board            +1.32      +2.7     +2.1    -0.4
+
+    pass 5, from D                 weighted   marshal  knower  actuary
+    D                              +5.83      +3.0     +7.4    +6.8
+    relief 0.75                    +6.46      +3.2     +8.3    +7.6
+    FEED 4.0                       +6.43      +3.4     +8.6    +7.2
+    FEED on every board            +6.22      +3.4     +7.0    +7.8
+    pour 0.70                      +6.17      +3.7     +6.2    +8.2
+    FEED 6.0                       +6.14      +3.6     +8.0    +6.7
+    guard 0.45                     +6.03      +4.8     +5.3    +7.6
+    top-up floor 0.40              +5.83      +2.7     +8.0    +6.6
+    pour 1.0                       +5.10      +2.7     +6.6    +5.9
+    FEED 2.0                       +4.89      +3.3     +5.1    +6.0
+    relief 0.5                     +4.46      +2.6     +8.3    +2.9
+    FEED_MAX_TURNS 2               +4.11      +2.5     +4.5    +5.1
+    C                              +3.80      +3.2     +5.5    +2.9
+    FEED_FRONT off                 +2.48      +0.4     +3.6    +3.2
+
+- `FEED` rises to 3 and is flat to 6 (next section).
+- Relief 0.65 gains 3.8-3.9 against actuary from both centres, and 0.75 gains
+  4.4-4.7; each moves marshal and knower by 1.3 points or less in either
+  direction.
+- `FEED_MAX_TURNS` 3 beats 2 by 1.7 at `FEED` 3, all of it on the boards three
+  turns admits: 91% of 11/11 boards and 31% of 18/6 have a median lane of three
+  turns, so the shipped gate never feeds there (11/11: +4.3, +9.1, +2.8 against
+  marshal, knower, actuary). Feeding on every board is level with 3: the slow
+  boards it adds (median lane 4-9 turns) read within noise.
+- `FEED_FRONT` off costs 3.4.
+- Nothing in the long-lane pour group moves with the higher pour floor:
+  `DENY_SWAP` 0.75-1.25, the reflood gate at 4 or 7, the floor itself at
+  0.70-1.0 and the guard at 0.45 or 0.65 all read within noise of the centre.
+  The guard at 0.45 ends a quarter of the stalemates against marshal (92 timeouts
+  to D's 125) and leads scored as losses (+6.4 to D's +4.8), but against knower
+  it read +0.8 in one pass and -2.2 in the next.
+
+Each centre was re-measured on the next pass's seeds, which shows how much of a
+pass's best reading was the selection: P+R+F +3.10, then +2.82; PFK +3.57, then
++1.88 and +3.80; C with relief 0.65 +3.62, then +4.89; C with `FEED` 3.0 +3.07,
+then +4.46. Within the noise, in both directions.
+
+### `FEED` is a ratio that stops binding
+
+At the start of every turn of 32 games (D against stock at 18/6 and 24/12), a
+front facing a rival held, with our fleets inbound, a median 0.93-0.95 of the
+largest rival stack next door (stock: 0.97-1.00). `FEED` f calls a front short
+below f, and the share of such fronts that are short is 45-61% at 1, 88-90% at 2,
+92-94% at 3 and 95-98% at 6. From about 2 up nearly every front facing a rival is
+short whatever `FEED` is, and Phase 4 reads: the rear's surplus flows only toward
+fronts facing a rival, never to a front facing only neutrals, and a front facing
+only neutrals (never short) hands its leftover to a short neighbour up to a
+shortfall that no longer binds. The fronts do not get thicker (the median ratio
+barely moves); different fronts get the surplus. That is why the curve flattens
+where the short share saturates, and why `FEED_FRONT` is worth more at 3 than it
+was at 1.
+
+### Confirmation
+
+Pre-registered before any of its games: D as the candidate, passing on a weighted
+gain at z >= 2 with no opponent 4 points or more worse, the same sign in both
+halves of the seeds, and neither free-for-all significantly worse. Two variants
+measure D's parts: D without the pour floor (constants only: `FEED` 3.0,
+`FEED_MAX_TURNS` 3, `RELIEF_AWARE` 0.65), and D without the relief change. Seeds
+60000-60299 in the six duel cells and 18/6 at defender advantage 1.25 and 1.5:
+2,400 cell-seeds against each opponent, 57,600 games. Points against stock
+scored with the tilt, and in brackets with a timeout as a loss:
+
+                                     marshal         knower          actuary         weighted
+    D                                +2.85 (+1.08)   +3.79 (+3.38)   +6.83 (+6.08)   +4.67 (+3.71)
+      z                              +7.03 (+1.98)   +6.75 (+5.43)  +11.67 (+10.05) +15.07 (+10.75)
+      halves of the seeds            +3.6 / +2.1     +3.7 / +3.9     +7.3 / +6.4
+    D without the pour floor         +2.54 (+1.65)   +2.55 (+2.35)   +5.86 (+5.44)   +3.82 (+3.32)
+    D without the relief change      +3.05 (+2.29)   +2.69 (+2.44)   +3.04 (+2.92)   +2.94 (+2.58)
+
+    what each part adds at D
+    the pour floor                   +0.30 (-0.56)   +1.24 (+1.02)   +0.97 (+0.65)   +0.85 (+0.39)
+      z                              +0.70 (-1.10)   +2.58 (+1.88)   +1.92 (+1.24)   +3.05 (+1.28)
+    the relief change                -0.20 (-1.21)   +1.10 (+0.94)   +3.79 (+3.17)   +1.73 (+1.13)
+      z                              -0.64 (-3.05)   +2.82 (+2.12)   +9.09 (+7.29)   +7.79 (+4.59)
+
+By cell, D gains against actuary everywhere (+3.4 at 18/6 with advantage 1.5 to
++12.0 at 11/11), against knower everywhere but advantage 1.5 (-2.0, z -1.3), and
+against marshal everywhere, least at 13/3 (+0.3). It decides 53.8% of games
+against marshal (stock 50.0%), 65.1% against knower (60.7%) and 34.5% against
+actuary (27.0%), and the median decided game against marshal shortens from 154
+turns to 143. It times out more often against marshal (1,214 games to 1,044,
+ahead in as many as behind), so scored as losses its gain there is +1.1 (z +2.0,
+and -0.3 in the second half of the seeds); the relief change carries that (-1.2
+as losses, z -3.1).
+
+**A three-seat field** at the default setup (18 nodes, 6 ly/turn), each arm
+against knower and actuary in rotating seats, seeds 61000-61299, 3,600 games:
+
+                                   won     timeouts   against stock   z
+    stock                          27.8%   36
+    D                              32.9%   24         +4.47 (+5.11)   +3.41 (+3.87)
+    D without the pour floor       30.4%   28         +2.26 (+2.67)   +2.22 (+2.58)
+    D without the relief change    31.0%   26         +2.71 (+3.22)   +2.03 (+2.41)
+
+**A four-seat field** at 24 nodes, 6 ly/turn, each arm against marshal, knower
+and actuary in rotating seats, seeds 62000-62199, 3,200 games:
+
+                                   won     timeouts   against stock   z
+    stock                          14.8%   19
+    D                              18.1%   24         +3.69 (+3.38)   +2.69 (+2.44)
+    D without the pour floor       16.4%   17         +1.54 (+1.62)   +1.28 (+1.35)
+    D without the relief change    17.4%   29         +3.25 (+2.62)   +2.37 (+1.88)
+
+The pour floor is worth more in the fields than in duels: +2.2 in each, seed by
+seed (z +1.65 and +1.68). D passes on every count it was registered against:
+weighted z +15.1, no opponent below +2.8, both halves of the seeds ahead against
+every opponent, and better in both fields (z +3.4 and +2.7).
+
+### What would ship
+
+Nothing in `models/` has changed. D, as measured, is two pieces.
+
+- **Three constants, no code:** `FEED` 1.0 to 3.0, `FEED_MAX_TURNS` 2 to 3 and
+  `RELIEF_AWARE` 0.5 to 0.65. Alone they are "D without the pour floor" above:
+  +3.8 weighted, ahead against every opponent under both scorings, and in both
+  fields (+2.3, z +2.2; +1.5, z +1.3).
+- **The pour floor:** a `POUR_GUARD` of 0.85 beside `FRONTIER_GUARD`, so that
+  Phase 3b's pour from a frontier source stops at
+  `ceil(POUR_GUARD * _max_adjacent_enemy(...))` less what the source has already
+  sent, as sketched in *A floor per phase, for the next sweep*: about ten lines.
+  It adds +0.85 weighted at D in duels (z +3.05; +0.4 scored as losses, z +1.3),
+  most of it against knower and actuary, and +2.2 in each free-for-all.
+
+The relief change is the opponent-dependent part: +3.8 against actuary and +1.1
+against knower, but more stalemates against marshal itself (-1.2 scored as
+losses). The weighting here favours it; a tuning against marshal alone would
+not.
+
+Shipping either moves the bot column's `engine_rev`, and knower borrows marshal
+for its rollouts and as one of its `EXTERNAL_CANDIDATES` ([`knower.md`](knower.md),
+"Borrowed candidates"), so knower moves too: re-run the ladder in
+[`marshal.md`](marshal.md), "Where marshal stands", update the constants'
+comments and the docstring's `FEED_MAX_TURNS` paragraph in `models/marshal.py`
+(at `FEED` 3 the boards three turns admits gain against all three opponents),
+and run `tests/test_marshal.py`. Still open: the guard at 0.45 under the 0.85 pour
+floor (a quarter fewer stalemates against marshal, mixed against knower); D's one
+losing cell, defender advantage 1.5 against knower (-2.0, z -1.3); and `FEED`
+as a rule rather than a ratio ("feed every front facing a rival"), which the
+plateau suggests but which was not measured.

@@ -56,9 +56,9 @@ the section holding the evidence.
   `FRONTIER_GUARD` read as dead weight until Phase 3b spent what it hoarded
   ([`marshal.md`](marshal.md), first section), and one guard was two floors
   ([`marshal-joint.md`](marshal-joint.md); `tools/coupling_census.py`).
-- **Win rate is not the whole objective.** Watch timeouts and game length, and
-  score a timeout both as a draw and as a board not taken. See
-  [`marshal.md`](marshal.md), first section, and [`marshal-joint.md`](marshal-joint.md).
+- **Win rate is not the whole objective.** Watch timeouts and game length; score
+  a timeout by who was ahead (`tools/sweep.py`'s `TIMEOUT_LEAD`) and, for a
+  finalist, as a loss too. See [`marshal.md`](marshal.md), first section, and [`marshal-joint.md`](marshal-joint.md).
 - **Check, rather than assume, that a variant with every new flag off is
   bit-identical to the base.** See [`marshal-pricing.md`](marshal-pricing.md),
   "Two doomed neighbours…", and [`marshal-flow.md`](marshal-flow.md), "The empty
