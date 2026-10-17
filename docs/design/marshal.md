@@ -1,7 +1,7 @@
 # marshal design notes: overview and standing
 
 `models/marshal.py` is the strongest bot that predicts nobody. Its notes span
-three files, in the order the work happened:
+four files, in the order the work happened:
 
 - **This file:** what marshal was built on, what the first measurements
   deleted, the current ladder ("Where marshal stands", which is the table to
@@ -13,6 +13,11 @@ three files, in the order the work happened:
   re-flooding, the successor fixes folded back in (A-C), the empty interior,
   denying the swap, when to evacuate, and feeding captures (from the board's
   human wins).
+- [`marshal-joint.md`](marshal-joint.md): which constants should be tuned
+  together. Covers how the phase order couples them, the coupling census, joint
+  sweeps of each group, `FRONTIER_GUARD` split into a floor for the priced strike
+  and one for the surplus pour, and how far a joint optimum moves between
+  opponents. Read it before re-tuning any constant here.
 
 Later sections often supersede earlier ones. Look for a **Superseded** note
 before relying on a constant's history. Roster-wide rules and the measurement
@@ -165,50 +170,64 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 1260 games, 65 timed out and are excluded from the
+nodes, default settings — 1260 games, 69 timed out and are excluded from the
 percentages). **This table is the current one** — update it, not the module
 docstring, the next time marshal or the roster's pricing changes. Re-run
-2026-10-16, when knower began running a Learning seat as Planned
-([`knower.md`](knower.md), "Seats it cannot run"). learner is no longer a file of
-its own but actuary's Learning stop, so it has left the grid. actuary moved most
-since the 2026-10-08 reading (actuary 343, marshal 307, knower 262, with actuary
-beating knower 70% and marshal 64%): the same 91% against knower reads on `main`
-before this change, so that drift came earlier.
+2026-10-17, when marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3
+and `RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening
+against the roster"); knower moved with it, since it borrows marshal. The ladder
+is deterministic (a repeat run matched game for game), so the bot before the
+ship, run the same day on the same seeds, is an exact A/B: actuary 326, marshal
+282, knower 247, marshal beating knower 66% and actuary 24%.
 
-    actuary 330 (28%), marshal 283 (24%), knower 246 (21%), thinker 163 (14%),
+    actuary 321 (27%), marshal 290 (24%), knower 244 (20%), thinker 163 (14%),
     claudebot 84 (7%), heuristic 52 (4%), rusherplus 37 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  actuar  marsha  thinke  claude  heuris  rusher
-      knower         —      9%     34%     89%     95%    100%    100%
-      actuary      91%       —     78%     98%    100%    100%    100%
-      marshal      66%     22%       —     98%     98%    100%    100%
+      knower         —     11%     30%     89%     95%    100%    100%
+      actuary      89%       —     65%     98%    100%    100%    100%
+      marshal      70%     35%       —     98%     98%    100%    100%
       thinker      11%      2%      2%       —     89%     96%    100%
       claudebot     5%      0%      2%     11%       —     66%     75%
       heuristic     0%      0%      0%      4%     34%       —     61%
       rusherplus    0%      0%      0%      0%     25%     39%       —
 
+Eight more wins, all against actuary and knower (marshal beats the rest 98-100%
+either way): 35% against actuary from 24%, and 70% against knower from 66%. At 60
+games a pair that is a direction; the paired measurement behind the ship is +6.8
+points against actuary and +3.8 against knower over 2,400 cell-seeds each. The
+previous reading (2026-10-16, when knower began running a Learning seat as
+Planned; [`knower.md`](knower.md), "Seats it cannot run"), actuary 330, marshal
+283, knower 246, predates `RELIEF_IN_FLIGHT` in marshal and actuary, merged the
+same day. learner is no longer a file of its own but actuary's Learning stop, so
+it has left the grid.
+
 With `--aux actuary=2` (every actuary seat at Learning) the grid barely moves:
-actuary 329, marshal 284, knower 246, actuary beating knower 91% and marshal
-76%. Before knower ran the stand-in, Learning beat knower 95% on the same seeds
-(`--ai knower actuary --aux actuary=2`); now it is level with Planned's 91%, so
-the oracle claim earns nothing in this cell.
+actuary 324, marshal 285, knower 242, actuary beating knower 93% and marshal 72%
+(the bot before the ship: 328, 284, 245; 93% and 74%). Before knower ran the
+stand-in, Learning beat knower 95% on the same seeds (`--ai knower actuary --aux
+actuary=2`); now it reads 93% to Planned's 89%, so the oracle claim earns little
+in this cell.
 
 knower here is at its default, Predict. With `--aux knower=0` (Off) the same
-ladder read actuary 321, marshal 291, knower 209, thinker 172, actuary beating
-knower-0 98% (actuary at Greedy, not re-run). For all three Oracle settings against marshal and thinker over
+ladder reads actuary 325, marshal 297, knower 209, thinker 170, actuary beating
+knower-0 95% and marshal beating it 94% (the bot before the ship: 330, 297, 208;
+95% and 96%). For all three Oracle settings against marshal and thinker over
 more seeds, see [`knower.md`](knower.md), "Each Oracle setting against thinker
-and marshal".
+and marshal" (measured before the 2026-10-17 ship).
 
 The same ladder in two other cells, since this one cannot see anything keyed on
-long lanes. 30 seeds each; the symmetric one re-run with actuary (1260 games),
-the slow one not yet (`tests.sim` has no ship-speed flag; actuary's
-head-to-heads there are in `actuary.md`, and marshal beats it 68%):
+long lanes. 30 seeds each; the symmetric one re-run 2026-10-17 with the bot
+before the ship beside it, the slow one not since actuary joined (`tests.sim` has
+no ship-speed flag; actuary's head-to-heads there are in `actuary.md`, and
+marshal beats it 68%):
 
-    symmetric, 18 nodes, 6 ly/turn     269 timeouts
-    actuary 247 (25%), marshal 237 (24%), knower 227 (23%), thinker 120 (12%),
-    claudebot 99 (10%), heuristic 41 (4%), rusherplus 20 (2%)
-    marshal vs knower 75%, actuary vs marshal 47%, actuary vs knower 64%
+    symmetric, 18 nodes, 6 ly/turn     226 timeouts (before the ship: 220)
+    actuary 273 (26%), marshal 253 (24%), knower 216 (21%), thinker 127 (12%),
+    claudebot 105 (10%), heuristic 39 (4%), rusherplus 21 (2%)
+    marshal vs knower 73% (69%), actuary vs marshal 61% (63%), actuary vs knower 74%
+    before the ship: actuary 278, marshal 252, knower 218
 
     random, 24 nodes, 3 ly/turn        96 timeouts, 900 games, before actuary
     marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
@@ -339,6 +358,12 @@ Resolved by measurement rather than by restoring 0.3 — the guard is now `0.55`
 on the sweep below, and the attributability argument is formally dropped: three
 of marshal's margins are its own figures now, not thinker's, and the reason to
 prefer any of them is the measurement rather than its provenance.
+
+> **Revisited (2026-10-16).** Every guard row in this file moved the guard as one
+> number, and it is the floor for several phases. Against stock marshal they want
+> different floors (the priced strike none, the surplus pour about 0.55); against
+> actuary the whole guard wants raising. See "One guard, two floors" and "Against
+> the roster, the optimum moves" in [`marshal-joint.md`](marshal-joint.md).
 
 ## The 2026-09 tuning sweep
 

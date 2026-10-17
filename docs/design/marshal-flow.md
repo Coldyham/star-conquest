@@ -237,6 +237,12 @@ Weights showed no significant difference from each other in three independent
 tables; 0.5 was the pre-registered choice and reads numerically highest in all
 three, so it shipped.
 
+> **Revisited (2026-10-17): 0.65 shipped.** Against actuary a higher weight is
+> worth about 4 points (0.65: +3.8 on 2,400 fresh cell-seeds, z +9.1; 0.75 read
+> +4.4 to +4.7 in the screen), at a point or so either way against marshal and
+> knower, though against marshal it draws more (-1.2 with a timeout scored as a
+> loss). See "Screening against the roster" in [`marshal-joint.md`](marshal-joint.md).
+
 ### C. `FAST_GUARD_WEIGHT` — a guard across a 1-turn lane is a sunk cost, not a deterrent
 
 `_max_adjacent_enemy` sized the frontier guard off the largest adjacent rival
@@ -729,6 +735,14 @@ negative against knower, on where it clearly wins.
 Shipped with the two-turn cap: `FEED = 1.0`, `FEED_FRONT = True`,
 `FEED_MAX_TURNS = 2`. `FEED_LOCAL` was deleted rather than kept at zero. The
 constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
+
+> **Revisited (2026-10-17): `FEED` 3.0 and `FEED_MAX_TURNS` 3 shipped.** The
+> three-turn cap was measured here at `FEED` 1.0 only, where it is null. The two
+> are complements: in a factorial against marshal, knower and actuary, three turns
+> is worth nothing at `FEED` 1.0 and about a point at 2.0, and `FEED` itself rises
+> to about 3 and is flat to 6, where nearly every front facing a rival counts as
+> short. Shipped with a pour floor and `RELIEF_AWARE` 0.65; see "Screening against
+> the roster" in [`marshal-joint.md`](marshal-joint.md).
 
 ### Measured null (2026-10-12): no lone trickles into a rival
 
