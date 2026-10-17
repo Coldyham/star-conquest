@@ -119,6 +119,36 @@ TAIL_TURNS 12 (36.4), RISK_WEIGHT 0.3 (40.7) and 0.1 (30.1), MIN_GAIN 0.5-2
 which is edge risk's heavier weight again: edge risk replaces that term, so the
 two do not stack.
 
+## Look-ahead (`LOOKAHEAD`, off by default)
+
+Each decide builds hunter's plan and the same ledger at other postures (edge
+risk weight x0.4 and x2.5, and the nominal-roll strike on every board),
+dropping duplicates; on most turns they agree and nothing is rolled. Each
+distinct plan is played on a private board for `LOOK_PLIES` (6) turns. Every
+rival, and our own seat after the first ply, plays hunter's plain plan from
+its own seat: a self-model, so no other bot's code is run. Because hunter is
+actuary's fork, that self-model is unusually close to actuary's real play,
+which is likely why the gain against actuary is twice the gain against
+marshal. The board rolls its own dice (`dice_salt` + `:hunter-rollout`), the
+same for every line, so no line sees the game's dice and a score gap is the
+plan's. The score is the ledger's worth of the final board from our seat. A
+wall clock (`LOOK_BUDGET_S` x `BUDGET_SCALE`) stops between plans; the base plan
+is rolled first, so running out only falls back to plain hunter.
+
+Screen (9.1M, 25 seeds, paired against plain hunter): actuary 70.0% (+11.8,
+z +4.63), marshal 78.6% (+5.4, z +2.06), knower at Predict 85.8% (+0.6; knower
+runs hunter's own decide, look-ahead included). Confirm against actuary (9.2M,
+100 seeds): **68.2% (z +15.5), +11.4 over plain hunter (z +8.61)**, every cell
+up:
+
+| 7:6 | 11:6 | 18:6 | 24:3 | 18:18 |
+|---|---|---|---|---|
+| 67.5% (+7.8) | 71.0% (+12.2) | 64.8% (+16.2) | 73.0% (+7.5) | 64.5% (+13.2) |
+
+Stalemates fell to 5.7% of games (plain hunter about 10%). Cost with the guard
+lifted: median 1-12 ms per decide (most turns roll nothing), 95th percentile 23
+ms at 7:6 and 127 ms at 18:6.
+
 ## Where it stands
 
 Headline, 9.7M, 100 seeds a cell, against actuary: **55.1% (z +5.52)**.

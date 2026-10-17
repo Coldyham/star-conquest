@@ -240,3 +240,44 @@ def test_the_knob_reads_tolerantly(hu, aux, stop):
     """actuary's Learning stop and anything past it read as Planned."""
     seat = type("P", (), {"ai_params": type("A", (), {"aux": aux})()})()
     assert hu._stop_of(seat) == stop
+
+
+# --------------------------------------------------------------------------- #
+# Look-ahead
+# --------------------------------------------------------------------------- #
+def test_look_ahead_is_legal_read_only_and_reproducible(hu, monkeypatch):
+    monkeypatch.setattr(hu, "LOOKAHEAD", True)
+    monkeypatch.setattr(hu, "BUDGET_SCALE", float("inf"))
+    state = _state(nodes=18, players=2, seat=1)
+    for _ in range(25):
+        engine.end_turn(state, decide=ai.decide)
+    before = (tuple((s.owner_id, s.ships) for s in state.systems.values()), len(state.fleets),
+              state.rng.getstate(), state.dice_salt)
+    first = _orders(hu, state, 1)
+    assert (tuple((s.owner_id, s.ships) for s in state.systems.values()), len(state.fleets),
+            state.rng.getstate(), state.dice_salt) == before
+    assert _orders(hu, copy.deepcopy(state), 1) == first
+    for src, dst, n in first:
+        assert state.systems[src].owner_id == 1 and n >= 1
+
+
+def test_rollouts_never_roll_the_games_dice(hu):
+    """A rollout's board rolls its own family of dice: no line foresees a real fight."""
+    state = _state(nodes=18, players=2, seat=1)
+    clone = hu._clone(state)
+    assert clone.dice_salt != state.dice_salt
+    assert clone.dice_salt.startswith(state.dice_salt)
+    assert clone.rng is not state.rng
+    assert all(not p.is_human for p in clone.players.values())
+
+
+def test_without_a_second_plan_the_look_ahead_is_plain_hunter(hu, monkeypatch):
+    """With every posture the same as ours there is nothing to roll."""
+    monkeypatch.setattr(hu, "LOOK_WEIGHTS", ())
+    monkeypatch.setattr(hu, "LOOK_CAPTURE", False)
+    state = _state(nodes=18, players=2, seat=1)
+    for _ in range(15):
+        engine.end_turn(state, decide=ai.decide)
+    plain = _orders(hu, state, 1)
+    monkeypatch.setattr(hu, "LOOKAHEAD", True)
+    assert _orders(hu, state, 1) == plain

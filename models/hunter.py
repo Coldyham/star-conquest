@@ -45,11 +45,14 @@ it, and draws nothing from ``state.rng``: every tie breaks on system id.
 
 from __future__ import annotations
 
+import copy
 import heapq
 import itertools
 import math
+import random
+import time
 
-from starconquest import combat, config
+from starconquest import combat, config, engine
 from starconquest.model import Order
 
 # --- tunables -------------------------------------------------------------- #
@@ -96,6 +99,16 @@ CAPTURE_SWING = 1.0         # >0: the swing our strike on a rival-held system is
 CAPTURE_LANE = 6            # ...on a board whose median lane is at least this many turns
                             # (13:3 +7.8 pts; on 7:6 it cost 7-13); 0 = every board
 
+# --- look-ahead (docs/design/hunter.md, "Look-ahead") ------------------------- #
+LOOKAHEAD = False           # roll each candidate plan forward and keep the best
+LOOK_PLIES = 6              # turns each candidate is played on before it is scored
+LOOK_WEIGHTS = (0.4, 2.5)   # candidate postures besides ours: edge risk weight times these...
+LOOK_CAPTURE = True         # ...and our plan with the nominal-roll strike on every board
+LOOK_DECIDED = 1e6          # a rollout that ends the game scores this, won or lost
+LOOK_BUDGET_S = 0.150       # wall clock per decide, browser-sized; the base plan is rolled
+                            # first, so running out only ever falls back to plain hunter
+BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by this
+
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython
 # (M3), fitted to a grid of 18-120 systems, 3-18 ly/turn and 2 or 4 seats, hunter
 # against actuary (docs/design/hunter.md, "What it costs"). Only the system count
@@ -134,6 +147,8 @@ def decide(state, pid):
         orders = opening(state, pid)
         if orders is not None:
             return orders
+    if LOOKAHEAD:
+        return _look(state, pid)
     return _Ledger(state, pid).plan()
 
 
@@ -180,7 +195,7 @@ def decide_ms(settings, seat) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid):
+    def __init__(self, state, pid, weight=None, capture=None):
         self.state, self.pid = state, pid
         sysmap = state.systems
         self.ids = sorted(sysmap)
@@ -196,6 +211,9 @@ class _Ledger:
         lanes = sorted(state.travel_turns(a, b) for a in self.ids for b in sysmap[a].neighbors if a < b)
         median = (lanes[len(lanes) // 2] + lanes[(len(lanes) - 1) // 2]) / 2 if lanes else 0
         self.capture = CAPTURE_SWING if CAPTURE_SWING > 0 and median >= CAPTURE_LANE else 0.0
+        if capture is not None:
+            self.capture = capture
+        self.edge_weight = EDGE_RISK_WEIGHT if weight is None else weight
         self.gather = EDGE_GATHER_LANE > 0 and median <= EDGE_GATHER_LANE
         self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
                        for a in self.ids}
@@ -533,7 +551,7 @@ class _Ledger:
         if worst <= 0.0:
             return 0.0
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
-        return EDGE_RISK_WEIGHT * worst * stake
+        return self.edge_weight * worst * stake
 
     def _own_relief(self, sid, lines, under=None):
         """Per turn, ``SELF_RELIEF`` of what our garrisons next door could have
@@ -689,6 +707,88 @@ def _with(arrivals, t, owner, ships):
     slot[owner] = slot.get(owner, 0) + ships
     out[t] = slot
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Look-ahead
+#
+# Our candidate plans are hunter's own and the same ledger at other postures.
+# Each is played on a private board for LOOK_PLIES turns, every seat after the
+# first ply (and every rival from the first) playing hunter's plain plan from
+# its own seat: no other bot's code is run, so this is a self-model, not an
+# oracle. The copy rolls its own dice (`dice_salt` + ":hunter-rollout"), so no
+# line foresees the game's. Every line rolls the same dice, so a score gap is
+# the plan's, not luck's. The score is the ledger's value of the final board
+# from our seat, which already projects every fleet still flying.
+# --------------------------------------------------------------------------- #
+def _look(state, pid):
+    deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
+    plans, seen = [], set()
+    for weight, capture in _postures():
+        orders = _Ledger(state, pid, weight, capture).plan()
+        key = tuple(sorted((o.source_id, o.dest_id, o.ships) for o in orders))
+        if key not in seen:
+            seen.add(key)
+            plans.append(orders)
+        if time.perf_counter() > deadline:
+            break
+    if len(plans) == 1:
+        return plans[0]
+    best, best_score = plans[0], None
+    for orders in plans:
+        score = _rollout(state, pid, orders)
+        if best_score is None or score > best_score:
+            best, best_score = orders, score
+        if time.perf_counter() > deadline:
+            break
+    return best
+
+
+def _postures():
+    yield None, None
+    for factor in LOOK_WEIGHTS:
+        yield EDGE_RISK_WEIGHT * factor, None
+    if LOOK_CAPTURE and CAPTURE_SWING > 0:
+        yield None, CAPTURE_SWING
+
+
+def _rollout(state, pid, orders) -> float:
+    board = _clone(state)
+    first = [True]
+
+    def stepped(s, q):
+        if q == pid and first[0]:
+            return orders
+        if not any(x.owner_id == q for x in s.systems.values()):
+            return []
+        return _Ledger(s, q).plan()
+
+    for _ in range(LOOK_PLIES):
+        engine.end_turn(board, decide=stepped)
+        first[0] = False
+        if board.winner is not None:
+            return LOOK_DECIDED if board.winner == pid else -LOOK_DECIDED
+    if not any(x.owner_id == pid for x in board.systems.values()):
+        return -LOOK_DECIDED
+    return sum(_Ledger(board, pid).worth.values())
+
+
+def _clone(state):
+    """A private board: every mutable container rebuilt (as knower's `_clone`),
+    its own rng, every seat driven by `decide`, and its own dice."""
+    clone = copy.copy(state)
+    clone.systems = {sid: copy.copy(s) for sid, s in state.systems.items()}
+    for s in clone.systems.values():
+        s.neighbors = list(s.neighbors)
+    clone.fleets = [copy.copy(f) for f in state.fleets]
+    clone.players = {q: copy.copy(p) for q, p in state.players.items()}
+    for p in clone.players.values():
+        p.ai_params = copy.copy(p.ai_params)
+        p.is_human = False
+    clone.adjacency = {sid: dict(n) for sid, n in state.adjacency.items()}
+    clone.rng = random.Random(0)
+    clone.dice_salt = f"{state.dice_salt}:hunter-rollout"
+    return clone
 
 
 # --------------------------------------------------------------------------- #
