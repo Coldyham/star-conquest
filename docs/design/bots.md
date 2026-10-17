@@ -4,7 +4,7 @@ Why the AI is shaped as it is across the whole `models/` roster: the parameter
 space a tuning is only valid inside, how bots are measured, replaying bots for
 the leaderboard's bot column, the break-even margins every bot prices a fight
 with, and the two routes for bots written outside the repo. Single bots have
-their own files: [`knower.md`](knower.md), and marshal in
+their own files: [`knower.md`](knower.md), [`council.md`](council.md), and marshal in
 [`marshal.md`](marshal.md) (overview and standing),
 [`marshal-pricing.md`](marshal-pricing.md) (what a fight is priced against) and
 [`marshal-flow.md`](marshal-flow.md) (where the surplus goes). `CLAUDE.md`
