@@ -234,7 +234,7 @@ source thinned by its own launch.
 **Considered and left out of the list.** Territory or chokepoint play
 (betweenness lost at every weight; pocket-sealing was a constant offset), one
 hammer stack (spearhead, 23-42%), arriving after a rival breaks a neutral (null),
-all in "Decided against" in [`../README.md`](../README.md). A decoupled
+all in [`../decided-against.md`](../decided-against.md). A decoupled
 simultaneous-move tree search would cost what knower's search does and overlap
 it.
 
