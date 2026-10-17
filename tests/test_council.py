@@ -194,7 +194,7 @@ def keep_config(monkeypatch):
 
 def test_the_traps_rebuild_the_strikes_council_really_sent(co, keep_config):
     from tests import council_traps
-    assert [sent for *_, sent in council_traps.probe()] == [7, 11, 9, 8, 15, 10]
+    assert [sent for *_, sent in council_traps.probe()] == [7, 11, 0, 14, 15, 10]
 
 
 @pytest.mark.xfail(strict=True, reason="council's rollouts do not foresee a person's relief")

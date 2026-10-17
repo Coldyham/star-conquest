@@ -173,3 +173,8 @@ screen.
   inside the rollouts and safer openings were offered, but the judge picked the
   strike anyway: the ranking, not the stand-in, is most of the gap. Worth
   revisiting only if posted human games show people relieve like actuary.
+  *2026-10-17, merging main:* with knower's stand-ins and marshal's and
+  actuary's relief changes, shipped council loses 4 of the six traps, not 6:
+  it holds at 95210 t19 (was 9 sent) and takes 95208 t16 with 14 (was 8).
+  `test_the_traps_rebuild_the_strikes_council_really_sent` pins the new
+  strikes. Which change did it is not separated.
