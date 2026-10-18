@@ -169,6 +169,14 @@ lost.
   Opening: Planned. See [`actuary.md`](actuary.md), "The planned opening".
 - **convoy**, the turn as routing over time: supply at (system, turn), strikes
   as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
+- **fulcrum** (not on the list; built 2026-10-18), actuary's ledger with an
+  influence field for the pull on its ships: each ship goes where the balance of
+  force is closest, not to every front alike. The traps and full relief tried on
+  the way there are recorded with it. It opens further from actuary than marshal
+  does (0.26 against 0.17), plays the contested middle as actuary's close
+  relative (0.17, where marshal is 0.34), and is ahead of both in a duel at the
+  default settings, level with actuary in a free-for-all. See
+  [`fulcrum.md`](fulcrum.md).
 
 **learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent

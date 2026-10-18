@@ -101,6 +101,15 @@ the measured result was indistinguishable from the baseline.
 - Shipping convoy as a roster bot: between thinker and marshal, distinct only in the opening. Removed from `models/`; the code is at commit `7153065`. *Built, measured, not shipped* (the file's opening paragraph).
 - Borrowing convoy's opening for another bot, as surveyor's was for actuary: 32-45% in front of marshal, 47% pooled against actuary's Planned opening. *Its opening in front of another bot.*
 
+## fulcrum ([`design/fulcrum.md`](design/fulcrum.md))
+- A refill of our source the turn after a dooming strike, bolted onto actuary: 45.5% against actuary. The same priced inside the ledger (a doomed rival garrison assumed to flee into our nearest source, weight 0.5): 46.8%. Full relief of any system a visible fleet would take, bolted onto marshal or actuary: null (51.3%, 51.0% against themselves). *Where a ledger's moves come from.*
+- Two phase bots built round traps, full relief and worst-case floors: 3.6-21.1% against actuary and marshal. *Same section.*
+- On actuary's ledger: the defence priced against the rival's whole reach (48.5-49.6%), a held system worth 10 or 40 turns of income, a rival's ships counted 1.5x, stacks valued as ships^1.1, `FRONT_BONUS` 1.0, `FRONT_DECAY` 0.9: null or worse. *Same section.*
+- A pull scaled by the rival ships next door: +2.3 points paired on fresh seeds (z +1.44) and 0.08 from actuary in play, a re-tune rather than a new bot. A front's ships worth the bonus only up to 0.8 of the stack facing it (pinning): 39.6% against actuary. *Same section.*
+- In the field: decay per turn rather than per median lane (8.4% against actuary at 3 ly/turn), a leave-one-out balance (-10.1 points), a transit cost on moves between our own systems (-31 and -46), `FRONT_BONUS` 0.75 (-1.4), a contest width of 0.35 (+2.2 against +5.6 at the same decay and reach) or 0.8 (-3.1 against -0.4). *The field, How it was tuned.*
+- A field that weighs only the strongest rival at each system rather than every rival summed (identical in a duel): +1.3 points in a three-seat free-for-all (z +0.85). *Where fulcrum stands.*
+- **Open, not rejected:** a capture's income discounted by the balance (+6.9) and half actuary's front with half the field (+6.6, the steadier at 3 ly/turn), level with the shipped field at 60 seeds and measured with a neutral's garrison still in the stake. *Same section.*
+
 ## The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
 - A `simulate` callback or oracle parity for external bots: ruled out, and rival strategy names are masked. *Bots that aren't Python.*
