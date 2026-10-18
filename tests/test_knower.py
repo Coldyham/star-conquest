@@ -254,17 +254,17 @@ def test_a_stand_in_that_cannot_be_used_falls_back_to_blind(kn, hook):
         del sys.modules["sc_model_fake_oracle"]
 
 
-def test_a_learning_actuary_is_predicted_as_planned():
-    """actuary at Learning claims the oracle flag; knower runs it at Planned."""
+def test_a_learning_actuary_is_predicted_as_field():
+    """actuary at Learning claims the oracle flag; knower runs it at Field."""
     assert "actuary" in ai.load_models()
     kn = sys.modules["sc_model_knower"]          # load_models re-imported it
     state = _state(knower_seat=2)
     state.players[3].ai_strategy = "actuary"
     state.players[3].ai_params.aux = 2.0
     for _ in range(12):
-        planned = copy.deepcopy(state)
-        planned.players[3].ai_params.aux = 1.0
-        expected = ai.STRATEGIES["actuary"](planned, 3)
+        field = copy.deepcopy(state)
+        field.players[3].ai_params.aux = 1.0
+        expected = ai.STRATEGIES["actuary"](field, 3)
         ai.decide(state, 2)
         assert kn.LAST_ORACLE.seats[3] == "stand-in" and 3 in kn.LAST_ORACLE.trusted
         assert kn.LAST_ORACLE.orders[3] == expected

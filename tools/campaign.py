@@ -43,7 +43,7 @@ sys.path.insert(0, str(ROOT))
 from starconquest import config, mapgen
 from starconquest.settings import (
     ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY, Settings, apply_globals,
-    build_state, randomise_knobs,
+    build_state, randomise_knobs, roll_seed,
 )
 from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials
 
@@ -121,7 +121,7 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
 
 def _fresh_seed(rng: random.Random, taken: set[tuple[str, int]], mode: str) -> int:
     for _ in range(SEED_TRIES):
-        seed = rng.randrange(config.SEED_MAX)
+        seed = roll_seed(rng)       # a new map, so the newest pool deals its random seats
         if (mode, seed) not in taken:
             taken.add((mode, seed))
             return seed

@@ -6,7 +6,7 @@
     uv run python tools/guard_census.py --report results/guard_census.jsonl
 
 Step 1 of "Is the guard a pool?" (``docs/design/marshal.md``). Stock marshal duels
-marshal, actuary (Planned) and knower (Predict); the seat marshal is censused in
+marshal, actuary (its default stop) and knower (Predict); the seat marshal is censused in
 alternates with the seed's parity. For every rival fleet that will land on a
 marshal frontier system down a lane of 2 turns or more, at the first marshal
 decide that sees it, this records:

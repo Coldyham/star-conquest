@@ -42,7 +42,7 @@ so `Watcher` counts them itself, turn by turn, from `actuary.launches`.
 the person played by hand, each bot seat next to them predicts their launches,
 and the bots knower could stand in for a person join the four, each its plan
 for the person's seat read as certain (`GUESSES`): **knower** (its blind plan,
-`knower._blind`, what it plays now), **marshal** and **actuary** (at Planned).
+`knower._blind`, what it plays now), **marshal** and **actuary** (at its default stop).
 """
 
 from __future__ import annotations

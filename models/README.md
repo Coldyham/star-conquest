@@ -289,9 +289,10 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 (scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
-launch raises that value most; by default it plans the land-grab up to first
-contact on a big map with fast lanes, where that pays, and opens with the
-ledger everywhere else; its *Style* knob runs Greedy, Planned, Learning),
+launch raises that value most; its *Style* knob picks the pull on its ships:
+Greedy sends them to every front alike, Field, the default, to where the
+balance of force is closest, and Learning is Field reading each rival's habits
+into its risk),
 `hunter.py` (actuary's ledger, but a threat counts only if a rival would launch
 it: a system next door, or several landing on the same turn, that wins the
 worst roll, and a short look-ahead over a few postures with every rival
@@ -311,9 +312,10 @@ leaves the seat's bot to the match seed, and `settings.build_state` resolves it 
 one of the above before the game starts. It is deliberately not a model file that
 forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
 seat whose bot it does not yet know (see *Predicting the other seats*), and every
-answer it could give is wrong for some pick. The pool is a fixed list
-(`settings.RANDOM_POOL`), so every copy of the game deals a seed the same bots; a
-drop-in of yours is never dealt. Don't name one `random.py`.
+answer it could give is wrong for some pick. The pools are fixed lists
+(`settings.RANDOM_POOLS`, append-only, the seed's era picking one), so every copy
+of the game deals a seed the same bots; a drop-in of yours is never dealt. Don't
+name one `random.py`.
 
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating

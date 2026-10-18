@@ -206,10 +206,16 @@ rather than even steps. The oracle pair (knower at Search, actuary at
 Learning) is the top. Next come marshal and plain actuary (only marshal is
 replayed), then a gap to thinker, a similar gap to claudebot, and heuristic and
 rusherplus at the bottom ("Where marshal stands" in [`marshal.md`](marshal.md)).
-So on 7 bots, Hard is 1-2 winning, Medium 3-4 and Easy 5+. That makes the live
+So on 7 bots, Hard was 1-2 winning, Medium 3-4 and Easy 5+. That made the live
 board 13 Easy, 39 Medium, 67 Hard and 18 Very hard. Tiering on the weakest
 class that won instead agrees on 119 of 137 maps. The rest are one weaker bot
 winning against the trend, which a count is less swayed by.
+
+Re-cut on 2026-10-18 for eight bots, with council in the column. council
+joins the top class, so Hard is 1-3 winning (council, knower at Search, actuary
+at Learning), Medium 4-5 (marshal and thinker too) and Easy 6+, at shares of
+0.55 and 0.25. Those cuts read the same counts on seven runs, so a map the
+newest bot has not reached yet is not moved a level by the gap.
 
 ## Checked scores (`share.py`, `tools/verify_scores.py`)
 
@@ -441,11 +447,12 @@ not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
 **The random pool is the other axis, and it gets the same flag.** A seat left
-to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
-dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
-A score whose numbers reproduce but whose rival seats faced bots other than the
-ones its setup deals today is `verified` and `outdated`: played honestly, by a
-build from before the pool was fixed or before an edit to it, against a lineup
+to chance is dealt from the pool its seed's era names (`settings.pool_for`)
+and the log records what it was dealt (`GameLog.strategies`;
+`docs/design/core.md`, "A seat left to the seed"). A score whose numbers
+reproduce but whose rival seats faced bots other than the ones its setup deals
+today is `verified` and `outdated`: played honestly, by a build from before the
+pool was fixed or a stale one that did not know its seed's era, against a lineup
 the map's other scores did not face. It stays counted and keeps the verified
 tick. Not a `mismatch`, because an edit to the pool would otherwise drop every
 honest earlier score on a random map, and a tampered lineup gains nothing a

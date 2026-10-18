@@ -337,9 +337,16 @@ already resolve simultaneously. The rationale for each rule is in
 - **A seat may be left to the seed.** `settings.RANDOM_STRATEGY` (`"random"`)
   is resolved inside `build_state` by `settings.resolve_strategy`, never by a
   dispatcher bot. The pick is derived (`random.Random(f"{seed}:strategy:{pid}")`)
-  from `settings.RANDOM_POOL`, never the loaded roster. **Editing the pool
-  re-deals every random map ever shared**, so a new bot joins it only on purpose
-  (`test_the_pool_still_deals_what_it_dealt`). `Settings` keeps `"random"`; the
+  from the pool the seed's era names (`settings.pool_for`: seed //
+  `POOL_ERA`, every seed below the second pool's era the first's), never the
+  loaded roster. **`settings.RANDOM_POOLS` is append-only**: editing a pool
+  that has shipped re-deals every random map of its era, so to change what a
+  random seat deals, append a pool, which deals only seeds rolled from then on
+  (`settings.roll_seed`, `test_a_shipped_pool_is_never_edited`,
+  `test_each_pool_still_deals_what_it_dealt`). Seeds are rolled only through
+  `roll_seed`, and the menu's seed field stops at `seed_top`, so no seed is
+  made in an era that has no pool yet. A bot any pool names keeps shipping
+  (`test_every_bot_in_every_pool_ships`). `Settings` keeps `"random"`; the
   win overlay (`render._winner_label`) reveals the bot. Detail:
   `docs/design/core.md`.
 - **A bot that reads other seats** (see `models/knower.py`) must never call

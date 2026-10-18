@@ -702,14 +702,14 @@ def _pool(*names):
     """Deal random seats from ``names``, each registered as a strategy that
     issues no orders."""
     from starconquest import settings as settings_module
-    saved_pool, saved = settings_module.RANDOM_POOL, dict(ai.STRATEGIES)
+    saved_pool, saved = settings_module.RANDOM_POOLS, dict(ai.STRATEGIES)
     try:
-        settings_module.RANDOM_POOL = tuple(names)
+        settings_module.RANDOM_POOLS = (tuple(names),)
         for name in names:
             ai.register(name, lambda state, pid: [])
         yield
     finally:
-        settings_module.RANDOM_POOL = saved_pool
+        settings_module.RANDOM_POOLS = saved_pool
         ai.STRATEGIES.clear()
         ai.STRATEGIES.update(saved)
 

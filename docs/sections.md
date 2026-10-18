@@ -9,7 +9,7 @@ The file index is [`README.md`](README.md).
 
 ## design/core.md
 - **Settings tokens.** Pruned, then deflated. Mode, players, nodes and seed are always emitted.
-- **A seat left to the seed.** Why `random` resolves in `build_state` rather than in a dispatcher bot (the oracle contract). The pick is derived, never drawn. The pool is a fixed list (`RANDOM_POOL`) and the log records what it dealt. The win overlay reveals it, and `Settings` keeps the placeholder.
+- **A seat left to the seed.** Why `random` resolves in `build_state` rather than in a dispatcher bot (the oracle contract). The pick is derived, never drawn. The pools are fixed lists, append-only (`RANDOM_POOLS`), the seed's era (seed // `POOL_ERA`) naming the one it deals from, so appending a pool re-deals no map; why the seed and not a `Settings` field; the menu's seed cap and stale builds. The log records what it dealt. The win overlay reveals it, and `Settings` keeps the placeholder.
 - **Challenge links.** Score and tie rules. Links travel by clipboard only. Editing a challenge asks first rather than locking the widgets.
   - *Keys outlive the schema that made them.* `_LEGACY_KEY_DROPS`, `findTwin` folding, newest key wins, the `sc_config_key` trade-off, the int/float `aux` digest leak.
 - **Ship-speed growth.** Applies at launch only, and compounds rather than growing linearly (with the reason). Re-times from `length_ly`.
@@ -167,9 +167,20 @@ only for a fight; what is deliberately not animated.
 - **Where it loses to actuary.** Level at contact, out-traded after it.
 - **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
 
+## design/field.md
+- **The middle game the roster plays.** actuary-marshal duels read through `combat.resolve_arrival`: half the strikes land on an empty system, a doomed garrison steps into its striker's source (marshal 46%, actuary 31% of evacuees), 49-ship front stacks over interiors holding 10% of the ships, and defensive losses, not attacking ones, separating the winner from the loser.
+- **Where a ledger's moves come from.** Traps, full relief and two new phase bots measured and dropped; a stripped copy of actuary's ledger as an exact paired baseline; actuary's value system hard to improve on, except that `FRONT_BONUS` 0 collapses it (6%); pulls that steer the front (a re-tune, 0.08 from actuary) and pinning (distinct, weaker).
+- **The field.** Influence per median lane, the stake of a system weighted by how close the balance is, the pull as a share of the strongest; what it does on positions. *How it was tuned*: per turn collapses at 3 ly/turn, locality decides the rest, a neutral's garrison out of the stake, the nulls and the two open variants.
+- **Where Field stands.** As fulcrum, fresh seeds, five cells: 55.4% against actuary (ahead in three cells, level at 40 nodes, behind at 3 ly/turn), 72.0% against marshal (+10.8 paired over actuary); the rest of the roster, knower at Search (43.5%), council (6.7%), the ladder, an outside bot; the combat sliders and symmetric maps (ahead of actuary in every cell, marshal beats both at jitter 0.3); free-for-alls, level with actuary, and the strongest-rival field that did not help there.
+- **How differently it plays.** `bot_distance.py`: the most distinct opening of any strong bot (0.26 from actuary, 0.37 from marshal), a middle game 0.17 from actuary that strikes more and keeps no stack on a quiet front. *In its own games*: contact three turns sooner and a fifth fewer ships lost defending than actuary against marshal, with the empty landings and evacuations unchanged.
+- **What it costs.** About actuary's cost; `decide_ms` reuses actuary's fit.
+- **Built, measured, dropped.** Traps, full relief, pricing the rival's reinforcement, value systems, pulls that only steer, pinning, the field per turn, leave-one-out, a transit cost, a field against the strongest rival; open: a capture discounted by the balance, half actuary's front.
+- **Folded into actuary.** Field replaces Planned as stop 1, Learning is rebuilt on it. Against marshal, Field +8.8 and Learning +6.0 over Planned, both together +12.5: additive within noise (interaction -2.3, z -1.07). New Learning beats old Learning 54.2% but 38.5% at 3 ly/turn.
+- **Slow lanes: half the front.** The front alone or gated on lane length: null. Half field, half front everywhere: ahead on slow lanes, -9 at 24 nodes and 12 ly/turn. Shipped on slow lanes only (`SLOW_LANE` 5): fresh seeds +3.6 and +4.9 against marshal at stops 1 and 2.
+
 ## design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
-- **Where marshal stands.** **The current full roster ladder (re-run 2026-10-17, after the pour floor and `FEED` re-tune shipped, with the bot before it as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
+- **Where marshal stands.** **The current full roster ladder (re-run 2026-10-18 when actuary's default became Field, beside the 2026-10-17 run after the pour floor and `FEED` re-tune shipped, with the bot before that as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
 - **A stagger's nearer wave is reserved.**
 - **More ideas measured and deleted.**
 - **`FRONTIER_GUARD`.** How it came to be 0.40 while documented as 0.3; now 0.55.

@@ -474,8 +474,8 @@ wrong for actuary at Learning, the one other oracle seat on the roster: `_blind`
 guessed at an actuary with a thinker-strength plan.
 
 **The stand-in.** A predicting module may export `stand_in_params(player)`, the
-params of its nearest version that does not predict (actuary's: Planned for a
-Learning seat; knower's: Off). `_stand_in` runs that module's own `decide` at
+params of its nearest version that does not predict (actuary's: Field for a
+Learning seat, Planned before 2026-10-18; knower's: Off). `_stand_in` runs that module's own `decide` at
 those params on the probe, swapping the seat's params in and back out
 (`_run`), in the one-turn forecast and in Search rollouts alike
 (`_rollout_decide`). Params that still answer `is_oracle_seat`, `None` or a
