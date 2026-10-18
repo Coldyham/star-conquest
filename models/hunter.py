@@ -812,17 +812,19 @@ def _look(state, pid):
     # its orders there are worked out once, not once per line.
     first = {q: _Ledger(state, q).plan() for q, p in state.players.items()
              if q != pid and not p.is_neutral and any(x.owner_id == q for x in state.systems.values())}
-    best, best_score = plans[0], None
+    lines = []
     for i, orders in enumerate(plans):
         if (i + 1) * line > LOOK_WORK and i > 0:
             break                         # the next line would pass the work budget
-        score = _rollout(state, pid, orders, deadline, first)
+        lines.append(_Line(state, pid, orders, first))
+    best, best_score = plans[0], None
+    for ln in lines:
+        score = ln.play(LOOK_PLIES, deadline)
         if score is None:
             break                         # out of time mid-line: keep the best scored
         if best_score is None or score > best_score:
-            best, best_score = orders, score
+            best, best_score = ln.orders, score
     return best
-
 
 def _postures():
     yield None, None
@@ -832,32 +834,43 @@ def _postures():
         yield None, CAPTURE_SWING
 
 
-def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
-    """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
-    out before the last of them (checked before each, so an overrun is one ply)."""
-    board = _clone(state)
-    first = [True]
+class _Line:
+    """One candidate played forward on a private board, a few turns at a time."""
 
-    def stepped(s, q):
-        if first[0]:
-            if q == pid:
-                return orders
-            if first_orders is not None:
-                return first_orders.get(q, [])
+    def __init__(self, state, pid, orders, first_orders=None):
+        self.board, self.pid, self.orders = _clone(state), pid, orders
+        self.first_orders, self.plies = first_orders, 0
+
+    def _decide(self, s, q):
+        if self.plies == 0:
+            if q == self.pid:
+                return self.orders
+            if self.first_orders is not None:
+                return self.first_orders.get(q, [])
         if not any(x.owner_id == q for x in s.systems.values()):
             return []
         return _Ledger(s, q).plan()
 
-    for _ in range(LOOK_PLIES):
-        if time.perf_counter() > deadline:
-            return None
-        engine.end_turn(board, decide=stepped)
-        first[0] = False
+    def play(self, upto, deadline=math.inf):
+        """The line's score once it has played ``upto`` turns in all, or ``None``
+        if the clock ran out first (checked before each, so an overrun is one ply)."""
+        board, pid = self.board, self.pid
+        while self.plies < upto and board.winner is None:
+            if time.perf_counter() > deadline:
+                return None
+            engine.end_turn(board, decide=self._decide)
+            self.plies += 1
         if board.winner is not None:
             return LOOK_DECIDED if board.winner == pid else -LOOK_DECIDED
-    if not any(x.owner_id == pid for x in board.systems.values()):
-        return -LOOK_DECIDED
-    return sum(_Ledger(board, pid).worth.values())
+        if not any(x.owner_id == pid for x in board.systems.values()):
+            return -LOOK_DECIDED
+        return sum(_Ledger(board, pid).worth.values())
+
+
+def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
+    """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
+    out before the last of them."""
+    return _Line(state, pid, orders, first_orders).play(LOOK_PLIES, deadline)
 
 
 def _clone(state):

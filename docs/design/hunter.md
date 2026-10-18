@@ -180,6 +180,18 @@ also halves a line's work, which lets the look-ahead run on bigger boards; on
 exactly +0.0 at 80:6, every seed the same result at about seven times the
 time. Not adopted.
 
+Speed. Two-thirds of a look-ahead decide was edge risk; reading each
+neighbour's timeline once, skipping rivals with nothing next door and working
+out our relief once per quickest lane halved it, and each rival's first-turn
+orders are now worked out once for all lines. `tools/hunt_exact.py` checks
+such a change against 92 recorded positions: no order differs, and the 92
+decides take 1.05 s instead of 2.10 (plain hunter 0.09 s instead of 0.18).
+Racing the lines (play all two turns, finish only the best two) saved 10% and
+changed one move in 92, since most decides have only two or three distinct
+lines; keeping only the best one saved 31% but changed 8 moves in 92, a
+shorter look-ahead in effect. Not adopted. About half of what remains is the
+root's four posture ledgers.
+
 ## Against main's newer actuary and marshal
 
 `main` changed both after these measurements: each now counts a rival fleet
