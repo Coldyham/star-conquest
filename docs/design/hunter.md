@@ -231,11 +231,12 @@ seeds, five cells):
 `tools/hunt_cost.py`: 75th-percentile CPU ms per decide on native CPython (M3),
 hunter against actuary, 3-18 ly/turn, 2 or 4 seats. Plain hunter: 2-10 ms at
 18 systems, 13-29 at 40, 15-47 at 80-120; fitted 10.2 ms at 40 systems,
-exponent 1.28. With the look-ahead under its work budget: 27-79 ms at 18
-systems with two seats and 89-208 with four (worst 0.53 s), 27-304 at 40 with
-two and 19-76 with four, 15-49 at 80 (no look-ahead). `decide_ms` adds
-`COST_LOOK_MS` (0.04) per unit of `_look_work` to the plain fit, so it peaks on
-the mid-sized boards the look-ahead still runs on. actuary's fit is 8.3 ms, exponent 0.77: edge
+exponent 1.28. With the look-ahead under its work budget, after the speed-up
+(see "Look-ahead"): 5-32 ms at 18 systems with two seats and 22-75 with four
+(worst 0.16 s), 10-130 at 40 with two and 3-14 with four (worst 0.27 s), 7-14 at
+80 (no look-ahead; worst 0.03 s). Before it: 27-79 / 89-208 at 18, worst 0.53
+s. `decide_ms` adds `COST_LOOK_MS` (0.025) per unit of `_look_work` to the plain
+fit, so it peaks on the mid-sized boards the look-ahead still runs on. actuary's fit is 8.3 ms, exponent 0.77: edge
 risk reads every launch turn of the horizon. Median and 95th percentile against
 actuary in the same games: 7:6 0.5/2.2 ms (actuary 0.2/0.8), 40:6 3.1/20.2
 (1.8/6.8).

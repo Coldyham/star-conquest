@@ -131,7 +131,7 @@ BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by 
 COST_REF_NODES = 40
 COST_DECIDE_MS = 10.2
 COST_NODES_EXP = 1.28
-COST_LOOK_MS = 0.04
+COST_LOOK_MS = 0.025
 
 # --- the opening ------------------------------------------------------------ #
 GREEDY, PLANNED = 0, 1      # the Style knob's stops; anything unreadable, or at or past
