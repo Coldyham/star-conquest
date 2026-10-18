@@ -268,14 +268,14 @@ export function leaderCredit(game) {
 
 // The share of bots that lose a map (game_summary.difficulty) at or below which
 // each word applies, easiest first. Cut along the roster's classes, so on the
-// 9-bot roster: Hard is a map only the top three (council, knower at Search,
-// actuary at Learning) take, 1-3 winning; Medium is one fulcrum, marshal and
-// thinker take too, 4-6; Easy is one claudebot, heuristic or rusherplus take
-// too, 7+; Very hard is none. The same counts hold on 8 bots, while a new bot
-// is still being replayed onto the maps the other eight have reached.
+// 8-bot roster: Hard is a map only the top three (council, knower at Search,
+// actuary at Learning) take, 1-3 winning; Medium is one marshal and thinker take
+// too, 4-5; Easy is one claudebot, heuristic or rusherplus take too, 6+; Very
+// hard is none. The same counts hold on 7 bots, while a new bot is still being
+// replayed onto the maps the other seven have reached.
 const DIFFICULTY_LEVELS = [
-  { most: 0.24, text: "Easy", cls: "easy" },
-  { most: 0.6, text: "Medium", cls: "medium" },
+  { most: 0.25, text: "Easy", cls: "easy" },
+  { most: 0.55, text: "Medium", cls: "medium" },
   { most: 0.999, text: "Hard", cls: "hard" },
   { most: 1, text: "Very hard", cls: "very-hard" },
 ];

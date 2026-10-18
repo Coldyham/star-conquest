@@ -153,11 +153,11 @@ test("the difficulty word follows how many of the bots won, out of however many 
     createTextNode: (text) => text,
   };
   const word = (wins, runs) => difficultyLevel(Math.round((1 - wins / runs) * 1000) / 1000).text;
-  assert.deepEqual([9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 9)),
-    ["Easy", "Easy", "Easy", "Medium", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
-  // While a new bot is still being replayed, eight runs read the same counts.
   assert.deepEqual([8, 7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 8)),
-    ["Easy", "Easy", "Medium", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
+    ["Easy", "Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
+  // While a new bot is still being replayed, seven runs read the same counts.
+  assert.deepEqual([7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 7)),
+    ["Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
   // PostgREST may hand a numeric over as a string.
   assert.equal(difficultyLevel("1.000").text, "Very hard");
   assert.equal(difficultyLevel(null), null);
@@ -166,5 +166,5 @@ test("the difficulty word follows how many of the bots won, out of however many 
   assert.match(badge.className, /\bdifficulty\b.*\bhard\b/);
   assert.equal(difficultyBadge({ bot_wins: 0, bot_runs: 0, difficulty: null }), null);
   // A config card passes its average and has no counts of its own.
-  assert.equal(difficultyBadge({ avg_difficulty: 0.6 }, 0.6).textContent, "Medium");
+  assert.equal(difficultyBadge({ avg_difficulty: 0.5 }, 0.5).textContent, "Medium");
 });

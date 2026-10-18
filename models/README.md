@@ -289,15 +289,10 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 (scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
-launch raises that value most; by default it plans the land-grab up to first
-contact on a big map with fast lanes, where that pays, and opens with the
-ledger everywhere else; its *Style* knob runs Greedy, Planned, Learning),
-`fulcrum.py` (actuary's ledger with a different pull on its ships: an influence
-field sends each one where the balance of force is closest, not to every front
-alike, so in the opening it moves ships forward to the ground both sides can
-reach, and later keeps no stack on a front nobody contests; first on the ladder
-at the default settings, behind actuary only on slow ships, level with it in a
-free-for-all), `knower.py` (the oracle — it runs every rival's
+launch raises that value most; its *Style* knob picks the pull on its ships:
+Greedy sends them to every front alike, Field, the default, to where the
+balance of force is closest, and Learning is Field reading each rival's habits
+into its risk), `knower.py` (the oracle — it runs every rival's
 own `decide` before the engine asks for it), `council.py` (knower's Search with a
 learned judge: actuary joins the openings it compares, each borrowed opening is
 played forward by the bot that proposed it, and the boards it lands on are

@@ -53,8 +53,7 @@ RANDOM_STRATEGY = "random"
 POOL_ERA = 10_000_000
 RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
     ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
-    ("council", "knower", "actuary", "fulcrum", "marshal", "thinker", "claudebot", "heuristic",
-     "rusherplus"),
+    ("council", "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
 )
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.

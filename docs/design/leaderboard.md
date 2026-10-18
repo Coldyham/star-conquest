@@ -211,12 +211,11 @@ board 13 Easy, 39 Medium, 67 Hard and 18 Very hard. Tiering on the weakest
 class that won instead agrees on 119 of 137 maps. The rest are one weaker bot
 winning against the trend, which a count is less swayed by.
 
-Re-cut on 2026-10-18 for nine bots, when council and fulcrum joined the
-column. council joins the top class and fulcrum the middle one, so Hard is 1-3
-winning (council, knower at Search, actuary at Learning), Medium 4-6 (fulcrum,
-marshal, thinker too) and Easy 7+, at shares of 0.6 and 0.24. Those cuts read
-the same counts on eight runs, so a map the newest bot has not reached yet is
-not moved a level by the gap.
+Re-cut on 2026-10-18 for eight bots, with council in the column. council
+joins the top class, so Hard is 1-3 winning (council, knower at Search, actuary
+at Learning), Medium 4-5 (marshal and thinker too) and Easy 6+, at shares of
+0.55 and 0.25. Those cuts read the same counts on seven runs, so a map the
+newest bot has not reached yet is not moved a level by the gap.
 
 ## Checked scores (`share.py`, `tools/verify_scores.py`)
 

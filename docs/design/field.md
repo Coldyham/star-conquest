@@ -1,15 +1,23 @@
-# fulcrum design notes
+# actuary's Field stop (once fulcrum)
 
-`models/fulcrum.py` is actuary's ledger with a different pull on its ships. The
-pull (how much more a ship is worth standing in one place than another) decides
-where a ledger bot's ships go, and it turned out to be most of what makes
-actuary and marshal play alike. fulcrum replaces actuary's front, where every
-system touching anything not ours pulls the same, with an influence field:
-ships go where the balance of force is closest. It was built on 2026-10-18 to
-test whether the two top non-oracle bots are fitted to each other, and whether a
-bot that plays differently can stand with them. Roster-wide rules and the
-measurement checklist are in [`bots.md`](bots.md), and actuary's own notes are
-in [`actuary.md`](actuary.md). Index: [`../README.md`](../README.md).
+actuary's *Style: Field*, the default stop, is its ledger with a different pull
+on its ships. The pull (how much more a ship is worth standing in one place
+than another) decides where a ledger bot's ships go, and it turned out to be
+most of what makes actuary and marshal play alike. Greedy's front, where every
+system touching anything not ours pulls the same, gives way to an influence
+field (`_Ledger._field`): ships go where the balance of force is closest.
+
+It was built on 2026-10-18 as a separate bot, `models/fulcrum.py`, to test
+whether the two top non-oracle bots are fitted to each other and whether a bot
+that plays differently can stand with them. Its ledger was actuary's to the
+order, so it was folded in the same day: the field took the place of the
+planned opening as stop 1, and Learning was rebuilt on it ("Folded into
+actuary", at the end). Field plays exactly as fulcrum did (422 positions out of
+roster games, every order the same), so the measurements below keep the name
+fulcrum, and "actuary" in them is actuary as it was then, at Planned unless
+they say otherwise. Roster-wide rules and the measurement checklist are in
+[`bots.md`](bots.md), and actuary's own notes are in
+[`actuary.md`](actuary.md). Index: [`../README.md`](../README.md).
 
 Every measurement here was made with a scratch harness (not committed): duels
 across 4 processes, both seatings per seed, `replay.reseed` each turn as
@@ -202,7 +210,7 @@ arriving ships do not make their own post look safe) at -10.1, and a transit
 cost on moves between our own systems, 0.05 or 0.15 a ship-turn, at -31 and -46.
 The second is the forward flow stopping: the pull is not the problem.
 
-## Where fulcrum stands
+## Where Field stands
 
 Fresh seeds 1001-1200, both seatings, 400 games a cell, against the roster as it
 plays by default (actuary at Planned, marshal as shipped). actuary against

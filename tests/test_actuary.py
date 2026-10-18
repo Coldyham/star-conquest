@@ -6,8 +6,8 @@ reproducibility, nothing drawn from `state.rng`) and then the three things its
 design rests on: the projection agrees with the engine wherever it is not
 deliberately pessimistic, a launch's priced gain is exactly the change in the
 ledger, and the caches that keep a decide cheap change no answer. Last, the
-planned opening (Opening: Planned): when it hands over, and the trade its score
-makes between ships and income.
+Field stop's pull: its range, that it reads lanes rather than turns, and that a
+balance pulls harder than a front nobody is contesting.
 
 Internals are reached through `sys.modules["sc_model_actuary"]`, the synthetic
 name `ai.load_models` imports each model file under.
@@ -175,18 +175,18 @@ def test_game_is_reproducible_from_its_seed(ac):
     assert (a.winner, a.turns) == (b.winner, b.turns)
 
 
-def test_the_style_slider_defaults_to_planned(ac):
+def test_the_style_slider_defaults_to_field(ac):
     assert ai.aux_spec("actuary") == ("Style", 0.0, 2.0, 1.0, True)
-    assert ai.aux_names("actuary") == ("Greedy", "Planned", "Learning")
-    assert AiParams().aux == ac.PLANNED
+    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning")
+    assert AiParams().aux == ac.FIELD
 
 
-@pytest.mark.parametrize("aux, stop", [(0.0, "GREEDY"), (1.0, "PLANNED"), (7.0, "PLANNED"),
-                                       (0.5, "GREEDY"), ("junk", "PLANNED")])
-def test_the_opening_knob_reads_tolerantly(ac, aux, stop):
+@pytest.mark.parametrize("aux, stop", [(0.0, "GREEDY"), (1.0, "FIELD"), (2.0, "LEARNING"),
+                                       (7.0, "LEARNING"), (0.5, "GREEDY"), ("junk", "FIELD")])
+def test_the_style_knob_reads_tolerantly(ac, aux, stop):
     from types import SimpleNamespace
     seat = SimpleNamespace(ai_params=SimpleNamespace(aux=aux))
-    assert ac._opening_of(seat) == getattr(ac, stop)
+    assert ac._stop_of(seat) == getattr(ac, stop)
 
 
 def test_actuary_is_not_an_oracle(ac):
@@ -314,156 +314,94 @@ def test_beats_the_heuristic(ac):
 
 
 # --------------------------------------------------------------------------- #
-# The planned opening (Opening: Planned)
+# The field (Style: Field and Learning)
 # --------------------------------------------------------------------------- #
-def _planned(state, seat=1):
-    state.players[seat].ai_params = AiParams()
+def _front(distance=2):
+    """Ours: 1 at home, 2 and 3 on two fronts. Front 2 faces a rival stack of
+    about our size (a balance); front 3 faces a rival garrison our side swamps.
+    ``distance`` scales every lane."""
+    d = distance
+    return _board({1: (1, 4, 3), 2: (1, 20, 3), 3: (1, 30, 3),
+                   4: (2, 22, 3), 5: (2, 2, 3), 6: (2, 25, 3)},
+                  [(1, 2, d), (1, 3, d), (2, 4, d), (3, 5, d), (4, 6, d), (5, 6, 3 * d)])
+
+
+def _at(state, stop):
+    state.players[1].ai_params = AiParams(aux=float(stop))
     return state
 
 
-@pytest.fixture
-def small_side(ac, monkeypatch):
-    """Let the opening run on a hand-built board. Ours are small enough to read
-    by eye, which puts them under `OPENING_MIN_SIDE`."""
-    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 0)
+def test_field_differs_from_greedy_only_in_the_pull(ac, monkeypatch):
+    """Put Greedy's front values back in place of the field and every Field
+    order matches Greedy's."""
+    boards = _boards(30)
+    greedy = [_orders(ac, _at(b, ac.GREEDY)) for b in boards]
+    field = [_orders(ac, _at(b, ac.FIELD)) for b in boards]
+    assert field != greedy, "the field should move some orders"
+    monkeypatch.setattr(ac._Ledger, "_field", ac._Ledger._front_values)
+    assert [_orders(ac, _at(b, ac.FIELD)) for b in boards] == greedy
+    assert any(greedy)
 
 
-def _costly_neutral(rival_lane):
-    """Our home 1 next to a costly, poor neutral 2; the rival's home 3 is
-    ``rival_lane`` turns beyond a neutral 4 that sits between us."""
-    return _planned(_board({1: (1, 20, 3), 2: (0, 14, 6), 3: (2, 12, 3), 4: (0, 3, 5)},
-                           [(1, 2, 2), (1, 4, 2), (4, 3, rival_lane)]))
+@pytest.mark.parametrize("stop", ["GREEDY", "FIELD"])
+def test_its_orders_never_depend_on_what_a_rival_runs(ac, stop):
+    """Greedy and Field are no oracle in behaviour as well as in their flags:
+    they read the board alone, so a rival said to run another bot at another
+    knob changes no order, and deciding the positions in the other order
+    changes none either."""
+    boards = [_at(b, getattr(ac, stop)) for b in _boards(12)]
+    first = [_orders(ac, b) for b in boards]
+    for b in boards:
+        for pid, p in b.players.items():
+            if pid != 1 and not p.is_neutral:
+                p.ai_strategy, p.ai_params = "knower", AiParams(aux=2.0)
+    assert [_orders(ac, b) for b in reversed(boards)][::-1] == first
+    assert not ac.is_oracle_seat(boards[0].players[1])
 
 
-def test_greedy_never_consults_the_plan(ac, monkeypatch):
-    def boom(state, pid):
-        raise AssertionError("the opening ran on a Greedy seat")
-
-    monkeypatch.setattr(ac, "opening", boom)
-    state = _costly_neutral(30)
-    state.players[1].ai_params = AiParams(aux=0.0)
-    ac.decide(state, 1)
-
-
-def test_the_plan_runs_only_on_a_big_map_with_fast_lanes(ac):
-    """The gate: 24+ systems and a median lane of 2 turns or less. Everywhere
-    else Planned opens with the ledger, as Greedy does."""
-    def lanes(turns, systems):
-        ids = list(range(1, systems + 1))
-        return _board({sid: (1 if sid == 1 else 0, 5, 3) for sid in ids},
-                      [(a, a + 1, turns) for a in ids[:-1]])
-
-    assert ac._plans(lanes(2, ac.OPENING_GATE_SYSTEMS))
-    assert ac._plans(lanes(1, 40))
-    assert not ac._plans(lanes(3, 40))
-    assert not ac._plans(lanes(2, ac.OPENING_GATE_SYSTEMS - 1))
+def test_the_pull_runs_from_one_to_the_full_bonus(ac):
+    """Every system's pull is between 1 and 1 + FRONT_BONUS; the strongest of
+    ours has the whole bonus, and a landing on a system we do not hold keeps it,
+    as on Greedy."""
+    for board in _boards(16):
+        ledger = ac._Ledger(board, 1, field=True)
+        mine = [s for s in ledger.ids if board.systems[s].owner_id == 1]
+        for sid, value in ledger.front_value.items():
+            assert 1.0 <= value <= 1.0 + ac.FRONT_BONUS + 1e-12
+            if board.systems[sid].owner_id != 1:
+                assert value == 1.0 + ac.FRONT_BONUS
+        if mine and max(ledger.front_value[s] for s in mine) > 1.0:
+            assert max(ledger.front_value[s] for s in mine) == pytest.approx(1.0 + ac.FRONT_BONUS)
 
 
-def test_planned_opens_with_the_ledger_off_the_gate(ac, monkeypatch):
-    def boom(state, pid):
-        raise AssertionError("the plan ran on a map the gate refuses")
-
-    monkeypatch.setattr(ac, "opening", boom)
-    state = _state(nodes=18, players=2, seat=2)
-    state.players[2].ai_params = AiParams()
-    assert not ac._plans(state)
-    ac.decide(state, 2)
+def test_a_balance_pulls_harder_than_a_front_nobody_contests(ac):
+    ledger = ac._Ledger(_front(), 1, field=True)
+    assert ledger.front_value[2] > ledger.front_value[3]
 
 
-def test_planned_orders_are_legal_and_reproducible(ac, monkeypatch):
-    # Let the plan run here, in the module `ai.decide` dispatches to as well:
-    # another test file may have reloaded the models since `ac` was taken.
-    for module in {ac, sys.modules[ai.STRATEGIES["actuary"].__module__]}:
-        monkeypatch.setattr(module, "OPENING_FAST_LANE", 99)
-    state = _state(nodes=40, players=2, seat=2)
-    assert ac._plans(state)
-    state.players[2].ai_params = AiParams()
-    for _ in range(40):
-        if state.winner is not None:
-            break
-        rng_before = state.rng.getstate()
-        orders = ai.decide(state, 2)
-        assert state.rng.getstate() == rng_before
-        assert [(o.source_id, o.dest_id, o.ships) for o in ac.decide(copy.deepcopy(state), 2)] == \
-            [(o.source_id, o.dest_id, o.ships) for o in orders]
-        per_source: dict[int, int] = {}
-        for order in orders:
-            assert state.systems[order.source_id].owner_id == 2
-            assert state.travel_turns(order.source_id, order.dest_id) is not None
-            per_source[order.source_id] = per_source.get(order.source_id, 0) + order.ships
-        for sid, total in per_source.items():
-            assert 0 < total <= state.systems[sid].ships
-        engine.end_turn(state, decide=ai.decide)
+def test_a_lane_behind_a_balance_pulls_harder_than_a_quiet_front(ac):
+    """Home touches no rival, so it has no stake of its own, but it is a lane
+    from the balance at 2: it pulls less than 2 and more than the front at 3,
+    which faces a garrison our side swamps. Greedy pulls 2 and 3 alike and home
+    least of all."""
+    pull = ac._Ledger(_front(), 1, field=True).front_value
+    assert pull[3] < pull[1] < pull[2]
+    greedy = ac._Ledger(_front(), 1).front_value
+    assert greedy[2] == greedy[3] > greedy[1]
 
 
-def test_the_opening_ends_at_contact(ac, small_side):
-    """Bordering a rival, or a rival fleet heading for us, hands the seat to the
-    ledger."""
-    state = _costly_neutral(30)
-    assert ac.opening(state, 1) is not None
-    state.systems[4].owner_id = 2
-    assert ac.opening(state, 1) is None
-    state.systems[4].owner_id = 0
-    state.fleets.append(Fleet(2, 3, 4, 5, 30, 3))
-    assert ac.opening(state, 1) is not None
-    state.fleets.append(Fleet(2, 4, 1, 5, 2, 1))
-    assert ac.opening(state, 1) is None
+def test_the_field_reads_lanes_not_turns(ac):
+    """Distance is counted in median lanes, so a board with every lane twice as
+    long, fleets included, pulls exactly as the original does."""
+    short, long = _front(2), _front(4)
+    short.fleets.append(Fleet(2, 6, 4, 9, 2, 1))
+    long.fleets.append(Fleet(2, 6, 4, 9, 4, 2))
+    assert ac._Ledger(short, 1, field=True).front_value == \
+        pytest.approx(ac._Ledger(long, 1, field=True).front_value)
 
 
-def test_a_side_too_small_to_plan_is_left_to_the_ledger(ac, monkeypatch):
-    """Our side counts what we hold plus the region: here home 1 and neutrals
-    2 and 4, three systems."""
-    state = _costly_neutral(30)
-    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 3)
-    assert ac.opening(state, 1) is not None
-    monkeypatch.setattr(ac, "OPENING_MIN_SIDE", 4)
-    assert ac.opening(state, 1) is None
-    planned = _orders(ac, state)
-    state.players[1].ai_params = AiParams(aux=0.0)
-    assert planned == _orders(ac, state)
-
-
-def test_after_contact_planned_plays_the_ledger(ac, small_side):
-    state = _costly_neutral(30)
-    state.systems[4].owner_id = 2
-    planned = _orders(ac, state)
-    state.players[1].ai_params = AiParams(aux=0.0)
-    assert planned == _orders(ac, state)
-
-
-def test_a_neutral_equally_near_a_rival_is_not_ours_to_take(ac):
-    assert ac._Opening(_costly_neutral(2), 1).region == {2}
-
-
-def test_keeps_its_ships_when_contact_is_near(ac, small_side):
-    """The rival can land on us in four turns; neutral 2 costs nearly six ships
-    even taken with everything, and repays a sixth of one a turn."""
-    state = _costly_neutral(2)
-    assert ac._Opening(state, 1).clock == round(4 * ac.OPENING_CLOCK_SCALE)
-    assert not any(dst == 2 for _, dst, _ in _orders(ac, state))
-
-
-def test_spends_them_when_contact_is_far(ac, small_side):
-    state = _costly_neutral(30)
-    assert ac._Opening(state, 1).clock > 20
-    assert any(dst in (2, 4) for _, dst, _ in _orders(ac, state))
-
-
-def test_moves_ships_with_nothing_to_take_towards_the_expansion(ac, small_side):
-    """Home 1 is inland; 5 borders the neutrals, so 1's ships go to 5."""
-    state = _planned(_board({1: (1, 20, 3), 5: (1, 0, 3), 2: (0, 4, 2), 3: (2, 12, 3)},
-                            [(1, 5, 2), (5, 2, 2), (2, 3, 40)]))
-    assert (1, 5, 20) in _orders(ac, state)
-
-
-def test_every_plan_it_compares_is_a_different_plan(ac):
-    """The policies are a cross product; on an open board they should not all
-    agree, or the search is buying nothing."""
-    import itertools
-    plan = ac._Opening(_state(nodes=40, players=2, seat=1), 1)
-    firsts = set()
-    for policy in itertools.product(ac.OPENING_ORDERS, ac.OPENING_SENDS, ac.OPENING_SKIPS):
-        sim_ = ac._OpeningSim(plan, policy)
-        sim_.run()
-        firsts.add(tuple((o.source_id, o.dest_id, o.ships) for o in sim_.first))
-    assert len(firsts) > 1
+def test_a_board_with_nothing_to_contest_has_no_pull(ac):
+    """No rival and nothing unowned left: every system of ours is interior."""
+    state = _at(_board({1: (1, 5, 3), 2: (1, 5, 3)}, [(1, 2, 2)]), ac.FIELD)
+    assert ac._Ledger(state, 1, field=True).front_value == {1: 1.0, 2: 1.0}
+    assert ac.decide(state, 1) == []

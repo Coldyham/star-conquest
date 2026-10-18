@@ -27,16 +27,25 @@ moves.
     candidate pays. Defence, evacuation, strikes and logistics are not written
     anywhere; they are what the margin chooses.
 
-The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Opening*) picks how the seat
-plays until it first borders a rival. *Planned*, the default, treats the
-land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival,
-and scores a dozen expansion plans by the ships and income they would hold when a
-rival could first strike. It plays the first turn of the best plan, and the
-ledger takes over at contact, or from the first turn when our side of the map is
-too small to plan. The plan only pays on fast lanes, so it runs only on a map of
-`OPENING_GATE_SYSTEMS` or more whose median lane is `OPENING_FAST_LANE` turns or
-less; everywhere else Planned opens with the ledger, exactly as *Greedy* does
-from the first turn. *Learning* opens the same way as Planned.
+The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has three stops.
+
+  * *Greedy* pulls its ships to every front alike: a ship on a system touching
+    anything not ours is worth 1 + `FRONT_BONUS`, falling by `FRONT_DECAY` per
+    turn of travel back.
+  * *Field*, the default, pulls them to where the balance of force is closest
+    (`_Ledger._field`). Every garrison, and every fleet in flight at the system
+    it will land on, projects its ships over what it could reach, keeping
+    `FIELD_DECAY` of them per median lane out to `FIELD_REACH` lanes. A system's
+    stake, `TAIL_TURNS` of its income plus a rival garrison on it, counts for
+    exp(-x^2), x the gap between our influence and the rivals' over
+    `CONTEST_WIDTH` of their sum; our interior has none. A ship at one of our
+    systems is worth 1 + `FRONT_BONUS` times the contested stake within its
+    reach, decayed the same way, as a share of the most any system has. A front
+    nobody contests stops holding a stack, and the ships go where a few more of
+    them tip a system.
+  * *Learning* is Field reading each rival's habits into the risk term
+    (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
+    seen, so it is the one stop an oracle must model rather than run.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -48,7 +57,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import heapq
-import itertools
 import math
 from collections import Counter, OrderedDict, defaultdict
 from typing import NamedTuple
@@ -88,18 +96,14 @@ COST_REF_NODES = 40
 COST_DECIDE_MS = 8.3
 COST_NODES_EXP = 0.77
 
-# --- the opening ------------------------------------------------------------ #
-GREEDY, PLANNED, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreadable is PLANNED
-OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
-OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
-OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
-OPENING_GATE_SYSTEMS = 24       # the plan runs only on a map at least this big...
-OPENING_FAST_LANE = 2           # ...whose median lane is at most this many turns
-                                # (see "Planned against Greedy again" in actuary.md)
-OPENING_MIN_SIDE = 7            # a side (held + region) smaller than this is left to the ledger
-OPENING_ORDERS = ("value", "near", "cheap")
-OPENING_SENDS = ("lean", "mass")
-OPENING_SKIPS = (True, False)
+# --- the Style knob ---------------------------------------------------------- #
+GREEDY, FIELD, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreadable is FIELD
+
+# --- the field (Style: Field and Learning; "The field" in docs/design/actuary.md)
+FIELD_DECAY = 0.45          # influence kept per median lane of travel
+FIELD_REACH = 3.0           # ...counted out to this many median lanes
+CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
+                            # which a system's stake falls to 1/e
 
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
@@ -133,11 +137,11 @@ PRIOR_STRIKE = (
 )
 
 # What the AI tab's generic aux slider is called when this bot holds the seat (read
-# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Planned.
+# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Field.
 AUX_LABEL = "Style"
 AUX_RANGE = (GREEDY, LEARNING, 1)
 AUX_INT = True
-AUX_NAMES = ("Greedy", "Planned", "Learning")
+AUX_NAMES = ("Greedy", "Field", "Learning")
 
 
 def decide(state, pid):
@@ -147,26 +151,7 @@ def decide(state, pid):
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    if stop != GREEDY and _plans(state):
-        orders = opening(state, pid)
-        if orders is not None:
-            return orders
-    return _Ledger(state, pid, curves).plan()
-
-
-def _plans(state) -> bool:
-    """Whether Planned and Learning open with the plan on this map: only where
-    lanes are fast and the map is big. Everywhere else the ledger opens, which
-    measured level or better than the plan at 3 and 6 ly/turn at every size."""
-    if len(state.systems) < OPENING_GATE_SYSTEMS:
-        return False
-    lanes = sorted(state.travel_turns(a, b) for a, s in state.systems.items()
-                   for b in s.neighbors if a < b)
-    if not lanes:
-        return False
-    mid = len(lanes) // 2
-    median = lanes[mid] if len(lanes) % 2 else (lanes[mid - 1] + lanes[mid]) / 2
-    return median <= OPENING_FAST_LANE
+    return _Ledger(state, pid, curves, field=stop != GREEDY).plan()
 
 
 def _stop_of(player) -> int:
@@ -176,28 +161,23 @@ def _stop_of(player) -> int:
     try:
         aux = float(player.ai_params.aux)
     except Exception:                     # noqa: BLE001
-        return PLANNED
+        return FIELD
     if aux >= LEARNING:
         return LEARNING
-    return PLANNED if aux >= PLANNED else GREEDY
-
-
-def _opening_of(player) -> int:
-    """Whether this seat plans its opening: Planned and Learning both do."""
-    return GREEDY if _stop_of(player) == GREEDY else PLANNED
+    return FIELD if aux >= FIELD else GREEDY
 
 
 def is_oracle_seat(player) -> bool:
     """A Learning seat decides from the boards it has seen, so an oracle has to
-    model it rather than run it. Greedy and Planned read only the board."""
+    model it rather than run it. Greedy and Field read only the board."""
     return _stop_of(player) == LEARNING
 
 
 def stand_in_params(player):
-    """The params an oracle runs a Learning seat at instead: Planned, the same bot
-    with no memory. Greedy and Planned are their own."""
+    """The params an oracle runs a Learning seat at instead: Field, the same bot
+    with no memory. Greedy and Field are their own."""
     params = copy.copy(player.ai_params)
-    params.aux = float(PLANNED) if _stop_of(player) == LEARNING else params.aux
+    params.aux = float(FIELD) if _stop_of(player) == LEARNING else params.aux
     return params
 
 
@@ -205,8 +185,8 @@ def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us. knower never runs a Learning seat (`is_oracle_seat`),
-    but runs Planned in its place (`stand_in_params`), so this prices Greedy and
-    Planned."""
+    but runs Field in its place (`stand_in_params`), so this prices Greedy and
+    Field."""
     drawn = getattr(settings, "custom_map", None)
     nodes = len(drawn.nodes) if drawn is not None else settings.nodes
     return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
@@ -215,7 +195,7 @@ def decide_ms(settings, seat) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None):
+    def __init__(self, state, pid, curves=None, field=False):
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
         sysmap = state.systems
@@ -242,7 +222,7 @@ class _Ledger:
             slot[f.owner_id] = slot.get(f.owner_id, 0) + f.ships
 
         self.garrison = {sid: sysmap[sid].ships for sid in self.ids}
-        self.front_value = self._front_values()
+        self.front_value = self._field() if field else self._front_values()
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
                       for sid in self.ids}
@@ -709,6 +689,64 @@ class _Ledger:
                     heapq.heappush(heap, (nd, nbr))
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
 
+    def _field(self):
+        """The pull on a ship at each system, 1 to 1 + `FRONT_BONUS`: see the
+        module docstring. Reads the board as it stands; the greedy then prices
+        every launch against these values without recomputing them."""
+        sysmap, pid = self.state.systems, self.pid
+        rivals = set(self.rivals)
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        unit = float(lanes[len(lanes) // 2]) if lanes else 1.0
+        near = {sid: self._within(sid, FIELD_REACH * unit, unit) for sid in self.ids}
+
+        mine, foe = defaultdict(float), defaultdict(float)
+        for w in self.ids:
+            node = sysmap[w]
+            side = mine if node.owner_id == pid else foe if node.owner_id in rivals else None
+            if side is None or node.ships <= 0:
+                continue
+            for s, d in near[w].items():
+                side[s] += node.ships * FIELD_DECAY ** d
+        for f in self.state.fleets:
+            side = mine if f.owner_id == pid else foe if f.owner_id in rivals else None
+            if side is None:
+                continue
+            for s, d in near[f.dest_id].items():
+                side[s] += f.ships * FIELD_DECAY ** (d + f.turns_remaining / unit)
+
+        stake = {}
+        for s in self.ids:
+            node = sysmap[s]
+            if node.owner_id == pid and all(sysmap[n].owner_id == pid for n in node.neighbors):
+                continue                    # our interior: nothing to contest
+            standing = node.ships if node.owner_id in rivals else 0
+            x = (mine[s] - foe[s]) / (CONTEST_WIDTH * max(1.0, mine[s] + foe[s]))
+            stake[s] = (TAIL_TURNS * self.income[s] + standing) * math.exp(-x * x)
+
+        pull = {}
+        for w in self.ids:
+            if sysmap[w].owner_id == pid:
+                pull[w] = sum(stake[s] * FIELD_DECAY ** near[w][s] for s in stake if s in near[w])
+        top = max(pull.values(), default=0.0)
+        return {sid: (1.0 + FRONT_BONUS * pull[sid] / top if top > 0 else 1.0)
+                if sid in pull else 1.0 + FRONT_BONUS
+                for sid in self.ids}
+
+    def _within(self, src, radius, unit):
+        """Median lanes from ``src`` to every system within ``radius`` turns."""
+        dist = {src: 0}
+        heap = [(0, src)]
+        while heap:
+            d, sid = heapq.heappop(heap)
+            if d > dist[sid]:
+                continue
+            for nbr, t in self.travel[sid].items():
+                nd = d + t
+                if nd <= radius and nd < dist.get(nbr, math.inf):
+                    dist[nbr] = nd
+                    heapq.heappush(heap, (nd, nbr))
+        return {sid: d / unit for sid, d in dist.items()}
+
     def _relief(self):
         """relief[sid][t]: ships the holder of ``sid`` could land there by turn t,
         launching no sooner than next turn, as (from garrisons next door, from
@@ -1086,226 +1124,3 @@ def strike_curve(model: Model, kind: int, pressed: int) -> list[float]:
         rates.append(hit / total)
         weights.append(total)
     return _monotone(rates, weights)
-
-
-# --------------------------------------------------------------------------- #
-# The planned opening (Opening: Planned)
-# --------------------------------------------------------------------------- #
-def opening(state, pid):
-    """This turn's orders under the planned opening until `_Opening.over`, else
-    ``None`` (and the ledger plays). Measurements behind it:
-    "The planned opening" in docs/design/actuary.md."""
-    plan = _Opening(state, pid)
-    if plan.over():
-        return None
-    return plan.orders()
-
-
-class _Opening:
-    """The land-grab as a one-player puzzle. The region is the neutrals strictly
-    nearer us than any rival, in lane turns. The clock is the earliest turn a
-    rival's ships could land on our side, times `OPENING_CLOCK_SCALE`. Each
-    policy is scored by ships held at the clock plus the income rate there,
-    weighted by `OPENING_INCOME_CLOCKS` clocks of it."""
-
-    def __init__(self, state, pid):
-        self.state, self.pid = state, pid
-        sysmap = state.systems
-        self.rivals = {p.id for p in state.players.values()
-                       if not p.is_neutral and p.id != pid and p.alive}
-        self.owned = sorted(sid for sid, s in sysmap.items() if s.owner_id == pid)
-        self.attack = combat.edge_attacking(TUNED_SWING)
-        self.advantage = math.sqrt(self.attack / combat.edge_defending(TUNED_SWING))
-        self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
-                       for a in sysmap}
-        self.ours = self._dijkstra({sid: 0 for sid in self.owned})
-        self.theirs = self._dijkstra(
-            {sid: 0 for sid, s in sysmap.items() if s.owner_id in self.rivals})
-        self.region = {sid for sid, s in sysmap.items() if s.owner_id == 0
-                       and self.ours.get(sid, math.inf) < self.theirs.get(sid, math.inf)}
-        self.clock = self._clock()
-        self.weight = OPENING_INCOME_CLOCKS * self.clock
-
-    def _dijkstra(self, starts):
-        dist = dict(starts)
-        heap = [(t, sid) for sid, t in starts.items()]
-        heapq.heapify(heap)
-        while heap:
-            t, sid = heapq.heappop(heap)
-            if t > dist[sid]:
-                continue
-            for nbr, turns in self.travel[sid].items():
-                if t + turns < dist.get(nbr, math.inf):
-                    dist[nbr] = t + turns
-                    heapq.heappush(heap, (t + turns, nbr))
-        return dist
-
-    def _clock(self):
-        """The earliest turn a rival's ships could land on a system on our side."""
-        best = min((max(self.ours.get(a, math.inf), self.theirs.get(a, math.inf))
-                    for a in set(self.owned) | self.region), default=math.inf)
-        if math.isinf(best):
-            return OPENING_CLOCK_MAX
-        return max(1, min(OPENING_CLOCK_MAX, round(OPENING_CLOCK_SCALE * best)))
-
-    def over(self):
-        """Bordering a live rival, a rival fleet heading for us, or our side of
-        the map (what we hold plus the region) under `OPENING_MIN_SIDE`."""
-        sysmap = self.state.systems
-        for sid in self.owned:
-            if any(sysmap[n].owner_id in self.rivals for n in self.travel[sid]):
-                return True
-        if any(f.owner_id in self.rivals and f.dest_id in self.owned for f in self.state.fleets):
-            return True
-        return not self.region or len(self.owned) + len(self.region) < OPENING_MIN_SIDE
-
-    def orders(self):
-        best, best_score = [], -math.inf
-        for policy in itertools.product(OPENING_ORDERS, OPENING_SENDS, OPENING_SKIPS):
-            sim = _OpeningSim(self, policy)
-            score = sim.run()
-            if score > best_score:
-                best, best_score = sim.first, score
-        return best
-
-    def need(self, garrison):
-        """Ships that take ``garrison`` at the worst roll; at least one more."""
-        return max(math.floor(garrison) + 1, math.floor(self.attack * garrison) + 1)
-
-    def survivors(self, ships, garrison):
-        enemy = garrison * self.advantage
-        return math.sqrt(max(0.0, ships * ships - enemy * enemy))
-
-
-class _OpeningSim:
-    """Our side of the map played forward under one policy, nobody else moving.
-    Ships and production are continuous; captures are at the nominal roll, while
-    a launch is sized for the worst one.
-
-    A policy is (which neutral first: most valuable, nearest or cheapest; send just
-    enough or everything; skip a capture that does not pay, or not). A system with
-    nothing to take sends its ships one hop towards the nearest of ours that has."""
-
-    def __init__(self, plan, policy):
-        self.plan = plan
-        self.order, self.send, self.skip = policy
-        sysmap = plan.state.systems
-        self.ships = {sid: float(sysmap[sid].ships) for sid in plan.owned}
-        self.garrison = {sid: float(sysmap[sid].ships) for sid in plan.region}
-        self.income = {sid: (1.0 / s.production if s.production > 0 else 0.0)
-                       for sid, s in sysmap.items()}
-        self.fleets = [(f.turns_remaining, f.dest_id, float(f.ships))
-                       for f in plan.state.fleets if f.owner_id == plan.pid]
-        self.first: list[Order] = []
-        self.t = 0
-        self._feed_to = None
-
-    def run(self):
-        while self.t < self.plan.clock:
-            self._decide()
-            self._advance()
-        held = sum(self.ships.values()) + sum(s for _, _, s in self.fleets)
-        rate = sum(self.income[sid] for sid in self.ships)
-        return held + self.plan.weight * rate
-
-    def _launch(self, src, dst, ships):
-        if ships <= 0:
-            return
-        self.ships[src] -= ships
-        self.fleets.append((self.plan.travel[src][dst], dst, float(ships)))
-        if self.t == 0:
-            self.first.append(Order(self.plan.pid, src, dst, int(ships)))
-
-    def _pending(self, dst):
-        return sum(s for _, d, s in self.fleets if d == dst)
-
-    def _decide(self):
-        travel = self.plan.travel
-        feed = self._feed()
-        for src in sorted(self.ships):
-            avail = math.floor(self.ships[src])
-            targets = [n for n in travel[src] if n in self.garrison]
-            if not targets:
-                nxt = feed.get(src)
-                if nxt is not None and avail > 0:
-                    self._launch(src, nxt, avail)
-                continue
-            for dst in self._rank(src, targets):
-                if avail <= 0:
-                    break
-                need = self.plan.need(self.garrison[dst]) - self._pending(dst)
-                if need <= 0:
-                    continue
-                if need > avail:
-                    if self.send == "mass":
-                        break
-                    continue
-                if self.skip and self._worth(src, dst, need) <= 0:
-                    continue
-                ships = avail if self.send == "mass" else math.ceil(need)
-                self._launch(src, dst, ships)
-                avail -= ships
-
-    def _worth(self, src, dst, ships):
-        land = self.t + self.plan.travel[src][dst]
-        lost = ships - self.plan.survivors(ships, self.garrison[dst])
-        income = self.income[dst]
-        return income * max(0, self.plan.clock - land) + self.plan.weight * income - lost
-
-    def _rank(self, src, targets):
-        travel = self.plan.travel[src]
-        if self.order == "near":
-            key = lambda n: (travel[n], -self.income[n], n)
-        elif self.order == "cheap":
-            key = lambda n: (self.garrison[n], travel[n], n)
-        else:
-            key = lambda n: (-self._worth(src, n, self.plan.need(self.garrison[n])), n)
-        return sorted(targets, key=key)
-
-    def _feed(self):
-        """For each of our systems with nothing to take, its next hop towards the
-        nearest of ours that has. Rebuilt only when what we own changes."""
-        key = (frozenset(self.ships), frozenset(self.garrison))
-        if self._feed_to is not None and self._feed_to[0] == key:
-            return self._feed_to[1]
-        travel = self.plan.travel
-        front = [sid for sid in self.ships if any(n in self.garrison for n in travel[sid])]
-        dist = {sid: 0 for sid in front}
-        hop: dict[int, int] = {}
-        heap = [(0, sid) for sid in sorted(front)]
-        heapq.heapify(heap)
-        while heap:
-            t, sid = heapq.heappop(heap)
-            if t > dist[sid]:
-                continue
-            for nbr, turns in travel[sid].items():
-                if nbr in self.ships and t + turns < dist.get(nbr, math.inf):
-                    dist[nbr] = t + turns
-                    hop[nbr] = sid
-                    heapq.heappush(heap, (t + turns, nbr))
-        self._feed_to = (key, hop)
-        return hop
-
-    def _advance(self):
-        for sid in self.ships:
-            self.ships[sid] += self.income[sid]
-        landed, flying = {}, []
-        for turns, dst, ships in self.fleets:
-            if turns <= 1:
-                landed[dst] = landed.get(dst, 0.0) + ships
-            else:
-                flying.append((turns - 1, dst, ships))
-        self.fleets = flying
-        for dst, ships in sorted(landed.items()):
-            if dst in self.ships:
-                self.ships[dst] += ships
-            elif dst in self.garrison:
-                left = self.plan.survivors(ships, self.garrison[dst])
-                if left > 0:
-                    del self.garrison[dst]
-                    self.ships[dst] = left
-                else:
-                    held = self.garrison[dst] * self.plan.advantage
-                    self.garrison[dst] = math.sqrt(max(0.0, held * held - ships * ships)) \
-                        / self.plan.advantage
-        self.t += 1

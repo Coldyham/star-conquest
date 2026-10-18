@@ -60,7 +60,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/learner.md`](design/learner.md) | learner: each rival's habits read off the board and kept turn to turn, memory keyed by the game's path, how well it predicts the roster's launches and a person's, the gate it did not pass, the bot built on actuary anyway, and the improvements proposed for it |
 | [`design/learning.md`](design/learning.md) | actuary's third stop (Style: Learning): the learned strike curve in the risk term, each garrison next door priced as striking whole or not at all, and the arms tried on it |
 | [`design/convoy.md`](design/convoy.md) | convoy (built, measured, not shipped; code at `7153065`): supply and demand over time, launching only what must leave now; where it stands, how differently it plays, what the measurements changed |
-| [`design/fulcrum.md`](design/fulcrum.md) | fulcrum: actuary's ledger with an influence field for the pull on its ships; the middle game actuary and marshal play, why the pull is the lever, the field and how it was tuned, where it stands, how differently it plays, what was built and dropped on the way |
+| [`design/field.md`](design/field.md) | actuary's Field stop (built as fulcrum and folded in): the ledger with an influence field for the pull on its ships; the middle game actuary and marshal play, why the pull is the lever, the field and how it was tuned, where it stands, how differently it plays, what was built and dropped on the way, and folding it into actuary (Planned retired, Learning rebuilt on it) |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
