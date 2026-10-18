@@ -158,7 +158,7 @@ only for a fight; what is deliberately not animated.
 - **What it is for, and its constraints.** Blind, browser-sized, deterministic, no foresight of the dice.
 - **The policy.** A menu of priced moves per system, each naming its principle; a linear scorer plus a small residual head over size-free features.
 - **The look-ahead.** Variants of the policy's move played six turns at the expected roll; rivals hold (most likely) or strike all-out (most dangerous); the gain is the veto. Timed in the web build at native speed.
-- **Where it stands.** Marshal level in duels, behind actuary, short in multi-seat; plays unlike the roster.
+- **Where it stands.** Third of six on a ladder (behind actuary and marshal, ahead of thinker), weaker in multi-seat; the 8-cell headline; plays unlike the roster, which is not the same as strong.
 - **Training it.** CMA-ES over paired seatings, the turn-40 share, the noise fix, how the shipped weights came about.
 - **Measuring it.** The paired bench, the +4 bar, loss diagnosis against a control.
 - **Why multi-seat is short.** Three diagnoses against a control; no blind remedy found.

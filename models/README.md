@@ -289,8 +289,8 @@ arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
 (scheduled defence and staggered pincers), `evolved.py` (no hand-written
 tactics: a menu of priced moves, each naming its principle, scored by weights
 evolved offline, plus a short look-ahead that plans for rivals holding and
-vetoes what an all-out strike would punish; level with marshal in duels, behind
-it with more seats, and plays unlike any of the others), `marshal.py` (thinker's phases, but it
+vetoes what an all-out strike would punish; it beats thinker and loses to
+marshal, and plays unlike any of the others), `marshal.py` (thinker's phases, but it
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
 launch raises that value most; by default it plans the land-grab up to first

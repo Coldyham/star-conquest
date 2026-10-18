@@ -103,34 +103,57 @@ cost nothing measurable either: +2.51 pts over Off against +2.69 unguarded.
 
 ## Where it stands
 
-The 8-cell headline (`tools/evo_bench.py`, 200 seeds from 2,700,000, both
-seatings, the bot's win share; fair share in multi-seat cells is 1/players):
+**Against the roster, 11 systems** (`tools/evo_bench.py` used as a ladder, from
+seed 6,200,000, no time guards; actuary at Style: Learning, its strongest stop).
+Duels: every pair on 100 maps, both seatings. Three seats: each bot against two
+copies of each other bot on 50 maps, every seating (a fair share is 33%):
+
+| Bot | duels, average | three seats, average | evolved's duels against it |
+| --- | --- | --- | --- |
+| actuary | 91% | 79% | 14% |
+| marshal | 75% | 58% | 29% |
+| **evolved** | **64%** | **46%** | |
+| thinker | 38% | 35% | 85% |
+| claudebot | 19% | 14% | 100% |
+| rusherplus | 13% | 13% | 92% |
+
+**The 8-cell headline** (200 seeds from 2,700,000, both seatings, the bot's win
+share; fair share in multi-seat cells is 1/players), against the roster as of
+`4837642`, actuary at its default (Style: Planned). Different maps from the
+ladder above, so the two tables differ within sampling (marshal at 11:6:2:
+36.9% here on 200 maps, 29% there on 100):
 
 | Cell | vs marshal | vs actuary | vs thinker |
 | --- | --- | --- | --- |
-| random:7:6:2 | 41.1% | 21.9% | 81.1% |
-| random:11:6:2 | 43.0% | 18.9% | 83.2% |
-| random:11:6:3 | 23.8% | 10.1% | 45.4% |
-| random:13:3:2 | 49.2% | 21.6% | 87.4% |
-| random:18:6:2 | 56.5% | 23.4% | 92.2% |
-| random:24:3:2 | 45.0% | 17.0% | 89.5% |
-| random:18:18:2 | 61.3% | 44.5% | 95.8% |
-| random:31:6:5 | 17.2% | 6.2% | 40.6% |
-| **all** | **36.1%** | **17.1%** | **68.4%** |
+| random:7:6:2 | 37.1% | 19.0% | 81.1% |
+| random:11:6:2 | 36.9% | 18.1% | 83.2% |
+| random:11:6:3 | 21.6% | 7.7% | 45.4% |
+| random:13:3:2 | 40.1% | 16.6% | 87.4% |
+| random:18:6:2 | 45.9% | 19.5% | 92.2% |
+| random:24:3:2 | 35.9% | 13.6% | 89.5% |
+| random:18:18:2 | 55.4% | 44.2% | 95.8% |
+| random:31:6:5 | 14.7% | 3.7% | 40.6% |
+| **mean of the cells** | **35.9%** | **17.8%** | **76.9%** |
 
-The look-ahead adds +3.17 pts over the plain policy across those cells (z
+The look-ahead added +3.17 pts over the plain policy across those cells (z
 +7.00, 19 of 24 cells up), most on bigger, slower maps (24:3:2: marshal
-+13.1, actuary +7.1).
++13.1, actuary +7.1), measured against the roster before marshal's pour floor
+and the in-flight relief (#127, #128). Those two changes cost evolved about 6.6
+pts on the quick cells (18:6:2 against marshal 61% to 43%): marshal now keeps
+a garrison behind what it pours forward, where evolved used to strike.
 
-- **Duels: marshal level** (mean 49% over the six duel cells, 41–61%), well
-  behind actuary.
-- **Multi-seat: short** (11:6:3 23.8% against a fair 33%; 31:6:5 17.2%
-  against 20%). See "Why multi-seat is short".
+- **Third of six**, between marshal and thinker: it beats thinker, claudebot
+  and rusherplus, and loses to marshal and actuary. Against marshal it averages
+  41.9% over the six duel cells, from 35.9% (24:3:2) to 55.4% (18:18:2).
+- **Multi-seat is weaker** than duels (46% against a fair 33% on average, but
+  21.6% against marshal at 11:6:3 and 14.7% against a fair 20% at 31:6:5). See
+  "Why multi-seat is short".
 - **It plays unlike the roster.** `tools/bot_distance.py` (11 systems):
-  evolved's nearest roster bot is claudebot at 0.38 in duels and 0.34 in three
-  seats, while each roster bot but rusherplus has a neighbour within 0.12–0.25.
-  It launches 55% of its garrison a turn (actuary 15%, marshal 10%), 79% of it
-  to its own systems.
+  evolved's nearest bot is claudebot at 0.35 in duels, and actuary or
+  claudebot at 0.37 in three seats, while each roster bot but rusherplus has a
+  neighbour within 0.12–0.23 (duels). It launches 47% of its garrison a turn in
+  duels (actuary 19%, marshal 8%), 65% of it to its own systems. Distinct is not
+  strong: rusherplus is about as distinct and ranks last.
 
 ## Training it
 
