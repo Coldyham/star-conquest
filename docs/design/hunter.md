@@ -170,6 +170,13 @@ The browser-budget figure above was measured under the first, clock-bounded
 version, so it is a pessimistic reading of a guard that no longer decides
 anything below 24 systems.
 
+The look-ahead's own knobs (Kaggle, 10.0M, 50 seeds, against the actuary of
+the first measurements, each paired with the shipped look-ahead at 68.3%):
+dropping the nominal-roll posture cost -3.1 (z -2.36) and a wider set of edge
+weights (0.2, 0.4, 2.5, 5) -1.9; depth is flat from 3 to 10 plies (3: +1.9, 4:
+0.0, 8: +0.8, 10: +2.4, none significant). The shipped settings stand; three
+plies would do as well for half the work.
+
 ## Against main's newer actuary and marshal
 
 `main` changed both after these measurements: each now counts a rival fleet
