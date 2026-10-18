@@ -170,6 +170,18 @@ The browser-budget figure above was measured under the first, clock-bounded
 version, so it is a pessimistic reading of a guard that no longer decides
 anything below 24 systems.
 
+## Against main's newer actuary and marshal
+
+`main` changed both after these measurements: each now counts a rival fleet
+landing next door as relief for a system it strikes (`RELIEF_IN_FLIGHT`, main
+`5bfdc0c`), and marshal re-tuned its pour floor (`67f017b`). hunter carries the
+relief term as a switch, off (`RELIEF_IN_FLIGHT` 0.3 with the other switches off
+is the current actuary). Re-measured on fresh 10.2M, 100 seeds, hunter with
+its look-ahead: **68.5% against the new actuary** (z +16.1; 7:6 73.8, 11:6 67.2,
+18:6 66.5, 24:3 71.8, 18:18 63.2), so the change did not dent it; hunter
+adopting the relief term itself measured +0.1 (null). Against the new marshal
+73.9% (z +19.8), down from 81.2% against the old one on 9.2M.
+
 ## Where it stands
 
 Headline, 9.7M, 100 seeds a cell, against actuary: **55.1% (z +5.52)**.
