@@ -132,8 +132,10 @@ CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
 SLOW_LANE = 5               # a median lane this many turns or more is slow: there
                             # the pull is half the field and half Greedy's front
                             # (0 = never)...
-SLOW_FRONT = 0.5            # ...and Greedy's front is this share of it there (1 = the
-                            # front alone)
+SLOW_FRONT = 1.0            # ...and Greedy's front is this share of it there (actuary
+                            # 0.5; 1, the front alone, measured +6.9 pts over hunter
+                            # without the field, 0.5 null and 0 -1.9: on slow boards the
+                            # look-ahead wants the front)
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython
 # (M3), hunter against actuary over 18-120 systems, 3-18 ly/turn and 2 or 4 seats
