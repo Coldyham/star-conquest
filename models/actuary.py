@@ -42,7 +42,8 @@ The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has three stops.
     systems is worth 1 + `FRONT_BONUS` times the contested stake within its
     reach, decayed the same way, as a share of the most any system has. A front
     nobody contests stops holding a stack, and the ships go where a few more of
-    them tip a system.
+    them tip a system. Where the median lane is `SLOW_LANE` turns or more the
+    pull is half the field and half Greedy's front.
   * *Learning* is Field reading each rival's habits into the risk term
     (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
     seen, so it is the one stop an oracle must model rather than run.
@@ -104,6 +105,9 @@ FIELD_DECAY = 0.45          # influence kept per median lane of travel
 FIELD_REACH = 3.0           # ...counted out to this many median lanes
 CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
                             # which a system's stake falls to 1/e
+SLOW_LANE = 5               # a median lane this many turns or more is slow: there
+                            # the pull is half the field and half Greedy's front
+                            # ("Slow lanes: half the front" in docs/design/field.md)
 
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
@@ -222,7 +226,7 @@ class _Ledger:
             slot[f.owner_id] = slot.get(f.owner_id, 0) + f.ships
 
         self.garrison = {sid: sysmap[sid].ships for sid in self.ids}
-        self.front_value = self._field() if field else self._front_values()
+        self.front_value = self._pull() if field else self._front_values()
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
                       for sid in self.ids}
@@ -688,6 +692,16 @@ class _Ledger:
                     dist[nbr] = nd
                     heapq.heappush(heap, (nd, nbr))
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
+
+    def _pull(self):
+        """Field and Learning's pull: the field, or on a board whose median lane
+        is `SLOW_LANE` turns or more, the mean of the field and Greedy's front."""
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        field = self._field()
+        if not lanes or lanes[len(lanes) // 2] < SLOW_LANE:
+            return field
+        front = self._front_values()
+        return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
 
     def _field(self):
         """The pull on a ship at each system, 1 to 1 + `FRONT_BONUS`: see the

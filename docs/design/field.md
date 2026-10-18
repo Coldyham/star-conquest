@@ -425,7 +425,9 @@ actuary and marshal, mostly at 18 nodes (6 ly/turn) and 24 (3 ly/turn).
 60 seeds) and half actuary's front with half the field (+6.6, the steadier at 3
 ly/turn, 52.5% against actuary there) are level with the shipped field (+6.2)
 at that sample; both were measured with a neutral's garrison still counted in
-its stake. The slow regime is where either would be worth a fresh run.
+its stake. The slow regime is where either would be worth a fresh run. The
+half-and-half blend got that run and ships on slow lanes ("Slow lanes: half
+the front").
 
 ## Folded into actuary
 
@@ -470,3 +472,41 @@ cells, but **38.5% at 24 nodes and 3 ly/turn**. That is the field's weak cell
 carried up a stop ("The slow regime is the weak one"): Learning on Planned
 gained most there (+12.5 against marshal) and Learning on the field less
 (+5.8). Against marshal the two top stops are level there (66.6 and 69.0).
+
+## Slow lanes: half the front
+
+The field's weak cell is slow lanes: 45.1% against Planned at 24 nodes and 3
+ly/turn, and new Learning 38.5% against old there. Planned's plan never ran on
+those maps (its gate wanted lanes of two turns or less), so what beat the field
+there was Greedy's front. Three ways to bring it back, as scratch copies of
+actuary, seeds 4101-4140, both seatings, 80 games a cell: the front alone at
+stops 1 and 2, the front where the median lane is 5 turns or more (the slow
+cells run 5-7, every 6 ly/turn cell 4 or less), and half the field with half
+the front everywhere. Paired by seed against shipped Field and Learning, against
+marshal, on 18, 24 and 40 nodes at 3 ly/turn and 18 nodes at 6:
+
+                                stop 1          stop 2
+    the front everywhere         -0.5            +0.4   (-11.6 at 18 nodes, 6 ly)
+    the front on slow lanes      -2.0            +2.5
+    half and half everywhere     +2.1 (z +0.99)  +7.3 (z +3.13)
+
+The front swings with the map (+13.8 at 40 nodes, -11.6 at 18 nodes and 6
+ly/turn), so a gate on lane length cannot pick its cases. Half and half was
+ahead in all four cells. On the fast cells it had not been run on (24 nodes at
+12 ly/turn, 30 and 40 at 6) it cost: -9.4 and -9.9 at 24 nodes and 12 ly/turn
+(z -2.86, -2.25), level at 30 and 40, and 41-46% head to head against
+Learning. So the shipped pull is half and half on slow lanes only
+(`SLOW_LANE` 5, `_Ledger._pull`), and every board with a median lane under 5
+turns plays exactly as before.
+
+That rule was picked after reading those numbers, so it was run again on fresh
+seeds, 4201-4240, on the three slow cells. Against marshal, paired by seed
+against the field alone:
+
+                       18 nodes   24 nodes   40 nodes   pooled
+    stop 1 (Field)       +0.2       +5.4       +5.1      +3.6 (z +1.51)
+    stop 2 (Learning)    +1.6       +8.1       +5.0      +4.9 (z +1.97)
+
+Head to head against the field alone, 52.8% at stop 1 and 52.4% at stop 2.
+Positive in every cell at both stops, on seeds it was not chosen on, so it
+shipped.

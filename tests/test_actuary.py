@@ -400,6 +400,17 @@ def test_the_field_reads_lanes_not_turns(ac):
         pytest.approx(ac._Ledger(long, 1, field=True).front_value)
 
 
+def test_slow_lanes_pull_half_the_field_and_half_the_front(ac):
+    """From `SLOW_LANE` turns a median lane is slow, and Field's pull there is
+    the mean of the field and Greedy's front; below it, the field alone."""
+    fast, slow = _front(ac.SLOW_LANE - 1), _front(ac.SLOW_LANE)
+    assert ac._Ledger(fast, 1, field=True).front_value == ac._Ledger(fast, 1)._field()
+    ledger = ac._Ledger(slow, 1, field=True)
+    field, front = ledger._field(), ledger._front_values()
+    assert field != front
+    assert ledger.front_value == pytest.approx({s: (field[s] + front[s]) / 2 for s in field})
+
+
 def test_a_board_with_nothing_to_contest_has_no_pull(ac):
     """No rival and nothing unowned left: every system of ours is interior."""
     state = _at(_board({1: (1, 5, 3), 2: (1, 5, 3)}, [(1, 2, 2)]), ac.FIELD)

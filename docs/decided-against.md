@@ -108,7 +108,8 @@ the measured result was indistinguishable from the baseline.
 - A pull scaled by the rival ships next door: +2.3 points paired on fresh seeds (z +1.44) and 0.08 from actuary in play, a re-tune rather than a new bot. A front's ships worth the bonus only up to 0.8 of the stack facing it (pinning): 39.6% against actuary. *Same section.*
 - In the field: decay per turn rather than per median lane (8.4% against actuary at 3 ly/turn), a leave-one-out balance (-10.1 points), a transit cost on moves between our own systems (-31 and -46), `FRONT_BONUS` 0.75 (-1.4), a contest width of 0.35 (+2.2 against +5.6 at the same decay and reach) or 0.8 (-3.1 against -0.4). *The field, How it was tuned.*
 - A field that weighs only the strongest rival at each system rather than every rival summed (identical in a duel): +1.3 points in a three-seat free-for-all (z +0.85). *Where Field stands.*
-- **Open, not rejected:** a capture's income discounted by the balance (+6.9) and half actuary's front with half the field (+6.6, the steadier at 3 ly/turn), level with the shipped field at 60 seeds and measured with a neutral's garrison still in the stake. *Same section.*
+- Greedy's front instead of the field on slow lanes (median lane 5+ turns), or everywhere: -2.0 / +2.5 and -0.5 / +0.4 against marshal at stops 1 / 2, swinging by map. Half field, half front on every board: -9 at 24 nodes and 12 ly/turn. Shipped instead: half and half on slow lanes only. *Slow lanes: half the front.*
+- **Open, not rejected:** a capture's income discounted by the balance (+6.9) level with the shipped field at 60 seeds and measured with a neutral's garrison still in the stake (half actuary's front with half the field, the other open variant, shipped on slow lanes). *Same section.*
 
 ## The roster ([`design/bots.md`](design/bots.md))
 - A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
