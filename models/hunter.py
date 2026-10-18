@@ -131,7 +131,9 @@ CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
                             # which a system's stake falls to 1/e
 SLOW_LANE = 5               # a median lane this many turns or more is slow: there
                             # the pull is half the field and half Greedy's front
-                            # (0 = never)
+                            # (0 = never)...
+SLOW_FRONT = 0.5            # ...and Greedy's front is this share of it there (1 = the
+                            # front alone)
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython
 # (M3), hunter against actuary over 18-120 systems, 3-18 ly/turn and 2 or 4 seats
@@ -737,13 +739,14 @@ class _Ledger:
 
     def _pull(self):
         """The Field pull: the field, or on a board whose median lane is
-        `SLOW_LANE` turns or more, the mean of the field and Greedy's front."""
+        `SLOW_LANE` turns or more, the field and Greedy's front mixed by
+        `SLOW_FRONT`."""
         lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
         field = self._field()
         if not lanes or SLOW_LANE <= 0 or lanes[len(lanes) // 2] < SLOW_LANE:
             return field
         front = self._front_values()
-        return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
+        return {sid: (1 - SLOW_FRONT) * field[sid] + SLOW_FRONT * front[sid] for sid in self.ids}
 
     def _field(self):
         """actuary's `_field`: the pull on a ship at each system, 1 to 1 +
