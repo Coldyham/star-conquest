@@ -264,14 +264,14 @@ def test_on_slow_lanes_a_strike_need_only_win_the_nominal_roll(hu):
 # The Style knob
 # --------------------------------------------------------------------------- #
 def test_the_style_knob_has_two_stops(hu):
-    assert hu.AUX_NAMES == ("Greedy", "Planned")
+    assert hu.AUX_NAMES == ("Greedy", "Field")
     params = AiParams()
-    assert hu._stop_of(type("P", (), {"ai_params": params})()) == hu.PLANNED
+    assert hu._stop_of(type("P", (), {"ai_params": params})()) == hu.FIELD_STOP
 
 
 @pytest.mark.parametrize("aux, stop", [(0.0, 0), (1.0, 1), (2.0, 1), (7.0, 1), ("x", 1)])
 def test_the_knob_reads_tolerantly(hu, aux, stop):
-    """actuary's Learning stop and anything past it read as Planned."""
+    """actuary's Learning stop and anything past it read as Field."""
     seat = type("P", (), {"ai_params": type("A", (), {"aux": aux})()})()
     assert hu._stop_of(seat) == stop
 

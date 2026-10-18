@@ -295,9 +295,9 @@ balance of force is closest, and Learning is Field reading each rival's habits
 into its risk),
 `hunter.py` (actuary's ledger, but a threat counts only if a rival would launch
 it: a system next door, or several landing on the same turn, that wins the
-worst roll, and a short look-ahead over a few postures with every rival
-modelled by its own plain plan; built to beat actuary, and stronger against
-the rest too), `knower.py` (the oracle — it runs every rival's
+worst roll, actuary's Field pull on fast boards and its old front on slow
+ones, and a short look-ahead over a few postures with every rival modelled by
+its own plain plan; built to beat actuary, and stronger against the rest too), `knower.py` (the oracle — it runs every rival's
 own `decide` before the engine asks for it), `council.py` (knower's Search with a
 learned judge: actuary joins the openings it compares, each borrowed opening is
 played forward by the bot that proposed it, and the boards it lands on are

@@ -133,10 +133,11 @@ only for a fight; what is deliberately not animated.
 - **Softer strikes on slow boards (`CAPTURE_SWING`, `CAPTURE_LANE`).** The nominal-roll strike, on median lanes of 6 or more only.
 - **REINFORCE_WEIGHT.** 0.45-0.7 a plateau of about +2; the 43-variant single-constant sweep.
 - **Look-ahead (`LOOKAHEAD`, on by default).** Postures rolled six turns, rivals on hunter's own plan, own dice; bounded by work, not time; 68.2% against actuary, +11.4; +3.5 against marshal.
-- **Where it stands.** The headline by cell; against marshal, thinker, knower at Predict and at Search.
+- **The field, by lane length (`FIELD`, `SLOW_LANE`, `SLOW_FRONT`).** actuary's Field pull below 5-turn lanes, Greedy's front at or above; actuary's half-and-half and the field everywhere cost on slow boards with the look-ahead on. 66.9% against actuary at Field, +6.9 (z +5.23); 79.5% against marshal, +4.2. The planned opening retired.
+- **Where it stands.** Against actuary at Field; the earlier headline by cell; against marshal, thinker, knower at Predict and at Search.
 - **What it costs.** Plain and look-ahead decide times by size; `decide_ms` peaks on mid-sized boards.
 - **Built, measured, removed.** Predicted counter-punch, per-rival thresholds, a start-of-turn trigger, fast-board tuning, the stalemate breaker and endgame closer, Style: Learning.
-- **Open.** Fast boards and knower at Search.
+- **Open.** knower at Search; why the field costs on slow boards with the look-ahead; re-sweeping hunter's knobs on the field.
 
 ## design/learner.md
 - **Why the oracle flag does not make memory safe.** Every caller that runs a bot's `decide` on copies, branches, isolated positions or rewound boards, and `load_models` wiping module state.

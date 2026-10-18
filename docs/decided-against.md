@@ -87,6 +87,9 @@ the measured result was indistinguishable from the baseline.
 - Gathering on every board: -3.2 pooled; shipped on median lanes of 2 or less. *Gathering on fast boards.*
 - The nominal-roll strike on every board: 7:6 -7 to -13; shipped on median lanes of 6 or more. *Softer strikes on slow boards.*
 - A one-turn look for edge risk: 39.6%. *Edge risk.*
+- actuary's pull as it is (half field, half front on 5-turn lanes and up): null pooled, 7:6 -7.0 and 24:3 -8.5 with the look-ahead on; the field everywhere -1.9, 24:3 -17.0. Shipped with the front alone on slow boards. *The field, by lane length.*
+- The field's slow-board line at 4-turn lanes: -1.0 against 5 (18:6 -4.5). *Same section.*
+- The planned opening, kept beside the field: -3.8 on 24:12 and 40:6 (z -1.13); retired as in actuary. *Same section.*
 - Three-ply rollouts (half the work, so the look-ahead reaches 80-system boards): null at 40:6, every seed unchanged at 80:6 for about 7x the time. *Look-ahead.*
 - A look-ahead stopped by the wall clock: up to 0.99 s a decide with the guard live, and play that depends on the machine; bounded by work instead. *Look-ahead.*
 
