@@ -83,6 +83,75 @@ slower, the median within half a turn.
 Melees are its weakest setting; duels and three-player games are where it
 dominates.
 
+## Against the posted maps and the people who posted them
+
+*2026-10-18*, all 152 posted maps. The stored bot column was of mixed vintage
+(knower's rows from eight `engine_rev`s, none current), so council, knower:2
+and actuary were replayed afresh on the main of that date, as the worker does
+(guards ×100, no timeouts); the other bots' rows are the stored ones. A result
+is ranked as the board ranks it: a win, then fewer turns, then fewer ships lost.
+
+| | Stored column | Fresh replay |
+| --- | --- | --- |
+| council wins | 143 | 146 |
+| council's result beats every other bot's | 97 (2 shared) | 112 |
+| some bot beats it | 53 | 33 |
+| … knower:2 | 32 (7 where council lost) | 22 (all faster; council never lost one) |
+| … actuary | 27 | 10 |
+| knower:2 wins | 114 | 110 |
+
+**knower:2 is not a strictly weaker council, and its wins are not a pattern.**
+Only 6 of the 32 maps knower took in the stored column are still knower's in
+the fresh replay. The first turn the judge disagrees with knower's material
+score, the two play different games with different fights and different
+dice, so any one map can fall either way. Where both win, council is a median
+13 turns faster (faster on 83 of 110). The tuned combat sliders on posted maps,
+which the judge never saw (`DEFENDER_ADVANTAGE` 1.05, jitter 0.06 or 0.08),
+do not explain knower's wins: it wins slightly fewer of those maps.
+
+**council's stored losses** (9) are all three- and four-seat games on 13–20
+systems at 7.5–8.5 ly, most against knower and marshal together.
+
+**People beat it on most maps.** The best counted human score beats council's on
+115 of 151 maps (108 against the fresh replay), and council's median win is 7
+turns (16%) slower than the record. 106 posted games played at least 80% by
+hand, read with `tools/human_habits.py`'s `score_log` beside council's stored
+game on the same map (council's turns all counted as its own):
+
+| | Person | council |
+| --- | --- | --- |
+| Turn reaching 50% of the board's income | 37 | **33.5** |
+| 50% → 90% of the board's income (62 games reaching it) | **30** (mean 30.3) | 31.5 (mean 36.0) |
+| 90% → the win | **4.5** (mean 5.6) | 6 (mean 8.0) |
+| Ships lost (median) | **37** | 58.5 |
+| Frontier systems lost per 100 frontier system-turns | **2.0** | 3.6 |
+| Voluntary frontier empties lost within five turns | **6%** | 30% |
+| … when relief could not land in time (`short`) | 13% | 41% |
+| … with nothing covering them (`uncovered`) | 29% | 60% |
+| A wave over the target's garrison (median) | **1.5×** | 1.33× |
+| Waves smaller than the garrison | **20%** | 25% |
+
+council's opening is as quick as a person's or quicker. It loses its time in the
+middle game (349 turns more over the 62 games) and the close (143 more), and
+most of it is stripped frontiers: people empty about as many frontier systems,
+but lose a fifth as many of them, while council empties systems it cannot
+relieve and then pays to take them back, which is where its extra ship losses
+go. People also strike heavier and less often, and fewer of their waves fall
+short.
+
+One confound: rivals may not answer a person's seat as they answer a bot's
+(council is modelled as an oracle seat; actuary learns the person's habits), so
+part of the gap in punished empties may be the rivals rather than council.
+
+**What to try.** Rank down rolled-out lines that leave a frontier system empty
+with relief `short` or `uncovered`, in the judge's ranking rather than in a
+stand-in (the traps under "Built, measured, dropped" point the same way), and
+measure it against posted games, not the roster: relief bolted onto marshal
+and actuary was null against bots (`docs/decided-against.md`), so self-play is
+the wrong screen for a habit only people expose. The position suite and
+`tests/council_traps.py` are the cheap first checks; the fresh replay above is
+the before.
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:
