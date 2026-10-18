@@ -642,8 +642,8 @@ against actuary. So the ranking says more about knower than about learner.
 20 points**, since the flag is a claim knower takes on trust. The contract is
 in `models/README.md`, "Predicting the other seats". learner's own claim rests on
 its memory (`is_oracle_seat`), which is real, but nothing stops a bot claiming
-it falsely. Since 2026-10-16 knower runs a Learning seat as Planned and believes
-it (`stand_in_params`), which takes back a third to a half of those points at
+it falsely. Since 2026-10-16 knower runs a Learning seat as the stop below it
+(Planned, Field from 2026-10-18) and believes it (`stand_in_params`), which takes back a third to a half of those points at
 Predict and most of the Search row ([`knower.md`](knower.md), "Seats it cannot
 run"). A bot that claims the flag without the hook still gets the whole 20.
 

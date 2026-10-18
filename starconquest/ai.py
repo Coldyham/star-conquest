@@ -90,7 +90,8 @@ def decide(state: GameState, pid: int) -> list[Order]:
 # marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
 # aux=12), not its default seat. actuary tops that same ladder at the defaults
-# but loses to knower at Search (37%), so it sits second (docs/design/actuary.md).
+# (Style: Field) but loses to knower at Search (43.5%), so it sits second
+# (docs/design/field.md).
 # council, knower's Search with a learned judge, beats knower at Search by 40
 # points above the fair share on untouched seeds, so it heads the list
 # (docs/design/council.md).

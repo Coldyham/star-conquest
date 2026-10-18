@@ -166,9 +166,18 @@ lost.
 
 - **surveyor**, the opening planned as a schedule: which neutrals, in what
   order, with which converging groups, priced by payback. Folded into actuary as
-  Opening: Planned. See [`actuary.md`](actuary.md), "The planned opening".
+  Opening: Planned, and retired on 2026-10-18 when the field took its stop. See
+  [`actuary.md`](actuary.md), "The planned opening".
 - **convoy**, the turn as routing over time: supply at (system, turn), strikes
   as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
+- **fulcrum** (not on the list; built 2026-10-18), actuary's ledger with an
+  influence field for the pull on its ships: each ship goes where the balance of
+  force is closest, not to every front alike. The traps and full relief tried on
+  the way there are recorded with it. It opened further from actuary than
+  marshal does (0.26 against 0.17), played the contested middle as actuary's
+  close relative (0.17, where marshal is 0.34), and was ahead of both in a duel
+  at the default settings. Folded into actuary the same day as *Style: Field*,
+  the default. See [`field.md`](field.md).
 
 **learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent
@@ -941,10 +950,11 @@ the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[
     chance must not shift `state.rng`, or the same seed would fight the same map
     differently depending on how many seats were left to it. A seed therefore
     reproduces the opponents as surely as it reproduces the map, which is what
-    lets a challenge link on one be raced fairly. The pool is the fixed
-    `settings.RANDOM_POOL`, not the loaded roster, so every build deals a seed
-    the same bots; a new bot joins it only on purpose, since that re-deals every
-    random map (`docs/design/core.md`). `Settings` keeps `"random"`, so
+    lets a challenge link on one be raced fairly. The pool is the one the seed's
+    era names in the append-only `settings.RANDOM_POOLS`, not the loaded roster,
+    so every build deals a seed the same bots; a new bot joins by appending a
+    pool, which deals only seeds rolled from then on (`docs/design/core.md`).
+    `Settings` keeps `"random"`, so
     a shared link stays a mystery to its recipient and the leaderboard's
     opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
     the bot that played — the setup's rule, not its outcome. Disclosing the

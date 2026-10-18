@@ -223,10 +223,10 @@ class GameLog:
     # the log, the other says whether replaying it still reproduces the game.
     rules_version: int = field(default_factory=lambda: engine.RULES_VERSION)
     # Which strategy each seat was built with (`seat_strategies`), so a seat left
-    # to `settings.RANDOM_STRATEGY` keeps the bot it was dealt: the pick depends
-    # on the roster loaded at Start, which moves with the code and with a stale
-    # cached build. Empty on a log written before the field existed, which
-    # rebuilds with today's picks as it always did.
+    # to `settings.RANDOM_STRATEGY` keeps the bot it was dealt: the pick once
+    # depended on the roster loaded at Start, and a stale cached build may not
+    # know its seed's pool (`settings.pool_for`). Empty on a log written before
+    # the field existed, which rebuilds with today's picks as it always did.
     strategies: dict[int, str] = field(default_factory=dict)
     winner: int | None = None
     finished: bool = False

@@ -23,7 +23,7 @@ keep pre-compression links working.
 
 The Strategy dropdown's last entry, `random`, is the one option that names no
 decision function. `settings.resolve_strategy` turns it into a real bot inside
-`build_state`, drawing from `settings.RANDOM_POOL`. The point is to play
+`build_state`, drawing from `settings.RANDOM_POOLS`. The point is to play
 without knowing who you are playing: a large part of this game's skill is
 knowing how a given bot answers a given opening, and that is knowledge a fixed
 opponent hands you before the first turn.
@@ -76,14 +76,11 @@ win overlay named today's pick.
 
 Two fixes, each covering what the other cannot:
 
-- **`settings.RANDOM_POOL` is written out**, so every build deals a seed the same
-  bots whatever its `models/` holds, a stale cached build included, as long as
-  the pool is unchanged. A pool name that is not registered plays as the
-  heuristic (`ai.decide`'s fallback); `test_every_bot_in_the_pool_ships` keeps
-  that from happening silently, and `test_the_pool_still_deals_what_it_dealt`
-  pins the deal. A new bot is not dealt until someone adds it, and adding it
-  re-deals every random map, so it is done on purpose, like a `RULES_VERSION`
-  bump. Drop-ins are never dealt.
+- **The pools are written out** (`settings.RANDOM_POOLS`), so every build deals
+  a seed the same bots whatever its `models/` holds, a stale cached build
+  included. A pool name that is not registered plays as the heuristic
+  (`ai.decide`'s fallback); `test_every_bot_in_every_pool_ships` keeps that from
+  happening silently. Drop-ins are never dealt.
 - **`replay.GameLog.strategies` records each seat's strategy as built**
   (`replay.seat_strategies`), and `reconstruct` stamps it back on.
   `main.start_game` records it through `new_log`. `sim.play_settings` records it
@@ -91,6 +88,42 @@ Two fixes, each covering what the other cannot:
   A play-by-post log records it on its first rebuild, while it has no turns, so
   the resolver's upload carries the picks and every other client adopts them. A
   log from before the field existed has none and rebuilds with today's picks.
+
+**The pools are append-only, and the seed names its pool.** With one written-out
+pool, a new bot was dealt only by editing it, and an edit re-dealt nearly every
+random seat on every map ever shared: their scores, crowns, the bot column and
+the campaign's all-random nodes with them, and older scores were set aside as
+`outdated` by `tools/verify_scores.py`. So the pool was never edited. No pick
+from one growing list can avoid that: any rule that ever deals the new bot deals
+it to some seed that already existed, unless something says which seeds are
+new. So the pools are numbered, oldest first, and the seed says:
+seed // `POOL_ERA` (ten million) names its pool (`settings.pool_for`), and every
+seed below the second pool's era deals from the first. That first era holds
+every seed anyone could make before the pools were numbered: rolled seeds were
+under `config.SEED_MAX` (a million) and the menu typed seven digits.
+`settings.roll_seed` rolls a new seed in the newest pool's era, the newest pool
+times ten million plus up to `SEED_MAX` (`20xxxxxx` for the second), and it is
+the only roller (`random_seed`, the menu's dice, `tools/campaign.py`). To change
+what a random seat deals, append a pool: only seeds rolled from then on deal
+from it. `test_a_shipped_pool_is_never_edited` lists the pools and
+`test_each_pool_still_deals_what_it_dealt` pins a deal in each era.
+
+Why the seed and not a field. The seed is the one part of a setup that is
+rolled rather than chosen, it is always in a link (`_TOKEN_ALWAYS`), the
+challenge key, the log, the play-by-post match and the campaign node, and it is
+what a person reads out and types. Carrying the era in it moves no challenge
+key, adds no `Settings` field (and no `_LEGACY_KEY_DROPS` entry), leaves
+`settings_json`, `sc_bots` and `sc_config_key` exactly as they were, so a config
+does not split when a pool is appended, and keeps "the same setup and seed face
+the same opponents" true of a seed typed by hand. The cost is longer seeds
+(eight digits from the second pool on) and a rule a reader has to know.
+
+Two edges. A seed from an era with no pool yet would deal from today's newest
+pool and then from whichever is appended for its era, so the menu's seed field
+stops at `settings.seed_top` (`menu._seed_digits`); only a hand-written link or
+`--seed` can reach past it. A stale cached build does not know a newer era and
+deals that seed from the newest pool it has; `verify_scores` sets a score from
+one aside as `outdated`, as it did for a build from before the pool was fixed.
 
 The alternative to a fixed pool was a roster fingerprint in the challenge key
 whenever a seat is random: the same key would always mean the same lineup, but

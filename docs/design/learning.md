@@ -8,6 +8,11 @@ standalone bot this grew out of. actuary itself is in [`actuary.md`](actuary.md)
 Roster-wide rules and the measurement checklist are in [`bots.md`](bots.md).
 Index: [`../README.md`](../README.md).
 
+Since 2026-10-18 Learning is built on the Field stop ([`field.md`](field.md)):
+the same learned risk on top of the influence-field pull, where it was built on
+Planned before. The measurements below were made on Planned; whether the two
+gains add is in [`field.md`](field.md), "Folded into actuary".
+
 ## Why the curve goes in the risk term
 
 Built 2026-10-09, from two observations by the author on why Raise was level with

@@ -42,7 +42,8 @@ SHIP_SPEED_GROWTH_PCT = 0.0    # compounding % gained each game turn (0 == fixed
 DEFAULT_NODES = 18
 DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
-SEED_MAX = 1_000_000          # rolled seeds are 0..SEED_MAX-1 (short enough to read out)
+SEED_MAX = 1_000_000          # a rolled seed is 0..SEED_MAX-1 past its pool's era
+                              # (short enough to read out; settings.roll_seed)
 
 # Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
 MIN_PLAYERS = 2               # a game needs at least two sides
