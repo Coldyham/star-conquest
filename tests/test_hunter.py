@@ -23,7 +23,7 @@ from tests import sim
 
 # hunter's changes, each set to what actuary does.
 ACTUARY = {"EDGE_RISK": False, "CAPTURE_SWING": 0.0, "EDGE_GATHER_LANE": 0,
-           "REINFORCE_WEIGHT": 0.3, "LOOKAHEAD": False}
+           "REINFORCE_WEIGHT": 0.3, "LOOKAHEAD": False, "RELIEF_IN_FLIGHT": 0.3}
 
 
 @pytest.fixture(scope="module")
