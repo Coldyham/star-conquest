@@ -23,7 +23,7 @@ from tests import sim
 
 # hunter's changes, each set to what actuary does.
 ACTUARY = {"EDGE_RISK": False, "CAPTURE_SWING": 0.0, "EDGE_GATHER_LANE": 0,
-           "REINFORCE_WEIGHT": 0.3}
+           "REINFORCE_WEIGHT": 0.3, "LOOKAHEAD": False}
 
 
 @pytest.fixture(scope="module")
@@ -154,10 +154,17 @@ def test_beats_the_heuristic(hu):
     assert r.winner == 1
 
 
-def test_declares_what_a_decide_costs(hu):
+def test_declares_what_a_decide_costs(hu, monkeypatch):
+    """knower prices a Search against rival bots with this (`ai.decide_ms`). The
+    look-ahead runs only where its work fits, so a mid-sized duel costs more
+    than the plain ledger there, and a big board only the plain ledger."""
     from starconquest.settings import Settings
-    small, big = Settings(nodes=18), Settings(nodes=120)
-    assert 0 < ai.decide_ms("hunter", small, 2) < ai.decide_ms("hunter", big, 2)
+    mid, big = Settings(nodes=18, players=2), Settings(nodes=120, players=2)
+    with_look = ai.decide_ms("hunter", mid, 2)
+    assert hu._look_work(120, 2) == 0.0 and hu._look_work(18, 2) > 0.0
+    monkeypatch.setattr(hu, "LOOKAHEAD", False)
+    assert 0 < ai.decide_ms("hunter", mid, 2) < with_look
+    assert ai.decide_ms("hunter", mid, 2) < ai.decide_ms("hunter", big, 2)
 
 
 # --------------------------------------------------------------------------- #
@@ -245,8 +252,11 @@ def test_the_knob_reads_tolerantly(hu, aux, stop):
 # --------------------------------------------------------------------------- #
 # Look-ahead
 # --------------------------------------------------------------------------- #
+def test_look_ahead_is_on_by_default(hu):
+    assert hu.LOOKAHEAD
+
+
 def test_look_ahead_is_legal_read_only_and_reproducible(hu, monkeypatch):
-    monkeypatch.setattr(hu, "LOOKAHEAD", True)
     monkeypatch.setattr(hu, "BUDGET_SCALE", float("inf"))
     state = _state(nodes=18, players=2, seat=1)
     for _ in range(25):
@@ -275,6 +285,7 @@ def test_without_a_second_plan_the_look_ahead_is_plain_hunter(hu, monkeypatch):
     """With every posture the same as ours there is nothing to roll."""
     monkeypatch.setattr(hu, "LOOK_WEIGHTS", ())
     monkeypatch.setattr(hu, "LOOK_CAPTURE", False)
+    monkeypatch.setattr(hu, "LOOKAHEAD", False)
     state = _state(nodes=18, players=2, seat=1)
     for _ in range(15):
         engine.end_turn(state, decide=ai.decide)

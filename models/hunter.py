@@ -25,10 +25,15 @@ part that stops a launch leaving a system too thin.
     the nominal roll next door.
   * `REINFORCE_WEIGHT` 0.45 (actuary 0.3): a rival's ships next door to a system
     we strike are assumed to relieve it a little more.
+  * **Look-ahead.** Our plan and the ledger at other postures are each played
+    `LOOK_PLIES` turns on a private board (its own dice), every rival on
+    hunter's plain plan, and the best final ledger wins: 68.2% against actuary,
+    +11.4 over plain hunter; +3.5 against marshal. Bounded by work
+    (`LOOK_WORK`), so it runs on boards up to about 40 systems and plays the
+    same on any machine.
 
-Against actuary, paired by seed with seats swapped, on three fresh blocks of 100
-seeds: 55.5%, 55.3% and 55.1%, up to 64.5% at 24 nodes 3 ly/turn and level on
-fast or big boards. Against the rest of the roster it is stronger than actuary
+Against actuary, paired by seed with seats swapped: without the look-ahead
+55.5%, 55.3% and 55.1% on three fresh blocks of 100 seeds; with it 68.2%. Against the rest of the roster it is stronger than actuary
 too (marshal +5.7 pts, knower at Predict +3.6). Every switch off is actuary
 exactly (`tests/test_hunter.py`). It runs no other bot's code and reads nothing
 but the board; actuary's Style: Learning is not carried over, so hunter keeps no
@@ -100,23 +105,29 @@ CAPTURE_LANE = 6            # ...on a board whose median lane is at least this m
                             # (13:3 +7.8 pts; on 7:6 it cost 7-13); 0 = every board
 
 # --- look-ahead (docs/design/hunter.md, "Look-ahead") ------------------------- #
-LOOKAHEAD = False           # roll each candidate plan forward and keep the best
+LOOKAHEAD = True            # roll each candidate plan forward and keep the best
 LOOK_PLIES = 6              # turns each candidate is played on before it is scored
 LOOK_WEIGHTS = (0.4, 2.5)   # candidate postures besides ours: edge risk weight times these...
 LOOK_CAPTURE = True         # ...and our plan with the nominal-roll strike on every board
 LOOK_DECIDED = 1e6          # a rollout that ends the game scores this, won or lost
-LOOK_BUDGET_S = 0.150       # wall clock per decide, browser-sized; the base plan is rolled
-                            # first, so running out only ever falls back to plain hunter
+LOOK_WORK = 4000            # work per decide: a rollout ply costs systems ** 1.3 x seats
+                            # (how a ledger decide grows); a line that would pass it is not
+                            # rolled. Work, not time, so a seat plays the same on any machine
+LOOK_BUDGET_S = 1.0         # a catastrophe guard on the wall clock, as knower's: never the
+                            # budget that decides. The base plan is rolled first, so running
+                            # out of either only ever falls back to plain hunter
 BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by this
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython
-# (M3), fitted to a grid of 18-120 systems, 3-18 ly/turn and 2 or 4 seats, hunter
-# against actuary (docs/design/hunter.md, "What it costs"). Only the system count
-# is in the fit, as for actuary; edge risk reads every launch turn, so the cost
-# grows faster with the map than actuary's (8.3 ms, exponent 0.77).
+# (M3), hunter against actuary over 18-120 systems, 3-18 ly/turn and 2 or 4 seats
+# (tools/hunt_cost.py; docs/design/hunter.md, "What it costs"). The plain ledger
+# grows as COST_DECIDE_MS x (systems / COST_REF_NODES) ** COST_NODES_EXP; the
+# look-ahead adds COST_LOOK_MS per unit of the work it is allowed (LOOK_WORK), so
+# the dearest boards are the mid-sized ones it still runs on.
 COST_REF_NODES = 40
 COST_DECIDE_MS = 10.2
 COST_NODES_EXP = 1.28
+COST_LOOK_MS = 0.04
 
 # --- the opening ------------------------------------------------------------ #
 GREEDY, PLANNED = 0, 1      # the Style knob's stops; anything unreadable, or at or past
@@ -188,8 +199,20 @@ def decide_ms(settings, seat) -> float:
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us."""
     drawn = getattr(settings, "custom_map", None)
-    nodes = len(drawn.nodes) if drawn is not None else settings.nodes
-    return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
+    nodes = max(1, len(drawn.nodes) if drawn is not None else settings.nodes)
+    plain = COST_DECIDE_MS * (nodes / COST_REF_NODES) ** COST_NODES_EXP
+    return plain + COST_LOOK_MS * _look_work(nodes, max(2, settings.players))
+
+
+def _look_work(systems: int, seats: int) -> float:
+    """The work units one look-ahead decide spends on this board: whole lines,
+    up to one per posture, while they fit LOOK_WORK, and none unless two do."""
+    if not LOOKAHEAD:
+        return 0.0
+    line = LOOK_PLIES * seats * systems ** 1.3
+    lines = min(1 + len(LOOK_WEIGHTS) + (1 if LOOK_CAPTURE and CAPTURE_SWING > 0 else 0),
+                int(LOOK_WORK // line))
+    return lines * line if lines >= 2 else 0.0
 
 
 class _Ledger:
@@ -723,6 +746,10 @@ def _with(arrivals, t, owner, ships):
 # --------------------------------------------------------------------------- #
 def _look(state, pid):
     deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
+    seats = sum(1 for p in state.players.values() if not p.is_neutral and p.alive)
+    line = LOOK_PLIES * seats * len(state.systems) ** 1.3     # the work one line costs
+    if 2 * line > LOOK_WORK:
+        return _Ledger(state, pid).plan()   # not two lines' worth: nothing to compare
     plans, seen = [], set()
     for weight, capture in _postures():
         orders = _Ledger(state, pid, weight, capture).plan()
@@ -735,12 +762,14 @@ def _look(state, pid):
     if len(plans) == 1:
         return plans[0]
     best, best_score = plans[0], None
-    for orders in plans:
-        score = _rollout(state, pid, orders)
+    for i, orders in enumerate(plans):
+        if (i + 1) * line > LOOK_WORK and i > 0:
+            break                         # the next line would pass the work budget
+        score = _rollout(state, pid, orders, deadline)
+        if score is None:
+            break                         # out of time mid-line: keep the best scored
         if best_score is None or score > best_score:
             best, best_score = orders, score
-        if time.perf_counter() > deadline:
-            break
     return best
 
 
@@ -752,7 +781,9 @@ def _postures():
         yield None, CAPTURE_SWING
 
 
-def _rollout(state, pid, orders) -> float:
+def _rollout(state, pid, orders, deadline=math.inf):
+    """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
+    out before the last of them (checked before each, so an overrun is one ply)."""
     board = _clone(state)
     first = [True]
 
@@ -764,6 +795,8 @@ def _rollout(state, pid, orders) -> float:
         return _Ledger(s, q).plan()
 
     for _ in range(LOOK_PLIES):
+        if time.perf_counter() > deadline:
+            return None
         engine.end_turn(board, decide=stepped)
         first[0] = False
         if board.winner is not None:

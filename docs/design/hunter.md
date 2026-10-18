@@ -119,7 +119,7 @@ TAIL_TURNS 12 (36.4), RISK_WEIGHT 0.3 (40.7) and 0.1 (30.1), MIN_GAIN 0.5-2
 which is edge risk's heavier weight again: edge risk replaces that term, so the
 two do not stack.
 
-## Look-ahead (`LOOKAHEAD`, off by default)
+## Look-ahead (`LOOKAHEAD`, on by default)
 
 Each decide builds hunter's plan and the same ledger at other postures (edge
 risk weight x0.4 and x2.5, and the nominal-roll strike on every board),
@@ -131,9 +131,23 @@ actuary's fork, that self-model is unusually close to actuary's real play,
 which is likely why the gain against actuary is twice the gain against
 marshal. The board rolls its own dice (`dice_salt` + `:hunter-rollout`), the
 same for every line, so no line sees the game's dice and a score gap is the
-plan's. The score is the ledger's worth of the final board from our seat. A
-wall clock (`LOOK_BUDGET_S` x `BUDGET_SCALE`) stops between plans; the base plan
-is rolled first, so running out only falls back to plain hunter.
+plan's. The score is the ledger's worth of the final board from our seat. The
+look-ahead is bounded by work, not time: a rollout ply costs systems^1.3 x seats
+units, a decide may spend `LOOK_WORK` (4,000), and a line that would pass it is
+not rolled. So a seat plays the same on any machine, and a browser only takes
+longer. That is four lines on every duel up to 24 systems, two at 40 systems
+with two seats, and none at 40 with four seats or at 80 and up. A wall clock
+(`LOOK_BUDGET_S`, 1 s, x `BUDGET_SCALE`) is checked before every rollout ply as
+a catastrophe guard only; the base plan is rolled first, so running out of
+either falls back to plain hunter.
+
+The first version had the clock as the budget (150 ms), checked only between
+lines. With the guard live that cost a 75th percentile of 200-730 ms at 40-80
+systems and up to 0.99 s, since one line already outran it; and a guard that
+trips on most turns makes play depend on the machine (`tools/check_bot.py`'s
+reproducibility check flaked). The figures below were measured with the guard
+lifted, and the work-bounded version replays them exactly (100 of 100 games on
+9.2M across the five cells).
 
 Screen (9.1M, 25 seeds, paired against plain hunter): actuary 70.0% (+11.8,
 z +4.63), marshal 78.6% (+5.4, z +2.06), knower at Predict 85.8% (+0.6; knower
@@ -150,9 +164,11 @@ every cell up. Under a browser-sized guard (`BUDGET_SCALE` 0.5 on the Mac, so
 wall-clock dependent): 65.7% against actuary, +8.9 (z +7.23), about 80% of the
 unlimited gain; 24:3, where rollouts cost most, kept only +1.8.
 
-Stalemates fell to 5.7% of games (plain hunter about 10%). Cost with the guard
-lifted: median 1-12 ms per decide (most turns roll nothing), 95th percentile 23
-ms at 7:6 and 127 ms at 18:6.
+Stalemates fell to 5.7% of games (plain hunter about 10%).
+
+The browser-budget figure above was measured under the first, clock-bounded
+version, so it is a pessimistic reading of a guard that no longer decides
+anything below 24 systems.
 
 ## Where it stands
 
@@ -178,10 +194,14 @@ seeds, five cells):
 
 ## What it costs
 
-75th-percentile CPU ms per decide on native CPython (M3), hunter against
-actuary, 18-120 systems, 3-18 ly/turn, 2 or 4 seats: 2-10 ms at 18 systems,
-13-29 at 40, 15-47 at 80-120; fitted 10.2 ms at 40 systems, exponent 1.28
-(`COST_*`, read by `decide_ms`). actuary's fit is 8.3 ms, exponent 0.77: edge
+`tools/hunt_cost.py`: 75th-percentile CPU ms per decide on native CPython (M3),
+hunter against actuary, 3-18 ly/turn, 2 or 4 seats. Plain hunter: 2-10 ms at
+18 systems, 13-29 at 40, 15-47 at 80-120; fitted 10.2 ms at 40 systems,
+exponent 1.28. With the look-ahead under its work budget: 27-79 ms at 18
+systems with two seats and 89-208 with four (worst 0.53 s), 27-304 at 40 with
+two and 19-76 with four, 15-49 at 80 (no look-ahead). `decide_ms` adds
+`COST_LOOK_MS` (0.04) per unit of `_look_work` to the plain fit, so it peaks on
+the mid-sized boards the look-ahead still runs on. actuary's fit is 8.3 ms, exponent 0.77: edge
 risk reads every launch turn of the horizon. Median and 95th percentile against
 actuary in the same games: 7:6 0.5/2.2 ms (actuary 0.2/0.8), 40:6 3.1/20.2
 (1.8/6.8).
