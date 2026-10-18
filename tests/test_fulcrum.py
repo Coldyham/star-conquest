@@ -2,11 +2,11 @@
 
 Pure/headless (no pygame). fulcrum is actuary's ledger with a different pull on
 its ships, so these tests cover the drop-in contract every model owes (legal
-orders, no mutation, reproducibility, nothing drawn from `state.rng`), then pin
-that relationship (with actuary's front pull put back, it plays move for move as
-actuary's Greedy stop), and then the field itself: its range, that it reads
-lanes rather than turns, and that a balance pulls harder than a front nobody is
-contesting.
+orders, no mutation, reproducibility, nothing drawn from `state.rng`) and that it
+is no oracle, then pin that relationship (with actuary's front pull put back, it
+plays move for move as actuary's Greedy stop), and then the field itself: its
+range, that it reads lanes rather than turns, and that a balance pulls harder
+than a front nobody is contesting.
 
 Internals are reached through `sys.modules["sc_model_fulcrum"]`, the synthetic
 name `ai.load_models` imports each model file under.
@@ -152,6 +152,19 @@ def test_fulcrum_is_not_an_oracle(fu):
     assert not getattr(fu, "IS_ORACLE", False)
     assert not hasattr(fu, "is_oracle_seat")
     assert ai.aux_spec("fulcrum") is None
+
+
+def test_its_orders_never_depend_on_what_a_rival_runs(fu):
+    """Not an oracle in behaviour as well as in its flags: it reads the board
+    alone, so a rival said to run another bot at another knob changes no order,
+    and deciding the positions in the other order changes none either."""
+    boards = _boards(12)
+    first = [_orders(fu, b) for b in boards]
+    for b in boards:
+        for pid, p in b.players.items():
+            if pid != 1 and not p.is_neutral:
+                p.ai_strategy, p.ai_params = "knower", AiParams(aux=2.0)
+    assert [_orders(fu, b) for b in reversed(boards)][::-1] == first
 
 
 def test_declares_what_a_decide_costs(fu):
