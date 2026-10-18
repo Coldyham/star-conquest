@@ -241,6 +241,8 @@ Each built and measured; paired against the bot of the day on fresh seeds.
 | **The look-ahead's ceiling**: a 10-turn horizon, twice the plans, wider postures, no guard | −0.5 against actuary (mode 6 +0.5 on the same seeds). More search buys nothing on this policy. |
 | **Fewer own-to-own moves** (reinforce bias −1/−2/−4) | −1.7 / −1.2 / −3.1 |
 | **Pricing a third seat's fleet into the ask** (the pile-up fold) | −0.18; duels identical, since the fleets involved launch the same turn |
+| **Retraining with the look-ahead on** (the ten move-kind biases and guard parameters, `--cand-aux 1`, 68 generations) | −0.92 (18:6:2 against marshal −9.5): the weights tuned without it were not mismatched |
+| **A separate weight set for multi-seat** (the same ten, trained on 11:6:3 only, to ship by seat count) | +0.67 on 11:6:3, null |
 
 **Why evolution does not reach actuary.** It tunes weights over a fixed menu
 and fixed features; it cannot add a calculation the policy does not do.
