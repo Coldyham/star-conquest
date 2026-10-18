@@ -162,7 +162,7 @@ only for a fight; what is deliberately not animated.
 - **How differently it plays.** `bot_distance.py`: the most distinct opening of any strong bot (0.26 from actuary, 0.37 from marshal), a middle game 0.17 from actuary that strikes more and keeps no stack on a quiet front. *In its own games*: contact three turns sooner and a fifth fewer ships lost defending than actuary against marshal, with the empty landings and evacuations unchanged.
 - **What it costs.** About actuary's cost; `decide_ms` reuses actuary's fit.
 - **Built, measured, dropped.** Traps, full relief, pricing the rival's reinforcement, value systems, pulls that only steer, pinning, the field per turn, leave-one-out, a transit cost, a field against the strongest rival; open: a capture discounted by the balance, half actuary's front.
-- **Folded into actuary.** Field replaces Planned as stop 1, Learning is rebuilt on it; whether the two gains add.
+- **Folded into actuary.** Field replaces Planned as stop 1, Learning is rebuilt on it. Against marshal, Field +8.8 and Learning +6.0 over Planned, both together +12.5: additive within noise (interaction -2.3, z -1.07). New Learning beats old Learning 54.2% but 38.5% at 3 ly/turn.
 
 ## design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).

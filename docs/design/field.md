@@ -426,3 +426,47 @@ actuary and marshal, mostly at 18 nodes (6 ly/turn) and 24 (3 ly/turn).
 ly/turn, 52.5% against actuary there) are level with the shipped field (+6.2)
 at that sample; both were measured with a neutral's garrison still counted in
 its stake. The slow regime is where either would be worth a fresh run.
+
+## Folded into actuary
+
+fulcrum's ledger was actuary's to the order, so on 2026-10-18 it became
+actuary's stop 1, *Style: Field*, in place of Planned. Planned's plan ran only
+on 24+ systems with lanes of two turns or less, and fulcrum, which had no plan,
+scored 64.3% against it in the one cell where the plan was on. Greedy is
+unchanged, and Learning is rebuilt on the field: the same learned risk
+([`learning.md`](learning.md)) with the field's pull in place of Planned's
+front. The stops keep their numbers, so no stored `aux` changes meaning, and
+Field plays exactly as fulcrum did (422 positions out of roster games, every
+order the same). knower runs a Learning seat as Field (`stand_in_params`), and
+council's actuary adviser, run at the default stop, now proposes Field's moves.
+
+**Do the field and Learning add?** Fresh seeds 4001-4060, both seatings, five
+cells (18 nodes at 6 ly/turn, 24 at 12 and at 3, 30 and 40 at 6), 600 games a
+pairing. The old stops are actuary as it was, run from a scratch copy. Against
+marshal, pts%, and paired by seed against old Planned:
+
+                        vs marshal    over Planned, paired
+    Planned (old 1)       63.2          —
+    Learning (old 2)      69.2          +6.0  (z +4.01)
+    Field (new 1)         72.0          +8.8  (z +4.24)
+    Learning (new 2)      75.7          +12.5 (z +6.20)
+
+Learning adds +3.7 on top of the field (z +2.50), where it added +6.0 on top of
+Planned. The interaction, Learning's gain on the field less its gain on
+Planned, is -2.3 a seed (z -1.07): not distinguishable from additive, and the
+two together beat either alone in every cell. Per cell, field gain / Learning
+on Planned / Learning on Field / both:
+
+    18 nodes, 6 ly     +12.2 / +6.5  / +1.2 / +13.5
+    24 nodes, 12 ly    +14.1 / +1.7  / +3.3 / +17.4
+    24 nodes, 3 ly      +4.4 / +12.5 / +5.8 / +10.1
+    30 nodes, 6 ly      +5.5 / +3.0  / +5.1 / +10.6
+    40 nodes, 6 ly      +7.9 / +6.4  / +3.2 / +11.1
+
+Head to head the same holds: Learning over the stop below it is 53.0% on the
+field (48.6-57.0 a cell) and 54.0% on Planned. New Learning against old
+Learning is 54.2% pooled: 58.3, 65.5, 57.8 and 51.0 in the fast and middling
+cells, but **38.5% at 24 nodes and 3 ly/turn**. That is the field's weak cell
+carried up a stop ("The slow regime is the weak one"): Learning on Planned
+gained most there (+12.5 against marshal) and Learning on the field less
+(+5.8). Against marshal the two top stops are level there (66.6 and 69.0).
