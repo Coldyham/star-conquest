@@ -501,6 +501,14 @@ h1::after {
   text-decoration: none;
 }
 .filters .clear:hover { color: var(--bad); }
+/* How many the filtered list holds, under the controls. */
+.match-count {
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin: 0 0 1.25rem;
+}
 
 .config-head:empty { display: none; }
 /* Title on the left, the way to play it on the right — the button sits on the

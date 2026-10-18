@@ -7,12 +7,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { insert, rpc, selectPage } from "../js/api.mjs";
+import { insert, rangeTotal, rpc, selectPage } from "../js/api.mjs";
 
 /** Stub fetch to answer with `body` (JSON-encoded on the way out, exactly as
  * PostgREST would), and hand back every call made so a test can inspect the
  * URL and options actually sent. */
-function mockFetch(body) {
+function mockFetch(body, headers = {}) {
   const calls = [];
   const real = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
@@ -22,6 +22,7 @@ function mockFetch(body) {
       status: body === undefined ? 204 : 201,
       text: async () => (body === undefined ? "" : JSON.stringify(body)),
       json: async () => ({}),
+      headers: { get: (name) => headers[name] ?? null },
     };
   };
   return { calls, restore: () => { globalThis.fetch = real; } };
@@ -115,4 +116,22 @@ test("selectPage reports no more once a page comes back short", async () => {
   } finally {
     restore();
   }
+});
+
+test("selectPage with count asks for an exact count and reads the total back", async () => {
+  const { calls, restore } = mockFetch([{ id: 1 }, { id: 2 }, { id: 3 }], { "Content-Range": "0-2/123" });
+  try {
+    const page = await selectPage("game_summary?select=game_key", { size: 2, count: true });
+    assert.equal(calls[0].options.headers.Prefer, "count=exact");
+    assert.deepEqual(page, { rows: [{ id: 1 }, { id: 2 }], more: true, total: 123 });
+  } finally {
+    restore();
+  }
+});
+
+test("rangeTotal reads the count after the slash, or null without one", () => {
+  assert.equal(rangeTotal("0-49/123"), 123);
+  assert.equal(rangeTotal("*/0"), 0);
+  assert.equal(rangeTotal("0-49/*"), null);
+  assert.equal(rangeTotal(null), null);
 });
