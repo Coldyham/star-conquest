@@ -9,7 +9,7 @@ The file index is [`README.md`](README.md).
 
 ## design/core.md
 - **Settings tokens.** Pruned, then deflated. Mode, players, nodes and seed are always emitted.
-- **A seat left to the seed.** Why `random` resolves in `build_state` rather than in a dispatcher bot (the oracle contract). The pick is derived, never drawn. The pool is a fixed list (`RANDOM_POOL`) and the log records what it dealt. The win overlay reveals it, and `Settings` keeps the placeholder.
+- **A seat left to the seed.** Why `random` resolves in `build_state` rather than in a dispatcher bot (the oracle contract). The pick is derived, never drawn. The pools are fixed lists, append-only (`RANDOM_POOLS`), the seed's era (seed // `POOL_ERA`) naming the one it deals from, so appending a pool re-deals no map; why the seed and not a `Settings` field; the menu's seed cap and stale builds. The log records what it dealt. The win overlay reveals it, and `Settings` keeps the placeholder.
 - **Challenge links.** Score and tie rules. Links travel by clipboard only. Editing a challenge asks first rather than locking the widgets.
   - *Keys outlive the schema that made them.* `_LEGACY_KEY_DROPS`, `findTwin` folding, newest key wins, the `sc_config_key` trade-off, the int/float `aux` digest leak.
 - **Ship-speed growth.** Applies at launch only, and compounds rather than growing linearly (with the reason). Re-times from `length_ly`.

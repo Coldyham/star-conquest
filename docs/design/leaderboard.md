@@ -441,11 +441,12 @@ not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
 **The random pool is the other axis, and it gets the same flag.** A seat left
-to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
-dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
-A score whose numbers reproduce but whose rival seats faced bots other than the
-ones its setup deals today is `verified` and `outdated`: played honestly, by a
-build from before the pool was fixed or before an edit to it, against a lineup
+to chance is dealt from the pool its seed's era names (`settings.pool_for`)
+and the log records what it was dealt (`GameLog.strategies`;
+`docs/design/core.md`, "A seat left to the seed"). A score whose numbers
+reproduce but whose rival seats faced bots other than the ones its setup deals
+today is `verified` and `outdated`: played honestly, by a build from before the
+pool was fixed or a stale one that did not know its seed's era, against a lineup
 the map's other scores did not face. It stays counted and keeps the verified
 tick. Not a `mismatch`, because an edit to the pool would otherwise drop every
 honest earlier score on a random map, and a tampered lineup gains nothing a

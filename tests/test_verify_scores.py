@@ -262,7 +262,8 @@ def test_a_score_dealt_a_different_lineup_is_set_aside(posted):
 
 def test_a_random_seat_is_checked_against_the_pool(posted, monkeypatch):
     """The case the check exists for: the setup says "random", so the lineup it
-    deals comes from `RANDOM_POOL`, and an edit to the pool sets old scores aside."""
+    deals comes from its seed's pool, and a log dealt from another (a stale build)
+    is set aside."""
     from starconquest import settings as settings_module
     from starconquest.settings import RANDOM_STRATEGY
     score, blob, setup = posted
@@ -274,7 +275,7 @@ def test_a_random_seat_is_checked_against_the_pool(posted, monkeypatch):
     blob = log.encoded()
     with _preserve_config():
         assert verify_scores.verify(score, blob, setup).verdict == "verified"
-        monkeypatch.setattr(settings_module, "RANDOM_POOL", ("alpha",))
+        monkeypatch.setattr(settings_module, "RANDOM_POOLS", (("alpha",),))
         check = verify_scores.verify(score, blob, setup)
     assert (check.verdict, check.outdated) == ("verified", True)
     assert "the setup deals alpha" in check.detail

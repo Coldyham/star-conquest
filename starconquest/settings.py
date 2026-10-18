@@ -39,12 +39,21 @@ MODES = ("random", "symmetric")
 # a model file must never be named this.
 RANDOM_STRATEGY = "random"
 
-# The bots a seat left to `RANDOM_STRATEGY` is dealt from. The pick indexes this
-# by length and position, so adding, removing or reordering a name re-deals
-# nearly every random seat on every map ever shared: edit it only on purpose
-# (`docs/design/core.md`, "A seat left to the seed").
-RANDOM_POOL: tuple[str, ...] = (
-    "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus",
+# Every pool a seat left to `RANDOM_STRATEGY` has been dealt from, oldest first,
+# and the seed says which (`pool_for`): seed // `POOL_ERA` names its pool,
+# counting from 1, and every seed below the second pool's era deals from the
+# first, which is every seed rolled or typed before the pools were numbered. A
+# seed rolled now lands in the newest pool's era (`roll_seed`).
+#
+# Append-only. The pick indexes a pool by length and position, so editing one
+# that has shipped (adding, removing or reordering a bot) re-deals nearly every
+# random seat in its era. To change what a random seat deals, append a pool:
+# only seeds rolled from then on deal from it, and every map ever shared keeps
+# dealing what it dealt (`docs/design/core.md`, "A seat left to the seed").
+POOL_ERA = 10_000_000
+RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
+    ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+    ("knower", "actuary", "fulcrum", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
 )
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
@@ -664,8 +673,32 @@ def fresh_rng() -> random.Random:
 
 
 def random_seed() -> int:
-    """A fresh, unpredictable map seed."""
-    return fresh_rng().randrange(config.SEED_MAX)
+    """A fresh, unpredictable map seed, in the newest pool's era (`roll_seed`)."""
+    return roll_seed(fresh_rng())
+
+
+def roll_seed(rng: random.Random) -> int:
+    """A seed drawn from ``rng`` in the newest pool's era, so a seat it leaves to
+    chance deals from the newest of ``RANDOM_POOLS``. The first pool's era starts
+    at 0, so while it is the only one a seed rolls as it always did."""
+    newest = len(RANDOM_POOLS)
+    return (newest * POOL_ERA if newest > 1 else 0) + rng.randrange(config.SEED_MAX)
+
+
+def pool_for(seed: int) -> tuple[str, ...]:
+    """The pool a seat this seed leaves to chance is dealt from: the one its era
+    names (seed // `POOL_ERA`, counting from 1), the first for any seed below the
+    second's era, and the newest for a seed from an era this build has no pool
+    for yet (a stale cached build, which `tools/verify_scores.py` sets aside)."""
+    era = max(1, min(seed // POOL_ERA, len(RANDOM_POOLS)))
+    return RANDOM_POOLS[era - 1]
+
+
+def seed_top() -> int:
+    """The largest seed whose era has a pool. A seed typed past it would deal
+    from today's newest pool and then from whichever is appended for its era, so
+    the menu's seed field stops here."""
+    return (len(RANDOM_POOLS) + 1) * POOL_ERA - 1
 
 
 def apply_globals(settings: Settings) -> None:
@@ -728,14 +761,17 @@ def resolve_strategy(name: str, seed: int, pid: int) -> str:
     engine's stream untouched, gives each seat an independent pick, and still
     reproduces exactly: the same setup and seed always face the same opponents.
 
-    The pool is ``RANDOM_POOL``, never what happens to be registered, so every
-    build deals a seed the same bots whatever its ``models/`` holds. A pick that
-    is not registered here plays as the heuristic, which is the degradation
-    ``ai.decide`` already applies to an unrecognised strategy name.
+    The pool is the one the seed's era names (``pool_for``), never what happens
+    to be registered, so every build deals a seed the same bots whatever its
+    ``models/`` holds, and appending a pool deals no seed from an earlier era
+    differently. A pick that is not registered here plays as the heuristic,
+    which is the degradation ``ai.decide`` already applies to an unrecognised
+    strategy name.
     """
     if name != RANDOM_STRATEGY:
         return name
-    return RANDOM_POOL[random.Random(f"{seed}:strategy:{pid}").randrange(len(RANDOM_POOL))]
+    pool = pool_for(seed)
+    return pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
 
 
 def build_state(settings: Settings, seed: int) -> GameState:

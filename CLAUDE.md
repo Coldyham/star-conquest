@@ -225,9 +225,11 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 fight: the rules in full")
 
 - **AI is per-seat and pluggable** (`Player.ai_strategy`, `model.AiParams`).
-- **A random seat is resolved in `build_state`** from `settings.RANDOM_POOL`,
-  never the loaded roster. **Editing the pool re-deals every random map ever
-  shared** (`test_the_pool_still_deals_what_it_dealt`).
+- **A random seat is resolved in `build_state`** from the pool its seed's era
+  names (`settings.pool_for`), never the loaded roster. **`RANDOM_POOLS` is
+  append-only**: append a pool to change what a random seat deals; editing a
+  shipped one re-deals its era (`test_a_shipped_pool_is_never_edited`). Roll
+  seeds only through `settings.roll_seed`.
 - **A bot that reads other seats** (`models/knower.py`) never calls
   `ai.load_models()`, reads `ai.STRATEGIES` lazily, and draws **nothing** from
   `state.rng`. Predicting bots advertise `IS_ORACLE`/`is_oracle_seat`/
