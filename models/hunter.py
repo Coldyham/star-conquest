@@ -122,6 +122,17 @@ LOOK_BUDGET_S = 1.0         # a catastrophe guard on the wall clock, as knower's
                             # out of either only ever falls back to plain hunter
 BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by this
 
+# --- the pull (actuary's Style: Field; docs/design/field.md) ------------------ #
+FIELD = True                # pull ships to where the balance of force is closest, as
+                            # actuary's Field does; False is Greedy's front everywhere
+FIELD_DECAY = 0.45          # influence kept per median lane of travel
+FIELD_REACH = 3.0           # ...counted out to this many median lanes
+CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
+                            # which a system's stake falls to 1/e
+SLOW_LANE = 5               # a median lane this many turns or more is slow: there
+                            # the pull is half the field and half Greedy's front
+                            # (0 = never)
+
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython
 # (M3), hunter against actuary over 18-120 systems, 3-18 ly/turn and 2 or 4 seats
 # (tools/hunt_cost.py; docs/design/hunter.md, "What it costs"). The plain ledger
@@ -162,9 +173,10 @@ def decide(state, pid):
         orders = opening(state, pid)
         if orders is not None:
             return orders
+    field = FIELD and _stop_of(state.players[pid]) != GREEDY
     if LOOKAHEAD:
-        return _look(state, pid)
-    return _Ledger(state, pid).plan()
+        return _look(state, pid, field)
+    return _Ledger(state, pid, field=field).plan()
 
 
 def _plans(state) -> bool:
@@ -222,7 +234,7 @@ def _look_work(systems: int, seats: int) -> float:
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, weight=None, capture=None):
+    def __init__(self, state, pid, weight=None, capture=None, field=False):
         self.state, self.pid = state, pid
         sysmap = state.systems
         self.ids = sorted(sysmap)
@@ -255,7 +267,7 @@ class _Ledger:
             slot[f.owner_id] = slot.get(f.owner_id, 0) + f.ships
 
         self.garrison = {sid: sysmap[sid].ships for sid in self.ids}
-        self.front_value = self._front_values()
+        self.front_value = self._pull() if field else self._front_values()
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
                       for sid in self.ids}
@@ -723,6 +735,73 @@ class _Ledger:
                     heapq.heappush(heap, (nd, nbr))
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
 
+    def _pull(self):
+        """The Field pull: the field, or on a board whose median lane is
+        `SLOW_LANE` turns or more, the mean of the field and Greedy's front."""
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        field = self._field()
+        if not lanes or SLOW_LANE <= 0 or lanes[len(lanes) // 2] < SLOW_LANE:
+            return field
+        front = self._front_values()
+        return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
+
+    def _field(self):
+        """actuary's `_field`: the pull on a ship at each system, 1 to 1 +
+        `FRONT_BONUS`, from how close the balance of force is within its reach."""
+        sysmap, pid = self.state.systems, self.pid
+        rivals = set(self.rivals)
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        unit = float(lanes[len(lanes) // 2]) if lanes else 1.0
+        near = {sid: self._within(sid, FIELD_REACH * unit, unit) for sid in self.ids}
+
+        mine, foe = defaultdict(float), defaultdict(float)
+        for w in self.ids:
+            node = sysmap[w]
+            side = mine if node.owner_id == pid else foe if node.owner_id in rivals else None
+            if side is None or node.ships <= 0:
+                continue
+            for s, d in near[w].items():
+                side[s] += node.ships * FIELD_DECAY ** d
+        for f in self.state.fleets:
+            side = mine if f.owner_id == pid else foe if f.owner_id in rivals else None
+            if side is None:
+                continue
+            for s, d in near[f.dest_id].items():
+                side[s] += f.ships * FIELD_DECAY ** (d + f.turns_remaining / unit)
+
+        stake = {}
+        for s in self.ids:
+            node = sysmap[s]
+            if node.owner_id == pid and all(sysmap[n].owner_id == pid for n in node.neighbors):
+                continue                    # our interior: nothing to contest
+            standing = node.ships if node.owner_id in rivals else 0
+            x = (mine[s] - foe[s]) / (CONTEST_WIDTH * max(1.0, mine[s] + foe[s]))
+            stake[s] = (TAIL_TURNS * self.income[s] + standing) * math.exp(-x * x)
+
+        pull = {}
+        for w in self.ids:
+            if sysmap[w].owner_id == pid:
+                pull[w] = sum(stake[s] * FIELD_DECAY ** near[w][s] for s in stake if s in near[w])
+        top = max(pull.values(), default=0.0)
+        return {sid: (1.0 + FRONT_BONUS * pull[sid] / top if top > 0 else 1.0)
+                if sid in pull else 1.0 + FRONT_BONUS
+                for sid in self.ids}
+
+    def _within(self, src, radius, unit):
+        """Median lanes from ``src`` to every system within ``radius`` turns."""
+        dist = {src: 0}
+        heap = [(0, src)]
+        while heap:
+            d, sid = heapq.heappop(heap)
+            if d > dist[sid]:
+                continue
+            for nbr, t in self.travel[sid].items():
+                nd = d + t
+                if nd <= radius and nd < dist.get(nbr, math.inf):
+                    dist[nbr] = nd
+                    heapq.heappush(heap, (nd, nbr))
+        return {sid: d / unit for sid, d in dist.items()}
+
     def _relief(self):
         """relief[sid][t]: ships the holder of ``sid`` could land there by turn t,
         launching no sooner than next turn, as (from garrisons next door, from
@@ -791,15 +870,15 @@ def _with(arrivals, t, owner, ships):
 # the plan's, not luck's. The score is the ledger's value of the final board
 # from our seat, which already projects every fleet still flying.
 # --------------------------------------------------------------------------- #
-def _look(state, pid):
+def _look(state, pid, field=False):
     deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
     seats = sum(1 for p in state.players.values() if not p.is_neutral and p.alive)
     line = LOOK_PLIES * seats * len(state.systems) ** 1.3     # the work one line costs
     if 2 * line > LOOK_WORK:
-        return _Ledger(state, pid).plan()   # not two lines' worth: nothing to compare
+        return _Ledger(state, pid, field=field).plan()   # not two lines' worth: nothing to compare
     plans, seen = [], set()
     for weight, capture in _postures():
-        orders = _Ledger(state, pid, weight, capture).plan()
+        orders = _Ledger(state, pid, weight, capture, field).plan()
         key = tuple(sorted((o.source_id, o.dest_id, o.ships) for o in orders))
         if key not in seen:
             seen.add(key)
@@ -810,13 +889,13 @@ def _look(state, pid):
         return plans[0]
     # Every rival decides its first turn from this same board in every line, so
     # its orders there are worked out once, not once per line.
-    first = {q: _Ledger(state, q).plan() for q, p in state.players.items()
+    first = {q: _Ledger(state, q, field=field).plan() for q, p in state.players.items()
              if q != pid and not p.is_neutral and any(x.owner_id == q for x in state.systems.values())}
     lines = []
     for i, orders in enumerate(plans):
         if (i + 1) * line > LOOK_WORK and i > 0:
             break                         # the next line would pass the work budget
-        lines.append(_Line(state, pid, orders, first))
+        lines.append(_Line(state, pid, orders, first, field))
     best, best_score = plans[0], None
     for ln in lines:
         score = ln.play(LOOK_PLIES, deadline)
@@ -837,9 +916,9 @@ def _postures():
 class _Line:
     """One candidate played forward on a private board, a few turns at a time."""
 
-    def __init__(self, state, pid, orders, first_orders=None):
+    def __init__(self, state, pid, orders, first_orders=None, field=False):
         self.board, self.pid, self.orders = _clone(state), pid, orders
-        self.first_orders, self.plies = first_orders, 0
+        self.first_orders, self.plies, self.field = first_orders, 0, field
 
     def _decide(self, s, q):
         if self.plies == 0:
@@ -849,7 +928,7 @@ class _Line:
                 return self.first_orders.get(q, [])
         if not any(x.owner_id == q for x in s.systems.values()):
             return []
-        return _Ledger(s, q).plan()
+        return _Ledger(s, q, field=self.field).plan()
 
     def play(self, upto, deadline=math.inf):
         """The line's score once it has played ``upto`` turns in all, or ``None``
@@ -864,13 +943,13 @@ class _Line:
             return LOOK_DECIDED if board.winner == pid else -LOOK_DECIDED
         if not any(x.owner_id == pid for x in board.systems.values()):
             return -LOOK_DECIDED
-        return sum(_Ledger(board, pid).worth.values())
+        return sum(_Ledger(board, pid, field=self.field).worth.values())
 
 
-def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
+def _rollout(state, pid, orders, deadline=math.inf, first_orders=None, field=False):
     """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
     out before the last of them."""
-    return _Line(state, pid, orders, first_orders).play(LOOK_PLIES, deadline)
+    return _Line(state, pid, orders, first_orders, field).play(LOOK_PLIES, deadline)
 
 
 def _clone(state):
