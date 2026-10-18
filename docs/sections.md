@@ -110,6 +110,7 @@ only for a fight; what is deliberately not animated.
 - **What council changes, and what each change bought.** actuary as an adviser, the learned judge, each adviser playing its own line (the biggest gain). The judge's features and fit. `aux` 0 is knower at Search.
 - **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
 - **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
+- **Against the posted maps and the people who posted them.** All 152 posted maps replayed fresh (2026-10-18): council leads the bots on 112, knower:2's wins are chaos not a pattern (6 of 32 survive a re-run); people beat it on 115 of 151, losing nothing in the opening and gaining in the middle game, where council strips frontiers it can't relieve (30% of its empties lost within five turns, people 6%). What to try next.
 - **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
 - **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 
