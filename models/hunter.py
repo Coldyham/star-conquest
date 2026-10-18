@@ -545,29 +545,40 @@ class _Ledger:
         (SELF_RELIEF) only if they land before it."""
         pid, H = self.pid, self.horizon
         edge = self.advantage * (EDGE_SWING if EDGE_SWING > 0 else self.swing)
+        travel, base = self.travel, self.lines
+        # Each neighbour's timeline, read once (a lane is at least a turn, so a
+        # launch after H - 1 cannot land inside the horizon).
+        near = [(nbr, d) + (lines.get(nbr) or base[nbr]) for nbr, d in travel[sid].items()]
+        last_k = min(EDGE_LOOK, H - 1)
+        relief: dict = {}                 # quickest rival lane -> our relief per turn
         worst = 0.0
         for rival in self.rivals:
-            for k in range(0, EDGE_LOOK + 1):
+            theirs = [x for x in near if rival in x[2]]     # systems it ever holds
+            if not theirs:
+                continue
+            for k in range(0, last_k + 1):
                 by_d: dict[int, int] = {}
-                for nbr, d in self.travel[sid].items():
+                for nbr, d, n_owners, n_ships in theirs:
                     if k + d > H:
                         continue
-                    n_owners, n_ships = lines.get(nbr) or self.lines[nbr]
                     if n_owners[k] == rival and n_ships[k] > 0:
                         gathered = n_ships[k]
                         if self.gather and k > 0:
-                            for far, e in self.travel[nbr].items():
+                            for far, e in travel[nbr].items():
                                 if far == sid or e > k:
                                     continue
-                                f_owners, f_ships = lines.get(far) or self.lines[far]
+                                f_owners, f_ships = lines.get(far) or base[far]
                                 if f_owners[0] == rival:
                                     gathered += f_ships[0]
                         by_d[d] = by_d.get(d, 0) + gathered
                 if not by_d:
                     continue
-                quickest = min(by_d)
-                own = (self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
-                       if SELF_RELIEF > 0 else None)
+                own = None
+                if SELF_RELIEF > 0:
+                    quickest = min(by_d) if SELF_RELIEF_REACTS else None
+                    own = relief.get(quickest)
+                    if own is None:
+                        own = relief[quickest] = self._own_relief(sid, lines, quickest)
                 for d, sent in by_d.items():
                     t = k + d
                     if owners[t] != pid:
@@ -797,11 +808,15 @@ def _look(state, pid):
             break
     if len(plans) == 1:
         return plans[0]
+    # Every rival decides its first turn from this same board in every line, so
+    # its orders there are worked out once, not once per line.
+    first = {q: _Ledger(state, q).plan() for q, p in state.players.items()
+             if q != pid and not p.is_neutral and any(x.owner_id == q for x in state.systems.values())}
     best, best_score = plans[0], None
     for i, orders in enumerate(plans):
         if (i + 1) * line > LOOK_WORK and i > 0:
             break                         # the next line would pass the work budget
-        score = _rollout(state, pid, orders, deadline)
+        score = _rollout(state, pid, orders, deadline, first)
         if score is None:
             break                         # out of time mid-line: keep the best scored
         if best_score is None or score > best_score:
@@ -817,15 +832,18 @@ def _postures():
         yield None, CAPTURE_SWING
 
 
-def _rollout(state, pid, orders, deadline=math.inf):
+def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
     """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
     out before the last of them (checked before each, so an overrun is one ply)."""
     board = _clone(state)
     first = [True]
 
     def stepped(s, q):
-        if q == pid and first[0]:
-            return orders
+        if first[0]:
+            if q == pid:
+                return orders
+            if first_orders is not None:
+                return first_orders.get(q, [])
         if not any(x.owner_id == q for x in s.systems.values()):
             return []
         return _Ledger(s, q).plan()
