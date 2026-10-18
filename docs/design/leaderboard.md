@@ -206,10 +206,17 @@ rather than even steps. The oracle pair (knower at Search, actuary at
 Learning) is the top. Next come marshal and plain actuary (only marshal is
 replayed), then a gap to thinker, a similar gap to claudebot, and heuristic and
 rusherplus at the bottom ("Where marshal stands" in [`marshal.md`](marshal.md)).
-So on 7 bots, Hard is 1-2 winning, Medium 3-4 and Easy 5+. That makes the live
+So on 7 bots, Hard was 1-2 winning, Medium 3-4 and Easy 5+. That made the live
 board 13 Easy, 39 Medium, 67 Hard and 18 Very hard. Tiering on the weakest
 class that won instead agrees on 119 of 137 maps. The rest are one weaker bot
 winning against the trend, which a count is less swayed by.
+
+Re-cut on 2026-10-18 for nine bots, when council and fulcrum joined the
+column. council joins the top class and fulcrum the middle one, so Hard is 1-3
+winning (council, knower at Search, actuary at Learning), Medium 4-6 (fulcrum,
+marshal, thinker too) and Easy 7+, at shares of 0.6 and 0.24. Those cuts read
+the same counts on eight runs, so a map the newest bot has not reached yet is
+not moved a level by the gap.
 
 ## Checked scores (`share.py`, `tools/verify_scores.py`)
 

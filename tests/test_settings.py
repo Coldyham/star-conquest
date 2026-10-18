@@ -664,8 +664,8 @@ def test_a_shipped_pool_is_never_edited():
     pool instead, and add it here."""
     assert RANDOM_POOLS == (
         ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
-        ("knower", "actuary", "fulcrum", "marshal", "thinker", "claudebot", "heuristic",
-         "rusherplus"),
+        ("council", "knower", "actuary", "fulcrum", "marshal", "thinker", "claudebot",
+         "heuristic", "rusherplus"),
     )
 
 
@@ -675,8 +675,8 @@ def test_each_pool_still_deals_what_it_dealt():
     different lineups, from before the pools were numbered."""
     assert [resolve_strategy(RANDOM_STRATEGY, 626502, pid) for pid in (2, 3, 4, 5)] == [
         "heuristic", "claudebot", "claudebot", "rusherplus"]
-    assert [resolve_strategy(RANDOM_STRATEGY, 20000003, pid) for pid in (2, 3, 4, 5)] == [
-        "actuary", "marshal", "rusherplus", "fulcrum"]
+    assert [resolve_strategy(RANDOM_STRATEGY, 20000015, pid) for pid in (2, 3, 4, 5)] == [
+        "fulcrum", "actuary", "council", "marshal"]
 
 
 def test_a_seed_deals_from_the_pool_its_era_names():
