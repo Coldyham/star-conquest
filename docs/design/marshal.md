@@ -170,32 +170,33 @@ that the margins hold up off their tuned point, not a tuning:
 Weakest in the middle rather than at either end, and never below 68%.
 
 **Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30 --ai
-knower actuary marshal fulcrum thinker claudebot heuristic rusherplus`, 18
-nodes, default settings — 1680 games, 78 timed out and are excluded from the
+knower actuary marshal thinker claudebot heuristic rusherplus`, 18 nodes,
+default settings — 1260 games, 62 timed out and are excluded from the
 percentages; council is left out, as it always has been here, for its cost).
 **This table is the current one** — update it, not the module docstring, the
 next time marshal or the roster's pricing changes. Re-run 2026-10-18, when
-fulcrum joined the roster ([`fulcrum.md`](fulcrum.md)). The ladder is
-deterministic, and every pair without fulcrum reads game for game as it did on
-2026-10-17, so the older bots' totals moved only by their games against it.
+actuary's default stop became Field ([`field.md`](field.md)). The ladder is
+deterministic: every pair without actuary reads game for game as it did on
+2026-10-17, and actuary's row is the row fulcrum read as a bot of its own the
+same morning (61% against the Planned actuary it replaced).
 
-    fulcrum 370 (23%), actuary 343 (21%), marshal 305 (19%), knower 248 (15%),
-    thinker 163 (10%), claudebot 84 (5%), heuristic 52 (3%), rusherplus 37 (2%)
+    actuary 336 (28%), marshal 285 (24%), knower 242 (20%), thinker 162 (14%),
+    claudebot 84 (7%), heuristic 52 (4%), rusherplus 37 (3%)
 
     head-to-head (row's win rate vs column)
-                knower  actuar  marsha  fulcru  thinke  claude  heuris  rusher
-      knower         —     11%     30%      7%     89%     95%    100%    100%
-      actuary      89%       —     65%     39%     98%    100%    100%    100%
-      marshal      70%     35%       —     25%     98%     98%    100%    100%
-      fulcrum      93%     61%     75%       —    100%    100%    100%    100%
-      thinker      11%      2%      2%      0%       —     89%     96%    100%
-      claudebot     5%      0%      2%      0%     11%       —     66%     75%
-      heuristic     0%      0%      0%      0%      4%     34%       —     61%
-      rusherplus    0%      0%      0%      0%      0%     25%     39%       —
+                knower  actuar  marsha  thinke  claude  heuris  rusher
+      knower         —      7%     30%     89%     95%    100%    100%
+      actuary      93%       —     75%    100%    100%    100%    100%
+      marshal      70%     25%       —     98%     98%    100%    100%
+      thinker      11%      0%      2%       —     89%     96%    100%
+      claudebot     5%      0%      2%     11%       —     66%     75%
+      heuristic     0%      0%      0%      4%     34%       —     61%
+      rusherplus    0%      0%      0%      0%     25%     39%       —
 
-The 2026-10-17 run, before fulcrum, was the seven-bot grid above without its
-fulcrum row and column: actuary 321 (27%), marshal 290 (24%), knower 244
-(20%), thinker 163, claudebot 84, heuristic 52, rusherplus 37. It was taken when
+The 2026-10-17 run, with actuary at Planned, read actuary 89% against knower,
+65% against marshal and 98% against thinker, and in all: actuary 321 (27%),
+marshal 290 (24%), knower 244 (20%), thinker 163, claudebot 84, heuristic 52,
+rusherplus 37. It was taken when
 marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3 and
 `RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening against
 the roster"); knower moved with it, since it borrows marshal. The bot before

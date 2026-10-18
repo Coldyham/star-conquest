@@ -166,7 +166,7 @@ only for a fight; what is deliberately not animated.
 
 ## design/marshal.md
 - **What the measurements deleted.** The square-law case for overwhelming force. The guard interacts with commitment. Chokepoints lose. Two bugs. Standing aside in a free-for-all (`_wedge`, gated on player count).
-- **Where marshal stands.** **The current full roster ladder (re-run 2026-10-18 when fulcrum joined, beside the 2026-10-17 run after the pour floor and `FEED` re-tune shipped, with the bot before that as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
+- **Where marshal stands.** **The current full roster ladder (re-run 2026-10-18 when actuary's default became Field, beside the 2026-10-17 run after the pour floor and `FEED` re-tune shipped, with the bot before that as a same-seed A/B); update this table, not the docstring.** Also the results against knower's oracle, across defender advantage, and the A/B against the old marshal.
 - **A stagger's nearer wave is reserved.**
 - **More ideas measured and deleted.**
 - **`FRONTIER_GUARD`.** How it came to be 0.40 while documented as 0.3; now 0.55.
