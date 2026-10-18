@@ -87,6 +87,7 @@ the measured result was indistinguishable from the baseline.
 - Gathering on every board: -3.2 pooled; shipped on median lanes of 2 or less. *Gathering on fast boards.*
 - The nominal-roll strike on every board: 7:6 -7 to -13; shipped on median lanes of 6 or more. *Softer strikes on slow boards.*
 - A one-turn look for edge risk: 39.6%. *Edge risk.*
+- Three-ply rollouts (half the work, so the look-ahead reaches 80-system boards): null at 40:6, every seed unchanged at 80:6 for about 7x the time. *Look-ahead.*
 - A look-ahead stopped by the wall clock: up to 0.99 s a decide with the guard live, and play that depends on the machine; bounded by work instead. *Look-ahead.*
 
 ## learner ([`design/learner.md`](design/learner.md))

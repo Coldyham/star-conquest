@@ -174,8 +174,11 @@ The look-ahead's own knobs (Kaggle, 10.0M, 50 seeds, against the actuary of
 the first measurements, each paired with the shipped look-ahead at 68.3%):
 dropping the nominal-roll posture cost -3.1 (z -2.36) and a wider set of edge
 weights (0.2, 0.4, 2.5, 5) -1.9; depth is flat from 3 to 10 plies (3: +1.9, 4:
-0.0, 8: +0.8, 10: +2.4, none significant). The shipped settings stand; three
-plies would do as well for half the work.
+0.0, 8: +0.8, 10: +2.4, none significant). The shipped settings stand. Three plies
+also halves a line's work, which lets the look-ahead run on bigger boards; on
+40:6 and 80:6 duels (10.3M, 50 seeds) it read +3.0 at 40:6 (z +0.60) and
+exactly +0.0 at 80:6, every seed the same result at about seven times the
+time. Not adopted.
 
 ## Against main's newer actuary and marshal
 
