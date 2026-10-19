@@ -110,6 +110,7 @@ only for a fight; what is deliberately not animated.
 - **What council changes, and what each change bought.** actuary as an adviser, the learned judge, each adviser playing its own line (the biggest gain). The judge's features and fit. `aux` 0 is knower at Search.
 - **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
 - **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
+- **Against the posted maps and the people who posted them.** All 152 posted maps replayed fresh (2026-10-18): council leads the bots on 112, knower:2's wins are chaos not a pattern (6 of 32 survive a re-run); people beat it on 115 of 151, losing nothing in the opening and gaining in the middle game, where council strips frontiers it can't relieve (30% of its empties lost within five turns, people 6%). What to try next.
 - **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
 - **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 
@@ -167,6 +168,15 @@ only for a fight; what is deliberately not animated.
 - **Its opening in front of another bot.** Costs in front of marshal, no gain over actuary's Planned; not borrowed.
 - **Where it loses to actuary.** Level at contact, out-traded after it.
 - **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
+
+## design/evolved.md
+- **What it is for, and its constraints.** Blind, browser-sized, deterministic, no foresight of the dice.
+- **The policy.** A menu of priced moves per system, each naming its principle; a linear scorer plus a small residual head over size-free features.
+- **The look-ahead.** Variants of the policy's move played six turns at the expected roll; rivals hold (most likely) or strike all-out (most dangerous); the gain is the veto. Timed in the web build at native speed.
+- **Where it stands.** Third of six on a ladder (behind actuary and marshal, ahead of thinker), weaker in multi-seat; the 8-cell headline; plays unlike the roster, which is not the same as strong.
+- **Training it.** CMA-ES over paired seatings, the turn-40 share, the noise fix, how the shipped weights came about.
+- **Measuring it.** The paired bench, the +4 bar, loss diagnosis against a control.
+- **Why multi-seat is short.** Three diagnoses against a control; no blind remedy found.
 
 ## design/field.md
 - **The middle game the roster plays.** actuary-marshal duels read through `combat.resolve_arrival`: half the strikes land on an empty system, a doomed garrison steps into its striker's source (marshal 46%, actuary 31% of evacuees), 49-ship front stacks over interiors holding 10% of the ships, and defensive losses, not attacking ones, separating the winner from the loser.

@@ -8,7 +8,7 @@ import {
   leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
-  familyQueries, filtersFromParams, FIRST_SEEN_QUERY, isFiltered, listQuery, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
+  familyQueries, filtersFromParams, FIRST_SEEN_QUERY, isFiltered, listQuery, MAX_EXCLUDED, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
   urlFor, viewKind,
 } from "./listing.mjs";
 import { families, familyForest, paceLabel, withFirstSeen } from "./families.mjs";
@@ -213,6 +213,20 @@ function filterBar(filters) {
   const reset = urlFor({ group: filters.config ? "game" : filters.group, sort: filters.sort, dir: filters.dir });
   children.push(el("a", { class: "clear", href: reset, text: "Clear filters" }));
   return el("div", { class: "filters" }, children);
+}
+
+/** How many maps, setups or families the list holds under these filters —
+ * the whole list, not just the page drawn. `upTo` marks a count that may run
+ * high: "Unplayed by me" past MAX_EXCLUDED of your maps drops the rest only as
+ * rows arrive, so the server counted some of them. Nothing when the count
+ * didn't come back, or for an empty list, which already says so. */
+function matchCount(total, [one, many], filters, { upTo = false } = {}) {
+  if (!total) return null;
+  const noun = total === 1 ? one : many;
+  const text = isFiltered(filters)
+    ? `${upTo ? "Up to " : ""}${total} ${noun} ${total === 1 ? "matches" : "match"} these filters`
+    : `${total} ${noun}`;
+  return el("p", { class: "match-count", text });
 }
 
 /**
@@ -517,6 +531,8 @@ async function loadFamilies(filters) {
   if (matches) shown = shown.filter((f) => f.members.some((m) => matches.has(m.config.config_key)));
   if (filters.dir === "asc") shown.reverse();
   target.classList.remove("loading");
+  const count = matchCount(shown.length, ["family", "families"], filters);
+  if (count) filterTarget.append(count);
   if (!shown.length) {
     clear(target).append(el("p", { class: "empty" }, isFiltered(filters)
       ? ["No setups match this filter. ", el("a", { href: urlFor({ group: filters.group }), text: "Clear filters" }), "."]
@@ -555,8 +571,8 @@ async function load() {
     const nodes = filters.campaign ? [...(await marks).keys()] : [];
     const list = listQuery(filters, { played: [...played], nodes });
     const { kind } = list;
-    const [{ rows: fetched, more }, campaigns] = await Promise.all([
-      selectPage(list.query, { size: PAGE_SIZE }), marks,
+    const [{ rows: fetched, more, total }, campaigns] = await Promise.all([
+      selectPage(list.query, { size: PAGE_SIZE, count: true }), marks,
     ]);
     // listQuery excludes only the first MAX_EXCLUDED of a player's maps by key;
     // anything past that is dropped here as it arrives.
@@ -577,6 +593,9 @@ async function load() {
     clear(filterTarget).append(controls(filters));
     const bar = filterBar(filters);
     if (bar) filterTarget.append(bar);
+    const count = matchCount(total, kind === "config" ? ["setup", "setups"] : ["map", "maps"], filters,
+      { upTo: kind === "game" && filters.unplayed && played.size > MAX_EXCLUDED });
+    if (count) filterTarget.append(count);
 
     clear(headTarget);
     if (filters.config && kind === "game" && rows.length) {
