@@ -930,6 +930,61 @@ def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
         pygame.quit()
 
 
+def test_choosing_another_strategy_starts_it_at_its_default_stop():
+    """An aux carried from the last strategy would mean something else to the
+    next (knower's old depth slider left 12s that would read as a top stop)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('knower')}")
+        assert settings.ai[1].aux == 12.0, "re-picking the same strategy changes nothing"
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('actuary')}")
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("actuary", config.AI_AUX)
+    finally:
+        pygame.quit()
+
+
+def test_a_legacy_seat_shows_its_family_and_stop_until_its_stop_is_edited(monkeypatch):
+    """A seat stored as a bot since folded into a family (`ai.LEGACY`) keeps
+    its name, so its link's key never moves, and reads as the family at its
+    stop; a value past a knob's top shows the stop it plays (`ai.aux_over`)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert "knower · Council" in drawn
+        assert drawn[drawn.index("Oracle") + 1] == "Council"
+        assert settings.ai_strategy[1] == "council", "drawing never rewrites the seat"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert drawn[drawn.index("Oracle") + 1] == "Search"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        _drag_slider(screen, ms, settings, "ai_aux", 0.0)
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("knower", 0)
+    finally:
+        pygame.quit()
+
+
 class _FakeSoftKeyboard:
     """Stand-in for the browser's hidden DOM field (see softkeyboard.py): holds a
     value, knows whether it has focus, and can be 'dismissed' like a Done key."""
