@@ -46,7 +46,7 @@ from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
                        Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
-                       randomise_knobs, random_seed, setup_warnings)
+                       randomise_knobs, random_seed, seed_top, setup_warnings)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -85,7 +85,7 @@ _NOTE_H = 18  # ...and between `small` note / table rows
 _MATRIX_N = 3  # jitter matrix: swings per axis, spanning ∓jitter; keep it odd
 _MATRIX_ROW_H = 24  # ...its row pitch, and
 _TLABEL_W = 120  # ...the gutter its row labels sit in
-_SEED_MAX_LEN = 7
+_SEED_MAX_LEN = len(str(seed_top()))  # a typed seed stops at the newest pool's era
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
 # Saved configs live in a gitignored dir under the writable data dir (repo root
@@ -1830,7 +1830,7 @@ def pump(ms: MenuState, settings: Settings) -> None:
         return
     if field_name == "seed":
         raw = softkeyboard.value(ms.seed_text)
-        text = _filter(raw, str.isdigit, _SEED_MAX_LEN)
+        text = _seed_digits(raw)
         if text != ms.seed_text:
             ms.seed_text = text
             _apply_seed_text(ms, settings)
@@ -1855,6 +1855,17 @@ def pump(ms: MenuState, settings: Settings) -> None:
 def _filter(text: str, allowed, limit: int) -> str:
     """``text`` reduced to the characters a field accepts, capped at ``limit``."""
     return "".join(ch for ch in text if allowed(ch))[:limit]
+
+
+def _seed_digits(text: str) -> str:
+    """The seed field's text: digits only, and no seed past ``seed_top`` — the
+    last digit that would cross it is refused, as a full field refuses one. A
+    seed from an era with no pool yet would deal one bot today and another once
+    its pool is appended (`settings.pool_for`)."""
+    digits = _filter(text, str.isdigit, _SEED_MAX_LEN)
+    while digits and int(digits) > seed_top():
+        digits = digits[:-1]
+    return digits
 
 
 def _editing_field(ms: MenuState) -> str | None:
@@ -1930,8 +1941,7 @@ def _handle_text_input(text: str, ms: MenuState, settings: Settings):
     both arrive here as TEXTINPUT. Control keys stay in ``_handle_key``."""
     if ms.editing_seed:
         for ch in text:
-            if ch.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
-                ms.seed_text += ch
+            ms.seed_text = _seed_digits(ms.seed_text + ch) if ch.isdigit() else ms.seed_text
         _apply_seed_text(ms, settings)
     elif ms.editing_filename:
         for ch in text:

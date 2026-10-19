@@ -4,10 +4,13 @@
 shared skeleton. Every other bot from claudebot up walks the systems it owns in
 phases (budget, defend, strike, flow the rest forward). actuary has no phases.
 It projects the whole board forward, values it in ships, and commits whichever
-launch raises that value most until none does. By default the land-grab, up to
-first contact, is played by a planner instead; see "The planned opening". A
-third stop, *Learning*, also prices the risk next door by a model of each rival
-kept from turn to turn; it is in [`learning.md`](learning.md). Roster-wide rules and the measurement checklist are in
+launch raises that value most until none does. The *Style* knob picks the pull
+on its ships. *Greedy* pulls them to every front alike. *Field*, the default,
+pulls them to where the balance of force is closest; it is in
+[`field.md`](field.md). *Learning* is Field that also prices the risk next door
+by a model of each rival kept from turn to turn; it is in
+[`learning.md`](learning.md). Until 2026-10-18 stop 1 was *Planned*, the
+land-grab played by a planner; it is retired ("The planned opening"). Roster-wide rules and the measurement checklist are in
 [`bots.md`](bots.md). Index: [`../README.md`](../README.md).
 
 ## The ledger and the greedy
@@ -374,7 +377,13 @@ turns, and it was the real one in the game that prompted this. Variance-seeking
 there is a separate idea, unmeasured. A seat short of ships has less to gamble
 with.
 
-## The planned opening (Opening: Planned)
+## The planned opening (Opening: Planned; retired 2026-10-18)
+
+Stop 1 was Planned until the field replaced it: by then the plan ran only on
+24+ systems with lanes of two turns or less, and fulcrum, with no plan at all,
+scored 64.3% against it at 24 nodes and 12 ly/turn, the one cell of five where
+the plan was on ([`field.md`](field.md)). The code is in git history, up to the
+commit that folded fulcrum in. What follows is the record of it.
 
 The seat's `aux` knob (`AUX_LABEL` *Style*, *Opening* until 2026-10-09) has
 three stops. *Planned* (1, the default, and anything unreadable) runs
