@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """What one Hunt decide costs, for `decide_ms` (models/actuary.py `HUNT_COST_*`,
-`COST_LOOK_MS`; Hunt is actuary's Style stop 3, once the bot hunter).
+`COST_LOOK_MS`; Hunt is actuary's Style stop 3).
 
     uv run python tools/hunt_cost.py                 # in-game guard (BUDGET_SCALE 1)
     uv run python tools/hunt_cost.py --budget-scale inf

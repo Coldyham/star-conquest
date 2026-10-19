@@ -7,6 +7,12 @@ costs, and what was built and dropped on the way. The search it builds on is in
 [`knower.md`](knower.md); roster-wide rules are in [`bots.md`](bots.md). Index:
 [`../README.md`](../README.md).
 
+Since 2026-10-19 council is no bot of its own but knower's fourth stop, *Oracle:
+Council*, playing exactly as `models/council.py` did at On; its patches to a
+private copy of knower are knower's `_COUNCIL` branches, and a seat stored as
+`council` plays there (`ai.LEGACY`). Its Off became knower's Search. The
+measurements below name it council. See [`bot-families.md`](bot-families.md).
+
 ## What council changes, and what each change bought
 
 knower's Search compares candidate openings (its own plan, a timid posture, and

@@ -48,8 +48,7 @@ The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has four stops.
     (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
     seen, so it is the one stop an oracle must model rather than run.
   * *Hunt* guards only against the strikes a rival would launch, and looks a few
-    turns ahead (docs/design/hunter.md). It was `models/hunter.py`, a fork of
-    this file built to beat it, until 2026-10-19:
+    turns ahead (docs/design/hunter.md):
 
       - **Edge risk.** The threat next door is only a strike a rival launches by
         actuary's own rule: one system next door, or several whose lanes take
@@ -75,8 +74,8 @@ The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has four stops.
 
     It runs no other bot's code and keeps no memory, so it is its own stand-in.
 
-A stored value past Hunt reads as Learning (``AUX_OVER``), as it did before Hunt
-was added: Hunt is reached only by its own value.
+A stored value past Hunt reads as Learning (``AUX_OVER``): Hunt is reached only
+by its own value.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.

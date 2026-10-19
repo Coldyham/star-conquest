@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tune Hunt's constants (actuary's Style: Hunt, once the bot hunter) together
+"""Tune Hunt's constants (actuary's Style: Hunt) together
 with CMA-ES against a panel of bots.
 
     uv run --with cma python tools/hunt_tune.py --hours 0.1 --pop 4 --seeds 2   # smoke

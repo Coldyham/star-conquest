@@ -1,4 +1,4 @@
-"""knower's Oracle: Council, once `models/council.py`.
+"""knower's Oracle: Council.
 
 Council is knower's Search with a learned judge and advisers that play their own
 lines, so it keeps knower's duties as an oracle (leave `state.rng` alone, never

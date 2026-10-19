@@ -1,5 +1,4 @@
-"""actuary's Style: Hunt, which guards only against strikes that come. It was
-`models/hunter.py`, a fork of actuary, until 2026-10-19.
+"""actuary's Style: Hunt, which guards only against strikes that come.
 
 Pure/headless (no pygame). Hunt reads no other seat's code, so these tests
 cover the drop-in contract every model owes (legal orders, no mutation,

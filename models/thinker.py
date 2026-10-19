@@ -28,9 +28,8 @@ Four behaviours, each tuned to rules this game actually rewards:
 The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has two stops:
 *Thinker*, the default, is everything above; *Claudebot* is the bot thinker was
 tuned against, kept whole (`_claudebot`): focus fire from one distance at a
-time, one-hop defence, and margins padded over the break-even edge. It was
-`models/claudebot.py` until 2026-10-19, and a seat stored under that name plays
-here (`ai.LEGACY`).
+time, one-hop defence, and margins padded over the break-even edge. A seat
+stored as ``claudebot`` plays it (`ai.LEGACY`).
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and routes every tie-break through ``state.rng`` so games stay reproducible.
@@ -378,7 +377,7 @@ def _flow_to_front(state, owned, frontier, pid, max_prod) -> dict[int, int]:
 
 
 # --------------------------------------------------------------------------- #
-# Style: Claudebot (once models/claudebot.py, kept whole)
+# Style: Claudebot
 # --------------------------------------------------------------------------- #
 # Focus fire, jitter-safe margins and defence before greed: fleets that reach a
 # node on the same turn resolve together, so each target is struck by the

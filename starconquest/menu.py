@@ -2038,7 +2038,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         idx = int(hit[len("strategy_opt_") :])
         if 0 <= idx < len(ms.strategies) and ms.strategies[idx] != settings.ai_strategy[ms.ai_seat - 1]:
             # A new strategy starts at its own default stop: an aux carried from
-            # the last one would mean something else to it (knower's old 12).
+            # the last one would mean something else to it.
             settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
             settings.ai[ms.ai_seat - 1] = replace(settings.ai[ms.ai_seat - 1], aux=config.AI_AUX)
         ms.strategy_open = False

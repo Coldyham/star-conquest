@@ -7,8 +7,7 @@ paired by seed.
     uv run python tools/hunt_bench.py --bot actuary:1 --label fork --seeds 20   # exactly 50%
 
 A seat is a strategy, or ``name:aux`` for a stop of its knob; Hunt is
-``actuary:3`` (it was the bot ``hunter`` until 2026-10-19, and the ledgers in
-``results/hunter/`` name it so). A variant sets actuary's module constants
+``actuary:3`` (older ledgers in ``results/hunter/`` call it ``hunter``). A variant sets actuary's module constants
 (`configure`), so one that Hunt shares with the other stops (``RISK_WEIGHT``,
 ``TAIL_TURNS``, ``FRONT_BONUS``, ...) moves an actuary opponent too: vary the
 ``HUNT_``, ``EDGE_``, ``CAPTURE_`` and ``LOOK_`` constants, which only Hunt reads.

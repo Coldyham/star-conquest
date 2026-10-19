@@ -95,6 +95,14 @@ only for a fight; what is deliberately not animated.
 - **Bots that aren't Python.** Why the wire protocol is shaped as it is.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): external bots' four rules; `AiParams.aux`; the `tests/sim` harness; per-seat AI and pricing a fight.
+## design/bot-families.md
+- **The families.** knower (Off, Predict, Search, Council), actuary (Greedy, Field, Learning, Hunt), thinker (Claudebot, Thinker), evolved (Off, On); marshal, heuristic and rusherplus have no stops. marshal stays its own bot.
+- **Each fold plays exactly as the bot it replaced.** `tools/fold_check.py` against `0689b0a`, 120 positions: council On, hunter and claudebot identical, every old stop unchanged; council Off differs from Search in 10, by one trust rule Council keeps.
+- **Legacy names (`ai.LEGACY`).** Never rewritten, never registered; `ai.canonical`, `ai.strategy_fn`, `ai.known`; the menu's family · stop.
+- **A value past a new top stop (`AUX_OVER`).** The 12s knower's old depth slider left (63 stored seats) keep their stop; the menu resets aux on a change of strategy.
+- **A random seat deals the stop too.** Pool 2 rewritten before it shipped: every stop as `name:stop` (`settings.resolve_profile`).
+- **On the leaderboard.** One row per family at its top stop (`fold-bots.sql`); `sc_bots` profiles and `sc_bot_profile`; two-part chips; `bots.mjs` and the generated `bot-stops.mjs`; difficulty bands for 7 bots.
+- **Decided against.** Rewriting stored names, hunter's Greedy stop, marshal as a stop, a row per stop, clamping past the old top.
 ## design/knower.md
 - **Simultaneous resolution.** Why an oracle is possible at all.
 - **What the oracle buys, and where.** A turn of warning, worth more the faster ships are. Depth 0 is not thinker.

@@ -57,8 +57,8 @@ covered the lanes and a fixed one was wrong somewhere — 12 was too long on 1-t
 lanes and too short on 26-turn ones — so the horizon is read off the map instead,
 every decide (lanes shorten with `SHIP_SPEED_GROWTH_PCT`). Any stored value above 3
 reads as Search (``AUX_OVER``), so an old setup or link keeps its meaning and its
-digest: Council is reached only by its own value. Council was ``models/council.py``
-until 2026-10-19, and a seat stored under that name plays here (`ai.LEGACY`).
+digest: Council is reached only by its own value. A seat stored as ``council``
+plays here (`ai.LEGACY`).
 
 Search is a **search over openings**. ``engine.end_turn`` is drivable on a clone, so
 ``_rollout`` steps one ply of one line: every candidate opening is played on the
@@ -499,8 +499,8 @@ def _surrogate(player, human=None):
         params = player.ai_params
     fn = ai.STRATEGIES.get(name, ai.compute_orders)
     if fn is decide:
-        # A Council seat believes a knower below Council, as council did: to it a
-        # knower seat was another bot's, run at its stand-in, which is our blind plan.
+        # A Council seat also believes a knower seat below Council
+        # (docs/design/bot-families.md).
         believed = _seat_depth(player) == 0 or (_COUNCIL and _seat_stop(player) < COUNCIL)
         return _blind, None, (_TRUSTED if believed else _UNTRUSTED)
     if _is_oracle(fn, player):
@@ -808,7 +808,7 @@ def stand_in_params(player):
     of the drop-in contract — see models/README.md.
 
     None for a Council seat, which a sibling oracle models with its own blind
-    planner, as it did while council was a bot of its own and named no stand-in."""
+    planner."""
     if _seat_stop(player) == COUNCIL:
         return None
     return replace(player.ai_params, aux=0.0)
@@ -1145,8 +1145,7 @@ def _external_plan(state, pid, borrowed, salt):
 #     the bot that proposed it (`_policy_advance`), not by the blind planner, so
 #     the search compares whole strategies rather than first moves.
 #
-# It was models/council.py, which patched a private copy of this module; the
-# patches are the `_COUNCIL` branches, set for the length of one decide.
+# The `_COUNCIL` branches are on for the length of one Council decide.
 COUNCIL_ADVISERS = (("actuary", None),)   # after `EXTERNAL_CANDIDATES`, as (name, aux)
 _SALT_POLICY = 51               # an adviser's line i plays on from salt _SALT_POLICY + i
 # A Council ply against a Search ply on the same setup, from the top of the

@@ -80,7 +80,11 @@ Two fixes, each covering what the other cannot:
   a seed the same bots whatever its `models/` holds, a stale cached build
   included. A pool name that is not registered plays as the heuristic
   (`ai.decide`'s fallback); `test_every_bot_in_every_pool_ships` keeps that from
-  happening silently. Drop-ins are never dealt.
+  happening silently, accepting a legacy name (`ai.LEGACY`), which plays as its
+  family. Drop-ins are never dealt. An entry `name:stop` deals the stop with
+  the bot (`settings.resolve_profile`), so a seat's carried aux never reaches
+  it; the second pool deals every stop of every family that way
+  ([`bot-families.md`](bot-families.md)).
 - **`replay.GameLog.strategies` records each seat's strategy as built**
   (`replay.seat_strategies`), and `reconstruct` stamps it back on.
   `main.start_game` records it through `new_log`. `sim.play_settings` records it

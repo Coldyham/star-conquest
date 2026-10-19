@@ -58,7 +58,7 @@ RANDOM_STRATEGY = "random"
 POOL_ERA = 10_000_000
 RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
     ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
-    # Every stop of every family, a seat's own aux never carried (2026-10-19).
+    # Every stop of every family, a seat's own aux never carried.
     ("knower:0", "knower:1", "knower:2", "knower:3",
      "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
      "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),

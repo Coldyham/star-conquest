@@ -7,6 +7,15 @@ Every switch has an off position, and with all of them off hunter is actuary
 exactly (`tests/test_hunter.py`), which is what every measurement below is
 paired against.
 
+Since 2026-10-19 hunter is no bot of its own but actuary's fourth stop, *Style:
+Hunt*, playing exactly as `models/hunter.py` did at Field; its switches are
+gated on the ledger's `hunt` flag, and the `hunt_*` tools seat it as
+`actuary:3`. Its Greedy stop was dropped (nothing stored named it). The gate
+for putting Hunt above Learning: against actuary at Learning, 64.8% (z +13.1)
+over 500 paired seeds, every cell 61-71%
+(`results/hunter/hunt-vs-learning.jsonl`; 66.9% against Field). The
+measurements below name it hunter. See [`bot-families.md`](bot-families.md).
+
 ## How it was measured
 
 `tools/hunt_bench.py` plays a bot against one opponent in two-seat games, both

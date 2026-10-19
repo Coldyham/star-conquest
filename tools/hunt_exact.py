@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record or check Hunt's orders (actuary's Style stop 3, once the bot hunter)
+"""Record or check Hunt's orders (actuary's Style stop 3)
 on a fixed set of positions, so a speed-up can be shown to change no decision.
 
     uv run python tools/hunt_exact.py --record results/hunter/exact.pkl

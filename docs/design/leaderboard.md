@@ -939,7 +939,8 @@ The best-score rule settles a collision with what already exists.
   only funnel that pushes them into `config`. The replayed seat gets default
   `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
   `bot_replay.replay_aux` puts each bot at the top of its own slider there
-  (`knower` on Oracle: Search, `actuary` on Style: Learning) and the value in force is stored on the row; opponents keep
+  (`knower` on Oracle: Council, `actuary` on Style: Hunt), one row per family
+  ([`bot-families.md`](bot-families.md)), and the value in force is stored on the row; opponents keep
   theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
   `is_human`, sets the strategy and params; plain `engine.end_turn(state,
   decide=decide)` then drives every seat, the replayed one included, just as
