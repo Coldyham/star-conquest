@@ -3,8 +3,9 @@
 `models/knower.py` is the oracle bot. It predicts every rival by running that
 rival's real `decide`, then searches over candidate openings. This file covers
 why the oracle is possible, what it buys, the depth search and its horizon
-(Oracle: Off / Predict / Search), the borrowed candidates, and the cost of a
-decide, which drives the slow-setup warning. Roster-wide rules (margins,
+(Oracle: Off / Predict / Search), the borrowed candidates, the cost of a
+decide, which drives the slow-setup warning, and what Search does with a
+garrison a borrowed opening leaves to die. Roster-wide rules (margins,
 measurement method, leaderboard replays at `replay_aux`) are in
 [`bots.md`](bots.md). marshal's results against knower are in
 [`marshal.md`](marshal.md), "Where marshal stands". Index:
@@ -539,3 +540,96 @@ function.
   is nearer knower's blind plan than a person is, so this test favours the guess
   and does not settle it for people. It is the only test of play there is, and it
   says the phantoms catch more than the guard they waste.
+
+## A doomed garrison leaves whole (2026-10-19)
+
+Reported from play: knower at Search sometimes leaves a few ships on a system a
+wave is about to overrun, and they die for nothing. Search plays whichever
+opening wins its rollouts, and a borrowed opening keeps its author's habits.
+heuristic never evacuates: it launches only the surplus over
+`AI_RESERVE_FLOOR`/`AI_RESERVE_FRACTION` and keeps the reserve home whatever is
+coming. The other borrowed bots hold a garrison in some positions where
+knower's own Phase 2 would leave. The square law makes that a pure loss: a
+garrison far smaller than the wave kills almost nothing, and the rounding can
+make it nothing (3 against 20 leaves round(√391) = 20).
+
+**What it costs.** 72 games per stop (7:6:2, 11:6:3 and 18:6:2, against
+heuristic, rusherplus, thinker and marshal, seeds 8,000,000 + 6), counting every
+fight that took one of knower's garrisons, by the attackers it killed over its
+size at the fight:
+
+| A game | Search | Council |
+| --- | --- | --- |
+| Ships lost | 42.3 | 29.5 |
+| … in fights that killed under half the garrison | 2.40 | 0.90 |
+| … of those, ships there when knower decided, which could have left | 0.65 | 0.31 |
+| … the same, in fights that killed under the whole garrison | 0.90 | 0.74 |
+
+Most ships that die in a lopsided fight could not have left that turn. They were
+built there that turn (production comes before combat), or they are our own
+fleets landing as the system falls. The habit reported is the rest, about 1.5%
+of Search's losses.
+
+**The rule** (`_flee`, `FLEE_BELOW` 0.5), run on the opening Search chose:
+
+- It looks at every system of ours where hostile ships land this turn. Only
+  certain arrivals count: fleets already flying, and the launches of seats the
+  oracle reads exactly. A person's predicted strike never counts (defence only:
+  a guess may raise a guard, never empty a system).
+- The garrison at the fight is what the opening leaves, plus this turn's
+  production, plus our fleets landing there.
+- It acts only if the wave beats the garrison even at the garrison's best roll
+  (`combat.preview_fight`'s worst corner for the attacker). Several attackers
+  are folded strongest first, as a pile-up resolves.
+- It acts only if, at the nominal roll, the garrison kills fewer than
+  `FLEE_BELOW` of its own number. Kills are judged at the nominal roll and the
+  loss at the best one. Judged at the best roll, a 3-ship remnant facing 7
+  "kills 2" and stays, though it really kills 1.
+- Then what the opening left there leaves. It joins the biggest fleet the
+  opening already sends from that system, or else takes `_evacuate`'s route: a
+  capture in reach (the attacker's emptied home included), else the friend next
+  door with the biggest garrison. A cornered garrison stays. Our own launches
+  that would land there this turn stay home.
+
+With it, the ships that could have left and died anyway fell from 47 to 0 over
+Search's 72 games, and from 22 to 1 over Council's.
+
+**Where it pays.** Not mostly in ships. Over 24 Search games against marshal
+and thinker it fired 45 times. 34 were retreats (50 ships). In 11, a garrison of
+about 7 that a borrowed opening had left to die stepped into the attacker's
+home, emptied to launch the wave, and 8 of those took it. None joined a
+departing fleet: against these bots the habit is mostly a whole garrison a
+borrowed opening holds, not a reserve kept back from an evacuation.
+
+**Measured** with `tools/win_turns.py --quick` against heuristic, rusherplus,
+thinker and marshal, paired against the tree before it:
+
+| Stop | Seeds | Pairs | Beats | z | Turns | Ships lost a game |
+| --- | --- | --- | --- | --- | --- | --- |
+| Search | 7,000,000 + 25 | 700 | 53.5% | +3.4 | −0.6% | −1.23 (z −1.8) |
+| Search | 7,100,000 + 40 | 1,120 | 51.2% | +1.5 | +0.1% | −0.35 (z −0.7) |
+| Council | 7,000,000 + 25 | 700 | 50.8% | +1.0 | +0.3% | −0.39 (z −0.9) |
+
+On the 153 posted maps, Council with the rule beat Council without it on 24,
+was level on 96 and worse on 33 (47.1%, z −1.2). On maps with a knower rival at
+Search the rival changed too. Council against knower:2 is confounded the same
+way, since both seats are this module: 50.6%, −2.9 points won.
+
+Search's fresh block is smaller than its screen: the marshal cells that carried
+the screen (61%, 56%, 58%) came back at 51%, 50% and 49%. Both blocks lean the
+same way, and together they come to about 52% over 1,820 pairs. **Shipped on
+Search.** **Not on Council**, for three reasons. Its judge, ranking lines on
+which each adviser plays on, already picks openings knowing the garrison dies
+([`council.md`](council.md), "Stripped frontiers are trades, not mistakes").
+Half as many of its ships die this way. And it measured null against bots and
+leaned worse on the posted maps.
+
+**Open.**
+
+- `FLEE_BELOW` 1.0, leaving fights that would trade below even. It would reach
+  about 0.25 more ships a game on Search. Untested.
+- Our own fleets landing into a falling system, the larger share of the dead.
+  The rule keeps home only this turn's launches that land with the wave. Relief
+  sent on an earlier turn cannot be recalled, so the check belongs where it is
+  launched. knower's Phase 1 makes that check for its own plan, and a borrowed
+  opening does not. Unmeasured.

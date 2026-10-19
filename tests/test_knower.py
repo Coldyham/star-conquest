@@ -971,3 +971,75 @@ def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
     assert "on 120 systems" in lines[0]
     assert "use a smaller map" in lines[-1]
+
+
+# --------------------------------------------------------------------------- #
+# A doomed garrison leaves whole (`_flee`)
+# --------------------------------------------------------------------------- #
+def _doomed(kn, left, wave, human=False):
+    """Our system 1 (seat 2) under a ``wave`` from system 2 (seat 3) that lands
+    this turn, with ``left`` of its 16 ships still there after the opening; 3 is
+    a friend behind it. The oracle is built as Search builds it."""
+    ai.register("strike_test", lambda state, pid: [Order(3, 2, 1, wave)])
+    state = _board({1: (2, 16, 3), 2: (3, wave, 3), 3: (2, 4, 3)},
+                   [(1, 2, 1), (1, 3, 2)])
+    state.players[3].ai_strategy = "strike_test"
+    state.players[3].is_human = human
+    state.players[2].ai_params.aux = 2.0
+    root = [Order(2, 1, 3, 16 - left)] if left < 16 else []
+    return state, kn._build_oracle(state, 2), root
+
+
+def test_a_doomed_garrison_leaves_with_the_fleet_already_leaving(kn):
+    """3 left behind against 20 kill nobody (round(sqrt(400 - 9)) = 20): they go
+    with the 13 the opening already sends."""
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 3, 16)]
+
+
+def test_a_doomed_garrison_with_no_fleet_leaving_goes_as_evacuate_sends_it(kn):
+    """Nothing leaves 1 in the opening, so `_evacuate` picks the way out: here
+    the attacker's home, which the strike has just emptied."""
+    state, orc, root = _doomed(kn, left=16, wave=40)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 2, 16)]
+
+
+def test_a_garrison_that_could_hold_or_sells_itself_dearly_stays(kn):
+    # 10 against 12: the best roll holds it (10.8 against 11).
+    state, orc, root = _doomed(kn, left=10, wave=12)
+    assert kn._flee(state, orc, 2, root) == root
+    # 10 against 13: lost whatever the dice, but it takes 5 down with it.
+    state, orc, root = _doomed(kn, left=10, wave=13)
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_persons_predicted_strike_never_empties_a_system(kn):
+    state, orc, root = _doomed(kn, left=3, wave=20, human=True)
+    assert 3 not in orc.trusted
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_doomed_system_is_not_reinforced_into_the_same_fight(kn):
+    """A launch of ours that lands on 1 this turn would only die with it."""
+    state, _, _ = _doomed(kn, left=3, wave=20)
+    state.systems[4] = System(id=4, pos=(40.0, 0.0), owner_id=2, ships=2, production=3)
+    state.add_lane(1, 4, 6.0, 1)
+    state.rebuild_topology()
+    orc = kn._build_oracle(state, 2)
+    out = kn._flee(state, orc, 2, [Order(2, 1, 3, 13), Order(2, 4, 1, 2)])
+    assert out == [Order(2, 1, 3, 16)]
+
+
+def test_flee_runs_on_search_alone(kn, monkeypatch):
+    calls = []
+    real = kn._flee
+    monkeypatch.setattr(kn, "_flee", lambda *a: calls.append(a) or real(*a))
+    for aux, runs in ((0.0, False), (1.0, False), (2.0, True), (3.0, False)):
+        calls.clear()
+        state, _, _ = _doomed(kn, left=3, wave=20)
+        state.players[2].ai_params.aux = aux
+        ai.decide(state, 2)
+        assert bool(calls) == runs, aux
+    monkeypatch.setattr(kn, "FLEE_BELOW", 0.0)
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert real(state, orc, 2, root) == root

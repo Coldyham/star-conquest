@@ -123,11 +123,14 @@ only for a fight; what is deliberately not animated.
 - **Cost per decide, and where the search guard trips.** The `ply_ms` fit and `setup_warning`, which also counts rival bots that declare `decide_ms`. The browser is unmeasured; never measure on a loaded machine.
 - **Seats it cannot run: stand-ins and people.** A predicting module's `stand_in_params` (actuary: Learning runs as Planned), run in the forecast and the rollouts and trusted. Against actuary-Learning, untrusted is null at Predict (z +0.95) and large at Search (z +9.50); trust adds z +6.54 / +3.88. People stay on `_blind`: a stronger bot is a worse forecast of them, and assuming they hold loses to bots flagged as people (z -3.33).
 
+- **A doomed garrison leaves whole (2026-10-19).** A borrowed opening (heuristic's reserve) can leave ships on a system about to be overrun; `_flee` sends away a garrison certain to fall that would kill under half its number. Most dead in lopsided fights could not have left (new production, our own fleets landing); the fleeable rest is 0.65 ships a game at Search, 0.31 at Council. Search: 53.5% (z +3.4) then 51.2% (z +1.5) on fresh seeds, mostly from garrisons stepping into the attacker's emptied home; shipped on Search. Council: null on bots, 47.1% on the posted maps; not applied.
+
 ## design/council.md
 - **What council changes, and what each change bought.** actuary as an adviser, the learned judge, each adviser playing its own line (the biggest gain). The judge's features and fit. `aux` 0 is knower at Search.
 - **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
 - **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
 - **Against the posted maps and the people who posted them.** All 152 posted maps replayed fresh (2026-10-18): council leads the bots on 112, knower:2's wins are chaos not a pattern (6 of 32 survive a re-run); people beat it on 115 of 151, losing nothing in the opening and gaining in the middle game, where council strips frontiers it can't relieve (30% of its empties lost within five turns, people 6%). What to try next.
+- **Stripped frontiers are trades, not mistakes (2026-10-19).** Council's rollouts foresee 48 of the 54 frontier empties it then loses; offering the opening with them held (`_cover`) is null on bots, knower:2 and the 153 posted maps, and ranking such lines down (`LOSS_PENALTY`) cuts the lost empties from 27% to 9-13% and loses to the old council (37.6%, 25.2%). The habit is style, not the gap to people.
 - **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
 - **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 

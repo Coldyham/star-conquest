@@ -66,6 +66,13 @@ node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 No lint step; match the surrounding style. Pylance basic type-checking
 (`.vscode/settings.json`) warnings are real signal.
 
+Run the tests a change can reach, not the whole suite each time. A docs-only
+change needs none unless a test reads the file (`tests/test_bot_brief.py` reads
+`docs/bot-brief.md`, `tests/test_botio.py` reads `bots/README.md`). A change to
+one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
+has `tests/test_council.py`). Run the full suite after a change to
+`starconquest/`, and before opening a PR on a code change.
+
 ## Architecture
 
 A hard split between a **pure simulation core** and a **thin pygame shell**, so

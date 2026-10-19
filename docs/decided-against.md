@@ -26,6 +26,8 @@ the measured result was indistinguishable from the baseline.
 - Hybrids (−4.9 points) and dice shopping against the real keyed dice (−8.7). *Same section.*
 - NTBEA tuning, root crossover, successive halving: null on confirmation. *Same section.*
 - Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Same section.*
+- A doomed garrison leaving whole (`_flee`) on Council: null against bots (50.8%, ships lost -0.39), 47.1% (z -1.2) on the posted maps. Shipped on Search only. *A doomed garrison leaves whole* (knower.md).
+- Offering the picked opening again with the systems its rollout lost held (`_cover`): null against the weak bots, marshal, knower:2 (a z +1.7 lean that did not replicate) and the 153 posted maps. Ranking down lines that lose a system they stripped (`LOSS_PENALTY` 0.03, 0.10): halves the lost empties and loses to the old council 37.6% and 25.2% on the posted maps. Council foresees 48 of 54 such losses; they are trades. *Stripped frontiers are trades, not mistakes.*
 
 ## marshal: [`design/marshal.md`](design/marshal.md)
 - Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*
