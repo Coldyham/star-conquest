@@ -365,9 +365,123 @@ the two changes unless stated:
   from 3:1 to the win. The difference is which strikes are made, and Council's
   edge there is knowing what the rival will do. A rule bot doesn't get that.
 - **The three-seat stalls** where marshal is the weakest seat.
+- **The second round** (below) tried the relay and 29 other arms. None ships.
 - **Not re-run:** the full ladder in [`marshal.md`](marshal.md), "Where marshal
   stands", the advantage and jitter sliders, free-for-alls past three seats, and
   the posted maps.
+
+## marshal: a second round, nothing shipped (2026-10-19)
+
+On the tree after `SPARE_TARGET` (stock marshal at `827852a`), 30 arms were
+screened on the default schedule against stock, game by game, at 23 s a run on 4
+cores. Each was a constant patched in every worker. One reached a fresh block,
+and none ships. The arms and the diagnostics behind them are below, so the next
+round can start from them.
+
+### Where marshal still loses
+
+- **Three seats.** 72 of the 97 games stock marshal loses, and 31 of its 52
+  unfinished, are on 11:6:3. In the 43 it loses against two thinkers it is behind
+  by turn 5 (31% of the income against the leading thinker's 41%) and falls
+  steadily, while the leader eats both other seats. In the games it wins it
+  leads by turn 10.
+- **Council is ahead from turn 8** in the same seats (11:6:3 against thinker, 20
+  seeds): 2.28 systems against 2.12 at turn 8 and 4.70 against 3.63 at turn 30,
+  with more ships at every mark. Over the first 30 turns Council takes 1.73
+  rival systems a game with no fight against marshal's 0.85, half of them
+  emptied that same turn by the owner's own launch. It also attacks rivals more
+  (1.05 fights to 0.62) and sends more ships per fight (7.1 to 3.9). In one
+  game traced turn by turn (seed 7,000,019, seat 1), marshal raced a thinker to a
+  neutral and landed beside its fleet. Council struck the system that fleet had
+  just left. A rule bot sees the fleet on the lane, but not the launch on the
+  turn it is made.
+- **Against heuristic, rival fights fail.** On 7:6:2 over 40 turns marshal wins
+  66% of the rival fights it lands (1.38 of 2.10 a game) and Council 84% (2.23 of
+  2.67). Council sends 1.29 times the garrison it meets and marshal 1.15.
+  Heuristic stands where thinker flees, so the missing jitter cushion
+  (`_enemy_margin`) costs marshal against heuristic and pays against thinker. See
+  the pad arms below.
+- **The two-seat stalls are mostly level.** Of the 21 unfinished duels, 19 never
+  reach a 3:1 lead. One traced (7:6:2 against thinker, seed 7,000,012) sits at
+  257 ships against 333 across a single 8-turn lane at turn 300, and neither
+  side can cross.
+
+### The arms
+
+Pooled over the 18 groups, seeds 7,000,000 + 50, against stock:
+
+    arm                                         beats      z    Δwon   Δturns
+    relay: a neutral-only front sends what a
+      neighbour lacks for an unstruck neutral   50.5%   +0.6  -0.2pt   -0.1%
+    ...sending its whole leftover               52.6%   +3.0  -0.1pt   -0.8%
+    ...to rival targets too                     52.7%   +3.0  -0.1pt   -1.0%
+    ...even when its own target is sooner       52.1%   +2.5  -0.3pt   -0.5%
+    FEED 20 (rear surplus to rival fronts only) 53.0%   +3.0  +0.5pt   -0.3%
+    FEED 5                                      51.6%   +1.8  +0.1pt   -0.1%
+    FEED 2 / 1.5 / 1                            47.0 / 43.1 / 39.8%, +1.4 / +3.9 / +6.6% turns
+    relay (whole leftover) + FEED 20            54.1%   +3.9  +0.3pt   -1.3%
+    Phase 4 routed by travel turns, not hops    49.3%   -0.8  -0.2pt   +0.1%
+    rival attack margin x1.1                    50.5%   +0.5  -0.7pt   +0.7%
+    ...x1.2                                     45.9%   -3.8  -1.8pt   +4.1%
+    ...x1.1-1.3 on 1-turn strikes only   49.9 / 49.7 / 49.1%                null to worse
+    ...x1.2 on a target with no friendly
+      neighbour to flee to                      49.8%   -0.2  +0.2pt   +1.3%
+    no relief pricing on a target of 0 / <3     49.4 / 50.4%                    null
+    no relief pricing at all                    48.1%   -1.8  -3.8pt   +2.1%
+    a neutral priced through a rival bloc
+      landing with us (any field / 3+ seats)    50.5 / 50.0%                    null
+    targets by richness per ship (^1, ^0.5)     50.4 / 50.3%                    null
+    NEUTRAL_MARGIN 1.2 / 1.4                    48.2 / 49.9%                    null to worse
+    FRONTIER_GUARD 0.45 / POUR_GUARD 0.7        50.2 / 51.7%, the pour -0.4pt won, +0.6% turns
+    WEDGE_MIN_PLAYERS 3, BEYOND_DECAY 0 / 0.7,
+      REMNANT_MAX_PLAYERS 3, OVERWHELM 1.5,
+      RISK_PARITY 0.9                           49.9-50.9%                      null
+    FAST_GUARD_WEIGHT 1                         48.5%   -3.3  -0.3pt   +0.1%
+
+- **The rival margin splits by opponent.** At x1.1 it gains 58-68% on beats
+  against heuristic on four boards and loses 38-44% against thinker on four.
+  That is "Garrisons run away" in [`marshal-pricing.md`](marshal-pricing.md)
+  seen from the other side: heuristic doesn't run. Telling the two apart needs a
+  model of the rival, which marshal's no-state contract rules out. Padding only
+  the strikes a garrison cannot see coming (a 1-turn lane), or a garrison with
+  nowhere of its own to flee to, gains nothing.
+- **More feeding is better, up to a plateau.** Below 3, `FEED` loses steeply
+  (39.8% at 1): a rival front that isn't short gives the rear's surplus to a
+  neutral front, and that is slower. Above 3 it creeps up (53.0% at 20).
+
+**Fresh seeds** (7,200,000 + 50; stock replayed there as `stock72`):
+
+    FEED 20                    55.0% (z +5.1)  -0.3pt  -1.5% turns
+    relay (whole leftover)     50.5% (z +0.6)  -0.4pt  -0.3%
+    relay + FEED 20            52.4% (z +2.2)  -0.3pt  -1.1%
+
+The relay doesn't survive the fresh block. `FEED` 20 does, so it was played
+against the roster on the same block: the same cells against stock marshal
+(a copy of `models/marshal.py` at `827852a`), knower at Predict and actuary at
+Field, 1,950 games a side, points a win 1, a timeout 0.5 and a loss 0.
+
+    against stock marshal   -1.1 (z -1.1)   won 288 vs 298
+    against knower          +1.0 (z +1.0)   won 428 vs 424
+    against actuary         -1.5 (z -1.5)   won 183 vs 194
+
+Level within noise, but leaning worse on two of three, for 1.5% of turns
+against the weak bots. Not shipped.
+
+### What this leaves
+
+- **Constants are at their optimum here.** Every constant moved either way reads
+  null or worse, including the four already re-tuned in the first round.
+- **The gaps that are left need knowledge of the rival.** Council's lead before
+  3:1 comes from strikes timed to a rival's launch and from not racing where a
+  rival is going, and the x1.1 margin shows that the right price differs by
+  opponent. A bot that learns its rivals (actuary at Learning or Hunt) can reach
+  those. A rule bot with no memory can't.
+- **Still not built:** a rule that counter-punches a rival system the turn after
+  its garrison leaves. The fleet is on the lane and visible, so it is
+  non-oracle. It goes through the target sort, though, and the sort has measured
+  null every time it was changed.
+- **`FEED` 20 is the one candidate standing**: worth a re-test if the roster
+  moves.
 
 ## Reading it
 
