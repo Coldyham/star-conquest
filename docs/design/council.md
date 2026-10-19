@@ -165,17 +165,18 @@ worse, so the first half of this paragraph is closed.
 
 ## Stripped frontiers are trades, not mistakes (2026-10-19)
 
-Tested on main at `827852a`, from the 174 distinct maps among the public
-replays on current rules (`public_replays`, read with the publishable key):
+Tested on main at `827852a`, on the 153 posted maps among the public replays
+on current rules (`public_replays`, read with the publishable key; one replay
+per map, by challenge key and seed):
 council in the posted seat against the posted bots, guards lifted, played to
 the end. The empties and frontier losses are read with `tools/playstyle.py`'s
 `empties`, `_outcomes` and `_frontier`, as in the table above. Arms are paired
 map by map and ranked as the board ranks them.
 
-**Council sees the losses coming.** On every twelfth posted map (18 games,
-275 voluntary frontier empties), 54 empties were lost within five turns. In 48
-of them the line the search picked had already lost that system inside its own
-rollout, within five plies. Only 6 were not foreseen. The rollouts play every
+**Council sees the losses coming.** On every twelfth public replay's map (18
+games, 275 voluntary frontier empties), 54 empties were lost within five turns.
+In 48 of them the line the search picked had already lost that system inside its
+own rollout, within five plies. Only 6 were not foreseen. The rollouts play every
 bot rival as the oracle reads it, so they see the punishment. The judge then
 picks the line anyway, because what the opening bought is worth more than the
 system.
@@ -193,22 +194,22 @@ quarter of decides and won a quarter of those.
 | Turns to win, `--quick`, against heuristic, rusherplus, thinker and marshal | 700 | 50.7% (turns −0.4%) | +0.6 |
 | Against knower:2, `--quick`, seeds 7,000,000 + 25 | 175 | 55.4% (+2.4 pt won) | +1.7 |
 | … confirmed on seeds 7,100,000 + 40 | 280 | 49.9% | −0.0 |
-| The 174 posted maps | 174 | 49.1% (empties lost 27% → 26%) | −0.3 |
+| The 153 posted maps | 153 | 48.0% (empties lost 27% → 26%) | −0.6 |
 
 **Ranking the losses down plays much worse** (`LOSS_PENALTY`, built and
 removed). Each line's judged win chance was reduced by a constant for every
 system its opening drew from and a rival took within five plies, in the main
 ranking and in `_cover`'s comparison.
 
-| On the 174 posted maps | Old council | Penalty 0.03 | Penalty 0.10 |
+| On the 153 posted maps | Old council | Penalty 0.03 | Penalty 0.10 |
 | --- | --- | --- | --- |
 | Frontier empties lost within five turns | 27% | 13% | 9% |
-| … `short` / `uncovered` | 28% / 52% | 14% / 31% | 10% / 20% |
-| Frontier systems lost per 100 frontier system-turns | 6.41 | 4.37 | 3.72 |
-| Maps won | 169 | 166 | 156 |
-| Beats the old council | | 34.8% (z −4.6) | 24.4% (z −8.6) |
-| Turns, pairs both won (mean) | | +7.4 | +8.5 |
-| Ships lost, pairs both won (mean) | | +27.9 | +23.3 |
+| … `short` / `uncovered` | 28% / 52% | 15% / 30% | 10% / 20% |
+| Frontier systems lost per 100 frontier system-turns | 6.54 | 4.48 | 3.91 |
+| Maps won | 148 | 145 | 137 |
+| Beats the old council | | 37.6% (z −3.4) | 25.2% (z −7.8) |
+| Turns, pairs both won (mean) | | +7.2 | +8.9 |
+| Ships lost, pairs both won (mean) | | +28.1 | +24.6 |
 
 At 0.10 council's empties and frontier losses come near a person's (6% and 2.0
 in the table above), and it is slower, loses more ships and wins fewer maps.
@@ -300,6 +301,12 @@ screen.
   the end. The shipped judge picks a losing opening in about a third of the
   positions where the choice matters, so there is headroom, but labels built
   from council's own view do not reach it.
+- **A doomed garrison leaving whole** (`_flee`, knower's at Search since
+  2026-10-19): null against the weak bots and marshal (50.8%, z +1.0; ships
+  lost −0.39 a game) and 47.1% (z −1.2) on the posted maps, so Council does not
+  run it. Its judge already picks openings knowing the garrison dies, and half
+  as many of its ships die this way. See [`knower.md`](knower.md), "A doomed
+  garrison leaves whole".
 - **actuary as the stand-in for a person** in the rollouts, in place of
   knower's `_blind`, on the first rolled turn or on every one. Against a rival
   council was told is a person (20 seeds, both seatings, random:11:11:2 and
