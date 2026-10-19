@@ -127,6 +127,7 @@ only for a fight; what is deliberately not animated.
 - **How it borrows knower.** A private copy of `knower.py`, patched; the oracle rules kept.
 - **The measurements.** Untouched seeds against knower:2, actuary and marshal; positions from real games; the unbeaten posted maps; five players.
 - **Against the posted maps and the people who posted them.** All 152 posted maps replayed fresh (2026-10-18): council leads the bots on 112, knower:2's wins are chaos not a pattern (6 of 32 survive a re-run); people beat it on 115 of 151, losing nothing in the opening and gaining in the middle game, where council strips frontiers it can't relieve (30% of its empties lost within five turns, people 6%). What to try next.
+- **Stripped frontiers are trades, not mistakes (2026-10-19).** Council's rollouts foresee 48 of the 54 frontier empties it then loses; offering the opening with them held (`_cover`) is null on bots, knower:2 and the 174 posted maps, and ranking such lines down (`LOSS_PENALTY`) cuts the lost empties from 27% to 9-13% and loses to the old council (34.8%, 24.4%). The habit is style, not the gap to people.
 - **What it costs.** Browser timing, the guards on slow devices, the missing `setup_warning`, the gentler-jitter test exemption.
 - **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 
