@@ -156,9 +156,10 @@ export function tally(rows, roster) {
 /**
  * The measured full-roster ladder (docs/design/marshal.md "Full roster ladder" in
  * the Python repo, mirrored here since JS can't import it), strongest to
- * weakest. Keep in sync with `starconquest/ai.py`'s `LADDER_ORDER`.
+ * weakest, one entry per family. Keep in sync with `starconquest/ai.py`'s
+ * `LADDER_ORDER`.
  */
-export const LADDER_ORDER = ["council", "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
+export const LADDER_ORDER = ["knower", "actuary", "marshal", "evolved", "thinker", "heuristic", "rusherplus"];
 
 /** Ladder order first, any bot missing from it (a fresh drop-in) alphabetical after. */
 function byLadderOrder(a, b) {

@@ -176,13 +176,15 @@ def test_game_is_reproducible_from_its_seed(ac):
 
 
 def test_the_style_slider_defaults_to_field(ac):
-    assert ai.aux_spec("actuary") == ("Style", 0.0, 2.0, 1.0, True)
-    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning")
+    assert ai.aux_spec("actuary") == ("Style", 0.0, 3.0, 1.0, True)
+    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning", "Hunt")
     assert AiParams().aux == ac.FIELD
+    assert ai.aux_over("actuary") == ac.LEARNING
 
 
 @pytest.mark.parametrize("aux, stop", [(0.0, "GREEDY"), (1.0, "FIELD"), (2.0, "LEARNING"),
-                                       (7.0, "LEARNING"), (0.5, "GREEDY"), ("junk", "FIELD")])
+                                       (3.0, "HUNT"), (3.5, "LEARNING"), (7.0, "LEARNING"),
+                                       (0.5, "GREEDY"), ("junk", "FIELD")])
 def test_the_style_knob_reads_tolerantly(ac, aux, stop):
     from types import SimpleNamespace
     seat = SimpleNamespace(ai_params=SimpleNamespace(aux=aux))

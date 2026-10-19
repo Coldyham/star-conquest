@@ -4,6 +4,7 @@
 // usernames and Challenge.by are free text typed by strangers, so they must never
 // be parsed as markup.
 
+import { profileLabel, profiles, stopName } from "./bots.mjs";
 import { configTitle, fogLabel, hasFog } from "./setup.mjs";
 import { compareScores } from "./standings.mjs";
 
@@ -237,16 +238,25 @@ export function fogBadge(game, group = "game") {
 }
 
 /**
- * One chip per opponent strategy (game_summary.bots), each linking to the main
- * list filtered to that bot — omitted entirely when every seat is the built-in
- * heuristic, since that's the common case and would otherwise repeat on every
- * card. Strategy names come from models/*.py drop-ins, so textContent only.
+ * One chip per opponent (game_summary.bots, through `profiles`), linking to the
+ * main list filtered to that bot — omitted entirely when every seat is the
+ * built-in heuristic, since that's the common case and would otherwise repeat on
+ * every card. A bot off its default stop is a two-part chip, "knower · council":
+ * the family half finds every stop of it, the stop half that stop alone. Strategy
+ * names come from models/*.py drop-ins, so textContent only.
  */
 export function botChips(game) {
-  const bots = game.bots || [];
-  if (bots.length === 1 && bots[0] === "heuristic") return [];
-  return bots.map((bot) =>
-    el("a", { class: "chip", href: `index.html?bot=${encodeURIComponent(bot)}`, text: bot }));
+  const shown = profiles(game.bots);
+  if (shown.length === 1 && shown[0] === "heuristic") return [];
+  const link = (bot, text, cls = null) =>
+    el("a", { class: cls, href: `index.html?bot=${encodeURIComponent(bot)}`, text });
+  return shown.map((profile) => {
+    const family = profile.split(":")[0];
+    const stop = stopName(profile);
+    if (!stop) return link(family, family, "chip");
+    return el("span", { class: "chip pair", title: profileLabel(profile) },
+      [link(family, family), " · ", link(profile, stop.toLowerCase())]);
+  });
 }
 
 /**
@@ -268,14 +278,14 @@ export function leaderCredit(game) {
 
 // The share of bots that lose a map (game_summary.difficulty) at or below which
 // each word applies, easiest first. Cut along the roster's classes, so on the
-// 8-bot roster: Hard is a map only the top three (council, knower at Search,
-// actuary at Learning) take, 1-3 winning; Medium is one marshal and thinker take
-// too, 4-5; Easy is one claudebot, heuristic or rusherplus take too, 6+; Very
-// hard is none. The same counts hold on 7 bots, while a new bot is still being
-// replayed onto the maps the other seven have reached.
+// 7-bot roster, one per family at its top stop: Hard is a map only the top two
+// (knower at Council, actuary at Hunt) take, 1-2 winning; Medium is one marshal,
+// evolved and thinker take too, 3-5; Easy is one heuristic or rusherplus take
+// too, 6+; Very hard is none. The same counts hold on 6 bots, while a new bot is
+// still being replayed onto the maps the other six have reached.
 const DIFFICULTY_LEVELS = [
-  { most: 0.25, text: "Easy", cls: "easy" },
-  { most: 0.55, text: "Medium", cls: "medium" },
+  { most: 0.2, text: "Easy", cls: "easy" },
+  { most: 0.6, text: "Medium", cls: "medium" },
   { most: 0.999, text: "Hard", cls: "hard" },
   { most: 1, text: "Very hard", cls: "very-hard" },
 ];

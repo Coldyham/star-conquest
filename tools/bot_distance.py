@@ -376,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     ai.load_models()
     roster = args.bots or ai.available_strategies()
     players = args.play_with or roster
-    unknown = [b for b in {*roster, *players} if b not in ai.STRATEGIES]
+    unknown = [b for b in {*roster, *players} if not ai.known(b)]
     if unknown:
         print(f"not registered: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2

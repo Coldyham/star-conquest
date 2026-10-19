@@ -412,7 +412,7 @@ def main(argv=None) -> int:
         if not hasattr(module, const):
             raise SystemExit(f"{a.bot} defines no {const!r}")
     for opp in a.opp or OPPONENTS:
-        if opp not in ai.STRATEGIES:
+        if not ai.known(opp):
             raise SystemExit(f"unknown opponent {opp!r}")
     seeds = list(range(a.seed_base, a.seed_base + a.seeds))
     data = run(a.bot, perturb, a.cell or list(CELLS), a.opp or list(OPPONENTS),

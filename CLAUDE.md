@@ -16,7 +16,7 @@ those files. Two companion pages are for **grepping, not reading whole**:
 **Grep `docs/decided-against.md` before proposing a mechanism, a bot tactic or a
 re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
-`hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `knower`,
+`hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `bot-families`, `knower`,
 `council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`,
 `actuary`, `hunter`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
@@ -53,7 +53,8 @@ uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots 
 uv run python tools/config_census.py            # which setups people play
 uv run python tools/setup_sweep.py              # ...and whether the ranking moves there
 uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by hand
-uv run python tools/hunt_bench.py --seeds 50     # hunter (or a --variant) vs actuary, paired
+uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --variant) vs Field, paired
+uv run python tools/fold_check.py               # a stop plays as the bot folded into it
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
 uv run python tools/evo_bench.py --bot evolved --quick --seeds 50   # evolved's gate
 uv run --with cma python tools/evo_train.py --run NAME  # retrain evolved (CMA-ES)
@@ -232,7 +233,14 @@ fight: the rules in full")
   names (`settings.pool_for`), never the loaded roster. **`RANDOM_POOLS` is
   append-only**: append a pool to change what a random seat deals; editing a
   shipped one re-deals its era (`test_a_shipped_pool_is_never_edited`). Roll
-  seeds only through `settings.roll_seed`.
+  seeds only through `settings.roll_seed`. An entry `name:stop` deals the stop
+  too (`settings.resolve_profile`).
+- **A variant of a bot is a stop of its knob, not a bot.** A folded name
+  (`council`, `claudebot`) stays a legacy name (`ai.LEGACY`): never rewritten,
+  never registered, read only through `ai.canonical`/`ai.family`/`ai.known`. A
+  knob that grows a top stop declares `AUX_OVER` so stored values keep their
+  stop. A fold plays exactly as what it replaced (`tools/fold_check.py`).
+  `docs/design/bot-families.md`.
 - **A bot that reads other seats** (`models/knower.py`) never calls
   `ai.load_models()`, reads `ai.STRATEGIES` lazily, and draws **nothing** from
   `state.rng`. Predicting bots advertise `IS_ORACLE`/`is_oracle_seat`/

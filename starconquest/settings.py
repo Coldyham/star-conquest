@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import hashlib
 import itertools
 import json
@@ -50,10 +51,17 @@ RANDOM_STRATEGY = "random"
 # random seat in its era. To change what a random seat deals, append a pool:
 # only seeds rolled from then on deal from it, and every map ever shared keeps
 # dealing what it dealt (`docs/design/core.md`, "A seat left to the seed").
+#
+# An entry is a strategy, which keeps the seat's own aux, or a profile
+# ``name:stop``, which deals the stop too (`resolve_profile`). The first pool
+# names bots since folded into a family; they still play (`ai.LEGACY`).
 POOL_ERA = 10_000_000
 RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
     ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
-    ("council", "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+    # Every stop of every family, a seat's own aux never carried.
+    ("knower:0", "knower:1", "knower:2", "knower:3",
+     "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+     "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
 )
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
@@ -734,18 +742,27 @@ def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[s
     if people is None:
         people = set() if settings.autoplay else {1}
     by_strategy: dict[str, list[int]] = {}
+    bots = settings
     for seat in range(1, settings.players + 1):
         if seat in people:
             continue
         name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY and settings.seed is None:
+            continue
+        stop = settings.seat_params(seat).aux
         if name == RANDOM_STRATEGY:
-            if settings.seed is None:
-                continue
-            name = resolve_strategy(name, settings.seed, seat)
-        by_strategy.setdefault(name, []).append(seat)
+            name, stop = resolve_profile(name, stop, settings.seed, seat)
+        family, stop = ai.canonical(name, stop)
+        if (family, stop) != (settings.seat_strategy(seat), settings.seat_params(seat).aux):
+            # A dealt profile or a legacy name: the hook reads the seat as it plays.
+            if bots is settings:
+                bots = copy.deepcopy(settings)
+            bots.ai_strategy[seat - 1] = family
+            bots.ai[seat - 1] = replace(bots.ai[seat - 1], aux=stop)
+        by_strategy.setdefault(family, []).append(seat)
     lines: list[str] = []
     for name, seats in by_strategy.items():
-        lines.extend(ai.setup_warning(name, settings, seats, people=sorted(people)))
+        lines.extend(ai.setup_warning(name, bots, seats, people=sorted(people)))
     return lines
 
 
@@ -768,10 +785,20 @@ def resolve_strategy(name: str, seed: int, pid: int) -> str:
     which is the degradation ``ai.decide`` already applies to an unrecognised
     strategy name.
     """
+    return resolve_profile(name, 0.0, seed, pid)[0]
+
+
+def resolve_profile(name: str, aux: float, seed: int, pid: int) -> tuple[str, float]:
+    """``(strategy, aux)`` for a seat set to ``name`` at ``aux``: as it is,
+    unless it is ``RANDOM_STRATEGY``, in which case a pool entry is drawn as in
+    `resolve_strategy`. An entry ``name:stop`` deals its stop; a bare name keeps
+    the seat's own ``aux``."""
     if name != RANDOM_STRATEGY:
-        return name
+        return name, aux
     pool = pool_for(seed)
-    return pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+    pick = pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+    strategy, _, stop = pick.partition(":")
+    return strategy, float(stop) if stop else aux
 
 
 def build_state(settings: Settings, seed: int) -> GameState:
@@ -799,8 +826,10 @@ def build_state(settings: Settings, seed: int) -> GameState:
         state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players, settings.layout)
     for player in state.players.values():
         if not player.is_neutral:
-            player.ai_strategy = resolve_strategy(settings.seat_strategy(player.id), seed, player.id)
-            player.ai_params = replace(settings.seat_params(player.id))
+            params = settings.seat_params(player.id)
+            player.ai_strategy, aux = resolve_profile(settings.seat_strategy(player.id), params.aux,
+                                                      seed, player.id)
+            player.ai_params = replace(params, aux=aux)
         if settings.autoplay:
             player.is_human = False
     return state

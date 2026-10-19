@@ -505,8 +505,10 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    picks the change up without touching a row. If a page 404s on a new table or
    view right after pasting, PostgREST's schema cache hasn't caught up yet; the
    file's own final statement (`notify pgrst, 'reload schema';`) normally makes
-   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
-   here, run only when two keys need merging (see above).
+   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is another script
+   here, run only when two keys need merging (see above);
+   [`fold-bots.sql`](fold-bots.sql), run once, folds the bot column onto one row
+   per family (`docs/design/bot-families.md`).
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and the project's
    *publishable* key (`sb_publishable_…`; the older `anon` JWT is under Supabase's
    "Legacy API keys" tab and works too). That key belongs in git — it is designed

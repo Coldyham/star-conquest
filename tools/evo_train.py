@@ -97,7 +97,7 @@ _league: dict[str, object] = {}
 
 def _register_opponent(opp: str) -> None:
     """Make ``opp`` playable in this worker: a roster bot, or ``evo:<label>``."""
-    if opp in ai.STRATEGIES:
+    if ai.known(opp):
         return
     if not opp.startswith("evo:"):
         ai.load_models()

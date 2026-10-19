@@ -346,9 +346,20 @@ already resolve simultaneously. The rationale for each rule is in
   `test_each_pool_still_deals_what_it_dealt`). Seeds are rolled only through
   `roll_seed`, and the menu's seed field stops at `seed_top`, so no seed is
   made in an era that has no pool yet. A bot any pool names keeps shipping
-  (`test_every_bot_in_every_pool_ships`). `Settings` keeps `"random"`; the
-  win overlay (`render._winner_label`) reveals the bot. Detail:
-  `docs/design/core.md`.
+  (`test_every_bot_in_every_pool_ships`). A pool entry `name:stop` deals the
+  stop too (`settings.resolve_profile`); a bare name keeps the seat's own aux.
+  `Settings` keeps `"random"`; the win overlay (`render._winner_label`)
+  reveals the bot. Detail: `docs/design/core.md`.
+- **A bot folded into a family keeps its old name as a legacy name**
+  (`ai.LEGACY`: council is knower at Search or Council, claudebot thinker at
+  Claudebot). A stored name is never rewritten, so no key, deal or log moves,
+  and is never registered: `ai.canonical` is the one place it becomes a family
+  and stop, and anything that looks a seat up by name goes through it (or
+  `ai.family`, `ai.known`, `ai.strategy_fn`), never `ai.STRATEGIES` alone. A
+  knob that grows a top stop declares `AUX_OVER`, the old top, so a stored value
+  past the new top keeps the stop it read as (`ai.aux_over`); the new top is
+  reached only by its own value. A fold must play exactly as the bot it
+  replaces (`tools/fold_check.py`). Detail: `docs/design/bot-families.md`.
 - **A bot that reads other seats** (see `models/knower.py`) must never call
   `ai.load_models()`, must read `ai.STRATEGIES` lazily inside `decide`, and must
   draw **nothing** from `state.rng` (`tests/test_knower.py`). A predicting bot
@@ -370,9 +381,11 @@ already resolve simultaneously. The rationale for each rule is in
   before copying either half.
 - **`AiParams.aux` is the one bot-defined knob.** The core never interprets it;
   `1.0` is "untuned". A strategy declares `AUX_LABEL` (+ `AUX_RANGE`, `AUX_INT`,
-  `AUX_NAMES`; read by `ai.aux_spec`/`ai.aux_names`). Narrow a knob by clamping
-  on read, never by rewriting what was stored. Add per-bot knobs here, not as
-  new `AiParams` fields. Detail: `docs/design/bots.md`.
+  `AUX_NAMES`, `AUX_OVER`; read by `ai.aux_spec`/`ai.aux_names`/`ai.aux_over`).
+  Narrow a knob by clamping on read, never by rewriting what was stored. Add
+  per-bot knobs here, not as new `AiParams` fields; a variant of a bot is a stop
+  of its knob, not a bot of its own. The menu resets aux to `config.AI_AUX` when
+  a seat's strategy changes. Detail: `docs/design/bots.md`.
 - **A bot can warn about a setup** with `setup_warning(settings, seats)`
   (`ai.setup_warning`, `settings.setup_warnings`), raised on Start and on the
   play-by-post roster's Confirm; a hook that declares `people` is also told

@@ -142,6 +142,11 @@ the measured result was indistinguishable from the baseline.
 - A shallower search for the offline bot column instead of a bigger budget: not reproducible. *Replaying a bot for the leaderboard.*
 - Leaving the replayed seat flagged human to match the Watch link: a handicap. Superseded by stored replays. *Same section.*
 
+## Bot families ([`design/bot-families.md`](design/bot-families.md))
+- Rewriting a stored `council` or `claudebot` seat to its family: moves every link's `challenge_key()`. Legacy names (`ai.LEGACY`) instead. *Decided against.*
+- hunter's own Greedy stop: nothing stored named it; Greedy is actuary's. marshal as a stop of thinker or knower: its code is its own. *Same section.*
+- A bot-column row for every stop: one row per family at its top stop. Clamping a stored aux past the old top into the new top stop: 63 stored seats at 12 would have changed bot (`AUX_OVER`). *Same section.*
+
 ## Core ([`design/core.md`](design/core.md))
 - A `models/` dispatcher bot for the random seat: breaks the oracle contract. Drawing the pick from `state.rng`: would shift the dice. *A seat left to the seed.*
 - Dealing random seats from the loaded roster: re-deals every random map whenever a bot is added, and differs between builds. A roster fingerprint in the challenge key: splits the board on every new bot. *A seat left to the seed.*

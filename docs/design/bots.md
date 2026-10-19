@@ -186,6 +186,10 @@ lost.
   it owns its moves instead of borrowing actuary's, and is blind. Between
   marshal and thinker on the ladder, weaker in multi-seat, and unlike the
   roster in how it plays. Shipped. See [`evolved.md`](evolved.md).
+- council and hunter, built since as forks of knower and actuary, are not new
+  families: on 2026-10-19 they were folded into them as the stops Council and
+  Hunt, and claudebot into thinker as Claudebot. See
+  [`bot-families.md`](bot-families.md).
 
 **learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent
@@ -875,9 +879,11 @@ protocol. Four rules hold it together:
   `menu._ai_specs` appends that slider to `_AI_PARAMS` for the edited seat, so a
   strategy declaring nothing (the built-in heuristic, `thinker`, …) shows no aux
   slider at all. `models/knower.py` labels it *Oracle*, stops Off / Predict /
-  Search, and clamps a stored value above 2 (its old 0-12 depths) to Search —
-  narrowing a knob by clamping on read, never by rewriting what was stored, is
-  what keeps every old link's digest. `bot_replay.aux_note` sends a named stop
+  Search / Council, and reads a stored value above 3 (its old 0-12 depths) as
+  Search, its `AUX_OVER` — narrowing a knob by clamping on read, never by
+  rewriting what was stored, is what keeps every old link's digest. A variant of
+  a bot is a stop of its knob, not a bot of its own; a name folded in that way
+  stays readable as a legacy name (`ai.LEGACY`; [`bot-families.md`](bot-families.md)). `bot_replay.aux_note` sends a named stop
   to the board as "Label: Stop", which `format.mjs`'s `botProfile` prints
   without a number. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
   preserves that — `aux` is the one field whose int/float form survives a
@@ -936,6 +942,9 @@ a per-seat dispatcher that routes each seat to its named strategy
 built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
 crashes). Keep this inversion — it is why the core has no AI dependency, and it is
 the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
+A legacy name (`ai.LEGACY`, a bot since folded into a family as a stop) is
+never registered; `ai.decide` plays it as its family at its stop
+([`bot-families.md`](bot-families.md)).
 
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring

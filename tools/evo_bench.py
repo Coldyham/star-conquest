@@ -121,7 +121,7 @@ def use_weights(path: str | None) -> None:
 def play_one(cell: Cell, seed: int, seats: tuple[Seat, ...], scale: float,
              weights: str | None = None) -> dict:
     """One game; ``seats[i]`` holds pid ``i + 1``. Returns the ledger row."""
-    if not ai.STRATEGIES.get(seats[0].name) or "thinker" not in ai.STRATEGIES:
+    if not ai.known(seats[0].name) or "thinker" not in ai.STRATEGIES:
         ai.load_models()
     use_weights(weights)
     # Every call, not only on first load: a forked worker (Linux) inherits the
@@ -245,7 +245,7 @@ def main() -> None:
         args.seeds = QUICK_SEEDS if args.quick else 50
     cells = [Cell.parse(c) for c in (args.cell or (QUICK_CELLS if args.quick else CELLS))]
     for s in [bot, *opps]:
-        if s.name not in ai.STRATEGIES:
+        if not ai.known(s.name):
             raise SystemExit(f"unknown bot {s.name!r}; known: {', '.join(sorted(ai.STRATEGIES))}")
 
     folder = RESULTS if math.isinf(args.budget_scale) else RESULTS / "clock"

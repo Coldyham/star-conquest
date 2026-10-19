@@ -10,6 +10,7 @@
 // There is no account behind it; the game owns the store and this page never
 // prunes it.
 
+import { profileLabel, seatProfile } from "./bots.mjs";
 import { GAME_URL, PLAYER_COLORS, PLAYER_NAMES } from "./config.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 import { phrase } from "./matchnames.mjs";
@@ -98,10 +99,16 @@ export function roster(match) {
       kind,
       state,
       name: kind === "person" ? (names[seat] || "").trim() : "",
-      bot: kind === "bot" ? ((settings.ai_strategy || [])[seat - 1] || "heuristic") : "",
+      bot: kind === "bot" ? seatBot(settings, seat) : "",
     });
   }
   return rows;
+}
+
+/** A bot seat's name as the board shows it: "knower · council", "random", "heuristic". */
+function seatBot(settings, seat) {
+  const name = (settings.ai_strategy || [])[seat - 1] || "heuristic";
+  return name === "random" ? name : profileLabel(seatProfile(name, ((settings.ai || [])[seat - 1] || {}).aux));
 }
 
 /** "Alice", "open seat", "knower (bot)", "random bot", or "player" for an unnamed person. */

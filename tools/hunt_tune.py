@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Tune hunter's constants together with CMA-ES against a panel of bots.
+"""Tune Hunt's constants (actuary's Style: Hunt) together
+with CMA-ES against a panel of bots.
 
     uv run --with cma python tools/hunt_tune.py --hours 0.1 --pop 4 --seeds 2   # smoke
     uv run --with cma python tools/hunt_tune.py --hours 10 --run t1
@@ -10,7 +11,9 @@ every cell, so candidates are ranked on common dice. Fitness is the mean seed
 score. Each generation's mean, best and the CMA mean vector append to
 results/hunter/tune/<run>.jsonl, so a stopped run still says where it was. The
 search runs in a normalised space: each constant is its value over its scale,
-clamped to its bounds on read.
+clamped to its bounds on read. The constants Hunt shares with actuary's other
+stops (``SELF_RELIEF``, ``FRONT_BONUS``, ...) move an actuary panel bot too
+(`hunt_bench`): tune them against marshal alone, or not at all.
 """
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ import hunt_bench  # noqa: E402
 # name: (start, scale, low, high, integer)
 SPACE = {
     "EDGE_RISK_WEIGHT": (1.0, 0.3, 0.2, 3.0, False),
-    "REINFORCE_WEIGHT": (0.45, 0.15, 0.0, 1.2, False),
+    "HUNT_REINFORCE_WEIGHT": (0.45, 0.15, 0.0, 1.2, False),
     "SELF_RELIEF": (0.8, 0.2, 0.0, 1.0, False),
     "FRONT_BONUS": (0.5, 0.2, 0.1, 1.5, False),
     "FRONT_DECAY": (0.5, 0.15, 0.1, 0.95, False),
@@ -44,6 +47,7 @@ SPACE = {
     "EDGE_SWING": (1.222, 0.06, 1.0, 1.4, False),
 }
 PANEL = ("actuary", "marshal")
+HUNT = "actuary:3"
 CELLS = ("7:6", "11:6", "18:6", "24:3", "18:18")
 
 
@@ -69,13 +73,13 @@ def fitness(variants, seeds, ex) -> list[float]:
         for opp in PANEL:
             for cell in CELLS:
                 for seed in seeds:
-                    for seats in (("hunter", opp), (opp, "hunter")):
+                    for seats in ((HUNT, opp), (opp, HUNT)):
                         jobs.append((cell, seed, seats, v))
                         keys.append((i, opp, cell, seed))
     scores: dict = {}
     for key, row in zip(keys, ex.map(one, jobs, chunksize=4)):
         w = row["winner"]
-        res = 0.5 if not w else (1.0 if row["seats"][w - 1] == "hunter" else 0.0)
+        res = 0.5 if not w else (1.0 if row["seats"][w - 1] == HUNT else 0.0)
         scores.setdefault(key, []).append(res)
     out = [[] for _ in variants]
     for (i, *_), v in scores.items():

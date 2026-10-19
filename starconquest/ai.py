@@ -18,6 +18,7 @@ import inspect
 import math
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from . import config, model
@@ -80,9 +81,77 @@ def register(name: str, fn: DecideFn) -> None:
 
 
 def decide(state: GameState, pid: int) -> list[Order]:
-    """Dispatch a seat to its chosen strategy (falling back to the heuristic)."""
-    strategy = STRATEGIES.get(state.players[pid].ai_strategy, compute_orders)
-    return strategy(state, pid)
+    """Dispatch a seat to its chosen strategy (falling back to the heuristic).
+
+    A legacy name (`LEGACY`) plays as its family at the stop it was folded into.
+    The seat is shown to the family under that name and stop for the length of
+    the call and put back after, so the stored name never changes and the bot
+    reads its own knob, as any seat of its own would hold it."""
+    return (strategy_fn(state.players[pid].ai_strategy) or compute_orders)(state, pid)
+
+
+def strategy_fn(name: str) -> DecideFn | None:
+    """The decide function a seat named ``name`` plays with, or None if nothing
+    plays it: the registered one, or for a legacy name its family's, run with
+    the seat shown as the family at its stop (see `decide`)."""
+    fn = STRATEGIES.get(name)
+    if fn is not None or name not in LEGACY:
+        return fn
+    family_fn = STRATEGIES.get(LEGACY[name][0])
+    if family_fn is None:
+        return None
+
+    def legacy(state: GameState, pid: int) -> list[Order]:
+        player = state.players[pid]
+        held = player.ai_strategy, player.ai_params
+        family_name, aux = canonical(name, player.ai_params.aux)
+        player.ai_strategy, player.ai_params = family_name, replace(player.ai_params, aux=aux)
+        try:
+            return family_fn(state, pid)
+        finally:
+            player.ai_strategy, player.ai_params = held
+    return legacy
+
+
+def known(name: str) -> bool:
+    """Does a seat named ``name`` play as a bot here (registered, or legacy)?"""
+    return strategy_fn(name) is not None
+
+
+# A bot folded into another as one of its aux stops, by its old name: the family
+# that plays it now and the stop it plays at, either one stop or one per value of
+# the old bot's own knob (read as that bot read it, rounded and clamped into its
+# keys; unreadable is the highest key). The one place a stored name becomes a
+# family and a stop: a stored `Settings`, a pool and a log keep the old name, so
+# no challenge key, deal or replay moves. A name here is never registered.
+# Mirrored for the leaderboard in `leaderboard/schema.sql` (`sc_bot_profile`).
+LEGACY: dict[str, tuple[str, int | dict[int, int]]] = {
+    "council": ("knower", {0: 2, 1: 3}),
+    "claudebot": ("thinker", 0),
+}
+
+
+def canonical(name: str, aux: float) -> tuple[str, float]:
+    """``(family, aux)`` for a seat stored as ``name`` at ``aux``: itself unless
+    ``name`` is a legacy name (`LEGACY`)."""
+    entry = LEGACY.get(name)
+    if entry is None:
+        return name, aux
+    family, stop = entry
+    if isinstance(stop, dict):
+        keys = sorted(stop)
+        try:
+            key = max(keys[0], min(keys[-1], round(float(aux))))
+        except Exception:                 # noqa: BLE001 — a hand-edited token
+            key = keys[-1]
+        stop = stop[key]
+    return family, float(stop)
+
+
+def family(name: str) -> str:
+    """The registered strategy a name plays as: itself, or a legacy name's family."""
+    entry = LEGACY.get(name)
+    return entry[0] if entry is not None else name
 
 
 # The measured full-roster ladder (docs/design/marshal.md "Full roster ladder"),
@@ -91,13 +160,12 @@ def decide(state: GameState, pid: int) -> list[Order]:
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
 # aux=12), not its default seat. actuary tops that same ladder at the defaults
 # (Style: Field) but loses to knower at Search (43.5%), so it sits second
-# (docs/design/field.md).
-# council, knower's Search with a learned judge, beats knower at Search by 40
-# points above the fair share on untouched seeds, so it heads the list
-# (docs/design/council.md).
+# (docs/design/field.md). evolved sits between marshal and thinker
+# (docs/design/evolved.md, "Where it stands"). One entry per family, placed by
+# its top stop: knower at Council, actuary at Hunt, thinker at Thinker.
 # A strategy missing from this list — a fresh drop-in with no measured ladder
 # placement — sorts alphabetically after it.
-LADDER_ORDER = ["council", "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"]
+LADDER_ORDER = ["knower", "actuary", "marshal", "evolved", "thinker", "heuristic", "rusherplus"]
 
 
 def available_strategies() -> list[str]:
@@ -117,6 +185,12 @@ AuxSpec = tuple[str, float, float, float, bool]  # label, lo, hi, step, is_int
 AUX_RANGE_DEFAULT = (0.0, 8.0, 1.0)
 
 
+def _module(name: str):
+    """The module that registered strategy ``name`` (a legacy name's family's)."""
+    fn = STRATEGIES.get(family(name))
+    return sys.modules.get(getattr(fn, "__module__", "") or "")
+
+
 def aux_spec(name: str) -> AuxSpec | None:
     """What ``ai_params.aux`` means for strategy ``name``, or None if it ignores it.
 
@@ -124,8 +198,7 @@ def aux_spec(name: str) -> AuxSpec | None:
     declaration falls back rather than raising, so a bad model can only cost itself
     the slider.
     """
-    fn = STRATEGIES.get(name)
-    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    module = _module(name)
     label = getattr(module, "AUX_LABEL", None)
     if not isinstance(label, str) or not label.strip():
         return None
@@ -150,8 +223,7 @@ def aux_names(name: str) -> tuple[str, ...] | None:
     if spec is None:
         return None
     _label, lo, hi, step, is_int = spec
-    fn = STRATEGIES.get(name)
-    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    module = _module(name)
     names = getattr(module, "AUX_NAMES", None)
     if not is_int or step != 1 or not isinstance(names, (tuple, list)):
         return None
@@ -161,14 +233,47 @@ def aux_names(name: str) -> tuple[str, ...] | None:
     return tuple(n.strip() for n in names)
 
 
+def aux_over(name: str) -> float | None:
+    """The stop a value past the top of strategy ``name``'s knob reads as, when
+    that is not the top stop itself, else None.
+
+    A bot that grows a new top stop declares ``AUX_OVER``, the top it had
+    before, so a stored value above the old range (knower's depth slider ran to
+    12) keeps reading as the stop it always read as; the new stop is reached
+    only by its own value. Frozen once declared: it is what old seats mean."""
+    spec = aux_spec(family(name))
+    over = getattr(_module(name), "AUX_OVER", None)
+    if spec is None or not isinstance(over, (int, float)) or not spec[1] <= over < spec[2]:
+        return None
+    return float(over)
+
+
+def aux_reads_as(name: str, aux: float) -> float:
+    """The value strategy ``name``'s knob reads ``aux`` as: a legacy name's stop
+    in its family (`canonical`), and a value past the top as `aux_over`.
+    Otherwise ``aux`` itself; the bot clamps the rest as it always has."""
+    name, aux = canonical(name, aux)
+    spec = aux_spec(name)
+    over = aux_over(name)
+    if spec is not None and over is not None:
+        try:
+            if float(aux) > spec[2]:
+                return over
+        except (TypeError, ValueError):
+            pass
+    return aux
+
+
 def aux_stop_name(name: str, aux: float) -> str | None:
     """The name of the stop ``aux`` sits on for strategy ``name``, or None when its
-    knob names no stops. Clamped into range, as the slider itself would be."""
+    knob names no stops. A legacy name reads as its family's stop, a value past
+    the top as `aux_over`, and the rest is clamped into range, as the slider
+    itself would be."""
     names = aux_names(name)
     if names is None:
         return None
     lo = aux_spec(name)[1]
-    return names[max(0, min(len(names) - 1, round(aux - lo)))]
+    return names[max(0, min(len(names) - 1, round(aux_reads_as(name, aux) - lo)))]
 
 
 def setup_warning(name: str, settings, seats: list[int],
@@ -184,8 +289,7 @@ def setup_warning(name: str, settings, seats: list[int],
     parameter is told which seats a person holds, so it can tell the bots it
     will face from the people (every other seat up to ``settings.players``).
     """
-    fn = STRATEGIES.get(name)
-    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    module = _module(name)
     hook = getattr(module, "setup_warning", None)
     if not callable(hook):
         return []
@@ -213,8 +317,7 @@ def decide_ms(name: str, settings, seat: int) -> float:
     nothing to declare. Tolerant like the other hooks: missing, raising or junk
     reads as 0.0.
     """
-    fn = STRATEGIES.get(name)
-    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    module = _module(name)
     hook = getattr(module, "decide_ms", None)
     if not callable(hook):
         return 0.0

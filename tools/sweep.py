@@ -331,7 +331,7 @@ def validate(arms: list[Arm], baseline: Arm, cells: list[Cell]) -> None:
         by_identity[ident] = f"arm {arm.name!r}"
 
     for arm in arms + [baseline]:
-        if arm.strategy not in ai.STRATEGIES:
+        if not ai.known(arm.strategy):
             _fatal(f"arm {arm.name!r}: unknown strategy {arm.strategy!r}",
                    f"registered: {', '.join(ai.available_strategies())}")
         if arm.consts:

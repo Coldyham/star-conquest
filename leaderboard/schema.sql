@@ -222,20 +222,68 @@ language sql immutable strict parallel safe as $$
   select substr(md5((settings - array['seed', 'autoplay'])::text), 1, 16);
 $$;
 
--- The distinct opponent strategies over seats 2..players. ai_strategy is indexed
--- from seat 1 (index 0 is the human), trailing "heuristic" entries are trimmed,
--- and the key is absent when every seat is default, so a missing, trimmed or
--- blank entry reads as 'heuristic'. The client reads this column rather than
--- re-deriving it.
+-- One seat's bot as the board names it: "family:stop" for a bot with a stop
+-- knob, the name alone otherwise. A name folded into a family as a stop
+-- (ai.LEGACY: council, claudebot) is that family at that stop; council read any
+-- aux that rounds to 1 or more as On. A stop is the whole part of aux, clamped
+-- into the knob's range, except that a value past the top reads as `over`, the
+-- top the knob had before its last stop was added (ai.aux_over); a missing or
+-- unreadable aux is 1, every bot's default (evolved rounds where this takes the
+-- whole part, which only a hand-edited fraction can tell apart). Both tables
+-- are pinned to ai.py by tests/test_leaderboard_sync.py.
+create or replace function public.sc_bot_profile(p_name text, p_aux text)
+returns text
+language sql immutable parallel safe as $$
+  with legacy(old, family, off_stop, on_stop) as (values
+    ('council', 'knower', 2, 3),
+    ('claudebot', 'thinker', 0, 0)
+  ), knobs(family, lo, hi, over) as (values
+    ('knower', 0, 3, 2),
+    ('actuary', 0, 3, 2),
+    ('thinker', 0, 1, null::integer),
+    ('evolved', 0, 1, null::integer)
+  ), seat as (
+    select coalesce(l.family, p_name) as family, l.off_stop, l.on_stop,
+           case when p_aux ~ '^\s*-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?\s*$'
+                then p_aux::numeric else 1 end as aux
+    from (values (1)) as one(x)
+    left join legacy l on l.old = p_name
+  )
+  select case
+    when k.family is null then s.family
+    else s.family || ':' || case
+      when s.on_stop is not null then
+        case when round(s.aux) >= 1 then s.on_stop else s.off_stop end
+      when s.aux > k.hi and k.over is not null then k.over
+      else greatest(k.lo, least(k.hi, floor(s.aux)))::integer
+    end
+  end
+  from seat s left join knobs k on k.family = s.family;
+$$;
+
+-- The distinct opponents over seats 2..players: each seat's family and, for a
+-- bot with a stop knob, its "family:stop" profile too (sc_bot_profile), so a
+-- filter on `knower` finds every knower seat and one on `knower:3` that stop
+-- alone (format.mjs's botChips shows the profiles). ai_strategy and ai are
+-- indexed from seat 1 (index 0 is the human), trailing default entries are
+-- trimmed, and a key is absent when every seat is default, so a missing,
+-- trimmed or blank strategy reads as 'heuristic'. A random seat reads as
+-- 'random': which bot it was dealt is in its log, not its setup. The client
+-- reads this column rather than re-deriving it.
 create or replace function public.sc_bots(settings jsonb, p_players integer)
 returns text[]
 language sql immutable strict parallel safe as $$
   select coalesce(array_agg(distinct bot order by bot), array[]::text[])
   from (
-    select coalesce(
-             nullif(trim(settings #>> array['ai_strategy', (s.seat - 1)::text]), ''),
-             'heuristic') as bot
-    from generate_series(2, greatest(p_players, 1)) as s(seat)
+    select unnest(case when p like '%:%' then array[split_part(p, ':', 1), p]
+                       else array[p] end) as bot
+    from (
+      select public.sc_bot_profile(
+               coalesce(nullif(trim(settings #>> array['ai_strategy', (s.seat - 1)::text]), ''),
+                        'heuristic'),
+               settings #>> array['ai', (s.seat - 1)::text, 'aux']) as p
+      from generate_series(2, greatest(p_players, 1)) as s(seat)
+    ) seats
   ) q;
 $$;
 
@@ -830,8 +878,8 @@ grant insert on public.users, public.games, public.configs,
 revoke insert on public.scores from anon, authenticated;
 grant insert (game_key, user_id, turns, lost, hand, by_name, raw_token, match_id,
   campaign_start) on public.scores to anon, authenticated;
-grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer)
-  to anon, authenticated;
+grant execute on function public.sc_config_key(jsonb), public.sc_bots(jsonb, integer),
+  public.sc_bot_profile(text, text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Grants to service_role, the secret key the workers and functions hold. It
