@@ -59,6 +59,8 @@ the section holding the evidence.
 - **Win rate is not the whole objective.** Watch timeouts and game length; score
   a timeout by who was ahead (`tools/sweep.py`'s `TIMEOUT_LEAD`) and, for a
   finalist, as a loss too. See [`marshal.md`](marshal.md), first section, and [`marshal-joint.md`](marshal-joint.md).
+  Against bots it nearly always beats, a bot's turns to win are the reading
+  (`tools/win_turns.py`; [`win-turns.md`](win-turns.md)).
 - **Check, rather than assume, that a variant with every new flag off is
   bit-identical to the base.** See [`marshal-pricing.md`](marshal-pricing.md),
   "Two doomed neighbours…", and [`marshal-flow.md`](marshal-flow.md), "The empty

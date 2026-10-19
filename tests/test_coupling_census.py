@@ -19,8 +19,14 @@ from tools import coupling_census as cc
 
 @pytest.fixture(scope="module")
 def ma():
+    """marshal with ``SPARE_TARGET`` off, the bot the board below was worked out
+    for: with it the 15-ship stack is affordable from 20 (``_front_board``)."""
     assert "marshal" in ai.load_models(), "models/marshal.py failed to import"
-    return sys.modules["sc_model_marshal"]
+    module = sys.modules["sc_model_marshal"]
+    spare = module.SPARE_TARGET
+    module.SPARE_TARGET = False
+    yield module
+    module.SPARE_TARGET = spare
 
 
 def _front_board():

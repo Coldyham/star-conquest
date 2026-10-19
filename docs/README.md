@@ -50,7 +50,8 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/seat-play.md`](design/seat-play.md) | Six games played by hand against marshal and actuary with `tools/seat_play.py`: what decided them, strikes on emptied systems (people refill, bots do not), marshal's price against a seat that stands, and a person's brief |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post |
 | [`design/bots.md`](design/bots.md) | The roster as a whole: measurement method, the parameter space, real-game positions, replaying bots for the board, break-even margins, defender advantage, the bot maker, non-Python bots |
-| [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost |
+| [`design/win-turns.md`](design/win-turns.md) | Turns to win (`tools/win_turns.py`): how fast the top bots win against bots they nearly always beat; the reading (a game not won counts as slower than any win, then the opening, middle game and close), pairing two trees game by game, ledgers keyed by a code digest, the first readings |
+| [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost, what Search does with a doomed garrison |
 | [`design/bot-families.md`](design/bot-families.md) | One bot per family, its variants as stops of its knob: the families, how each fold was proved to play the same (`tools/fold_check.py`), legacy names (`ai.LEGACY`), `AUX_OVER`, the random pool's profiles, the bot column and its two-part chips |
 | [`design/council.md`](design/council.md) | knower's Oracle: Council (once the bot council): knower's Search with a learned judge, actuary as an adviser, and each adviser playing its own line; the measurements, the cost, what was dropped |
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |

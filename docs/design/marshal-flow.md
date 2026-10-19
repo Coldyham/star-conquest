@@ -743,6 +743,11 @@ constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
 > to about 3 and is flat to 6, where nearly every front facing a rival counts as
 > short. Shipped with a pour floor and `RELIEF_AWARE` 0.65; see "Screening against
 > the roster" in [`marshal-joint.md`](marshal-joint.md).
+>
+> **Revisited (2026-10-19): `FEED_MAX_TURNS` 0, on every board.** Level with the
+> cap against the roster, and with `SPARE_TARGET` 57.7% on beats and 5.3% sooner
+> against the weak bots. See "marshal: sparing the target and feeding on every
+> board" in [`win-turns.md`](win-turns.md).
 
 ### Measured null (2026-10-12): no lone trickles into a rival
 

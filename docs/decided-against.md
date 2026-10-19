@@ -26,6 +26,8 @@ the measured result was indistinguishable from the baseline.
 - Hybrids (−4.9 points) and dice shopping against the real keyed dice (−8.7). *Same section.*
 - NTBEA tuning, root crossover, successive halving: null on confirmation. *Same section.*
 - Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Same section.*
+- A doomed garrison leaving whole (`_flee`) on Council: null against bots (50.8%, ships lost -0.39), 47.1% (z -1.2) on the posted maps. Shipped on Search only. *A doomed garrison leaves whole* (knower.md).
+- Offering the picked opening again with the systems its rollout lost held (`_cover`): null against the weak bots, marshal, knower:2 (a z +1.7 lean that did not replicate) and the 153 posted maps. Ranking down lines that lose a system they stripped (`LOSS_PENALTY` 0.03, 0.10): halves the lost empties and loses to the old council 37.6% and 25.2% on the posted maps. Council foresees 48 of 54 such losses; they are trades. *Stripped frontiers are trades, not mistakes.*
 
 ## marshal: [`design/marshal.md`](design/marshal.md)
 - Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*
@@ -60,6 +62,15 @@ the measured result was indistinguishable from the baseline.
 - A higher pour floor on its own (0.75, 1.0) at the shipped guard against marshal: null to worse. A lower floor for relief alone: null; for the front top-ups alone: +0.7. *Same section*. Against the roster 0.85 adds: +1.65 weighted in the factorial, +0.85 at D. *Screening against the roster*.
 - The guard moved as one number, up or down (0.40-1.0, every floor): it trades actuary against marshal and knower (1.0: +4.3 against actuary, -8.1 against marshal, -5.8 against knower), so no level survives the weighted screen. A strike floor above the pour (0.85 / 0.55): -7.6 against marshal. A long-lane guard weight (0.5, 1.5): worse. `RELIEF_AWARE` 0.35 (-3.0 against actuary) or 1.0 (-3.2 against marshal). `FEED_FRONT` off at `FEED` 3: -3.4. *Screening against the roster*.
 - **Open, not rejected:** the guard at 0.45 under the shipped 0.85 pour floor (ends a quarter of the stalemates against marshal, mixed against knower); D at defender advantage 1.5, its one losing cell (-2.0 against knower); a pour floor shaped by lane length. *Screening against the roster*, *Against the roster*.
+
+## marshal: [`design/win-turns.md`](design/win-turns.md)
+- The guard at 0 (ends the most stalemates against weak bots, -8.2 against actuary). A guard scaled down by a lead in ships (`LEAD_GUARD`): worse against knower and actuary. No guard past 75% or 90% of the income: slightly slower. Half or three quarters of the target's guard released: worse but against actuary. The pour floor sparing the target too: no gain. *What else was tried*.
+- Relief from a rival system bordering one of ours at least its size, discounted: -5.1 against actuary at 0. A neutral-only front feeding a short rival front: fewer wins, -2.6 against marshal. No neutral targets past a lead: a ships-lost tie-break only, and can strand the last strike. *Same section*.
+- On top of `SPARE_TARGET`: the neutral price at the worst-roll edge, `RELIEF_AWARE` 0.35, `RELIEF_IN_FLIGHT` 0.25, `FRONTIER_GUARD` 0.45, `POUR_GUARD` 0.55, `FEED` off, `HOLD_FOLLOW` 0.5: null or worse. *Same section*.
+- A relay from a neutral-only front to a neighbour's unstruck capture (four forms): up to 52.7% on the screen, 50.5% on fresh seeds. *A second round, nothing shipped*.
+- A rival attack margin above the advantage alone (x1.1, x1.2): gains against heuristic, which stands, and loses against thinker, which flees. On 1-turn strikes only, or on a garrison with nowhere to flee: null. *Same section*.
+- `FEED` below 3 (39.8% at 1). `FEED` 20: 55.0% on fresh seeds but -1.1 / +1.0 / -1.5 against marshal, knower and actuary, for 1.5% of turns. Phase 4 by travel turns, relief pricing dropped on empty targets, a neutral priced through a rival landing with us, targets by richness per ship, and twelve constants: null or worse. *Same section*.
+- **Open, not rejected:** a counter-punch on a rival system the turn after its garrison leaves. `FEED` 20 if the roster moves. *Same section*.
 
 ## actuary ([`design/actuary.md`](design/actuary.md))
 - Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*

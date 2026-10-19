@@ -375,8 +375,9 @@ def _decide(state, pid, depth):
             # into `decide`, which `_surrogate`'s identity check cannot see.
             _DEPTH += 1
             try:
-                return _search(state, pid, orc, _horizon(state),
+                root = _search(state, pid, orc, _horizon(state),
                                time.perf_counter() + SEARCH_BUDGET_S * BUDGET_SCALE)
+                return root if _COUNCIL else _flee(state, orc, pid, root)
             finally:
                 _DEPTH -= 1
         return _plan(state, pid, orc)
@@ -1272,6 +1273,95 @@ def _council_warning(settings, council, seats, people=()) -> list[str]:
     out.append(f'Set Knower\'s Oracle to "Predict", {smaller} or increase ship speed '
                "to avoid this")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# A doomed garrison leaves whole
+# --------------------------------------------------------------------------- #
+# Search plays whichever opening wins its rollouts, and a borrowed one keeps its
+# author's habits: heuristic keeps a reserve home whatever is coming, so a
+# system about to be overrun can hold back a few ships of an evacuation that
+# was otherwise right. Under the square law a garrison far smaller than the
+# wave kills next to nothing (3 against 20 leaves round(sqrt(391)) = 20), so
+# those ships are thrown away. `_flee` runs on the opening Search chose,
+# whatever it is: a garrison the oracle sees overrun this turn whatever the
+# dice, killing fewer than `FLEE_BELOW` of its own number at the nominal roll,
+# leaves. Not on Council, where it measured null against bots and leaned worse
+# on the posted maps. docs/design/knower.md, "A doomed garrison leaves whole".
+FLEE_BELOW = 0.5                # 0 turns it off
+
+
+def _flee(state, orc, pid, orders):
+    """``orders`` with every garrison that would die for next to nothing sent away.
+
+    The ships left behind join the biggest fleet the opening already sends from
+    that system, or, where it sends none, go where `_evacuate` would take a
+    doomed garrison (a capture in reach, else the friend next door with the
+    biggest garrison; a cornered one stays). Our own launches that would land there this turn, into
+    the same lost fight, stay home.
+
+    Only what is certain counts as landing: fleets already flying, and the
+    launches of seats the oracle reads exactly. A person's predicted strike is a
+    guess, and a guess may raise a threat (`_garrison`) but never empty a
+    system.
+    """
+    if orc is None or FLEE_BELOW <= 0:
+        return orders
+    post = orc.post
+    # `post` is the board's fleets, in order, then each predicted launch as
+    # `engine.apply_order` clamped it.
+    flying = len(state.fleets)
+    landing: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for k, f in enumerate(post.fleets):
+        if f.turns_remaining <= 1 and (k < flying or f.owner_id in orc.trusted):
+            landing[f.dest_id][f.owner_id] += f.ships
+    sent: dict[int, int] = defaultdict(int)
+    for o in orders:
+        sent[o.source_id] += o.ships
+        if (state.travel_turns(o.source_id, o.dest_id) or 1) <= 1:
+            landing[o.dest_id][pid] += o.ships
+
+    out = list(orders)
+    max_prod = None
+    for sid in sorted(landing):
+        s = state.systems[sid]
+        left = s.ships - sent[sid]
+        hostile = sorted((n for q, n in landing[sid].items() if q != pid and n > 0),
+                         reverse=True)
+        if s.owner_id != pid or left <= 0 or not hostile:
+            continue
+        held = left + _production_by(s, 1) + landing[sid][pid]
+        wave = _fold(hostile)
+        fight = combat.preview_fight(wave, held, config.COMBAT_JITTER,
+                                     config.DEFENDER_ADVANTAGE)
+        if fight.worst.winner != combat.ATTACKER:
+            continue                     # it could hold, or take them all with it
+        if wave - fight.nominal.survivors >= FLEE_BELOW * held:
+            continue                     # it sells itself dearly enough to stay
+        out = [o for o in out if not (o.dest_id == sid and
+                                      (state.travel_turns(o.source_id, sid) or 1) <= 1)]
+        mine = [k for k, o in enumerate(out) if o.source_id == sid]
+        if mine:
+            k = max(mine, key=lambda k: out[k].ships)
+            out[k] = replace(out[k], ships=out[k].ships + left)
+            continue
+        if max_prod is None:
+            max_prod = max(x.production for x in post.systems.values())
+        order = _evacuate(post, orc, pid, post.systems[sid], max_prod, _posture())
+        if order is not None:
+            out.append(replace(order, ships=left))
+    return out
+
+
+def _fold(sides: list[int]) -> int:
+    """The force left standing when attacking sides, strongest first, fight each
+    other before the garrison (`combat.resolve_arrival`'s pile-up), at the
+    nominal roll."""
+    cur = sides[0]
+    for ships in sides[1:]:
+        roll = combat.preview_fight(cur, ships, 0.0, 1.0).nominal
+        cur = roll.survivors
+    return cur
 
 
 # --------------------------------------------------------------------------- #

@@ -16,7 +16,7 @@ those files. Two companion pages are for **grepping, not reading whole**:
 **Grep `docs/decided-against.md` before proposing a mechanism, a bot tactic or a
 re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
-`hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `bot-families`, `knower`,
+`hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `win-turns`, `bot-families`, `knower`,
 `council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`,
 `actuary`, `hunter`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
@@ -56,6 +56,8 @@ uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by ha
 uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --variant) vs Field, paired
 uv run python tools/candidate_bench.py --borrow evolved:0   # a bot as one more knower candidate, paired
 uv run python tools/fold_check.py               # a stop plays as the bot folded into it
+uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
+                                                # (--label NEW --base OLD pairs two trees game by game)
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
 uv run python tools/evo_bench.py --bot evolved --quick --seeds 50   # evolved's gate
 uv run --with cma python tools/evo_train.py --run NAME  # retrain evolved (CMA-ES)
@@ -64,6 +66,13 @@ node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 
 No lint step; match the surrounding style. Pylance basic type-checking
 (`.vscode/settings.json`) warnings are real signal.
+
+Run the tests a change can reach, not the whole suite each time. A docs-only
+change needs none unless a test reads the file (`tests/test_bot_brief.py` reads
+`docs/bot-brief.md`, `tests/test_botio.py` reads `bots/README.md`). A change to
+one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
+has `tests/test_council.py`). Run the full suite after a change to
+`starconquest/`, and before opening a PR on a code change.
 
 ## Architecture
 
