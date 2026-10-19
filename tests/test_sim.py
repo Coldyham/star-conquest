@@ -457,11 +457,10 @@ def test_budget_scale_is_wired_and_only_matters_when_it_bites():
 
 def test_set_budget_scale_only_touches_bots_that_declare_one():
     # Opt-in and declarative, like aux_spec: a bot with no wall-clock guard has
-    # nothing to scale and must be left alone.
+    # nothing to scale and must be left alone. hunter's guard is on its look-ahead.
     ai.load_models()
     try:
-        # evolved declares one for its look-ahead's 50 ms guard.
-        assert ai.set_budget_scale(50) == ["council", "evolved", "knower"]
+        assert ai.set_budget_scale(50) == ["council", "evolved", "hunter", "knower"]
     finally:
         ai.set_budget_scale(1)
 
