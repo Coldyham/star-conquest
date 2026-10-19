@@ -65,7 +65,10 @@ the measured result was indistinguishable from the baseline.
 - The guard at 0 (ends the most stalemates against weak bots, -8.2 against actuary). A guard scaled down by a lead in ships (`LEAD_GUARD`): worse against knower and actuary. No guard past 75% or 90% of the income: slightly slower. Half or three quarters of the target's guard released: worse but against actuary. The pour floor sparing the target too: no gain. *What else was tried*.
 - Relief from a rival system bordering one of ours at least its size, discounted: -5.1 against actuary at 0. A neutral-only front feeding a short rival front: fewer wins, -2.6 against marshal. No neutral targets past a lead: a ships-lost tie-break only, and can strand the last strike. *Same section*.
 - On top of `SPARE_TARGET`: the neutral price at the worst-roll edge, `RELIEF_AWARE` 0.35, `RELIEF_IN_FLIGHT` 0.25, `FRONTIER_GUARD` 0.45, `POUR_GUARD` 0.55, `FEED` off, `HOLD_FOLLOW` 0.5: null or worse. *Same section*.
-- **Open, not rejected:** a relay pooling two neutral-only fronts into one cheap capture. *What is left*.
+- A relay from a neutral-only front to a neighbour's unstruck capture (four forms): up to 52.7% on the screen, 50.5% on fresh seeds. *A second round, nothing shipped*.
+- A rival attack margin above the advantage alone (x1.1, x1.2): gains against heuristic, which stands, and loses against thinker, which flees. On 1-turn strikes only, or on a garrison with nowhere to flee: null. *Same section*.
+- `FEED` below 3 (39.8% at 1). `FEED` 20: 55.0% on fresh seeds but -1.1 / +1.0 / -1.5 against marshal, knower and actuary, for 1.5% of turns. Phase 4 by travel turns, relief pricing dropped on empty targets, a neutral priced through a rival landing with us, targets by richness per ship, and twelve constants: null or worse. *Same section*.
+- **Open, not rejected:** a counter-punch on a rival system the turn after its garrison leaves. `FEED` 20 if the roster moves. *Same section*.
 
 ## actuary ([`design/actuary.md`](design/actuary.md))
 - Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
