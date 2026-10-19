@@ -6,6 +6,7 @@
 // missing key read as its default, never as text: settings_json is pruned to
 // non-defaults, and a Python-written `1.0` must equal a browser-written `1`.
 
+import { profileLabel, profiles } from "./bots.mjs";
 import { FOG_ON_SCOUT, FOG_ON_SIGHT, PACE_LY, SETUP_DEFAULTS, SHIP_LY_PER_TURN, STANDARD_MAX_NODES } from "./config.mjs";
 import { setupSummary, systemCount } from "./format.mjs";
 import { KNOB_LABELS } from "./setup.mjs";
@@ -81,7 +82,7 @@ function fogShown(sight, scout) {
 }
 
 function opponents(row) {
-  return [...new Set(row.bots || [])].sort();
+  return profiles(row.bots).map(profileLabel);
 }
 
 /**

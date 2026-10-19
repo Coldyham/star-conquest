@@ -329,6 +329,9 @@ h1::after {
 .badge:hover { background: #240a1a; }
 .chip { color: var(--dim); }
 .chip:hover { color: var(--cyan); border-color: var(--cyan); }
+/* A bot off its default stop: "knower · council", each half its own filter. */
+.chip.pair a { color: inherit; text-decoration: none; }
+.chip.pair a:hover { color: var(--cyan); }
 
 /* No human score beats this map's best bot yet — cyan for "machine", the same
  * convention .score.bot uses on a map's own page. Not a link: it states a

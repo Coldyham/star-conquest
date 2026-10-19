@@ -153,11 +153,11 @@ test("the difficulty word follows how many of the bots won, out of however many 
     createTextNode: (text) => text,
   };
   const word = (wins, runs) => difficultyLevel(Math.round((1 - wins / runs) * 1000) / 1000).text;
-  assert.deepEqual([8, 7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 8)),
-    ["Easy", "Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
-  // While a new bot is still being replayed, seven runs read the same counts.
   assert.deepEqual([7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 7)),
-    ["Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Hard", "Very hard"]);
+    ["Easy", "Easy", "Medium", "Medium", "Medium", "Hard", "Hard", "Very hard"]);
+  // While a new bot is still being replayed, six runs read the same counts.
+  assert.deepEqual([6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 6)),
+    ["Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Very hard"]);
   // PostgREST may hand a numeric over as a string.
   assert.equal(difficultyLevel("1.000").text, "Very hard");
   assert.equal(difficultyLevel(null), null);

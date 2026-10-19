@@ -160,11 +160,12 @@ def family(name: str) -> str:
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.
 # aux=12), not its default seat. actuary tops that same ladder at the defaults
 # (Style: Field) but loses to knower at Search (43.5%), so it sits second
-# (docs/design/field.md). One entry per family, placed by its top stop: knower
-# at Council, actuary at Hunt, thinker at Thinker.
+# (docs/design/field.md). evolved sits between marshal and thinker
+# (docs/design/evolved.md, "Where it stands"). One entry per family, placed by
+# its top stop: knower at Council, actuary at Hunt, thinker at Thinker.
 # A strategy missing from this list — a fresh drop-in with no measured ladder
 # placement — sorts alphabetically after it.
-LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "heuristic", "rusherplus"]
+LADDER_ORDER = ["knower", "actuary", "marshal", "evolved", "thinker", "heuristic", "rusherplus"]
 
 
 def available_strategies() -> list[str]:
