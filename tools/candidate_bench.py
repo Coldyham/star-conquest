@@ -35,8 +35,14 @@ live seat timed in CPU on the same position with the candidate and without, in
 one process; run it on a quiet machine.
 
 Wall-clock guards are lifted (``ai.set_budget_scale(inf)``), so the result is the
-same on any machine. Rows append to ``results/candidates/<label>.jsonl`` and a
-rerun skips games already there.
+same on any machine. Rows append to
+``results/candidates/<label>/<borrow>_stop<stop>.jsonl`` and a rerun plays only
+the games missing. As in `tools/win_turns.py`, every row carries ``rev``, a digest
+of the code that decides a game (`win_turns.play_rev`); the label defaults to it,
+so a changed tree starts a ledger of its own, and a named ledger refuses rows
+from another tree. The default seeds start past the block evolved was trained and
+selected on (2,000,000 to 5,400,000, docs/design/evolved.md, "Measuring it"), so a
+borrowed evolved meets no map its weights were fitted to.
 """
 from __future__ import annotations
 
@@ -61,9 +67,10 @@ from starconquest import ai, engine, replay  # noqa: E402
 from starconquest.settings import Settings, build_state  # noqa: E402
 from tools.bot_distance import PHASES, phase_of  # noqa: E402
 from tools.evo_bench import CELLS, Cell, Seat, load  # noqa: E402
+from tools.win_turns import foreign_revs, git_hint, play_rev  # noqa: E402
 
 RESULTS = ROOT / "results" / "candidates"
-SEED_BASE = 4_400_000
+SEED_BASE = 7_200_000
 MAX_TURNS = 600
 TIME_EVERY = 10                 # `--time`: a position every this many turns
 VARIANT, BASE = "variant", "base"
@@ -199,7 +206,7 @@ def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
     """One game; ``seats[i]`` holds pid ``i + 1`` and is VARIANT, BASE or the
     opponent's label. Returns the ledger row."""
     global _under_test, _borrow, _tally
-    if "knower" not in ai.STRATEGIES or borrow[0] not in ai.STRATEGIES:
+    if "knower" not in ai.STRATEGIES:
         ai.load_models()
     _patch()
     ai.set_budget_scale(math.inf)       # every call: a forked worker inherits guards
@@ -261,6 +268,10 @@ def _key(cell: str, seed: int, seats) -> str:
     return f"{cell}|{seed}|{','.join(seats)}"
 
 
+def ledger(label: str, borrow: Seat, stop: int) -> Path:
+    return RESULTS / label / f"{str(borrow).replace(':', '@')}_stop{stop}.jsonl"
+
+
 # --------------------------------------------------------------------------- #
 # Report
 # --------------------------------------------------------------------------- #
@@ -270,8 +281,9 @@ def _mean_z(xs: list[float], fair: float) -> tuple[float, float, int]:
         return math.nan, math.nan, 0
     mean = sum(xs) / n
     var = sum((x - mean) ** 2 for x in xs) / max(1, n - 1)
-    z = (mean - fair) / math.sqrt(var / n) if var > 0 else 0.0
-    return mean, z, n
+    if var > 0:
+        return mean, (mean - fair) / math.sqrt(var / n), n
+    return mean, 0.0 if mean == fair else math.copysign(math.inf, mean - fair), n
 
 
 def per_seed(rows: list[dict], cell: Cell, arm: str, other: str) -> dict[int, float]:
@@ -434,7 +446,7 @@ def time_cost(cells: list[Cell], seeds: range, stop: int, borrow) -> None:
     print(f"  load average {os.getloadavg()[0]:.2f}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--borrow", required=True, help="name[:aux] of the bot to borrow")
     ap.add_argument("--stop", type=int, default=2, choices=(2, 3),
@@ -445,50 +457,61 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=50)
     ap.add_argument("--seed-base", type=int, default=SEED_BASE)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
-    ap.add_argument("--label", default=None, help="ledger name (default: from --borrow and --stop)")
+    ap.add_argument("--label", default=None, help="ledger name (default: this tree's rev)")
     ap.add_argument("--report", action="store_true", help="re-print from the ledger only")
     ap.add_argument("--time", action="store_true",
                     help="time the candidate on matched positions instead (try --seeds 3)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     ai.load_models()
     borrow = Seat.parse(args.borrow)
     for name in [borrow.name, *(Seat.parse(s).name for s in args.vs)]:
         if name not in ai.STRATEGIES:
-            raise SystemExit(f"unknown bot {name!r}; known: {', '.join(sorted(ai.STRATEGIES))}")
+            ap.error(f"unknown bot {name!r}; known: {', '.join(sorted(ai.STRATEGIES))}")
     cells = [Cell.parse(c) for c in (args.cell or CELLS)]
     if args.time:
         time_cost(cells, range(args.seed_base, args.seed_base + args.seeds), args.stop,
                   (borrow.name, borrow.aux))
-        return
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    label = args.label or f"{str(borrow).replace(':', '@')}_stop{args.stop}"
-    ledger = RESULTS / f"{label}.jsonl"
-    rows = load(ledger)
+        return 0
+    rev = play_rev()
+    path = ledger(args.label or rev, borrow, args.stop)
+    rows = load(path)
+    if not args.report and foreign_revs(rows, rev):
+        ap.error(f"{path} holds games played by rev {', '.join(foreign_revs(rows, rev))}, and "
+                 f"this tree is rev {rev}: name a new --label, or delete the ledger")
+    stamp = {"rev": rev, "git": git_hint()}
     seeds = range(args.seed_base, args.seed_base + args.seeds)
+    print(f"this tree: rev {rev}" + (f", git {stamp['git']}" if stamp["git"] else "")
+          + f" · {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
     if not args.report:
         done = {_key(r["cell"], r["seed"], r["seats"]) for r in rows}
         jobs = [(c, s, seats, Seat.parse(o) if o != "knower" else None)
                 for c in cells for o in args.vs for s, seats in schedule(c, o, seeds)
                 if _key(str(c), s, seats) not in done]
-        print(f"{len(jobs)} games to play ({len(done)} already in {ledger.name}), "
+        print(f"{len(jobs)} games to play ({len(done)} already in the ledger), "
               f"{args.jobs} workers")
-        t0 = time.perf_counter()
-        with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool, \
-                open(ledger, "a") as fh:
-            futures = [pool.submit(play_one, c, s, seats, args.stop, (borrow.name, borrow.aux), o)
-                       for c, s, seats, o in jobs]
-            for i, fut in enumerate(as_completed(futures), 1):
-                row = fut.result()
-                fh.write(json.dumps(row) + "\n")
-                fh.flush()
-                rows.append(row)
-                if i % 50 == 0 or i == len(futures):
-                    print(f"  {i}/{len(futures)}  {time.perf_counter() - t0:.0f}s", flush=True)
+        if jobs:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            t0 = time.perf_counter()
+            with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool, \
+                    open(path, "a") as fh:
+                futures = [pool.submit(play_one, c, s, seats, args.stop, (borrow.name, borrow.aux), o)
+                           for c, s, seats, o in jobs]
+                for i, fut in enumerate(as_completed(futures), 1):
+                    row = {**fut.result(), **stamp}
+                    fh.write(json.dumps(row) + "\n")
+                    fh.flush()
+                    rows.append(row)
+                    if i % 50 == 0 or i == len(futures):
+                        print(f"  {i}/{len(futures)}  {time.perf_counter() - t0:.0f}s", flush=True)
     rows = [r for r in rows if r["seed"] in seeds]
+    if not rows:
+        print("no games in the ledger for these seeds")
+        return 1
     report(rows, cells, args.vs, f"knower at stop {args.stop} + {borrow}, "
                                  f"seeds {args.seed_base}+{args.seeds}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
