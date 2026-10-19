@@ -204,7 +204,59 @@ its look-ahead: **68.5% against the new actuary** (z +16.1; 7:6 73.8, 11:6 67.2,
 adopting the relief term itself measured +0.1 (null). Against the new marshal
 73.9% (z +19.8), down from 81.2% against the old one on 9.2M.
 
+## The field, by lane length (`FIELD`, `SLOW_LANE`, `SLOW_FRONT`)
+
+`main` made actuary's default *Style: Field* on 2026-10-18 ([`field.md`](field.md)):
+ships are pulled to where the balance of force is closest rather than to every
+front alike, and where the median lane is `SLOW_LANE` (5) turns or more the
+pull is half the field and half the old front. Field changes the pull; hunter
+changes the risk term and adds a look-ahead, so the two touch different parts of
+the ledger. hunter carries actuary's `_field` verbatim, behind `FIELD`, and
+`SLOW_FRONT` sets the front's share on slow boards (actuary's 0.5).
+
+Against actuary at Field, 11.0M, 50 seeds a cell, each arm paired with hunter on
+the front alone (63.0%; without the look-ahead 50.8%, so Field took plain
+hunter's old 55% edge away and the look-ahead is all of its lead):
+
+| arm | 7:6 | 11:6 | 18:6 | 24:3 | 18:18 | pooled |
+|---|---|---|---|---|---|---|
+| front alone (hunter before) | 69.0 | 61.0 | 58.0 | 80.5 | 46.5 | 63.0 |
+| actuary's pull (`SLOW_FRONT` 0.5) | -7.0 | +1.0 | +8.0 | -8.5 | +8.0 | +0.3 |
+| the field everywhere (`SLOW_LANE` 0) | -8.0 | -0.5 | +8.0 | -17.0 (z -4.18) | +8.0 | -1.9 |
+| **field below 5-turn lanes, front at or above (`SLOW_FRONT` 1)** | 0.0 | +0.5 | +8.0 | 0.0 | +8.0 | **+3.3 (z +1.96)** |
+| ...the line at 4-turn lanes | 0.0 | 0.0 | +3.5 | 0.0 | +8.0 | +2.3 |
+| no look-ahead: actuary's pull, against no look-ahead on the front | -4.5 | +2.0 | +6.0 | +3.5 | +17.5 | +4.9 (z +2.14) |
+
+The median lane is 5-7 turns on every 7:6 and 24:3 map and 4-5 on 11:6, so the
+slow cells are where the blend ran. The plain ledger gains from the field
+nearly everywhere, as actuary did; with the look-ahead on, the field costs on
+slow boards in proportion to its share. Why was not measured. A guess: the
+rollouts score a line by the ledger's worth, pull included, and on long lanes a
+field read six turns on is a poor guide to where the ships should be.
+
+Confirmed on fresh seeds (11.1M, 100 a cell) against actuary at Field: **66.9%
+(z +14.0) against 60.1% for the front alone, +6.9 paired (z +5.23)**; 7:6 69.8
+(-0.2), 11:6 66.0 (+2.0), 18:6 67.8 (+13.5, z +3.42), 24:3 66.8 (0.0), 18:18
+64.2 (+19.0, z +4.29). Against marshal (11.2M, 40 seeds): 79.5% against 75.2%,
++4.2 (z +2.70), again all on the fast cells (18:18 +11.9). Fast boards, hunter's
+weak cell until now, are where it gains most. It ships as `SLOW_FRONT` 1.
+
+Per-turn game time moved by 0-10% (the field is read once per ledger), so
+`decide_ms` is unchanged.
+
+**The planned opening, retired.** hunter's *Planned* stop ran actuary's land-grab
+plan on maps of 24+ systems with median lanes of 2 or less, which no default
+cell reaches. On 24:12 and 40:6 (11.3M, 50 seeds, both with the shipped pull)
+dropping it read 60.0% against 56.2% (+3.8, z +1.13; 24:12 +5.5, 40:6 +2.0).
+Not significant, but the same way as actuary's own retirement of it, so the Style
+knob is now actuary's first two stops: *Field* (the default, the pull above) and
+*Greedy* (the front on every board).
+
 ## Where it stands
+
+Against actuary at Field, with the look-ahead and the field (11.1M, 100 seeds a
+cell): **66.9%**; against marshal 79.5% (above). What follows was measured
+before both, against the actuary of the time.
 
 Headline, 9.7M, 100 seeds a cell, against actuary: **55.1% (z +5.52)**.
 
@@ -274,8 +326,11 @@ actuary in the same games: 7:6 0.5/2.2 ms (actuary 0.2/0.8), 40:6 3.1/20.2
 
 ## Open
 
-- Fast boards (median lane 2) and knower at Search are where hunter does not
-  win. Both look like they need look-ahead rather than a better price: on
-  fast lanes actuary's short horizon is close to right already, and knower at
-  Search runs hunter's own `decide`.
+- knower at Search is where hunter does not win; it runs hunter's own
+  `decide`. Fast boards (median lane 2) were the other until the field
+  (18:18 64.2% against actuary at Field).
+- Why the field costs on slow boards only with the look-ahead on, and whether
+  a rollout scored without the pull would let the field play there too.
+- hunter's own knobs (`REINFORCE_WEIGHT`, `EDGE_RISK_WEIGHT`, the look-ahead's
+  postures) were tuned on the front; none has been re-swept with the field.
 - Kernel `hunter-knower-e` measures knower at Search on 60 seeds.

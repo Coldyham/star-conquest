@@ -169,29 +169,39 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 1260 games, 69 timed out and are excluded from the
-percentages). **This table is the current one** — update it, not the module
-docstring, the next time marshal or the roster's pricing changes. Re-run
-2026-10-17, when marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3
-and `RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening
-against the roster"); knower moved with it, since it borrows marshal. The ladder
-is deterministic (a repeat run matched game for game), so the bot before the
-ship, run the same day on the same seeds, is an exact A/B: actuary 326, marshal
-282, knower 247, marshal beating knower 66% and actuary 24%.
+**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30 --ai
+knower actuary marshal thinker claudebot heuristic rusherplus`, 18 nodes,
+default settings — 1260 games, 62 timed out and are excluded from the
+percentages; council is left out, as it always has been here, for its cost).
+**This table is the current one** — update it, not the module docstring, the
+next time marshal or the roster's pricing changes. Re-run 2026-10-18, when
+actuary's default stop became Field ([`field.md`](field.md)). The ladder is
+deterministic: every pair without actuary reads game for game as it did on
+2026-10-17, and actuary's row is the row fulcrum read as a bot of its own the
+same morning (61% against the Planned actuary it replaced).
 
-    actuary 321 (27%), marshal 290 (24%), knower 244 (20%), thinker 163 (14%),
+    actuary 336 (28%), marshal 285 (24%), knower 242 (20%), thinker 162 (14%),
     claudebot 84 (7%), heuristic 52 (4%), rusherplus 37 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  actuar  marsha  thinke  claude  heuris  rusher
-      knower         —     11%     30%     89%     95%    100%    100%
-      actuary      89%       —     65%     98%    100%    100%    100%
-      marshal      70%     35%       —     98%     98%    100%    100%
-      thinker      11%      2%      2%       —     89%     96%    100%
+      knower         —      7%     30%     89%     95%    100%    100%
+      actuary      93%       —     75%    100%    100%    100%    100%
+      marshal      70%     25%       —     98%     98%    100%    100%
+      thinker      11%      0%      2%       —     89%     96%    100%
       claudebot     5%      0%      2%     11%       —     66%     75%
       heuristic     0%      0%      0%      4%     34%       —     61%
       rusherplus    0%      0%      0%      0%     25%     39%       —
+
+The 2026-10-17 run, with actuary at Planned, read actuary 89% against knower,
+65% against marshal and 98% against thinker, and in all: actuary 321 (27%),
+marshal 290 (24%), knower 244 (20%), thinker 163, claudebot 84, heuristic 52,
+rusherplus 37. It was taken when
+marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3 and
+`RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening against
+the roster"); knower moved with it, since it borrows marshal. The bot before
+that ship, run the same day on the same seeds, is an exact A/B: actuary 326,
+marshal 282, knower 247, marshal beating knower 66% and actuary 24%.
 
 Eight more wins, all against actuary and knower (marshal beats the rest 98-100%
 either way): 35% against actuary from 24%, and 70% against knower from 66%. At 60

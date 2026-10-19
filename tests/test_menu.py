@@ -16,7 +16,7 @@ import pygame
 
 from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
-from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, seed_top
 
 
 def _setup():
@@ -990,7 +990,13 @@ def test_pump_reads_soft_keyboard_text_and_filters_it(monkeypatch):
 
         fake.text = "9" * (menu._SEED_MAX_LEN + 4)
         menu.pump(ms, settings)
-        assert len(ms.seed_text) == menu._SEED_MAX_LEN
+        assert len(ms.seed_text) == menu._SEED_MAX_LEN - 1, "no seed from an era with no pool"
+        assert settings.seed == int("9" * (menu._SEED_MAX_LEN - 1))
+
+        top = str(seed_top())
+        fake.text = top + "1"
+        menu.pump(ms, settings)
+        assert ms.seed_text == top and settings.seed == seed_top()
 
         fake.gone = True                         # the keyboard's Done key
         menu.pump(ms, settings)

@@ -23,7 +23,8 @@ from tests import sim
 
 # hunter's changes, each set to what actuary does.
 ACTUARY = {"EDGE_RISK": False, "CAPTURE_SWING": 0.0, "EDGE_GATHER_LANE": 0,
-           "REINFORCE_WEIGHT": 0.3, "LOOKAHEAD": False, "RELIEF_IN_FLIGHT": 0.3}
+           "REINFORCE_WEIGHT": 0.3, "LOOKAHEAD": False, "RELIEF_IN_FLIGHT": 0.3,
+           "SLOW_FRONT": 0.5}
 
 
 @pytest.fixture(scope="module")
@@ -183,6 +184,17 @@ def test_every_switch_off_is_actuary(hu, monkeypatch):
         assert _orders(hu, state) == _orders(actuary, state), f"turn {state.turn}"
 
 
+def test_with_the_front_alone_it_is_actuary_at_greedy(hu, monkeypatch):
+    """`FIELD` off is actuary's other pull: every front alike."""
+    actuary = sys.modules["sc_model_actuary"]
+    for name, value in ACTUARY.items():
+        monkeypatch.setattr(hu, name, value)
+    monkeypatch.setattr(hu, "FIELD", False)
+    for state in _boards(monkeypatch)[::3]:
+        state.players[1].ai_params = AiParams(aux=0.0)
+        assert _orders(hu, state) == _orders(actuary, state), f"turn {state.turn}"
+
+
 def test_the_switches_change_play(hu, monkeypatch):
     """...and as shipped, they do."""
     actuary = sys.modules["sc_model_actuary"]
@@ -222,6 +234,21 @@ def test_gathering_and_soft_strikes_follow_the_lanes(hu):
     assert slow.capture == hu.CAPTURE_SWING and not slow.gather
 
 
+def test_the_field_pulls_on_fast_boards_and_the_front_on_slow_ones(hu, monkeypatch):
+    """Below `SLOW_LANE` the pull is the field alone; at or above it, Greedy's
+    front mixed in by `SLOW_FRONT` (1 = the front alone)."""
+    monkeypatch.setattr(hu, "SLOW_FRONT", 1.0)
+    lanes = [(1, 2, None), (2, 3, None), (2, 4, None)]
+    systems = {1: (1, 20, 9), 2: (1, 5, 9), 3: (2, 6, 9), 4: (0, 3, 9)}
+
+    def ledger(turns):
+        return hu._Ledger(_board(systems, [(a, b, turns) for a, b, _ in lanes]), 1, field=True)
+
+    fast, slow = ledger(hu.SLOW_LANE - 1), ledger(hu.SLOW_LANE)
+    assert fast.front_value == fast._field() != fast._front_values()
+    assert slow.front_value == slow._front_values()
+
+
 def test_on_slow_lanes_a_strike_need_only_win_the_nominal_roll(hu):
     """Our 11 against a rival's 10: enough on 7-turn lanes, not on 2-turn ones."""
     def takes(lane):
@@ -237,14 +264,14 @@ def test_on_slow_lanes_a_strike_need_only_win_the_nominal_roll(hu):
 # The Style knob
 # --------------------------------------------------------------------------- #
 def test_the_style_knob_has_two_stops(hu):
-    assert hu.AUX_NAMES == ("Greedy", "Planned")
+    assert hu.AUX_NAMES == ("Greedy", "Field")
     params = AiParams()
-    assert hu._stop_of(type("P", (), {"ai_params": params})()) == hu.PLANNED
+    assert hu._stop_of(type("P", (), {"ai_params": params})()) == hu.FIELD_STOP
 
 
 @pytest.mark.parametrize("aux, stop", [(0.0, 0), (1.0, 1), (2.0, 1), (7.0, 1), ("x", 1)])
 def test_the_knob_reads_tolerantly(hu, aux, stop):
-    """actuary's Learning stop and anything past it read as Planned."""
+    """actuary's Learning stop and anything past it read as Field."""
     seat = type("P", (), {"ai_params": type("A", (), {"aux": aux})()})()
     assert hu._stop_of(seat) == stop
 
