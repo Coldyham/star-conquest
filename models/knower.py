@@ -337,9 +337,8 @@ def decide(state, pid):
 
     The stop comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1
     the plain one-turn oracle, 2 the oracle plus a search over openings, and 3
-    that search as council plays it.
+    that search with a learned judge and advisers (`_council`).
     """
-
     if _DEPTH:
         # Someone is predicting *us*. Answer as the blind planner: it terminates,
         # and it is the same self-model we use for seats we cannot read.
