@@ -34,6 +34,8 @@ uv run python main.py --mode symmetric --layout ring # ...sectors joined by bord
 uv run python main.py --seed 42 --nodes 24     # pre-fill a reproducible map
 uv run python main.py --no-menu --autoplay     # skip the menu; AI plays every seat
 uv run python main.py --watch MATCH_ID         # open a posted replay in history review
+uv run python main.py --watch games/game_X.json      # ...or a saved local one
+uv run python main.py --settings-from games/game_X.json   # pre-fill that game's setup
 uv run python main.py --match MATCH:TOKEN      # open your seat in a play-by-post match
 ```
 

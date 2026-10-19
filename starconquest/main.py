@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+from pathlib import Path
 
 import pygame
 
@@ -419,6 +420,31 @@ def _decode_log(blob: str) -> GameLog | None:
     except ValueError:
         return None
     return log if log.turn_count else None
+
+
+def is_log_path(wanted: str) -> bool:
+    """True when a ``--watch`` argument names a file rather than a match id."""
+    return wanted.endswith(".json") or Path(wanted).expanduser().is_file()
+
+
+def read_game_log(raw: str) -> GameLog:
+    """The saved match a command-line flag names (``ValueError`` if it isn't one)."""
+    try:
+        log = replay.load(Path(raw).expanduser())
+    except OSError as exc:
+        raise ValueError(f"can't read {raw}: {exc.strerror or exc}") from exc
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError(f"{raw} is not a game log") from exc
+    if not log.settings:
+        raise ValueError(f"{raw} is not a game log")
+    return log
+
+
+def log_settings(log: GameLog) -> Settings:
+    """The setup ``log`` was played on, its seed included and its score to beat left out."""
+    settings = Settings.from_dict(log.settings).without_challenge()
+    settings.seed = log.seed
+    return settings
 
 
 def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
@@ -1218,9 +1244,12 @@ async def main() -> None:
     ap.add_argument("--players", type=int, default=config.DEFAULT_PLAYERS)
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")
-    ap.add_argument("--watch", default="", metavar="MATCH_ID",
-                    help="download a posted replay and open it in history review "
-                         "(the desktop equivalent of a #log=<id> link)")
+    ap.add_argument("--watch", default="", metavar="MATCH_ID|FILE",
+                    help="open a replay in history review: a posted match id (the "
+                         "desktop equivalent of a #log=<id> link) or a saved games/ file")
+    ap.add_argument("--settings-from", default="", metavar="FILE",
+                    help="pre-fill the menu with a saved games/ file's setup and seed "
+                         "(replaces the map flags above)")
     ap.add_argument("--match", default="", metavar="MATCH:TOKEN",
                     help="open a play-by-post seat (the desktop equivalent of a "
                          "#pbp=<match>:<token> link)")
@@ -1232,6 +1261,12 @@ async def main() -> None:
     args = ap.parse_args([] if paths.is_android() else None)
 
     settings = Settings.from_args(args)
+    if args.settings_from:
+        try:
+            settings.copy_from(log_settings(read_game_log(args.settings_from)))
+        except ValueError as exc:
+            ap.error(str(exc))
+        settings.autoplay = settings.autoplay or args.autoplay
     _apply_shared_link(settings)   # web only: pre-fill from a #<token> in the URL
     ai.load_models()          # register any drop-in models/ strategies up front
 
@@ -1294,7 +1329,16 @@ async def main() -> None:
     # per frame, so waiting on a round trip here would freeze the canvas before
     # anything had been drawn.
     wanted = args.watch.strip() or replay_request()
-    pending_replay = share.fetch_log(wanted) if wanted else None
+    if wanted and is_log_path(wanted):
+        try:
+            local = read_game_log(wanted)
+        except ValueError as exc:
+            ap.error(str(exc))
+        if not local.turn_count:
+            ap.error(f"{wanted} has no turns to watch")
+        pending_replay = share.Download.ready(local.encoded())
+    else:
+        pending_replay = share.fetch_log(wanted) if wanted else None
     if wanted and pending_replay is None:
         print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
         menu.set_status(menu_state, WATCH_UNREACHABLE_MSG, False)
@@ -2125,8 +2169,8 @@ def run() -> None:
     except KeyboardInterrupt:
         pygame.quit()
     except BaseException as exc:
-        if isinstance(exc, SystemExit) and exc.code in (0, None):
-            raise                 # a clean exit is not a crash
+        if isinstance(exc, SystemExit):
+            raise                 # a clean exit or a usage error is not a crash
         import traceback
         traceback.print_exc()     # -> terminal on desktop, browser console on web
         if not paths.is_web():

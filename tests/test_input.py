@@ -1761,6 +1761,58 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
         pygame.quit()
 
 
+def test_a_saved_game_file_opens_as_a_watched_replay(tmp_path, monkeypatch):
+    """`--watch games/game_X.json` takes the downloaded path from the poll on, so
+    a local file gets the same review, the same watched mark and the same fork."""
+    from starconquest import share
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        assert log.path is not None and log.path.is_file()
+        assert main.is_log_path(str(log.path))
+        assert not main.is_log_path("00112233445566ff")
+        status, body = share.Download.ready(main.read_game_log(str(log.path)).encoded()).poll()
+        assert status == share.OK
+        opened = main.open_replay(body, Settings())
+        assert opened is not None
+        state, ui, restored = opened
+        assert restored.match_id == log.match_id
+        assert state.turn == log.turn_count
+        assert ui.watched is True
+    finally:
+        pygame.quit()
+
+
+def test_settings_from_a_saved_game_reproduce_its_map(tmp_path, monkeypatch):
+    """`--settings-from` hands the menu the log's setup with its concrete seed (the
+    stored settings say `seed: null`), and never the score to beat it carried."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        challenged = Settings.from_dict(log.settings)
+        challenged.challenge = Challenge(turns=9, lost=3)
+        log.settings = dict(challenged.to_dict(), seed=None)
+        log.save()
+        settings = main.log_settings(main.read_game_log(str(log.path)))
+        assert settings.seed == log.seed
+        assert settings.nodes == 18 and settings.players == 3
+        assert settings.challenge is None
+    finally:
+        pygame.quit()
+
+
+def test_a_file_that_is_not_a_game_log_is_refused(tmp_path):
+    """A typo, a saved setup and junk all fail with a message, never a traceback."""
+    setup = tmp_path / "setup.json"
+    Settings(nodes=20).save(setup)
+    junk = tmp_path / "junk.json"
+    junk.write_text("[1, 2, 3]")
+    for raw in (str(tmp_path / "missing.json"), str(setup), str(junk)):
+        try:
+            main.read_game_log(raw)
+        except ValueError:
+            continue
+        raise AssertionError(f"{raw} was read as a game log")
+
+
 def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
     """The H key asks a different question — 'what just happened' — and the answer
     is one step back from the latest turn, not a whole match away from it."""
