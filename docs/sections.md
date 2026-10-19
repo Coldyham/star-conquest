@@ -95,6 +95,13 @@ only for a fight; what is deliberately not animated.
 - **Bots that aren't Python.** Why the wire protocol is shaped as it is.
 
 - **Rules in full** (detail kept out of `CLAUDE.md`): external bots' four rules; `AiParams.aux`; the `tests/sim` harness; per-seat AI and pricing a fight.
+## design/win-turns.md
+- **The question.** The board ranks turns after the win, the top bots win nearly every game against the weak ones, and people beat council's score on 115 of 151 maps, mostly on turns; whether a bot can win sooner by playing closer to losing.
+- **How it measures.** Cells and line-ups (one seat for every other seat, or `a+b`); every seed in every seat; fixed work; one arm's reading (won, unfinished, turns to win at p25/median/p75 with a game not won counted slower than any win; the turns to a 3:1 lead in players' income, 3:1 to 9:1 and 9:1 to the win, which every win passes, and why not the board's income or two thirds; ships lost; `low`, the lowest income share on the way); two arms paired game by game (`beats` in the board's own order, the one to gate on; Δwon; Δturns as a geometric ratio over pairs both won; the gap split by phase); the 7,000,000 seed block.
+- **Ledgers and revs.** `results/win_turns/<label>/<bot>.jsonl`; `play_rev` digests the code that decides a game and `SHAPE`, the label defaults to it and a named ledger refuses another tree's rows; `--base` reads any ledger; `bot_replay.engine_rev` leaves `replay.py` (and `reseed`) out.
+- **First readings (2026-10-19).** Council, Hunt and marshal against heuristic, rusherplus and thinker on six cells: Council won 1,945 of 1,950 and is fastest everywhere (beats Hunt 76.9%, 17 turns sooner); Hunt is nearly saturated; marshal is not, and 189 of its 269 games not won were unfinished at turn 600; two thirds of every bot's win, and most of each gap, comes before the 3:1 lead; the fastest bot rides no closer to the line. *Against marshal*: Council still saturated (97-100%), Hunt not (57-83%), a quarter of Hunt's gap to Council after 9:1.
+- **Reading it.** Bots, not the posted maps (marshal is on most); read `beats` first; one |z| of 2 in 18 groups is chance; a rerun is the same run; the phase split is pooled raw turns; what a run costs.
+
 ## design/bot-families.md
 - **The families.** knower (Off, Predict, Search, Council), actuary (Greedy, Field, Learning, Hunt), thinker (Claudebot, Thinker), evolved (Off, On); marshal, heuristic and rusherplus have no stops. marshal stays its own bot.
 - **Each fold plays exactly as the bot it replaced.** `tools/fold_check.py` against `0689b0a`, 120 positions: council On, hunter and claudebot identical, every old stop unchanged; council Off differs from Search in 10, by one trust rule Council keeps.
