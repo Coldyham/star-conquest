@@ -296,9 +296,9 @@ def _seat(state, pid, aux):
     return state
 
 
-def test_the_style_knob_has_three_stops(ac):
-    assert ai.aux_spec("actuary") == ("Style", 0.0, 2.0, 1.0, True)
-    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning")
+def test_the_style_knob_has_four_stops(ac):
+    assert ai.aux_spec("actuary") == ("Style", 0.0, 3.0, 1.0, True)
+    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning", "Hunt")
     for aux, stop in ((0.0, ac.GREEDY), (0.5, ac.GREEDY), (1.0, ac.FIELD), (1.9, ac.FIELD),
                       (2.0, ac.LEARNING), (9.0, ac.LEARNING), ("junk", ac.FIELD)):
         seat = Player(1, "P1", (0, 0, 0), ai_params=AiParams(aux=aux))

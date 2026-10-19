@@ -482,14 +482,12 @@ def test_knower_beats_thinker_head_to_head(kn):
 # --------------------------------------------------------------------------- #
 # The Oracle knob (`aux`): Off, Predict, and the rollout search on Search
 # --------------------------------------------------------------------------- #
-def test_aux_slider_is_declared_as_three_named_stops(kn):
+def test_aux_slider_is_declared_as_four_named_stops(kn):
     """The AI tab labels the generic aux knob from these, offers our range, and
     shows each stop's name in place of its number."""
     assert kn.AUX_LABEL and kn.AUX_INT
-    assert ai.aux_spec("knower") == (
-        kn.AUX_LABEL, 0.0, float(kn.SEARCH_DEPTH_MAX), 1.0, True
-    )
-    assert ai.aux_names("knower") == ("Off", "Predict", "Search")
+    assert ai.aux_spec("knower") == (kn.AUX_LABEL, 0.0, float(kn.COUNCIL), 1.0, True)
+    assert ai.aux_names("knower") == ("Off", "Predict", "Search", "Council")
     assert ai.aux_stop_name("knower", 1.0) == "Predict"
     assert ai.aux_stop_name("knower", 12) == "Search", "an old depth reads as Search"
 
@@ -663,9 +661,9 @@ def test_external_candidates_are_offered_as_openings(kn):
 
     assert n > min(kn.SEARCH_WIDTH, len(kn.POSTURE_VARIANTS)), \
         "no borrowed opening survived — is the registry being read at import time?"
-    assert kn._external_plan(state, 2, "rusherplus", 11) is not None
-    assert kn._external_plan(state, 2, "no_such_bot", 11) is None, "unregistered must skip"
-    assert kn._external_plan(state, 2, "knower", 11) is None, "we are not our own candidate"
+    assert kn._external_plan(state, 2, ("rusherplus", None), 11) is not None
+    assert kn._external_plan(state, 2, ("no_such_bot", None), 11) is None, "unregistered must skip"
+    assert kn._external_plan(state, 2, ("knower", None), 11) is None, "we are not our own candidate"
 
 
 def test_an_external_candidate_never_touches_the_real_board(kn):
@@ -698,8 +696,10 @@ def test_an_external_candidate_reads_its_own_default_aux(kn):
     try:
         state = _state()
         state.players[2].ai_params.aux = 2
-        kn._external_plan(state, 2, "aux_spy_test", 11)
+        kn._external_plan(state, 2, ("aux_spy_test", None), 11)
         assert seen == [config.AI_AUX], "a borrowed candidate read our Oracle stop"
+        kn._external_plan(state, 2, ("aux_spy_test", 0.0), 11)
+        assert seen[-1] == 0.0, "a pair that names a stop borrows that stop"
         assert state.players[2].ai_params.aux == 2, "the real seat's aux was touched"
     finally:
         ai.STRATEGIES.pop("aux_spy_test", None)
@@ -711,11 +711,11 @@ def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
         raise RuntimeError("candidate exploded")
 
     ai.register("exploding_bot_test", boom)
-    kn.EXTERNAL_CANDIDATES, saved = ("exploding_bot_test",), kn.EXTERNAL_CANDIDATES
+    kn.EXTERNAL_CANDIDATES, saved = (("exploding_bot_test", None),), kn.EXTERNAL_CANDIDATES
     try:
         state = _state()
-        state.players[2].ai_params.aux = 3.0
-        assert kn._external_plan(state, 2, "exploding_bot_test", 11) is None
+        state.players[2].ai_params.aux = 2.0
+        assert kn._external_plan(state, 2, ("exploding_bot_test", None), 11) is None
         assert all(o.owner_id == 2 for o in ai.decide(state, 2))   # search still ran
     finally:
         kn.EXTERNAL_CANDIDATES = saved

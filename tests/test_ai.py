@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from starconquest import ai, mapgen
+from starconquest import ai, engine, mapgen
 from starconquest.model import AiParams, Order
 
 
@@ -355,3 +355,69 @@ def test_a_wilder_jitter_does_still_widen_the_ask():
         assert moved, "no bot reacted to a jitter well past its tuning"
     finally:
         config.COMBAT_JITTER = before
+
+
+# --------------------------------------------------------------------------- #
+# Legacy names: a bot folded into a family as one of its stops
+# --------------------------------------------------------------------------- #
+def test_a_legacy_name_is_its_family_at_its_stop():
+    """`ai.LEGACY` is the one place a stored name becomes a family and stop."""
+    assert ai.canonical("council", 1.0) == ("knower", 3.0)
+    assert ai.canonical("council", 0.0) == ("knower", 2.0)
+    assert ai.canonical("council", 12.0) == ("knower", 3.0), "council read any 1+ as On"
+    assert ai.canonical("council", "junk") == ("knower", 3.0), "unreadable was On"
+    assert ai.canonical("claudebot", 7.0) == ("thinker", 0.0)
+    assert ai.canonical("knower", 12.0) == ("knower", 12.0), "a family is itself"
+    assert ai.family("council") == "knower" and ai.family("marshal") == "marshal"
+
+
+def test_a_legacy_name_is_never_registered_and_plays_through_its_family():
+    ai.load_models()
+    for name, (family, _) in ai.LEGACY.items():
+        assert name not in ai.STRATEGIES, f"{name} would shadow its fold"
+        assert family in ai.STRATEGIES and ai.known(name)
+        assert name not in ai.available_strategies()
+    assert not ai.known("no_such_bot")
+
+
+def test_a_legacy_seat_decides_as_its_family_and_keeps_its_name():
+    """claudebot was thinker's Claudebot stop exactly (tools/fold_check.py), and
+    the seat is shown to thinker as a seat of its own only for the call."""
+    ai.load_models()
+    seen = []
+    real = ai.STRATEGIES["thinker"]
+
+    def spy(state, pid):
+        p = state.players[pid]
+        seen.append((p.ai_strategy, p.ai_params.aux))
+        return real(state, pid)
+
+    for name, aux in (("claudebot", 1.0), ("thinker", 0.0)):
+        state = mapgen.generate_random(3, num_nodes=18, num_players=2)
+        state.players[2].ai_strategy, state.players[2].ai_params.aux = name, aux
+        for _ in range(8):
+            engine.end_turn(state, decide=ai.decide)
+        if name == "claudebot":
+            legacy = [(o.source_id, o.dest_id, o.ships) for o in ai.decide(state, 2)]
+            ai.STRATEGIES["thinker"] = spy
+            try:
+                ai.decide(state, 2)
+            finally:
+                ai.STRATEGIES["thinker"] = real
+            assert seen == [("thinker", 0.0)]
+            assert (state.players[2].ai_strategy, state.players[2].ai_params.aux) == ("claudebot", 1.0)
+        else:
+            assert [(o.source_id, o.dest_id, o.ships) for o in ai.decide(state, 2)] == legacy
+
+
+def test_a_value_past_a_new_top_stop_reads_as_the_old_top():
+    """knower's old depth slider ran to 12: a carried 12 must not become Council,
+    nor an actuary 12 Hunt (`AUX_OVER`)."""
+    ai.load_models()
+    assert ai.aux_over("knower") == 2.0 and ai.aux_over("actuary") == 2.0
+    assert ai.aux_over("thinker") is None and ai.aux_over("marshal") is None
+    assert ai.aux_reads_as("knower", 12.0) == 2.0 and ai.aux_reads_as("knower", 3.0) == 3.0
+    assert ai.aux_stop_name("actuary", 12.0) == "Learning"
+    assert ai.aux_stop_name("actuary", 3.0) == "Hunt"
+    assert ai.aux_stop_name("thinker", 12.0) == "Thinker"
+    assert ai.aux_stop_name("claudebot", 1.0) == "Claudebot"
