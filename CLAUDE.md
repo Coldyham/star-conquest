@@ -18,7 +18,7 @@ re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
 `hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `knower`,
 `council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`,
-`actuary`, `convoy`, `evolved`, `learner`, `learning`, `field`; `pbp`; `par`; `seat-play`. Keep
+`actuary`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
 `docs/sections.md` when one grows past that). Keep this file to rules and
 pointers. `docs/bot-api.md` (wire protocol for non-Python bots) and
