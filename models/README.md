@@ -245,7 +245,7 @@ To make that last one detectable, a predicting bot should advertise itself:
   anything that only checks it.
 - **`stand_in_params(player) -> AiParams`** — optional: the params of this seat's
   nearest version that *doesn't* predict (knower's is Oracle: Off, actuary's is
-  Planned for a Learning seat). An oracle then runs your `decide` at those params
+  Field for a Learning seat). An oracle then runs your `decide` at those params
   on its copy of the board, rather than guessing at you with a planner of its own.
   Return a copy, never the seat's own params. Params that still answer
   `is_oracle_seat` true, `None`, or a raise all mean "no stand-in".
@@ -284,28 +284,46 @@ For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orde
 
 ## The roster
 
-The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
-arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
-(scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
+The bots already here, one per family, weakest to strongest; a variant of a
+bot is a stop of its knob, not a file of its own: `rusherplus.py` (the above,
+plus arrival arithmetic), `thinker.py` (scheduled defence and staggered
+pincers; its *Style* knob's other stop, Claudebot, is the bot it was tuned
+against: focus fire, one turn deep), `evolved.py` (no hand-written
+tactics: a menu of priced moves, each naming its principle, scored by weights
+evolved offline, plus a short look-ahead that plans for rivals holding and
+vetoes what an all-out strike would punish; it beats thinker and loses to
+marshal, and plays unlike any of the others), `marshal.py` (thinker's phases, but it
 commits its surplus instead of parking it), `actuary.py` (no phases: it projects
 every system's future, values the board in ships and greedily commits whichever
-launch raises that value most; by default it plans the land-grab up to first
-contact on a big map with fast lanes, where that pays, and opens with the
-ledger everywhere else; its *Style* knob runs Greedy, Planned, Learning), `knower.py` (the oracle — it runs every rival's
-own `decide` before the engine asks for it). At *Learning* actuary also keeps a
-model of each rival, read off the boards it has seen, and prices the threat
-next door by how often that rival strikes a garrison as thin as ours will be:
-the one seat here that remembers anything between turns, so knower models it
-rather than running it (`is_oracle_seat`), as Planned (`stand_in_params`).
+launch raises that value most; its *Style* knob picks the pull on its ships:
+Greedy sends them to every front alike, Field, the default, to where the
+balance of force is closest, Learning is Field reading each rival's habits
+into its risk, and Hunt, its strongest, counts a threat only if a rival would
+launch it: a system next door, or several landing on the same turn, that wins
+the worst roll, with a short look-ahead over a few postures and every rival
+modelled by Hunt's own plain plan), `knower.py` (the oracle — it runs every
+rival's own `decide` before the engine asks for it; at *Oracle: Council*, its
+strongest, its Search is judged by a small network fitted on roster self-play,
+actuary joins the openings it compares, and each borrowed opening is played
+forward by the bot that proposed it). At *Learning* actuary also keeps a model
+of each rival, read off the boards it has seen, and prices the threat next door
+by how often that rival strikes a garrison as thin as ours will be: the one
+seat here that remembers anything between turns, so knower models it rather
+than running it (`is_oracle_seat`), as Field (`stand_in_params`).
+
+A seat stored under a name since folded into a family (`council`, `claudebot`)
+still plays, as that family at its stop (`ai.LEGACY`); don't name a file of
+yours after one, or it will shadow the fold.
 
 The dropdown carries one entry that is **not** a bot and cannot be one: `random`
 leaves the seat's bot to the match seed, and `settings.build_state` resolves it to
 one of the above before the game starts. It is deliberately not a model file that
 forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
 seat whose bot it does not yet know (see *Predicting the other seats*), and every
-answer it could give is wrong for some pick. The pool is a fixed list
-(`settings.RANDOM_POOL`), so every copy of the game deals a seed the same bots; a
-drop-in of yours is never dealt. Don't name one `random.py`.
+answer it could give is wrong for some pick. The pools are fixed lists
+(`settings.RANDOM_POOLS`, append-only, the seed's era picking one), so every copy
+of the game deals a seed the same bots; a drop-in of yours is never dealt. Don't
+name one `random.py`.
 
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating

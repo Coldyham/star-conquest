@@ -290,8 +290,10 @@ uv run python -m tests.sim --ladder --trials 20    # against the whole roster
 `--swap` or `--ladder` rather than a single game: both play every seating, so a
 result is not merely a report on which corner of the map is stronger. Beating
 `heuristic` is the first bar. The roster above it, weakest to strongest, is
-`rusherplus`, `claudebot`, `thinker`, `marshal`, `actuary`, `knower` (`knower`
-on its Search setting; at its default, `actuary` beats it).
+`rusherplus`, `thinker`, `evolved`, `marshal`, `actuary`, `knower`. Most have
+settings of their own (`--aux`, e.g. `--aux knower=3`): `thinker` at 0 is
+`claudebot`, below it; `actuary` at 3 (Hunt) and `knower` at 3 (Council) are the
+strongest of all. At their defaults, `actuary` beats `knower`.
 
 **Read the head-to-head grid, not just the ranking.** `--ladder` prints who beat
 whom, and a bot that finishes fifth overall while taking games off `marshal` is a

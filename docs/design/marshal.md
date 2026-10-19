@@ -1,7 +1,7 @@
 # marshal design notes: overview and standing
 
 `models/marshal.py` is the strongest bot that predicts nobody. Its notes span
-three files, in the order the work happened:
+four files, in the order the work happened:
 
 - **This file:** what marshal was built on, what the first measurements
   deleted, the current ladder ("Where marshal stands", which is the table to
@@ -13,6 +13,11 @@ three files, in the order the work happened:
   re-flooding, the successor fixes folded back in (A-C), the empty interior,
   denying the swap, when to evacuate, and feeding captures (from the board's
   human wins).
+- [`marshal-joint.md`](marshal-joint.md): which constants should be tuned
+  together. Covers how the phase order couples them, the coupling census, joint
+  sweeps of each group, `FRONTIER_GUARD` split into a floor for the priced strike
+  and one for the surplus pour, and how far a joint optimum moves between
+  opponents. Read it before re-tuning any constant here.
 
 Later sections often supersede earlier ones. Look for a **Superseded** note
 before relying on a constant's history. Roster-wide rules and the measurement
@@ -164,51 +169,75 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30`, 18
-nodes, default settings — 1260 games, 65 timed out and are excluded from the
-percentages). **This table is the current one** — update it, not the module
-docstring, the next time marshal or the roster's pricing changes. Re-run
-2026-10-16, when knower began running a Learning seat as Planned
-([`knower.md`](knower.md), "Seats it cannot run"). learner is no longer a file of
-its own but actuary's Learning stop, so it has left the grid. actuary moved most
-since the 2026-10-08 reading (actuary 343, marshal 307, knower 262, with actuary
-beating knower 70% and marshal 64%): the same 91% against knower reads on `main`
-before this change, so that drift came earlier.
+**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30 --ai
+knower actuary marshal thinker claudebot heuristic rusherplus`, 18 nodes,
+default settings — 1260 games, 62 timed out and are excluded from the
+percentages; council is left out, as it always has been here, for its cost).
+**This table is the current one** — update it, not the module docstring, the
+next time marshal or the roster's pricing changes. Re-run 2026-10-18, when
+actuary's default stop became Field ([`field.md`](field.md)). The ladder is
+deterministic: every pair without actuary reads game for game as it did on
+2026-10-17, and actuary's row is the row fulcrum read as a bot of its own the
+same morning (61% against the Planned actuary it replaced).
 
-    actuary 330 (28%), marshal 283 (24%), knower 246 (21%), thinker 163 (14%),
+    actuary 336 (28%), marshal 285 (24%), knower 242 (20%), thinker 162 (14%),
     claudebot 84 (7%), heuristic 52 (4%), rusherplus 37 (3%)
 
     head-to-head (row's win rate vs column)
                 knower  actuar  marsha  thinke  claude  heuris  rusher
-      knower         —      9%     34%     89%     95%    100%    100%
-      actuary      91%       —     78%     98%    100%    100%    100%
-      marshal      66%     22%       —     98%     98%    100%    100%
-      thinker      11%      2%      2%       —     89%     96%    100%
+      knower         —      7%     30%     89%     95%    100%    100%
+      actuary      93%       —     75%    100%    100%    100%    100%
+      marshal      70%     25%       —     98%     98%    100%    100%
+      thinker      11%      0%      2%       —     89%     96%    100%
       claudebot     5%      0%      2%     11%       —     66%     75%
       heuristic     0%      0%      0%      4%     34%       —     61%
       rusherplus    0%      0%      0%      0%     25%     39%       —
 
+The 2026-10-17 run, with actuary at Planned, read actuary 89% against knower,
+65% against marshal and 98% against thinker, and in all: actuary 321 (27%),
+marshal 290 (24%), knower 244 (20%), thinker 163, claudebot 84, heuristic 52,
+rusherplus 37. It was taken when
+marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3 and
+`RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening against
+the roster"); knower moved with it, since it borrows marshal. The bot before
+that ship, run the same day on the same seeds, is an exact A/B: actuary 326,
+marshal 282, knower 247, marshal beating knower 66% and actuary 24%.
+
+Eight more wins, all against actuary and knower (marshal beats the rest 98-100%
+either way): 35% against actuary from 24%, and 70% against knower from 66%. At 60
+games a pair that is a direction; the paired measurement behind the ship is +6.8
+points against actuary and +3.8 against knower over 2,400 cell-seeds each. The
+previous reading (2026-10-16, when knower began running a Learning seat as
+Planned; [`knower.md`](knower.md), "Seats it cannot run"), actuary 330, marshal
+283, knower 246, predates `RELIEF_IN_FLIGHT` in marshal and actuary, merged the
+same day. learner is no longer a file of its own but actuary's Learning stop, so
+it has left the grid.
+
 With `--aux actuary=2` (every actuary seat at Learning) the grid barely moves:
-actuary 329, marshal 284, knower 246, actuary beating knower 91% and marshal
-76%. Before knower ran the stand-in, Learning beat knower 95% on the same seeds
-(`--ai knower actuary --aux actuary=2`); now it is level with Planned's 91%, so
-the oracle claim earns nothing in this cell.
+actuary 324, marshal 285, knower 242, actuary beating knower 93% and marshal 72%
+(the bot before the ship: 328, 284, 245; 93% and 74%). Before knower ran the
+stand-in, Learning beat knower 95% on the same seeds (`--ai knower actuary --aux
+actuary=2`); now it reads 93% to Planned's 89%, so the oracle claim earns little
+in this cell.
 
 knower here is at its default, Predict. With `--aux knower=0` (Off) the same
-ladder read actuary 321, marshal 291, knower 209, thinker 172, actuary beating
-knower-0 98% (actuary at Greedy, not re-run). For all three Oracle settings against marshal and thinker over
+ladder reads actuary 325, marshal 297, knower 209, thinker 170, actuary beating
+knower-0 95% and marshal beating it 94% (the bot before the ship: 330, 297, 208;
+95% and 96%). For all three Oracle settings against marshal and thinker over
 more seeds, see [`knower.md`](knower.md), "Each Oracle setting against thinker
-and marshal".
+and marshal" (measured before the 2026-10-17 ship).
 
 The same ladder in two other cells, since this one cannot see anything keyed on
-long lanes. 30 seeds each; the symmetric one re-run with actuary (1260 games),
-the slow one not yet (`tests.sim` has no ship-speed flag; actuary's
-head-to-heads there are in `actuary.md`, and marshal beats it 68%):
+long lanes. 30 seeds each; the symmetric one re-run 2026-10-17 with the bot
+before the ship beside it, the slow one not since actuary joined (`tests.sim` has
+no ship-speed flag; actuary's head-to-heads there are in `actuary.md`, and
+marshal beats it 68%):
 
-    symmetric, 18 nodes, 6 ly/turn     269 timeouts
-    actuary 247 (25%), marshal 237 (24%), knower 227 (23%), thinker 120 (12%),
-    claudebot 99 (10%), heuristic 41 (4%), rusherplus 20 (2%)
-    marshal vs knower 75%, actuary vs marshal 47%, actuary vs knower 64%
+    symmetric, 18 nodes, 6 ly/turn     226 timeouts (before the ship: 220)
+    actuary 273 (26%), marshal 253 (24%), knower 216 (21%), thinker 127 (12%),
+    claudebot 105 (10%), heuristic 39 (4%), rusherplus 21 (2%)
+    marshal vs knower 73% (69%), actuary vs marshal 61% (63%), actuary vs knower 74%
+    before the ship: actuary 278, marshal 252, knower 218
 
     random, 24 nodes, 3 ly/turn        96 timeouts, 900 games, before actuary
     marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
@@ -339,6 +368,12 @@ Resolved by measurement rather than by restoring 0.3 — the guard is now `0.55`
 on the sweep below, and the attributability argument is formally dropped: three
 of marshal's margins are its own figures now, not thinker's, and the reason to
 prefer any of them is the measurement rather than its provenance.
+
+> **Revisited (2026-10-16).** Every guard row in this file moved the guard as one
+> number, and it is the floor for several phases. Against stock marshal they want
+> different floors (the priced strike none, the surplus pour about 0.55); against
+> actuary the whole guard wants raising. See "One guard, two floors" and "Against
+> the roster, the optimum moves" in [`marshal-joint.md`](marshal-joint.md).
 
 ## The 2026-09 tuning sweep
 
@@ -481,3 +516,140 @@ much less than a 55% against a null pinned at 50%. Second, **cell choice can
 erase a result**: symmetric two-player duels time out in 64 of 80 games and
 1 ly/turn in 56 of 60, so both are unusable as measurement cells however
 interesting they are to play.
+
+## Is the guard a pool? (proposed and run 2026-10-16: a reserve, not a pool)
+
+**The question.** `FRONTIER_GUARD` holds 0.55 of the largest rival garrison next
+door on each frontier system separately. Pooled defence says that systems of ours
+nearer each other than the rival need only their total to cover a stack. Take a
+triangle with lanes of 4, 3 and 3, with the rival at one end of the 4. The corner
+of the two 3s can answer a strike on our end of the 4 in time, and it is safe
+while it does, because the ships that would take it are in that strike. The
+question is whether 0.55 works because it approximates that pool without saying
+so.
+
+**Why it might.** Two things in the code make a pool. The guard is sized against
+the rival's garrison as it stands (`_max_adjacent_enemy`), and `apply_order`
+takes a fleet off the board at launch, so when a stack launches, the guard on
+every system of ours beside it falls with it. And Phase 1 draws relief from
+neighbours' `budget`, the ships above their own guard, so the released guard is
+exactly what it can send. In the triangle, with 10 ships at the rival's end, our
+two systems hold 6 each. When the 10 launch at the 4-end, the corner's guard at
+the next decide is 0, and its 6 are budget. It is not threatened, and its 3-turn
+lane is inside the deadline, so Phase 1 can send them. A system that another
+stack also borders keeps its guard against that one. That is the condition the
+deleted actuary arm tested (`actuary.md`, "Relief only the same stack can pin").
+Two guards make 1.1 of the stack. Phase 1 asks for `_defend_margin()` of it,
+1.27 at the default sliders, so the pair holds only if production over the lane
+makes up the difference. A pool read literally would want about 0.64 on each of
+a pair.
+
+**Why it might not.** 86.7% of struck garrisons evacuate (`marshal-pricing.md`,
+"Garrisons run away"). Dropping the guard against a system already falling
+(*More ideas measured and deleted*) showed that the guard holds and retakes
+captures. So the guard may be a retake reserve and a deterrent that only looks
+like a pool. Stage 0's guard sweep (`marshal-flow.md`, "A non-oracle successor to
+marshal") found no regime dependence for 0.3 or 0.7 across 3, 6 and 12 ly/turn.
+That counts mildly against a pool: relief in time needs a lane shorter than the
+strike's, which should be rarer at 12 ly/turn, so the best guard should be
+higher there. But at about 190 games a cell, Stage 0 could not have seen an
+effect of a few points.
+
+**Step 0: the mechanism on a hand board.** A check in `tests/test_marshal.py` on
+the triangle. The rival launches 10 at the 4-end, and at marshal's next decide
+the corner sends its released guard to the 4-end. Run it with and without
+production enough to close the margin. If the corner never sends, the pool does
+not exist in the code and the rest is moot.
+
+**Step 1: a census, with no change to behaviour.** Stock marshal plays marshal,
+actuary (Planned) and knower (Predict) in cells 11:11, 13:3, 18:6, 24:3, 24:12
+and 18:18, 100 seeds each. A script outside `models/` steps the games. For each
+rival fleet that will land on a marshal frontier system down a lane of 2 turns
+or more, it records the following at the first marshal decide that sees it:
+
+- the strike's size, the stack it left and the lane `L`;
+- the target's ships and guard, and the guard it had the turn before the launch;
+- the released guard: how far each marshal neighbour's guard fell between those
+  two turns;
+- pooled neighbours: marshal systems next to the target on a lane shorter than
+  `L` whose rival neighbours are all that rival's stacks next to the target, and
+  what they hold;
+- what marshal ordered: relief into the target (and how much of it was released
+  guard), or the target doomed, consolidated or evacuated;
+- the result when the strike landed, and whether the target was retaken within 4
+  turns, and by which ships.
+
+Per cell, it reports the share of frontier system-turns with a pooled neighbour,
+and the hold rate by released relief (none, some, or enough to cover the strike).
+It reads as a pool if released guard is in the relief for a quarter or more of
+the seen strikes on guarded targets, and the hold rate rises with it. It reads as
+a reserve if most struck targets are evacuated whatever relief there is, and
+guard ships mostly end in retakes and flow.
+
+**Step 2: two arms, only if Step 1 reads as a pool.** These are paired as
+`RELIEF_IN_FLIGHT` was (`marshal-pricing.md`, "A fleet landing next door is
+relief too"): the same six cells, 500 seeds, both seatings, against stock
+marshal, actuary (Planned) and knower (Predict). Anything at |z| > 2 is re-run on
+fresh seeds.
+
+- `STICKY_GUARD`, an ablation. Size the guard against the stack's garrison plus
+  its fleets launched this turn or last (board facts: `Fleet.source_id` and
+  `turns_total - turns_remaining`), so the guard no longer falls at launch. A
+  pool predicts this is worse. A reserve predicts null.
+- `ISOLATED_GUARD`, the corollary. Keep 0.55 on a frontier system with a pooled
+  neighbour against that stack, and raise it to 0.8 or 1.0 on one with none. A
+  pool predicts a gain, since a system nothing can relieve is under-guarded, or
+  at worst null. A reserve predicts null or worse: more ships idle on systems
+  that evacuate anyway.
+
+If both arms read as a pool, the next arm is an explicit pooled guard: a stack's
+guard placed once, at a system that covers every system of ours beside it. That
+frees ships where three or more systems face one stack. If neither does, record
+the census and stop.
+
+**Cost.** Step 1 is 1,800 games plus the census script. Step 2 is the base arm,
+`STICKY_GUARD` and `ISOLATED_GUARD` at two settings, so 24,000 games per
+opponent. That is about 20 minutes each against marshal and actuary on 22
+workers, and longer against knower. The paired runner from the
+`RELIEF_IN_FLIGHT` measurement is not in the repo. It is a thin parallel loop
+over `tools/sweep.py`'s `parse_arm` and `play_duel`.
+
+**Result (2026-10-16): the pool exists in the code and almost never runs.**
+Step 0 passes; Step 1 reads as a reserve, so Step 2 was not run.
+
+*Step 0* is `test_a_launch_releases_the_corner_guard_into_relief`. On the
+triangle the corner's guard falls from 6 to 0 at the decide after the launch,
+and where the 4-end builds one ship before the strike lands (production 2 or 3)
+the corner sends all 6 into it. With no production the gap stays open. Then
+nothing is relieved: both guards counter-strike the rival's emptied home. So the
+released guard goes to whatever Phase 1 to 3 find worth doing, and relief is
+only one of those.
+
+*Step 1* is `tools/guard_census.py`, 1,800 games (six cells, three opponents,
+100 seeds; marshal's seat alternates with seed parity), with `RELIEF_IN_FLIGHT`
+in. It counts 92,115 seen strikes on targets that held a guard the turn before
+the launch:
+
+    released guard sent into the target, first decide     1.4%  (25% would read as a pool)
+    ...any relief before landing, released or not         3.3%
+    a neighbour's guard fell at all                       28.5%; of those, relieved 4.8%
+    a pooled neighbour's guard fell                        7.2%; of those, relieved 11.2%,
+                                                                 evacuated 61.6%, held 14.7%
+    released-guard ships that went into relief             2.8% of 403,758
+    target evacuated / stood / relieved                   64.9% / 30.8% / 3.8%
+    frontier system-turns with a pooled neighbour         15.9% (7.0% at 24:12, 20.1% at 13:3)
+
+Hold rate does rise with released relief (none 5.7%, some 74.7%, enough 80.9%),
+but relief is sent only where Phase 1 has already judged the target savable, so
+the rise is selection rather than a pool at work. No cell or opponent comes near
+the threshold: released relief is 0.6% to 3.4% of guarded strikes in every row,
+and 1.0% to 1.8% at every lane length from 2 to 7. Of the ships landing on a
+retake turn, 37% come from where the target's garrison evacuated to, 2% from
+pooled neighbours and the rest from elsewhere. What the guard is for is the
+earlier finding, a retake reserve and a deterrent. A strike outnumbers the
+garrison it is aimed at 76.6% of the time, and the target is mostly gone by the
+time it lands. The census did not follow guard ships into flow. A first run
+without `RELIEF_IN_FLIGHT` read the same (released relief 1.6%, 64.2%
+evacuated).
+
+`STICKY_GUARD`, `ISOLATED_GUARD` and the explicit pooled guard stay unbuilt.

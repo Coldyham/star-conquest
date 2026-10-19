@@ -779,6 +779,60 @@ def test_fast_forward_button_only_exists_while_spectating():
         pygame.quit()
 
 
+def test_ironman_hides_history_until_the_game_is_decided():
+    """The footer offers History exactly when ``Ui.can_review`` does: under ironman
+    not while the game is undecided (even once knocked out — rewinding is the
+    point of hiding it), and again once there is a winner."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        state.turn = 3
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] > 0
+
+        ui.ironman = True
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0
+        state.players[1].alive = False
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0, "a spectator could still rewind"
+
+        state.winner = 2
+        assert ui.can_review(state)
+    finally:
+        pygame.quit()
+
+
+def test_top_bar_shows_our_ships_lost():
+    """The tie-break, in view all game rather than only on the win overlay."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        drawn: list[str] = []
+        real = render._text
+
+        def spy(surface, font, text, *args, **kwargs):
+            drawn.append(text)
+            return real(surface, font, text, *args, **kwargs)
+
+        render._text = spy
+        try:
+            state.players[1].ships_lost = 17
+            state.players[2].ships_lost = 5
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real
+        assert "17 lost" in drawn and "5 lost" not in drawn
+    finally:
+        pygame.quit()
+
+
 def test_touch_build_drops_keyboard_only_text():
     """A phone has no keyboard, so the '(Esc)' suffixes and the shortcut lines in
     the help panel are dropped there — they were also what overflowed the labels."""

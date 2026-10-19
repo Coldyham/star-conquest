@@ -16,7 +16,8 @@ from starconquest.model import AiParams
 from starconquest.settings import (
     _GLOBAL_KNOBS,
     _LEGACY_KEY_DROPS,
-    RANDOM_POOL,
+    POOL_ERA,
+    RANDOM_POOLS,
     RANDOM_STRATEGY,
     Challenge,
     Settings,
@@ -24,6 +25,7 @@ from starconquest.settings import (
     build_state,
     random_seed,
     resolve_seed,
+    resolve_profile,
     resolve_strategy,
 )
 
@@ -45,7 +47,8 @@ def test_resolve_seed_uses_explicit():
 
 def test_resolve_seed_random_when_none():
     v = resolve_seed(Settings(seed=None))
-    assert isinstance(v, int) and 0 <= v < 1_000_000
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert isinstance(v, int) and base <= v < base + config.SEED_MAX
 
 
 def test_from_args_maps_fields():
@@ -572,14 +575,14 @@ def _roster(*names):
 
 @contextlib.contextmanager
 def _pool(*names):
-    """Deal random seats from ``names`` instead of the shipped pool."""
+    """Deal every random seat from ``names`` instead of the shipped pools."""
     from starconquest import settings as settings_module
-    saved = settings_module.RANDOM_POOL
-    settings_module.RANDOM_POOL = tuple(names)
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = (tuple(names),)
     try:
         yield
     finally:
-        settings_module.RANDOM_POOL = saved
+        settings_module.RANDOM_POOLS = saved
 
 
 def test_a_random_seat_resolves_to_a_real_bot():
@@ -641,32 +644,107 @@ def test_the_pick_ignores_what_is_registered():
     with _roster("heuristic", "alpha", "beta", "gamma"):
         busy = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
     assert bare == busy
-    assert set(bare) <= set(RANDOM_POOL)
+    assert set(bare) <= set(RANDOM_POOLS[0])
 
 
-def test_every_bot_in_the_pool_ships():
-    """A pool name with no model behind it would play as the heuristic, silently."""
+def test_every_bot_in_every_pool_ships():
+    """A pool name with no model behind it would play as the heuristic, silently,
+    and a past pool deals its era for good, so a bot any pool names must keep
+    shipping, registered or as a legacy name its family plays (`ai.LEGACY`). A
+    dealt stop must be one its knob has."""
     from starconquest import ai
     ai.load_models()
-    assert set(RANDOM_POOL) <= set(ai.STRATEGIES)
-    assert len(set(RANDOM_POOL)) == len(RANDOM_POOL)
-    assert RANDOM_STRATEGY not in RANDOM_POOL, "random names no decision function"
+    for pool in RANDOM_POOLS:
+        for entry in pool:
+            name, _, stop = entry.partition(":")
+            assert ai.known(name), entry
+            if stop:
+                spec = ai.aux_spec(name)
+                assert spec is not None and spec[1] <= float(stop) <= spec[2], entry
+        assert len(set(pool)) == len(pool)
+        assert RANDOM_STRATEGY not in pool, "random names no decision function"
 
 
-def test_the_pool_still_deals_what_it_dealt():
-    """Editing `RANDOM_POOL` (adding, removing or reordering a bot) re-deals
-    nearly every random seat on every map ever shared; this pins the deal, so the
-    edit is never made in passing. Map ea1d2a0bf0a95ba4 is the one where two
-    players on different rosters were dealt different lineups."""
+def test_a_shipped_pool_is_never_edited():
+    """The pools are append-only: editing one that has shipped (adding, removing
+    or reordering a bot) re-deals nearly every random seat in its era. Append a
+    pool instead, and add it here. (The second was rewritten once, on
+    2026-10-19, before any build dealt from it.)"""
+    assert RANDOM_POOLS == (
+        ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+        ("knower:0", "knower:1", "knower:2", "knower:3",
+         "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+         "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
+    )
+
+
+def test_each_pool_still_deals_what_it_dealt():
+    """Pins one deal per era, so an edit is never made in passing. Map
+    ea1d2a0bf0a95ba4 is the one where two players on different rosters were dealt
+    different lineups, from before the pools were numbered."""
     assert [resolve_strategy(RANDOM_STRATEGY, 626502, pid) for pid in (2, 3, 4, 5)] == [
         "heuristic", "claudebot", "claudebot", "rusherplus"]
+    assert [resolve_profile(RANDOM_STRATEGY, 1.0, 20000015, pid) for pid in (2, 3, 4, 5)] == [
+        ("heuristic", 1.0), ("evolved", 0.0), ("heuristic", 1.0), ("heuristic", 1.0)]
 
 
-def test_random_seed_is_in_range_and_not_a_fixed_sequence():
+def test_a_dealt_profile_sets_the_seats_stop_and_a_bare_name_keeps_its_own():
+    """A ``name:stop`` entry deals the stop too, so a carried aux (12 from
+    knower's old depth slider) never reaches a random seat dealt from it; the
+    first pool's bare names still keep the seat's own aux, as they always did."""
+    from starconquest.model import AiParams
+    seed = next(n for n in range(2 * POOL_ERA, 2 * POOL_ERA + 500)
+                if resolve_profile(RANDOM_STRATEGY, 12.0, n, 2) == ("knower", 3.0))
+    cfg = Settings(players=2, nodes=12)
+    cfg.ai_strategy[1] = RANDOM_STRATEGY
+    cfg.ai[1] = AiParams(aux=12.0)
+    seat = build_state(cfg, seed).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 3.0)
+    old = next(n for n in range(500) if resolve_strategy(RANDOM_STRATEGY, n, 2) == "knower")
+    seat = build_state(cfg, old).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 12.0)
+
+
+def test_a_seed_deals_from_the_pool_its_era_names():
+    """Every seed below the second pool's era is the first pool's: every seed
+    rolled (under `SEED_MAX`) or typed (seven digits) before the pools were
+    numbered. A seed from an era with no pool yet deals from the newest."""
+    from starconquest.settings import pool_for
+    first, newest = RANDOM_POOLS[0], RANDOM_POOLS[-1]
+    for seed in (0, 626502, config.SEED_MAX - 1, 9_999_999, 2 * POOL_ERA - 1):
+        assert pool_for(seed) == first
+    assert pool_for(2 * POOL_ERA) == RANDOM_POOLS[1]
+    assert pool_for(len(RANDOM_POOLS) * POOL_ERA + config.SEED_MAX) == newest
+    assert pool_for(10 ** 9) == newest
+
+
+def test_appending_a_pool_re_deals_no_seed_from_before():
+    """The point of numbering the pools: a new one deals only its own era."""
+    from starconquest import settings as settings_module
+    seeds = list(range(0, 3000, 97)) + [2 * POOL_ERA + n for n in range(0, 3000, 97)]
+
+    def deal():
+        return [resolve_strategy(RANDOM_STRATEGY, s, pid) for s in seeds for pid in (2, 3)]
+
+    before = deal()
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = saved + (("alpha", "beta"),)
+    try:
+        assert deal() == before
+        assert settings_module.pool_for(settings_module.random_seed()) == ("alpha", "beta")
+    finally:
+        settings_module.RANDOM_POOLS = saved
+
+
+def test_random_seed_is_in_the_newest_era_and_not_a_fixed_sequence():
     """Rolled seeds must differ *within* a run even if the clock is coarse (the
-    browser blunts it), which is what a repeated roll on the web build hit."""
+    browser blunts it), which is what a repeated roll on the web build hit, and
+    land where a random seat deals from the newest pool."""
+    from starconquest.settings import pool_for, seed_top
     seeds = [random_seed() for _ in range(50)]
-    assert all(0 <= s < config.SEED_MAX for s in seeds)
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert all(base <= s < base + config.SEED_MAX for s in seeds)
+    assert all(pool_for(s) == RANDOM_POOLS[-1] and s <= seed_top() for s in seeds)
     assert len(set(seeds)) > 45           # collisions vanishingly unlikely
 
 

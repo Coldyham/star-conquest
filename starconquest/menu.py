@@ -46,7 +46,7 @@ from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
                        Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
-                       randomise_knobs, random_seed, setup_warnings)
+                       randomise_knobs, random_seed, seed_top, setup_warnings)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -75,8 +75,9 @@ _TABS = (
 )
 
 _CH = 34  # control height
-_ROW_H = 52  # vertical pitch between Basic-tab rows (nine of them fit the
-             # fixed panel at 52; at 54 the last one hangs 4px out of it)
+_ROW_H = 52  # vertical pitch between Basic-tab rows (eight now, the checkboxes in
+             # two columns; nine fit the fixed panel at 52, at 54 the ninth hangs
+             # 4px out of it)
 _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
@@ -84,7 +85,7 @@ _NOTE_H = 18  # ...and between `small` note / table rows
 _MATRIX_N = 3  # jitter matrix: swings per axis, spanning ∓jitter; keep it odd
 _MATRIX_ROW_H = 24  # ...its row pitch, and
 _TLABEL_W = 120  # ...the gutter its row labels sit in
-_SEED_MAX_LEN = 7
+_SEED_MAX_LEN = len(str(seed_top()))  # a typed seed stops at the newest pool's era
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
 # Saved configs live in a gitignored dir under the writable data dir (repo root
@@ -342,6 +343,16 @@ def _strategy_options() -> list[str]:
     above it undisturbed.
     """
     return ai.available_strategies() + [RANDOM_STRATEGY]
+
+
+def _strategy_label(name: str, aux: float) -> str:
+    """What the strategy dropdown shows for a seat: its name, or for a name since
+    folded into a family (`ai.LEGACY`) the family and the stop it plays at. The
+    seat keeps the stored name until it is edited."""
+    if name not in ai.LEGACY:
+        return name
+    stop = ai.aux_stop_name(name, aux)
+    return f"{ai.family(name)} · {stop}" if stop else ai.family(name)
 
 
 def _ai_specs(ms: MenuState, settings: Settings) -> tuple:
@@ -912,28 +923,40 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     _seed_control(surface, ms, settings, right, y)
     y += _ROW_H
 
+    # The checkboxes sit in two columns. Left: this game's setup. Right: the rows
+    # that are *not* Settings fields — they belong to this installation, never
+    # travel in a save file or a shared link, and never show a changed-dot
+    # (`_changed` reads Settings).
+    mid = (left + right) // 2
+    col_r = mid - 17    # left column's checkboxes end here...
+    col_l = mid + 17    # ...and the right column's labels start here
+    top = y
+
     _row_label(surface, "Autoplay", left, y, _changed(settings, "autoplay"))
-    _checkbox(surface, ms, "autoplay", settings.autoplay, right, y)
+    _checkbox(surface, ms, "autoplay", settings.autoplay, col_r, y)
     y += _ROW_H
 
     # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
     # State is derived from the sliders, so it tracks Advanced edits automatically.
     fog_changed = _changed(settings, "fog_sight") or _changed(settings, "fog_scout")
     _row_label(surface, "Fog of war", left, y, fog_changed)
-    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), right, y)
-    y += _ROW_H
+    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), col_r, y)
 
-    # The one row here that is *not* a Settings field: it belongs to this
-    # installation rather than to a game setup, so it never travels in a save file
-    # or a shared link, and never shows a changed-dot (`_changed` reads Settings).
+    y = top
     # Off until switched on — see `webstore.share_games` and `share`.
-    _row_label(surface, "Share replays", left, y, False)
+    _row_label(surface, "Share replays", col_l, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
     y += _ROW_H
 
-    # ...and nor is this one: how a turn is *drawn* cannot move a result.
-    _row_label(surface, "Animate turns", left, y, False)
+    # How a turn is *drawn* cannot move a result.
+    _row_label(surface, "Animate turns", col_l, y, False)
     _checkbox(surface, ms, "animate_turns", webstore.animate_turns(), right, y)
+    y += _ROW_H
+
+    # An honour code kept by this installation. It hides History (and so
+    # rewind) until a game is decided (`Ui.can_review`).
+    _row_label(surface, "Ironman", col_l, y, False)
+    _checkbox(surface, ms, "ironman", webstore.ironman(), right, y)
 
 
 def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -1231,15 +1254,19 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
     if settings.seat_strategy(ms.ai_seat) != "heuristic":
         _changed_dot(surface, x - 12, y + _CH // 2)
     _text(surface, _fonts()["small"], "Strategy", config.COLOR_TEXT_DIM, midleft=(x, y + _CH // 2))
-    _dropdown(surface, ms, "strategy", settings.seat_strategy(ms.ai_seat), ms.strategies, ms.strategy_open, x + 100, y, panel.width - 48 - 100)
+    strategy, params = settings.seat_strategy(ms.ai_seat), settings.ai[ms.ai_seat - 1]
+    _dropdown(surface, ms, "strategy", _strategy_label(strategy, params.aux), ms.strategies,
+              ms.strategy_open, x + 100, y, panel.width - 48 - 100)
 
     # per-seat param sliders (hidden while the dropdown is open so its options,
-    # which overlay this region, own the hit-test — no slider rect underneath)
+    # which overlay this region, own the hit-test — no slider rect underneath).
+    # The aux slider shows the stop the seat plays: a legacy name's, or the one
+    # a value past the top reads as (`ai.aux_reads_as`).
     y += 46
     if not ms.strategy_open:
-        params = settings.ai[ms.ai_seat - 1]
-        names = ai.aux_names(settings.seat_strategy(ms.ai_seat))
-        _sliders(surface, ms, params, _ai_specs(ms, settings), x, y, panel.width - 48,
+        names = ai.aux_names(strategy)
+        shown = replace(params, aux=ai.aux_reads_as(strategy, params.aux)) if names else params
+        _sliders(surface, ms, shown, _ai_specs(ms, settings), x, y, panel.width - 48,
                  names={_AUX_KEY: names} if names else None)
 
 
@@ -1817,7 +1844,7 @@ def pump(ms: MenuState, settings: Settings) -> None:
         return
     if field_name == "seed":
         raw = softkeyboard.value(ms.seed_text)
-        text = _filter(raw, str.isdigit, _SEED_MAX_LEN)
+        text = _seed_digits(raw)
         if text != ms.seed_text:
             ms.seed_text = text
             _apply_seed_text(ms, settings)
@@ -1842,6 +1869,17 @@ def pump(ms: MenuState, settings: Settings) -> None:
 def _filter(text: str, allowed, limit: int) -> str:
     """``text`` reduced to the characters a field accepts, capped at ``limit``."""
     return "".join(ch for ch in text if allowed(ch))[:limit]
+
+
+def _seed_digits(text: str) -> str:
+    """The seed field's text: digits only, and no seed past ``seed_top`` — the
+    last digit that would cross it is refused, as a full field refuses one. A
+    seed from an era with no pool yet would deal one bot today and another once
+    its pool is appended (`settings.pool_for`)."""
+    digits = _filter(text, str.isdigit, _SEED_MAX_LEN)
+    while digits and int(digits) > seed_top():
+        digits = digits[:-1]
+    return digits
 
 
 def _editing_field(ms: MenuState) -> str | None:
@@ -1917,8 +1955,7 @@ def _handle_text_input(text: str, ms: MenuState, settings: Settings):
     both arrive here as TEXTINPUT. Control keys stay in ``_handle_key``."""
     if ms.editing_seed:
         for ch in text:
-            if ch.isdigit() and len(ms.seed_text) < _SEED_MAX_LEN:
-                ms.seed_text += ch
+            ms.seed_text = _seed_digits(ms.seed_text + ch) if ch.isdigit() else ms.seed_text
         _apply_seed_text(ms, settings)
     elif ms.editing_filename:
         for ch in text:
@@ -1999,8 +2036,11 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.strategy_open = not ms.strategy_open
     elif hit.startswith("strategy_opt_"):
         idx = int(hit[len("strategy_opt_") :])
-        if 0 <= idx < len(ms.strategies):
+        if 0 <= idx < len(ms.strategies) and ms.strategies[idx] != settings.ai_strategy[ms.ai_seat - 1]:
+            # A new strategy starts at its own default stop: an aux carried from
+            # the last one would mean something else to it.
             settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
+            settings.ai[ms.ai_seat - 1] = replace(settings.ai[ms.ai_seat - 1], aux=config.AI_AUX)
         ms.strategy_open = False
     elif hit == "copy_all":
         src = settings.ai[ms.ai_seat - 1]
@@ -2014,6 +2054,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.ai_strategy[seat - 1] = "heuristic"
     elif hit == "randomise_ai":
         _randomise_sliders(settings.ai[ms.ai_seat - 1], _ai_specs(ms, settings))
+        settings.ai_strategy[ms.ai_seat - 1] = ai.family(settings.ai_strategy[ms.ai_seat - 1])
     elif hit == "randomise_adv":
         # The hidden groups are not the die's to roll: they describe generation,
         # and a hand map has already been generated by hand.
@@ -2061,6 +2102,10 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         want = not webstore.animate_turns()
         if not webstore.set_animate_turns(want) and want:
             set_status(ms, "Couldn't save that here — turns stay instant", False)
+    elif hit == "ironman":
+        want = not webstore.ironman()
+        if not webstore.set_ironman(want) and want:
+            set_status(ms, "Couldn't save that here — History stays available", False)
     elif hit == "fog_of_war":
         if _fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT
@@ -2147,6 +2192,10 @@ def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
         target = ms  # transient: never reaches Settings, so no un-challenge prompt
     else:
         target = settings.ai[ms.ai_seat - 1]
+        if key == _AUX_KEY:
+            # Editing a legacy seat's stop makes it a seat of the family.
+            name = settings.ai_strategy[ms.ai_seat - 1]
+            settings.ai_strategy[ms.ai_seat - 1] = ai.family(name)
     setattr(target, attr, value)
 
 

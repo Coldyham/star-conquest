@@ -191,7 +191,7 @@ def _probe_rng(state: GameState, me: int, salt: int) -> random.Random:
 def borrowed(state: GameState, me: int, name: str, salt: int = 0) -> list[Order] | None:
     """``name``'s orders for ``me``'s seat, decided on a private copy with an rng of
     its own, so asking never moves the real board or its dice."""
-    fn = ai.STRATEGIES.get(name)
+    fn = ai.strategy_fn(name)
     if fn is None:
         return None
     probe = clone(state, _probe_rng(state, me, _SALT_PROBE + salt))
@@ -373,14 +373,14 @@ class Search:
         return min(ranks)
 
     def run(self) -> Best:
-        unknown = [p for p in self.policies if p not in ai.STRATEGIES]
+        unknown = [p for p in self.policies if not ai.known(p)]
         if unknown:
             raise ValueError(f"unknown rollout bot: {' '.join(unknown)}")
         self.started = time.perf_counter()
         with self._dice():
             root = Node(clone(self.root))
             for name in self.names:
-                if name not in ai.STRATEGIES:
+                if not ai.known(name):
                     continue
                 end, records = self.rollout(root.board, name, cutoff=False)
                 self.alone[name] = (end.winner == self.me, end.turn, self.lost(end))

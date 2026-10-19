@@ -43,6 +43,13 @@ WEB_SHARE_GAMES_KEY = "sc_share_games"
 # *drawn* can move a result.
 WEB_ANIMATE_TURNS_KEY = "sc_animate_turns"
 
+# Storage key for the "ironman" preference (`webstore.ironman`): off unless the
+# player turns it on. Honour-based — it only takes the History button away during
+# a live game, so there is no rewinding a bad turn — and nothing about it reaches
+# a result, so it is a local preference like the two above rather than a
+# `Settings` field that would move `challenge_key()` and travel in every link.
+WEB_IRONMAN_KEY = "sc_ironman"
+
 # Storage key for the player's UI size (`webstore.ui_size`), a whole percentage
 # applied on top of the fit to the window. A local preference like the two above:
 # it belongs to this screen, not to a game setup.

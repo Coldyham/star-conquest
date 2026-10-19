@@ -321,6 +321,10 @@ class Ui:
     pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: tuple[int, int] | None = None
     challenge_by: str = ""
+    # Ironman mode (`webstore.ironman`), stamped by `main.new_ui` when the match
+    # starts so neither render nor input reads the store once a frame. It only
+    # takes History away while the game is undecided — see `can_review`.
+    ironman: bool = False
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
@@ -495,6 +499,16 @@ class Ui:
         self.view.fit_to(points)
 
     # -- spectating --------------------------------------------------------- #
+    def can_review(self, state: GameState) -> bool:
+        """Is History (and so rewind) available?
+
+        It needs a recorded turn to scrub through, and under ironman it waits for
+        the game to be decided: reviewing is where a bad turn gets rewound. Render
+        gates the footer button on this and main gates entering on it, so the H
+        key and the button can never disagree.
+        """
+        return state.turn > 0 and not (self.ironman and state.winner is None)
+
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?
 

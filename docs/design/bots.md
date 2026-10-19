@@ -4,7 +4,7 @@ Why the AI is shaped as it is across the whole `models/` roster: the parameter
 space a tuning is only valid inside, how bots are measured, replaying bots for
 the leaderboard's bot column, the break-even margins every bot prices a fight
 with, and the two routes for bots written outside the repo. Single bots have
-their own files: [`knower.md`](knower.md), and marshal in
+their own files: [`knower.md`](knower.md), [`council.md`](council.md), and marshal in
 [`marshal.md`](marshal.md) (overview and standing),
 [`marshal-pricing.md`](marshal-pricing.md) (what a fight is priced against) and
 [`marshal-flow.md`](marshal-flow.md) (where the surplus goes). `CLAUDE.md`
@@ -30,8 +30,9 @@ the section holding the evidence.
   keyed off travel time is live in one regime of three. See "Lane length across
   the parameter space" below.
 - **Check against other opponents, not only a copy of the bot.** `ENEMY_NEAR`
-  gained 5 points in self-play and lost 7 against thinker. See
-  [`marshal.md`](marshal.md), "The 2026-09 tuning sweep".
+  gained 5 points in self-play and lost 7 against thinker ([`marshal.md`](marshal.md),
+  "The 2026-09 tuning sweep"); a split guard gained 6 in self-play and lost 6
+  against actuary ([`marshal-joint.md`](marshal-joint.md), "Against the roster").
 - **Score a rarely-firing change by seed, not by game.** An untouched seed splits
   1-1, so `tools/sweep.py`'s SEED PAIRS and PAIRED ARMS count only what changed.
   The remnant tactic read 51.3% by game and z +3.93 by seed. See
@@ -51,12 +52,13 @@ the section holding the evidence.
   game.** An unknown name silently falls back to heuristic, so a z of +17 is a
   bug, not a discovery. See [`marshal-pricing.md`](marshal-pricing.md), "Racing
   a third player for the same system".
-- **Ablating one mechanism at a time hides interactions.** `FRONTIER_GUARD` read
-  as dead weight until Phase 3b spent the ships it was hoarding. See
-  [`marshal.md`](marshal.md), first section.
-- **Win rate is not the whole objective.** Watch timeouts and game length too: a
-  variant can hold its win rate while games stretch into stalemates. See
-  [`marshal.md`](marshal.md), first section.
+- **Ablating one mechanism, or tuning one constant, at a time hides interactions.**
+  `FRONTIER_GUARD` read as dead weight until Phase 3b spent what it hoarded
+  ([`marshal.md`](marshal.md), first section), and one guard was two floors
+  ([`marshal-joint.md`](marshal-joint.md); `tools/coupling_census.py`).
+- **Win rate is not the whole objective.** Watch timeouts and game length; score
+  a timeout by who was ahead (`tools/sweep.py`'s `TIMEOUT_LEAD`) and, for a
+  finalist, as a loss too. See [`marshal.md`](marshal.md), first section, and [`marshal-joint.md`](marshal-joint.md).
 - **Check, rather than assume, that a variant with every new flag off is
   bit-identical to the base.** See [`marshal-pricing.md`](marshal-pricing.md),
   "Two doomed neighbours…", and [`marshal-flow.md`](marshal-flow.md), "The empty
@@ -164,9 +166,30 @@ lost.
 
 - **surveyor**, the opening planned as a schedule: which neutrals, in what
   order, with which converging groups, priced by payback. Folded into actuary as
-  Opening: Planned. See [`actuary.md`](actuary.md), "The planned opening".
+  Opening: Planned, and retired on 2026-10-18 when the field took its stop. See
+  [`actuary.md`](actuary.md), "The planned opening".
 - **convoy**, the turn as routing over time: supply at (system, turn), strikes
   as demand. Built, measured, not shipped. See [`convoy.md`](convoy.md).
+- **fulcrum** (not on the list; built 2026-10-18), actuary's ledger with an
+  influence field for the pull on its ships: each ship goes where the balance of
+  force is closest, not to every front alike. The traps and full relief tried on
+  the way there are recorded with it. It opened further from actuary than
+  marshal does (0.26 against 0.17), played the contested middle as actuary's
+  close relative (0.17, where marshal is 0.34), and was ahead of both in a duel
+  at the default settings. Folded into actuary the same day as *Style: Field*,
+  the default. See [`field.md`](field.md).
+- **evolved** (not on the list), a family of its own: no hand-written tactics
+  and nothing of actuary's, but a menu of priced moves per system, each naming
+  a principle, scored by weights evolved offline by CMA-ES, plus a short
+  look-ahead that vetoes what an all-out strike would punish. Nearest to
+  apprentice in that its values come from training rather than reasoning, but
+  it owns its moves instead of borrowing actuary's, and is blind. Between
+  marshal and thinker on the ladder, weaker in multi-seat, and unlike the
+  roster in how it plays. Shipped. See [`evolved.md`](evolved.md).
+- council and hunter, built since as forks of knower and actuary, are not new
+  families: on 2026-10-19 they were folded into them as the stops Council and
+  Hunt, and claudebot into thinker as Claudebot. See
+  [`bot-families.md`](bot-families.md).
 
 **learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent
@@ -232,7 +255,7 @@ source thinned by its own launch.
 **Considered and left out of the list.** Territory or chokepoint play
 (betweenness lost at every weight; pocket-sealing was a constant offset), one
 hammer stack (spearhead, 23-42%), arriving after a rival breaks a neutral (null),
-all in "Decided against" in [`../README.md`](../README.md). A decoupled
+all in [`../decided-against.md`](../decided-against.md). A decoupled
 simultaneous-move tree search would cost what knower's search does and overlap
 it.
 
@@ -856,9 +879,11 @@ protocol. Four rules hold it together:
   `menu._ai_specs` appends that slider to `_AI_PARAMS` for the edited seat, so a
   strategy declaring nothing (the built-in heuristic, `thinker`, …) shows no aux
   slider at all. `models/knower.py` labels it *Oracle*, stops Off / Predict /
-  Search, and clamps a stored value above 2 (its old 0-12 depths) to Search —
-  narrowing a knob by clamping on read, never by rewriting what was stored, is
-  what keeps every old link's digest. `bot_replay.aux_note` sends a named stop
+  Search / Council, and reads a stored value above 3 (its old 0-12 depths) as
+  Search, its `AUX_OVER` — narrowing a knob by clamping on read, never by
+  rewriting what was stored, is what keeps every old link's digest. A variant of
+  a bot is a stop of its knob, not a bot of its own; a name folded in that way
+  stays readable as a legacy name (`ai.LEGACY`; [`bot-families.md`](bot-families.md)). `bot_replay.aux_note` sends a named stop
   to the board as "Label: Stop", which `format.mjs`'s `botProfile` prints
   without a number. An `AUX_INT` slider stores an **int**, and `_ai_from_dict`
   preserves that — `aux` is the one field whose int/float form survives a
@@ -917,6 +942,9 @@ a per-seat dispatcher that routes each seat to its named strategy
 built-in `"heuristic"` for any unknown name, so a stale/missing strategy never
 crashes). Keep this inversion — it is why the core has no AI dependency, and it is
 the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[Order]`).
+A legacy name (`ai.LEGACY`, a bot since folded into a family as a stop) is
+never registered; `ai.decide` plays it as its family at its stop
+([`bot-families.md`](bot-families.md)).
 
 - **AI is per-seat and pluggable.** Each `Player` carries `ai_strategy` (a key
   into `ai.STRATEGIES`) and `ai_params` (`model.AiParams`, defaults mirroring
@@ -939,10 +967,11 @@ the seam for user-written AIs (`ai.register(name, fn)`, `fn(state, pid) -> list[
     chance must not shift `state.rng`, or the same seed would fight the same map
     differently depending on how many seats were left to it. A seed therefore
     reproduces the opponents as surely as it reproduces the map, which is what
-    lets a challenge link on one be raced fairly. The pool is the fixed
-    `settings.RANDOM_POOL`, not the loaded roster, so every build deals a seed
-    the same bots; a new bot joins it only on purpose, since that re-deals every
-    random map (`docs/design/core.md`). `Settings` keeps `"random"`, so
+    lets a challenge link on one be raced fairly. The pool is the one the seed's
+    era names in the append-only `settings.RANDOM_POOLS`, not the loaded roster,
+    so every build deals a seed the same bots; a new bot joins by appending a
+    pool, which deals only seeds rolled from then on (`docs/design/core.md`).
+    `Settings` keeps `"random"`, so
     a shared link stays a mystery to its recipient and the leaderboard's
     opponent chip (`sc_bots`, off `settings_json`) reads `random` rather than
     the bot that played — the setup's rule, not its outcome. Disclosing the

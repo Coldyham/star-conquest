@@ -52,9 +52,10 @@ old games a rules change does not actually disturb still verify normally.
 
 A lineup that disagrees is ``verified`` and ``outdated``. A log records the
 bot each seat was built with (``GameLog.strategies``), and a seat left to chance
-is dealt from ``settings.RANDOM_POOL``. A log dealt from another pool, by a build
-from before the pool was fixed or before an edit to it, was played honestly
-against bots the map's other scores did not face. A log that records no bots
+is dealt from the pool its seed's era names (``settings.pool_for``). A log dealt
+from another pool, by a build from before the pool was fixed or a stale one that
+does not know its seed's era, was played honestly against bots the map's other
+scores did not face. A log that records no bots
 cannot be checked, and is judged on its numbers alone.
 
 The dice are checked too, where they can be. Since dice were keyed per fight

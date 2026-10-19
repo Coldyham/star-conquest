@@ -16,7 +16,7 @@ import pygame
 
 from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
-from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, seed_top
 
 
 def _setup():
@@ -930,6 +930,61 @@ def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
         pygame.quit()
 
 
+def test_choosing_another_strategy_starts_it_at_its_default_stop():
+    """An aux carried from the last strategy would mean something else to the
+    next (knower's old depth slider left 12s that would read as a top stop)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('knower')}")
+        assert settings.ai[1].aux == 12.0, "re-picking the same strategy changes nothing"
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('actuary')}")
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("actuary", config.AI_AUX)
+    finally:
+        pygame.quit()
+
+
+def test_a_legacy_seat_shows_its_family_and_stop_until_its_stop_is_edited(monkeypatch):
+    """A seat stored as a bot since folded into a family (`ai.LEGACY`) keeps
+    its name, so its link's key never moves, and reads as the family at its
+    stop; a value past a knob's top shows the stop it plays (`ai.aux_over`)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert "knower · Council" in drawn
+        assert drawn[drawn.index("Oracle") + 1] == "Council"
+        assert settings.ai_strategy[1] == "council", "drawing never rewrites the seat"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert drawn[drawn.index("Oracle") + 1] == "Search"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        _drag_slider(screen, ms, settings, "ai_aux", 0.0)
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("knower", 0)
+    finally:
+        pygame.quit()
+
+
 class _FakeSoftKeyboard:
     """Stand-in for the browser's hidden DOM field (see softkeyboard.py): holds a
     value, knows whether it has focus, and can be 'dismissed' like a Done key."""
@@ -990,7 +1045,13 @@ def test_pump_reads_soft_keyboard_text_and_filters_it(monkeypatch):
 
         fake.text = "9" * (menu._SEED_MAX_LEN + 4)
         menu.pump(ms, settings)
-        assert len(ms.seed_text) == menu._SEED_MAX_LEN
+        assert len(ms.seed_text) == menu._SEED_MAX_LEN - 1, "no seed from an era with no pool"
+        assert settings.seed == int("9" * (menu._SEED_MAX_LEN - 1))
+
+        top = str(seed_top())
+        fake.text = top + "1"
+        menu.pump(ms, settings)
+        assert ms.seed_text == top and settings.seed == seed_top()
 
         fake.gone = True                         # the keyboard's Done key
         menu.pump(ms, settings)
@@ -1163,6 +1224,23 @@ def test_share_replays_toggles_the_stored_preference(monkeypatch, tmp_path):
         pygame.quit()
 
 
+def test_ironman_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """Off until switched on, and like the other local rows it never touches the
+    setup, so it cannot move `challenge_key()`."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.ironman() is False
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is True
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is False
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
 def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_path):
     monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "no" / "kv.json")
     screen, ms, settings = _setup()
@@ -1250,7 +1328,7 @@ def test_a_custom_map_hides_the_controls_it_decides():
             assert key not in ms.rects, key
         # ...and the rows that still mean something are untouched.
         for key in ("seed_field", "autoplay", "fog_of_war", "share_games",
-                    "animate_turns"):
+                    "animate_turns", "ironman"):
             assert key in ms.rects, key
     finally:
         pygame.quit()

@@ -329,6 +329,9 @@ h1::after {
 .badge:hover { background: #240a1a; }
 .chip { color: var(--dim); }
 .chip:hover { color: var(--cyan); border-color: var(--cyan); }
+/* A bot off its default stop: "knower · council", each half its own filter. */
+.chip.pair a { color: inherit; text-decoration: none; }
+.chip.pair a:hover { color: var(--cyan); }
 
 /* No human score beats this map's best bot yet — cyan for "machine", the same
  * convention .score.bot uses on a map's own page. Not a link: it states a
@@ -501,6 +504,14 @@ h1::after {
   text-decoration: none;
 }
 .filters .clear:hover { color: var(--bad); }
+/* How many the filtered list holds, under the controls. */
+.match-count {
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin: 0 0 1.25rem;
+}
 
 .config-head:empty { display: none; }
 /* Title on the left, the way to play it on the right — the button sits on the

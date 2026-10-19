@@ -137,6 +137,22 @@ compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
 doesn't get re-snapped every turn, only the one that actually crosses into it.
 
+## Ironman and the ships-lost readout
+
+Ironman (`webstore.ironman`, the menu's *Ironman* row) is honour-based: it takes
+History away while the game is undecided, because History is where rewind
+lives, and nothing records or posts that it was on. It is a local preference
+for the reason `animate_turns` is: on `Settings` it would move `challenge_key()`
+for every map ever shared. `main.new_ui` stamps it onto `Ui.ironman` so nothing
+reads the store once a frame, and `Ui.can_review` is the one gate render's
+footer button and main's `toggle_history` both ask. A spectator who has been
+knocked out still can't open History, or they could rewind and play on; once
+the game has a winner, *Review history* on the win overlay is offered as usual.
+
+The top bar shows our seat's `ships_lost` beside the turn counter
+(`render._draw_ships_lost`) all game, since it is a score's tie-break and
+someone chasing a posted result would otherwise only learn it at the end.
+
 ## Route mode (`viewstate.ROUTING`)
 
 Everything else in the game commits on click; this doesn't. It writes a dozen

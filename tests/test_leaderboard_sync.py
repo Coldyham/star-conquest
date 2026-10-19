@@ -145,3 +145,46 @@ def test_the_boards_pace_estimate_tracks_real_maps():
     # Exact on 59 of these 72 maps when written; the misses are the ceil
     # landing either side of a lane length on the turn boundary.
     assert exact >= 0.75 * total, f"exact on {exact} of {total}"
+
+
+def test_the_board_names_each_bots_stops_as_the_game_does():
+    """`bot-stops.mjs` is generated from the game's knob declarations and
+    `ai.LEGACY` (`tools/gen_bot_stops.py`); a bot that grows a stop, or a name
+    folded into a family, must regenerate it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gen_bot_stops", ROOT / "tools" / "gen_bot_stops.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert (ROOT / "leaderboard" / "js" / "bot-stops.mjs").read_text() == gen.render(), \
+        "stale: run `uv run python tools/gen_bot_stops.py`"
+
+
+def _sql_rows(table: str) -> list[tuple[str, ...]]:
+    """The VALUES rows of one of `sc_bot_profile`'s inline tables, as text."""
+    sql = (ROOT / "leaderboard" / "schema.sql").read_text()
+    body = re.search(r"create or replace function public\.sc_bot_profile\(.*?\$\$;", sql, re.S)
+    assert body is not None, "sc_bot_profile not found in schema.sql"
+    block = re.search(rf"{table}\([^)]*\) as \(values(.*?)\n  \)", body.group(0), re.S)
+    assert block is not None, f"{table} not found in sc_bot_profile"
+    return [tuple(x.strip().strip("'").replace("::integer", "") for x in row.split(","))
+            for row in re.findall(r"\(([^()]*)\)", block.group(1))]
+
+
+def test_the_database_reads_each_seats_stop_as_the_game_does():
+    """`sc_bot_profile`'s two tables (the knobs with named stops, and the names
+    folded into a family) are the game's: `ai.aux_spec`/`ai.aux_over` and
+    `ai.LEGACY`, mirrored by hand since SQL can't import them."""
+    ai.load_models()
+    knobs = {}
+    for name in ai.STRATEGIES:
+        if ai.aux_names(name) is None:
+            continue
+        _label, lo, hi, _step, _int = ai.aux_spec(name)
+        over = ai.aux_over(name)
+        knobs[name] = (str(int(lo)), str(int(hi)), "null" if over is None else str(int(over)))
+    assert {row[0]: row[1:] for row in _sql_rows("knobs")} == knobs
+    legacy = {}
+    for old, (family, stop) in ai.LEGACY.items():
+        off, on = (stop[min(stop)], stop[max(stop)]) if isinstance(stop, dict) else (stop, stop)
+        legacy[old] = (family, str(off), str(on))
+    assert {row[0]: row[1:] for row in _sql_rows("legacy")} == legacy

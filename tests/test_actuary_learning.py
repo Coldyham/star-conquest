@@ -296,37 +296,37 @@ def _seat(state, pid, aux):
     return state
 
 
-def test_the_style_knob_has_three_stops(ac):
-    assert ai.aux_spec("actuary") == ("Style", 0.0, 2.0, 1.0, True)
-    assert ai.aux_names("actuary") == ("Greedy", "Planned", "Learning")
-    for aux, stop in ((0.0, ac.GREEDY), (0.5, ac.GREEDY), (1.0, ac.PLANNED), (1.9, ac.PLANNED),
-                      (2.0, ac.LEARNING), (9.0, ac.LEARNING), ("junk", ac.PLANNED)):
+def test_the_style_knob_has_four_stops(ac):
+    assert ai.aux_spec("actuary") == ("Style", 0.0, 3.0, 1.0, True)
+    assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning", "Hunt")
+    for aux, stop in ((0.0, ac.GREEDY), (0.5, ac.GREEDY), (1.0, ac.FIELD), (1.9, ac.FIELD),
+                      (2.0, ac.LEARNING), (9.0, ac.LEARNING), ("junk", ac.FIELD)):
         seat = Player(1, "P1", (0, 0, 0), ai_params=AiParams(aux=aux))
         assert ac._stop_of(seat) == stop, aux
         assert ac.is_oracle_seat(seat) == (stop == ac.LEARNING)
         stand_in = ac.stand_in_params(seat)
         assert stand_in is not seat.ai_params
-        assert stand_in.aux == (float(ac.PLANNED) if stop == ac.LEARNING else aux)
+        assert stand_in.aux == (float(ac.FIELD) if stop == ac.LEARNING else aux)
     assert not getattr(ac, "IS_ORACLE", False), "only a Learning seat is an oracle's"
 
 
-def test_learning_counting_every_garrison_in_full_plays_as_planned(ac):
+def test_learning_counting_every_garrison_in_full_plays_as_field(ac):
     """With every learned chance read as certain, the risk is actuary's own, so
-    Learning plays exactly as Planned; only the reach in the risk differs."""
+    Learning plays exactly as Field; only the reach in the risk differs."""
     ac.LEARN_REACH = 1e9
     for nodes in (12, 18):
         state = _seat(_game(nodes=nodes), 1, float(ac.LEARNING))
         for _ in range(60):
             if state.winner is not None:
                 break
-            planned = copy.deepcopy(state)
-            planned.players[1].ai_params.aux = float(ac.PLANNED)
-            assert _orders(ac.decide, state, 1) == _orders(ac.decide, planned, 1)
+            field = copy.deepcopy(state)
+            field.players[1].ai_params.aux = float(ac.FIELD)
+            assert _orders(ac.decide, state, 1) == _orders(ac.decide, field, 1)
             engine.end_turn(state, decide=ai.decide)
 
 
 def test_a_learned_rival_thins_the_risk_and_a_thin_garrison_brings_it_back(ac):
-    """Against a rival that never strikes, Learning prices no risk where Planned
+    """Against a rival that never strikes, Learning prices no risk where Field
     prices some. Against one that strikes only from some ratio up, a garrison
     above that ratio is safe, and the same garrison thinned below it is not."""
     rival = 9
@@ -380,7 +380,7 @@ def test_decide_leaves_the_state_alone_and_draws_nothing(ac):
 
 
 def test_knower_never_runs_a_learning_seat(ac, monkeypatch):
-    """An oracle models a Learning seat instead of running it (as Planned, which
+    """An oracle models a Learning seat instead of running it (as Field, which
     keeps no memory), so nothing it does on its copies of the board reaches the
     memo."""
     calls = []
