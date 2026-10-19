@@ -178,6 +178,14 @@ lost.
   close relative (0.17, where marshal is 0.34), and was ahead of both in a duel
   at the default settings. Folded into actuary the same day as *Style: Field*,
   the default. See [`field.md`](field.md).
+- **evolved** (not on the list), a family of its own: no hand-written tactics
+  and nothing of actuary's, but a menu of priced moves per system, each naming
+  a principle, scored by weights evolved offline by CMA-ES, plus a short
+  look-ahead that vetoes what an all-out strike would punish. Nearest to
+  apprentice in that its values come from training rather than reasoning, but
+  it owns its moves instead of borrowing actuary's, and is blind. Between
+  marshal and thinker on the ladder, weaker in multi-seat, and unlike the
+  roster in how it plays. Shipped. See [`evolved.md`](evolved.md).
 
 **learner (proposed as reader): a rival modelled from the board, without running its code.**
 Estimate each rival's attack margin from its fleets in flight (ships sent

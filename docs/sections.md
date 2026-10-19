@@ -83,7 +83,7 @@ only for a fight; what is deliberately not animated.
 ## design/bots.md
 - **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.
 - **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa and fingerprints on shared positions, split into contested and opening; why it replaces the candidate share as the first check; the first reading.
-- **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built, and learner's model (stage 1, `learner.md`); duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Also two measurement ideas not yet built.
+- **New bot families (proposed 2026-10-05).** Six designs to play differently from the roster. surveyor (now actuary's planned opening) and convoy were built, and learner's model (stage 1, `learner.md`); duelist (the simultaneous move as a matrix game), apprentice (a learned evaluator) and riposte (the counter-punch) are not. Off the list, fulcrum (folded into actuary as Field) and evolved (its own family, `evolved.md`) were built too. Also two measurement ideas not yet built.
 - **Lane length across the parameter space.** Node count and ship speed move lane length over more than an order of magnitude, so a constant keyed off travel time is live in one regime of three.
 - **The person's habits.** A pointer to `learner.md`.
 - **Positions from real games.** `position_suite`: `faster`, `median gain` and `recovered`, and why they must not be blurred together.
@@ -154,6 +154,15 @@ only for a fight; what is deliberately not animated.
 - **Its opening in front of another bot.** Costs in front of marshal, no gain over actuary's Planned; not borrowed.
 - **Where it loses to actuary.** Level at contact, out-traded after it.
 - **What the measurements changed.** The guard against the target, `STRIKE_PAD` 1.25, evacuation; the nulls and deleted tactics.
+
+## design/evolved.md
+- **What it is for, and its constraints.** Blind, browser-sized, deterministic, no foresight of the dice.
+- **The policy.** A menu of priced moves per system, each naming its principle; a linear scorer plus a small residual head over size-free features.
+- **The look-ahead.** Variants of the policy's move played six turns at the expected roll; rivals hold (most likely) or strike all-out (most dangerous); the gain is the veto. Timed in the web build at native speed.
+- **Where it stands.** Third of six on a ladder (behind actuary and marshal, ahead of thinker), weaker in multi-seat; the 8-cell headline; plays unlike the roster, which is not the same as strong.
+- **Training it.** CMA-ES over paired seatings, the turn-40 share, the noise fix, how the shipped weights came about.
+- **Measuring it.** The paired bench, the +4 bar, loss diagnosis against a control.
+- **Why multi-seat is short.** Three diagnoses against a control; no blind remedy found.
 
 ## design/field.md
 - **The middle game the roster plays.** actuary-marshal duels read through `combat.resolve_arrival`: half the strikes land on an empty system, a doomed garrison steps into its striker's source (marshal 46%, actuary 31% of evacuees), 49-ship front stacks over interiors holding 10% of the ships, and defensive losses, not attacking ones, separating the winner from the loser.
