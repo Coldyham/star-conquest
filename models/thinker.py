@@ -25,6 +25,13 @@ Four behaviours, each tuned to rules this game actually rewards:
     both waves advance in lockstep. Generalised, every rear layer steps one hop
     toward the front each turn — a rolling column that never leaves ships idle.
 
+The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has two stops:
+*Thinker*, the default, is everything above; *Claudebot* is the bot thinker was
+tuned against, kept whole (`_claudebot`): focus fire from one distance at a
+time, one-hop defence, and margins padded over the break-even edge. It was
+`models/claudebot.py` until 2026-10-19, and a seat stored under that name plays
+here (`ai.LEGACY`).
+
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and routes every tie-break through ``state.rng`` so games stay reproducible.
 """
@@ -64,6 +71,16 @@ RESERVE_FLOOR = 1               # never strip an unthreatened system below this
 FRONTIER_GUARD = 0.3            # a frontier system keeps this fraction of its
                                 # scariest adjacent enemy garrison home as a guard
 
+# --- the Style knob ---------------------------------------------------------- #
+CLAUDEBOT, THINKER = 0, 1       # the Style knob's stops; anything unreadable is THINKER
+
+# What the AI tab's generic aux slider is called when this bot holds the seat (read
+# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Thinker.
+AUX_LABEL = "Style"
+AUX_RANGE = (CLAUDEBOT, THINKER, 1)
+AUX_INT = True
+AUX_NAMES = ("Claudebot", "Thinker")
+
 
 def _defend_margin() -> float:
     return combat.edge_defending(TUNED_SWING) + DEFEND_PAD
@@ -79,6 +96,8 @@ def _enemy_margin(dist: int) -> float:
 
 
 def decide(state, pid):
+    if _stop_of(state.players[pid]) == CLAUDEBOT:
+        return _claudebot(state, pid)
     sysmap = state.systems
     owned = [sid for sid, s in sysmap.items() if s.owner_id == pid]
     if not owned:
@@ -205,6 +224,17 @@ def decide(state, pid):
             budget[sid] = 0
 
     return orders
+
+
+def _stop_of(player) -> int:
+    """This seat's Style stop. Anything at or past a stop is that stop, and
+    anything unreadable is the default, so a hand-edited token cannot take the
+    bot down."""
+    try:
+        aux = float(player.ai_params.aux)
+    except Exception:                     # noqa: BLE001
+        return THINKER
+    return THINKER if aux >= THINKER else CLAUDEBOT
 
 
 # --- helpers --------------------------------------------------------------- #
@@ -337,6 +367,181 @@ def _flow_to_front(state, owned, frontier, pid, max_prod) -> dict[int, int]:
     seen = set(frontier)
     seeds = sorted(frontier, key=lambda sid: (-_front_pull(state, pid, sid, max_prod), sid))
     queue = deque(seeds)
+    while queue:
+        cur = queue.popleft()
+        for nbr in sorted(state.systems[cur].neighbors):
+            if nbr in owned and nbr not in seen:
+                seen.add(nbr)
+                parent[nbr] = cur
+                queue.append(nbr)
+    return parent
+
+
+# --------------------------------------------------------------------------- #
+# Style: Claudebot (once models/claudebot.py, kept whole)
+# --------------------------------------------------------------------------- #
+# Focus fire, jitter-safe margins and defence before greed: fleets that reach a
+# node on the same turn resolve together, so each target is struck by the
+# nearest group of our systems at one distance whose combined budget clears the
+# margin; a system hit this turn holds and pulls one-hop help that lands with
+# the strike; rear systems stream their surplus to the front.
+#
+# --- Claudebot's tunables ---------------------------------------------------- #
+# Every margin is the break-even edge plus a task-specific cushion. The edge is
+# `combat.edge_attacking`/`edge_defending`, read live: it is 1.222x at the default
+# jitter with no defender advantage, and both menu sliders move it from there —
+# attacking and defending in opposite directions, since the bonus goes to
+# whoever holds the system.
+# `CB_TUNED_SWING` floors the edge's jitter half at the swing these pads were
+# fitted against, so a knob only ever raises a margin: without it, a game set to
+# zero jitter would thin every margin below what claudebot was measured at.
+CB_TUNED_SWING = 1.1 / 0.9      # the +/-10% swing these pads were fitted at
+CB_DEFEND_PAD = 0.05            # to hold: garrison must clear the known incoming force
+CB_NEUTRAL_PAD = 0.08           # neutrals are static, so a thin cushion suffices
+CB_ENEMY_PAD = 0.15             # enemies may produce/reinforce mid-attack — a modest pad
+                                # (a fresh enemy launch always costs a turn we can react to)
+
+CB_RESERVE_FLOOR = 1            # never strip a system below this when it isn't threatened
+CB_FRONTIER_GUARD = 0.34        # a frontier system keeps this fraction of its scariest
+                                # adjacent enemy garrison home as a standing guard
+
+
+def _cb_defend_margin() -> float:
+    return combat.edge_defending(CB_TUNED_SWING) + CB_DEFEND_PAD
+
+
+def _cb_neutral_margin() -> float:
+    return combat.edge_attacking(CB_TUNED_SWING) + CB_NEUTRAL_PAD
+
+
+def _cb_enemy_margin() -> float:
+    return combat.edge_attacking(CB_TUNED_SWING) + CB_ENEMY_PAD
+
+
+def _claudebot(state, pid):
+    sysmap = state.systems
+    owned = {s.id for s in sysmap.values() if s.owner_id == pid}
+    if not owned:
+        return []
+
+    max_prod = max(s.production for s in sysmap.values())
+    frontier = {sid for sid in owned
+                if any(sysmap[n].owner_id != pid for n in sysmap[sid].neighbors)}
+
+    # Ships each system may spend this turn, after holding a defensive reserve.
+    budget: dict[int, int] = {}
+    under_attack: set[int] = set()
+    for sid in owned:
+        s = sysmap[sid]
+        incoming = _cb_imminent(state, pid, sid)
+        if incoming > 0:
+            # Being hit now: hold just enough to win *this* fight and spend the
+            # rest, so a system under steady light pressure still fuels the war.
+            hold = math.ceil(incoming * _cb_defend_margin())
+            help_now = _inbound(state, sid, pid, 1)
+            if s.ships + help_now < hold:
+                budget[sid] = 0            # can't hold alone — keep all, call for help
+                under_attack.add(sid)
+            else:
+                budget[sid] = max(0, s.ships - max(0, hold - help_now))
+        elif sid in frontier:
+            guard = math.ceil(CB_FRONTIER_GUARD * _max_adjacent_enemy(state, pid, s))
+            budget[sid] = max(0, s.ships - max(CB_RESERVE_FLOOR, guard))
+        else:
+            budget[sid] = max(0, s.ships - CB_RESERVE_FLOOR)
+
+    orders: list[Order] = []
+
+    # 1) DEFENCE. For a system being hit this turn, pull one-hop help that lands
+    #    on the same turn and joins the grouped fight, up to a jitter-safe hold.
+    for sid in sorted(under_attack):
+        s = sysmap[sid]
+        incoming = _cb_imminent(state, pid, sid)
+        need = math.ceil(incoming * _cb_defend_margin()) - (s.ships + _inbound(state, sid, pid, 1))
+        if need <= 0:
+            continue
+        helpers = sorted(
+            (n for n in s.neighbors
+             if sysmap[n].owner_id == pid and budget.get(n, 0) > 0
+             and state.travel_turns(n, sid) == 1),
+            key=lambda n: -budget[n],
+        )
+        for h in helpers:
+            if need <= 0:
+                break
+            send = min(budget[h], need)
+            orders.append(Order(pid, h, sid, send))
+            budget[h] -= send
+            need -= send
+
+    # 2) OFFENCE. Target-first focus fire: for each capturable neighbour, find the
+    #    nearest distance-group of our systems whose *combined* budget clears the
+    #    win margin, and commit just enough from that group so they arrive together.
+    targets = [sysmap[n] for n in
+               {n for sid in frontier for n in sysmap[sid].neighbors
+                if sysmap[n].owner_id != pid}]
+    targets.sort(key=lambda t: (-(max_prod - t.production + 1), t.ships, state.rng.random()))
+
+    for target in targets:
+        groups: dict[int, list[int]] = {}
+        for sid in owned:
+            if budget.get(sid, 0) > 0 and target.id in sysmap[sid].neighbors:
+                groups.setdefault(state.travel_turns(sid, target.id), []).append(sid)
+
+        for dist in sorted(groups):  # nearest first: sooner arrival, less time to reinforce
+            need = _cb_required(state, pid, target, dist) - _inbound(state, target.id, pid, dist)
+            if need <= 0:
+                break  # a fleet already in transit will take it — don't pile on
+            srcs = sorted(groups[dist], key=lambda s: -budget[s])
+            if sum(budget[s] for s in srcs) < need:
+                continue  # this range can't crack it; a farther (weaker-timed) group might
+            for s in srcs:
+                if need <= 0:
+                    break
+                send = min(budget[s], need)
+                orders.append(Order(pid, s, target.id, send))
+                budget[s] -= send
+                need -= send
+            break
+
+    # 3) LOGISTICS. Rear systems push their leftover surplus one hop toward the
+    #    nearest frontier so interior production never stagnates.
+    parent = _cb_flow_to_front(state, owned, frontier)
+    for sid in sorted(owned):
+        if sid not in frontier and budget.get(sid, 0) > 0 and sid in parent:
+            orders.append(Order(pid, sid, parent[sid], budget[sid]))
+            budget[sid] = 0
+
+    return orders
+
+
+# --- Claudebot's helpers ------------------------------------------------------ #
+def _cb_imminent(state, pid, sid) -> int:
+    """Enemy ships arriving at ``sid`` *this* turn — they fight the garrison now."""
+    return sum(f.ships for f in state.fleets
+               if f.dest_id == sid and f.owner_id != pid and f.turns_remaining <= 1)
+
+
+def _cb_required(state, pid, target, dist) -> int:
+    """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns."""
+    if target.owner_id == 0:  # static neutral garrison
+        return max(target.ships + 1, math.ceil(target.ships * _cb_neutral_margin()))
+    # Enemy: fold in its own reinforcements that land by the time we arrive.
+    defence = target.ships + sum(
+        f.ships for f in state.fleets
+        if f.dest_id == target.id and f.owner_id == target.owner_id and f.turns_remaining <= dist)
+    return max(target.ships + 1, math.ceil(defence * _cb_enemy_margin()))
+
+
+def _cb_flow_to_front(state, owned, frontier) -> dict[int, int]:
+    """Multi-source BFS over owned territory: rear node -> next hop toward the front.
+
+    Sorted seeds/neighbours keep the flow deterministic, so a rear system's next
+    hop is stable while the frontier is, instead of oscillating turn to turn.
+    """
+    parent: dict[int, int] = {}
+    seen = set(frontier)
+    queue = deque(sorted(frontier))
     while queue:
         cur = queue.popleft()
         for nbr in sorted(state.systems[cur].neighbors):

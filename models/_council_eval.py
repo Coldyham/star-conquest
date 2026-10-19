@@ -1,7 +1,7 @@
 """council's judge: board features and a small learned value function.
 
-Underscore-prefixed so `ai.load_models` skips it (it has no `decide`); council
-loads it by path.
+Underscore-prefixed so `ai.load_models` skips it (it has no `decide`); knower
+loads it by path for its Council stop.
 
 Pure Python, no numpy: the model ships as constant tables (between the
 ``WEIGHTS`` markers) and is evaluated by `value`, a few hundred multiply-adds.

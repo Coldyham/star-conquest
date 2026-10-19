@@ -27,7 +27,7 @@ moves.
     candidate pays. Defence, evacuation, strikes and logistics are not written
     anywhere; they are what the margin chooses.
 
-The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has three stops.
+The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has four stops.
 
   * *Greedy* pulls its ships to every front alike: a ship on a system touching
     anything not ours is worth 1 + `FRONT_BONUS`, falling by `FRONT_DECAY` per
@@ -47,6 +47,36 @@ The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has three stops.
   * *Learning* is Field reading each rival's habits into the risk term
     (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
     seen, so it is the one stop an oracle must model rather than run.
+  * *Hunt* guards only against the strikes a rival would launch, and looks a few
+    turns ahead (docs/design/hunter.md). It was `models/hunter.py`, a fork of
+    this file built to beat it, until 2026-10-19:
+
+      - **Edge risk.** The threat next door is only a strike a rival launches by
+        actuary's own rule: one system next door, or several whose lanes take
+        the same time, that beats what we hold on landing *on the worst roll*,
+        launched now or on any later turn of the horizon (`_edge_risk`).
+        actuary's launches meet that rule 98-100% of the time, so a garrison
+        above it is safe from actuary, and the ships it would keep go to the
+        front. The shortfall share costs `EDGE_RISK_WEIGHT` of the stake.
+      - **Gathering, on fast boards.** Where the median lane is at most
+        `EDGE_GATHER_LANE` turns, a rival system next door also counts the
+        rival garrisons beside it that could have joined it by the launch turn.
+      - **Softer strikes, on slow boards.** Where the median lane is at least
+        `CAPTURE_LANE` turns, a strike on a rival-held system is priced at the
+        nominal roll (`CAPTURE_SWING`): actuary guards only to it next door.
+      - Relief a little heavier (`HUNT_REINFORCE_WEIGHT`), none from fleets in
+        flight (`HUNT_RELIEF_IN_FLIGHT`), and on slow lanes Greedy's front
+        alone (`HUNT_SLOW_FRONT`).
+      - **Look-ahead.** The plan and the ledger at other postures are each
+        played `LOOK_PLIES` turns on a private board with its own dice, every
+        rival on Hunt's plain plan, and the best final ledger wins (`_look`).
+        Bounded by work (`LOOK_WORK`), so it runs on boards up to about 40
+        systems and plays the same on any machine.
+
+    It runs no other bot's code and keeps no memory, so it is its own stand-in.
+
+A stored value past Hunt reads as Learning (``AUX_OVER``), as it did before Hunt
+was added: Hunt is reached only by its own value.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -59,10 +89,12 @@ import copy
 import hashlib
 import heapq
 import math
+import random
+import time
 from collections import Counter, OrderedDict, defaultdict
 from typing import NamedTuple
 
-from starconquest import combat, config
+from starconquest import combat, config, engine
 from starconquest.model import Order
 
 # --- tunables -------------------------------------------------------------- #
@@ -98,7 +130,8 @@ COST_DECIDE_MS = 8.3
 COST_NODES_EXP = 0.77
 
 # --- the Style knob ---------------------------------------------------------- #
-GREEDY, FIELD, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreadable is FIELD
+GREEDY, FIELD, LEARNING, HUNT = 0, 1, 2, 3  # the Style knob's stops; anything
+                                            # unreadable is FIELD
 
 # --- the field (Style: Field and Learning; "The field" in docs/design/actuary.md)
 FIELD_DECAY = 0.45          # influence kept per median lane of travel
@@ -108,6 +141,54 @@ CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
 SLOW_LANE = 5               # a median lane this many turns or more is slow: there
                             # the pull is half the field and half Greedy's front
                             # ("Slow lanes: half the front" in docs/design/field.md)
+
+# --- Style: Hunt (docs/design/hunter.md); every switch off is Field ---------- #
+EDGE_RISK = True            # price a threat as actuary launches one: a source next door,
+                            # or several landing on the same turn, that wins the worst
+                            # roll (tools/hunt_predict.py: recall 0.98-1.00)...
+EDGE_LOOK = 40              # ...launched this turn or up to this many turns later (1
+                            # measured -10 pts: a front thins faster than it refills)...
+EDGE_RISK_WEIGHT = 1.0      # ...a full shortfall costing this share of the stake (2.5
+                            # and the fast-board 1.5 measured worse)
+EDGE_SWING = 0.0            # >0: the swing a rival's strike must clear in place of the
+                            # worst roll's (1.0 = the nominal roll); 1.0 and 1.1 were
+                            # within noise against four bots
+EDGE_GATHER_LANE = 2        # on a board whose median lane is at most this many turns, a
+                            # rival system next door also counts, by launch turn k, the
+                            # rival garrisons beside it that could have joined it by
+                            # then (18:18 +8.2 pts; on every board -3.2); 0 = never
+CAPTURE_SWING = 1.0         # >0: the swing our strike on a rival-held system is priced
+                            # at (1.0 = it wins the nominal roll) in place of the worst
+                            # roll: actuary guards only to the nominal roll next door...
+CAPTURE_LANE = 6            # ...on a board whose median lane is at least this many turns
+                            # (13:3 +7.8 pts; on 7:6 it cost 7-13); 0 = every board
+HUNT_REINFORCE_WEIGHT = 0.45  # `REINFORCE_WEIGHT` at Hunt (0.45-0.7 is a plateau, ~+2
+                              # pts against actuary)...
+HUNT_RELIEF_IN_FLIGHT = 0.0   # ...`RELIEF_IN_FLIGHT` (0 is Hunt as measured)...
+HUNT_SLOW_FRONT = 1.0       # ...and Greedy's front's share of the pull on slow lanes
+                            # (Field 0.5; 1, the front alone, measured +6.9 pts over
+                            # the field, 0.5 null and 0 -1.9: on slow boards the
+                            # look-ahead wants the front)
+
+LOOKAHEAD = True            # roll each candidate plan forward and keep the best
+LOOK_PLIES = 6              # turns each candidate is played on before it is scored
+LOOK_WEIGHTS = (0.4, 2.5)   # candidate postures besides ours: edge risk weight times these...
+LOOK_CAPTURE = True         # ...and our plan with the nominal-roll strike on every board
+LOOK_DECIDED = 1e6          # a rollout that ends the game scores this, won or lost
+LOOK_WORK = 4000            # work per decide: a rollout ply costs systems ** 1.3 x seats
+                            # (how a ledger decide grows); a line that would pass it is not
+                            # rolled. Work, not time, so a seat plays the same on any machine
+LOOK_BUDGET_S = 1.0         # a catastrophe guard on the wall clock, as knower's: never the
+                            # budget that decides. The base plan is rolled first, so running
+                            # out of either only ever falls back to the plain plan
+BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by this
+
+# What a Hunt decide costs (`decide_ms`), fitted as above against actuary over the
+# same grid (tools/hunt_cost.py; docs/design/hunter.md, "What it costs"): the plain
+# ledger, and COST_LOOK_MS per unit of the work the look-ahead is allowed.
+HUNT_COST_DECIDE_MS = 10.2
+HUNT_COST_NODES_EXP = 1.28
+COST_LOOK_MS = 0.025
 
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
@@ -142,16 +223,20 @@ PRIOR_STRIKE = (
 
 # What the AI tab's generic aux slider is called when this bot holds the seat (read
 # by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Field.
+# ``AUX_OVER`` is the stop a stored value past the top reads as (`ai.aux_over`).
 AUX_LABEL = "Style"
-AUX_RANGE = (GREEDY, LEARNING, 1)
+AUX_RANGE = (GREEDY, HUNT, 1)
 AUX_INT = True
-AUX_NAMES = ("Greedy", "Field", "Learning")
+AUX_NAMES = ("Greedy", "Field", "Learning", "Hunt")
+AUX_OVER = LEARNING
 
 
 def decide(state, pid):
     if not any(s.owner_id == pid for s in state.systems.values()):
         return []
     stop = _stop_of(state.players[pid])
+    if stop == HUNT:
+        return _look(state, pid) if LOOKAHEAD else _Ledger(state, pid, field=True, hunt=True).plan()
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
@@ -159,13 +244,21 @@ def decide(state, pid):
 
 
 def _stop_of(player) -> int:
-    """This seat's Style stop. Anything at or past a stop is that stop, and
-    anything unreadable is the default, so a hand-edited token cannot take the
-    bot down."""
+    """This seat's Style stop. Anything at or past a stop is that stop, past Hunt
+    is Learning (``AUX_OVER``), and anything unreadable is the default, so a
+    hand-edited token cannot take the bot down."""
+    return _params_stop(getattr(player, "ai_params", None))
+
+
+def _params_stop(params) -> int:
     try:
-        aux = float(player.ai_params.aux)
+        aux = float(params.aux)
     except Exception:                     # noqa: BLE001
         return FIELD
+    if aux > HUNT:
+        return AUX_OVER
+    if aux >= HUNT:
+        return HUNT
     if aux >= LEARNING:
         return LEARNING
     return FIELD if aux >= FIELD else GREEDY
@@ -179,7 +272,7 @@ def is_oracle_seat(player) -> bool:
 
 def stand_in_params(player):
     """The params an oracle runs a Learning seat at instead: Field, the same bot
-    with no memory. Greedy and Field are their own."""
+    with no memory. Greedy, Field and Hunt are their own."""
     params = copy.copy(player.ai_params)
     params.aux = float(FIELD) if _stop_of(player) == LEARNING else params.aux
     return params
@@ -189,19 +282,38 @@ def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us. knower never runs a Learning seat (`is_oracle_seat`),
-    but runs Field in its place (`stand_in_params`), so this prices Greedy and
-    Field."""
+    but runs Field in its place (`stand_in_params`), so this prices Greedy, Field
+    and Hunt."""
     drawn = getattr(settings, "custom_map", None)
-    nodes = len(drawn.nodes) if drawn is not None else settings.nodes
-    return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
+    nodes = max(1, len(drawn.nodes) if drawn is not None else settings.nodes)
+    seat_params = getattr(settings, "seat_params", None)
+    if seat_params is not None and _params_stop(seat_params(seat)) == HUNT:
+        plain = HUNT_COST_DECIDE_MS * (nodes / COST_REF_NODES) ** HUNT_COST_NODES_EXP
+        return plain + COST_LOOK_MS * _look_work(nodes, max(2, settings.players))
+    return COST_DECIDE_MS * (nodes / COST_REF_NODES) ** COST_NODES_EXP
+
+
+def _look_work(systems: int, seats: int) -> float:
+    """The work units one Hunt look-ahead decide spends on this board: whole
+    lines, up to one per posture, while they fit LOOK_WORK, and none unless two
+    do."""
+    if not LOOKAHEAD:
+        return 0.0
+    line = LOOK_PLIES * seats * systems ** 1.3
+    lines = min(1 + len(LOOK_WEIGHTS) + (1 if LOOK_CAPTURE and CAPTURE_SWING > 0 else 0),
+                int(LOOK_WORK // line))
+    return lines * line if lines >= 2 else 0.0
 
 
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None, field=False):
+    def __init__(self, state, pid, curves=None, field=False, hunt=False, weight=None,
+                 capture=None):
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
+        self.hunt = hunt            # Hunt's switches; ``weight`` and ``capture`` are
+                                    # its look-ahead's postures
         sysmap = state.systems
         self.ids = sorted(sysmap)
         # The two edges are adv * swing and swing / adv, so both halves come back
@@ -213,6 +325,19 @@ class _Ledger:
         longest = max((state.travel_turns(a, b) for a in self.ids
                        for b in sysmap[a].neighbors), default=1)
         self.horizon = max(2, min(HORIZON_MAX, longest + HORIZON_PAD))
+        self.reinforce = HUNT_REINFORCE_WEIGHT if hunt else REINFORCE_WEIGHT
+        self.relief_in_flight = HUNT_RELIEF_IN_FLIGHT if hunt else RELIEF_IN_FLIGHT
+        self.capture, self.gather, self.edge_weight = 0.0, False, EDGE_RISK_WEIGHT
+        if hunt:
+            lanes = sorted(state.travel_turns(a, b) for a in self.ids
+                           for b in sysmap[a].neighbors if a < b)
+            median = (lanes[len(lanes) // 2] + lanes[(len(lanes) - 1) // 2]) / 2 if lanes else 0
+            self.capture = CAPTURE_SWING if CAPTURE_SWING > 0 and median >= CAPTURE_LANE else 0.0
+            if capture is not None:
+                self.capture = capture
+            if weight is not None:
+                self.edge_weight = weight
+            self.gather = EDGE_GATHER_LANE > 0 and median <= EDGE_GATHER_LANE
         self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
                        for a in self.ids}
         self.income = {sid: (1.0 / sysmap[sid].production if sysmap[sid].production > 0 else 0.0)
@@ -473,12 +598,15 @@ class _Ledger:
         all, at min(1, `LEARN_REACH` times the rival's learned chance of striking
         at the ratio of it to our garrison then), and takes the expected
         shortfall, so thinning ours raises the threat it sees again.
+        Hunt prices only the strikes a rival would launch (`_edge_risk`).
         ``lines`` overrides some timelines (a launch being priced)."""
         lines = lines or {}
         owners, ships = lines.get(sid) or self.lines[sid]
         pid, H = self.pid, self.horizon
         if pid not in owners:
             return 0.0
+        if self.hunt and EDGE_RISK:
+            return self._edge_risk(sid, owners, ships, lines)
         worst = 0.0
         for rival in self.rivals:
             curve = self.curves.get(rival) if self.curves is not None else None
@@ -514,6 +642,58 @@ class _Ledger:
             return 0.0
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
         return RISK_WEIGHT * worst * stake
+
+    def _edge_risk(self, sid, owners, ships, lines):
+        """Hunt's risk: the shortfall share against the strongest strike a rival
+        would launch by actuary's rule: launched at turn k <= EDGE_LOOK from one
+        system next door, or several whose lanes take the same time, only if it
+        beats what we hold on landing on the worst roll. Our garrisons next door
+        count as relief (SELF_RELIEF) only if they land before it."""
+        pid, H = self.pid, self.horizon
+        edge = self.advantage * (EDGE_SWING if EDGE_SWING > 0 else self.swing)
+        travel, base = self.travel, self.lines
+        near = [(nbr, d) + (lines.get(nbr) or base[nbr]) for nbr, d in travel[sid].items()]
+        last_k = min(EDGE_LOOK, H - 1)
+        relief: dict = {}                 # quickest rival lane -> our relief per turn
+        worst = 0.0
+        for rival in self.rivals:
+            theirs = [x for x in near if rival in x[2]]     # systems it ever holds
+            if not theirs:
+                continue
+            for k in range(0, last_k + 1):
+                by_d: dict[int, int] = {}
+                for nbr, d, n_owners, n_ships in theirs:
+                    if k + d > H:
+                        continue
+                    if n_owners[k] == rival and n_ships[k] > 0:
+                        gathered = n_ships[k]
+                        if self.gather and k > 0:
+                            for far, e in travel[nbr].items():
+                                if far == sid or e > k:
+                                    continue
+                                f_owners, f_ships = lines.get(far) or base[far]
+                                if f_owners[0] == rival:
+                                    gathered += f_ships[0]
+                        by_d[d] = by_d.get(d, 0) + gathered
+                if not by_d:
+                    continue
+                own = None
+                if SELF_RELIEF > 0:
+                    quickest = min(by_d) if SELF_RELIEF_REACTS else None
+                    own = relief.get(quickest)
+                    if own is None:
+                        own = relief[quickest] = self._own_relief(sid, lines, quickest)
+                for d, sent in by_d.items():
+                    t = k + d
+                    if owners[t] != pid:
+                        continue
+                    held = ships[t] + (own[t] if own else 0.0)
+                    if sent > held * edge and sent > held:
+                        worst = max(worst, 1.0 - held * edge / sent)
+        if worst <= 0.0:
+            return 0.0
+        stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
+        return self.edge_weight * worst * stake
 
     def _own_relief(self, sid, lines, under=None):
         """Per turn, ``SELF_RELIEF`` of what our garrisons next door could have
@@ -618,8 +798,8 @@ class _Ledger:
         if owner not in (0, self.pid) and self.pid in landing:
             # A rival we strike may be relieved before we land.
             by_t, flying = self.relief[sid]
-            forces[owner] += int(REINFORCE_WEIGHT * by_t.get(t, 0)
-                                 + RELIEF_IN_FLIGHT * flying.get(t, 0))
+            forces[owner] += int(self.reinforce * by_t.get(t, 0)
+                                 + self.relief_in_flight * flying.get(t, 0))
         sides = [(o, n) for o, n in forces.items() if n > 0]
         if not sides:
             return 0, 0
@@ -651,7 +831,7 @@ class _Ledger:
         if ao == pid:
             if bo == defender and an <= bn:
                 return b
-            b_eff *= swing
+            b_eff *= self.capture if self.capture > 0 and bo in self.rivals else swing
         elif bo == pid:
             a_eff *= swing
         if a_eff > b_eff:
@@ -694,13 +874,17 @@ class _Ledger:
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
 
     def _pull(self):
-        """Field and Learning's pull: the field, or on a board whose median lane
-        is `SLOW_LANE` turns or more, the mean of the field and Greedy's front."""
+        """The pull at Field, Learning and Hunt: the field, or on a board whose
+        median lane is `SLOW_LANE` turns or more, the mean of the field and
+        Greedy's front (at Hunt, the two mixed by `HUNT_SLOW_FRONT`)."""
         lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
         field = self._field()
-        if not lanes or lanes[len(lanes) // 2] < SLOW_LANE:
+        if not lanes or SLOW_LANE <= 0 or lanes[len(lanes) // 2] < SLOW_LANE:
             return field
         front = self._front_values()
+        if self.hunt:
+            return {sid: (1 - HUNT_SLOW_FRONT) * field[sid] + HUNT_SLOW_FRONT * front[sid]
+                    for sid in self.ids}
         return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
 
     def _field(self):
@@ -775,7 +959,7 @@ class _Ledger:
                     if sysmap[nbr].owner_id == owner:
                         for t in range(d + 1, self.horizon + 1):
                             by_t[t] = by_t.get(t, 0) + sysmap[nbr].ships
-                if RELIEF_IN_FLIGHT > 0:
+                if self.relief_in_flight > 0:
                     for t0, ships in self._relief_in_flight(sid, owner):
                         for t in range(t0, self.horizon + 1):
                             flying[t] = flying.get(t, 0) + ships
@@ -815,6 +999,136 @@ def _with(arrivals, t, owner, ships):
     slot[owner] = slot.get(owner, 0) + ships
     out[t] = slot
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Hunt's look-ahead
+#
+# Our candidate plans are Hunt's own and the same ledger at other postures.
+# Each is played on a private board for LOOK_PLIES turns, every seat after the
+# first ply (and every rival from the first) playing Hunt's plain plan from its
+# own seat: no other bot's code is run, so this is a self-model, not an oracle.
+# The copy rolls its own dice (`dice_salt` + ":hunter-rollout"), so no line
+# foresees the game's. Every line rolls the same dice, so a score gap is the
+# plan's, not luck's. The score is the ledger's value of the final board from
+# our seat, which already projects every fleet still flying.
+# --------------------------------------------------------------------------- #
+def _look(state, pid):
+    deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
+    seats = sum(1 for p in state.players.values() if not p.is_neutral and p.alive)
+    line = LOOK_PLIES * seats * len(state.systems) ** 1.3     # the work one line costs
+    if 2 * line > LOOK_WORK:
+        return _hunt(state, pid).plan()   # not two lines' worth: nothing to compare
+    plans, seen = [], set()
+    for weight, capture in _postures():
+        orders = _hunt(state, pid, weight, capture).plan()
+        key = tuple(sorted((o.source_id, o.dest_id, o.ships) for o in orders))
+        if key not in seen:
+            seen.add(key)
+            plans.append(orders)
+        if time.perf_counter() > deadline:
+            break
+    if len(plans) == 1:
+        return plans[0]
+    # Every rival decides its first turn from this same board in every line, so
+    # its orders there are worked out once, not once per line.
+    first = {q: _hunt(state, q).plan() for q, p in state.players.items()
+             if q != pid and not p.is_neutral and any(x.owner_id == q for x in state.systems.values())}
+    lines = []
+    for i, orders in enumerate(plans):
+        if (i + 1) * line > LOOK_WORK and i > 0:
+            break                         # the next line would pass the work budget
+        lines.append(_HuntLine(state, pid, orders, first))
+    best, best_score = plans[0], None
+    for ln in lines:
+        score = ln.play(LOOK_PLIES, deadline)
+        if score is None:
+            break                         # out of time mid-line: keep the best scored
+        if best_score is None or score > best_score:
+            best, best_score = ln.orders, score
+    return best
+
+
+def _hunt(state, pid, weight=None, capture=None):
+    """Hunt's plain ledger for ``pid``, at a posture of the look-ahead's."""
+    return _Ledger(state, pid, field=True, hunt=True, weight=weight, capture=capture)
+
+
+def _postures():
+    yield None, None
+    for factor in LOOK_WEIGHTS:
+        yield EDGE_RISK_WEIGHT * factor, None
+    if LOOK_CAPTURE and CAPTURE_SWING > 0:
+        yield None, CAPTURE_SWING
+
+
+class _HuntLine:
+    """One candidate played forward on a private board, a few turns at a time."""
+
+    def __init__(self, state, pid, orders, first_orders=None):
+        self.board, self.pid, self.orders = _clone(state), pid, orders
+        self.first_orders, self.plies = first_orders, 0
+
+    def _decide(self, s, q):
+        if self.plies == 0:
+            if q == self.pid:
+                return self.orders
+            if self.first_orders is not None:
+                return self.first_orders.get(q, [])
+        if not any(x.owner_id == q for x in s.systems.values()):
+            return []
+        return _hunt(s, q).plan()
+
+    def play(self, upto, deadline=math.inf):
+        """The line's score once it has played ``upto`` turns in all, or ``None``
+        if the clock ran out first (checked before each, so an overrun is one ply)."""
+        board, pid = self.board, self.pid
+        while self.plies < upto and board.winner is None:
+            if time.perf_counter() > deadline:
+                return None
+            engine.end_turn(board, decide=self._decide)
+            self.plies += 1
+        if board.winner is not None:
+            return LOOK_DECIDED if board.winner == pid else -LOOK_DECIDED
+        if not any(x.owner_id == pid for x in board.systems.values()):
+            return -LOOK_DECIDED
+        return sum(_hunt(board, pid).worth.values())
+
+
+def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
+    """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
+    out before the last of them."""
+    return _HuntLine(state, pid, orders, first_orders).play(LOOK_PLIES, deadline)
+
+
+def _clone(state):
+    """A private board: every mutable container rebuilt (as knower's `_clone`),
+    its own rng, every seat driven by `decide`, and its own dice."""
+    clone = copy.copy(state)
+    clone.systems = {sid: copy.copy(s) for sid, s in state.systems.items()}
+    for s in clone.systems.values():
+        s.neighbors = list(s.neighbors)
+    clone.fleets = [copy.copy(f) for f in state.fleets]
+    clone.players = {q: copy.copy(p) for q, p in state.players.items()}
+    for p in clone.players.values():
+        p.ai_params = copy.copy(p.ai_params)
+        p.is_human = False
+    clone.adjacency = {sid: dict(n) for sid, n in state.adjacency.items()}
+    clone.rng = random.Random(0)
+    clone.dice_salt = f"{state.dice_salt}:hunter-rollout"
+    return clone
+
+
+def configure(overrides: dict) -> None:
+    """Set module constants by name, for the bench's variants (tools/hunt_bench.py)."""
+    g = globals()
+    for name, value in overrides.items():
+        if name not in g:
+            raise KeyError(name)
+        if isinstance(g[name], tuple):
+            g[name] = tuple(value) if isinstance(value, (tuple, list)) else (value,)
+        else:
+            g[name] = type(g[name])(value) if isinstance(g[name], (int, float, bool)) else value
 
 
 # --------------------------------------------------------------------------- #
