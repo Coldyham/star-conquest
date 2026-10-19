@@ -128,10 +128,11 @@ What it changes, in descending order of measured value:
     with leftover budget tops up a short neighbour (``FEED``, ``FEED_FRONT``).
     That is what the people who beat marshal on the leaderboard do, and it is
     worth 54.0% (z = +4.04, REPRODUCED) where the median lane is two turns or
-    less. ``FEED_MAX_TURNS`` switches it off on longer lanes. At ``FEED`` 3.0
-    nearly every front facing a rival counts as short, so the rear feeds those
-    alone, and the gate pays at three turns, where at ``FEED`` 1.0 it measured
-    null. See "What the board's human wins say" in `docs/design/marshal-flow.md`.
+    less. At ``FEED`` 3.0 nearly every front facing a rival counts as short, so
+    the rear feeds those alone, and it now runs on every board
+    (``FEED_MAX_TURNS`` 0): level with a three-turn cap against the roster, and
+    sooner against the weak bots. See "What the board's human wins say" in
+    `docs/design/marshal-flow.md`.
 
   * **The pour leaves more at home than the strike does.** The guard is the
     floor for every phase that spends, but Phase 3b's surplus pour is what
@@ -142,6 +143,18 @@ What it changes, in descending order of measured value:
     +2.9, +3.8 and +6.8 against each), and ahead in three- and four-seat
     free-for-alls. See "Screening against the roster" in
     `docs/design/marshal-joint.md`.
+
+  * **A strike on a stack spends the guard kept against it.** The guard is a
+    share of the largest rival stack next door, and that stack is usually the
+    one being struck: held back from the strike on itself, by every source that
+    borders it, it deadlocked a front at any income ratio short of about 1.55.
+    ``SPARE_TARGET`` lets a priced strike on a rival spend the part of the guard
+    that only the target called for, and keeps the guard against every other
+    stack. Against heuristic, rusherplus and thinker it ends two thirds of the
+    games marshal left unfinished at turn 600; against stock marshal and knower
+    it gains, and against actuary it is level, where dropping the guard outright
+    loses 8.2 points. See "marshal: sparing the target and feeding on every
+    board" in `docs/design/win-turns.md`.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
@@ -247,11 +260,12 @@ FEED = 3.0                      # Phase 4: rear surplus flows only to frontier
                                  # rival is short, so the ratio stops binding
 FEED_FRONT = True               # ...and a frontier system's own leftover tops up
                                  # a short neighbour, up to its shortfall
-FEED_MAX_TURNS = 3              # ...only on a board whose median lane is at most
+FEED_MAX_TURNS = 0              # ...only on a board whose median lane is at most
                                  # this many turns; 0 = on any board. See "Feed
                                  # what was just taken" in docs/design/marshal-flow.md,
-                                 # and "Screening against the roster" in
-                                 # docs/design/marshal-joint.md for 3.0 and 3
+                                 # "Screening against the roster" in
+                                 # docs/design/marshal-joint.md for 3.0, and
+                                 # docs/design/win-turns.md for 0
 HOLD_FOLLOW = 0.0               # Phase 3c: while a strike is in flight, send a
                                  # follow-up timed to land between the capture and
                                  # the earliest counter, sized to hold this fraction
@@ -265,6 +279,8 @@ REMNANT_MAX_PLAYERS = 2         # ...while at most this many players are alive:
                                  # significant in duels, leaning worse in 3-seat
                                  # games with knower. See "Racing a third player
                                  # for the same system" in docs/design/marshal-pricing.md
+SPARE_TARGET = True             # Phase 3: a priced strike on a rival spends the
+                                 # guard its source keeps against that same target
 
 
 # --------------------------------------------------------------------------- #
@@ -422,8 +438,9 @@ def _production_by(s, turns: int) -> int:
     return (s.prod_progress + turns) // s.production
 
 
-def _max_adjacent_enemy(state, pid, sysobj) -> float:
-    """Largest garrison next door belonging to a real rival. Neutrals never attack.
+def _max_adjacent_enemy(state, pid, sysobj, skip=None) -> float:
+    """Largest garrison next door belonging to a real rival, ``skip`` aside.
+    Neutrals never attack.
 
     A rival reachable in exactly one turn is weighted by ``FAST_GUARD_WEIGHT``:
     a strike across a 1-turn lane lands the turn it launches, so the garrison
@@ -433,7 +450,7 @@ def _max_adjacent_enemy(state, pid, sysobj) -> float:
     best = 0.0
     for n in sysobj.neighbors:
         o = state.systems[n]
-        if o.owner_id != pid and o.owner_id != 0:
+        if o.owner_id != pid and o.owner_id != 0 and n != skip:
             weight = 1.0
             if FAST_GUARD_WEIGHT != 1.0 and (state.travel_turns(sysobj.id, n) or 99) == 1:
                 weight = FAST_GUARD_WEIGHT
@@ -1023,6 +1040,7 @@ def decide(state, pid):
     # pour is what thins a front, and the priced strike wants the lower floor.
     budget: dict[int, int] = {}
     pour_floor: dict[int, int] = {}
+    held: dict[int, int] = {}   # frontier sid -> ships its guard keeps out of budget
     for sid in owned:
         s = sysmap[sid]
         threat = (_max_adjacent_enemy(state, pid, s)
@@ -1030,6 +1048,7 @@ def decide(state, pid):
         if sid in frontier and FRONTIER_GUARD > 0:
             guard = math.ceil(FRONTIER_GUARD * threat)
             budget[sid] = max(0, s.ships - max(RESERVE_FLOOR, guard))
+            held[sid] = s.ships - budget[sid]
         else:
             budget[sid] = max(0, s.ships - RESERVE_FLOOR)
         if sid in frontier and POUR_GUARD > FRONTIER_GUARD:
@@ -1129,8 +1148,15 @@ def decide(state, pid):
     def spendable(sid, target, surplus: bool = False) -> int:
         """``budget[sid]``, less what ``sid`` must keep to hold against
         ``target``'s own garrison stepping into it — see ``DENY_SWAP`` — and, for
-        the surplus pour, less what it keeps at ``POUR_GUARD``."""
+        the surplus pour, less what it keeps at ``POUR_GUARD``. With
+        ``SPARE_TARGET``, a strike on a rival may also spend the part of the
+        guard that only ``target`` itself called for."""
         b = budget[sid]
+        if (SPARE_TARGET and target.owner_id != 0 and sid in held
+                and sid not in threatened_set):
+            rest = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(
+                state, pid, sysmap[sid], skip=target.id))
+            b = max(0, b + held[sid] - max(RESERVE_FLOOR, rest))
         if surplus and sid in pour_floor:
             left = sysmap[sid].ships - sum(n for (src, _dst), n in sends.items() if src == sid)
             b = max(0, min(b, left - pour_floor[sid]))
@@ -1152,7 +1178,8 @@ def decide(state, pid):
     for target in targets:
         nbrs = [(state.travel_turns(sid, target.id), sid) for sid in owned
                 if target.id in sysmap[sid].neighbors
-                and budget.get(sid, 0) > 0 and sid not in pincer_held]
+                and (budget.get(sid, 0) > 0 or spendable(sid, target) > 0)
+                and sid not in pincer_held]
         if not nbrs:
             continue
 

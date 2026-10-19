@@ -208,6 +208,167 @@ CPU s, Council a median 4.68 s a game and Hunt 4.16 s.
   is 62 turns slower: 33.2 before 3:1, 12.5 from 3:1 to 9:1 and 16.6 after 9:1.
   About a quarter of the gap is Hunt failing to finish marshal off.
 
+## marshal: sparing the target and feeding on every board (2026-10-19)
+
+The first reading left marshal as the one unsaturated bot, with 189 of 1,950
+games unfinished at turn 600. Two changes to `models/marshal.py` take that to
+53, win 6.2 points more games and win 15.8% sooner on the ones both arms won.
+They also gain against stock marshal and knower and stay level against actuary.
+Neither costs anything per turn.
+
+### What the stalemates were
+
+Each of the 189 games was replayed to turn 300, and marshal's cheapest strike on
+a rival was split into its price terms and what its sources could spend:
+
+    blocked by                                   stalls
+    the guard alone (enough ships next door,       99
+      less the guard, is short of the price)
+    the guard and the relief terms together        30
+    the relief terms alone                          4
+    short of ships even with neither               50
+    nothing (a strike was affordable)               6
+
+The guard is `FRONTIER_GUARD` (0.55) of the largest rival stack next door, and
+that stack is usually the target itself. A source holds 0.55 of a stack back from
+the strike on that same stack, and two sources bordering one stack each hold 0.55
+of all of it. The deadlock doesn't depend on scale. Ships bank in proportion to
+income, so the ratio of the two stacks settles near the income ratio. That has to
+pass about 1.55 (a 61% income share, one source) before the guard leaves enough
+to strike, and waiting never gets there. In one 18:6:2 game against thinker,
+marshal held 2.1 times thinker's ships for 300 turns, its two fronts guarding
+522 ships against one 474-ship stack. That is the mechanism
+[`marshal-joint.md`](marshal-joint.md), "The decision order is what couples
+them", describes for marshal against itself.
+
+The 50 stalls short of ships even without guard or relief are mostly marshal
+behind. 47 of the 63 left after sparing the target are three-seat games where
+marshal holds 10-40% of the income and neither rival finishes it.
+
+### The two changes
+
+- **`SPARE_TARGET` (Phase 3).** A priced strike on a rival may spend the part of
+  a source's guard that only the target called for. The guard against every
+  other adjacent stack stays, and a source under attack (Phase 1's
+  `threatened_set`) keeps all of it. `spendable` adds back the guard less
+  `FRONTIER_GUARD` of the largest *other* rival stack (`_max_adjacent_enemy`'s
+  `skip`). The pour floor is untouched. Against the guard set to 0, which ends
+  even more stalls (189 to 27) but loses 8.2 points to actuary (z -5.1), this
+  keeps actuary level. The guard that matters against actuary is the one against
+  a stack you are not striking.
+- **`FEED_MAX_TURNS` 0 (Phase 4).** `FEED` now runs on every board. Rear
+  surplus goes to fronts short of a rival stack rather than to the nearest front,
+  which on a slow board is often one facing a neutral. "Feeding on every board"
+  read level with the 3-turn cap against the roster in 2026-10
+  ([`marshal-joint.md`](marshal-joint.md), "Levels around the corner"), so the cap
+  had been a coin-flip choice. Against the weak bots it is not.
+
+### Measurements
+
+Each arm is a copy of `models/marshal.py` with constants patched in each worker,
+played on this bench's schedule and paired against stock marshal game by game.
+The roster arm plays the same cells against stock marshal, knower (Predict) and
+actuary (Field) in every seat. Points score a win 1, a timeout 0.5 and a loss 0,
+averaged per seed with z over seeds.
+
+Screen (seeds 7,000,000 + 50), against stock:
+
+    arm                         beats      z    Δwon   unf     Δturns   roster: marshal / knower / actuary
+    SPARE_TARGET                66.7%  +16.7  +6.1pt    63    -10.9%   +9.8 / +2.6 / +0.5
+    FRONTIER_GUARD 0            66.8%  +15.4  +4.5pt    27    -12.9%   +1.5 / -2.2 / -8.2 (z -5.1)
+    LEAD_GUARD 1.5 (see below)  65.0%  +14.2  +3.7pt   108    -11.0%   worse against knower, actuary
+    both changes                71.1%  +21.4  +6.2pt    53    -15.8%   +11.2 / +4.1 / +0.8
+
+On top of `SPARE_TARGET`, `FEED_MAX_TURNS` 0 alone: 57.7% (z +8.1), -5.3% turns,
+roster +1.4 / +1.5 / +0.3.
+
+Confirmation, fresh seeds 7,100,000 + 50, the same comparison:
+
+    weak bots   beats 72.3% (z +22.2), Δwon +5.8pt (z +8.0), Δturns -15.9% (z -18.1),
+                unfinished 180 -> 52; per phase -13.0 / -4.7 / -1.1 turns
+    roster      marshal +8.6 (z +5.7): won 318 vs 228, lost 251 vs 262, unfinished 81 vs 160
+                knower  +5.9 (z +3.5): won 423 vs 361, lost 188 vs 196, unfinished 39 vs 93
+                actuary  0.0 (z 0.0):  won 187 vs 175, lost 447 vs 429, unfinished 16 vs 46
+
+In the roster confirmation the opponents' marshal (and knower's marshal adviser)
+was patched back to stock. With the new marshal as the opponent instead, the
+same pairs read +8.4 / +5.9 / 0.0.
+
+The bench on the new tree (rev `d589c682`, `--base af6119e0`) reproduces the
+screen game for game. Median turns to win · share won · unfinished:
+
+| Cell | Against | before | after | Council |
+| --- | --- | --- | --- | --- |
+| 7:6:2 | heuristic | 75 · 86% · 14 | 52 · 94% · 2 | 34 · 100% |
+| | rusherplus | 74.5 · 90% · 2 | 56 · 94% · 0 | 37 · 100% |
+| | thinker | 129.5 · 70% · 26 | 76 · 89% · 7 | 44 · 100% |
+| 11:6:3 | heuristic | 142.5 · 71% · 31 | 87.5 · 81% · 13 | 53 · 99% |
+| | rusherplus | 84.5 · 90% · 5 | 74 · 90% · 1 | 53.5 · 100% |
+| | thinker | — · 49% · 44 | 226.5 · 60% · 17 | 64 · 99% |
+| 13:3:2 | heuristic | 128.5 · 86% · 14 | 107.5 · 96% · 3 | 83 · 100% |
+| | rusherplus | 111 · 100% · 0 | 106 · 100% · 0 | 86 · 100% |
+| | thinker | 245 · 75% · 24 | 168 · 91% · 8 | 106.5 · 99% |
+| 18:6:2 | heuristic | 74 · 99% · 1 | 65 · 100% · 0 | 47 · 100% |
+| | rusherplus | 75 · 100% · 0 | 69 · 100% · 0 | 52 · 100% |
+| | thinker | 107 · 88% · 7 | 89 · 97% · 1 | 55 · 99% |
+| 24:3:2 | heuristic | 129.5 · 96% · 4 | 122 · 100% · 0 | 100 · 100% |
+| | rusherplus | 123 · 100% · 0 | 117.5 · 100% · 0 | 101 · 100% |
+| | thinker | 205 · 86% · 12 | 166.5 · 100% · 0 | 123.5 · 100% |
+| 18:18:2 | heuristic | 45 · 97% · 3 | 43 · 99% · 1 | 28 · 100% |
+| | rusherplus | 44 · 98% · 0 | 43 · 100% · 0 | 29 · 100% |
+| | thinker | 43.5 · 95% · 2 | 40 · 97% · 0 | 29 · 100% |
+
+Cost: 0.27 ms a turn before and 0.28 after (all seats), and the default schedule
+fell from 85 to 61 CPU s because games are shorter. Council's lead over marshal
+fell from 96.1% to 90.6% on beats, and from 48 to 31 turns a game on the pairs
+both won (18.5 before 3:1, 6.7 from 3:1 to 9:1, 5.8 after).
+
+### What else was tried (all deleted)
+
+Each was screened on the same seeds against both weak bots and roster, on top of
+the two changes unless stated:
+
+- **A guard scaled down by a lead in ships** (`LEAD_GUARD`, gone at 1.5-3 times
+  the rival's ships), instead of sparing the target: 63-65% on beats, but worse
+  against knower and actuary, which a lead in ships doesn't stop.
+- **No guard or pour floor past an income share** (0.75, 0.9): slightly slower
+  (+0.8% turns at 0.75). Even far ahead, the guard is what holds new captures.
+- **Releasing part of the guard against the target** (half, three quarters):
+  worse on beats (38%, 43%) and against marshal and knower; +3.4 against actuary
+  at half, mostly by turning its losses into timeouts.
+- **The pour floor sparing the target too**: no gain over the strike alone, and
+  worse against marshal and knower.
+- **Relief from a rival system next to one of ours at least its size**, counted
+  at 0.5 or 0: null on the weak bots, -5.1 against actuary at 0.
+- **A front facing only neutrals passing its leftover to a short rival front**:
+  56% on beats but fewer games won (-0.7pt), and -2.6 against marshal.
+- **No neutral targets past 75% or 90% of the income**: beats moved (55-57%) but
+  turns didn't. The gain was the ships-lost tie-break, and it can strand marshal
+  when the rival's last system is behind a neutral.
+- **Constants on top of `SPARE_TARGET`**: the neutral price at the worst-roll
+  edge (`NEUTRAL_MARGIN` 1.0 with pad 0.001 or 0.03), `RELIEF_AWARE` 0.35,
+  `RELIEF_IN_FLIGHT` 0.25, `FRONTIER_GUARD` 0.45, `POUR_GUARD` 0.55, `FEED` off,
+  `HOLD_FOLLOW` 0.5. Null or worse everywhere. The neutral cushion is worth its
+  turns even against weak bots, as in [`marshal-flow.md`](marshal-flow.md).
+
+### What is left
+
+- **The land grab** is a few turns behind Council's (4-7 at 18:18:2, about 2 at
+  18:6:2). Phase 4 pulls toward the richest neutral, not the one nearest to
+  affordable, and fronts facing only neutrals keep their leftover. So two fronts
+  can mass separately when pooling would take a cheap neutral turns sooner. A
+  relay rule (a neutral-only front hands its leftover to a neighbour it would
+  complete a capture for) is the obvious next arm. It is not built.
+- **After the lead**, Council and marshal hold their ships in the same places
+  (about a fifth on rival fronts, a third or more in flight between their own
+  systems, 18:6:2 and 13:3:2 against thinker), yet marshal takes twice the turns
+  from 3:1 to the win. The difference is which strikes are made, and Council's
+  edge there is knowing what the rival will do. A rule bot doesn't get that.
+- **The three-seat stalls** where marshal is the weakest seat.
+- **Not re-run:** the full ladder in [`marshal.md`](marshal.md), "Where marshal
+  stands", the advantage and jitter sliders, free-for-alls past three seats, and
+  the posted maps.
+
 ## Reading it
 
 - **These are bots, not the posted maps.** In the board's snapshot of

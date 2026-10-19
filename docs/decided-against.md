@@ -61,6 +61,12 @@ the measured result was indistinguishable from the baseline.
 - The guard moved as one number, up or down (0.40-1.0, every floor): it trades actuary against marshal and knower (1.0: +4.3 against actuary, -8.1 against marshal, -5.8 against knower), so no level survives the weighted screen. A strike floor above the pour (0.85 / 0.55): -7.6 against marshal. A long-lane guard weight (0.5, 1.5): worse. `RELIEF_AWARE` 0.35 (-3.0 against actuary) or 1.0 (-3.2 against marshal). `FEED_FRONT` off at `FEED` 3: -3.4. *Screening against the roster*.
 - **Open, not rejected:** the guard at 0.45 under the shipped 0.85 pour floor (ends a quarter of the stalemates against marshal, mixed against knower); D at defender advantage 1.5, its one losing cell (-2.0 against knower); a pour floor shaped by lane length. *Screening against the roster*, *Against the roster*.
 
+## marshal: [`design/win-turns.md`](design/win-turns.md)
+- The guard at 0 (ends the most stalemates against weak bots, -8.2 against actuary). A guard scaled down by a lead in ships (`LEAD_GUARD`): worse against knower and actuary. No guard past 75% or 90% of the income: slightly slower. Half or three quarters of the target's guard released: worse but against actuary. The pour floor sparing the target too: no gain. *What else was tried*.
+- Relief from a rival system bordering one of ours at least its size, discounted: -5.1 against actuary at 0. A neutral-only front feeding a short rival front: fewer wins, -2.6 against marshal. No neutral targets past a lead: a ships-lost tie-break only, and can strand the last strike. *Same section*.
+- On top of `SPARE_TARGET`: the neutral price at the worst-roll edge, `RELIEF_AWARE` 0.35, `RELIEF_IN_FLIGHT` 0.25, `FRONTIER_GUARD` 0.45, `POUR_GUARD` 0.55, `FEED` off, `HOLD_FOLLOW` 0.5: null or worse. *Same section*.
+- **Open, not rejected:** a relay pooling two neutral-only fronts into one cheap capture. *What is left*.
+
 ## actuary ([`design/actuary.md`](design/actuary.md))
 - Pricing a fight's survivors at the worst roll as well as its verdict: refused every capture at jitter 0.3 (0 of 40 against marshal). *What the measurements changed.*
 - Pricing threats at the worst roll: hoarded garrisons; worse in both cells measured. *Same section.*
