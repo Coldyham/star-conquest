@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""What one hunter decide costs, for `decide_ms` (models/hunter.py `COST_*`).
+"""What one Hunt decide costs, for `decide_ms` (models/actuary.py `HUNT_COST_*`,
+`COST_LOOK_MS`; Hunt is actuary's Style stop 3, once the bot hunter).
 
     uv run python tools/hunt_cost.py                 # in-game guard (BUDGET_SCALE 1)
     uv run python tools/hunt_cost.py --budget-scale inf
 
-Plays hunter against actuary over a grid of system counts, ship speeds and
-seat counts, records hunter's CPU ms per decide (process time, so other load
+Plays Hunt against actuary over a grid of system counts, ship speeds and
+seat counts, records Hunt's CPU ms per decide (process time, so other load
 on the machine does not count), prints the 75th percentile per cell and fits
 ``ms = A * (nodes / 40) ** B`` by least squares on the logs, as actuary's
 constants are fitted. Time it on a quiet machine: the guard reads the wall clock.
@@ -28,14 +29,14 @@ def run(job):
     nodes, ly, seats, seed, scale = job
     from starconquest import ai, engine, replay
     from starconquest.settings import Settings, build_state
-    if "hunter" not in ai.STRATEGIES:
+    if "actuary" not in ai.STRATEGIES:
         ai.load_models()
     ai.set_budget_scale(scale)
     st = build_state(Settings(mode="random", nodes=nodes, players=seats,
                               ship_ly_per_turn=ly, autoplay=True), seed)
     for pid in range(1, seats + 1):
-        st.players[pid].ai_strategy = "hunter" if pid == 1 else "actuary"
-        st.players[pid].ai_params = replace(st.players[pid].ai_params, aux=1.0)
+        st.players[pid].ai_strategy = "actuary"
+        st.players[pid].ai_params = replace(st.players[pid].ai_params, aux=3.0 if pid == 1 else 1.0)
     ms = []
 
     def dec(s, pid):

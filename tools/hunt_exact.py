@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Record or check hunter's orders on a fixed set of positions, so a speed-up
-can be shown to change no decision.
+"""Record or check Hunt's orders (actuary's Style stop 3, once the bot hunter)
+on a fixed set of positions, so a speed-up can be shown to change no decision.
 
     uv run python tools/hunt_exact.py --record results/hunter/exact.pkl
     uv run python tools/hunt_exact.py --check results/hunter/exact.pkl
 
-Positions come from hunter-vs-actuary games (7, 11, 18 and 24 systems, two and
-three seats), every fifth turn; at each, hunter's orders with and without its
+Positions come from Hunt-vs-actuary games (7, 11, 18 and 24 systems, two and
+three seats), every fifth turn; at each, Hunt's orders with and without its
 look-ahead are stored, and the time each took.
 """
 from __future__ import annotations
@@ -37,8 +37,9 @@ def positions():
                        autoplay=True)
         st = build_state(cfg, 9_950_000 + i)
         for pid in range(1, seats + 1):
-            st.players[pid].ai_strategy = "hunter" if pid == 1 else "actuary"
-            st.players[pid].ai_params = replace(st.players[pid].ai_params, aux=1.0)
+            st.players[pid].ai_strategy = "actuary"
+            st.players[pid].ai_params = replace(st.players[pid].ai_params,
+                                                aux=3.0 if pid == 1 else 1.0)
         while st.winner is None and st.turn < 120 and st.players[1].alive:
             if st.turn % 5 == 0:
                 out.append((cfg, copy.deepcopy(st)))
@@ -66,7 +67,7 @@ def main() -> None:
     a = ap.parse_args()
     ai.load_models()
     ai.set_budget_scale(math.inf)
-    hu = sys.modules[ai.STRATEGIES["hunter"].__module__]
+    hu = sys.modules[ai.STRATEGIES["actuary"].__module__]
     look0 = hu.LOOKAHEAD
     if a.record:
         boards = positions()

@@ -761,7 +761,7 @@ def main() -> None:
     if strategies:
         ai.load_models()  # register drop-in models/ strategies before we name them
         _register_external(args)
-        unknown = [n for n in strategies if n not in ai.STRATEGIES]
+        unknown = [n for n in strategies if not ai.known(n)]
         if unknown:
             ap.error(f"unknown strategy: {', '.join(unknown)}. available: {', '.join(ai.available_strategies())}")
     elif args.swap or args.ladder:

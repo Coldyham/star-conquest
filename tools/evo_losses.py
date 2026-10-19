@@ -68,7 +68,7 @@ def _income(state, pid: int) -> float:
 
 def play(job) -> dict:
     cell, seed, rival, seat, weights, control = job
-    if rival not in ai.STRATEGIES or BOT not in ai.STRATEGIES:
+    if not ai.known(rival) or BOT not in ai.STRATEGIES:
         ai.load_models()
     if weights:
         from tools.evo_bench import use_weights

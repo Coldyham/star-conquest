@@ -426,7 +426,7 @@ def _bot_guess(state, rival: int, name: str) -> dict[tuple[int, int, int], tuple
     probe = copy.deepcopy(state)
     probe.players[rival].ai_params = AiParams()
     probe.players[rival].ai_strategy = name
-    fn = sys.modules["sc_model_knower"]._blind if name == "knower" else ai.STRATEGIES[name]
+    fn = sys.modules["sc_model_knower"]._blind if name == "knower" else ai.strategy_fn(name)
     out: dict[tuple[int, int, int], int] = defaultdict(int)
     for o in fn(probe, rival) or []:
         if state.systems[o.source_id].owner_id == rival and o.ships > 0:
@@ -712,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown cells: {', '.join(unknown)}", file=sys.stderr)
         return 2
     _init()
-    missing = [b for b in args.bots if b not in ai.STRATEGIES]
+    missing = [b for b in args.bots if not ai.known(b)]
     if missing or "sc_model_actuary" not in sys.modules:
         print(f"not loaded: {', '.join(missing) or 'models/actuary.py'}", file=sys.stderr)
         return 2

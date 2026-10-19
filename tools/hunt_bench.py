@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""hunter's gate: a bot (or a variant of hunter) against actuary, paired by seed.
+"""Hunt's gate: a bot (or a variant of actuary at Style: Hunt) against actuary,
+paired by seed.
 
-    uv run python tools/hunt_bench.py --seeds 50                    # hunter vs actuary
-    uv run python tools/hunt_bench.py --variant RISK_WEIGHT=0.3 --seeds 50
-    uv run python tools/hunt_bench.py --label fork --seeds 20   # the unchanged fork: exactly 50%
+    uv run python tools/hunt_bench.py --seeds 50                    # Hunt vs Field
+    uv run python tools/hunt_bench.py --variant EDGE_RISK_WEIGHT=0.8 --seeds 50
+    uv run python tools/hunt_bench.py --bot actuary:1 --label fork --seeds 20   # exactly 50%
+
+A seat is a strategy, or ``name:aux`` for a stop of its knob; Hunt is
+``actuary:3`` (it was the bot ``hunter`` until 2026-10-19, and the ledgers in
+``results/hunter/`` name it so). A variant sets actuary's module constants
+(`configure`), so one that Hunt shares with the other stops (``RISK_WEIGHT``,
+``TAIL_TURNS``, ``FRONT_BONUS``, ...) moves an actuary opponent too: vary the
+``HUNT_``, ``EDGE_``, ``CAPTURE_`` and ``LOOK_`` constants, which only Hunt reads.
 
 Every seed is played twice on the same map with the seats swapped, so
 first-position advantage cancels; a seed scores 1, 0.5 or 0 and z is taken over
@@ -46,21 +54,27 @@ def _variant(spec: list[str]) -> dict[str, float]:
     return out
 
 
+def profile(seat: str, aux: float = 1.0) -> tuple[str, float]:
+    """``(strategy, aux)`` for a seat written ``name`` or ``name:aux``."""
+    name, _, stop = seat.partition(":")
+    return name, float(stop) if stop else aux
+
+
 def play_one(cell: str, seed: int, seats: tuple[str, str], variant: dict, extra: dict,
              vs_aux: float = 1.0, vs: str = "") -> dict:
     if "actuary" not in ai.STRATEGIES:
         ai.load_models()
     ai.set_budget_scale(math.inf)
     if variant:
-        sys.modules[ai.STRATEGIES["hunter"].__module__].configure(variant)
+        sys.modules[ai.STRATEGIES["actuary"].__module__].configure(variant)
     nodes, ly = cell.split(":")
     cfg = Settings(mode="random", nodes=int(nodes), players=2,
                    ship_ly_per_turn=float(ly), autoplay=True, **extra)
     state = build_state(cfg, seed)
-    for pid, name in enumerate(seats, start=1):
+    for pid, seat in enumerate(seats, start=1):
         p = state.players[pid]
-        p.ai_strategy = name
-        p.ai_params = replace(p.ai_params, aux=vs_aux if name == vs else 1.0)
+        p.ai_strategy, aux = profile(seat, vs_aux if seat == vs else 1.0)
+        p.ai_params = replace(p.ai_params, aux=aux)
     t0 = time.perf_counter()
     while state.winner is None and state.turn < MAX_TURNS:
         replay.reseed(state)
@@ -120,9 +134,9 @@ def report(rows: list[dict], bot: str, cells, base: list[dict] | None = None) ->
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bot", default="hunter")
+    ap.add_argument("--bot", default="actuary:3")
     ap.add_argument("--vs", default="actuary")
-    ap.add_argument("--variant", nargs="*", default=[], help="NAME=VALUE overrides for hunter.configure")
+    ap.add_argument("--variant", nargs="*", default=[], help="NAME=VALUE overrides for actuary.configure")
     ap.add_argument("--cells", nargs="*", default=list(CELLS))
     ap.add_argument("--seeds", type=int, default=50)
     ap.add_argument("--seed-base", type=int, default=SEED_BASE)
@@ -136,7 +150,7 @@ def main() -> None:
 
     variant = _variant(a.variant)
     extra = {"combat_jitter": a.jitter} if a.jitter is not None else {}
-    label = a.label or (a.bot + ("_" + "_".join(a.variant) if a.variant else ""))
+    label = a.label or (a.bot.replace(":", "@") + ("_" + "_".join(a.variant) if a.variant else ""))
     if a.jitter is not None:
         label += f"_j{a.jitter:g}"
     RESULTS.mkdir(parents=True, exist_ok=True)

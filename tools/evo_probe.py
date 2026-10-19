@@ -82,7 +82,7 @@ def _new_state(cell: str, seed: int, seats: dict[int, str]):
 
 def _moves_game(job):
     vec, cell, seed, seat, rival = job
-    if rival not in ai.STRATEGIES:
+    if not ai.known(rival):
         ai.load_models()
     policy = evo_train._module().make_policy(vec)
     kinds: Counter = Counter()
