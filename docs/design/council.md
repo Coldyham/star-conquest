@@ -156,7 +156,9 @@ measure it against posted games, not the roster: relief bolted onto marshal
 and actuary was null against bots (`docs/decided-against.md`), so self-play is
 the wrong screen for a habit only people expose. The position suite and
 `tests/council_traps.py` are the cheap first checks; the fresh replay above is
-the before.
+the before. A change aimed at the turns rather than the losses (striking sooner,
+closing faster) can be screened on turns to win against the weak bots, where
+council's win rate is saturated ([`win-turns.md`](win-turns.md)).
 
 ## What it costs
 

@@ -47,7 +47,8 @@ def _restore_globals(ma):
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
              "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "RELIEF_IN_FLIGHT", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS",
+             "SPARE_TARGET", "FEED_MAX_TURNS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -1031,8 +1032,10 @@ def test_a_launch_releases_the_corner_guard_into_relief(ma):
     """The stack's launch takes its garrison off the board, so the corner's guard
     falls to 0 at the next decide and Phase 1 sends what that frees. Two guards
     are 1.1 of the stack against a 1.27 ask: the pair holds only where the 4-end's
-    production over the 3 turns left closes the gap."""
+    production over the 3 turns left closes the gap. ``SPARE_TARGET`` is off:
+    with it the unlaunched stack is struck (next test)."""
     assert ma.FRONTIER_GUARD == 0.55 and math.ceil(0.55 * 10) == 6
+    ma.SPARE_TARGET = False
     for prod in (0, 1, 2, 3):
         assert ai.decide(_triangle(prod, launched=False), 2) == [], "guard not held"
     # Production closes the gap: the corner's whole released guard goes in.
@@ -1044,3 +1047,26 @@ def test_a_launch_releases_the_corner_guard_into_relief(ma):
     sends = {(o.source_id, o.dest_id): o.ships
              for o in ai.decide(_triangle(0, launched=True), 2)}
     assert sends == {(2, 1): 6, (3, 1): 6}, sends
+
+
+def test_two_guards_against_one_stack_strike_it(ma):
+    """Each corner keeps 6 against the same 10-ship stack, and together they
+    are 12 against its price of 11. With ``SPARE_TARGET`` a strike on the stack
+    spends the guard kept against it: the 4-lane corner launches the far wave
+    now (11 less the 6 the 3-lane corner sends next turn), and without it the
+    guards hold and nothing moves."""
+    assert ma.SPARE_TARGET
+    for prod in (0, 3):
+        sends = {(o.source_id, o.dest_id): o.ships
+                 for o in ai.decide(_triangle(prod, launched=False), 2)}
+        assert sends == {(2, 1): 5}, (prod, sends)
+    ma.SPARE_TARGET = False
+    assert ai.decide(_triangle(0, launched=False), 2) == []
+
+
+def test_spare_target_keeps_the_guard_against_another_stack(ma):
+    """Only the part of the guard the target itself called for is released: a
+    second, larger rival stack next door still holds the source at its guard."""
+    state = _board({1: (1, 10, 0), 2: (2, 12, 0), 4: (1, 20, 0)},
+                   [(1, 2, 3), (2, 4, 3)], seats=2)
+    assert ai.decide(state, 2) == []          # 12 - ceil(0.55 * 20) = 1 to spend
