@@ -2580,23 +2580,18 @@ def test_the_web_framebuffer_takes_the_viewports_shape():
     assert main.web_framebuffer(640, 480, 0.5) == (640, 480)         # dpr floored at 1
 
 
-def test_a_browser_resize_reshapes_the_surface_and_refits_the_ui(monkeypatch):
+def test_a_browser_resize_reshapes_the_surface(monkeypatch):
     """The surface only changes size when the game resizes it, so a browser resize
-    must come through `fit_web_canvas` for the loop's reflow to see anything — and
-    it then asks pygbag to restyle the canvas for the new aspect."""
+    must come through `fit_web_canvas` for the loop's reflow to see anything."""
     pygame.init()
     try:
         pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
         view = [(1600, 1200, 1.0)]
-        kicks = []
         monkeypatch.setattr(main.webstore, "viewport", lambda: view[0])
-        monkeypatch.setattr(main.webstore, "trigger_resize", lambda: kicks.append(1) or True)
 
         assert main.fit_web_canvas()
         assert pygame.display.get_surface().get_size() == (1600, 1200)
-        assert kicks == [1]
         assert not main.fit_web_canvas(), "an unchanged viewport must not set_mode again"
-        assert kicks == [1]
 
         view[0] = (900, 1600, 1.0)                    # rotated to portrait
         assert main.fit_web_canvas()
@@ -2607,3 +2602,29 @@ def test_a_browser_resize_reshapes_the_surface_and_refits_the_ui(monkeypatch):
         assert pygame.display.get_surface().get_size() == (900, 1600)
     finally:
         pygame.quit()
+
+
+def test_the_game_owns_the_canvas_box_it_measures(monkeypatch):
+    """pygbag's own fit keeps the framebuffer's aspect, so left in charge it
+    letterboxes or, racing a resize, stretches the picture. `viewport` takes the
+    canvas over, makes it fill the page, and reports the box it is *shown* at."""
+    import sys
+    import types
+    from starconquest import webstore
+
+    style = types.SimpleNamespace()
+    canvas = types.SimpleNamespace(
+        style=style,
+        getBoundingClientRect=lambda: types.SimpleNamespace(width=844.6, height=390.2))
+    window = types.SimpleNamespace(
+        canvas=canvas, devicePixelRatio=3,
+        python=types.SimpleNamespace(config=types.SimpleNamespace(user_canvas_managed=0)))
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setitem(sys.modules, "platform", types.SimpleNamespace(window=window))
+
+    assert webstore.viewport() == (844, 390, 3.0)
+    assert window.python.config.user_canvas_managed == 1
+    assert (style.position, style.width, style.height) == ("fixed", "100%", "100%")
+
+    canvas.getBoundingClientRect = lambda: types.SimpleNamespace(width=0, height=0)
+    assert webstore.viewport() is None, "a canvas not laid out yet has no size to fit"

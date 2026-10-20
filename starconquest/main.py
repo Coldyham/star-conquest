@@ -1227,9 +1227,9 @@ def ui_scale_for(size: tuple[int, int], touch: bool, pct: int) -> float:
 
 
 def web_framebuffer(css_w: int, css_h: int, dpr: float) -> tuple[int, int]:
-    """The canvas framebuffer for a browser viewport of ``css_w`` x ``css_h``.
+    """The canvas framebuffer for a canvas shown at ``css_w`` x ``css_h``.
 
-    The window's own shape, at its device resolution (so nothing is scaled and
+    The box's own shape, at its device resolution (so nothing is scaled and
     text stays crisp) but never more pixels than ``WEB_FB_W`` x ``WEB_FB_H``,
     which bounds the per-frame draw cost on a big high-DPI screen. pygbag fits
     the canvas to the page keeping the framebuffer's aspect, so a fixed 16:9
@@ -1245,9 +1245,9 @@ def web_framebuffer(css_w: int, css_h: int, dpr: float) -> tuple[int, int]:
 def fit_web_canvas() -> bool:
     """Web only: resize the framebuffer to the browser viewport if it has moved.
 
-    Returns True if it changed. The new surface is picked up by the loop's reflow,
-    and the synthetic resize then has pygbag restyle the canvas to the new aspect
-    (it reads the framebuffer's shape, and only does so on a ``resize`` event).
+    Returns True if it changed. The new surface is picked up by the loop's reflow.
+    The canvas's on-screen box is ours, not pygbag's (``webstore.viewport``), so
+    nothing else needs telling.
     """
     view = webstore.viewport()
     if view is None:
@@ -1257,7 +1257,6 @@ def fit_web_canvas() -> bool:
     if screen is not None and screen.get_size() == size:
         return False
     pygame.display.set_mode(size)
-    webstore.trigger_resize()
     return True
 
 

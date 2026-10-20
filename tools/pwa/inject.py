@@ -102,6 +102,16 @@ def main() -> int:
     else:
         print("inject.py: WARNING — boot body colour '#7f7f7f' not found; skipping")
 
+    # pygbag emits a second viewport meta, height=device-height alone, which on a
+    # phone drops the first one's width=device-width and lays the page out at a
+    # desktop width. The game sizes its framebuffer from the canvas's CSS box
+    # (main.web_framebuffer), so that box has to be the real screen (best-effort).
+    bad_meta = '<meta name="viewport" content="height=device-height, initial-scale=1.0">'
+    if bad_meta in html:
+        html = html.replace(bad_meta, "", 1)
+    else:
+        print("inject.py: WARNING — second viewport meta not found; leaving it")
+
     path.write_text(html, encoding="utf-8")
     print(f"inject.py: patched {path} for PWA + dark loading screen")
     return 0
