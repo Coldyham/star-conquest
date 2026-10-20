@@ -377,6 +377,13 @@ turns, and it was the real one in the game that prompted this. Variance-seeking
 there is a separate idea, unmeasured. A seat short of ships has less to gamble
 with.
 
+**A settled front with income left behind it (2026-10-20).** A person beat
+actuary at Field from a stalemate in which actuary was behind on income but
+had neutrals in its own backyard it never took. That was not a standing to
+switch on but a gap in the field's pull, which gives a neutral only we border
+no stake, and it is fixed there (`BACKYARD`; [`field.md`](field.md), "Backyard
+neutrals").
+
 ## The planned opening (Opening: Planned; retired 2026-10-18)
 
 Stop 1 was Planned until the field replaced it: by then the plan ran only on
