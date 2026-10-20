@@ -510,3 +510,128 @@ against the field alone:
 Head to head against the field alone, 52.8% at stop 1 and 52.4% at stop 2.
 Positive in every cell at both stops, on seeds it was not chosen on, so it
 shipped.
+
+## Backyard neutrals (`BACKYARD`, 2026-10-20)
+
+**The game that prompted it.** A person beat actuary at Field from a stalemate.
+The person had slightly more income, but actuary's side of the map held more
+systems: some of them were neutrals it had not taken before the two sides met.
+actuary spent the rest of the game pouring ships into its front stack and fell
+further behind. The game is not among the posted replays, so what follows was
+reproduced in bot games.
+
+**Why the field leaves them.** A neutral that borders only our systems has
+none of the rivals' influence near it, so ours swamps it: x reaches 2 and its
+stake falls to e^-4, 2% of its income. The systems next to it have nothing else
+pulling them, so the greedy sends each ship they build toward the front, where
+the stake is the rival's income plus its standing garrison. Taking the neutral
+needs a source, or sources landing together, holding more than 1.22 times its
+garrison (8 ships against 6 at the default jitter), and none ever does. Greedy has no such gap: a system
+touching a neutral is a front, so it keeps its ships and takes the neutral as
+soon as it can.
+
+Seed 10, 18 systems at 6 ly/turn, actuary in seat 1 against marshal. On turn
+60 four neutrals sit in a pocket behind actuary's front, worth 1.03 ships a
+turn between them. The two it borders hold 6 ships each, and their stakes are
+0.09 and 0.11 ships (of 4.8 and 6.0) against 62.5 at the rival system facing
+actuary's front stack. The systems next to them hold 0-2 ships from turn 40 to
+turn 200, while actuary holds 100-400 ships and leads on income 2.20 to 1.78;
+it loses on turn 431. At Greedy it takes both by turn 40 and wins on turn 178.
+Over seeds 1-10 at 18 systems (20 games against marshal), the neutrals in
+actuary's backyard after contact came to 115 neutral-turns a game at Field and
+53 at Greedy (marshal, in the same games: 56 and 51). A backyard neutral is one
+with a neighbour we hold and none a rival holds.
+
+**Why a stalemate wants income.** actuary strikes only when it wins the worst
+roll, 1.22 times the garrison at the default jitter. Two front stacks growing at
+incomes within that ratio never reach it, so between bots a stalemate lasts to
+the turn cap: in seed 7300008 at 18 systems, actuary against actuary, the
+incomes are 2.35 and 2.18, both stacks pass 1,000 ships by turn 480, and two
+neutrals sit in seat 1's backyard all game. Against a person, who will strike
+at worse odds, whoever earns more wins it, as in the game that prompted this.
+In a settled front a few more ships tip nothing, which is where the field's
+premise, that ships go where a few more of them tip a system, stops holding.
+
+**The floor (`_Ledger._backyard`).** Once the front has settled, each system of
+ours next to a backyard neutral pulls at least 1 + `BACKYARD` x `FRONT_BONUS`,
+the most the field gives anywhere: it keeps what it builds, draws its
+neighbours' ships, and takes the neutral when the ledger says it can. The
+neutral must also have no rival fleet flying to it, not be taken already in our
+projection, and be worth taking at that pull (`_pays_to_take`: `TAIL_TURNS` of
+its income and the survivors, against the fewest ships that win it). The front
+has settled when a rival garrison next to us holds `BACKYARD_MATURE` (15) turns
+of our income. Greedy needs no floor, and Hunt is left as it was: its pull was
+tuned with its look-ahead ([`hunter.md`](hunter.md), "The field, by lane
+length"). On seed 10 the floor takes all four neutrals by turn 60, leads 3.40 to
+1.62 a turn by turn 70, and wins on turn 150. Ending a stalemate is not
+winning it, though: on seed 7300008 seat 1 with the floor takes its two
+neutrals by turn 80, out-earns the other seat 2.80 to 2.18, strikes once its
+stack is 1.24 times the other's, soon after turn 200, and loses the swap war
+that follows.
+
+**The arms.** The scratch harness the rest of this file uses, seeds
+7300000-7300099 in five cells (18 systems at 6 ly/turn, 24 at 3, 30 and 40 at
+6, 24 at 12), both seatings, 1,000 games an arm. Against stock actuary, pts%,
+and against marshal paired by seed with stock actuary's games on the same seeds
+(70.9%):
+
+    floor 1.0                                vs actuary        vs marshal
+    from the first turn                      43.7  (z -5.13)
+    from contact                             48.5  (z -1.44)   -2.9  (z -2.58)
+    from contact, at 0.5                     46.8  (z -3.57)
+    while no system of ours carries risk     49.4  (z -0.59)   +1.4  (z +1.16)
+    once a rival garrison next to us holds
+      15 turns of our income                 50.8  (z +1.11)   +1.8  (z +3.22)
+      30 turns of our income                 50.8  (z +1.47)   +1.2  (z +3.35)
+
+Before contact the floor undoes the field's opening, and the field pulls ahead
+early ("Where Field stands"). From contact it costs on the large and fast cells
+(-6.0, -7.5 and -5.0 against marshal at 30 and 40 systems and 24 at 12
+ly/turn): the ships it keeps back are the ones the fights just after contact
+are decided by. Half the floor is worse than the whole of it; a guess, not
+tested: it holds the ships next to the neutral without drawing its neighbours'.
+The risk gate seldom opens. The arms after the first three also skip a neutral
+our projection already takes. The gates on a settled front are the only arms
+that gain, and they were chosen after reading the rest, so 15 turns went to
+fresh seeds as the arm to ship, with 30 beside it.
+
+**Confirmation.** The same harness on fresh seeds, 7400000-7400299, with 15
+turns as the arm to ship and 30 beside it: against marshal paired by seed with
+stock actuary's games on the same seeds (70.6%), and against stock actuary head
+to head, 1,500 seeds and 3,000 games a row. "Seed pairs" counts the seeds an
+arm changed, better / worse:
+
+                        18@6   24@3   30@6   40@6   24@12   pooled          seed pairs
+    15 turns
+      vs marshal        +0.7   +0.5   +0.3   +0.5   +0.2    +0.4 (z +1.29)   65 / 49
+      vs actuary        50.5   52.0   50.9   51.3   50.6    51.1 (z +2.58)  147 / 99
+    30 turns
+      vs marshal        +0.7   +0.1   +1.2   +0.5   +0.1    +0.5 (z +2.92)   31 / 10
+      vs actuary        50.2   50.4   50.4   50.9   50.2    50.4 (z +1.34)   97 / 71
+
+The floor changes the orders of 2% of decides (16 of 814 on positions out of
+actuary's games against marshal) and 6-16% of seeds, depending on the opponent.
+At Learning, seeds 7400000-7400199 (1,000 seeds a row), against marshal paired
+with stock Learning's games (74.6%) and against stock Learning:
+
+                        18@6   24@3   30@6   40@6   24@12   pooled          seed pairs
+    vs marshal          -0.4   +0.7   +1.0   -0.8   +1.0    +0.3 (z +0.88)   35 / 22
+    vs Learning         51.1   53.1   51.5   52.6   50.9    51.8 (z +4.34)   96 / 41
+
+Against knower at Predict, seeds 7400000-7400199, paired with stock actuary's
+games on them (84.3%): +0.4 (z +1.39), seed pairs 41 / 25. In a three-seat
+free-for-all with marshal and thinker, seeds 7500000-7500149 at 18 and 24
+systems (6 ly/turn), every seating, paired by seed with stock actuary in the
+same seats: it wins 62.8% of the seatings to stock's 62.9% (-0.1, z -0.17).
+
+**Shipped (2026-10-20)** at Field and Learning, `BACKYARD` 1.0 with
+`BACKYARD_MATURE` 15: better than its own stock at both stops, level to a little
+better against marshal and knower, level in a free-for-all, and no measurable
+cost (0.99 of stock's CPU over 357 decides). It plays exactly as the measured
+arm (814 decides, every order the same), and at `BACKYARD` 0 exactly as
+before. Council's actuary adviser runs the default stop, so it proposes the
+floor's moves too; that was not measured, and the roster ladder was not re-run.
+The case it was built for, a person who pins the front and out-earns actuary
+behind it ([`seat-play.md`](seat-play.md), "What a person should do"), is one
+that bot games seldom reach, so these numbers say little about what it buys
+there.
