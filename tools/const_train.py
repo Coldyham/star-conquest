@@ -348,6 +348,42 @@ def confirm(args) -> None:
               f"({capped['cand']} at cap); {m[0]:+.2f} ± {m[1]:.2f}, z {m[2]:+.2f}")
 
 
+ABLATE_SEED = 7_500_000
+ABLATE_GROUPS = {"pads+overwhelm": ("DEFEND_PAD", "NEUTRAL_PAD", "OVERWHELM")}
+
+
+def ablate(args) -> None:
+    """The registered candidate with each constant (and each group in
+    ``ABLATE_GROUPS``) put back to stock, in the confirmation's duel cells: what
+    each part of the candidate is worth, against every opponent."""
+    folder = RESULTS / args.ablate
+    cand = json.loads((folder / "confirm_plan.json").read_text())["candidate"]
+    stock = stock_values()
+    arms = {"stock": {}, "cand": cand}
+    for name in NAMES:
+        if cand[name] != stock[name]:
+            arms[f"-{name}"] = {**cand, name: stock[name]}
+    for label, names in ABLATE_GROUPS.items():
+        arms[f"-{label}"] = {**cand, **{n: stock[n] for n in names}}
+    seeds = [ABLATE_SEED + k for k in range(args.confirm_seeds)]
+    gs = [(c, s, o, seat) for s in seeds for c in CONFIRM_DUELS for o in OPPONENTS
+          for seat in (1, 2)]
+    t0 = time.perf_counter()
+    out = run_arms(args.jobs, arms, gs, args.cap)
+    with open(folder / "ablate.jsonl", "w") as fh:
+        for r in out:
+            fh.write(json.dumps(r) + "\n")
+    print(f"{len(out)} games in {time.perf_counter() - t0:.0f}s\n")
+    print("what each part is worth: the candidate's points over the arm that puts it back")
+    print(f"{'arm':22} {'weighted':>14}   " + "   ".join(f"{o:>14}" for o in OPPONENTS))
+    for arm in arms:
+        if arm == "cand":
+            continue
+        mean, se, per = paired(out, "cand", arm)
+        bits = "   ".join(f"{per[o][0]:+6.2f} ± {per[o][1]:4.2f}" for o in OPPONENTS)
+        print(f"{arm:22} {mean:+6.2f} ± {se:4.2f}   {bits}")
+
+
 def train(args) -> None:
     import cma
 
@@ -415,12 +451,16 @@ def main() -> None:
     ap.add_argument("--hours", type=float, default=0.0)
     ap.add_argument("--confirm", metavar="RUN",
                     help="pre-register RUN's candidate and play it against stock on fresh seeds")
+    ap.add_argument("--ablate", metavar="RUN",
+                    help="put each constant of RUN's registered candidate back to stock")
     ap.add_argument("--tail", type=int, default=10,
                     help="with --confirm: average the means of the last this many generations")
     ap.add_argument("--confirm-seeds", type=int, default=300)
     args = ap.parse_args()
     if args.confirm:
         confirm(args)
+    elif args.ablate:
+        ablate(args)
     elif args.pilot:
         pilot(args)
     elif args.run:
