@@ -96,7 +96,7 @@ line, and a rerun plays only the games missing. A rerun that only fills gaps
 would mix two trees' games silently once the code changed under a ledger, so
 every row carries `rev`, a digest of the code that decides a game (`play_rev`).
 That code is the simulation's modules and every `models/` file, since a rival is
-part of the game and knower borrows other bots as advisers. The digest also
+part of the game and knower borrows other bots as candidates. The digest also
 covers `SHAPE`, the layout of a row, so a change to what a row records starts
 new ledgers too. Every row also carries `git`, HEAD's short hash with `+` for
 changes not committed, as a hint for a reader.
@@ -290,7 +290,7 @@ Confirmation, fresh seeds 7,100,000 + 50, the same comparison:
                 knower  +5.9 (z +3.5): won 423 vs 361, lost 188 vs 196, unfinished 39 vs 93
                 actuary  0.0 (z 0.0):  won 187 vs 175, lost 447 vs 429, unfinished 16 vs 46
 
-In the roster confirmation the opponents' marshal (and knower's marshal adviser)
+In the roster confirmation the opponents' marshal (and the marshal knower borrows)
 was patched back to stock. With the new marshal as the opponent instead, the
 same pairs read +8.4 / +5.9 / 0.0.
 

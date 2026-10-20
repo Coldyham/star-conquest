@@ -284,9 +284,9 @@ at Council) for one seat, which played knower at the same stop on every seating
 of each map. A seat whose candidate proposes nothing plays bit-identically to
 knower at both stops (`tests/test_candidate_bench.py`), so the null is exactly
 the fair share and every point off it is the candidate's. At Council the
-candidate's line is played on by evolved, as every adviser's is. Look-ahead Off
-because the plain policy answers in well under a millisecond, while the
-look-ahead's 50 ms wall-clock guard would make knower's plan depend on the
+candidate's line is played on by evolved, as every borrowed candidate's is.
+Look-ahead Off because the plain policy answers in well under a millisecond,
+while the look-ahead's 50 ms wall-clock guard would make knower's plan depend on the
 clock, and at Council every rolled turn of evolved's line would pay 8-34 ms for
 it. Guards lifted, the six `evo_bench` cells, 50 seeds a cell. The screen's block
 lies inside the seeds evolved was trained and selected on (2,000,000 to
@@ -363,8 +363,8 @@ actuary already, it still adds +6.3, the first extra opening there to measure
 well above the +1 that more postures, actuary at Greedy and a hold opening each
 gave ([`council.md`](council.md), "Built, measured, dropped"). Council borrows
 actuary at Field; Hunt in Field's place gains about as much (+6.8), at three to
-nine times a decide ([`council.md`](council.md), "actuary at Hunt as the
-adviser").
+nine times a decide ([`council.md`](council.md), "actuary at Hunt in
+Field's place").
 
 **What it costs** (`--time`: CPU ms of a decide on the same positions with the
 candidate and without, every tenth turn of knower-only games on the same block,
@@ -388,7 +388,7 @@ ledger adds about a tenth on top of its line.
 points head to head at Search (+4.9 against marshal, +2.8 against actuary) and
 +6.3 at Council, for about a sixth more a decide. actuary buys +13.4 at Search
 for about a quarter more. Shipping either goes past `EXTERNAL_CANDIDATES` (or
-`COUNCIL_ADVISERS`). `_lines()` counts the candidates, but only the rival bots'
+`COUNCIL_CANDIDATES`). `_lines()` counts the candidates, but only the rival bots'
 share of `estimated_decide_ms` reads it: `ply_ms` and `COST_VS_KNOWER` were
 fitted with the lines of the day, so the setup warning would price a decide
 about a line short. Every knower result in the bot column goes out of date, and
@@ -745,8 +745,9 @@ way, since both seats are this module: 50.6%, −2.9 points won.
 Search's fresh block is smaller than its screen: the marshal cells that carried
 the screen (61%, 56%, 58%) came back at 51%, 50% and 49%. Both blocks lean the
 same way, and together they come to about 52% over 1,820 pairs. **Shipped on
-Search.** **Not on Council**, for three reasons. Its judge, ranking lines on
-which each adviser plays on, already picks openings knowing the garrison dies
+Search.** **Not on Council**, for three reasons. Its judge, ranking lines
+played on by the bots that proposed them, already picks openings knowing the
+garrison dies
 ([`council.md`](council.md), "Stripped frontiers are trades, not mistakes").
 Half as many of its ships die this way. And it measured null against bots and
 leaned worse on the posted maps.

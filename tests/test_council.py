@@ -1,8 +1,8 @@
 """knower's Oracle: Council.
 
-Council is knower's Search with a learned judge and advisers that play their own
-lines, so it keeps knower's duties as an oracle (leave `state.rng` alone, never
-touch the real board) and adds its own: the advisers it borrows must be offered
+Council is knower's Search with a learned judge and borrowed candidates that play
+their own lines, so it keeps knower's duties as an oracle (leave `state.rng`
+alone, never touch the real board) and adds its own: the candidates it borrows must be offered
 and play their own lines, a seat stored as ``council`` must play here, and no
 other stop may see any of it.
 
@@ -109,7 +109,7 @@ def test_actuary_is_offered_and_plays_its_own_line(kn, fixed_work, monkeypatch):
     assert not kn._COUNCIL and not kn._SOURCE, "nothing outlives the decide"
 
 
-def test_search_borrows_no_adviser_and_judges_by_material(kn, fixed_work, monkeypatch):
+def test_search_borrows_no_council_candidate_and_judges_by_material(kn, fixed_work, monkeypatch):
     seen = []
     real = kn._external_plan
     monkeypatch.setattr(kn, "_external_plan",

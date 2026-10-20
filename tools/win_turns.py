@@ -235,7 +235,7 @@ def play_one(game: Game, stamp: dict) -> dict:
 
 def play_rev() -> str:
     """A digest of the code that decides a game here, `_PLAY_MODULES` and every
-    `models/` file (a rival, or an adviser knower borrows), and of `SHAPE`."""
+    `models/` file (a rival, or a bot knower borrows), and of `SHAPE`."""
     digest = hashlib.blake2s(digest_size=4)
     digest.update(f"shape {SHAPE}\0".encode("utf-8"))
     for path in ([ROOT / "starconquest" / f"{name}.py" for name in _PLAY_MODULES]

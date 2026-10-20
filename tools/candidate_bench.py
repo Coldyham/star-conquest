@@ -16,11 +16,11 @@ changes nothing until its line outscores every other one, so a seat whose new
 candidate is never picked plays exactly as knower does. Every other seat in the
 game is untouched, a knower included, and models the seat under test as it
 models any knower seat (`knower._surrogate`). At Council the candidate's line is
-played on by the bot that proposed it, as every adviser's is
+played on by the bot that proposed it, as every borrowed candidate's is
 (`knower._policy_advance`). ``--instead NAME[:AUX]`` puts the candidate in the
 place of a bot knower already borrows at that stop, in its slot and with its
 salt, rather than after the rest: ``--borrow actuary:3 --instead actuary --stop
-3`` is Council with its adviser at Hunt, and ``--borrow actuary:1 --instead
+3`` is Council with its actuary at Hunt, and ``--borrow actuary:1 --instead
 actuary`` is Council exactly. ``--with CONST=VALUE`` sets a constant of the
 borrowed bot's module for the length of each of its calls for the seat under
 test only (``LOOKAHEAD=0``: Hunt without its look-ahead), so the same bot
@@ -528,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
         with_[const] = float(value)
     if swap is not None:
         k = sys.modules[ai.STRATEGIES["knower"].__module__]
-        borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_ADVISERS if args.stop == k.COUNCIL else ())
+        borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_CANDIDATES if args.stop == k.COUNCIL else ())
         if swap not in borrowed:
             ap.error(f"knower does not borrow {instead} at stop {args.stop}; it borrows "
                      + ", ".join(_label(e) for e in borrowed))

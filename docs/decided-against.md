@@ -28,8 +28,8 @@ the measured result was indistinguishable from the baseline.
 - Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Same section.*
 - A doomed garrison leaving whole (`_flee`) on Council: null against bots (50.8%, ships lost -0.39), 47.1% (z -1.2) on the posted maps. Shipped on Search only. *A doomed garrison leaves whole* (knower.md).
 - Offering the picked opening again with the systems its rollout lost held (`_cover`): null against the weak bots, marshal, knower:2 (a z +1.7 lean that did not replicate) and the 153 posted maps. Ranking down lines that lose a system they stripped (`LOSS_PENALTY` 0.03, 0.10): halves the lost empties and loses to the old council 37.6% and 25.2% on the posted maps. Council foresees 48 of 54 such losses; they are trades. *Stripped frontiers are trades, not mistakes.*
-- **Open, not rejected:** actuary at Hunt as the adviser in Field's place: +6.8 (z +3.86) head to head, at three to nine times a decide (998 ms median at 24 systems, 3 ly/turn), past the browser's search guard. *actuary at Hunt as the adviser.*
-- Hunt without its look-ahead as the adviser in Field's place: +2.6 (z +1.49), two cells negative, at no cost; a lean, not adopted (plain Hunt and Field are near-equal). *actuary at Hunt as the adviser.*
+- **Open, not rejected:** actuary at Hunt in Field's place, as the actuary Council borrows: +6.8 (z +3.86) head to head, at three to nine times a decide (998 ms median at 24 systems, 3 ly/turn), past the browser's search guard. *actuary at Hunt in Field's place.*
+- Hunt without its look-ahead in Field's place, as the actuary Council borrows: +2.6 (z +1.49), two cells negative, at no cost; a lean, not adopted (plain Hunt and Field are near-equal). *actuary at Hunt in Field's place.*
 
 ## marshal: [`design/marshal.md`](design/marshal.md)
 - Baiting a rival into a relievable system, and the offensive half of "stand aside": needs a model of rivals, which is knower's territory. *What the measurements deleted.*

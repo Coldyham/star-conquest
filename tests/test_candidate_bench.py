@@ -141,9 +141,10 @@ def test_the_candidate_is_offered_on_every_search_and_its_picks_are_counted(know
 
 
 def test_in_anothers_place_the_same_bot_plays_as_council(knower, monkeypatch):
-    """``actuary:1`` is the adviser Council borrows (an aux of None is
+    """``actuary:1`` is the actuary Council borrows (an aux of None is
     `config.AI_AUX`), so put in its place, in its slot and with its salt, it plays
-    Council exactly, and the picks name the candidate instead of the adviser."""
+    Council exactly, and the picks name the candidate instead of the bot it
+    replaces."""
     monkeypatch.setattr(cb, "MAX_TURNS", 30)
     boards = _trace(monkeypatch)
     swap = (("actuary", 1.0), None, ("actuary", None))
