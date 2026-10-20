@@ -6,6 +6,7 @@
     uv run python tools/candidate_bench.py --borrow evolved:0 --vs marshal actuary
     uv run python tools/candidate_bench.py --borrow evolved:0 --report
     uv run python tools/candidate_bench.py --borrow evolved:0 --time --seeds 3   # its cost
+    uv run python tools/candidate_bench.py --borrow actuary:3 --instead actuary --stop 3
 
 knower at ``--stop`` (2 Search, 3 Council) with the bot ``--borrow`` names
 (``name:aux`` borrows a stop of its knob) appended after every other borrowed
@@ -15,7 +16,11 @@ candidate is never picked plays exactly as knower does. Every other seat in the
 game is untouched, a knower included, and models the seat under test as it
 models any knower seat (`knower._surrogate`). At Council the candidate's line is
 played on by the bot that proposed it, as every adviser's is
-(`knower._policy_advance`).
+(`knower._policy_advance`). ``--instead NAME[:AUX]`` puts the candidate in the
+place of a bot knower already borrows at that stop, in its slot and with its
+salt, rather than after the rest: ``--borrow actuary:3 --instead actuary --stop
+3`` is Council with its adviser at Hunt, and ``--borrow actuary:1 --instead
+actuary`` is Council exactly.
 
 ``--vs knower`` (the default) plays that seat against knower at the same stop.
 Two identical deterministic bots on every seating of a map score exactly the
@@ -26,8 +31,8 @@ and reports the difference seed by seed.
 Each decide of a seat under test also records which line the search picked, by
 phase (`bot_distance.phase_of`: contested when we hold a system next to a live
 rival's); whether the candidate's opening differed from the default's, and from
-every other candidate's; whether its line changed the move played; and whether a
-new opening of its tied the pick, since a candidate listed last loses every tie
+every other candidate's; whether its line changed the move played, against the best of the other lines;
+and whether a new opening of its tied the pick, since a candidate listed last loses every tie
 (docs/design/bots.md, "How differently two bots play"). Each seat's decide time
 is kept too, a rough ratio from a loaded machine. ``--time`` is the cost figure:
 positions from knower-only games at the stop, every ``TIME_EVERY`` turns, each
@@ -84,6 +89,7 @@ POSTURES = ("default", "timid", "all-in", "push-for-depth")
 _patched = None                 # the knower module the wrappers below sit on
 _under_test: frozenset[int] = frozenset()
 _borrow: tuple[str, float | None] = ("", None)
+_instead: tuple[str, float | None] | None = None   # the entry `_borrow` replaces, if any
 _deciding: int | None = None    # the seat under test whose search is running
 _rec: dict | None = None        # that search's openings, their labels, its last lines
 _tally: dict = {}               # this game's counts, by phase
@@ -100,7 +106,12 @@ def _patch():
     external_plan, advance, policy_advance = k._external_plan, k._advance, k._policy_advance
 
     def _externals():
-        return externals() + ((_borrow,) if _deciding is not None else ())
+        out = externals()
+        if _deciding is None:
+            return out
+        if _instead is None:
+            return out + (_borrow,)
+        return tuple(_borrow if e == _instead else e for e in out)
 
     def _search(state, pid, orc, turns, deadline):
         global _deciding, _rec
@@ -176,14 +187,15 @@ def _record(state, pid, root, rec) -> None:
     t = _tally.setdefault(phase, {"decides": 0, "picks": Counter(), "borrow": Counter()})
     t["decides"] += 1
     t["picks"][labels[chosen] if chosen is not None else "?"] += 1
-    b = len(plans) - 1          # appended last, when it proposed anything
+    # The candidate's line, found by the entry that proposed it.
+    b = next((i for i, p in enumerate(plans) if rec["labels"].get(id(p)) is _borrow), None)
     c = t["borrow"]
-    if labels[b] != _label(_borrow):
+    if b is None:
         c["absent"] += 1
         return
     c["offered"] += 1
     sigs = [_sig(p) for p in plans]
-    novel = sigs[b] not in sigs[:b]
+    novel = sigs[b] not in sigs[:b] + sigs[b + 1:]
     c["differs"] += sigs[b] != sigs[0]
     c["novel"] += novel
     c["chosen"] += chosen == b
@@ -192,8 +204,9 @@ def _record(state, pid, root, rec) -> None:
         c["unscored"] += 1
         return
     values = [_value(line.score) for line in lines]
-    # What the search plays without the candidate: the first best of the rest.
-    without = max(range(b), key=lambda i: (values[i], -i))
+    # What the search plays without the candidate (or, in another's place, with
+    # neither): the first best of the rest.
+    without = max((i for i in range(len(plans)) if i != b), key=lambda i: (values[i], -i))
     c["changed"] += chosen == b and sigs[b] != sigs[without]
     c["tied"] += novel and chosen != b and values[b] >= values[chosen]
 
@@ -202,10 +215,11 @@ def _record(state, pid, root, rec) -> None:
 # Games
 # --------------------------------------------------------------------------- #
 def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
-             borrow: tuple[str, float | None], opp: Seat | None) -> dict:
+             borrow: tuple[str, float | None], opp: Seat | None,
+             instead: tuple[str, float | None] | None = None) -> dict:
     """One game; ``seats[i]`` holds pid ``i + 1`` and is VARIANT, BASE or the
     opponent's label. Returns the ledger row."""
-    global _under_test, _borrow, _tally
+    global _under_test, _borrow, _instead, _tally
     if "knower" not in ai.STRATEGIES:
         ai.load_models()
     _patch()
@@ -219,7 +233,7 @@ def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
         player.ai_strategy = name
         player.ai_params = replace(player.ai_params, aux=1.0 if aux is None else aux)
     _under_test = frozenset(pid for pid, seat in enumerate(seats, start=1) if seat == VARIANT)
-    _borrow, _tally = borrow, {}
+    _borrow, _instead, _tally = borrow, instead, {}
     ms: dict[int, float] = defaultdict(float)
     calls: Counter = Counter()
 
@@ -268,8 +282,9 @@ def _key(cell: str, seed: int, seats) -> str:
     return f"{cell}|{seed}|{','.join(seats)}"
 
 
-def ledger(label: str, borrow: Seat, stop: int) -> Path:
-    return RESULTS / label / f"{str(borrow).replace(':', '@')}_stop{stop}.jsonl"
+def ledger(label: str, borrow: Seat, stop: int, instead: Seat | None = None) -> Path:
+    name = str(borrow) + (f"_for_{instead}" if instead is not None else "")
+    return RESULTS / label / f"{name.replace(':', '@')}_stop{stop}.jsonl"
 
 
 # --------------------------------------------------------------------------- #
@@ -372,7 +387,7 @@ def shares(rows: list[dict], cells: list[Cell]) -> None:
         offered = borrow["offered"]
         if offered:
             print(f"  candidate offered {offered / decides:.1%}; of those its opening differs "
-                  f"from the default's {borrow['differs'] / offered:.1%}, from every earlier "
+                  f"from the default's {borrow['differs'] / offered:.1%}, from every other "
                   f"line's {borrow['novel'] / offered:.1%}")
             print(f"  its line picked {borrow['chosen'] / offered:.1%}, changing the move "
                   f"played {borrow['changed'] / offered:.1%}; a new opening level with the "
@@ -415,14 +430,15 @@ def _cpu_ms(board, pid: int, under: frozenset[int]) -> float:
     return (time.process_time() - t) * 1000
 
 
-def time_cost(cells: list[Cell], seeds: range, stop: int, borrow) -> None:
+def time_cost(cells: list[Cell], seeds: range, stop: int, borrow, instead=None) -> None:
     """CPU ms of a decide with the candidate and without, on the same positions,
     which go first alternating, in this process."""
-    global _borrow
+    global _borrow, _instead
     _patch()
     ai.set_budget_scale(math.inf)
-    _borrow = borrow
-    print(f"CPU ms a decide, knower at stop {stop}, without and with {_label(borrow)}; "
+    _borrow, _instead = borrow, instead
+    what = _label(borrow) + (f" in place of {_label(instead)}" if instead else "")
+    print(f"CPU ms a decide, knower at stop {stop}, without and with {what}; "
           f"load average {os.getloadavg()[0]:.2f}")
     for cell in cells:
         base, more = [], []
@@ -451,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--borrow", required=True, help="name[:aux] of the bot to borrow")
     ap.add_argument("--stop", type=int, default=2, choices=(2, 3),
                     help="knower's Oracle stop: 2 Search (default), 3 Council")
+    ap.add_argument("--instead", default=None,
+                    help="name[:aux] of a bot knower borrows at the stop, for the candidate to replace")
     ap.add_argument("--vs", nargs="*", default=["knower"],
                     help="knower (head to head, the default) or opponents, name[:aux]")
     ap.add_argument("--cell", action="append", default=[], help="mode:nodes:ly:players")
@@ -468,13 +486,21 @@ def main(argv: list[str] | None = None) -> int:
     for name in [borrow.name, *(Seat.parse(s).name for s in args.vs)]:
         if name not in ai.STRATEGIES:
             ap.error(f"unknown bot {name!r}; known: {', '.join(sorted(ai.STRATEGIES))}")
+    instead = Seat.parse(args.instead) if args.instead else None
+    swap = (instead.name, instead.aux) if instead else None
+    if swap is not None:
+        k = sys.modules[ai.STRATEGIES["knower"].__module__]
+        borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_ADVISERS if args.stop == k.COUNCIL else ())
+        if swap not in borrowed:
+            ap.error(f"knower does not borrow {instead} at stop {args.stop}; it borrows "
+                     + ", ".join(_label(e) for e in borrowed))
     cells = [Cell.parse(c) for c in (args.cell or CELLS)]
     if args.time:
         time_cost(cells, range(args.seed_base, args.seed_base + args.seeds), args.stop,
-                  (borrow.name, borrow.aux))
+                  (borrow.name, borrow.aux), swap)
         return 0
     rev = play_rev()
-    path = ledger(args.label or rev, borrow, args.stop)
+    path = ledger(args.label or rev, borrow, args.stop, instead)
     rows = load(path)
     if not args.report and foreign_revs(rows, rev):
         ap.error(f"{path} holds games played by rev {', '.join(foreign_revs(rows, rev))}, and "
@@ -495,8 +521,8 @@ def main(argv: list[str] | None = None) -> int:
             t0 = time.perf_counter()
             with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool, \
                     open(path, "a") as fh:
-                futures = [pool.submit(play_one, c, s, seats, args.stop, (borrow.name, borrow.aux), o)
-                           for c, s, seats, o in jobs]
+                futures = [pool.submit(play_one, c, s, seats, args.stop, (borrow.name, borrow.aux),
+                                       o, swap) for c, s, seats, o in jobs]
                 for i, fut in enumerate(as_completed(futures), 1):
                     row = {**fut.result(), **stamp}
                     fh.write(json.dumps(row) + "\n")
@@ -508,7 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     if not rows:
         print("no games in the ledger for these seeds")
         return 1
-    report(rows, cells, args.vs, f"knower at stop {args.stop} + {borrow}, "
+    what = f"{borrow} in place of {instead}" if instead else str(borrow)
+    report(rows, cells, args.vs, f"knower at stop {args.stop} + {what}, "
                                  f"seeds {args.seed_base}+{args.seeds}")
     return 0
 

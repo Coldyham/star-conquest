@@ -88,7 +88,7 @@ def knower(monkeypatch):
         module = sys.modules.get(fn.__module__)
         if isinstance(getattr(module, "BUDGET_SCALE", None), float):
             monkeypatch.setattr(module, "BUDGET_SCALE", module.BUDGET_SCALE)
-    for name in ("_patched", "_under_test", "_borrow", "_tally", "MAX_TURNS"):
+    for name in ("_patched", "_under_test", "_borrow", "_instead", "_tally", "MAX_TURNS"):
         monkeypatch.setattr(cb, name, getattr(cb, name))
     with _preserve_config():
         yield k
@@ -137,6 +137,32 @@ def test_the_candidate_is_offered_on_every_search_and_its_picks_are_counted(know
                       "evolved:0"}
     picked = sum(t["picks"].get("evolved:0", 0) for t in tally)
     assert sum(t["borrow"].get("chosen", 0) for t in tally) == picked
+
+
+def test_in_anothers_place_the_same_bot_plays_as_council(knower, monkeypatch):
+    """``actuary:1`` is the adviser Council borrows (an aux of None is
+    `config.AI_AUX`), so put in its place, in its slot and with its salt, it plays
+    Council exactly, and the picks name the candidate instead of the adviser."""
+    monkeypatch.setattr(cb, "MAX_TURNS", 30)
+    boards = _trace(monkeypatch)
+    swap = (("actuary", 1.0), None, ("actuary", None))
+    cb.play_one(DUEL, 7, (cb.BASE, cb.BASE), 3, *swap)
+    played = list(boards)
+    boards.clear()
+    tried = cb.play_one(DUEL, 7, (cb.VARIANT, cb.BASE), 3, *swap)
+    assert boards == played
+    tally = [t for ph, t in tried["tally"].items() if ph != "errors"]
+    searches = sum(t["decides"] for t in tally)
+    assert searches > 0 and sum(t["borrow"]["offered"] for t in tally) == searches
+    assert not any("actuary" in t["picks"] for t in tally)
+
+
+def test_only_a_bot_knower_borrows_at_the_stop_can_be_replaced(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cb, "RESULTS", tmp_path)
+    with pytest.raises(SystemExit):
+        cb.main(["--borrow", "actuary:3", "--instead", "actuary", "--stop", "2",
+                 "--cell", str(DUEL), "--seeds", "1", "--report"])
+    assert "does not borrow actuary at stop 2" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("stop,rolled", [(2, False), (3, True)])
