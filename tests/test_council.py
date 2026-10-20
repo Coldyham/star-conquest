@@ -1,8 +1,8 @@
 """knower's Oracle: Council.
 
-Council is knower's Search with a learned judge and advisers that play their own
-lines, so it keeps knower's duties as an oracle (leave `state.rng` alone, never
-touch the real board) and adds its own: the advisers it borrows must be offered
+Council is knower's Search with a learned judge and borrowed candidates that play
+their own lines, so it keeps knower's duties as an oracle (leave `state.rng`
+alone, never touch the real board) and adds its own: the candidates it borrows must be offered
 and play their own lines, a seat stored as ``council`` must play here, and no
 other stop may see any of it.
 
@@ -88,7 +88,7 @@ def test_a_stored_council_seat_plays_as_knower_at_council_or_search(kn, fixed_wo
             assert legacy.players[2].ai_strategy == "council", "the seat is never rewritten"
 
 
-def test_actuary_is_offered_and_plays_its_own_line(kn, fixed_work, monkeypatch):
+def test_each_council_candidate_is_offered_and_plays_its_own_line(kn, fixed_work, monkeypatch):
     asked, offered = [], []
     real_plan, real_score = kn._external_plan, kn._score
 
@@ -104,12 +104,13 @@ def test_actuary_is_offered_and_plays_its_own_line(kn, fixed_work, monkeypatch):
     monkeypatch.setattr(kn, "_external_plan", spy)
     monkeypatch.setattr(kn, "_score", score)
     ai.decide(_state(), 2)
-    assert "actuary" in offered, "actuary's opening was not offered"
-    assert "actuary" in asked, "actuary's line was not played on by actuary"
+    for name, _ in kn.COUNCIL_CANDIDATES:
+        assert name in offered, f"{name}'s opening was not offered"
+        assert name in asked, f"{name}'s line was not played on by {name}"
     assert not kn._COUNCIL and not kn._SOURCE, "nothing outlives the decide"
 
 
-def test_search_borrows_no_adviser_and_judges_by_material(kn, fixed_work, monkeypatch):
+def test_search_borrows_no_council_candidate_and_judges_by_material(kn, fixed_work, monkeypatch):
     seen = []
     real = kn._external_plan
     monkeypatch.setattr(kn, "_external_plan",

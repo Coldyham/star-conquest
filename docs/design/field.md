@@ -440,7 +440,7 @@ unchanged, and Learning is rebuilt on the field: the same learned risk
 front. The stops keep their numbers, so no stored `aux` changes meaning, and
 Field plays exactly as fulcrum did (422 positions out of roster games, every
 order the same). knower runs a Learning seat as Field (`stand_in_params`), and
-council's actuary adviser, run at the default stop, now proposes Field's moves.
+the actuary council borrows, run at the default stop, now proposes Field's moves.
 
 **Do the field and Learning add?** Fresh seeds 4001-4060, both seatings, five
 cells (18 nodes at 6 ly/turn, 24 at 12 and at 3, 30 and 40 at 6), 600 games a
@@ -629,7 +629,7 @@ same seats: it wins 62.8% of the seatings to stock's 62.9% (-0.1, z -0.17).
 better against marshal and knower, level in a free-for-all, and no measurable
 cost (0.99 of stock's CPU over 357 decides). It plays exactly as the measured
 arm (814 decides, every order the same), and at `BACKYARD` 0 exactly as
-before. Council's actuary adviser runs the default stop, so it proposes the
+before. The actuary Council borrows runs the default stop, so it proposes the
 floor's moves too; that was not measured, and the roster ladder was not re-run.
 The case it was built for, a person who pins the front and out-earns actuary
 behind it ([`seat-play.md`](seat-play.md), "What a person should do"), is one

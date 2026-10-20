@@ -304,7 +304,7 @@ the worst roll, with a short look-ahead over a few postures and every rival
 modelled by Hunt's own plain plan), `knower.py` (the oracle — it runs every
 rival's own `decide` before the engine asks for it; at *Oracle: Council*, its
 strongest, its Search is judged by a small network fitted on roster self-play,
-actuary joins the openings it compares, and each borrowed opening is played
+actuary and evolved join the openings it compares, and each borrowed opening is played
 forward by the bot that proposed it). At *Learning* actuary also keeps a model
 of each rival, read off the boards it has seen, and prices the threat next door
 by how often that rival strikes a garrison as thin as ours will be: the one

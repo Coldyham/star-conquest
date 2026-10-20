@@ -48,9 +48,9 @@ named in the menu by ``AUX_NAMES``:
     2   Search   the oracle, then the board *played out* and scored, far enough
                  for every lane to land: the longest lane in current travel turns
                  plus ``LANE_CUSHION`` (`_horizon`)
-    3   Council  Search with a learned judge and actuary as one more adviser,
-                 each borrowed opening played on by the bot that proposed it
-                 (`_council`; docs/design/council.md)
+    3   Council  Search with a learned judge and two more borrowed candidates
+                 (actuary, evolved), each borrowed opening played on by the bot
+                 that proposed it (`_council`; docs/design/council.md)
 
 It used to be a depth slider, 0-12. Measured, a depth only paid once the horizon
 covered the lanes and a fixed one was wrong somewhere — 12 was too long on 1-turn
@@ -337,7 +337,7 @@ def decide(state, pid):
 
     The stop comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1
     the plain one-turn oracle, 2 the oracle plus a search over openings, and 3
-    that search with a learned judge and advisers (`_council`).
+    that search with a learned judge and more borrowed candidates (`_council`).
     """
     if _DEPTH:
         # Someone is predicting *us*. Answer as the blind planner: it terminates,
@@ -1088,8 +1088,8 @@ def _candidates(state, pid, orc, base):
 
 def _externals():
     """The bots whose openings this search borrows: `EXTERNAL_CANDIDATES`, and
-    Council's advisers after them."""
-    return EXTERNAL_CANDIDATES + (COUNCIL_ADVISERS if _COUNCIL else ())
+    `COUNCIL_CANDIDATES` after them at Council."""
+    return EXTERNAL_CANDIDATES + (COUNCIL_CANDIDATES if _COUNCIL else ())
 
 
 def _external_plan(state, pid, borrowed, salt):
@@ -1131,7 +1131,8 @@ def _external_plan(state, pid, borrowed, salt):
 
 
 # --------------------------------------------------------------------------- #
-# Oracle: Council — Search judged by a learned evaluator, with advisers
+# Oracle: Council — Search judged by a learned evaluator, each borrowed line
+# played on by its author
 # --------------------------------------------------------------------------- #
 # Council changes three things in Search (docs/design/council.md):
 #
@@ -1139,18 +1140,22 @@ def _external_plan(state, pid, borrowed, salt):
 #     a small network fitted offline on roster self-play that estimates the
 #     seat's chance of winning, in place of `_evaluate`'s hand-weighted material
 #     difference (which counts a fleet in transit at full value).
-#   * **actuary as one more adviser** (`COUNCIL_ADVISERS`), its move for our seat
-#     offered as an opening beside the bots Search already borrows.
-#   * **Each adviser plays its own line.** A borrowed opening is played on by
-#     the bot that proposed it (`_policy_advance`), not by the blind planner, so
-#     the search compares whole strategies rather than first moves.
+#   * **actuary and evolved as more borrowed candidates** (`COUNCIL_CANDIDATES`),
+#     their moves for our seat offered as openings beside the bots Search
+#     already borrows.
+#   * **Each borrowed candidate plays its own line.** A borrowed opening is
+#     played on by the bot that proposed it (`_policy_advance`), not by the
+#     blind planner, so the search compares whole strategies rather than first
+#     moves.
 #
 # The `_COUNCIL` branches are on for the length of one Council decide.
-COUNCIL_ADVISERS = (("actuary", None),)   # after `EXTERNAL_CANDIDATES`, as (name, aux)
-_SALT_POLICY = 51               # an adviser's line i plays on from salt _SALT_POLICY + i
+# After `EXTERNAL_CANDIDATES`, as (name, aux).
+COUNCIL_CANDIDATES = (("actuary", None), ("evolved", 0.0))
+_SALT_POLICY = 51               # a borrowed line i plays on from salt _SALT_POLICY + i
 # A Council ply against a Search ply on the same setup, from the top of the
 # measured range, until a cost model is fitted to Council's own lines.
 COST_VS_KNOWER = 2.5
+COST_COUNCIL_LINES = 7          # ...measured over this many Council lines (`_council_lines`)
 
 _COUNCIL = False                # a Council seat is deciding (single-threaded, as `_DEPTH`)
 _SOURCE: dict[int, tuple] = {}  # id(opening) -> the (name, aux) that proposed it
@@ -1243,16 +1248,21 @@ def _policy_advance(lines, pid, humans):
     return out
 
 
+def _council_lines() -> int:
+    """Lines a Council decide rolls out: Search's, and `COUNCIL_CANDIDATES`."""
+    return _lines() + len(COUNCIL_CANDIDATES)
+
+
 def _council_warning(settings, council, seats, people=()) -> list[str]:
     """The warning for the Council seats ``council`` (all of ours ``seats``):
-    Search's, priced at ``COST_VS_KNOWER`` times a Search ply."""
+    Search's, priced at ``COST_VS_KNOWER`` times a Search ply, per Council line."""
     drawn = settings.custom_map is not None
     nodes = len(settings.custom_map.nodes) if drawn else settings.nodes
     longest = _longest_lane(settings)
     plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
     rival_ms = sum(ms for _, ms in _rivals(settings, set(seats), set(people)).values())
-    ply = (ply_ms(nodes, settings.players, settings.ship_ly_per_turn)
-           + _lines() * rival_ms) * COST_VS_KNOWER
+    ply = ((ply_ms(nodes, settings.players, settings.ship_ly_per_turn) + _lines() * rival_ms)
+           * COST_VS_KNOWER * _council_lines() / COST_COUNCIL_LINES)
     reach, one = _search_run(ply, plies, rival_ms)
     turn_ms = one * len(council)
     clipped = reach < longest

@@ -53,7 +53,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/win-turns.md`](design/win-turns.md) | Turns to win (`tools/win_turns.py`): how fast the top bots win against bots they nearly always beat; the reading (a game not won counts as slower than any win, then the opening, middle game and close), pairing two trees game by game, ledgers keyed by a code digest, the first readings |
 | [`design/knower.md`](design/knower.md) | knower: the oracle, the search, its horizon, its cost, what Search does with a doomed garrison |
 | [`design/bot-families.md`](design/bot-families.md) | One bot per family, its variants as stops of its knob: the families, how each fold was proved to play the same (`tools/fold_check.py`), legacy names (`ai.LEGACY`), `AUX_OVER`, the random pool's profiles, the bot column and its two-part chips |
-| [`design/council.md`](design/council.md) | knower's Oracle: Council (once the bot council): knower's Search with a learned judge, actuary as an adviser, and each adviser playing its own line; the measurements, the cost, what was dropped |
+| [`design/council.md`](design/council.md) | knower's Oracle: Council (once the bot council): knower's Search with a learned judge, actuary and evolved as more borrowed candidates, and each borrowed candidate playing its own line; the measurements, the cost, what was dropped |
 | [`design/marshal.md`](design/marshal.md) | marshal: what it was built on, **the current roster ladder**, the 2026-09 constant sweep |
 | [`design/marshal-pricing.md`](design/marshal-pricing.md) | marshal: what a strike or a defence is priced against |
 | [`design/marshal-flow.md`](design/marshal-flow.md) | marshal: where the surplus goes, plus the successor fixes and FEED |

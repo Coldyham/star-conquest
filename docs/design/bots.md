@@ -261,13 +261,16 @@ all in [`../decided-against.md`](../decided-against.md). A decoupled
 simultaneous-move tree search would cost what knower's search does and overlap
 it.
 
-**Measurement ideas from the same list, not yet built.** `bot_distance.py`
-covers distance, kappa and fingerprints. Two more were proposed. Fit one rating
-per bot to the ladder grid (Bradley-Terry) and read the residuals: a bot that
-plays differently beats or loses to someone its rating says it should not. And
-when a bot is tried as a knower candidate, shuffle the candidate order so the
-last one is not undercounted on ties, and measure whether knower wins more
-with it, which was not measured for actuary.
+**Measurement ideas from the same list.** `bot_distance.py` covers distance,
+kappa and fingerprints. Two more were proposed. Fit one rating per bot to the
+ladder grid (Bradley-Terry) and read the residuals: a bot that plays
+differently beats or loses to someone its rating says it should not (not yet
+built). And when a bot is tried as a knower candidate, count it fairly on ties
+and measure whether knower wins more with it: `tools/candidate_bench.py`, built
+2026-10-19. It counts the ties the candidate loses on list order rather than
+shuffling the order, which would change what knower plays. First readings:
+evolved and actuary ([`knower.md`](knower.md), "evolved as a borrowed candidate
+(2026-10-19)").
 
 ## The person's habits
 
