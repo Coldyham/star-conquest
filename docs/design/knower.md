@@ -361,7 +361,10 @@ Search, and most of all in three seats (+16.7 against evolved's +4.0). evolved
 is not a substitute for actuary but an addition: at Council, which borrows
 actuary already, it still adds +6.3, the first extra opening there to measure
 well above the +1 that more postures, actuary at Greedy and a hold opening each
-gave ([`council.md`](council.md), "Built, measured, dropped").
+gave ([`council.md`](council.md), "Built, measured, dropped"). Council borrows
+actuary at Field; Hunt in Field's place gains about as much (+6.8), at three to
+nine times a decide ([`council.md`](council.md), "actuary at Hunt as the
+adviser").
 
 **What it costs** (`--time`: CPU ms of a decide on the same positions with the
 candidate and without, every tenth turn of knower-only games on the same block,

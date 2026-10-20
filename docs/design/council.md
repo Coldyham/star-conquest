@@ -235,29 +235,37 @@ Greedy and a hold opening each gave ("Built, measured, dropped"). The tables and
 the reasons it is not shipped yet are in [`knower.md`](knower.md), "evolved as a
 borrowed candidate (2026-10-19)".
 
-## actuary at Hunt as the adviser (2026-10-20, measuring)
+## actuary at Hunt as the adviser (2026-10-20, measured, not shipped)
 
 Council borrows actuary at Field: the adviser is `("actuary", None)`, and an aux
 of None is `config.AI_AUX`, Field. Hunt, actuary's top stop, beats Field 66.9%
 head to head ([`hunter.md`](hunter.md), "Where it stands"). Tried in Field's
 place, in its slot and with its salt (`tools/candidate_bench.py --borrow
 actuary:3 --instead actuary --stop 3`; the same swap at Field, `actuary:1`, plays
-Council exactly), head to head against Council on seeds 7,200,000:
+Council exactly), head to head against Council on seeds 7,200,000 + 50, after
+knower's `_flee`:
 
-| Cell (25 seeds) | Points above fair | Cost a decide |
+| Cell | Points above fair | Cost a decide, matched positions (median ms) |
 | --- | --- | --- |
-| random:7:6:2 | +4.0 (z 0.62) | ×3.6 |
-| random:11:6:3 | +12.0 (z 1.81) | ×3.0 |
-| random:18:6:2 | +2.0 (z 0.33) | ×8.0 |
-| **Pooled** | **+6.0 (z 1.63)** | |
+| random:7:6:2 | +4.0 (z 0.94) | 25 → 56 (×3.6) |
+| random:11:6:3 | +8.0 (z 2.00) | 32 → 78 (×3.0) |
+| random:13:3:2 | +4.0 (z 0.85) | 44 → 125 (×3.0) |
+| random:18:6:2 | +5.0 (z 1.15) | 41 → 225 (×8.0) |
+| random:24:3:2 | +6.0 (z 1.29) | 106 → 998 (×9.3) |
+| random:18:18:2 | +14.0 (z 3.46) | 22 → 63 (×3.8) |
+| **Pooled, 300 seeds** | **+6.8 (z 3.86)** | |
 
-Hunt's line is picked on 37% of contested decisions and changes the move from
-the best other line's on 27%. Its cost is its look-ahead, run again on every
-rolled turn of its line: on matched positions (`--time`) a decide's median goes
-from 25 to 56 ms at 7 systems, 41 to 225 at 18 and 106 to 998 at 24 systems on
-3 ly/turn (×3.0 to ×9.3 in total). The browser's 150 ms search guard would cut
-most of those searches short, so the guard-lifted bench is not what a player
-would meet. The full run, all six cells at 50 seeds, is under way.
+Every cell gains. Hunt's line is picked on 37.5% of contested decisions and
+changes the move from the best other line's on 29.4%. The ratios are of the
+totals (`--time`, one process, guards lifted).
+
+**Not shipped, for its cost.** Its look-ahead runs again on every rolled turn of
+its line, so a decide costs three to nine times as much, about a second at 24
+systems on 3 ly/turn. The browser's 150 ms search guard would cut most of those
+searches short, so a player would not meet the Council this bench measured.
+evolved, added beside Field, buys about as much (+6.3, "evolved as one more
+adviser") for a sixth more a decide. Untested: the two together, and Hunt with
+its look-ahead off, which no stop of actuary's knob offers.
 
 ## What it costs
 
