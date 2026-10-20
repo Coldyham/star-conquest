@@ -264,8 +264,17 @@ its line, so a decide costs three to nine times as much, about a second at 24
 systems on 3 ly/turn. The browser's 150 ms search guard would cut most of those
 searches short, so a player would not meet the Council this bench measured.
 evolved, added beside Field, buys about as much (+6.3, "evolved as one more
-adviser") for a sixth more a decide. Untested: the two together, and Hunt with
-its look-ahead off, which no stop of actuary's knob offers.
+adviser") for a sixth more a decide. Untested: the two together.
+
+**Without its look-ahead** (`--with LOOKAHEAD=0`, set only around the adviser's
+own calls; no stop of actuary's knob offers it), on the same seeds: +2.6 points
+(z +1.49), the cells −3.0, +3.3, +12.0, +5.0, +4.0, −6.0 in the order above, at
+no measurable cost (×0.99 to ×1.06). Its line is still picked on 36.5% of
+contested decisions, as often as with the look-ahead, but the gain is mostly
+gone. That matches plain Hunt against Field head to head, 50.8%
+([`hunter.md`](hunter.md), "The field, by lane length"): the look-ahead is all
+of Hunt's lead, and two near-equal advisers mostly trade which of two similar
+lines wins. A lean, not adopted.
 
 ## What it costs
 
