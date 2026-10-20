@@ -235,6 +235,30 @@ Greedy and a hold opening each gave ("Built, measured, dropped"). The tables and
 the reasons it is not shipped yet are in [`knower.md`](knower.md), "evolved as a
 borrowed candidate (2026-10-19)".
 
+## actuary at Hunt as the adviser (2026-10-20, measuring)
+
+Council borrows actuary at Field: the adviser is `("actuary", None)`, and an aux
+of None is `config.AI_AUX`, Field. Hunt, actuary's top stop, beats Field 66.9%
+head to head ([`hunter.md`](hunter.md), "Where it stands"). Tried in Field's
+place, in its slot and with its salt (`tools/candidate_bench.py --borrow
+actuary:3 --instead actuary --stop 3`; the same swap at Field, `actuary:1`, plays
+Council exactly), head to head against Council on seeds 7,200,000:
+
+| Cell (25 seeds) | Points above fair | Cost a decide |
+| --- | --- | --- |
+| random:7:6:2 | +4.0 (z 0.62) | ×3.6 |
+| random:11:6:3 | +12.0 (z 1.81) | ×3.0 |
+| random:18:6:2 | +2.0 (z 0.33) | ×8.0 |
+| **Pooled** | **+6.0 (z 1.63)** | |
+
+Hunt's line is picked on 37% of contested decisions and changes the move from
+the best other line's on 27%. Its cost is its look-ahead, run again on every
+rolled turn of its line: on matched positions (`--time`) a decide's median goes
+from 25 to 56 ms at 7 systems, 41 to 225 at 18 and 106 to 998 at 24 systems on
+3 ly/turn (×3.0 to ×9.3 in total). The browser's 150 ms search guard would cut
+most of those searches short, so the guard-lifted bench is not what a player
+would meet. The full run, all six cells at 50 seeds, is under way.
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:

@@ -363,10 +363,33 @@ actuary already, it still adds +6.3, the first extra opening there to measure
 well above the +1 that more postures, actuary at Greedy and a hold opening each
 gave ([`council.md`](council.md), "Built, measured, dropped").
 
-**Neither is in the list yet.** The cost per decide and the menu's cost model
-(`_lines()`, `ply_ms`) are still to weigh, and adding a candidate puts every
-knower result in the bot column out of date and can move the strikes
-`tests/council_traps.py` pins.
+**What it costs** (`--time`: CPU ms of a decide on the same positions with the
+candidate and without, every tenth turn of knower-only games on the same block,
+one process, guards lifted, load average about 1). Medians, and the ratio of the
+totals:
+
+| Cell | Search, + evolved | Search, + actuary | Council, + evolved |
+| --- | --- | --- | --- |
+| random:7:6:2 | 15.0 → 17.3 (×1.17) | 14.1 → 17.6 (×1.24) | 23.7 → 29.7 (×1.16) |
+| random:11:6:3 | 19.3 → 22.6 (×1.18) | 19.3 → 25.0 (×1.23) | 30.8 → 35.7 (×1.17) |
+| random:13:3:2 | 28.9 → 34.3 (×1.18) | 27.6 → 35.0 (×1.26) | 69.8 → 80.0 (×1.13) |
+| random:18:6:2 | 18.8 → 23.3 (×1.22) | 17.7 → 23.7 (×1.30) | 32.1 → 37.7 (×1.19) |
+| random:24:3:2 | 47.5 → 55.1 (×1.19) | 45.0 → 59.9 (×1.32) | 109.9 → 120.9 (×1.11) |
+| random:18:18:2 | 11.1 → 13.4 (×1.18) | 11.6 → 14.8 (×1.34) | 21.0 → 24.8 (×1.16) |
+
+evolved costs what one more line costs, a sixth at Search (seven lines for six)
+and a seventh at Council: its plain policy adds next to nothing. actuary's
+ledger adds about a tenth on top of its line.
+
+**Neither is in the list yet**: the call is the author's. evolved buys +5.7
+points head to head at Search (+4.9 against marshal, +2.8 against actuary) and
++6.3 at Council, for about a sixth more a decide. actuary buys +13.4 at Search
+for about a quarter more. Shipping either goes past `EXTERNAL_CANDIDATES` (or
+`COUNCIL_ADVISERS`). `_lines()` counts the candidates, but only the rival bots'
+share of `estimated_decide_ms` reads it: `ply_ms` and `COST_VS_KNOWER` were
+fitted with the lines of the day, so the setup warning would price a decide
+about a line short. Every knower result in the bot column goes out of date, and
+the strikes `tests/council_traps.py` pins can move.
 
 ## How far to look: the longest lane, plus a cushion
 
