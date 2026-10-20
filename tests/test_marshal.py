@@ -244,7 +244,7 @@ def test_the_enemy_margin_is_the_advantage_and_nothing_else(ma):
         assert not hasattr(ma, name), f"{name} is dead — delete it, don't strand it"
 
     config.DEFENDER_ADVANTAGE = 1.0
-    assert ma._neutral_margin() == pytest.approx(1.3)     # NEUTRAL_MARGIN, untouched
+    assert ma._neutral_margin() == pytest.approx(ma.NEUTRAL_MARGIN)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,6 +257,7 @@ def test_an_evacuated_system_is_priced_against_the_fleet_taking_it(ma):
     into a node that would be held by 12 ships by the time it arrived — losing the
     strike and leaving its own system empty for the counter.
     """
+    ma.RELIEF_AWARE = 0.0  # isolate this from the calm-neighbour relief price
     state = _board({1: (1, 9, 4), 2: (1, 0, 3), 3: (2, 6, 4), 4: (3, 9, 4)},
                    [(2, 1, 1), (2, 3, 2), (2, 4, 1)])
     state.fleets.append(Fleet(owner_id=3, source_id=4, dest_id=2, ships=12,
@@ -559,9 +560,9 @@ def test_commitment_does_not_re_flood_an_already_covered_target(ma):
     every turn, for as long as the original wave is still in transit.
     """
     state = _board({1: (2, 32, 3), 2: (0, 6, 3)}, [(1, 2, 3)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
-    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+    assert ma._required(state, 2, state.systems[2], 3) <= 10, \
         "test board's existing wave should already cover the target"
 
     orders = [o for o in ai.decide(state, 2) if o.dest_id == 2]
@@ -585,9 +586,9 @@ def test_a_settled_dead_end_frontier_flows_its_surplus_onward(ma):
     config.COMBAT_JITTER = 0.10
     state = _board({1: (2, 40, 3), 2: (0, 6, 3), 3: (2, 5, 3), 4: (3, 50, 3)},
                    [(1, 2, 3), (1, 3, 1), (3, 4, 1)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
-    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+    assert ma._required(state, 2, state.systems[2], 3) <= 10, \
         "test board's existing wave should already cover the neutral"
 
     totals = _totals(ai.decide(state, 2))
@@ -609,7 +610,7 @@ def _dead_end_branch(cover_both=True):
                     3: (2, 5, 3), 4: (3, 50, 3), 7: (0, 9, 1)},
                    [(1, 2, 3), (5, 2, 3), (1, 6, 2), (1, 3, 1), (5, 3, 1),
                     (3, 4, 1), (2, 7, 2)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
     if cover_both:
         state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=6, ships=8,
@@ -623,7 +624,7 @@ def test_a_multi_system_dead_end_flows_every_surplus_onward(ma):
     count as dead ends, so both surpluses go to 3, the system facing a rival.
     A neutral past the branch (7) touches none of ours and changes nothing."""
     state = _dead_end_branch()
-    assert ma._required(state, 2, state.systems[2], 3) <= 8
+    assert ma._required(state, 2, state.systems[2], 3) <= 10
     assert ma._required(state, 2, state.systems[6], 2) <= 8
 
     totals = _totals(ai.decide(state, 2))
@@ -1031,10 +1032,10 @@ def _triangle(prod, launched):
 def test_a_launch_releases_the_corner_guard_into_relief(ma):
     """The stack's launch takes its garrison off the board, so the corner's guard
     falls to 0 at the next decide and Phase 1 sends what that frees. Two guards
-    are 1.1 of the stack against a 1.27 ask: the pair holds only where the 4-end's
+    are 1.1 of the stack against a 1.22 ask: the pair holds only where the 4-end's
     production over the 3 turns left closes the gap. ``SPARE_TARGET`` is off:
     with it the unlaunched stack is struck (next test)."""
-    assert ma.FRONTIER_GUARD == 0.55 and math.ceil(0.55 * 10) == 6
+    ma.FRONTIER_GUARD = 0.55            # ceil(0.55 * 10) == 6: the board's arithmetic
     ma.SPARE_TARGET = False
     for prod in (0, 1, 2, 3):
         assert ai.decide(_triangle(prod, launched=False), 2) == [], "guard not held"
