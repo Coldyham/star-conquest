@@ -126,25 +126,34 @@ def _worker_setup() -> None:
 
 
 def play(consts: dict, cell_spec: str, seed: int, opp: str, cand_seat: int, cap: int):
-    """One duel: the candidate's score in [0, 1], the turns played, and seconds."""
+    """One game: the candidate's score in [0, 1], the turns played, and seconds.
+
+    ``opp`` names the other seats in order, joined by ``+`` for a free-for-all
+    (``knower+actuary`` is a three-seat game). A duel at the turn cap scores
+    ``TIMEOUT_LEAD`` for the side ahead; a free-for-all scores only a win.
+    """
     _worker_setup()
     for name, value in _stock.items():
         setattr(_cand, name, consts.get(name, value))
     t0 = time.perf_counter()
     cell = sweep.parse_cell(cell_spec)
     settings_mod.apply_globals(cell.settings())
-    state = mapgen.generate(seed, cell.mode, cell.nodes, 2)
-    for pid, p in state.players.items():
+    others = opp.split("+")
+    state = mapgen.generate(seed, cell.mode, cell.nodes, 1 + len(others))
+    rest = iter(others)
+    for pid, p in sorted(state.players.items()):
         if p.is_neutral:
             continue
         p.is_human = False
-        p.ai_strategy = CAND if pid == cand_seat else opp
-        aux = p.ai_params.aux if pid == cand_seat else OPP_AUX.get(opp, p.ai_params.aux)
-        p.ai_params = replace(p.ai_params, aux=aux)
+        strategy = CAND if pid == cand_seat else next(rest)
+        p.ai_strategy = strategy
+        p.ai_params = replace(p.ai_params, aux=OPP_AUX.get(strategy, p.ai_params.aux))
     while state.winner is None and state.turn < cap:
         engine.end_turn(state, decide=ai.decide)
     if state.winner is not None:
         score = 1.0 if state.winner == cand_seat else 0.0
+    elif len(others) > 1:
+        score = 0.0
     else:
         ahead = sweep.leader(state)
         lead = sweep.TIMEOUT_LEAD / 2
@@ -244,6 +253,101 @@ def pilot(args) -> None:
             print(f"  {arm}: " + " ".join(f"{k}={v}" for k, v in consts.items()))
 
 
+CONFIRM_DUELS = ("random:11:11", "random:13:3", "random:18:6", "random:24:3",
+                 "random:24:12", "random:18:18", "random:18:6,defender_advantage=1.25",
+                 "random:18:6,defender_advantage=1.5")
+CONFIRM_FIELDS = (("random:18:6", "knower+actuary", 7_100_000, 300),
+                  ("random:24:6", "marshal+knower+actuary", 7_200_000, 200))
+CONFIRM_SEED = 7_000_000
+CONFIRM_RULE = ("passes on a weighted gain (timeout tilt) at z >= 2, with no opponent "
+                "4 points or more worse, the same sign in both halves of the seeds "
+                "against every opponent, and neither free-for-all worse at z <= -2")
+
+
+def _z(d):
+    m = sum(d) / len(d)
+    se = math.sqrt(sum((x - m) ** 2 for x in d) / max(1, len(d) - 1) / len(d))
+    return 100 * m, 100 * se, (m / se if se else 0.0)
+
+
+def confirm(args) -> None:
+    """Pre-register the run's candidate (the mean of its last ``--tail``
+    generations' means, to two places) and play it against stock on fresh seeds."""
+    folder = RESULTS / args.confirm
+    rows = [json.loads(x) for x in (folder / "log.jsonl").read_text().splitlines() if x.strip()]
+    tail = rows[-args.tail:]
+    cand = {n: round(sum(r["mean"][n] for r in tail) / len(tail), 2) for n in NAMES}
+    plan = {"candidate": cand, "from": f"{args.confirm} gens {tail[0]['gen']}..{tail[-1]['gen']}",
+            "duel_cells": CONFIRM_DUELS, "duel_seeds": [CONFIRM_SEED, args.confirm_seeds],
+            "opponents": OPPONENTS, "weights": WEIGHTS, "fields": CONFIRM_FIELDS,
+            "cap": args.cap, "rule": CONFIRM_RULE}
+    plan_path = folder / "confirm_plan.json"
+    if plan_path.exists():
+        if json.loads(plan_path.read_text()) != json.loads(json.dumps(plan)):
+            sys.exit(f"{plan_path} holds a different plan; move it aside to register a new one")
+    else:
+        plan_path.write_text(json.dumps(plan, indent=1) + "\n")
+    print("candidate: " + " ".join(f"{k}={v}" for k, v in cand.items()), flush=True)
+
+    arms = {"stock": {}, "cand": cand}
+    seeds = [CONFIRM_SEED + k for k in range(args.confirm_seeds)]
+    duels = [(c, s, o, seat) for s in seeds for c in CONFIRM_DUELS for o in OPPONENTS
+             for seat in (1, 2)]
+    fields = [(c, s, o, seat) for c, o, base, n in CONFIRM_FIELDS for s in range(base, base + n)
+              for seat in range(1, 2 + o.count("+") + 1)]
+    t0 = time.perf_counter()
+    out = run_arms(args.jobs, arms, duels + fields, args.cap)
+    with open(folder / "confirm.jsonl", "w") as fh:
+        for r in out:
+            fh.write(json.dumps(r) + "\n")
+    print(f"{len(out)} games in {time.perf_counter() - t0:.0f}s\n")
+
+    for label, as_loss in (("timeout tilt", False), ("timeout as loss", True)):
+        unit = defaultdict(lambda: defaultdict(float))
+        for a, cell, seed, opp, seat, score, _t, _x in out:
+            if "+" in opp:
+                continue
+            v = (1.0 if score == 1.0 else 0.0) if as_loss else score
+            unit[(cell, seed, opp)][a] += v / 2
+        diff = {k: v["cand"] - v["stock"] for k, v in unit.items()}
+        print(f"duels, {label}: points against stock (z)")
+        per = {}
+        for opp in OPPONENTS:
+            d = [x for k, x in diff.items() if k[2] == opp]
+            lo = [x for k, x in diff.items() if k[2] == opp and k[1] < CONFIRM_SEED + args.confirm_seeds // 2]
+            hi = [x for k, x in diff.items() if k[2] == opp and k[1] >= CONFIRM_SEED + args.confirm_seeds // 2]
+            per[opp] = _z(d)
+            print(f"  {opp:8} {per[opp][0]:+6.2f} ± {per[opp][1]:.2f}  z {per[opp][2]:+6.2f}"
+                  f"   halves {_z(lo)[0]:+5.1f} / {_z(hi)[0]:+5.1f}")
+        wsum = sum(WEIGHTS.values())
+        w = [sum(WEIGHTS[o] * diff[(c, s, o)] for o in OPPONENTS) / wsum
+             for c in CONFIRM_DUELS for s in seeds]
+        wm = _z(w)
+        print(f"  weighted {wm[0]:+6.2f} ± {wm[1]:.2f}  z {wm[2]:+6.2f}")
+        for c in CONFIRM_DUELS:
+            bits = "  ".join(f"{o} {_z([x for k, x in diff.items() if k[0] == c and k[2] == o])[0]:+5.1f}"
+                             for o in OPPONENTS)
+            print(f"    {c:36} {bits}")
+        print()
+
+    for cell, opp, base, n in CONFIRM_FIELDS:
+        unit = defaultdict(lambda: defaultdict(float))
+        won = defaultdict(float)
+        capped = defaultdict(int)
+        seats = opp.count("+") + 2
+        for a, c, seed, o, seat, score, t, _x in out:
+            if (c, o) == (cell, opp):
+                unit[seed][a] += score / seats
+                won[a] += score
+                capped[a] += t >= args.cap
+        games = n * seats
+        d = [v["cand"] - v["stock"] for v in unit.values()]
+        m = _z(d)
+        print(f"field {cell} vs {opp}: stock won {100 * won['stock'] / games:.1f}% "
+              f"({capped['stock']} at cap), candidate {100 * won['cand'] / games:.1f}% "
+              f"({capped['cand']} at cap); {m[0]:+.2f} ± {m[1]:.2f}, z {m[2]:+.2f}")
+
+
 def train(args) -> None:
     import cma
 
@@ -309,10 +413,20 @@ def main() -> None:
     ap.add_argument("--opp", action="append", default=[])
     ap.add_argument("--jobs", type=int, default=22)
     ap.add_argument("--hours", type=float, default=0.0)
+    ap.add_argument("--confirm", metavar="RUN",
+                    help="pre-register RUN's candidate and play it against stock on fresh seeds")
+    ap.add_argument("--tail", type=int, default=10,
+                    help="with --confirm: average the means of the last this many generations")
+    ap.add_argument("--confirm-seeds", type=int, default=300)
     args = ap.parse_args()
-    if not args.pilot and not args.run:
-        ap.error("--run NAME, or --pilot")
-    pilot(args) if args.pilot else train(args)
+    if args.confirm:
+        confirm(args)
+    elif args.pilot:
+        pilot(args)
+    elif args.run:
+        train(args)
+    else:
+        ap.error("--run NAME, --pilot or --confirm RUN")
 
 
 if __name__ == "__main__":
