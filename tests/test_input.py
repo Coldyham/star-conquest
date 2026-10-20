@@ -2559,3 +2559,51 @@ def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
         assert (ui.selected, ui.dest) == (home, b)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Web canvas: the framebuffer follows the browser viewport
+# --------------------------------------------------------------------------- #
+def test_the_web_framebuffer_takes_the_viewports_shape():
+    """pygbag letterboxes a framebuffer into the page keeping its aspect, so a fixed
+    16:9 one never filled any other window; the canvas takes the viewport's shape
+    at device resolution instead, held to the WEB_FB pixel budget."""
+    budget = config.WEB_FB_W * config.WEB_FB_H
+    assert main.web_framebuffer(1920, 1080, 1.0) == (1920, 1080)     # native, unscaled
+    assert main.web_framebuffer(844, 390, 3.0) == (2532, 1170)       # landscape phone
+    w, h = main.web_framebuffer(390, 844, 3.0)                       # ...rotated
+    assert h > w and abs(w / h - 390 / 844) < 0.01
+    w, h = main.web_framebuffer(1920, 1080, 2.0)                     # 4K: capped
+    assert (w, h) == (config.WEB_FB_W, config.WEB_FB_H)
+    w, h = main.web_framebuffer(1600, 1200, 2.0)                     # 4:3, capped
+    assert abs(w / h - 4 / 3) < 0.01 and w * h <= budget * 1.01
+    assert main.web_framebuffer(640, 480, 0.5) == (640, 480)         # dpr floored at 1
+
+
+def test_a_browser_resize_reshapes_the_surface_and_refits_the_ui(monkeypatch):
+    """The surface only changes size when the game resizes it, so a browser resize
+    must come through `fit_web_canvas` for the loop's reflow to see anything — and
+    it then asks pygbag to restyle the canvas for the new aspect."""
+    pygame.init()
+    try:
+        pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        view = [(1600, 1200, 1.0)]
+        kicks = []
+        monkeypatch.setattr(main.webstore, "viewport", lambda: view[0])
+        monkeypatch.setattr(main.webstore, "trigger_resize", lambda: kicks.append(1) or True)
+
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (1600, 1200)
+        assert kicks == [1]
+        assert not main.fit_web_canvas(), "an unchanged viewport must not set_mode again"
+        assert kicks == [1]
+
+        view[0] = (900, 1600, 1.0)                    # rotated to portrait
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+
+        view[0] = None                                # DOM unreadable: keep what we have
+        assert not main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+    finally:
+        pygame.quit()

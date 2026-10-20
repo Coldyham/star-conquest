@@ -405,6 +405,26 @@ def trigger_resize() -> bool:
         return False
 
 
+def viewport() -> tuple[int, int, float] | None:
+    """Web only: the page's size in CSS pixels and its device pixel ratio.
+
+    What ``main.web_framebuffer`` sizes the canvas from, so the framebuffer takes
+    the window's shape rather than the fixed 16:9 pygbag letterboxes into it.
+    None off the web or if the DOM can't be read; the caller keeps its size.
+    """
+    if not is_web():
+        return None
+    import platform as _platform
+
+    try:
+        w = int(_platform.window.innerWidth)
+        h = int(_platform.window.innerHeight)
+        dpr = float(_platform.window.devicePixelRatio or 1.0)
+    except Exception:
+        return None
+    return (w, h, dpr) if w > 0 and h > 0 else None
+
+
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
     if not is_web():

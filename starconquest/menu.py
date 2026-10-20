@@ -405,9 +405,9 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     cw, ch = canvas.get_size()
     scale = min(sw / cw, sh / ch)
     if is_web():
-        # The web framebuffer (config.WEB_FB_W/H, 16:9) is a wider aspect than
-        # this menu's fixed 3:2 design canvas, so the plain letterboxed fit above
-        # pillarboxes a chunk of the frame on a phone. Filling more of the frame
+        # The web framebuffer takes the browser's shape, which on a landscape
+        # phone is a wider aspect than this menu's fixed 3:2 design canvas, so
+        # the plain letterboxed fit above pillarboxes a chunk of the frame. Filling more of the frame
         # crops only the canvas's blank top/bottom margin (above the title, below
         # the Start/Quit row) rather than any widget, so boost it a bit for a
         # visibly bigger, more touch-friendly menu. Capped at the full-width fit
