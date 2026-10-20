@@ -334,6 +334,25 @@ there are its usual mix (a reinforce in 90%, a strike in 51%, pool and stagger
 in 1% between them). So what knower takes from it is its flow of ships to the
 front, not its rarer moves.
 
+**Against the roster** (Search, the same block after `_flee`; knower with
+evolved and without, each against marshal and actuary on the same seeds and
+seatings, paired by seed):
+
+| Cell | Against marshal | Against actuary |
+| --- | --- | --- |
+| random:7:6:2 | 83.0% → 90.0% (+7.0) | 65.5% → 63.5% (−2.0) |
+| random:11:6:3 | 80.7% → 77.3% (−3.3) | 54.7% → 52.7% (−2.0) |
+| random:13:3:2 | 80.5% → 84.5% (+4.0) | 60.5% → 67.0% (+6.5) |
+| random:18:6:2 | 80.0% → 93.0% (+13.0) | 60.0% → 64.0% (+4.0) |
+| random:24:3:2 | 73.5% → 82.5% (+9.0) | 60.0% → 64.0% (+4.0) |
+| random:18:18:2 | 97.5% → 97.0% (−0.5) | 79.0% → 85.0% (+6.0) |
+| **Pooled, 300 seeds** | **+4.9 (z +3.50)** | **+2.8 (z +1.51)** |
+
+The gain holds against marshal and leans the same way against actuary, both
+below the head-to-head +5.7. The three-seat cell leans worse against both (−3.3,
+−2.0), where evolved is weakest on its own ([`evolved.md`](evolved.md), "Why
+multi-seat is short").
+
 **actuary in its place** (Search, the same block after `_flee`): +13.4 points
 pooled (z +8.69), every cell positive (+6.0, +16.7, +8.0, +17.0, +21.0, +12.0 in
 the order above), picked on 10.7% of contested decisions, its opening new on
@@ -344,10 +363,10 @@ actuary already, it still adds +6.3, the first extra opening there to measure
 well above the +1 that more postures, actuary at Greedy and a hold opening each
 gave ([`council.md`](council.md), "Built, measured, dropped").
 
-**Neither is in the list yet.** Both gains are head to head against knower. The
-roster, the cost per decide and the menu's cost model (`_lines()`, `ply_ms`) are
-still to weigh, and adding a candidate puts every knower result in the bot
-column out of date and can move the strikes `tests/council_traps.py` pins.
+**Neither is in the list yet.** The cost per decide and the menu's cost model
+(`_lines()`, `ply_ms`) are still to weigh, and adding a candidate puts every
+knower result in the bot column out of date and can move the strikes
+`tests/council_traps.py` pins.
 
 ## How far to look: the longest lane, plus a cushion
 
