@@ -277,11 +277,18 @@ def confirm(args) -> None:
     rows = [json.loads(x) for x in (folder / "log.jsonl").read_text().splitlines() if x.strip()]
     tail = rows[-args.tail:]
     cand = {n: round(sum(r["mean"][n] for r in tail) / len(tail), 2) for n in NAMES}
+    stock = stock_values()
+    cand.update({n: stock[n] for n in args.revert})
+    base0 = args.seed_base
+    field_specs = tuple((c, o, b - CONFIRM_SEED + base0, n) for c, o, b, n in CONFIRM_FIELDS)
     plan = {"candidate": cand, "from": f"{args.confirm} gens {tail[0]['gen']}..{tail[-1]['gen']}",
-            "duel_cells": CONFIRM_DUELS, "duel_seeds": [CONFIRM_SEED, args.confirm_seeds],
-            "opponents": OPPONENTS, "weights": WEIGHTS, "fields": CONFIRM_FIELDS,
+            "duel_cells": CONFIRM_DUELS, "duel_seeds": [base0, args.confirm_seeds],
+            "opponents": OPPONENTS, "weights": WEIGHTS, "fields": field_specs,
             "cap": args.cap, "rule": CONFIRM_RULE}
-    plan_path = folder / "confirm_plan.json"
+    if args.revert:
+        plan["reverted_to_stock"] = list(args.revert)
+    suffix = f"_{args.label}" if args.label else ""
+    plan_path = folder / f"confirm_plan{suffix}.json"
     if plan_path.exists():
         if json.loads(plan_path.read_text()) != json.loads(json.dumps(plan)):
             sys.exit(f"{plan_path} holds a different plan; move it aside to register a new one")
@@ -290,14 +297,14 @@ def confirm(args) -> None:
     print("candidate: " + " ".join(f"{k}={v}" for k, v in cand.items()), flush=True)
 
     arms = {"stock": {}, "cand": cand}
-    seeds = [CONFIRM_SEED + k for k in range(args.confirm_seeds)]
+    seeds = [base0 + k for k in range(args.confirm_seeds)]
     duels = [(c, s, o, seat) for s in seeds for c in CONFIRM_DUELS for o in OPPONENTS
              for seat in (1, 2)]
-    fields = [(c, s, o, seat) for c, o, base, n in CONFIRM_FIELDS for s in range(base, base + n)
+    fields = [(c, s, o, seat) for c, o, base, n in field_specs for s in range(base, base + n)
               for seat in range(1, 2 + o.count("+") + 1)]
     t0 = time.perf_counter()
     out = run_arms(args.jobs, arms, duels + fields, args.cap)
-    with open(folder / "confirm.jsonl", "w") as fh:
+    with open(folder / f"confirm{suffix}.jsonl", "w") as fh:
         for r in out:
             fh.write(json.dumps(r) + "\n")
     print(f"{len(out)} games in {time.perf_counter() - t0:.0f}s\n")
@@ -314,8 +321,8 @@ def confirm(args) -> None:
         per = {}
         for opp in OPPONENTS:
             d = [x for k, x in diff.items() if k[2] == opp]
-            lo = [x for k, x in diff.items() if k[2] == opp and k[1] < CONFIRM_SEED + args.confirm_seeds // 2]
-            hi = [x for k, x in diff.items() if k[2] == opp and k[1] >= CONFIRM_SEED + args.confirm_seeds // 2]
+            lo = [x for k, x in diff.items() if k[2] == opp and k[1] < base0 + args.confirm_seeds // 2]
+            hi = [x for k, x in diff.items() if k[2] == opp and k[1] >= base0 + args.confirm_seeds // 2]
             per[opp] = _z(d)
             print(f"  {opp:8} {per[opp][0]:+6.2f} ± {per[opp][1]:.2f}  z {per[opp][2]:+6.2f}"
                   f"   halves {_z(lo)[0]:+5.1f} / {_z(hi)[0]:+5.1f}")
@@ -330,7 +337,7 @@ def confirm(args) -> None:
             print(f"    {c:36} {bits}")
         print()
 
-    for cell, opp, base, n in CONFIRM_FIELDS:
+    for cell, opp, base, n in field_specs:
         unit = defaultdict(lambda: defaultdict(float))
         won = defaultdict(float)
         capped = defaultdict(int)
@@ -456,6 +463,12 @@ def main() -> None:
     ap.add_argument("--tail", type=int, default=10,
                     help="with --confirm: average the means of the last this many generations")
     ap.add_argument("--confirm-seeds", type=int, default=300)
+    ap.add_argument("--seed-base", type=int, default=CONFIRM_SEED,
+                    help="with --confirm: the first duel seed; the fields' blocks move with it")
+    ap.add_argument("--revert", nargs="*", default=[], metavar="NAME",
+                    help="with --confirm: put these constants of the candidate back to stock")
+    ap.add_argument("--label", default="",
+                    help="with --confirm: name this plan and its results (confirm_plan_LABEL.json)")
     args = ap.parse_args()
     if args.confirm:
         confirm(args)
