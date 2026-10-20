@@ -7,6 +7,7 @@
     uv run python tools/candidate_bench.py --borrow evolved:0 --report
     uv run python tools/candidate_bench.py --borrow evolved:0 --time --seeds 3   # its cost
     uv run python tools/candidate_bench.py --borrow actuary:3 --instead actuary --stop 3
+    uv run python tools/candidate_bench.py --borrow actuary:3 --with LOOKAHEAD=0 --instead actuary --stop 3
 
 knower at ``--stop`` (2 Search, 3 Council) with the bot ``--borrow`` names
 (``name:aux`` borrows a stop of its knob) appended after every other borrowed
@@ -20,7 +21,10 @@ played on by the bot that proposed it, as every adviser's is
 place of a bot knower already borrows at that stop, in its slot and with its
 salt, rather than after the rest: ``--borrow actuary:3 --instead actuary --stop
 3`` is Council with its adviser at Hunt, and ``--borrow actuary:1 --instead
-actuary`` is Council exactly.
+actuary`` is Council exactly. ``--with CONST=VALUE`` sets a constant of the
+borrowed bot's module for the length of each of its calls for the seat under
+test only (``LOOKAHEAD=0``: Hunt without its look-ahead), so the same bot
+elsewhere in the game plays as it ships.
 
 ``--vs knower`` (the default) plays that seat against knower at the same stop.
 Two identical deterministic bots on every seating of a map score exactly the
@@ -52,6 +56,7 @@ borrowed evolved meets no map its weights were fitted to.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import json
 import math
@@ -90,6 +95,7 @@ _patched = None                 # the knower module the wrappers below sit on
 _under_test: frozenset[int] = frozenset()
 _borrow: tuple[str, float | None] = ("", None)
 _instead: tuple[str, float | None] | None = None   # the entry `_borrow` replaces, if any
+_with: dict[str, float] = {}    # the borrowed module's constants, set around its calls
 _deciding: int | None = None    # the seat under test whose search is running
 _rec: dict | None = None        # that search's openings, their labels, its last lines
 _tally: dict = {}               # this game's counts, by phase
@@ -136,7 +142,11 @@ def _patch():
             yield plan
 
     def _external_plan(state, pid, borrowed, salt):
-        plan = external_plan(state, pid, borrowed, salt)
+        if borrowed is _borrow and _with:
+            with _constants(borrowed[0], _with):
+                plan = external_plan(state, pid, borrowed, salt)
+        else:
+            plan = external_plan(state, pid, borrowed, salt)
         if _rec is not None and _rec["root"] and plan is not None:
             _rec["labels"][id(plan)] = borrowed
         return plan
@@ -155,6 +165,20 @@ def _patch():
     k._external_plan = _external_plan
     k._advance, k._policy_advance = _stepped(advance), _stepped(policy_advance)
     _patched = k
+
+
+@contextlib.contextmanager
+def _constants(name: str, values: dict[str, float]):
+    """``values`` set on the module that plays ``name``, put back after."""
+    module = sys.modules[ai.STRATEGIES[name].__module__]
+    held = {k: getattr(module, k) for k in values}
+    try:
+        for k, v in values.items():
+            setattr(module, k, type(held[k])(v))
+        yield
+    finally:
+        for k, v in held.items():
+            setattr(module, k, v)
 
 
 def _label(borrowed) -> str:
@@ -216,10 +240,11 @@ def _record(state, pid, root, rec) -> None:
 # --------------------------------------------------------------------------- #
 def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
              borrow: tuple[str, float | None], opp: Seat | None,
-             instead: tuple[str, float | None] | None = None) -> dict:
+             instead: tuple[str, float | None] | None = None,
+             with_: dict[str, float] | None = None) -> dict:
     """One game; ``seats[i]`` holds pid ``i + 1`` and is VARIANT, BASE or the
     opponent's label. Returns the ledger row."""
-    global _under_test, _borrow, _instead, _tally
+    global _under_test, _borrow, _instead, _with, _tally
     if "knower" not in ai.STRATEGIES:
         ai.load_models()
     _patch()
@@ -233,7 +258,7 @@ def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
         player.ai_strategy = name
         player.ai_params = replace(player.ai_params, aux=1.0 if aux is None else aux)
     _under_test = frozenset(pid for pid, seat in enumerate(seats, start=1) if seat == VARIANT)
-    _borrow, _instead, _tally = borrow, instead, {}
+    _borrow, _instead, _with, _tally = borrow, instead, dict(with_ or {}), {}
     ms: dict[int, float] = defaultdict(float)
     calls: Counter = Counter()
 
@@ -282,8 +307,10 @@ def _key(cell: str, seed: int, seats) -> str:
     return f"{cell}|{seed}|{','.join(seats)}"
 
 
-def ledger(label: str, borrow: Seat, stop: int, instead: Seat | None = None) -> Path:
-    name = str(borrow) + (f"_for_{instead}" if instead is not None else "")
+def ledger(label: str, borrow: Seat, stop: int, instead: Seat | None = None,
+           with_: dict[str, float] | None = None) -> Path:
+    name = (str(borrow) + "".join(f"_{k}={v:g}" for k, v in sorted((with_ or {}).items()))
+            + (f"_for_{instead}" if instead is not None else ""))
     return RESULTS / label / f"{name.replace(':', '@')}_stop{stop}.jsonl"
 
 
@@ -430,14 +457,16 @@ def _cpu_ms(board, pid: int, under: frozenset[int]) -> float:
     return (time.process_time() - t) * 1000
 
 
-def time_cost(cells: list[Cell], seeds: range, stop: int, borrow, instead=None) -> None:
+def time_cost(cells: list[Cell], seeds: range, stop: int, borrow, instead=None,
+              with_=None) -> None:
     """CPU ms of a decide with the candidate and without, on the same positions,
     which go first alternating, in this process."""
-    global _borrow, _instead
+    global _borrow, _instead, _with
     _patch()
     ai.set_budget_scale(math.inf)
-    _borrow, _instead = borrow, instead
-    what = _label(borrow) + (f" in place of {_label(instead)}" if instead else "")
+    _borrow, _instead, _with = borrow, instead, dict(with_ or {})
+    what = (_label(borrow) + "".join(f" {k}={v:g}" for k, v in _with.items())
+            + (f" in place of {_label(instead)}" if instead else ""))
     print(f"CPU ms a decide, knower at stop {stop}, without and with {what}; "
           f"load average {os.getloadavg()[0]:.2f}")
     for cell in cells:
@@ -467,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--borrow", required=True, help="name[:aux] of the bot to borrow")
     ap.add_argument("--stop", type=int, default=2, choices=(2, 3),
                     help="knower's Oracle stop: 2 Search (default), 3 Council")
+    ap.add_argument("--with", dest="with_", action="append", default=[],
+                    help="CONST=VALUE on the borrowed bot's module, around its calls only")
     ap.add_argument("--instead", default=None,
                     help="name[:aux] of a bot knower borrows at the stop, for the candidate to replace")
     ap.add_argument("--vs", nargs="*", default=["knower"],
@@ -488,6 +519,13 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"unknown bot {name!r}; known: {', '.join(sorted(ai.STRATEGIES))}")
     instead = Seat.parse(args.instead) if args.instead else None
     swap = (instead.name, instead.aux) if instead else None
+    with_ = {}
+    module = sys.modules[ai.STRATEGIES[borrow.name].__module__]
+    for item in args.with_:
+        const, _, value = item.partition("=")
+        if not isinstance(getattr(module, const, None), (bool, int, float)) or not value:
+            ap.error(f"--with {item}: {borrow.name} has no number or flag {const!r}")
+        with_[const] = float(value)
     if swap is not None:
         k = sys.modules[ai.STRATEGIES["knower"].__module__]
         borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_ADVISERS if args.stop == k.COUNCIL else ())
@@ -497,10 +535,10 @@ def main(argv: list[str] | None = None) -> int:
     cells = [Cell.parse(c) for c in (args.cell or CELLS)]
     if args.time:
         time_cost(cells, range(args.seed_base, args.seed_base + args.seeds), args.stop,
-                  (borrow.name, borrow.aux), swap)
+                  (borrow.name, borrow.aux), swap, with_)
         return 0
     rev = play_rev()
-    path = ledger(args.label or rev, borrow, args.stop, instead)
+    path = ledger(args.label or rev, borrow, args.stop, instead, with_)
     rows = load(path)
     if not args.report and foreign_revs(rows, rev):
         ap.error(f"{path} holds games played by rev {', '.join(foreign_revs(rows, rev))}, and "
@@ -522,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
             with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool, \
                     open(path, "a") as fh:
                 futures = [pool.submit(play_one, c, s, seats, args.stop, (borrow.name, borrow.aux),
-                                       o, swap) for c, s, seats, o in jobs]
+                                       o, swap, with_) for c, s, seats, o in jobs]
                 for i, fut in enumerate(as_completed(futures), 1):
                     row = {**fut.result(), **stamp}
                     fh.write(json.dumps(row) + "\n")
@@ -534,7 +572,8 @@ def main(argv: list[str] | None = None) -> int:
     if not rows:
         print("no games in the ledger for these seeds")
         return 1
-    what = f"{borrow} in place of {instead}" if instead else str(borrow)
+    what = (str(borrow) + "".join(f" {k}={v:g}" for k, v in with_.items())
+            + (f" in place of {instead}" if instead else ""))
     report(rows, cells, args.vs, f"knower at stop {args.stop} + {what}, "
                                  f"seeds {args.seed_base}+{args.seeds}")
     return 0

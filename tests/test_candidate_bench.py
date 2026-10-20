@@ -88,7 +88,8 @@ def knower(monkeypatch):
         module = sys.modules.get(fn.__module__)
         if isinstance(getattr(module, "BUDGET_SCALE", None), float):
             monkeypatch.setattr(module, "BUDGET_SCALE", module.BUDGET_SCALE)
-    for name in ("_patched", "_under_test", "_borrow", "_instead", "_tally", "MAX_TURNS"):
+    for name in ("_patched", "_under_test", "_borrow", "_instead", "_with", "_tally",
+                 "MAX_TURNS"):
         monkeypatch.setattr(cb, name, getattr(cb, name))
     with _preserve_config():
         yield k
@@ -155,6 +156,27 @@ def test_in_anothers_place_the_same_bot_plays_as_council(knower, monkeypatch):
     searches = sum(t["decides"] for t in tally)
     assert searches > 0 and sum(t["borrow"]["offered"] for t in tally) == searches
     assert not any("actuary" in t["picks"] for t in tally)
+
+
+def test_a_constant_holds_only_while_the_borrowed_bot_decides_for_the_seat(knower, monkeypatch):
+    """``LOOKAHEAD=0`` reaches actuary when Council asks it for the seat under
+    test, and only then: a seat not under test, and actuary after, see it on."""
+    actuary = sys.modules[ai.STRATEGIES["actuary"].__module__]
+    real = ai.STRATEGIES["actuary"]
+    seen: list[tuple[int, bool]] = []
+
+    def watching(state, pid):
+        seen.append((pid, actuary.LOOKAHEAD))
+        return real(state, pid)
+    watching.__module__ = real.__module__      # the module `--with` sets is actuary's
+    monkeypatch.setitem(ai.STRATEGIES, "actuary", watching)
+    monkeypatch.setattr(cb, "MAX_TURNS", 4)
+    row = cb.play_one(DUEL, 7, (cb.VARIANT, cb.BASE), 3, ("actuary", 3.0), None,
+                      ("actuary", None), {"LOOKAHEAD": 0.0})
+    assert "errors" not in row["tally"]
+    assert {flag for pid, flag in seen if pid == 1} == {False}
+    assert {flag for pid, flag in seen if pid == 2} == {True}
+    assert actuary.LOOKAHEAD is True
 
 
 def test_only_a_bot_knower_borrows_at_the_stop_can_be_replaced(tmp_path, monkeypatch, capsys):
