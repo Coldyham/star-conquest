@@ -265,7 +265,89 @@ still listed in `POSTURE_VARIANTS`, outside the width.
 
 actuary was measured as a fifth candidate (10.4% of contested picks, its move
 distinct from the default 91% of the time) but is not in the list; see
-[`actuary.md`](actuary.md), "As one of knower's borrowed candidates".
+[`actuary.md`](actuary.md), "As one of knower's borrowed candidates". What it is
+worth in games, beside evolved's, is in "evolved as a borrowed candidate (2026-10-19)".
+
+## evolved as a borrowed candidate (2026-10-19)
+
+"Borrowed candidates" credits a candidate with the moves it proposes that
+knower's four phases cannot express, not with its strength: rusherplus ranks
+last on the ladder and wins more contested searches than any other borrowed
+bot. evolved tests that claim from the other side. It ranks third of six, and it
+plays unlike the roster ([`evolved.md`](evolved.md), "Where it stands": its
+nearest bot is 0.35 away in duels, where every roster bot but rusherplus has one
+within 0.12-0.23).
+
+**How it was measured** (`tools/candidate_bench.py`). evolved at Look-ahead Off,
+`("evolved", 0.0)`, appended after every other borrowed opening (after actuary
+at Council) for one seat, which played knower at the same stop on every seating
+of each map. A seat whose candidate proposes nothing plays bit-identically to
+knower at both stops (`tests/test_candidate_bench.py`), so the null is exactly
+the fair share and every point off it is the candidate's. At Council the
+candidate's line is played on by evolved, as every adviser's is. Look-ahead Off
+because the plain policy answers in well under a millisecond, while the
+look-ahead's 50 ms wall-clock guard would make knower's plan depend on the
+clock, and at Council every rolled turn of evolved's line would pay 8-34 ms for
+it. Guards lifted, the six `evo_bench` cells, 50 seeds a cell. The screen's block
+lies inside the seeds evolved was trained and selected on (2,000,000 to
+5,400,000; [`evolved.md`](evolved.md), "Measuring it"), and the other two lie
+outside it. Main moved knower's Search ("A doomed garrison leaves whole") and
+marshal while this ran, so the last block was played on the tree after them
+(`play_rev` a5f404b5).
+
+Points above the fair share, z over seeds:
+
+| Cell | Search, screen 4,400,000 | Search, 7,100,000 | Search after `_flee`, 7,200,000 | Council, screen 4,400,000 | Council after `_flee`, 7,200,000 |
+| --- | --- | --- | --- | --- | --- |
+| random:7:6:2 | +14.0 (3.46) | +5.0 (1.15) | 0.0 | +4.0 (0.85) | +5.0 (1.15) |
+| random:11:6:3 | 0.0 | −2.0 (−0.57) | +4.0 (1.52) | +3.3 (1.00) | +6.0 (1.84) |
+| random:13:3:2 | +5.0 (1.09) | +6.0 (1.43) | +1.0 (0.24) | +11.0 (2.85) | +8.0 (1.66) |
+| random:18:6:2 | +13.0 (3.07) | +12.0 (3.06) | +5.0 (1.09) | +1.0 (0.23) | +8.0 (1.53) |
+| random:24:3:2 | +8.0 (2.06) | +10.0 (2.33) | +10.0 (3.50) | +9.0 (2.27) | +7.0 (1.48) |
+| random:18:18:2 | +17.0 (3.84) | +11.0 (2.85) | +14.0 (3.69) | +3.0 (0.72) | +4.0 (0.94) |
+| **Pooled, 300 seeds** | **+9.5 (5.61)** | **+7.0 (4.23)** | **+5.7 (3.68)** | **+5.2 (3.13)** | **+6.3 (3.49)** |
+
+One cell in 30 reads below zero, by two points. Search's gain is smaller after
+`_flee` (+7.0 on the block before it, +5.7 after), but on different maps, so the
+tree and the maps are not separated. Council's held.
+
+**How often it is picked**, on contested decisions in the block after `_flee`:
+
+    Search    default 54.7%  rusherplus 15.2%  marshal 8.9%  heuristic 7.2%
+              evolved 6.4%   timid 3.9%        thinker:0 3.8%
+    Council   actuary 30.1%  marshal 23.6%  default 15.7%  evolved 12.7%
+              rusherplus 7.9%  thinker:0 4.1%  heuristic 3.5%  timid 2.4%
+
+evolved's opening differs from the default's on 77% of them, and from every
+earlier line's on 62% (Search) and 57% (Council). At Search a new opening of
+evolved's scored level with the pick on another 17% (38% in the opening) and
+lost on list order, since the last candidate loses every tie: its share is a
+floor. At Council its line is picked more often (12.7%) than it changes the move
+(10.3%). The rest are the opening the search would have played without it,
+which evolved's play-on scored higher.
+
+**What it adds.** Over 140 contested decisions where Search picked evolved's line
+and the move changed (three duel cells, the screen's tree), evolved's opening
+sent 58% of the garrison against 39% for the opening it displaced: 5.6 ships to
+our own systems against 2.8, and 2.1 at rivals against 2.8. Its move kinds
+there are its usual mix (a reinforce in 90%, a strike in 51%, pool and stagger
+in 1% between them). So what knower takes from it is its flow of ships to the
+front, not its rarer moves.
+
+**actuary in its place** (Search, the same block after `_flee`): +13.4 points
+pooled (z +8.69), every cell positive (+6.0, +16.7, +8.0, +17.0, +21.0, +12.0 in
+the order above), picked on 10.7% of contested decisions, its opening new on
+68% of them. The strongest bot is worth more than twice the distinct one at
+Search, and most of all in three seats (+16.7 against evolved's +4.0). evolved
+is not a substitute for actuary but an addition: at Council, which borrows
+actuary already, it still adds +6.3, the first extra opening there to measure
+well above the +1 that more postures, actuary at Greedy and a hold opening each
+gave ([`council.md`](council.md), "Built, measured, dropped").
+
+**Neither is in the list yet.** Both gains are head to head against knower. The
+roster, the cost per decide and the menu's cost model (`_lines()`, `ply_ms`) are
+still to weigh, and adding a candidate puts every knower result in the bot
+column out of date and can move the strikes `tests/council_traps.py` pins.
 
 ## How far to look: the longest lane, plus a cushion
 

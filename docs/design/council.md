@@ -222,6 +222,19 @@ changes the habit should be screened against the people's own games, not
 bots. The traps in `tests/council_traps.py` were unchanged by `_cover`: it
 holds sources, and the traps are lost targets.
 
+## evolved as one more adviser (2026-10-19, measured, not shipped)
+
+evolved at Look-ahead Off, after actuary in the advisers, its line played on by
+evolved (`tools/candidate_bench.py --borrow evolved:0 --stop 3`), head to head
+against Council on every seating: +5.2 points pooled (z +3.13) on a screen block
+and +6.3 (z +3.49) on fresh seeds after `_flee` landed, every cell of the second
+between +4 and +8. Its line is picked on 12.7% of contested decisions, fourth
+after actuary, marshal and the default, and changes the move on 10.3%. It is the
+first extra opening to measure well above the +1 that more postures, actuary at
+Greedy and a hold opening each gave ("Built, measured, dropped"). The tables and
+the reasons it is not shipped yet are in [`knower.md`](knower.md), "evolved as a
+borrowed candidate (2026-10-19)".
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:

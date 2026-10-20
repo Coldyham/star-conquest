@@ -159,8 +159,14 @@ candidate. knower at Search against thinker and marshal, guards lifted, seeds
 
 Contested means we hold a system next to a live rival ("Measure candidate
 shares on contested decisions only", [`bots.md`](bots.md)). It is not shipped as
-a candidate: it would add its decide cost to every knower Search root, and
-whether knower plays better with it was not measured.
+a candidate: it would add its decide cost to every knower Search root.
+
+Whether knower plays better with it was measured on 2026-10-19
+(`tools/candidate_bench.py --borrow actuary`, at Field): head to head against
+knower at Search, on fresh seeds after knower's `_flee`, +13.4 points pooled (z
++8.69), every cell positive, +16.7 in three seats. That is more than twice what
+evolved adds in the same place. Council has borrowed it since it was built.
+See [`knower.md`](knower.md), "evolved as a borrowed candidate (2026-10-19)".
 
 ## What the measurements changed
 
