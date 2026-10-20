@@ -6,8 +6,9 @@ reproducibility, nothing drawn from `state.rng`) and then the three things its
 design rests on: the projection agrees with the engine wherever it is not
 deliberately pessimistic, a launch's priced gain is exactly the change in the
 ledger, and the caches that keep a decide cheap change no answer. Last, the
-Field stop's pull: its range, that it reads lanes rather than turns, and that a
-balance pulls harder than a front nobody is contesting.
+Field stop's pull: its range, that it reads lanes rather than turns, that a
+balance pulls harder than a front nobody is contesting, and the floor beside a
+neutral only we border once the front has settled.
 
 Internals are reached through `sys.modules["sc_model_actuary"]`, the synthetic
 name `ai.load_models` imports each model file under.
@@ -418,3 +419,70 @@ def test_a_board_with_nothing_to_contest_has_no_pull(ac):
     state = _at(_board({1: (1, 5, 3), 2: (1, 5, 3)}, [(1, 2, 2)]), ac.FIELD)
     assert ac._Ledger(state, 1, field=True).front_value == {1: 1.0, 2: 1.0}
     assert ac.decide(state, 1) == []
+
+
+# --------------------------------------------------------------------------- #
+# Backyard neutrals (Style: Field and Learning)
+# --------------------------------------------------------------------------- #
+def _backyard(ac, rival=26, garrison=6, beside=None):
+    """Ours: 1 on the front facing the rival's 2 (``rival`` ships), and 3 a lane
+    behind it, next to the neutral 4 that only 3 borders. 3 holds 3 ships, short
+    of the 8 that 4's 6 need. ``beside``, given, holds 5, next to 4."""
+    systems = {1: (1, 30, 3), 2: (2, rival, 3), 3: (1, 3, 3), 4: (0, garrison, 2),
+               6: (2, 4, 3)}
+    lanes = [(1, 2, 2), (1, 3, 2), (3, 4, 2), (2, 6, 2)]
+    if beside is not None:
+        systems[5] = (beside, 5, 3)
+        lanes.append((4, 5, 2))
+    return _at(_board(systems, lanes), ac.FIELD)
+
+
+def test_a_settled_front_gathers_beside_a_backyard_neutral(ac, monkeypatch):
+    """A stalemate: the rival's 26 cannot take our 30, and our 30 cannot win the
+    worst roll against them. They are 39 turns of our income, so the front has
+    settled: 3 pulls as a front and keeps its ships for 4. Without the floor the
+    field gives 4 no stake (nobody else can reach it) and 3 sends them on."""
+    state = _backyard(ac)
+    floor = 1.0 + ac.FRONT_BONUS * ac.BACKYARD
+    assert ac._Ledger(state, 1, field=True).front_value[3] == floor
+    assert not any(src == 3 for src, _, _ in _orders(ac, state))
+    monkeypatch.setattr(ac, "BACKYARD", 0.0)
+    assert ac._Ledger(state, 1, field=True).front_value[3] < floor
+    assert (3, 1, 3) in _orders(ac, state)
+
+
+def test_before_the_front_settles_the_backyard_waits(ac):
+    """8 rival ships next door are 12 turns of our income: the front still needs
+    every ship, and the pull is the field's."""
+    state = _backyard(ac, rival=8)
+    ledger = ac._Ledger(state, 1, field=True)
+    assert ledger.front_value == ledger._pull()
+
+
+def test_a_neutral_a_rival_borders_is_not_backyard(ac):
+    state = _backyard(ac, beside=2)
+    ledger = ac._Ledger(state, 1, field=True)
+    assert ledger.front_value == ledger._pull()
+
+
+def test_a_neutral_not_worth_taking_is_not_backyard(ac):
+    """40 ships for 24 turns of a hull every 2 turns: the fight costs more than
+    the system is worth, so 3 is not held back for it."""
+    state = _backyard(ac, garrison=40)
+    ledger = ac._Ledger(state, 1, field=True)
+    assert ledger.front_value == ledger._pull()
+
+
+def test_a_neutral_already_being_taken_is_not_backyard(ac):
+    state = _backyard(ac)
+    state.fleets.append(Fleet(1, 3, 4, 9, 2, 1))
+    ledger = ac._Ledger(state, 1, field=True)
+    assert ledger.front_value == ledger._pull()
+
+
+def test_greedy_and_hunt_have_no_backyard_floor(ac):
+    state = _backyard(ac)
+    greedy = ac._Ledger(state, 1)
+    assert greedy.front_value == greedy._front_values()
+    hunt = ac._Ledger(state, 1, field=True, hunt=True)
+    assert hunt.front_value == hunt._pull()

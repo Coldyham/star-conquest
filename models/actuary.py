@@ -43,7 +43,11 @@ The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has four stops.
     reach, decayed the same way, as a share of the most any system has. A front
     nobody contests stops holding a stack, and the ships go where a few more of
     them tip a system. Where the median lane is `SLOW_LANE` turns or more the
-    pull is half the field and half Greedy's front.
+    pull is half the field and half Greedy's front. Once the front has settled
+    (a rival garrison next to us holds `BACKYARD_MATURE` turns of our income), a
+    system next to a neutral that no rival borders pulls as a front
+    (`BACKYARD`), so it gathers the ships to take it rather than feeding a
+    stalemate (`_Ledger._backyard`).
   * *Learning* is Field reading each rival's habits into the risk term
     (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
     seen, so it is the one stop an oracle must model rather than run.
@@ -140,6 +144,12 @@ CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
 SLOW_LANE = 5               # a median lane this many turns or more is slow: there
                             # the pull is half the field and half Greedy's front
                             # ("Slow lanes: half the front" in docs/design/field.md)
+BACKYARD = 1.0              # a system of ours next to a neutral no rival borders pulls
+                            # at least 1 + this x FRONT_BONUS while taking it would pay,
+                            # so it gathers the ships to take it; 0 = off...
+BACKYARD_MATURE = 15.0      # ...once the front has settled: a rival garrison next to
+                            # us holds this many turns of our income ("Backyard
+                            # neutrals" in docs/design/field.md)
 
 # --- Style: Hunt (docs/design/hunter.md); every switch off is Field ---------- #
 EDGE_RISK = True            # price a threat as actuary launches one: a source next door,
@@ -354,6 +364,8 @@ class _Ledger:
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
                       for sid in self.ids}
+        if field:
+            self.front_value = self._backyard(self.front_value)
         self.worth = {sid: self._worth(sid, self.lines[sid]) for sid in self.ids}
         self.risk = {sid: self._risk(sid) for sid in self.ids}
         self.orders: list[Order] = []
@@ -885,6 +897,55 @@ class _Ledger:
             return {sid: (1 - HUNT_SLOW_FRONT) * field[sid] + HUNT_SLOW_FRONT * front[sid]
                     for sid in self.ids}
         return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
+
+    def _backyard(self, pull):
+        """``pull`` with at least 1 + `BACKYARD` x `FRONT_BONUS` on each system of
+        ours next to a neutral in our backyard, once the front has settled.
+
+        A backyard neutral borders us and no rival, no rival fleet is flying to it,
+        our projection does not already take it, and taking it would pay
+        (`_pays_to_take`). Our influence swamps it, so the field gives it no stake,
+        and a system next to it sends every ship it builds to the front and never
+        holds enough to take it. The front has settled when a rival garrison next
+        to us holds `BACKYARD_MATURE` turns of our income: stacks that size grow
+        in step, a few more ships do not tip them, and income decides the
+        stalemate. Before that the front needs every ship, and before contact the
+        field's pull is the opening. Hunt is left as it is."""
+        if BACKYARD <= 0 or self.hunt:
+            return pull
+        sysmap, pid = self.state.systems, self.pid
+        rivals = set(self.rivals)
+        ours = [sid for sid in self.ids if sysmap[sid].owner_id == pid]
+        facing = [sysmap[n].ships for sid in ours for n in sysmap[sid].neighbors
+                  if sysmap[n].owner_id in rivals]
+        if not facing or max(facing) < BACKYARD_MATURE * sum(self.income[sid] for sid in ours):
+            return pull
+        flying = {f.dest_id for f in self.state.fleets if f.owner_id in rivals}
+        floor = 1.0 + FRONT_BONUS * BACKYARD
+        out = dict(pull)
+        for sid in self.ids:
+            node = sysmap[sid]
+            if node.owner_id != 0 or sid in flying or self.lines[sid][0][self.horizon] == pid:
+                continue
+            owners = {sysmap[n].owner_id for n in node.neighbors}
+            if pid not in owners or owners & rivals or not self._pays_to_take(sid, floor):
+                continue
+            for n in node.neighbors:
+                if sysmap[n].owner_id == pid:
+                    out[n] = max(out[n], floor)
+        return out
+
+    def _pays_to_take(self, sid, value):
+        """Whether taking the neutral ``sid`` from a system whose ships are worth
+        ``value`` each raises the ledger: its income for `TAIL_TURNS` and the
+        survivors at a capture's worth, against the fewest ships that win it."""
+        garrison = self.state.systems[sid].ships
+        for need in range(garrison + 1, 4 * garrison + 8):
+            won, left = self._fight((self.pid, need), (0, garrison), defender=0)
+            if won == self.pid:
+                return (TAIL_TURNS * self.income[sid] + (1.0 + FRONT_BONUS) * left
+                        > value * need)
+        return False
 
     def _field(self):
         """The pull on a ship at each system, 1 to 1 + `FRONT_BONUS`: see the
