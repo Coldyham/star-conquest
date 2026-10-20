@@ -150,8 +150,8 @@ What it changes, in descending order of measured value:
     +5.5 points over the bot before it (z = +13.1; +3.9, +1.7 and +9.8
     against each), and ahead in three- and four-seat free-for-alls. Most of it
     is a pickier price on neutrals (``NEUTRAL_MARGIN``), more weight on relief
-    already in flight (``RELIEF_IN_FLIGHT``) and no defend pad. See "Tuning by
-    CMA-ES" in `docs/design/marshal-joint.md`.
+    already in flight (``RELIEF_IN_FLIGHT``) and no defend pad. See
+    `docs/design/marshal-cma.md`.
 
   * **A strike on a stack spends the guard kept against it.** The guard is a
     share of the largest rival stack next door, and that stack is usually the
@@ -213,7 +213,7 @@ from starconquest.model import Order
 # `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
 # sweep" in `docs/design/marshal.md` for what it was measured at, and note that its
 # gain is a default-ship-speed result. The values below were last tuned together
-# by CMA-ES: see "Tuning by CMA-ES" in `docs/design/marshal-joint.md`.
+# by CMA-ES: see `docs/design/marshal-cma.md`.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
 DEFEND_PAD = 0.0

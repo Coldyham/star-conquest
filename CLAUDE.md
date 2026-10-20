@@ -17,7 +17,7 @@ those files. Two companion pages are for **grepping, not reading whole**:
 re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
 `hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `win-turns`, `bot-families`, `knower`,
-`council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`,
+`council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`, `marshal-cma`,
 `actuary`, `hunter`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
 `docs/sections.md` when one grows past that). Keep this file to rules and
@@ -61,6 +61,7 @@ uv run python tools/win_turns.py                # turns to win: Council, Hunt, m
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
 uv run python tools/evo_bench.py --bot evolved --quick --seeds 50   # evolved's gate
 uv run --with cma python tools/evo_train.py --run NAME  # retrain evolved (CMA-ES)
+uv run --with cma python tools/const_train.py --run NAME  # tune marshal's constants (CMA-ES)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 ```
 

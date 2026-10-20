@@ -817,3 +817,8 @@ stalemates against marshal, mixed against knower); D's one losing cell, defender
 advantage 1.5 against knower (-2.0, z -1.3); and `FEED` as a rule rather than a
 ratio ("feed every front facing a rival"), which the plateau suggests but which
 was not measured.
+
+## Tuning by CMA-ES (2026-10-20)
+
+The screen above, handed to CMA-ES over twelve constants: +5.5 points over the
+bot it shipped (z +13.1), in [`marshal-cma.md`](marshal-cma.md).
