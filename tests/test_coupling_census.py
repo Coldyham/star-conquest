@@ -19,14 +19,18 @@ from tools import coupling_census as cc
 
 @pytest.fixture(scope="module")
 def ma():
-    """marshal with ``SPARE_TARGET`` off, the bot the board below was worked out
-    for: with it the 15-ship stack is affordable from 20 (``_front_board``)."""
+    """marshal as the board below was worked out for: ``SPARE_TARGET`` off (with
+    it the 15-ship stack is affordable from 20, ``_front_board``), the guard at
+    0.55 and the neutral margin at 1.3."""
     assert "marshal" in ai.load_models(), "models/marshal.py failed to import"
     module = sys.modules["sc_model_marshal"]
-    spare = module.SPARE_TARGET
-    module.SPARE_TARGET = False
+    pinned = {"SPARE_TARGET": False, "FRONTIER_GUARD": 0.55, "NEUTRAL_MARGIN": 1.3}
+    before = {name: getattr(module, name) for name in pinned}
+    for name, value in pinned.items():
+        setattr(module, name, value)
     yield module
-    module.SPARE_TARGET = spare
+    for name, value in before.items():
+        setattr(module, name, value)
 
 
 def _front_board():

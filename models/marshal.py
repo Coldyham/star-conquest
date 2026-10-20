@@ -128,7 +128,7 @@ What it changes, in descending order of measured value:
     with leftover budget tops up a short neighbour (``FEED``, ``FEED_FRONT``).
     That is what the people who beat marshal on the leaderboard do, and it is
     worth 54.0% (z = +4.04, REPRODUCED) where the median lane is two turns or
-    less. At ``FEED`` 3.0 nearly every front facing a rival counts as short, so
+    less. At ``FEED`` 3 or more nearly every front facing a rival counts as short, so
     the rear feeds those alone, and it now runs on every board
     (``FEED_MAX_TURNS`` 0): level with a three-turn cap against the roster, and
     sooner against the weak bots. See "What the board's human wins say" in
@@ -143,6 +143,15 @@ What it changes, in descending order of measured value:
     +2.9, +3.8 and +6.8 against each), and ahead in three- and four-seat
     free-for-alls. See "Screening against the roster" in
     `docs/design/marshal-joint.md`.
+
+  * **Nine constants are tuned jointly, by CMA-ES against the roster.**
+    ``tools/const_train.py`` searched twelve of them against marshal, knower
+    and actuary at once; the nine that carry the gain shipped (2026-10-20):
+    +5.5 points over the bot before it (z = +13.1; +3.9, +1.7 and +9.8
+    against each), and ahead in three- and four-seat free-for-alls. Most of it
+    is a pickier price on neutrals (``NEUTRAL_MARGIN``), more weight on relief
+    already in flight (``RELIEF_IN_FLIGHT``) and no defend pad. See
+    `docs/design/marshal-cma.md`.
 
   * **A strike on a stack spends the guard kept against it.** The guard is a
     share of the largest rival stack next door, and that stack is usually the
@@ -203,26 +212,27 @@ from starconquest.model import Order
 # rather than fighting 86.7% of the time. See `_enemy_margin`.
 # `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
 # sweep" in `docs/design/marshal.md` for what it was measured at, and note that its
-# gain is a default-ship-speed result.
+# gain is a default-ship-speed result. The values below were last tuned together
+# by CMA-ES: see `docs/design/marshal-cma.md`.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
-DEFEND_PAD = 0.05
+DEFEND_PAD = 0.0
 NEUTRAL_PAD = 0.05
 
-NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
-RISK_PARITY = 1.0               # last-resort fallback once a doomed system also
+NEUTRAL_MARGIN = 1.53           # neutrals are static — a flat cushion suffices
+RISK_PARITY = 0.94              # last-resort fallback once a doomed system also
                                  # can't be saved by Phase 2's consolidation: hold
-                                 # anyway at raw parity or better, rather than
+                                 # anyway at this share of raw parity, rather than
                                  # evacuate for certain — see the Phase 1 loop and
                                  # `_enemy_arrivals`.
-OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
+OVERWHELM = 1.08                # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
-FRONTIER_GUARD = 0.55           # fraction of the scariest adjacent enemy held home
+FRONTIER_GUARD = 0.72           # fraction of the scariest adjacent enemy held home
 POUR_GUARD = 0.85               # ...and the floor a frontier source keeps under
                                  # Phase 3b's surplus pour; only a value above
                                  # FRONTIER_GUARD bites. See "Screening against the
                                  # roster" in docs/design/marshal-joint.md
-BEYOND_DECAY = 0.35             # weight on the richest system one hop past a target
+BEYOND_DECAY = 0.64             # weight on the richest system one hop past a target
 
 RIVAL_WEDGE = 1.0               # penalty per rival past the first bordering a target
 WEDGE_MIN_PLAYERS = 4           # ...applied only in a field this crowded
@@ -235,10 +245,9 @@ RETREAT_NEAREST = True          # ...and retreat by travel time, not garrison si
 # --- see "A non-oracle successor to marshal" in docs/design/marshal-flow.md - #
 FLOW_AVOIDS_ABANDONED = True    # Phase 4: don't flow surplus into a system
                                  # Phase 2 is giving up this same turn
-RELIEF_AWARE = 0.65             # _required: price a rival target against a
+RELIEF_AWARE = 0.85             # _required: price a rival target against a
                                  # calm neighbour's garrison too, weighted by this
-                                 # (0.5 until 2026-10-17: see marshal-joint.md)
-RELIEF_IN_FLIGHT = 0.5          # ...and a fleet landing next door that could
+RELIEF_IN_FLIGHT = 0.87         # ...and a fleet landing next door that could
                                  # turn round and land first, weighted by this
 FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
                                  # rival by this — a strike across it is never
@@ -253,7 +262,7 @@ RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
                                  # siege too, when its horizon is at least this
                                  # many turns; 0 = never (neutrals only). See
                                  # "Phase 3b re-flooding" in docs/design/marshal-flow.md
-FEED = 3.0                      # Phase 4: rear surplus flows only to frontier
+FEED = 3.73                     # Phase 4: rear surplus flows only to frontier
                                  # systems short of this fraction of their
                                  # largest rival neighbour, while any are; 0 = off.
                                  # From about 2 up nearly every front facing a
@@ -892,8 +901,8 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool
             -sysmap[n].ships, -_front_pull(state, pid, n, max_prod), n))
         return Order(pid, s.id, friends[0], ships)
 
-    # (c) Cornered. Only sortie if truly overwhelmed; otherwise hold — a garrison
-    #     kills more attackers than a doomed strike on a weak neighbour would.
+    # (c) Cornered. Sortie at the weakest enemy neighbour once out-numbered by
+    #     ``OVERWHELM``; otherwise hold.
     enemy_in = _incoming(state, s.id, pid, hostile=True)
     friend_in = _incoming(state, s.id, pid, hostile=False)
     if enemy_in > OVERWHELM * (ships + friend_in):

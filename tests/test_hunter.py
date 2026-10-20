@@ -200,6 +200,7 @@ def test_every_switch_off_is_field(hu, monkeypatch):
     switches back at actuary's values Hunt and Field must issue the same orders."""
     for name, value in ACTUARY.items():
         monkeypatch.setattr(hu, name, value)
+    monkeypatch.setattr(hu, "BACKYARD", 0.0)     # Field's backyard pull; Hunt has none
     boards = _boards(monkeypatch)
     assert len(boards) > 20
     for state in boards:
