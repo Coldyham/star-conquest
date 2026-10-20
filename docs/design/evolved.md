@@ -157,8 +157,9 @@ a garrison behind what it pours forward, where evolved used to strike.
 - **Distinct is worth borrowing.** As one more of knower's borrowed candidates,
   at Look-ahead Off, it adds +5.7 points at Search and +6.3 at Council head to
   head against knower on fresh seeds, where actuary in its place adds +13.4 at
-  Search. What knower takes from it is that flow of ships to its own front. See
-  [`knower.md`](knower.md), "evolved as a borrowed candidate (2026-10-19)".
+  Search. What knower takes from it is that flow of ships to its own front.
+  Council has borrowed it since 2026-10-20; Search has not. See [`knower.md`](knower.md),
+  "evolved as a borrowed candidate (2026-10-19)".
 
 ## Training it
 

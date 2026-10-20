@@ -136,7 +136,7 @@ the measured result was indistinguishable from the baseline.
 - A deeper, wider look-ahead with no guard: -0.5 against actuary; dice averaged per plan: below expected dice. *Same section.*
 - Fewer own-to-own moves (-1.2 to -3.1) and pricing a third seat's fleet into the ask (-0.18), the two remedies the multi-seat diagnoses named. *Why multi-seat is short.*
 - Retraining the move-kind biases with the look-ahead on (-0.92), and a separate multi-seat weight set (+0.67, null). *Decided against.*
-- **Open, not rejected:** evolved (Look-ahead Off) as one of knower's borrowed candidates: +5.7 points at Search and +6.3 at Council head to head against knower, not yet shipped. [`design/knower.md`](design/knower.md), *evolved as a borrowed candidate (2026-10-19)*.
+- **Open, not rejected:** evolved (Look-ahead Off) as one of knower's borrowed candidates at Search: +5.7 points head to head against knower, not taken; Council borrows it since 2026-10-20 (+6.3). [`design/knower.md`](design/knower.md), *evolved as a borrowed candidate (2026-10-19)*.
 
 ## Field, once fulcrum ([`design/field.md`](design/field.md))
 - A refill of our source the turn after a dooming strike, bolted onto actuary: 45.5% against actuary. The same priced inside the ledger (a doomed rival garrison assumed to flee into our nearest source, weight 0.5): 46.8%. Full relief of any system a visible fleet would take, bolted onto marshal or actuary: null (51.3%, 51.0% against themselves). *Where a ledger's moves come from.*

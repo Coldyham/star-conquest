@@ -191,14 +191,15 @@ def test_only_a_bot_knower_borrows_at_the_stop_can_be_replaced(tmp_path, monkeyp
 @pytest.mark.parametrize("stop,rolled", [(2, False), (3, True)])
 def test_at_council_the_candidates_line_is_played_on_by_its_bot(knower, monkeypatch, stop, rolled):
     """Search asks the candidate for its opening once; Council asks again on every
-    turn its line is rolled forward."""
+    turn its line is rolled forward. evolved is borrowed under a second name, since
+    Council borrows evolved itself."""
     real = ai.STRATEGIES["evolved"]
     asked: list[int] = []
 
     def counting(state, pid):
         asked.append(state.turn)
         return real(state, pid)
-    monkeypatch.setitem(ai.STRATEGIES, "evolved", counting)
+    monkeypatch.setitem(ai.STRATEGIES, "evolved_again", counting)
     state = build_state(Settings(mode="random", nodes=7, players=2, ship_ly_per_turn=6,
                                  autoplay=True), 7)
     for pid in (1, 2):
@@ -207,7 +208,7 @@ def test_at_council_the_candidates_line_is_played_on_by_its_bot(knower, monkeypa
     cb._patch()
     ai.set_budget_scale(math.inf)
     monkeypatch.setattr(cb, "_under_test", frozenset({1}))
-    monkeypatch.setattr(cb, "_borrow", ("evolved", 0.0))
+    monkeypatch.setattr(cb, "_borrow", ("evolved_again", 0.0))
     replay.reseed(state)
     engine.decide_seat(state, 2, ai.decide)
     assert asked == [], "a seat not under test never borrows it"
@@ -245,6 +246,13 @@ def test_a_report_reads_another_trees_ledger_and_plays_nothing(tmp_path, monkeyp
                     "--label", "base", "--report"]) == 0
     assert "50.0%" in capsys.readouterr().out
     assert len(path.read_text().splitlines()) == 2
+
+
+def test_a_bot_knower_already_borrows_is_refused(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cb, "RESULTS", tmp_path)
+    with pytest.raises(SystemExit):
+        cb.main(["--borrow", "marshal", "--cell", str(DUEL), "--seeds", "1", "--report"])
+    assert "already borrows marshal at stop 2" in capsys.readouterr().err
 
 
 def test_a_report_with_nothing_played_says_so(tmp_path, monkeypatch, capsys):

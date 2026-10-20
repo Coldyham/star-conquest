@@ -218,7 +218,8 @@ At 40-80 games a cell, treat anything within ~10 points as unresolved.
 ## Borrowed candidates (`EXTERNAL_CANDIDATES`)
 
 Four now: rusherplus, heuristic, marshal, claudebot (see the search above for what
-the last two bought). How often each wins E's search, over every decision of the
+the last two bought); Council borrows actuary and evolved after them
+(`COUNCIL_CANDIDATES`). How often each wins E's search, over every decision of the
 games above (the land-grab included, so the default share is inflated — see below):
 
     6 ly    default 54%  rusherplus 12%  marshal 11%  timid 9%  heuristic 8%  claudebot 5%
@@ -384,15 +385,25 @@ evolved costs what one more line costs, a sixth at Search (seven lines for six)
 and a seventh at Council: its plain policy adds next to nothing. actuary's
 ledger adds about a tenth on top of its line.
 
-**Neither is in the list yet**: the call is the author's. evolved buys +5.7
-points head to head at Search (+4.9 against marshal, +2.8 against actuary) and
-+6.3 at Council, for about a sixth more a decide. actuary buys +13.4 at Search
-for about a quarter more. Shipping either goes past `EXTERNAL_CANDIDATES` (or
-`COUNCIL_CANDIDATES`). `_lines()` counts the candidates, but only the rival bots'
-share of `estimated_decide_ms` reads it: `ply_ms` and `COST_VS_KNOWER` were
-fitted with the lines of the day, so the setup warning would price a decide
-about a line short. Every knower result in the bot column goes out of date, and
-the strikes `tests/council_traps.py` pins can move.
+**evolved is borrowed at Council since 2026-10-20; Search is unchanged.** evolved
+buys +5.7 points head to head at Search (+4.9 against marshal, +2.8 against
+actuary) and +6.3 at Council, for about a sixth more a decide. It joined
+`COUNCIL_CANDIDATES` after actuary, where the bench appended it, so Council plays
+exactly as measured. Search keeps its six lines and its cost. actuary buys +13.4
+at Search for about a quarter more and is not borrowed there either.
+
+What shipping changed:
+
+- **Council's warning.** A Council ply is priced at `COST_VS_KNOWER` times
+  Search's, scaled by Council's lines (`_council_lines`) over the seven that
+  factor was measured with (`COST_COUNCIL_LINES`): ×8/7 for evolved's line,
+  against the ×1.11-1.19 measured above. `ply_ms` was fitted with Search's six
+  lines and does not read `_lines()`, so a candidate added at Search would need
+  the same.
+- **The bot column.** It replays knower at the top of its slider, Council, so
+  knower's rows, and any with a Council seat in them, are out of date until
+  `tools/bot_replay.py --stale` reruns them. `engine_rev` moves for every row.
+- **The traps.** The strikes `tests/council_traps.py` pins did not move.
 
 ## How far to look: the longest lane, plus a cushion
 

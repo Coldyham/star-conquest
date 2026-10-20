@@ -54,7 +54,7 @@ uv run python tools/config_census.py            # which setups people play
 uv run python tools/setup_sweep.py              # ...and whether the ranking moves there
 uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by hand
 uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --variant) vs Field, paired
-uv run python tools/candidate_bench.py --borrow evolved:0   # a bot as one more knower candidate, paired
+uv run python tools/candidate_bench.py --borrow actuary     # a bot as one more knower candidate, paired
 uv run python tools/fold_check.py               # a stop plays as the bot folded into it
 uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
                                                 # (--label NEW --base OLD pairs two trees game by game)

@@ -1,11 +1,11 @@
 # council design notes
 
 `models/council.py` is knower's Search with three changes: a learned judge,
-actuary as one more borrowed candidate, and each borrowed candidate playing out
-its own line. This file says what each change is and what it bought, how
-council was measured, what it costs, and what was built and dropped on the way.
-The search it builds on is in [`knower.md`](knower.md); roster-wide rules are in
-[`bots.md`](bots.md). Index: [`../README.md`](../README.md).
+more borrowed candidates (actuary, and since 2026-10-20 evolved), and each
+borrowed candidate playing out its own line. This file says what each change is
+and what it bought, how council was measured, what it costs, and what was built
+and dropped on the way. The search it builds on is in [`knower.md`](knower.md);
+roster-wide rules are in [`bots.md`](bots.md). Index: [`../README.md`](../README.md).
 
 Since 2026-10-19 council is no bot of its own but knower's fourth stop, *Oracle:
 Council*, playing exactly as `models/council.py` did at On; its patches to a
@@ -17,13 +17,15 @@ measurements below name it council. See [`bot-families.md`](bot-families.md).
 
 knower's Search compares candidate openings (its own plan, a timid posture, and
 four borrowed bots' moves for its seat) by playing each a few turns forward and
-scoring where it lands. council keeps all of that and changes three things.
+scoring where it lands. council keeps all of that and changes three things, and
+since 2026-10-20 borrows one more bot (the last row).
 
 | Change | What it does | Gain against knower:2 |
 | --- | --- | --- |
 | **actuary as one more borrowed candidate** | actuary's move for our seat joins the openings | about +11 points |
 | **A learned judge** | a rolled-out board is scored by a win probability (`_council_eval.value`) instead of knower's material difference | about +5 more |
 | **Each borrowed candidate plays its own line** | a borrowed opening is played forward by the bot that proposed it, not by knower's blind planner | +27 more (paired, z 8.98) |
+| **evolved as one more borrowed candidate** (2026-10-20) | evolved's move at Look-ahead Off joins the openings, after actuary's | +6.3 more, head to head against Council (z 3.49) |
 
 Points are percentage points above the fair share (50% in a duel, 33% with three
 players), pooled over cells and paired by seed.
@@ -222,7 +224,7 @@ changes the habit should be screened against the people's own games, not
 bots. The traps in `tests/council_traps.py` were unchanged by `_cover`: it
 holds sources, and the traps are lost targets.
 
-## evolved as one more borrowed candidate (2026-10-19, measured, not shipped)
+## evolved as one more borrowed candidate (2026-10-19, shipped 2026-10-20)
 
 evolved at Look-ahead Off, borrowed after actuary, its line played on by
 evolved (`tools/candidate_bench.py --borrow evolved:0 --stop 3`), head to head
@@ -231,19 +233,20 @@ and +6.3 (z +3.49) on fresh seeds after `_flee` landed, every cell of the second
 between +4 and +8. Its line is picked on 12.7% of contested decisions, fourth
 after actuary, marshal and the default, and changes the move on 10.3%. It is the
 first extra opening to measure well above the +1 that more postures, actuary at
-Greedy and a hold opening each gave ("Built, measured, dropped"). The tables and
-the reasons it is not shipped yet are in [`knower.md`](knower.md), "evolved as a
-borrowed candidate (2026-10-19)".
+Greedy and a hold opening each gave ("Built, measured, dropped"). It shipped in
+`COUNCIL_CANDIDATES`, after actuary, where it was measured; Search does not
+borrow it. The tables, and what shipping changed, are in [`knower.md`](knower.md),
+"evolved as a borrowed candidate (2026-10-19)".
 
 ## actuary at Hunt in Field's place (2026-10-20, measured, not shipped)
 
-Council borrows actuary at Field: `COUNCIL_CANDIDATES` is `(("actuary", None),)`,
-and an aux of None is `config.AI_AUX`, Field. Hunt, actuary's top stop, beats
-Field 66.9% head to head ([`hunter.md`](hunter.md), "Where it stands"). Tried in Field's
-place, in its slot and with its salt (`tools/candidate_bench.py --borrow
-actuary:3 --instead actuary --stop 3`; the same swap at Field, `actuary:1`, plays
-Council exactly), head to head against Council on seeds 7,200,000 + 50, after
-knower's `_flee`:
+Council borrows actuary at Field: its entry in `COUNCIL_CANDIDATES` is
+`("actuary", None)`, and an aux of None is `config.AI_AUX`, Field. Hunt,
+actuary's top stop, beats Field 66.9% head to head ([`hunter.md`](hunter.md),
+"Where it stands"). Tried in Field's place, in its slot and with its salt
+(`tools/candidate_bench.py --borrow actuary:3 --instead actuary --stop 3`; the
+same swap at Field, `actuary:1`, plays Council exactly), head to head against
+Council on seeds 7,200,000 + 50, after knower's `_flee`:
 
 | Cell | Points above fair | Cost a decide, matched positions (median ms) |
 | --- | --- | --- |
@@ -264,14 +267,15 @@ its line, so a decide costs three to nine times as much, about a second at 24
 systems on 3 ly/turn. The browser's 150 ms search guard would cut most of those
 searches short, so a player would not meet the Council this bench measured.
 evolved, added beside Field, buys about as much (+6.3, "evolved as one more
-borrowed candidate") for a sixth more a decide. Untested: the two together.
+borrowed candidate") for a sixth more a decide, and has been borrowed since
+2026-10-20; this run was against Council without it. Untested: the two together.
 
 **Without its look-ahead** (`--with LOOKAHEAD=0`, set only around the borrowed
-actuary's own calls; no stop of actuary's knob offers it), on the same seeds:
-+2.6 points (z +1.49), the cells −3.0, +3.3, +12.0, +5.0, +4.0, −6.0 in the order above, at
-no measurable cost (×0.99 to ×1.06). Its line is still picked on 36.5% of
-contested decisions, as often as with the look-ahead, but the gain is mostly
-gone. That matches plain Hunt against Field head to head, 50.8%
+actuary's own calls; no stop of actuary's knob offers it), on the same seeds: +2.6
+points (z +1.49), the cells −3.0, +3.3, +12.0, +5.0, +4.0, −6.0 in the order
+above, at no measurable cost (×0.99 to ×1.06). Its line is still picked on
+36.5% of contested decisions, as often as with the look-ahead, but the gain is
+mostly gone. That matches plain Hunt against Field head to head, 50.8%
 ([`hunter.md`](hunter.md), "The field, by lane length"): the look-ahead is all
 of Hunt's lead, and two near-equal candidates mostly trade which of two similar
 lines wins. A lean, not adopted.
@@ -311,11 +315,16 @@ every bot seat included, guards on): 73 ms median on a 40-node duel, 163 ms on
 the same at 2 ly (a setup the warning flags), 323 ms on 31 nodes with four
 council seats of five.
 
+These figures predate evolved joining the candidates (2026-10-20), which costs
+about a seventh more ([`knower.md`](knower.md), "evolved as a borrowed candidate
+(2026-10-19)").
+
 **The setup warning** (`council.setup_warning`) is knower's, priced for
 council: every council seat searches, an Off seat at knower's cost and an On
 seat at `COST_VS_KNOWER` (2.5) times it, the top of the 1.4–2.5× range in the
-table above. A cost model fitted to council's own lines would replace the
-factor.
+table above, scaled by Council's lines over the seven that range was measured
+with (`COST_COUNCIL_LINES`), so evolved's line is priced too. A cost model
+fitted to council's own lines would replace the factor.
 
 **The gentler-jitter test** (`tests/test_ai.py`) skips council
 (`_ROLLS_OUT_FIGHTS`): its rollouts play fights at the real jitter, so its plan

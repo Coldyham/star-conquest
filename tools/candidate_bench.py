@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """A bot tried as one more of knower's borrowed candidates, paired by seed.
 
-    uv run python tools/candidate_bench.py --borrow evolved:0               # Search, head to head
-    uv run python tools/candidate_bench.py --borrow evolved:0 --stop 3      # ...at Council
-    uv run python tools/candidate_bench.py --borrow evolved:0 --vs marshal actuary
-    uv run python tools/candidate_bench.py --borrow evolved:0 --report
-    uv run python tools/candidate_bench.py --borrow evolved:0 --time --seeds 3   # its cost
+    uv run python tools/candidate_bench.py --borrow actuary                 # Search, head to head
+    uv run python tools/candidate_bench.py --borrow actuary:3 --stop 3      # ...at Council, beside Field
+    uv run python tools/candidate_bench.py --borrow actuary --vs marshal thinker
+    uv run python tools/candidate_bench.py --borrow actuary --report
+    uv run python tools/candidate_bench.py --borrow actuary --time --seeds 3   # its cost
     uv run python tools/candidate_bench.py --borrow actuary:3 --instead actuary --stop 3
     uv run python tools/candidate_bench.py --borrow actuary:3 --with LOOKAHEAD=0 --instead actuary --stop 3
 
@@ -13,7 +13,9 @@ knower at ``--stop`` (2 Search, 3 Council) with the bot ``--borrow`` names
 (``name:aux`` borrows a stop of its knob) appended after every other borrowed
 opening (`knower._externals`), for the seats under test only. Appended last, it
 changes nothing until its line outscores every other one, so a seat whose new
-candidate is never picked plays exactly as knower does. Every other seat in the
+candidate is never picked plays exactly as knower does, and a bot knower
+already borrows at the stop is refused: a second copy could never be picked.
+Every other seat in the
 game is untouched, a knower included, and models the seat under test as it
 models any knower seat (`knower._surrogate`). At Council the candidate's line is
 played on by the bot that proposed it, as every borrowed candidate's is
@@ -526,12 +528,14 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(getattr(module, const, None), (bool, int, float)) or not value:
             ap.error(f"--with {item}: {borrow.name} has no number or flag {const!r}")
         with_[const] = float(value)
-    if swap is not None:
-        k = sys.modules[ai.STRATEGIES["knower"].__module__]
-        borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_CANDIDATES if args.stop == k.COUNCIL else ())
-        if swap not in borrowed:
-            ap.error(f"knower does not borrow {instead} at stop {args.stop}; it borrows "
-                     + ", ".join(_label(e) for e in borrowed))
+    k = sys.modules[ai.STRATEGIES["knower"].__module__]
+    borrowed = k.EXTERNAL_CANDIDATES + (k.COUNCIL_CANDIDATES if args.stop == k.COUNCIL else ())
+    if swap is not None and swap not in borrowed:
+        ap.error(f"knower does not borrow {instead} at stop {args.stop}; it borrows "
+                 + ", ".join(_label(e) for e in borrowed))
+    if swap is None and (borrow.name, borrow.aux) in borrowed:
+        ap.error(f"knower already borrows {borrow} at stop {args.stop}; a second copy "
+                 "could never be picked")
     cells = [Cell.parse(c) for c in (args.cell or CELLS)]
     if args.time:
         time_cost(cells, range(args.seed_base, args.seed_base + args.seeds), args.stop,
