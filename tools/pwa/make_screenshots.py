@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pygame
 
-import main  # reuse new_ui/refresh_fog (fog seeding); import is guarded, no side effects
 from starconquest import ai, config, engine, render
+from starconquest import main  # reuse new_ui/refresh_fog (fog seeding); import is guarded, no side effects
 from starconquest.settings import Settings, build_state
 
 OUT = Path(__file__).resolve().parent

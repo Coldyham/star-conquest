@@ -31,6 +31,24 @@ keys tab and still work — see ``credentials``.)
 Nothing here imports pygame (or anything off PyPI): the simulation core is pure,
 which is what lets a plain ``python tools/bot_replay.py`` on a bare runner do the
 whole job.
+
+**A winning replay is stored, not just scored.** Alongside the ordinary
+``won``/``turns``/``lost`` row, a win also fills in a ``replay.GameLog`` turn by
+turn (``sim.play_settings``'s ``log`` parameter) and stores its encoded form on
+the same row (``bot_scores.log``/``match_id``/``rules_version``). That is what
+the board's Watch link on a winning bot plays back — ``#log=<match_id>``, the
+same mechanism a human's posted score uses — rather than handing the browser the
+setup and asking it to re-decide the whole match live. The two used to be able
+to disagree: re-deciding depends on exactly which commit is deployed where, and
+on treating the replayed seat as an oracle opponent could see any other bot
+(``sim._hand_over`` clears ``is_human`` for exactly this reason), which a token
+can never express — it can only ever say ``autoplay: true``, never "seat 1 is a
+bot". A stored log needs none of that agreement: ``replay.reconstruct`` applies
+its recorded orders and dice verbatim, asking no seat to decide anything, so
+watching it *is* rewatching the exact game this row reports on, regardless of
+what any seat was flagged during the run that produced it. A loss stores
+nothing — only a win is worth a Watch link, the same rule a human's own posted
+score follows.
 """
 
 from __future__ import annotations
@@ -46,15 +64,15 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tests import sim  # noqa: E402  — the shared headless harness (see its docstring)
+from starconquest import ai, replay
+from starconquest.settings import Settings
+from tests import sim
 
 # Modules whose contents can change what a replay produces. Deliberately not
 # "every file in the package": the shell (render/input/menu) and the
@@ -63,8 +81,8 @@ from tests import sim  # noqa: E402  — the shared headless harness (see its do
 # outcome-bearing despite being cosmetic — mapgen rolls names off `state.rng`,
 # so changing the name list shifts every draw taken after it.
 _OUTCOME_MODULES = (
-    "ai", "combat", "config", "engine", "geometry", "mapgen", "model",
-    "settings", "starnames",
+    "ai", "combat", "config", "custommap", "engine", "geometry", "mapgen",
+    "model", "settings", "starnames",
 )
 
 # ...and the subset that can move a *recorded* game: `_OUTCOME_MODULES` minus
@@ -72,25 +90,29 @@ _OUTCOME_MODULES = (
 # deals its recorded dice, so no bot is ever consulted (see `replay_rev`).
 _REPLAY_MODULES = tuple(name for name in _OUTCOME_MODULES if name != "ai")
 
-# Where a bot is replayed at something other than its default profile.
+# The harness that actually plays a bot replay is part of the answer too, and is
+# named separately because only `engine_rev` may read it: `sim.play_settings`
+# decides how the seat is handed over and how each turn is stepped, so a change
+# there moves every cached row exactly as a change to `engine` would. It cannot
+# move a *stored log's* replay, which asks no seat to decide anything, so it must
+# stay out of `_REPLAY_MODULES`.
+_OUTCOME_HARNESS = ("tests", "sim.py")
+
+# Every bot is replayed at the top of its own `aux` slider, not its menu default.
 #
 # `AiParams.aux` is the one bot-defined knob (`models/README.md`): the core never
-# interprets it and each strategy assigns its own meaning, so "this bot at its
-# best" is a judgement only a caller can make. 1.0 is the documented untuned
-# value and stays the default for everything not named here.
+# interprets it and each strategy assigns its own meaning. The board's bot column
+# is there to show the best a bot can do, and each strategy's slider runs from its
+# cheapest stop up to its strongest, so the top of the declared `AUX_RANGE` (read
+# through `ai.aux_spec`) is that bot at its best. A bot that declares no knob
+# replays at 1.0, the documented untuned value. Today that puts knower on Oracle:
+# Search and actuary on Style: Learning.
 #
-# knower reads aux as search depth, and 12 is the top of its own slider
-# (`SEARCH_DEPTH_MAX`) and the setting its measurements favour — "ahead in every
-# measurement taken and behind in none". Its work is iteration-bounded, so the
-# result stays reproducible; the caveat is `knower.SEARCH_BUDGET_S`, a 150 ms
-# per-decide catastrophe guard that, if it ever trips, makes the plan depend on
-# the wall clock. Measured headroom at depth 12 is comfortable on an ordinary map
-# and thin (~1.1x) on the largest the menu can build — 40 nodes and 6 seats. Depth
-# 12 also costs ~100x depth 1 in wall clock, which is what --limit and the
-# deadline are for.
-REPLAY_AUX: dict[str, float] = {
-    "knower": 12,
-}
+# knower's Search is iteration-bounded, so the result stays reproducible; the
+# caveat is `knower.SEARCH_BUDGET_S`, a 150 ms per-decide catastrophe guard that,
+# if it ever trips, makes the plan depend on the wall clock, which is why the
+# worker lifts it (`BUDGET_SCALE` below). Search costs tens of times Predict in
+# wall clock, which is what --limit and the deadline are for.
 
 # How far to lift the bots' own wall-clock catastrophe guards (`ai.set_budget_scale`).
 #
@@ -109,6 +131,7 @@ BUDGET_SCALE = 100.0
 PAGE = 1000          # PostgREST's own default ceiling; page rather than assume
 POST_TIMEOUT = 60    # seconds, per HTTP call
 RETRIES = 4          # network blips on a CI runner are ordinary
+CLOCK_SKEW = "PGRST303"   # "JWT issued at future": transient, so retried
 
 
 def credentials() -> tuple[str, str]:
@@ -155,7 +178,8 @@ def engine_rev() -> str:
     and only when — the simulation or a bot does.
     """
     return _digest([ROOT / "starconquest" / f"{name}.py" for name in _OUTCOME_MODULES]
-                   + sorted((ROOT / "models").glob("*.py")))
+                   + sorted((ROOT / "models").glob("*.py"))
+                   + [ROOT.joinpath(*_OUTCOME_HARNESS)])
 
 
 def replay_rev() -> str:
@@ -176,24 +200,32 @@ def replay_rev() -> str:
 
 
 def replay_aux(bot: str, overrides: dict[str, float] | None = None) -> float:
-    """The `aux` value this bot is replayed at (`config.AI_AUX`'s 1.0 by default)."""
+    """The `aux` value this bot is replayed at: the top of its declared slider, or
+    `config.AI_AUX`'s 1.0 for a bot that declares none. Needs `ai.load_models()`."""
     if overrides and bot in overrides:
         return overrides[bot]
-    return REPLAY_AUX.get(bot, 1.0)
+    spec = ai.aux_spec(bot)
+    return spec[2] if spec else 1.0
 
 
 def aux_note(bot: str, aux: float) -> str:
-    """How to say what a non-default `aux` meant, e.g. "Search depth" for knower.
+    """How to say what a non-default `aux` meant, e.g. "Oracle: Search" for knower.
 
-    Read off the strategy's own `AUX_LABEL` through `ai.aux_spec`, the same
-    declaration the menu's slider uses, so the board never invents a name for a
-    knob it doesn't own. Empty for a bot at its default, or one that ignores aux
-    entirely — there is nothing to disclose in either case.
+    Read off the strategy's own `AUX_LABEL` (and `AUX_NAMES`, when its stops are
+    named) through `ai.aux_spec`/`ai.aux_stop_name`, the same declarations the
+    menu's slider uses, so the board never invents a name for a knob it doesn't own.
+    A named stop comes back as "Label: Stop", which `format.mjs`'s `botProfile`
+    prints as it stands rather than appending the bare number. Empty for a bot at
+    its default, or one that ignores aux entirely — there is nothing to disclose in
+    either case.
     """
     if aux == 1.0:
         return ""
     spec = ai.aux_spec(bot)
-    return spec[0] if spec else ""
+    if not spec:
+        return ""
+    stop = ai.aux_stop_name(bot, aux)
+    return f"{spec[0]}: {stop}" if stop else spec[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -231,7 +263,11 @@ class Supabase:
                 # PostgREST explains itself in the body; surface that, not "400".
                 detail = err.read().decode("utf-8", "replace")[:500]
                 last = f"HTTP {err.code}: {detail}"
-                if err.code < 500:  # a 4xx will fail identically on a retry
+                # A 4xx will fail identically on a retry, except PGRST303: the
+                # gateway mints the request's JWT on a clock that can run a
+                # moment ahead of PostgREST's. It is refused before the query
+                # runs, so a retry can't apply a write twice.
+                if err.code < 500 and CLOCK_SKEW not in detail:
                     break
             except (urllib.error.URLError, TimeoutError, OSError) as err:
                 # Safe to retry a POST here: the only one is the upsert, and it
@@ -267,6 +303,25 @@ class Supabase:
         self._call(table, method="POST",
                    body=json.dumps(rows).encode("utf-8"),
                    extra={"Prefer": "resolution=merge-duplicates,return=minimal"})
+
+    def insert(self, table: str, rows: list[dict]) -> None:
+        """Insert rows outright; a duplicate key is an error, not a merge."""
+        if not rows:
+            return
+        self._call(table, method="POST",
+                   body=json.dumps(rows).encode("utf-8"),
+                   extra={"Prefer": "return=minimal"})
+
+    def update(self, table: str, query: str, patch: dict) -> list[dict]:
+        """Patch the rows a filter selects and return them as they now stand. An
+        empty list means the filter matched nothing, which is how a conditional
+        write (``updated_at=eq.…``) reports that it lost a race. Refuses an
+        unfiltered call for the same reason ``delete`` does."""
+        if not query.strip():
+            raise ValueError("refusing to update without a filter")
+        return self._call(f"{table}?{query}", method="PATCH",
+                          body=json.dumps(patch).encode("utf-8"),
+                          extra={"Prefer": "return=representation"}) or []
 
     def delete(self, table: str, query: str) -> None:
         """Delete the rows a filter selects. Refuses an unfiltered call, which
@@ -316,6 +371,50 @@ def _settings_for(row: dict) -> tuple[Settings, int] | None:
     return cfg, seed
 
 
+def _row_for(job: Job, result: sim.ReplayResult, log: replay.GameLog, rev: str) -> dict:
+    """The ``bot_scores`` upsert row for one finished replay.
+
+    ``log`` is always the run's full recording — ``play_settings`` fills it in
+    turn by turn regardless of the outcome, since nobody knows in advance
+    whether a run is worth keeping — but only a win's is stored: a log is what
+    backs a Watch link, and only a win gets one, the same rule a human's own
+    posted score follows (``Ui.can_post``). A loss therefore writes a blank
+    ``match_id``/``log``/``rules_version`` rather than omitting the keys — an
+    upsert only SETs the columns it is given, so an old winning row replayed
+    into a fresh loss (a bot retuned for the worse, say) must actively clear
+    what it no longer earns, not leave a stale replay pointing at a result the
+    row no longer reports.
+    """
+    row = {
+        "game_key": job.game_key,
+        "bot": job.bot,
+        "won": result.won,
+        "turns": result.turns,
+        "lost": result.lost,
+        "bot_timeouts": result.bot_timeouts,
+        # The profile this answer belongs to. Recorded, not implied: a board
+        # showing knower on Search beside a menu default of Predict owes
+        # the reader that much, and `pending` reads it back to notice when
+        # the policy has moved.
+        "aux": job.aux,
+        "aux_label": aux_note(job.bot, job.aux),
+        "engine_rev": rev,
+        # Sent rather than left to the column default: on an upsert PostgREST
+        # only SETs the columns present in the payload, so an omitted
+        # computed_at would keep the *original* row's timestamp on a redo.
+        "computed_at": datetime.now(UTC).isoformat(),
+    }
+    if result.won:
+        row["match_id"] = log.match_id
+        row["rules_version"] = log.rules_version
+        row["log"] = log.encoded()
+    else:
+        row["match_id"] = ""
+        row["rules_version"] = 0
+        row["log"] = ""
+    return row
+
+
 def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[str],
             rev: str, aux_for: Callable[[str], float], *,
             recompute: bool = False, stale: bool = False) -> list[Job]:
@@ -330,7 +429,7 @@ def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[s
     * a different ``aux`` means the row answers a *different question* — it is
       some other version of that bot. That one refills on an ordinary run, with
       no flag: leaving it would put two incomparable knowers side by side on one
-      board. It only ever fires when ``REPLAY_AUX`` actually changes.
+      board. It only ever fires when ``replay_aux``'s answer actually changes.
     """
     jobs: list[Job] = []
     for row in games:
@@ -382,7 +481,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "reproducible. 1 restores the in-game behaviour")
     parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
                         help="override a bot's replay profile for this run, e.g. "
-                             "--aux knower=8 (default: REPLAY_AUX in this file)")
+                             "--aux knower=1 (default: the top of each bot's own slider)")
     parser.add_argument("--recompute", action="store_true",
                         help="redo pairs that already have a row")
     parser.add_argument("--stale", action="store_true",
@@ -419,7 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     widened = ai.set_budget_scale(args.budget_scale)
 
     rev = engine_rev()
-    aux_for = lambda bot: replay_aux(bot, overrides)  # noqa: E731
+    aux_for = lambda bot: replay_aux(bot, overrides)
     profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
     print(f"engine_rev {rev} · models {', '.join(loaded) or 'none'} · "
           f"roster {', '.join(roster)}")
@@ -457,32 +556,19 @@ def main(argv: list[str] | None = None) -> int:
         if time.monotonic() > deadline:
             print(f"Deadline reached after {index - 1} replays; the next run resumes.")
             break
+        # Always built, on the same "nobody knows in advance" grounds as
+        # play_settings's own docstring — cheap beside the replay itself, and
+        # `_row_for` is what decides whether a loss's is worth keeping.
+        log = replay.new_log(job.cfg, job.seed)
         result = sim.play_settings(job.cfg, job.seed, job.bot, aux=job.aux,
                                    max_turns=args.max_turns,
-                                   bot_timeout=args.bot_timeout)
+                                   bot_timeout=args.bot_timeout,
+                                   log=log)
         outcome = f"won in {result.turns}" if result.won else f"lost after {result.turns}"
         tuned = f"@{job.aux:g}" if job.aux != 1.0 else ""
         print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot + tuned:<14} "
               f"{outcome} turns, {result.lost} ships lost")
-        batch.append({
-            "game_key": job.game_key,
-            "bot": job.bot,
-            "won": result.won,
-            "turns": result.turns,
-            "lost": result.lost,
-            "bot_timeouts": result.bot_timeouts,
-            # The profile this answer belongs to. Recorded, not implied: a board
-            # showing knower at search depth 12 beside a menu default of 1 owes
-            # the reader that much, and `pending` reads it back to notice when
-            # the policy has moved.
-            "aux": job.aux,
-            "aux_label": aux_note(job.bot, job.aux),
-            "engine_rev": rev,
-            # Sent rather than left to the column default: on an upsert PostgREST
-            # only SETs the columns present in the payload, so an omitted
-            # computed_at would keep the *original* row's timestamp on a redo.
-            "computed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        batch.append(_row_for(job, result, log, rev))
         # Flush as we go so a run that is cut short still banks its work.
         if len(batch) >= 50:
             if not args.dry_run:

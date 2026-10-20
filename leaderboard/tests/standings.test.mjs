@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CURRENT_RULES_VERSION } from "../js/config.mjs";
 import {
-  bestBot, botOrder, compareScores, displayOrder, humanVsBots, rankAmong,
-  scoreComparator, standings, tally,
+  bestBot, botOrder, botWatchKind, compareScores, displayOrder, humanVsBots,
+  rankAmong, scoreComparator, standings, tally,
 } from "../js/standings.mjs";
 
 const at = (day) => `2026-09-${String(day).padStart(2, "0")}T12:00:00+00:00`;
@@ -226,4 +227,32 @@ test("nothing to compare gives no verdict rather than a wrong one", () => {
   assert.equal(humanVsBots(null, rows), null);            // no score posted yet
   assert.equal(humanVsBots({ turns: 20, lost: 1 }, []), null);  // no replays yet
   assert.equal(humanVsBots({ turns: 20, lost: 1 }, [bot("x", 90, 3, false)]), null);  // no bot won
+});
+
+// -- botWatchKind (which Watch link, if any, a bot_scores row can offer) ----
+
+test("a win with a current stored replay plays it back exactly", () => {
+  assert.equal(
+    botWatchKind({ won: true, match_id: "00112233445566ff", rules_version: CURRENT_RULES_VERSION }),
+    "current",
+  );
+});
+
+test("a win whose stored replay predates the current rules is disclosed, not played", () => {
+  assert.equal(
+    botWatchKind({ won: true, match_id: "00112233445566ff", rules_version: CURRENT_RULES_VERSION - 1 }),
+    "outdated",
+  );
+});
+
+test("a win with no stored replay falls back to the legacy reconstruct-it-live method", () => {
+  assert.equal(botWatchKind({ won: true, match_id: "", rules_version: 0 }), "legacy");
+});
+
+test("a loss offers nothing, whatever match_id/rules_version happen to be set", () => {
+  // bot_scores blanks these on a loss (tools/bot_replay.py's own rule), but
+  // botWatchKind checks `won` first regardless, so a stray non-blank value on
+  // an old row can never accidentally offer a Watch link for a failed replay.
+  assert.equal(botWatchKind({ won: false, match_id: "", rules_version: 0 }), "none");
+  assert.equal(botWatchKind({ won: false, match_id: "00112233445566ff", rules_version: CURRENT_RULES_VERSION }), "none");
 });

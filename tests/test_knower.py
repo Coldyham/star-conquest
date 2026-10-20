@@ -13,11 +13,12 @@ Internals are reached through `sys.modules["sc_model_knower"]`, the synthetic na
 from __future__ import annotations
 
 import copy
+import dataclasses
 import sys
 
 import pytest
 
-from starconquest import ai, engine, mapgen
+from starconquest import ai, config, engine, mapgen
 from starconquest.model import GameState, Order, Player, System
 from tests import sim
 
@@ -115,9 +116,8 @@ def test_knower_does_not_mutate_state(kn):
     assert state.turn == original.turn and state.winner == original.winner
 
 
-def test_prediction_of_a_later_seat_is_exact(kn):
-    """A seat that decides after us is predicted order-for-order, every turn."""
-    state = _state()
+def _predictions_hold(kn, state, knower, rivals, turns=30):
+    """How many of ``rivals``' real decisions knower predicted order-for-order."""
     real: dict[int, list[Order]] = {}
 
     def spy(st, pid):
@@ -126,40 +126,45 @@ def test_prediction_of_a_later_seat_is_exact(kn):
         return orders
 
     checked = 0
-    for _ in range(30):
+    for _ in range(turns):
         if state.winner is not None:
             break
         real.clear()
-        ai.decide(state, 2)                      # builds the oracle
-        predicted = kn.LAST_ORACLE.orders.get(3)
+        ai.decide(state, knower)                 # builds the oracle
+        predicted = dict(kn.LAST_ORACLE.orders)
         engine.end_turn(state, decide=spy)
-        if 3 in real and state.players[3].alive:
-            assert predicted == real[3], f"seat 3 mispredicted on turn {state.turn}"
-            checked += 1
-    assert checked > 10, "the test never actually exercised a prediction"
+        for q in rivals:
+            if q in real and state.players[q].alive:
+                assert predicted.get(q) == real[q], f"seat {q} mispredicted on turn {state.turn}"
+                checked += 1
+    return checked
 
 
-def test_earlier_seat_prediction_is_close_but_not_guaranteed(kn):
-    """A seat that already drew is predicted from an unrecoverable rng position.
+def test_prediction_of_a_later_seat_is_exact(kn):
+    """A seat that decides after us is predicted order-for-order, every turn."""
+    assert _predictions_hold(kn, _state(), 2, [3]) > 10, \
+        "the test never actually exercised a prediction"
 
-    Its orders are still right except where it hit a genuine tie, so this asserts
-    the useful property — the prediction exists and is usually right — rather than
-    exactness we cannot honestly claim.
-    """
-    state = _state(knower_seat=3)                 # seat 1 and 2 decide before us
+
+def test_prediction_of_an_earlier_seat_is_exact(kn):
+    """Every seat decides from the same start of the rng (`engine.decide_seat`), so
+    a seat that decides before us is predicted as exactly as one after."""
+    state = _state(knower_seat=3)                 # seats 1 and 2 decide before us
+    assert _predictions_hold(kn, state, 3, [1, 2]) > 20, \
+        "the test never actually exercised a prediction"
     ai.decide(state, 3)
-    assert kn.LAST_ORACLE.seats[2] == "likely"
-    assert 2 in kn.LAST_ORACLE.trusted
+    assert kn.LAST_ORACLE.seats[2] == "exact" and 2 in kn.LAST_ORACLE.trusted
 
 
-def test_predicting_a_human_seat_does_not_break_the_chain(kn):
-    """The engine skips human seats, so predicting one must not advance the stream."""
+def test_a_human_seat_is_modelled_and_the_bots_around_it_stay_exact(kn):
+    """The engine never asks a person's seat to decide, so it is modelled from a
+    private rng and never trusted; the bot seats are still predicted exactly."""
     state = _state(knower_seat=2, players=4)
     state.players[3].is_human = True
     ai.decide(state, 2)
     orc = kn.LAST_ORACLE
     assert orc.seats[3] == "modelled" and 3 not in orc.trusted
-    assert orc.seats[4] == "exact" and 4 in orc.trusted   # chain survived seat 3
+    assert orc.seats[4] == "exact" and 4 in orc.trusted
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +199,98 @@ def test_sibling_oracle_is_proxied_not_recursed(kn):
         assert 3 not in kn.LAST_ORACLE.trusted
     finally:
         del sys.modules["sc_model_fake_oracle"]
+
+
+def _fake_oracle(calls, stand_in=None):
+    """Register a fake oracle module's bot as ``fake_oracle``; it records the aux
+    it was called at. ``stand_in`` becomes the module's ``stand_in_params``."""
+    def other(state, pid):
+        calls.append(state.players[pid].ai_params.aux)
+        return []
+
+    other.__module__ = "sc_model_fake_oracle"
+    fake = type(sys)("sc_model_fake_oracle")
+    fake.is_oracle_seat = lambda player: player.ai_params.aux >= 1
+    if stand_in is not None:
+        fake.stand_in_params = stand_in
+    sys.modules["sc_model_fake_oracle"] = fake
+    ai.register("fake_oracle", other)
+
+
+def test_an_oracle_with_a_stand_in_is_run_at_it(kn):
+    """An oracle seat whose module names a version of itself that doesn't predict
+    is run at those params, on our copy, and believed under `TRUST_STAND_INS`."""
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == [0.0]
+        assert state.players[3].ai_params.aux == 2.0, "the real seat's params moved"
+        assert kn.LAST_ORACLE.seats[3] == "stand-in"
+        assert (3 in kn.LAST_ORACLE.trusted) == kn.TRUST_STAND_INS
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+@pytest.mark.parametrize("hook", [
+    lambda player: player.ai_params,                    # still predicts: would recurse
+    lambda player: None,
+    lambda player: 1 / 0,
+])
+def test_a_stand_in_that_cannot_be_used_falls_back_to_blind(kn, hook):
+    calls = []
+    _fake_oracle(calls, hook)
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == []
+        assert 3 not in kn.LAST_ORACLE.trusted
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_a_learning_actuary_is_predicted_as_field():
+    """actuary at Learning claims the oracle flag; knower runs it at Field."""
+    assert "actuary" in ai.load_models()
+    kn = sys.modules["sc_model_knower"]          # load_models re-imported it
+    state = _state(knower_seat=2)
+    state.players[3].ai_strategy = "actuary"
+    state.players[3].ai_params.aux = 2.0
+    for _ in range(12):
+        field = copy.deepcopy(state)
+        field.players[3].ai_params.aux = 1.0
+        expected = ai.STRATEGIES["actuary"](field, 3)
+        ai.decide(state, 2)
+        assert kn.LAST_ORACLE.seats[3] == "stand-in" and 3 in kn.LAST_ORACLE.trusted
+        assert kn.LAST_ORACLE.orders[3] == expected
+        engine.end_turn(state, decide=ai.decide)
+
+
+def test_a_search_rolls_an_oracle_out_at_its_stand_in(kn):
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        kn._rollout_decide(state, 3)
+        assert calls == [0.0] and state.players[3].ai_params.aux == 2.0
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_knower_names_depth_zero_as_its_stand_in(kn):
+    player = Player(1, "P1", (0, 0, 0))
+    player.ai_params.aux = 2.0
+    stand_in = kn.stand_in_params(player)
+    assert stand_in.aux == 0.0 and player.ai_params.aux == 2.0
+    player.ai_params = stand_in
+    assert kn.is_oracle_seat(player) is False
 
 
 def test_raising_opponent_does_not_crash(kn):
@@ -356,7 +453,7 @@ def test_knower_works_as_the_autoplayed_human_seat(kn):
     """`main.resolve_turn` drives the human seat via `ai.decide` before `end_turn`.
 
     That is the one path where knower runs for a seat the engine will *skip*
-    (main.py:298-304), and it runs before every AI seat rather than in pid order.
+    (starconquest/main.py:298-304), and it runs before every AI seat rather than in pid order.
     Since knower draws nothing from `state.rng`, the later seats are still exactly
     where it predicted them.
     """
@@ -383,14 +480,16 @@ def test_knower_beats_thinker_head_to_head(kn):
 
 
 # --------------------------------------------------------------------------- #
-# Depth: the `aux` knob, and the rollout search above depth 1
+# The Oracle knob (`aux`): Off, Predict, and the rollout search on Search
 # --------------------------------------------------------------------------- #
-def test_aux_slider_is_declared_as_search_depth(kn):
-    """The AI tab labels the generic aux knob from these, and offers our range."""
+def test_aux_slider_is_declared_as_four_named_stops(kn):
+    """The AI tab labels the generic aux knob from these, offers our range, and
+    shows each stop's name in place of its number."""
     assert kn.AUX_LABEL and kn.AUX_INT
-    assert ai.aux_spec("knower") == (
-        kn.AUX_LABEL, 0.0, float(kn.SEARCH_DEPTH_MAX), 1.0, True
-    )
+    assert ai.aux_spec("knower") == (kn.AUX_LABEL, 0.0, float(kn.COUNCIL), 1.0, True)
+    assert ai.aux_names("knower") == ("Off", "Predict", "Search", "Council")
+    assert ai.aux_stop_name("knower", 1.0) == "Predict"
+    assert ai.aux_stop_name("knower", 12) == "Search", "an old depth reads as Search"
 
 
 def test_seat_depth_is_tolerant(kn):
@@ -400,7 +499,9 @@ def test_seat_depth_is_tolerant(kn):
 
     p = _P()
     p.ai_params = _P()
-    for raw, want in ((0.0, 0), (1.0, 1), (3.0, 3),
+    # Anything past Predict is Search: that is what every depth above 1 meant when
+    # this was a 0-12 slider, so an old link keeps playing the search it asked for.
+    for raw, want in ((0.0, 0), (1.0, 1), (2.0, 2), (3.0, 2), (12, 2),
                       (999.0, kn.SEARCH_DEPTH_MAX), (-5.0, 0)):
         p.ai_params.aux = raw
         assert kn._seat_depth(p) == want, raw
@@ -428,7 +529,7 @@ def test_depth_one_matches_the_plain_oracle(kn):
     assert plain == _totals(kn._plan(state, 2, kn.LAST_ORACLE))
 
 
-@pytest.mark.parametrize("depth", [2, 3, 5, 8, 12])
+@pytest.mark.parametrize("depth", [2, 12])     # Search, and a legacy depth clamped to it
 def test_search_is_deterministic_and_pure(kn, depth):
     """Common random numbers, state-derived rngs: same board in, same plan out.
 
@@ -544,7 +645,7 @@ def test_search_works_for_the_autoplayed_human_seat(kn):
 
 
 # --------------------------------------------------------------------------- #
-# The beam: borrowed openings, and keeping every opening alive
+# The search: borrowed openings, and keeping every opening alive
 # --------------------------------------------------------------------------- #
 def test_external_candidates_are_offered_as_openings(kn):
     """The search must actually reach the other bots, not silently skip them.
@@ -560,9 +661,9 @@ def test_external_candidates_are_offered_as_openings(kn):
 
     assert n > min(kn.SEARCH_WIDTH, len(kn.POSTURE_VARIANTS)), \
         "no borrowed opening survived — is the registry being read at import time?"
-    assert kn._external_plan(state, 2, "rusherplus", 11) is not None
-    assert kn._external_plan(state, 2, "no_such_bot", 11) is None, "unregistered must skip"
-    assert kn._external_plan(state, 2, "knower", 11) is None, "we are not our own candidate"
+    assert kn._external_plan(state, 2, ("rusherplus", None), 11) is not None
+    assert kn._external_plan(state, 2, ("no_such_bot", None), 11) is None, "unregistered must skip"
+    assert kn._external_plan(state, 2, ("knower", None), 11) is None, "we are not our own candidate"
 
 
 def test_an_external_candidate_never_touches_the_real_board(kn):
@@ -582,40 +683,68 @@ def test_an_external_candidate_never_touches_the_real_board(kn):
     assert state.rng.getstate() == rng_state, "a candidate drew from the real rng"
 
 
+def test_an_external_candidate_reads_its_own_default_aux(kn):
+    """`aux` means something different to every bot, so a borrowed candidate must
+    not read ours: under Search it would take our Oracle stop (2) as its own knob."""
+    seen = []
+
+    def spy(state, pid):
+        seen.append(state.players[pid].ai_params.aux)
+        return []
+
+    ai.register("aux_spy_test", spy)
+    try:
+        state = _state()
+        state.players[2].ai_params.aux = 2
+        kn._external_plan(state, 2, ("aux_spy_test", None), 11)
+        assert seen == [config.AI_AUX], "a borrowed candidate read our Oracle stop"
+        kn._external_plan(state, 2, ("aux_spy_test", 0.0), 11)
+        assert seen[-1] == 0.0, "a pair that names a stop borrows that stop"
+        assert state.players[2].ai_params.aux == 2, "the real seat's aux was touched"
+    finally:
+        ai.STRATEGIES.pop("aux_spy_test", None)
+
+
 def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
     """A drop-in bot may be anything at all; it must not take the search down."""
     def boom(state, pid):
         raise RuntimeError("candidate exploded")
 
     ai.register("exploding_bot_test", boom)
-    kn.EXTERNAL_CANDIDATES, saved = ("exploding_bot_test",), kn.EXTERNAL_CANDIDATES
+    kn.EXTERNAL_CANDIDATES, saved = (("exploding_bot_test", None),), kn.EXTERNAL_CANDIDATES
     try:
         state = _state()
-        state.players[2].ai_params.aux = 3.0
-        assert kn._external_plan(state, 2, "exploding_bot_test", 11) is None
+        state.players[2].ai_params.aux = 2.0
+        assert kn._external_plan(state, 2, ("exploding_bot_test", None), 11) is None
         assert all(o.owner_id == 2 for o in ai.decide(state, 2))   # search still ran
     finally:
         kn.EXTERNAL_CANDIDATES = saved
 
 
-def test_pruning_keeps_every_opening_alive_to_the_bottom(kn):
-    """The invariant the whole search rests on.
+def test_every_opening_is_carried_to_the_bottom_in_candidate_order(kn, monkeypatch):
+    """The invariant the whole search rests on: one line per opening, all the way down.
 
-    A pooled beam fills with continuations of whichever opening is ahead on material
-    right now, so the rival openings — the only thing being compared — die after one
-    ply. Grouping the cut by `origin` is what prevents that; measured on the pooled
-    version, 94% of survivors descended from the default alone.
+    The search compares openings, so every candidate has to reach the last ply, and
+    in candidate order — the tuned default first, so an exact tie keeps it.
     """
-    lines = [kn._Line(root=[], origin=o, board=None, score=score)
-             for o, score in enumerate((100.0, -50.0, -60.0, -70.0, -80.0, -90.0))]
-    # ...and a swarm of continuations of the *winning* opening, which under a pooled
-    # cut would take every slot.
-    lines += [kn._Line(root=[], origin=0, board=None, score=99.0 - i) for i in range(20)]
+    state = _state()
+    orc = kn._build_oracle(state, 2)
+    base = kn._plan(state, 2, orc)
+    openings = list(kn._candidates(state, 2, orc, base))
+    seen = []
+    real_advance = kn._advance
 
-    kept = kn._prune(lines)
-    assert {line.origin for line in kept} == {0, 1, 2, 3, 4, 5}, "an opening was cut"
-    assert all(sum(1 for k in kept if k.origin == o) <= kn.SEARCH_BEAM for o in range(6))
-    assert kept[0].origin == 0, "the tuned default must stay first, so ties favour it"
+    def advance(lines, pid, humans):
+        out = real_advance(lines, pid, humans)
+        seen.append([line.root for line in out])
+        return out
+
+    monkeypatch.setattr(kn, "_advance", advance)
+    kn._search(state, 2, orc, 4, float("inf"))
+    assert len(seen) == 3, "a ply was skipped"
+    for roots in seen:
+        assert len(roots) == len(openings), "an opening was dropped"
+        assert roots[0] == base, "the tuned default must stay first, so ties favour it"
 
 
 def test_a_decided_line_is_carried_not_stepped(kn):
@@ -623,7 +752,294 @@ def test_a_decided_line_is_carried_not_stepped(kn):
     state = _state()
     board = kn._clone(state, kn._priv(state, 2, 1))
     board.winner = 1
-    line = kn._Line(root=[], origin=0, board=board, score=-kn.EVAL_DECIDED)
+    line = kn._Line(root=[], board=board, score=-kn.EVAL_DECIDED)
 
-    out = kn._expand([line], 2, frozenset())
-    assert out == [line], "a decided line was expanded"
+    out = kn._advance([line], 2, frozenset())
+    assert out == [line], "a decided line was stepped"
+
+
+# --------------------------------------------------------------------------- #
+# What a setup costs (`ply_ms`, `_search_run`, `setup_warning`)
+# --------------------------------------------------------------------------- #
+def test_the_horizon_is_the_longest_lane_plus_the_cushion(kn):
+    state = _state()
+    longest = max(state.travel_turns(a, b) for a, nbrs in state.adjacency.items() for b in nbrs)
+    assert kn._horizon(state) == longest + kn.LANE_CUSHION
+
+
+def test_the_horizon_follows_the_ships_as_they_speed_up(kn, monkeypatch):
+    """`SHIP_SPEED_GROWTH_PCT` shortens every lane as the game goes on, so the
+    horizon is read per decide rather than fixed at the start."""
+    from starconquest import config
+    monkeypatch.setattr(config, "SHIP_SPEED_GROWTH_PCT", 10.0)
+    state = _state()
+    early = kn._horizon(state)
+    state.turn += 40
+    assert kn._horizon(state) < early
+
+
+def test_the_cost_model_stops_where_the_real_guard_does(kn, monkeypatch):
+    # A clock that moves only when a rollout runs — a root rollout costing its share
+    # of `COST_ROOT_PLIES`, every later one its share of a ply — so `_search`'s own
+    # guard can be compared with `_search_run` without timing anything.
+    from types import SimpleNamespace
+    state = _state(nodes=24, players=3)
+    pid = 2
+    state.players[pid].ai_params.aux = 2
+    horizon = kn._horizon(state)
+    base = kn._plan(state, pid, None)
+    cands = len(list(kn._candidates(state, pid, None, base)))
+    assert cands == kn.SEARCH_WIDTH + len(kn.EXTERNAL_CANDIDATES)
+    real_rollout, real_advance = kn._rollout, kn._advance
+    for ply in (7.0, 40.0, 70.0, 130.0, 149.0, 400.0):
+        clock, calls, plies = [0.0], [0], [0]
+
+        def rollout(*a, _ply=ply, _clock=clock, _calls=calls):
+            share = kn.COST_ROOT_PLIES if _calls[0] < cands else 1.0
+            _calls[0] += 1
+            _clock[0] += _ply * share / cands / 1000
+            return real_rollout(*a)
+
+        def advance(*a, _n=plies):
+            _n[0] += 1
+            return real_advance(*a)
+
+        monkeypatch.setattr(kn, "_rollout", rollout)
+        monkeypatch.setattr(kn, "_advance", advance)
+        monkeypatch.setattr(kn, "time", SimpleNamespace(perf_counter=lambda _c=clock: _c[0]))
+        kn.decide(state, pid)
+        assert 1 + plies[0] == kn._search_run(ply, horizon)[0], ply
+
+
+def test_the_ply_that_crosses_the_budget_still_runs(kn):
+    assert kn._search_run(1.0, 12)[0] == 12
+    assert kn._search_run(100.0, 12)[0] == 2    # the root fits, so one ply more runs
+    assert kn._search_run(1e6, 12)[0] == 1      # the root alone overruns: nothing more
+    assert kn._search_run(1e6, 1) == (1, 1e6 * kn.COST_ROOT_PLIES)
+    assert kn._search_run(5.0, 0) == (0, 0.0)
+
+
+def test_a_ply_costs_more_on_bigger_maps_with_more_seats_and_slower_ships(kn):
+    base = kn.ply_ms(40, 3, 6.0)
+    assert kn.ply_ms(120, 3, 6.0) > base
+    assert kn.ply_ms(40, 6, 6.0) > base
+    assert kn.ply_ms(40, 3, 1.0) > base > kn.ply_ms(40, 3, 18.0)
+
+
+def _knower_setup(depth, **kw):
+    from starconquest.model import AiParams
+    from starconquest.settings import Settings
+    s = Settings(**kw)
+    s.ai_strategy = ["knower"] * len(s.ai_strategy)
+    s.ai = [AiParams(aux=depth) for _ in s.ai]
+    return s
+
+
+def test_knower_never_warns_without_a_search(kn):
+    # Off and Predict run no search, whatever the map.
+    for depth in (0, 1):
+        s = _knower_setup(depth, nodes=120, players=6, ship_ly_per_turn=1.0)
+        assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
+
+
+def test_the_default_map_never_warns_even_at_the_top_of_the_slider(kn):
+    s = _knower_setup(kn.SEARCH_DEPTH_MAX)
+    assert kn.setup_warning(s, list(range(2, s.players + 1))) == []
+
+
+def test_the_largest_map_warns_and_says_how_far_it_will_really_look(kn):
+    s = _knower_setup(2, nodes=120, players=6, ship_ly_per_turn=1.0)
+    lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
+    longest = kn._longest_lane(s)
+    plies = min(kn.HORIZON_MAX, longest + kn.LANE_CUSHION)
+    reach = kn._search_run(kn.ply_ms(120, 6, s.ship_ly_per_turn), plies)[0]
+    assert reach < longest
+    assert any(f"about {reach} turns ahead, short of its {longest}-turn lanes" in line
+               for line in lines)
+    assert any("5 Knower seats on Search" in line for line in lines)
+    assert lines[0].startswith("Knower searching ") and " would need ~" in lines[0]
+    assert lines[-1] == ('Set Knower\'s Oracle to "Predict", reduce System count '
+                         "or increase ship speed to avoid this")
+
+
+def test_a_search_that_covers_its_lanes_does_not_warn(kn, monkeypatch):
+    """Losing some of the cushion is not worth interrupting Start for; only a search
+    cut short of its own lanes, or a slow turn, is."""
+    s = _knower_setup(2, nodes=40, players=2, ship_ly_per_turn=6.0)
+    assert kn.setup_warning(s, [2]) == []
+    monkeypatch.setattr(kn, "_longest_lane", lambda settings: 40)   # lanes no search could reach
+    assert kn.setup_warning(s, [2])
+
+
+def test_with_speed_growth_the_warning_says_when_the_clipping_ends(kn):
+    """Every figure a warning quotes is turn one's, the slowest the game gets; with
+    growth on it says so, and names the turn the search first sees past its lanes."""
+    import math
+    from starconquest import config
+    s = _knower_setup(2, nodes=24, players=2, ship_ly_per_turn=1.0)
+    assert not any("ships speed up" in line.lower() for line in kn.setup_warning(s, [2]))
+
+    s.ship_speed_growth_pct = 2.0
+    clear = kn._sees_lanes_from(s, 24)
+    assert clear is not None and clear > 0
+    assert any(f"from about turn {clear} it looks past its lanes" in line
+               for line in kn.setup_warning(s, [2]))
+
+    # ...and that turn is the first one the guarded search really does reach them.
+    from starconquest.settings import lane_lengths
+    longest_ly = max(lane_lengths(s))
+
+    def reaches(turn):
+        speed = min(config.SHIP_SPEED_MAX, 1.0 * 1.02 ** turn)
+        longest = math.ceil(longest_ly / speed)
+        plies = min(kn.HORIZON_MAX, longest + kn.LANE_CUSHION)
+        return kn._search_run(kn.ply_ms(24, 2, speed), plies)[0] >= longest
+
+    assert reaches(clear) and not reaches(clear - 1)
+
+
+def test_the_menu_hears_knowers_warning(kn):
+    from starconquest.settings import setup_warnings
+    s = _knower_setup(2, nodes=120, players=6, ship_ly_per_turn=1.0)
+    assert setup_warnings(s)
+    assert setup_warnings(s) == kn.setup_warning(s, [2, 3, 4, 5, 6])
+    s.ai_strategy[1:6] = ["thinker"] * 5
+    assert setup_warnings(s) == []
+
+
+def _rival_setup(rival, nodes=40, players=4):
+    """A person in seat 1, one knower on Search in seat 2, ``rival`` elsewhere."""
+    from starconquest.model import AiParams
+    from starconquest.settings import Settings
+    s = Settings(nodes=nodes, players=players, ship_ly_per_turn=6.0)
+    s.ai_strategy = ["heuristic", "knower"] + [rival] * (len(s.ai_strategy) - 2)
+    s.ai = [AiParams(aux=2.0 if i == 1 else 1.0) for i in range(len(s.ai))]
+    return s
+
+
+def test_a_rival_bot_that_thinks_is_paid_for_on_every_line(kn):
+    """`ply_ms` was fitted against bots that answer in microseconds. A rival that
+    declares a cost (`ai.decide_ms`) is run on every rolled turn of every line,
+    so the same setup that is fine against marshal is cut short against it."""
+    assert "actuary" in ai.load_models()
+    quick = _rival_setup("marshal")
+    assert kn.setup_warning(quick, [2], people=[1]) == []
+    slow = _rival_setup("actuary")
+    lines = kn.setup_warning(slow, [2], people=[1])
+    rival_ms = 2 * ai.decide_ms("actuary", slow, 3)
+    assert any(f"It replays 2 Actuary seats on every turn it looks ahead, adding "
+               f"~{kn._secs(kn._lines() * rival_ms)} to each" in line for line in lines)
+    assert any("short of its" in line for line in lines)
+    assert lines[-1] == "A faster bot in place of Actuary (AI tab) also helps"
+
+
+def test_only_the_bots_a_search_will_run_are_counted(kn):
+    assert "actuary" in ai.load_models()
+    s = _rival_setup("marshal")
+    s.ai_strategy[0] = "actuary"                       # seat 1, but a person holds it
+    assert kn._rivals(s, {2}, {1}) == {}
+    assert set(kn._rivals(s, {2}, set())) == {"actuary"}   # ...unless nobody does
+    s.ai_strategy[2] = "knower"                        # another knower: proxied, cheap
+    s.ai_strategy[3] = "thinker"                       # declares no cost
+    assert kn._rivals(s, {2}, {1}) == {}
+
+
+def test_a_random_rival_is_counted_once_its_seed_is_fixed(kn):
+    from starconquest.settings import RANDOM_STRATEGY, resolve_strategy
+    assert "actuary" in ai.load_models()
+    s = _rival_setup("marshal", players=3)
+    s.ai_strategy[2] = RANDOM_STRATEGY
+    assert kn._rivals(s, {2}, {1}) == {}
+    seed = next(n for n in range(500) if resolve_strategy(RANDOM_STRATEGY, n, 3) == "actuary")
+    s.seed = seed
+    assert set(kn._rivals(s, {2}, {1})) == {"actuary"}
+
+
+def test_the_menu_counts_rival_bots_for_knower(kn):
+    from starconquest.settings import setup_warnings
+    assert "actuary" in ai.load_models()
+    assert setup_warnings(_rival_setup("marshal")) == []
+    assert setup_warnings(_rival_setup("actuary"))
+
+
+def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(kn, "_longest_lane", lambda settings: 4)
+    s = _knower_setup(2, nodes=18, players=6, ship_ly_per_turn=1.0)
+    assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
+    s.custom_map = SimpleNamespace(nodes=[None] * 120)
+    lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
+    assert "on 120 systems" in lines[0]
+    assert "use a smaller map" in lines[-1]
+
+
+# --------------------------------------------------------------------------- #
+# A doomed garrison leaves whole (`_flee`)
+# --------------------------------------------------------------------------- #
+def _doomed(kn, left, wave, human=False):
+    """Our system 1 (seat 2) under a ``wave`` from system 2 (seat 3) that lands
+    this turn, with ``left`` of its 16 ships still there after the opening; 3 is
+    a friend behind it. The oracle is built as Search builds it."""
+    ai.register("strike_test", lambda state, pid: [Order(3, 2, 1, wave)])
+    state = _board({1: (2, 16, 3), 2: (3, wave, 3), 3: (2, 4, 3)},
+                   [(1, 2, 1), (1, 3, 2)])
+    state.players[3].ai_strategy = "strike_test"
+    state.players[3].is_human = human
+    state.players[2].ai_params.aux = 2.0
+    root = [Order(2, 1, 3, 16 - left)] if left < 16 else []
+    return state, kn._build_oracle(state, 2), root
+
+
+def test_a_doomed_garrison_leaves_with_the_fleet_already_leaving(kn):
+    """3 left behind against 20 kill nobody (round(sqrt(400 - 9)) = 20): they go
+    with the 13 the opening already sends."""
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 3, 16)]
+
+
+def test_a_doomed_garrison_with_no_fleet_leaving_goes_as_evacuate_sends_it(kn):
+    """Nothing leaves 1 in the opening, so `_evacuate` picks the way out: here
+    the attacker's home, which the strike has just emptied."""
+    state, orc, root = _doomed(kn, left=16, wave=40)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 2, 16)]
+
+
+def test_a_garrison_that_could_hold_or_sells_itself_dearly_stays(kn):
+    # 10 against 12: the best roll holds it (10.8 against 11).
+    state, orc, root = _doomed(kn, left=10, wave=12)
+    assert kn._flee(state, orc, 2, root) == root
+    # 10 against 13: lost whatever the dice, but it takes 5 down with it.
+    state, orc, root = _doomed(kn, left=10, wave=13)
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_persons_predicted_strike_never_empties_a_system(kn):
+    state, orc, root = _doomed(kn, left=3, wave=20, human=True)
+    assert 3 not in orc.trusted
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_doomed_system_is_not_reinforced_into_the_same_fight(kn):
+    """A launch of ours that lands on 1 this turn would only die with it."""
+    state, _, _ = _doomed(kn, left=3, wave=20)
+    state.systems[4] = System(id=4, pos=(40.0, 0.0), owner_id=2, ships=2, production=3)
+    state.add_lane(1, 4, 6.0, 1)
+    state.rebuild_topology()
+    orc = kn._build_oracle(state, 2)
+    out = kn._flee(state, orc, 2, [Order(2, 1, 3, 13), Order(2, 4, 1, 2)])
+    assert out == [Order(2, 1, 3, 16)]
+
+
+def test_flee_runs_on_search_alone(kn, monkeypatch):
+    calls = []
+    real = kn._flee
+    monkeypatch.setattr(kn, "_flee", lambda *a: calls.append(a) or real(*a))
+    for aux, runs in ((0.0, False), (1.0, False), (2.0, True), (3.0, False)):
+        calls.clear()
+        state, _, _ = _doomed(kn, left=3, wave=20)
+        state.players[2].ai_params.aux = aux
+        ai.decide(state, 2)
+        assert bool(calls) == runs, aux
+    monkeypatch.setattr(kn, "FLEE_BELOW", 0.0)
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert real(state, orc, 2, root) == root

@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from contextlib import contextmanager
 
+import pytest
+
 from starconquest import config, engine
 from starconquest.model import Fleet, GameState, Order, Player, System
 
@@ -55,6 +57,31 @@ def test_production_cadence():
     for _ in range(3):
         engine.end_turn(s)
     assert s.systems[0].ships == 2        # after 6 turns
+
+
+def test_a_hull_finished_this_turn_defends_its_own_system():
+    """Production resolves before arrivals, so a ship completing on the turn its
+    system is attacked is in the garrison for the fight. Sized against the garrison
+    the attacker can see rather than the one it meets: 4 v 3 takes the system, 4 v 4
+    annihilates to neutral."""
+    with no_jitter():
+        s = make_state([(0, 1, 4, 100), (1, 2, 3, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1        # one turn from its next ship
+        engine.apply_order(s, Order(1, 0, 1, 4))
+        engine.end_turn(s)
+        assert (s.systems[1].owner_id, s.systems[1].ships) == (0, 0)
+
+
+def test_a_system_that_falls_this_turn_accrues_from_the_next_one():
+    """The flip side of the phase order: capture resets the progress bar, and the
+    turn's accrual has already happened, so a captor starts from zero."""
+    with no_jitter():
+        s = make_state([(0, 1, 10, 100), (1, 2, 1, 2)], [(0, 1, 1)])
+        s.systems[1].prod_progress = 1
+        engine.apply_order(s, Order(1, 0, 1, 10))
+        engine.end_turn(s)
+        assert s.systems[1].owner_id == 1     # the extra hull wasn't enough
+        assert s.systems[1].prod_progress == 0
 
 
 def test_fleet_arrives_after_exactly_travel_turns():
@@ -375,20 +402,21 @@ def test_a_scripted_turn_replays_without_asking_any_seat():
 
 
 def test_a_scripted_turn_refights_the_battle_on_the_recorded_dice():
-    """Combat's swing is drawn from `state.rng`, which a replay leaves in a place
-    it never was live (nobody decided anything on the way there). So the recorded
-    draws are dealt back in its place, and they — not this run's rng — settle the
-    fight: the same 10-vs-10 attack goes either way on the dice it is given."""
+    """A turn from before dice were keyed per fight rolled them off `state.rng`,
+    which a replay leaves somewhere it never was live. So the recorded draws are
+    dealt back instead, and they — not anything rolled now — settle the fight: the
+    same 10-vs-10 attack goes either way on the dice it is given."""
     def fight(dice):
         s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
         s.rng = random.Random(7)      # would roll its own swing, if it were asked
         engine.end_turn(s, script=engine.TurnRecord([Order(1, 0, 1, 10)], dice))
         return s.systems[1].owner_id
 
-    # The draws are dealt in the order the fight asks for them: the side holding
-    # the node first (it is folded in as the incumbent), then the attacker.
-    assert fight([+0.9, -0.9]) == 2, "the dice favoured the defender; it should hold"
-    assert fight([-0.9, +0.9]) == 1, "and favouring the attacker should flip it"
+    # The draws are dealt in the order the fight asks for them: the attacker
+    # first, then the defender — the defender is folded in last, regardless of
+    # relative strength, since it holds the ground rather than queuing by size.
+    assert fight([+0.9, -0.9]) == 1, "the dice favoured the attacker; it should take the system"
+    assert fight([-0.9, +0.9]) == 2, "and favouring the defender should hold it"
 
 
 def test_end_turn_records_the_draws_a_live_fight_made():
@@ -398,5 +426,345 @@ def test_end_turn_records_the_draws_a_live_fight_made():
     assert len(record.dice) == 2      # one swing per side of the one fight
 
 
+def test_every_bot_seat_decides_from_the_same_start_of_the_rng():
+    """No seat's place in the order reaches what it draws, and the rng is left
+    where the turn started."""
+    s = make_state([(0, 1, 5, 100), (1, 2, 5, 100), (2, 3, 5, 100)], [(0, 1, 2), (1, 2, 2)])
+    start = s.rng.getstate()
+    seen: dict[int, list[float]] = {}
+
+    def probe(state, pid):
+        seen[pid] = [state.rng.random() for _ in range(pid)]  # each seat draws a different amount
+        return []
+
+    engine.end_turn(s, decide=probe)
+    assert seen[1] == seen[2][:1] == seen[3][:1]
+    assert seen[2] == seen[3][:2]
+    s.rng.setstate(start)
+    assert s.rng.random() == seen[1][0]
+
+
+def _contested(burn: int):
+    """A turn where seat 1 draws ``burn`` values and seat 2 sizes an attack off
+    the rng: what seat 2 ordered, and the dice the fight rolled."""
+    s = make_state([(0, 1, 10, 100), (1, 2, 30, 100)], [(0, 1, 1)])
+    s.rng = random.Random(11)
+
+    def decide(state, pid):
+        if pid == 1:
+            for _ in range(burn):
+                state.rng.random()
+            return []
+        return [Order(2, 1, 0, 15 + int(state.rng.random() * 10))]
+
+    record = engine.end_turn(s, decide=decide)
+    return [o for o in record.orders if o.owner_id == 2], record.dice
+
+
+def test_a_seat_that_draws_more_moves_nobody_else():
+    orders, dice = _contested(0)
+    assert dice, "the attack must have been fought"
+    for burn in (1, 7):
+        assert _contested(burn) == (orders, dice)
+
+
+def _front_and_back(back_line: list[Order]):
+    """Seat 1 attacks system 1, after ``back_line``: (the fight's dice, its result)."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 12, 100), (2, 1, 10, 100), (3, 0, 4, 100),
+                    (4, 1, 6, 100)], [(0, 1, 1), (2, 3, 1), (4, 0, 1)], human=1)
+    s.seed = 5
+    record = engine.end_turn(s, human_orders=[*back_line, Order(1, 0, 1, 20)])
+    return record.dice[-2:], (s.systems[1].owner_id, s.systems[1].ships)
+
+
+def test_a_fight_rolls_the_same_dice_whatever_happens_elsewhere():
+    """Its dice are keyed to where it is, so neither a fight walked before it nor a
+    back-line move can re-roll it."""
+    alone = _front_and_back([])
+    assert _front_and_back([Order(1, 2, 3, 10)]) == alone        # a fight walked first
+    assert _front_and_back([Order(1, 4, 0, 6)]) == alone         # a reinforcement behind it
+
+
+def test_a_copy_of_the_board_rolls_the_real_dice():
+    """The dice come from the board, never its rng: a predicting bot playing
+    `end_turn` on a copy with an rng of its own meets the fight that will happen."""
+    import copy
+
+    def fought(board):
+        return engine.end_turn(board, human_orders=[Order(1, 0, 1, 10)]).dice
+
+    s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+    s.seed = 9
+    clone = copy.deepcopy(s)
+    clone.rng = random.Random(1234)
+    assert fought(clone) == fought(s)
+
+
+def test_a_board_rolls_its_own_family_of_dice():
+    def fought(salt):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+        s.dice_salt = salt
+        return engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)]).dice
+
+    assert fought("dice") == fought("dice")
+    assert fought("dice") != fought("pbp-dice")
+
+
+def test_a_turn_says_whether_its_dice_were_keyed():
+    def play(script=None):
+        s = make_state([(0, 1, 10, 100), (1, 2, 10, 100)], [(0, 1, 1)], human=1)
+        return engine.end_turn(s, human_orders=[Order(1, 0, 1, 10)], script=script)
+
+    assert play().keyed
+    assert not play(engine.TurnRecord([Order(1, 0, 1, 10)], [0.1, -0.1])).keyed
+    assert play(engine.TurnRecord([Order(1, 0, 1, 10)], [0.1, -0.1], keyed=True)).keyed
+
+
 def _never_called(state, pid):
     raise AssertionError("a replayed turn must not consult a seat")
+
+
+def test_progress_at_is_the_one_formula():
+    """``Fleet.progress_at`` is what both the map and a lane battle measure with,
+    so its two ends must be the positions the engine used to compute by hand."""
+    f = Fleet(owner_id=1, source_id=0, dest_id=1, ships=3,
+              turns_total=8, turns_remaining=3)
+    assert f.progress_at(1.0) == f.progress()
+    assert f.progress_at(0.0) == 1.0 - (f.turns_remaining + 1) / f.turns_total
+    assert f.progress_at(0.5) == 1.0 - (f.turns_remaining + 0.5) / f.turns_total
+    # a fleet that launched this turn starts on its source and ends one step along
+    fresh = Fleet(owner_id=1, source_id=0, dest_id=1, ships=3,
+                  turns_total=4, turns_remaining=3)
+    assert fresh.progress_at(0.0) == 0.0
+    # degenerate schedules stay pinned at the destination, unmirrored
+    stuck = Fleet(owner_id=1, source_id=1, dest_id=0, ships=1,
+                  turns_total=0, turns_remaining=0)
+    assert stuck.progress_at(0.0) == stuck.progress_at(1.0) == 1.0
+    assert engine._lane_span(stuck, 0) == (1.0, 1.0)
+
+
+def test_lane_span_measures_both_headings_from_one_end():
+    """The span is `progress_at`'s two ends, mirrored for a fleet running the
+    other way so two opposing fleets sit on a single ruler."""
+    down = Fleet(owner_id=1, source_id=0, dest_id=1, ships=1,
+                 turns_total=10, turns_remaining=4)
+    up = Fleet(owner_id=2, source_id=1, dest_id=0, ships=1,
+               turns_total=10, turns_remaining=4)
+    assert engine._lane_span(down, 0) == (0.5, 0.6)
+    assert engine._lane_span(up, 0) == (0.5, 0.4)
+
+
+def test_a_crossing_is_recorded_where_both_fleets_are():
+    """`at` is the point the two fleets share at `when`, so a fight can be shown
+    exactly where the triangles are seen to touch."""
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 10)])
+    a = _stage(s, 1, 0, 1, 5, 10, 5)   # 0.4 -> 0.5 of the lane
+    b = _stage(s, 2, 1, 0, 5, 10, 4)   # 0.5 -> 0.4, the other way
+    engine._advance_fleets(s)          # crossings are measured after the step
+    crossings = engine._lane_crossings(s, 0, [0, 1])
+    assert len(crossings) == 1
+    cross = crossings[0]
+    assert cross.when == 0.5
+    assert cross.at == pytest.approx(a.progress_at(cross.when))
+    # ...and the same point measured off the fleet running the other way
+    assert cross.at == pytest.approx(1.0 - b.progress_at(cross.when))
+
+
+def test_simultaneous_crossings_still_break_on_launch_order():
+    """Two disjoint pairs meeting at the same instant, further along the lane
+    first. Order decides which fight is dealt the turn's dice first, so it must
+    stay fleet order — order of launch — and never where the fleets met.
+    """
+    s = make_state([(0, 1, 1, 100), (1, 2, 1, 100)], [(0, 1, 10)])
+    _stage(s, 1, 0, 1, 5, 10, 1)   # pair one, meeting at 0.85
+    _stage(s, 2, 1, 0, 5, 10, 8)
+    _stage(s, 1, 0, 1, 5, 10, 5)   # pair two, meeting at 0.45
+    _stage(s, 2, 1, 0, 5, 10, 4)
+    engine._advance_fleets(s)
+    crossings = engine._lane_crossings(s, 0, [0, 1, 2, 3])
+    assert [(c.a, c.b) for c in crossings] == [(0, 1), (2, 3)]
+    # ...and the test really is exercising the hazard: sorting on where they met
+    # would have swapped those two rows.
+    assert [c.when for c in crossings] == [0.5, 0.5]
+    assert [round(c.at, 10) for c in crossings] == [0.85, 0.45]
+
+
+# --------------------------------------------------------------------------- #
+# Lane tracks (cosmetic, but they have to hold still)
+# --------------------------------------------------------------------------- #
+
+
+def _slots(state):
+    return [f.lane_slot for f in state.fleets]
+
+
+def test_a_fleet_is_given_the_lowest_free_track_on_its_lane():
+    """Tracks run outward from the centre line, so the first fleet onto an empty
+    lane flies straight down it and later ones flank it."""
+    s = make_state([(0, 1, 30, 100), (1, 2, 1, 100)], [(0, 1, 5)])
+    for _ in range(5):
+        engine.apply_order(s, Order(1, 0, 1, 2))
+    assert _slots(s) == [0, -1, 1, -2, 2]
+
+
+def test_launching_does_not_shove_the_fleets_already_flying():
+    """Spreading a lane's fleets symmetrically across however many are currently
+    on it made every one of them step sideways whenever another set off."""
+    s = make_state([(0, 1, 30, 100), (1, 2, 1, 100)], [(0, 1, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    before = _slots(s)
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    engine.apply_order(s, Order(1, 0, 1, 3))
+    assert _slots(s)[:1] == before == [0]
+
+
+def test_a_fleet_arriving_does_not_shove_the_ones_behind_it():
+    """The case that showed up in play: three fleets strung down one lane, the
+    leader lands, and the two behind it must not jump sideways as the rank they
+    were drawn from re-packs. A track is held, not recomputed.
+
+    Launched a turn apart, since fleets that set off together share a speed and so
+    land together — the string down the lane is the point.
+    """
+    # a third system, held by the rival, purely so the win check doesn't end the
+    # match the moment player 1 is the last one standing
+    s = make_state([(0, 1, 30, 100), (1, 0, 1, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)])
+    with no_jitter():
+        engine.apply_order(s, Order(1, 0, 1, 9))   # launched first, so lands first
+        engine.end_turn(s)
+        engine.apply_order(s, Order(1, 0, 1, 1))
+        engine.end_turn(s)
+        engine.apply_order(s, Order(1, 0, 1, 1))
+        assert _slots(s) == [0, -1, 1]
+        engine.end_turn(s)                         # ...on which the leader lands
+
+    assert [f.ships for f in s.fleets] == [1, 1], "only the leader should have landed"
+    assert s.systems[1].owner_id == 1, "...and it took the system"
+    assert _slots(s) == [-1, 1], "the fleets behind it held their tracks"
+
+    # ...and the track the leader vacated is what the next launch gets, so no two
+    # fleets on a lane are ever drawn on top of each other
+    engine.apply_order(s, Order(1, 0, 1, 1))
+    assert _slots(s) == [-1, 1, 0]
+
+
+def test_fleets_running_opposite_ways_get_their_own_tracks():
+    """The reason tracks exist at all: two fleets can be at the same point on one
+    lane heading opposite ways, so both directions draw from one pool."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100)], [(0, 1, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 4))
+    engine.apply_order(s, Order(2, 1, 0, 4))
+    assert len(set(_slots(s))) == 2, "one lane, both directions: they must not overlap"
+
+
+def test_a_track_is_only_shared_with_a_different_lane():
+    """Tracks are per lane — two fleets on unrelated lanes both fly down the
+    middle, which is what makes the common case look right."""
+    s = make_state([(0, 1, 20, 100), (1, 0, 1, 100), (2, 0, 1, 100)],
+                   [(0, 1, 5), (0, 2, 5)])
+    engine.apply_order(s, Order(1, 0, 1, 4))
+    engine.apply_order(s, Order(1, 0, 2, 4))
+    assert _slots(s) == [0, 0]
+
+
+# --------------------------------------------------------------------------- #
+# More than one seat held by a person (play-by-post, hotseat)
+# --------------------------------------------------------------------------- #
+def _two_humans():
+    """Three seats facing a shared neutral; 1 and 3 are people, 2 is a bot."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100), (2, 3, 20, 100), (3, 0, 1, 100)],
+                   [(0, 3, 5), (1, 3, 5), (2, 3, 5)], human=1)
+    s.players[3].is_human = True
+    return s
+
+
+def test_both_human_seats_have_their_orders_applied():
+    """The bug this generalisation fixes: with two people at the table, the older
+    rule attributed every submitted order to `state.human()` — the first seat it
+    happened to find — so the second player's orders were silently dropped."""
+    s = _two_humans()
+    engine.end_turn(s, seat_orders={1: [Order(1, 0, 3, 5)], 3: [Order(3, 2, 3, 7)]},
+                    decide=lambda st, pid: [])
+    sent = {(f.owner_id, f.ships) for f in s.fleets}
+    assert sent == {(1, 5), (3, 7)}, "neither seat may be dropped"
+    assert s.systems[0].ships == 15 and s.systems[2].ships == 13
+
+
+def test_a_human_seat_is_never_asked_to_decide():
+    """A seat a person holds is theirs even when they submit nothing: the engine
+    must not quietly play it for them."""
+    s = _two_humans()
+    asked = []
+
+    def decide(st, pid):
+        asked.append(pid)
+        return []
+
+    engine.end_turn(s, seat_orders={1: [Order(1, 0, 3, 5)]}, decide=decide)
+    assert asked == [2], "only the bot seat decides; seat 3 holds rather than being played"
+
+
+def test_a_seat_that_submits_nothing_holds():
+    """The first-miss default a play-by-post deadline leans on: an unattended seat
+    launches nothing, but the turn is otherwise entirely normal."""
+    s = _two_humans()
+    turn = s.turn
+    engine.end_turn(s, seat_orders={1: []}, decide=lambda st, pid: [])
+    assert s.fleets == [], "nothing launched"
+    assert s.turn == turn + 1, "...but the turn still resolved"
+    assert s.systems[0].owner_id == 1, "and the seat still holds its ground"
+
+
+def test_a_seat_cannot_order_another_seats_ships():
+    """`_own_orders` is the boundary, and it has to hold per seat now that more
+    than one seat submits: seat 3 naming seat 1's system commands nothing."""
+    s = _two_humans()
+    engine.end_turn(s, seat_orders={3: [Order(1, 0, 3, 5), Order(3, 2, 3, 4)]},
+                    decide=lambda st, pid: [])
+    assert {(f.owner_id, f.ships) for f in s.fleets} == {(3, 4)}
+    assert s.systems[0].ships == 20, "seat 1's garrison is untouched"
+
+
+def test_seat_orders_are_applied_in_ascending_seat_order():
+    """Load-bearing for play-by-post: fleets are appended as they launch and the
+    combat dice are consumed along that walk, so two clients collecting the same
+    orders in different sequences would fight different battles. The sequence is
+    the seat order, never submission order."""
+    s = _two_humans()
+    # Submitted 3-then-1; the applied sequence must still be 1-then-3.
+    engine.end_turn(s, seat_orders={3: [Order(3, 2, 3, 7)], 1: [Order(1, 0, 3, 5)]},
+                    decide=lambda st, pid: [])
+    assert [f.owner_id for f in s.fleets] == [1, 3]
+
+
+def test_seat_orders_override_human_orders_for_the_seat_they_name():
+    s = _two_humans()
+    engine.end_turn(s, human_orders=[Order(1, 0, 3, 9)],
+                    seat_orders={1: [Order(1, 0, 3, 2)]}, decide=lambda st, pid: [])
+    assert [(f.owner_id, f.ships) for f in s.fleets] == [(1, 2)]
+
+
+def test_a_single_human_game_collects_exactly_as_it_always_did():
+    """The compatibility this whole change rests on: one person, one seat, the
+    sequence unchanged — which is why `RULES_VERSION` does not move."""
+    s = make_state([(0, 1, 20, 100), (1, 2, 20, 100), (2, 3, 20, 100), (3, 0, 1, 100)],
+                   [(0, 3, 5), (1, 3, 5), (2, 3, 5)], human=1)
+    orders = engine._collect_orders(
+        s, [Order(1, 0, 3, 5)], lambda st, pid: [Order(pid, {2: 1, 3: 2}[pid], 3, 1)])
+    assert [o.owner_id for o in orders] == [1, 2, 3]
+
+
+def test_a_dead_seat_orders_nothing_and_is_not_asked():
+    s = _two_humans()
+    s.players[2].alive = False
+    asked = []
+    orders = engine._collect_orders(s, None, lambda st, pid: asked.append(pid) or [])
+    assert asked == [], "no live bot seat here, and a dead one is never consulted"
+    assert orders == []
+
+
+def test_humans_lists_every_seat_a_person_holds():
+    s = _two_humans()
+    assert [p.id for p in s.humans()] == [1, 3]
+    assert s.human().id == 1, "the single-seat question still answers, unchanged"

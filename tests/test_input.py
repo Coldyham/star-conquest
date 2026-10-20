@@ -12,14 +12,15 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
+import pygame
 
-import main  # noqa: E402  (repo-root entry point; pytest adds "." to sys.path)
-from starconquest import config, engine, mapgen, replay  # noqa: E402
-from starconquest import input as game_input  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.settings import Challenge, Settings  # noqa: E402
-from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui  # noqa: E402
+from starconquest import main
+from starconquest import config, engine, mapgen, replay, turnfilm
+from starconquest import input as game_input
+from starconquest.geometry import WorldView
+from starconquest.model import Fleet, ForwardRule
+from starconquest.settings import Challenge, Settings
+from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
 def _setup():
@@ -125,7 +126,7 @@ def test_popup_tabs_switch_between_send_and_forward():
         ui.forward_tab_rect = (100, 100, 60, 20)
         _click_pos(state, ui, (110, 110))       # -> Forward (keep 0)
         assert ui.forward_armed is True and ui.pending == []
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
 
         ui.send_tab_rect = (200, 100, 60, 20)
         _click_pos(state, ui, (210, 110))       # -> Send (restores the count)
@@ -135,8 +136,9 @@ def test_popup_tabs_switch_between_send_and_forward():
         pygame.quit()
 
 
-def test_forward_stepper_adjusts_keep():
-    """On the Forward tab the −/+ controls set how many ships to hold back."""
+def test_forward_steppers_adjust_the_share_and_the_hold():
+    """On the Forward tab the main −/+ move the lane's share a step at a time, and
+    the hold row's −/+ set how many ships the system keeps back."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -144,19 +146,32 @@ def test_forward_stepper_adjusts_keep():
         _click(state, ui, home)
         _click(state, ui, nbr)
         ui.forward_tab_rect = (100, 100, 60, 20)
-        _click_pos(state, ui, (110, 110))       # arm forwarding, keep 0
-        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
+        _click_pos(state, ui, (110, 110))       # arm forwarding: all of it, hold 0
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100}, 0)
+
+        ui.minus_rect = (200, 130, 20, 20)
+        _click_pos(state, ui, (210, 140))
+        _click_pos(state, ui, (210, 140))
+        step = config.FORWARD_STEP_PCT
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100 - 2 * step}, 0)
 
         ui.plus_rect = (100, 130, 20, 20)
-        _click_pos(state, ui, (110, 140))       # +1 -> keep 1
-        _click_pos(state, ui, (110, 140))       # +1 -> keep 2
-        assert ui.keep == 2 and ui.auto_forward[home] == (nbr, 2)
+        _click_pos(state, ui, (110, 140))
+        assert ui.auto_forward[home].shares == {nbr: 100 - step}
 
-        # keep never drops below 0
-        ui.minus_rect = (200, 130, 20, 20)
-        for _ in range(5):
+        ui.hold_plus_rect = (100, 160, 20, 20)
+        ui.hold_minus_rect = (200, 160, 20, 20)
+        _click_pos(state, ui, (110, 170))
+        _click_pos(state, ui, (110, 170))
+        assert ui.auto_forward[home].hold == 2
+        for _ in range(5):                      # never below 0
+            _click_pos(state, ui, (210, 170))
+        assert ui.auto_forward[home].hold == 0
+
+        # sending nothing is no rule at all: down to 0% deletes it
+        for _ in range(100 // step):
             _click_pos(state, ui, (210, 140))
-        assert ui.keep == 0 and ui.auto_forward[home] == (nbr, 0)
+        assert home not in ui.auto_forward and not ui.forward_armed
     finally:
         pygame.quit()
 
@@ -206,8 +221,8 @@ def test_clear_all_forwarding_button():
         owned = [s.id for s in state.systems.values() if s.owner_id == 1]
         a = owned[0]
         b, c = state.systems[a].neighbors[0], state.systems[a].neighbors[-1]
-        ui.auto_forward[a] = (b, 0)
-        ui.auto_forward[b] = (c, 2)
+        ui.auto_forward[a] = ForwardRule({b: 100}, 0)
+        ui.auto_forward[b] = ForwardRule({c: 100}, 2)
 
         ui.clear_forward_rect = (100, 100, 120, 24)
         _click_pos(state, ui, (110, 110))
@@ -232,7 +247,7 @@ def test_shift_click_neighbour_arms_forward_rule():
             pygame.key.set_mods(0)
 
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)  # keep 0 == forward all
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)  # keep 0 == forward all
         assert ui.pending == []   # a rule, not a one-shot send
     finally:
         pygame.quit()
@@ -367,8 +382,9 @@ def test_slider_follows_a_dragged_popup():
 
 
 def test_slider_is_inert_with_nothing_to_size():
-    """An empty source gives the slider a zero-width range, and a popup closed
-    mid-drag gives it a zeroed rect. Neither may divide by zero."""
+    """An empty source still forwards a share of whatever it builds, so its slider
+    sizes a percentage rather than ships; and a popup closed mid-drag gives the
+    slider a zeroed rect, which must not divide by zero."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
@@ -377,11 +393,12 @@ def test_slider_is_inert_with_nothing_to_size():
         _click(state, ui, home)
         _click(state, ui, nbr)          # empty source -> arms Forward, garrison 0
         assert ui.mode == CHOOSING and ui.forward_armed
-        assert ui.slider_range(state) == (0, 0, 0)
+        assert ui.slider_range(state) == (0, 100, 100)
 
         ui.slider_rect = (100, 150, 100, 30)
         _click_pos(state, ui, (180, 160))
-        assert ui.keep == 0
+        share = ui.edited_share()
+        assert 0 < share < 100 and share % config.FORWARD_SNAP_PCT == 0
 
         # popup closed mid-drag: render zeroes the rect, motion must be a no-op
         ui.dragging_slider = True
@@ -389,7 +406,7 @@ def test_slider_is_inert_with_nothing_to_size():
         game_input.handle_event(
             pygame.event.Event(pygame.MOUSEMOTION, pos=(180, 160)), state, ui
         )
-        assert ui.keep == 0
+        assert ui.edited_share() == share
     finally:
         pygame.quit()
 
@@ -414,7 +431,7 @@ def test_shift_click_arms_forward_rule_from_empty_system():
             pygame.key.set_mods(0)
 
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
         assert ui.pending == []
 
         # switching to the Send tab on an empty source shows 0, not a phantom
@@ -440,7 +457,7 @@ def test_plain_click_from_empty_system_arms_forward():
         _click(state, ui, home)
         _click(state, ui, nbr)
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
         assert ui.pending == []
     finally:
         pygame.quit()
@@ -472,7 +489,7 @@ def test_drag_from_empty_source_arms_forward():
         state.systems[home].ships = 0
         _drag(state, ui, home, nbr)
         assert ui.mode == CHOOSING and ui.forward_armed is True
-        assert ui.auto_forward.get(home) == (nbr, 0)
+        assert ui.auto_forward.get(home) == ForwardRule({nbr: 100}, 0)
     finally:
         pygame.quit()
 
@@ -711,7 +728,7 @@ def test_forward_rule_expands_into_order():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
 
-        ui.auto_forward[home] = (nbr, 4)   # keep 4, forward the surplus
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 4)   # keep 4, forward the surplus
         orders = main.auto_forward_orders(state, ui)
         assert len(orders) == 1
         o = orders[0]
@@ -719,7 +736,7 @@ def test_forward_rule_expands_into_order():
         assert o.ships == state.systems[home].ships - 4
 
         # keeping the whole garrison forwards nothing
-        ui.auto_forward[home] = (nbr, state.systems[home].ships)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, state.systems[home].ships)
         assert main.auto_forward_orders(state, ui) == []
     finally:
         pygame.quit()
@@ -734,14 +751,14 @@ def test_losing_a_system_deletes_its_forwarding_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         back = next(n for n in state.systems[nbr].neighbors if n != home)
-        ui.auto_forward[home] = (nbr, 2)
-        ui.auto_forward[nbr] = (back, 1)     # a rule aimed at a system we don't hold
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
+        ui.auto_forward[nbr] = ForwardRule({back: 100}, 1)     # a rule aimed at a system we don't hold
         state.systems[home].owner_id = 2     # ...and the rule's own source, captured
         state.systems[nbr].owner_id = 1
 
         main.resolve_turn(state, ui, log=None)
         assert home not in ui.auto_forward
-        assert ui.auto_forward.get(nbr) == (back, 1)
+        assert ui.auto_forward.get(nbr) == ForwardRule({back: 100}, 1)
     finally:
         pygame.quit()
 
@@ -750,7 +767,7 @@ def test_forward_rules_all_die_when_the_human_is_knocked_out():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 0)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
         for s in state.systems.values():
             if s.owner_id == 1:
                 s.owner_id = 0
@@ -781,7 +798,7 @@ def test_clear_button_click_clears_forward_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.selected = home
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         ui.clear_button_rect = (100, 100, 120, 24)
         assert _click_pos(state, ui, (110, 110)) is None
@@ -865,6 +882,43 @@ def test_leaderboard_is_only_a_game_over_action():
         pygame.quit()
 
 
+def test_a_rewound_turn_rolls_what_the_straight_game_rolled(tmp_path, monkeypatch):
+    """Rewinding to a turn and ending it again with the same orders lands on the
+    board the game played straight through landed on: the turn's rng is derived
+    (`replay.reseed`), not carried, so a rewind is not a free re-roll."""
+    from starconquest.settings import build_state
+    from tests.test_replay import _preserve_config, _snapshot
+
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        with _preserve_config():
+            cfg = Settings(seed=3, nodes=12, players=3)
+            state = build_state(cfg, 3)
+            ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()),
+                    human_id=1, autoplay=True)
+            log = replay.new_log(cfg, 3, state)
+            log.path = tmp_path / "game.json"
+            boards = [_snapshot(state)]
+            while state.winner is None and state.turn < 40:
+                main.resolve_turn(state, ui, log)
+                boards.append(_snapshot(state))
+            fought = [i for i in range(log.turn_count) if log.script_for(i).dice]
+            assert fought
+            for turn in fought:
+                rewound = replay.GameLog.from_dict(log.to_dict())
+                rewound.truncate(turn)
+                again, _ = replay.reconstruct(rewound)
+                ui2 = Ui(view=WorldView(mapgen.map_bounds(again), config.play_rect()),
+                         human_id=1, autoplay=True)
+                main.resolve_turn(again, ui2, None)
+                assert _snapshot(again) == boards[turn + 1], f"turn {turn} re-rolled"
+    finally:
+        pygame.quit()
+
+
 def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
     """A game played by hand and then autoplayed to its end reports the hand
     count, and the Ui's running tally agrees with the log's per-turn flags."""
@@ -884,13 +938,19 @@ def test_hand_turns_counts_only_manually_played_turns(tmp_path, monkeypatch):
         pygame.quit()
 
 
-def test_defeat_snaps_the_camera_out_once_not_every_turn():
+def test_defeat_snaps_the_camera_out_once_not_every_turn(monkeypatch):
     """The turn the human is knocked out (but the match continues without
     them) should snap the camera to the whole map exactly once — a later turn
-    spent merely spectating must leave a manual zoom alone."""
+    spent merely spectating must leave a manual zoom alone.
+
+    Pinned to animation off, which is what these two assert: with it on the snap
+    waits for the film to land (see the deferred-snap tests below), so the
+    machine's own stored preference must not decide which behaviour is tested.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
-        for sid, s in state.systems.items():
+        for s in state.systems.values():
             if s.owner_id == 1:
                 s.owner_id = 0            # strip every system from the human
         state.fleets = [f for f in state.fleets if f.owner_id != 1]
@@ -908,7 +968,32 @@ def test_defeat_snaps_the_camera_out_once_not_every_turn():
         pygame.quit()
 
 
-def test_winning_snaps_the_camera_out_to_the_whole_map():
+def test_resolve_turn_archives_marks_even_with_the_animate_preference_off(monkeypatch):
+    """Turning the glide off must not take the "-N"/"+N" marks with it: a fight's
+    cost is cheap to report and worth seeing regardless of whether the rest of the
+    turn glides. `marking` (autoplay/fast-forward aside) gates this, strictly wider
+    than `filming` (which also needs the animate-turns preference on)."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        target = state.systems[home].neighbors[0]
+        state.systems[target].owner_id, state.systems[target].ships = 2, 1
+        state.fleets = [Fleet(owner_id=1, source_id=home, dest_id=target, ships=40,
+                              turns_total=2, turns_remaining=1)]
+
+        reel = main.resolve_turn(state, ui, log=None)
+
+        assert reel is None and ui.film is None       # no glide
+        assert state.systems[target].owner_id == 1    # the fight actually happened
+        assert len(ui.fading_fights) == 1
+        assert ui.fading_fights[0].node_id == target
+    finally:
+        pygame.quit()
+
+
+def test_winning_snaps_the_camera_out_to_the_whole_map(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
     state, ui = _setup()
     try:
         for s in state.systems.values():
@@ -928,7 +1013,7 @@ def test_winning_snaps_the_camera_out_to_the_whole_map():
 def test_restart_only_carries_autoplay_out_of_a_pure_demo():
     """Autoplaying the tail of a hand-played game must not start the next map in
     autoplay too — but a demo that was never touched keeps running."""
-    state, ui = _setup()
+    _state, ui = _setup()
     try:
         ui.autoplay = True
         assert main.carry_autoplay(ui) is True       # never played a turn: a demo
@@ -1054,7 +1139,7 @@ def test_x_key_clears_forward_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.selected = home
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         game_input.handle_event(
             pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui
@@ -1067,7 +1152,7 @@ def test_x_key_clears_forward_rule():
 # --------------------------------------------------------------------------- #
 # Editing / undoing queued orders
 # --------------------------------------------------------------------------- #
-from starconquest.model import Order  # noqa: E402
+from starconquest.model import Order
 
 
 def test_click_queued_lane_reopens_the_popup_on_that_order():
@@ -1172,38 +1257,21 @@ def test_lane_click_cycles_orders_on_same_lane():
 # --------------------------------------------------------------------------- #
 # Editing standing auto-forward rules
 # --------------------------------------------------------------------------- #
-def test_click_rule_row_reopens_the_popup_on_the_forward_tab():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
-
-        _click_pos(state, ui, (110, 105))
-        assert ui.sel_forward == home
-        assert ui.sel_order is None
-        assert ui.mode == CHOOSING and ui.forward_armed
-        assert (ui.selected, ui.dest) == (home, nbr)
-        assert ui.keep == 2
-        assert ui.editing_existing
-    finally:
-        pygame.quit()
-
-
-def test_click_rule_lane_selects_it():
+def test_click_rule_lane_reopens_the_popup_on_the_forward_tab():
     """Clicking a rule's chevron lane reopens the popup on it, just like a queued
-    order's lane — the panel row is no longer the only way in."""
+    order's lane."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         _click_pos(state, ui, _lane_mid(state, ui, home, nbr))
         assert ui.sel_forward == home
         assert ui.sel_order is None
-        assert ui.mode == CHOOSING and ui.forward_armed and ui.keep == 2
+        assert ui.mode == CHOOSING and ui.forward_armed and ui.edited_share() == 100
+        assert (ui.selected, ui.dest) == (home, nbr)
+        assert ui.editing_existing
     finally:
         pygame.quit()
 
@@ -1216,7 +1284,7 @@ def test_popup_delete_removes_a_reopened_order_or_rule():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.cancel_rect = (110, 260, 100, 20)   # normally recorded by render
 
         ui.edit_order(state, 0)
@@ -1249,7 +1317,7 @@ def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
         # same for a rule
         ui.close_send()
         ui.pending.clear()
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         _click_pos(state, ui, mid)
         ui.popup_pos = (300, 300)
         _click_pos(state, ui, mid)
@@ -1260,25 +1328,22 @@ def test_reopening_the_same_subject_keeps_a_dragged_popup_in_place():
 
 
 def test_dormant_rule_is_highlighted_but_never_opens_the_popup():
-    """A rule whose source we no longer hold stays in the list, but the popup reads
-    that source's garrison and would let the Send tab queue an order out of enemy
-    territory — so it highlights only."""
+    """A rule whose source we no longer hold is still a rule until the turn prunes
+    it, but the popup reads that source's garrison and would let the Send tab queue
+    an order out of enemy territory — so it highlights only."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         state.systems[home].owner_id = 2          # captured
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
 
-        _click_pos(state, ui, (110, 105))
+        ui.edit_forward(state, home)
         assert ui.sel_forward == home
         assert ui.mode != CHOOSING
         assert ui.selected is None and ui.dest is None
 
-        # the wheel still reaches its keep, and X still clears it
-        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home][1] == 3
+        # X still clears it
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
         assert home not in ui.auto_forward
     finally:
@@ -1293,7 +1358,7 @@ def test_lane_click_cycles_order_and_rule_on_same_lane():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.auto_forward[home] = (nbr, 1)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 1)
         mid = _lane_mid(state, ui, home, nbr)
 
         def picked():
@@ -1310,59 +1375,46 @@ def test_lane_click_cycles_order_and_rule_on_same_lane():
         pygame.quit()
 
 
-def test_click_rule_delete_button_removes_it():
+def test_wheel_edits_reopened_rule_share_in_place():
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.forward_hitboxes = [(home, (100, 100, 50, 20), (140, 100, 10, 20))]
+        ui.auto_forward[home] = ForwardRule({nbr: 50}, 2)
+        ui.edit_forward(state, home)
 
-        _click_pos(state, ui, (145, 105))
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50 + config.FORWARD_STEP_PCT}, 2)
+
+        # a share stops at 100%, and the hold is left alone
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 100}, 2)
+        # ...and wheeled down to nothing, the rule is gone
+        for _ in range(50):
+            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
         assert home not in ui.auto_forward
     finally:
         pygame.quit()
 
 
-def test_wheel_edits_reopened_rule_keep_in_place():
-    state, ui = _setup()
-    try:
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
-        ui.edit_forward(state, home)
-
-        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home] == (nbr, 3)
-
-        # keep is capped at the source's total garrison, and never drops below 0
-        for _ in range(50):
-            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
-        assert ui.auto_forward[home] == (nbr, state.systems[home].ships)
-        for _ in range(50):
-            game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.auto_forward[home] == (nbr, 0)
-    finally:
-        pygame.quit()
-
-
-def test_popup_step_buttons_adjust_a_reopened_rule_keep():
-    """The popup's −/+ buttons adjust a reopened rule's keep, same as for a queued
-    order — one editor for both, reached the same way."""
+def test_popup_step_buttons_adjust_a_reopened_rule_share():
+    """The popup's −/+ buttons adjust a reopened rule's share, same as a queued
+    order's count — one editor for both, reached the same way."""
     state, ui = _setup()
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         state.systems[home].ships = 10
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 50}, 2)
         ui.edit_forward(state, home)
         ui.minus_rect = (100, 100, 20, 20)   # normally recorded by render each frame
         ui.plus_rect = (140, 100, 20, 20)
 
         _click_pos(state, ui, (150, 110))    # + button
-        assert ui.auto_forward[home] == (nbr, 3)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50 + config.FORWARD_STEP_PCT}, 2)
         _click_pos(state, ui, (110, 110))    # − button
-        assert ui.auto_forward[home] == (nbr, 2)
+        assert ui.auto_forward[home] == ForwardRule({nbr: 50}, 2)
     finally:
         pygame.quit()
 
@@ -1372,7 +1424,7 @@ def test_x_key_removes_reopened_rule():
     try:
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.edit_forward(state, home)
 
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x), state, ui)
@@ -1389,7 +1441,7 @@ def test_editing_an_order_and_a_rule_are_mutually_exclusive():
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         nbr = state.systems[home].neighbors[0]
         ui.pending.append(Order(1, home, nbr, 3))
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
 
         ui.edit_order(state, 0)
         assert ui.sel_order == 0 and ui.sel_forward is None
@@ -1428,100 +1480,22 @@ def test_right_click_closes_the_edit_popup_then_selecting_system_clears_it():
 
 
 # --------------------------------------------------------------------------- #
-# Queued-list scrolling
+# The wheel over the side panel
 # --------------------------------------------------------------------------- #
-def _queue_many(state, ui, count):
-    """Queue ``count`` distinct orders and draw, so the list lays itself out."""
-    from starconquest import render
-    from starconquest.model import Order
-
-    ids = sorted(state.systems)
-    for i in range(count):
-        src, dst = ids[i % len(ids)], ids[(i + 1) % len(ids)]
-        ui.pending.append(Order(1, src, dst, i + 1))
-    screen = pygame.display.get_surface()
-    render._FONTS.clear()
-    render.draw(screen, state, ui)
-    return screen
-
-
-def test_long_queue_scrolls_instead_of_hiding_entries():
-    """A queue too long for its capped block becomes scrollable, and every entry is
-    reachable — a bare '+N more' line left the overflow unmanageable."""
+def test_wheel_over_the_panel_leaves_the_map_alone():
+    """The wheel zooms over the map only; from the info panel a stray flick would
+    throw the camera about."""
     state, ui = _setup()
     try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        assert ui.order_scroll_max > 0, "40 orders should overflow the capped block"
-        assert ui.order_up_rect[2] > 0 and ui.order_down_rect[2] > 0
-
-        seen = set()
-        for _ in range(ui.order_scroll_max + 1):
-            seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-            _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-            render.draw(screen, state, ui)
-        seen.update(idx for idx, _row, _del in ui.order_hitboxes)
-        assert seen == set(range(40)), "scrolling must reach every queued order"
-    finally:
-        pygame.quit()
-
-
-def test_deleting_a_row_while_scrolled_removes_that_order():
-    """The regression guard for the hit-rect index: rows carry their own index into
-    `pending`, so the second visible row of a scrolled list is not order #1."""
-    state, ui = _setup()
-    try:
-        from starconquest import render
-
-        screen = _queue_many(state, ui, 40)
-        _click_pos(state, ui, pygame.Rect(*ui.order_down_rect).center)
-        render.draw(screen, state, ui)
-        assert ui.order_scroll > 0
-
-        idx, _row, delete = ui.order_hitboxes[0]
-        assert idx == ui.order_scroll, "the first drawn row is the scroll offset"
-        doomed = ui.pending[idx]
-        before = len(ui.pending)
-        _click_pos(state, ui, pygame.Rect(*delete).center)
-        assert len(ui.pending) == before - 1
-        assert doomed not in ui.pending, "deleted the wrong order"
-    finally:
-        pygame.quit()
-
-
-def test_scroll_offset_survives_orders_being_removed():
-    """A stale offset (orders resolved out from under it) snaps back into range on
-    the next scroll rather than needing one press per vanished row."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
-        ui.order_scroll = ui.order_scroll_max
-        del ui.pending[5:]                       # most of the list goes away
-        _queue_many(state, ui, 0)                # redraw with the short list
-        ui.scroll_orders(1)
-        assert ui.order_scroll <= ui.order_scroll_max
-    finally:
-        pygame.quit()
-
-
-def test_wheel_over_the_panel_scrolls_the_list_not_the_map():
-    """The wheel means 'scroll this list' over the info panel and 'zoom' over the
-    map, so a flick while reviewing orders doesn't throw the camera about."""
-    state, ui = _setup()
-    try:
-        _queue_many(state, ui, 40)
         zoom = ui.view.zoom
         panel = (config.SCREEN_W - config.HUD_RIGHT_W // 2, config.SCREEN_H // 2)
         pygame.mouse.set_pos(panel)
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), state, ui)
-        assert ui.order_scroll == 1
         assert ui.view.zoom == zoom, "the wheel must not zoom the map from the panel"
 
         pygame.mouse.set_pos((config.SCREEN_W // 4, config.SCREEN_H // 2))
         game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), state, ui)
         assert ui.view.zoom > zoom, "over the map the wheel still zooms"
-        assert ui.order_scroll == 1
     finally:
         pygame.quit()
 
@@ -1742,7 +1716,7 @@ def test_a_downloaded_replay_opens_as_a_reviewable_game(tmp_path, monkeypatch):
         settings = Settings()          # whatever the menu happened to be showing
         opened = main.open_replay(log.encoded(), settings)
         assert opened is not None
-        state, ui, restored = opened
+        state, _ui, restored = opened
         assert restored.match_id == log.match_id
         assert state.turn == log.turn_count
         # ...and the menu now describes the replay's setup, not its own.
@@ -1777,7 +1751,7 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
     try:
         log = _watchable_log(tmp_path, monkeypatch)
         state, ui, _ = main.open_replay(log.encoded(), Settings())
-        states, fog, live = main.open_history(state, ui, log)
+        states, fog, _events, live = main.open_history(state, ui, log)
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
         assert ui.history_max == log.turn_count
@@ -1785,6 +1759,58 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
         assert live is not None          # the live fog is stashed for the way out
     finally:
         pygame.quit()
+
+
+def test_a_saved_game_file_opens_as_a_watched_replay(tmp_path, monkeypatch):
+    """`--watch games/game_X.json` takes the downloaded path from the poll on, so
+    a local file gets the same review, the same watched mark and the same fork."""
+    from starconquest import share
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        assert log.path is not None and log.path.is_file()
+        assert main.is_log_path(str(log.path))
+        assert not main.is_log_path("00112233445566ff")
+        status, body = share.Download.ready(main.read_game_log(str(log.path)).encoded()).poll()
+        assert status == share.OK
+        opened = main.open_replay(body, Settings())
+        assert opened is not None
+        state, ui, restored = opened
+        assert restored.match_id == log.match_id
+        assert state.turn == log.turn_count
+        assert ui.watched is True
+    finally:
+        pygame.quit()
+
+
+def test_settings_from_a_saved_game_reproduce_its_map(tmp_path, monkeypatch):
+    """`--settings-from` hands the menu the log's setup with its concrete seed (the
+    stored settings say `seed: null`), and never the score to beat it carried."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        challenged = Settings.from_dict(log.settings)
+        challenged.challenge = Challenge(turns=9, lost=3)
+        log.settings = dict(challenged.to_dict(), seed=None)
+        log.save()
+        settings = main.log_settings(main.read_game_log(str(log.path)))
+        assert settings.seed == log.seed
+        assert settings.nodes == 18 and settings.players == 3
+        assert settings.challenge is None
+    finally:
+        pygame.quit()
+
+
+def test_a_file_that_is_not_a_game_log_is_refused(tmp_path):
+    """A typo, a saved setup and junk all fail with a message, never a traceback."""
+    setup = tmp_path / "setup.json"
+    Settings(nodes=20).save(setup)
+    junk = tmp_path / "junk.json"
+    junk.write_text("[1, 2, 3]")
+    for raw in (str(tmp_path / "missing.json"), str(setup), str(junk)):
+        try:
+            main.read_game_log(raw)
+        except ValueError:
+            continue
+        raise AssertionError(f"{raw} was read as a game log")
 
 
 def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
@@ -1800,6 +1826,26 @@ def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
         pygame.quit()
 
 
+def test_resuming_a_match_always_lands_paused(tmp_path, monkeypatch):
+    """You go back to a turn in order to *look* at it.
+
+    Spotting a bot's blunder one turn too late, rewinding to it, and having the
+    board start moving again before it can be read is the exact thing history is
+    for. Waiting decides nothing now: autoplay is purely "is anything advancing",
+    since the seat is claimed by ending a turn under manual control
+    (`engine._claim_seat`) rather than by autoplay being off — so whether the bot
+    plays on or the player takes over is a choice handed back with the clock
+    stopped, from a resume, a rewind or a watched replay alike.
+    """
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        settings = Settings(seed=1, nodes=18, players=3, autoplay=True)
+        assert main.resume_game(log, settings)[1].autoplay is False
+        assert main.apply_rewind(log, settings, 3)[1].autoplay is False
+    finally:
+        pygame.quit()
+
+
 def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
     """A 404 body, a truncated download or an empty match all have to land as
     "no replay" rather than as an exception on the first frame."""
@@ -1809,5 +1855,707 @@ def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
             assert main.open_replay(blob, Settings()) is None
         empty = replay.new_log(Settings(seed=1), 1)
         assert main.open_replay(empty.encoded(), Settings()) is None
+    finally:
+        pygame.quit()
+
+
+def test_an_outdated_replay_is_declined_rather_than_misreplayed(tmp_path, monkeypatch):
+    """A log stamped under rules the engine has since moved past would silently
+    rebuild a different game than the one actually played (`GameLog.is_current`),
+    so it is turned away exactly like an unreadable blob — never shown as if it
+    still reproduced the match."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        log.rules_version = engine.RULES_VERSION + 1
+        assert main.open_replay(log.encoded(), Settings()) is None
+        # ...and told apart from a genuinely unreadable blob, for the status line.
+        decoded = main._decode_log(log.encoded())
+        assert decoded is not None and decoded.is_current is False
+        assert main._decode_log("not base64!!") is None
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Skipping a turn playback
+# --------------------------------------------------------------------------- #
+
+
+def _a_film() -> turnfilm.Film:
+    """A film with something in it, so `plays` and the beats are real."""
+    return turnfilm.film([
+        turnfilm.Advanced(((0, 2),)),
+        turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=3,
+                        owner_id=1, ships=3, prod_progress=0, steps=()),
+    ])
+
+
+def test_a_press_skips_a_live_film_and_does_nothing_else():
+    """The press is consumed. The footer is still drawn during a playback (the
+    board's winner stays None until the turn closes), so a press that fell through
+    could resolve a second turn underneath the one still being drawn."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.film_ms = _a_film(), 100.0
+        ui.end_turn_rect = (0, 0, 0, 0)   # render takes the button away meanwhile
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r")
+        assert game_input.handle_event(ev, state, ui) is None
+        assert ui.film is None and ui.film_ms == 0.0
+        # ...and a click is swallowed rather than selecting anything
+        state, ui = _setup()
+        ui.film = _a_film()
+        assert _click(state, ui, 0) is None
+        assert ui.film is None
+        assert ui.selected is None and ui.mode == IDLE
+    finally:
+        pygame.quit()
+
+
+def test_a_press_in_history_drops_the_film_and_still_seeks():
+    """In review the film is a transition and the controls are a scrubber, so the
+    press must fall through — swallowing it would mean a drag never started."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.history_max, ui.history_turn = True, 8, 3
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT, mod=0, unicode="")
+        game_input.handle_event(ev, state, ui)
+        assert ui.film is None            # dropped
+        assert ui.history_turn == 4       # ...and the seek still happened
+        assert ui.playing is False
+    finally:
+        pygame.quit()
+
+
+def test_hovering_or_zooming_leaves_a_film_running():
+    """Only a press skips. A wheel zoom or a mouse move must not throw away the
+    playback you are watching."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        pos = ui.view.to_screen(state.systems[0].pos)
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=pos,
+                                                   rel=(1, 1), buttons=(0, 0, 0)),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, y=1, x=0,
+                                                   flipped=False, which=0),
+                                state, ui)
+        assert ui.film is not None
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=pos,
+                                                   button=1), state, ui)
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def _a_moving_reel(state):
+    """A reel whose film is one move beat, on a board with a fleet to move."""
+    board = turnfilm.copy_board(state)
+    home = next(s.id for s in board.systems.values() if s.owner_id == 1)
+    board.fleets = [Fleet(owner_id=1, source_id=home,
+                          dest_id=board.systems[home].neighbors[0], ships=3,
+                          turns_total=3, turns_remaining=3)]
+    return turnfilm.Reel(board, turnfilm.film([turnfilm.Advanced(((0, 2),))]))
+
+
+def test_a_chained_film_starts_where_the_last_one_overran():
+    """A frame steps the clock by a whole frame's worth, so the frame that lands
+    a film almost always runs past its end. A run of turns is meant to be one
+    continuous glide, so that overrun is paid into the film that follows rather
+    than dropped — dropping it stalls every fleet for the rest of a frame at
+    every join, which is the stutter that told autoplay apart from history."""
+    state, ui = _setup()
+    try:
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, 20.0)
+        assert ui.film_ms == 20.0
+        # ...and nothing to carry leaves the film at its own opening.
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, 0.0)
+        assert ui.film_ms == 0.0
+    finally:
+        pygame.quit()
+
+
+def test_a_carry_longer_than_the_film_lands_it_rather_than_overrunning():
+    """A frame is capped (`config.MAX_FRAME_MS`) but a film is not bounded below
+    by it, so the debt is clamped too: the next frame lands this film and chains
+    on, instead of a playhead sitting past its own end."""
+    state, ui = _setup()
+    try:
+        reel = _a_moving_reel(state)
+        ui.film, ui.film_ms = reel.film, 0.0
+        main._carry_into(ui, reel, reel.film.total_ms * 10)
+        assert ui.film_ms == reel.film.total_ms
+    finally:
+        pygame.quit()
+
+
+def test_the_camera_controls_leave_a_film_running_and_still_work():
+    """Where you are looking changes nothing about the turn being played back, so
+    the cluster is exempt from "any press skips" the way Play/Pause is.
+
+    It is unusable otherwise under autoplay, where films chain back to back: the
+    press would be spent skipping one, and the next turn's would already be up by
+    the time a second arrived."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        ui.reset_view_rect, ui.zoom_minus_rect = (10, 10, 40, 40), (60, 10, 40, 40)
+        ui.zoom_plus_rect = (110, 10, 40, 40)
+        before = ui.view.zoom
+
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(120, 20), button=1),
+            state, ui) is None
+        assert ui.film is not None          # still playing
+        assert ui.view.zoom > before        # ...and the press zoomed
+
+        ui.view.zoom_at((600, 460), 3.0)
+        game_input.handle_event(
+            pygame.event.Event(pygame.KEYDOWN, key=pygame.K_r, mod=0, unicode="r"),
+            state, ui)
+        assert ui.film is not None
+        assert ui.view.zoom < 3.0           # R re-framed without losing the film
+    finally:
+        pygame.quit()
+
+
+def test_a_press_next_to_the_camera_cluster_still_skips():
+    """The exemption is the three rects and the R key, not "anything on the map":
+    a press that misses them is an ordinary press and skips as before."""
+    state, ui = _setup()
+    try:
+        ui.film = _a_film()
+        ui.reset_view_rect = (10, 10, 40, 40)
+        ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(200, 200), button=1),
+            state, ui) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_take_control_stops_an_autoplaying_film_in_one_press():
+    """Play/Pause is hidden under autoplay (it would be a no-op — the turn
+    advance isn't gated on `ui.playing` there), which makes Autoplay / Take
+    control the *only* way to stop the automatic advance — and films chain with
+    no gap under autoplay, so it has to fire on the very press that lands on a
+    running one, or the next turn's film is up before a second press arrives.
+
+    Unlike Play/Pause it doesn't need to freeze anything: the film keeps
+    playing (nothing is lost), and control is simply back the instant it lands,
+    since `main`'s chaining re-reads `ui.autoplay` fresh at that point."""
+    state, ui = _setup()
+    try:
+        ui.autoplay = True
+        ui.autoplay_button_rect = (10, 10, 80, 30)
+        ui.film = _a_film()
+
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a, mod=0, unicode="a")
+        assert game_input.handle_event(ev, state, ui) == "toggle_autoplay"
+        assert ui.film is not None          # kept playing, not discarded
+
+        ui.autoplay, ui.film = True, _a_film()   # click does the same
+        assert game_input.handle_event(
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(20, 20), button=1),
+            state, ui) == "toggle_autoplay"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def _won_with_animation(monkeypatch, playing: bool = False):
+    """A human win *worth watching*, with turn animation on: the reel plus its Ui.
+
+    The last rival holds one system and a fleet is one turn out from it, so the
+    turn that decides the game has a move and a fight in it. A board with nothing
+    left in transit resolves to a film of instants (`Film.plays` is False) and
+    would never defer anything — which is right, and no test of the deferral.
+
+    ``playing`` resolves the turn as play mode's own loop does rather than as a
+    press of End Turn, which is the one thing `resolve_turn` reads it for.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    ui.playing = playing
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    last = state.systems[home].neighbors[0]
+    for s in state.systems.values():
+        s.owner_id = 1                     # hand the human all but one system
+    state.systems[last].owner_id, state.systems[last].ships = 2, 1
+    state.fleets = [Fleet(owner_id=1, source_id=home, dest_id=last, ships=40,
+                          turns_total=2, turns_remaining=1)]
+    ui.view.zoom_at((600, 460), 2.0)       # ...watching the corner it happens in
+    reel = main.resolve_turn(state, ui, log=None)
+    assert state.winner == 1
+    assert reel is not None and ui.film is not None
+    return state, ui, reel
+
+
+def test_resolve_turn_lets_its_combat_linger(monkeypatch):
+    """A live End Turn asks `turnfilm.film` to linger (`main.resolve_turn`'s
+    `linger=True`) — unlike history playback, which must glide straight through
+    (see `main._next_history_film`'s own test)."""
+    _state, ui, _reel = _won_with_animation(monkeypatch)
+    combat = next(b for b in ui.film.beats if b.kind == "combat")
+    assert combat.ms == config.FILM_LINGER_COMBAT_MS
+    assert ui.film.total_ms > combat.end   # a trailing hold, not an instant end
+
+
+def test_play_mode_asks_for_a_film_that_glides_instead_of_lingering(monkeypatch):
+    """Play mode and history playback are one behaviour from two sources: a *run*
+    of turns has to glide, so only a turn ended by hand lingers. Lingering here
+    stopped the run dead for every fight (`FILM_LINGER_COMBAT_MS`) and held the
+    board after it (`FILM_LINGER_HOLD_MS`), on top of the `PLAY_MS` gap the loop
+    now chains past."""
+    _state, ui, _reel = _won_with_animation(monkeypatch, playing=True)
+    combat = next(b for b in ui.film.beats if b.kind == "combat")
+    assert combat.ms == config.FILM_COMBAT_MS == 0
+    assert ui.film.total_ms == combat.end      # nothing left to wait out
+
+
+def test_a_reel_comes_back_already_at_its_first_instant(monkeypatch):
+    """`main._primed`. A chained turn — play mode's or history's — is built inside
+    the per-frame update, past the point where a running film is stepped, so it is
+    drawn once before any `run_to` reaches it. Un-advanced, that frame draws every
+    continuing fleet a whole turn's worth of progress behind where it just was."""
+    _state, _ui, reel = _won_with_animation(monkeypatch, playing=True)
+    due = [e for at, e in reel.film.cues if at <= 0.0]
+    assert due and reel.at == len(due)
+    assert reel.run_to(0.0) == []              # ...nothing of it left to apply
+    flying = next(f for f in reel.board.fleets if f.owner_id == 1)
+    assert flying.turns_remaining == 0         # advanced, not still one turn out
+
+
+def test_the_deciding_turn_plays_out_before_the_camera_gives_the_map_away(monkeypatch):
+    """The snap that reveals the whole board is the deciding turn's *ending*.
+    Doing it first would play the last turn out on a map it had already given
+    away, and yank the frame out from under the fight being watched."""
+    state, ui, _reel = _won_with_animation(monkeypatch)
+    try:
+        assert ui.deferred_view_snap
+        assert ui.view.zoom == 2.0          # still framed where you were watching
+        main.land_film(state, ui)
+        assert ui.view.zoom == 1.0          # ...and revealed once it lands
+        assert not ui.deferred_view_snap and ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_skipping_the_last_film_still_reveals_the_board(monkeypatch):
+    """A skip must not be able to lose the reveal: `Ui.stop_film` deliberately
+    leaves the debt, and `main.land_film` — which both endings pass through —
+    pays it."""
+    state, ui, _ = _won_with_animation(monkeypatch)
+    try:
+        ui.stop_film()                      # what a press does, in `input`
+        assert ui.deferred_view_snap        # ...which is not the whole of it
+        assert ui.view.zoom == 2.0
+        main.land_film(state, ui)           # what the loop does on dropping the reel
+        assert ui.view.zoom == 1.0
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Pausing a playback (rather than skipping it)
+# --------------------------------------------------------------------------- #
+
+
+def test_play_toggle_does_not_skip_a_running_film():
+    """P (and its footer button) used to fall under the blanket "any press skips
+    a playback" rule, so pausing lost the animation just like any other key would.
+    It must not: `input` special-cases it so the film survives the press, and
+    `main.apply_toggle_play` is what actually freezes it (see the tests below)."""
+    state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+
+        ui.play_pause_rect = (100, 100, 120, 32)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_play_toggle_in_history_still_falls_through_to_the_scrubber():
+    """The history dispatch must still see this press — it is what actually flips
+    `ui.playing` — even though `input`'s top guard no longer discards the film for
+    it."""
+    state, ui = _setup()
+    try:
+        ui.history, ui.playing = True, True
+        ui.film = _a_film()
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p)
+        assert game_input.handle_event(ev, state, ui) == "toggle_play"
+        assert ui.film is not None
+    finally:
+        pygame.quit()
+
+
+def test_pausing_an_active_playthrough_freezes_the_film():
+    """Toggling play *off* while a film is running must not lose it — it should
+    freeze in place instead, so a paused review still shows what the turn did
+    rather than the plain board a skip leaves behind."""
+    _state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), True
+        main.apply_toggle_play(ui)
+        assert ui.playing is False
+        assert ui.film is not None
+        assert ui.film_paused is True
+    finally:
+        pygame.quit()
+
+
+def test_starting_play_while_a_manual_film_runs_does_not_freeze_it():
+    """A single manually-triggered film runs with `playing` False throughout (it
+    was never "playing" a sequence). Toggling play *on* in that state must leave it
+    running rather than pausing it — the button reads "Play", not "Pause"."""
+    _state, ui = _setup()
+    try:
+        ui.film, ui.playing = _a_film(), False
+        main.apply_toggle_play(ui)
+        assert ui.playing is True
+        assert ui.film is not None
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_stop_film_clears_a_pause_too():
+    _state, ui = _setup()
+    try:
+        ui.film, ui.film_paused = _a_film(), True
+        ui.stop_film()
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Chaining animated history turns with no gap between them
+# --------------------------------------------------------------------------- #
+
+
+def test_next_history_film_chains_straight_into_an_animated_turn(monkeypatch):
+    """Right after one turn's film lands, the turn after it should be ready to go
+    immediately if it also has something to show — no `PLAY_MS` gap stitched
+    between two animated turns."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        dest = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+
+        result = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert result is not None
+        assert ui.film is not None and ui.film.plays
+        assert ui.film_ms == 0.0
+        assert ui.film_paused is False
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_does_not_snap_a_continuing_fleet_back_a_turn(monkeypatch):
+    """A chained reel is handed straight to `render.draw` in the same frame it's
+    built — unlike a live End Turn, which always gets a `run_to` call first (see
+    `main`'s per-frame update) — so without applying this turn's launch/first
+    advance immediately, a continuing fleet would draw one frame at *last*
+    turn's un-advanced position: a visible snap back by a whole turn's worth of
+    progress before the next frame caught it back up. `_next_history_film` must
+    leave the reel already caught up to this instant.
+    """
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        dest = state.systems[0].neighbors[0]
+        # At the end of the turn just watched: 2 of 4 steps remaining.
+        state.fleets = [Fleet(owner_id=1, source_id=0, dest_id=dest, ships=5,
+                              turns_total=4, turns_remaining=2)]
+        end_of_last_turn_progress = state.fleets[0].progress_at(1.0)
+
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 1),))]]   # 2 -> 1 this turn
+
+        reel = main._next_history_film(ui, history_states, history_fog, history_events)
+        assert reel is not None
+        travel = ui.film.travel(0.0)   # what `render._travel` reads on this exact frame
+        assert reel.board.fleets[0].progress_at(travel) == end_of_last_turn_progress
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_never_lingers_on_combat(monkeypatch):
+    """History playback must glide continuously even through a fight — unlike a
+    live End Turn (`test_resolve_turn_lets_its_combat_linger`), it never asks
+    `turnfilm.film` to linger."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        source = state.systems[0].neighbors[0]
+        state.fleets = [Fleet(owner_id=2, source_id=source, dest_id=0, ships=7,
+                              turns_total=3, turns_remaining=1)]
+        landed = turnfilm.Landed(
+            node_id=0, fleets=(0,), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                                 defender_ships=6, winner=2, survivors=3),))
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [turnfilm.Advanced(((0, 0),)), landed]]
+
+        assert main._next_history_film(ui, history_states, history_fog, history_events)
+        combat = next(b for b in ui.film.beats if b.kind == "combat")
+        assert combat.ms == 0.0
+        assert ui.film.total_ms == combat.end   # no trailing hold either
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_is_none_for_a_quiet_turn():
+    """A turn with no events (or events that resolve to no watchable beats) must
+    not manufacture a film — the caller falls back to stepping it instantly."""
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_respects_the_animate_preference(monkeypatch):
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        ui.history_turn, ui.history_max = 0, 2
+        history_states = [state, state, state]
+        history_fog = [(set(state.systems), set(), {})] * 3
+        history_events = [[], [turnfilm.Advanced(((0, 2),))], []]
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None
+    finally:
+        pygame.quit()
+
+
+def test_next_history_film_archives_marks_even_with_the_animate_preference_off(monkeypatch):
+    """Mirrors `test_resolve_turn_archives_marks_even_with_the_animate_preference_off`
+    for history playback: no glide, but a fight's cost still gets its mark."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: False)
+    state, ui = _setup()
+    try:
+        landed = turnfilm.Landed(
+            node_id=0, fleets=(0,), was_owner=1, was_ships=6, owner_id=2, ships=3,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                                 defender_ships=6, winner=2, survivors=3),))
+        ui.history_turn, ui.history_max = 0, 1
+        history_states = [state, state]
+        history_fog = [(set(state.systems), set(), {})] * 2
+        history_events = [[], [landed]]
+
+        assert main._next_history_film(ui, history_states, history_fog, history_events) is None
+        assert ui.film is None                        # no glide
+        assert len(ui.fading_fights) == 1 and ui.fading_fights[0].node_id == 0
+    finally:
+        pygame.quit()
+
+
+def test_an_ordinary_turns_film_owes_no_snap(monkeypatch):
+    """Only the turn that crosses into a decided game (or a knocked-out human)
+    defers anything; every other film lands with the camera left alone."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        ui.view.zoom_at((600, 460), 2.0)
+        main.resolve_turn(state, ui, log=None)
+        assert state.winner is None
+        assert not ui.deferred_view_snap
+        main.land_film(state, ui)
+        assert ui.view.zoom == 2.0
+    finally:
+        pygame.quit()
+
+
+def test_a_film_carries_the_fog_the_turn_began_with(monkeypatch):
+    """`resolve_turn` refreshes the fog to the board it hands back, so the film
+    needs the earlier one alongside it — `Ui.sees` draws the union."""
+    monkeypatch.setattr(main.webstore, "animate_turns", lambda: True)
+    state, ui = _setup()
+    try:
+        main.refresh_fog(state, ui)
+        before = set(ui.visible)
+        for _ in range(12):     # play on until a turn has something to watch
+            reel = main.resolve_turn(state, ui, log=None)
+            if reel is not None:
+                break
+            before = set(ui.visible)
+        assert reel is not None
+        assert ui.film_visible == frozenset(before)
+        assert all(ui.sees(sid) for sid in before)
+        main.land_film(state, ui)
+        assert ui.film_visible == frozenset()   # additive: nothing to put back
+    finally:
+        pygame.quit()
+
+
+def test_a_click_at_the_origin_never_ends_the_turn_on_an_undrawn_button():
+    """Every rect test is guarded on the rect's width, including End Turn's.
+
+    `(0, 0, 0, 0)` is what a control that did not draw this frame is left as, and
+    `_point_in_rect` finds the point (0, 0) inside it — so an unguarded test is
+    live at exactly one pixel. `Ui` starts that way, and the loop polls events
+    before the first `render.draw`, so a press on the top-left pixel of the very
+    first frame used to end turn 0.
+    """
+    state, ui = _setup()
+    try:
+        assert ui.end_turn_rect == (0, 0, 0, 0)
+        assert ui.play_pause_rect == (0, 0, 0, 0)
+        assert _click_pos(state, ui, (0, 0)) is None
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_is_modal_and_names_the_seat_it_copies():
+    """A Copy row never touches the clipboard itself (that's main's job) — it
+    only names the seat on `Ui` and returns the action that asks for it — and
+    Continue clears the overlay outright, since nothing outside `Ui` needs
+    telling that it closed."""
+    state, ui = _setup()
+    try:
+        ui.pbp_invite = ((2, "https://game/#pbp=x:y"), (3, "https://game/#pbp=x:z"))
+        ui.pbp_invite_rects = {2: (10, 10, 40, 20), 3: (10, 40, 40, 20)}
+        ui.pbp_invite_close_rect = (10, 70, 40, 20)
+
+        # A click elsewhere on the board must not fall through to selection —
+        # the overlay is modal, exactly like history or a finished game.
+        assert _click(state, ui, next(iter(state.systems))) is None
+        assert ui.selected is None
+
+        assert _click_pos(state, ui, (30, 20)) == "pbp_copy_seat"
+        assert ui.pbp_copy_seat == 2
+
+        assert _click_pos(state, ui, (30, 80)) is None   # Continue
+        assert ui.pbp_invite == ()
+        assert ui.pbp_invite_rects == {}
+        assert ui.pbp_invite_close_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# UI size: the fit to the window, and the player's own size on top of it
+# --------------------------------------------------------------------------- #
+def test_ui_scale_fits_the_window_like_the_menu_does():
+    """The board grows with the window, as the menu's canvas does, so the two
+    stay in proportion; a window smaller than the baseline never shrinks it."""
+    base = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    assert main.ui_scale_for(base, False, 100) == 1.0
+    assert main.ui_scale_for((base[0] * 2, base[1] * 2), False, 100) == 2.0
+    assert main.ui_scale_for((base[0] * 2, base[1]), False, 100) == 1.0
+    assert main.ui_scale_for((800, 600), False, 100) == 1.0
+
+
+def test_ui_size_multiplies_the_fit_except_on_touch():
+    big = (config.BASE_SCREEN_W * 3 // 2, config.BASE_SCREEN_H * 3 // 2)
+    assert main.ui_scale_for(big, False, 125) == 1.5 * 1.25
+    assert main.ui_scale_for(big, True, 125) == 1.5 * config.TOUCH_UI_SCALE
+
+
+def test_ctrl_plus_minus_and_zero_set_the_ui_size():
+    def key(k, mod=pygame.KMOD_CTRL):
+        return main.ui_size_key(pygame.event.Event(pygame.KEYDOWN, key=k, mod=mod), 100)
+
+    assert key(pygame.K_EQUALS) == key(pygame.K_KP_PLUS) == 110
+    assert key(pygame.K_MINUS) == key(pygame.K_KP_MINUS) == 90
+    assert key(pygame.K_0) == 100
+    assert key(pygame.K_EQUALS, mod=0) is None   # plain −/+ still zooms the map
+    assert key(pygame.K_z) is None
+
+
+# --------------------------------------------------------------------------- #
+# A system split down several lanes
+# --------------------------------------------------------------------------- #
+def _split_setup():
+    """A human system with two lanes in a 50/50 split, open in the popup on the
+    first lane, with the panel drawn so its rects are recorded."""
+    from starconquest import render
+
+    state, ui = _setup()
+    home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+    state.systems[home].owner_id = 1
+    a, b = state.systems[home].neighbors[:2]
+    ui.visible = ui.seen = set(state.systems)
+    ui.auto_forward[home] = ForwardRule({a: 50, b: 50})
+    ui.edit_forward(state, home, a)
+    render._FONTS.clear()
+    render.draw(pygame.display.get_surface(), state, ui)
+    return state, ui, home, a, b
+
+
+def test_a_split_lanes_own_buttons_retune_that_lane():
+    state, ui, home, a, b = _split_setup()
+    try:
+        rows = {dest: (row, minus, plus) for dest, row, minus, plus in ui.share_rows}
+        assert set(rows) == {a, b}
+        _click_pos(state, ui, pygame.Rect(*rows[b][2]).center)       # + on b
+        step = config.FORWARD_STEP_PCT
+        assert ui.auto_forward[home].shares == {a: 50 - step, b: 50 + step}
+        assert ui.dest == b, "pressing a lane's buttons makes it the lane in focus"
+    finally:
+        pygame.quit()
+
+
+def test_tapping_a_split_row_moves_the_focus():
+    state, ui, home, a, b = _split_setup()
+    try:
+        row = next(r for dest, r, _m, _p in ui.share_rows if dest == b)
+        _click_pos(state, ui, (row[0] + 4, row[1] + row[3] // 2))     # the name end
+        assert ui.dest == b and ui.auto_forward[home].shares == {a: 50, b: 50}
+    finally:
+        pygame.quit()
+
+
+def test_even_split_and_delete_all_buttons():
+    state, ui, home, a, b = _split_setup()
+    try:
+        ui.auto_forward[home].shares = {a: 80, b: 20}
+        _click_pos(state, ui, pygame.Rect(*ui.even_split_rect).center)
+        assert ui.auto_forward[home].shares == {a: 50, b: 50}
+        _click_pos(state, ui, pygame.Rect(*ui.delete_all_rect).center)
+        assert home not in ui.auto_forward and ui.mode != CHOOSING
+    finally:
+        pygame.quit()
+
+
+def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
+    state, ui, home, a, b = _split_setup()
+    try:
+        ui.close_send()
+        _click_pos(state, ui, _lane_mid(state, ui, home, b))
+        assert ui.mode == CHOOSING and ui.forward_armed
+        assert (ui.selected, ui.dest) == (home, b)
     finally:
         pygame.quit()

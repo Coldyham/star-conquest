@@ -11,7 +11,6 @@ import heapq
 import random
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
 
 from . import config
 
@@ -112,6 +111,54 @@ def _dijkstra_by_turns(state: GameState, allowed: set[int],
     return dist, parent
 
 
+def cycle_nodes(graph: dict[int, list[int]], starts: set[int]) -> set[int]:
+    """Every node on a cycle of ``graph`` (node -> successors) that can be reached
+    from ``starts``: the members of each strongly connected component of more than
+    one node, or of one with an edge to itself (Tarjan, iterative, so a long chain
+    of rules can't hit the recursion limit)."""
+    index: dict[int, int] = {}
+    low: dict[int, int] = {}
+    stack: list[int] = []
+    on_stack: set[int] = set()
+    out: set[int] = set()
+
+    def visit(node: int) -> None:
+        index[node] = low[node] = len(index)
+        stack.append(node)
+        on_stack.add(node)
+
+    for root in sorted(starts):
+        if root in index:
+            continue
+        visit(root)
+        work = [(root, iter(graph.get(root, ())))]
+        while work:
+            node, succ = work[-1]
+            for nxt in succ:
+                if nxt not in index:
+                    visit(nxt)
+                    work.append((nxt, iter(graph.get(nxt, ()))))
+                    break
+                if nxt in on_stack:
+                    low[node] = min(low[node], index[nxt])
+            else:
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[node])
+                if low[node] == index[node]:
+                    comp = []
+                    while True:
+                        w = stack.pop()
+                        on_stack.discard(w)
+                        comp.append(w)
+                        if w == node:
+                            break
+                    if len(comp) > 1 or node in graph.get(node, ()):
+                        out.update(comp)
+    return out
+
+
 @dataclass
 class AiParams:
     """Per-seat tuning for the AI.
@@ -123,7 +170,7 @@ class AiParams:
     Every field but ``aux`` is read only by the built-in heuristic
     (``ai.compute_orders``). ``aux`` is the opposite: the core never interprets it,
     and each strategy is free to define its own meaning (``models/knower.py`` reads
-    it as search depth). See ``models/README.md``.
+    it as its Oracle mode: Off, Predict or Search). See ``models/README.md``.
     """
 
     reserve_fraction: float = config.AI_RESERVE_FRACTION
@@ -204,13 +251,70 @@ class Fleet:
     ships: int
     turns_total: int
     turns_remaining: int
-    route: Optional[list[int]] = None
+    route: list[int] | None = None
+    # Which parallel track of the lane this fleet flies on — see `free_lane_slot`,
+    # which hands one out at launch. Held for the whole flight, and the only
+    # cosmetic field here: nothing in the rules reads it, and it is deliberately
+    # not on the wire to external bots (`botio`).
+    lane_slot: int = 0
 
     def progress(self) -> float:
         """Fraction of the journey completed, in [0, 1] — for rendering."""
+        return self.progress_at(1.0)
+
+    def progress_at(self, t: float) -> float:
+        """Progress part-way through this turn's step: where the fleet stood when
+        the step began at ``t == 0``, and ``progress()`` at ``t == 1``.
+
+        The single place this arithmetic lives. ``engine._lane_span`` measures an
+        in-lane meeting with it and ``render`` draws with it, so a fight happens
+        exactly where the triangles are seen to touch.
+        """
         if self.turns_total <= 0:
             return 1.0
-        return 1.0 - self.turns_remaining / self.turns_total
+        return 1.0 - (self.turns_remaining + (1.0 - t)) / self.turns_total
+
+
+def lane_slot_at(rank: int) -> int:
+    """The ``rank``-th track outward from a lane's centre line: 0, -1, +1, -2, +2 …
+
+    Outward from the centre rather than spread across however many fleets there
+    are, so a track's position never depends on how many others exist.
+    """
+    if rank <= 0:
+        return 0
+    return -((rank + 1) // 2) if rank % 2 else (rank + 1) // 2
+
+
+def free_lane_slot(fleets: list[Fleet], a: int, b: int) -> int:
+    """The lowest unused track on the ``a``-``b`` lane, for a fleet launching now.
+
+    A fleet is *given* a track and keeps it until it leaves the board, which is the
+    whole point of storing one: a slot computed from a fleet's rank among whoever
+    happens to be on the lane re-packs the moment a lane-mate launches or arrives,
+    and every fleet still in transit visibly steps sideways. Since a track is only
+    freed by the fleet holding it leaving, two fleets on a lane never share one.
+
+    Both directions draw from the same pool, because fleets running opposite ways
+    pass through each other and that is the case the separation exists for.
+
+    The cost of holding a track is that a fleet whose lane-mates have gone keeps
+    flying one step off the centre line rather than sliding back onto it — a
+    stationary offset instead of a jump, and it heals as soon as the next fleet
+    launches into the freed centre.
+
+    Cannot be derived instead of stored: the launch turn is recoverable from
+    ``turn - (turns_total - turns_remaining)``, but turn playback applies those two
+    at different cues, so a track derived from it would shift mid-animation.
+    """
+    lane = lane_key(a, b)
+    taken = {f.lane_slot for f in fleets
+             if lane_key(f.source_id, f.dest_id) == lane}
+    for rank in range(len(taken) + 1):   # distinct candidates, so one must be free
+        slot = lane_slot_at(rank)
+        if slot not in taken:
+            return slot
+    return 0  # pragma: no cover - unreachable by the count above
 
 
 @dataclass
@@ -224,6 +328,124 @@ class Order:
 
 
 @dataclass
+class ForwardRule:
+    """A system's standing forwarding: hold back ``hold`` ships, then send each lane
+    its share of what is left, every turn. ``shares`` maps destination id to a whole
+    percent; they total at most 100, and whatever they leave stays home.
+
+    Dict order is the order lanes were added; the share helpers below break ties
+    by it, so it is part of the rule rather than an accident of storage.
+    """
+
+    shares: dict[int, int] = field(default_factory=dict)
+    hold: int = 0
+
+    def total(self) -> int:
+        return sum(self.shares.values())
+
+
+def _apportion(weights: list[int], total: int, start: int = 0) -> list[int]:
+    """Whole numbers in proportion to ``weights`` summing to exactly ``total``
+    (largest remainder). Equal remainders go to the earliest index counting round
+    from ``start``. Integer arithmetic throughout, so no float can tip a tie."""
+    wsum = sum(weights)
+    n = len(weights)
+    if total <= 0 or wsum <= 0:
+        return [0] * n
+    parts, rems = [], []
+    for w in weights:
+        q, r = divmod(w * total, wsum)
+        parts.append(q)
+        rems.append(r)
+    order = sorted(range(n), key=lambda i: (-rems[i], (i - start) % n))
+    for i in order[: total - sum(parts)]:
+        parts[i] += 1
+    return parts
+
+
+def _is_even(shares: dict[int, int]) -> bool:
+    """An even split, to within the one percent rounding leaves (34/33/33)."""
+    return not shares or max(shares.values()) - min(shares.values()) <= 1
+
+
+def forward_split(surplus: int, shares: dict[int, int], turn: int) -> dict[int, int]:
+    """Ships each lane of a rule sends this turn, out of ``surplus`` (the ships left
+    once the hold is kept back). Whatever the shares leave is a share of its own, so
+    it takes part in the rounding. A ship that could go either way rotates with
+    ``turn``, so a 50/50 split of an odd surplus alternates rather than always
+    favouring the first lane."""
+    if not shares:
+        return {}
+    home = -1  # never a system id
+    live = [(d, p) for d, p in [*shares.items(), (home, 100 - sum(shares.values()))] if p > 0]
+    out = dict.fromkeys(shares, 0)
+    if live:
+        parts = _apportion([p for _, p in live], max(0, surplus), turn % len(live))
+        out.update((d, n) for (d, _), n in zip(live, parts) if d != home)
+    return out
+
+
+def shares_with(shares: dict[int, int], dest: int) -> dict[int, int]:
+    """``shares`` with a lane to ``dest`` added: it gets an even cut of what is being
+    sent and the others shrink in proportion, so 100 becomes 50/50 becomes 34/33/33,
+    and a lone 50% becomes 25/25 with the other half still home. A rule that sends
+    nothing at all splits 100% instead, or the new lane would be born idle."""
+    if dest in shares:
+        return dict(shares)
+    if not shares:
+        return {dest: 100}
+    n = len(shares)
+    total = sum(shares.values()) or 100
+    weights = [1] * (n + 1) if _is_even(shares) else [s * n for s in shares.values()] + [total]
+    return dict(zip([*shares, dest], _apportion(weights, total)))
+
+
+def shares_without(shares: dict[int, int], dest: int) -> dict[int, int]:
+    """``shares`` with the lane to ``dest`` removed and its share handed back to the
+    others, so removing a lane undoes adding it: 50/50 becomes 100, 34/33/33 becomes
+    50/50."""
+    rest = [d for d in shares if d != dest]
+    if not rest:
+        return {}
+    weights = [shares[d] for d in rest]
+    if _is_even(shares) or not any(weights):
+        weights = [1] * len(rest)
+    return dict(zip(rest, _apportion(weights, sum(shares.values()))))
+
+
+def shares_set(shares: dict[int, int], dest: int, pct: int) -> dict[int, int]:
+    """``shares`` with ``dest``'s share moved toward ``pct`` (0-100). Raising it
+    takes from what stays home first, then from the other lanes in proportion, so
+    there is never a "full" state to back out of; lowering it gives the difference
+    back to staying home."""
+    if dest not in shares:
+        return dict(shares)
+    out = dict(shares)
+    cur = shares[dest]
+    pct = max(0, min(100, pct))
+    if pct <= cur:
+        out[dest] = pct
+        return out
+    need = pct - cur
+    from_home = min(need, max(0, 100 - sum(shares.values())))
+    others = [d for d in shares if d != dest]
+    pool = sum(shares[d] for d in others)
+    taken = min(need - from_home, pool)
+    out[dest] = cur + from_home + taken
+    if taken:
+        for d, s in zip(others, _apportion([shares[d] for d in others], pool - taken)):
+            out[d] = s
+    return out
+
+
+def shares_even(shares: dict[int, int]) -> dict[int, int]:
+    """``shares`` split evenly over the same total (100 when it was nothing)."""
+    if not shares:
+        return {}
+    return dict(zip(shares, _apportion([1] * len(shares), sum(shares.values()) or 100)))
+
+
+@dataclass
 class GameState:
     systems: dict[int, System] = field(default_factory=dict)
     lanes: dict[frozenset[int], Lane] = field(default_factory=dict)
@@ -233,12 +455,16 @@ class GameState:
     turn: int = 0
     seed: int = 0
     mode: str = "random"
-    winner: Optional[int] = None
+    winner: int | None = None
     rng: random.Random = field(default_factory=random.Random)
+    # Which family of combat dice this board rolls (`engine._Dice`): a shared match
+    # stamps its own (`pbp.seat_people`), so playing its seed alone shows nothing
+    # of the dice it will roll.
+    dice_salt: str = "dice"
 
     # -- construction ------------------------------------------------------- #
     @classmethod
-    def new(cls, seed: int, mode: str = "random") -> "GameState":
+    def new(cls, seed: int, mode: str = "random") -> GameState:
         return cls(seed=seed, mode=mode, rng=random.Random(seed))
 
     def add_lane(self, a: int, b: int, length_ly: float, travel_turns: int) -> None:
@@ -257,7 +483,7 @@ class GameState:
             self.systems[lane.b].neighbors.append(lane.a)
 
     # -- queries ------------------------------------------------------------ #
-    def travel_turns(self, a: int, b: int) -> Optional[int]:
+    def travel_turns(self, a: int, b: int) -> int | None:
         """Turns to cross the a-b lane if launched *now*, or None if not adjacent.
 
         ``Lane.travel_turns`` (and ``adjacency``) hold the mapgen-time value; with
@@ -291,11 +517,21 @@ class GameState:
         player = self.players.get(pid)
         return player is not None and not player.alive
 
-    def human(self) -> Optional[Player]:
+    def human(self) -> Player | None:
         for p in self.players.values():
             if p.is_human:
                 return p
         return None
+
+    def humans(self) -> list[Player]:
+        """Every seat a person holds, lowest id first.
+
+        ``human()`` answers the single-seat question the shell has always asked
+        and stays correct for it; this is the one to ask when more than one seat
+        can be a person's (play-by-post, hotseat), where "the" human seat is not
+        a well-formed question.
+        """
+        return [p for _, p in sorted(self.players.items()) if p.is_human]
 
     def fleets_incoming(self, dest_id: int) -> list[Fleet]:
         return [f for f in self.fleets if f.dest_id == dest_id]

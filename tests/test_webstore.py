@@ -13,7 +13,8 @@ import json
 import pytest
 
 from starconquest import paths, webstore
-from starconquest.paths import WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY
+from starconquest.paths import (WEB_ANIMATE_TURNS_KEY, WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY,
+                               WEB_UI_SIZE_KEY)
 
 
 @pytest.fixture(autouse=True)
@@ -176,7 +177,7 @@ def test_copy_link_reports_failure_when_the_clipboard_is_refused(monkeypatch):
 
 def test_quitting_ends_the_loop_off_the_web():
     """Off the browser a confirmed quit really does exit."""
-    import main
+    from starconquest import main
 
     assert main.leave_app() is True
 
@@ -186,7 +187,7 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
     on a dead black canvas that only a force-close escapes. So a web quit asks the
     browser to close the window and reports that we're still running, letting main
     fall back to the setup menu instead of tearing the display down."""
-    import main
+    from starconquest import main
 
     tried = []
     monkeypatch.setattr(main.paths, "is_web", lambda: True)
@@ -197,36 +198,8 @@ def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
 
 # --- finding the leaderboard from where we are -------------------------------- #
 #
-# The two halves are separate Netlify sites whose names differ by one string, and
-# Netlify names every deploy `<context>--<site>.netlify.app` from the same context
-# on both — so a preview can find its own sibling instead of being configured.
-def test_the_sibling_site_is_derived_across_every_deploy_context():
-    add = lambda host: paths.sibling_host(host, "-leaderboard", add=True)   # noqa: E731
-    assert add("star-conquest.netlify.app") == "star-conquest-leaderboard.netlify.app"
-    assert (add("deploy-preview-42--star-conquest.netlify.app")
-            == "deploy-preview-42--star-conquest-leaderboard.netlify.app")
-    assert (add("some-branch--star-conquest.netlify.app")
-            == "some-branch--star-conquest-leaderboard.netlify.app")
-
-
-def test_the_rule_runs_backwards_for_the_board_finding_the_game():
-    """`leaderboard/js/config.mjs` implements the same rule the other way; this
-    pins that the two are inverses, since nothing can check them against each
-    other at runtime."""
-    drop = lambda host: paths.sibling_host(host, "-leaderboard", add=False)  # noqa: E731
-    for host in ("star-conquest.netlify.app",
-                 "deploy-preview-42--star-conquest.netlify.app"):
-        assert drop(paths.sibling_host(host, "-leaderboard", add=True)) == host
-
-
-def test_a_host_the_rule_cannot_read_falls_back_rather_than_guessing():
-    """A custom domain, a local server or a host already in the wanted state: the
-    caller uses the configured origin instead, which is what desktop always does."""
-    for host in ("example.com", "localhost", "starconquest.example.org", "",
-                 "star-conquest-leaderboard.netlify.app"):   # already the board
-        assert paths.sibling_host(host, "-leaderboard", add=True) == ""
-
-
+# The board and its functions are served by the game's own site, so on a
+# `.netlify.app` page every deploy context answers for itself.
 def test_off_the_web_the_configured_origin_is_used():
     assert webstore.leaderboard_origin() == paths.LEADERBOARD_ORIGIN
     assert webstore.leaderboard_url("/api/log") == f"{paths.LEADERBOARD_ORIGIN}/api/log"
@@ -237,14 +210,70 @@ def test_a_blank_origin_disables_every_leaderboard_feature(monkeypatch):
     assert webstore.leaderboard_url("/api/log") == ""
 
 
-def test_on_the_web_the_endpoint_follows_the_page(monkeypatch):
-    """The whole point: a deploy preview of the game posts to the deploy preview
-    of the board, with nothing edited by hand between them."""
+def _on_page(monkeypatch, hostname):
     class _Window:
-        location = type("L", (), {"hostname": "deploy-preview-7--star-conquest.netlify.app"})
+        location = type("L", (), {"hostname": hostname})
 
     monkeypatch.setattr(webstore, "is_web", lambda: True)
     monkeypatch.setitem(__import__("sys").modules, "platform",
                         type("P", (), {"window": _Window()}))
-    assert webstore.leaderboard_url("/api/log") == (
-        "https://deploy-preview-7--star-conquest-leaderboard.netlify.app/api/log")
+
+
+def test_on_the_web_the_endpoint_is_the_pages_own(monkeypatch):
+    """The whole point: a deploy preview posts to its own functions, with
+    nothing edited by hand between them."""
+    for host in ("star-conquest.netlify.app",
+                 "deploy-preview-7--star-conquest.netlify.app",
+                 "some-branch--star-conquest.netlify.app"):
+        _on_page(monkeypatch, host)
+        assert webstore.leaderboard_url("/api/log") == f"https://{host}/api/log"
+
+
+def test_a_host_that_is_not_netlify_falls_back_to_the_configured_origin(monkeypatch):
+    """A local server or a custom domain has no functions of its own to call."""
+    for host in ("localhost", "127.0.0.1", "starconquest.example.org", ""):
+        _on_page(monkeypatch, host)
+        assert webstore.leaderboard_origin() == paths.LEADERBOARD_ORIGIN
+
+
+# --- the "animate turns" display preference ---------------------------------- #
+def test_animate_turns_is_on_until_it_is_switched_off():
+    """On by default: an absent key, and anything stored but a literal "0", reads
+    as on — only an explicit "0" (what `set_animate_turns(False)` writes) reads
+    off, which is what makes the tri-state encoding necessary for a preference
+    that defaults *on* (unlike `share_games`'s plain ``""``-for-off)."""
+    assert webstore.animate_turns() is True
+    webstore.set(WEB_ANIMATE_TURNS_KEY, "sure")
+    assert webstore.animate_turns() is True
+    webstore.set(WEB_ANIMATE_TURNS_KEY, "1")   # a legacy explicit-on value
+    assert webstore.animate_turns() is True
+
+
+def test_animate_turns_round_trips_and_can_be_switched_back_on():
+    assert webstore.set_animate_turns(False) is True
+    assert webstore.animate_turns() is False
+    assert webstore.set_animate_turns(True) is True
+    assert webstore.animate_turns() is True
+
+
+# --- the UI size preference -------------------------------------------------- #
+def test_ui_size_is_100_until_set_and_round_trips():
+    assert webstore.ui_size() == 100
+    assert webstore.set_ui_size(125) is True
+    assert webstore.ui_size() == 125
+
+
+def test_a_stored_ui_size_off_the_steps_reads_as_the_nearest_step():
+    """Every value read back is one the stepper can step from."""
+    for stored, read in (("130", 125), ("9000", webstore.UI_SIZES[-1]),
+                         ("1", webstore.UI_SIZES[0]), ("big", 100), ("", 100)):
+        webstore.set(WEB_UI_SIZE_KEY, stored)
+        assert webstore.ui_size() == read
+
+
+def test_stepping_the_ui_size_stops_at_either_end():
+    first, last = webstore.UI_SIZES[0], webstore.UI_SIZES[-1]
+    assert webstore.step_ui_size(100, +1) == 110
+    assert webstore.step_ui_size(100, -1) == 90
+    assert webstore.step_ui_size(first, -1) == first
+    assert webstore.step_ui_size(last, +1) == last

@@ -39,7 +39,7 @@ def pick(rng: random.Random, count: int) -> list[str]:
 
     Deterministic given the RNG state, which is what keeps a seed reproducing a
     whole map — names included. If a map ever wants more systems than the
-    catalogue has names (it cannot today: ``config.MAX_NODES`` is far smaller),
+    catalogue has names (it cannot today: ``config.MAX_NODES`` is well short of it),
     the surplus is numbered rather than left blank.
     """
     if count <= len(NAMES):

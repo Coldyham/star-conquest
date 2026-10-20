@@ -26,7 +26,8 @@ SCHEMA = ROOT / "leaderboard" / "schema.sql"
 FUNCTIONS = ROOT / "leaderboard" / "netlify" / "functions"
 
 # What each caller verb needs to be granted.
-_PYTHON_CALLS = {"select": {"select"}, "upsert": {"insert", "update"}, "delete": {"delete"}}
+_PYTHON_CALLS = {"select": {"select"}, "upsert": {"insert", "update"}, "insert": {"insert"},
+                 "update": {"update"}, "delete": {"delete"}}
 
 
 def _granted(role: str) -> dict[str, set[str]]:
@@ -62,13 +63,32 @@ def _python_uses() -> set[tuple[str, str]]:
 
 
 def _function_uses() -> set[tuple[str, str]]:
-    """...and the pairs the Netlify functions need, read off their REST paths."""
+    """...and the pairs the Netlify functions need, read off their REST paths.
+
+    Two shapes, because the functions write queries two ways. `log.mjs` and
+    `replay.mjs` fetch a whole `/rest/v1/<table>` URL inline; `pbp.mjs` builds
+    `/rest/v1` once in a helper and passes `"/<table>?…"` to it, which the first
+    pattern cannot see at all. Missing the second would make this test *pass
+    vacuously* for that function — the precise failure it exists to prevent, so
+    it is worth the second regex rather than a convention nobody can enforce.
+
+    The privilege is inferred from the method in the same window. PATCH is read
+    as an update: PostgREST spells one that way, and `pbp_matches` is the only
+    relation on this board that is ever updated at all.
+    """
     uses = set()
     for path in sorted(FUNCTIONS.glob("*.mjs")):
         text = path.read_text()
-        for match in re.finditer(r"/rest/v1/(\w+)", text):
-            window = text[match.start(): match.start() + 400]
-            uses.add((match.group(1), "insert" if '"POST"' in window else "select"))
+        for pattern in (r"/rest/v1/(\w+)", r"""call\(\s*[`"']/(\w+)"""):
+            for match in re.finditer(pattern, text):
+                window = text[match.start(): match.start() + 400]
+                if '"PATCH"' in window:
+                    privilege = "update"
+                elif '"POST"' in window:
+                    privilege = "insert"
+                else:
+                    privilege = "select"
+                uses.add((match.group(1), privilege))
     return uses
 
 
@@ -83,24 +103,165 @@ def test_the_schema_grants_everything_the_worker_reads_and_writes():
         " only for the worker, which is why nothing on the site would show it.")
 
 
+
+def _public_uses() -> set[str]:
+    """Relations the tools read with the publishable key, through
+    `config_census.public_rows`, which no worker grant covers."""
+    uses = set()
+    for path in sorted((ROOT / "tools").glob("*.py")):
+        uses.update(re.findall(r'public_rows\(\s*"([a-z_]+)"', path.read_text()))
+    return uses
+
+
+def test_the_schema_grants_anon_what_the_tools_read_publicly():
+    granted = _granted("anon")
+    missing = sorted(rel for rel in _public_uses() if "select" not in granted.get(rel, set()))
+    assert _public_uses(), "no public_rows reads found: has the helper moved?"
+    assert not missing, ("schema.sql does not grant anon select on: " + ", ".join(missing)
+                         + ". These tools read with the publishable key, so a missing "
+                         "grant fails them outright.")
+
+
+def _views() -> dict[str, tuple[bool, set[str]]]:
+    """``{view: (security_invoker, {relation it reads, …})}``, out of schema.sql."""
+    out = {}
+    for name, invoker, body in re.findall(
+            r"^create or replace view public\.(\w+)\s*(with \(security_invoker = true\))?"
+            r"\s*as\b(.*?);\s*$", SCHEMA.read_text(), re.MULTILINE | re.DOTALL):
+        out[name] = (bool(invoker), set(re.findall(r"public\.(\w+)\b(?!\s*\()", body)) - {name})
+    return out
+
+
+def _invoker_reads(start: set[str]) -> set[str]:
+    """Every relation a ``security_invoker`` view reads, on any view chain out of
+    ``start``. Postgres checks those against the role running the query, however
+    deep the view sits: an owner-rights view above it lends out only its own
+    direct reads. So the caller needs a grant on each of them as well."""
+    views, needed, seen, todo = _views(), set(), set(), list(start)
+    while todo:
+        rel = todo.pop()
+        if rel in seen or rel not in views:
+            continue
+        seen.add(rel)
+        invoker, reads = views[rel]
+        if invoker:
+            needed |= reads
+        todo.extend(reads)
+    return needed
+
+
+@pytest.mark.parametrize("role", ["service_role", "anon"])
+def test_a_role_can_read_what_its_invoker_views_read(role):
+    """`public_watchable_replays` -> `public_replays` -> `game_embargoes` ->
+    `campaign_games`: the last hop is checked as the caller, and service_role had
+    no grant on it, so every Watch link answered "lookup failed" while the board
+    (whose anon key had the grant) looked fine."""
+    granted = _granted(role)
+    if role == "service_role":
+        start = {rel for rel, priv in _python_uses() | _function_uses() if priv == "select"}
+    else:
+        start = {rel for rel, privs in granted.items() if "select" in privs}
+    missing = sorted(rel for rel in _invoker_reads(start)
+                     if "select" not in granted.get(rel, set()))
+    assert not missing, f"schema.sql does not grant {role} select on: {', '.join(missing)}"
+
+
+def test_the_view_scrape_sees_the_chain():
+    views = _views()
+    assert views["game_embargoes"] == (True, {"games", "campaign_games"})
+    assert views["public_replays"][0] is False
+    assert "campaign_games" in _invoker_reads({"public_watchable_replays"})
+
 def test_the_scrape_actually_found_the_callers():
     """A regex that silently matches nothing would make the test above vacuous."""
     uses = _python_uses() | _function_uses()
     assert ("game_logs", "select") in uses          # verify_scores / position_suite
     assert ("game_logs", "insert") in uses          # netlify/functions/log.mjs
-    assert ("public_replays", "select") in uses     # netlify/functions/replay.mjs
+    assert ("public_watchable_replays", "select") in uses  # netlify/functions/replay.mjs
     assert ("bot_scores", "insert") in uses         # bot_replay's upsert
+    assert ("pbp_matches", "select") in uses        # netlify/functions/pbp.mjs
+    assert ("pbp_matches", "insert") in uses        # ...which opens a match
+    assert ("pbp_orders", "insert") in uses         # ...and takes a submission
+    assert ("admin_actions", "insert") in uses      # tools/admin.py's audit row
+    assert ("pbp_matches", "update") in uses        # ...and a seat's token rewritten
     assert len(uses) >= 8
 
 
-@pytest.mark.parametrize("relation", ["game_logs", "public_replays"])
+@pytest.mark.parametrize("relation",
+                         ["game_logs", "public_replays", "public_watchable_replays",
+                          "pbp_matches", "pbp_orders", "admin_actions"])
 def test_a_replay_is_never_granted_to_the_public(relation):
     """The other half of the rule, and the one that matters more: `game_logs` is
-    readable by nobody but the worker, and `public_replays` lends out only the
-    replays a posted score already points at."""
+    readable by nobody but the worker, `public_replays` lends out only the
+    replays a posted score already points at, and `public_watchable_replays`
+    (the union `replay.mjs` actually reads) has no grant to the public at all —
+    everything it can serve is already reachable some other way (`public_replays`
+    directly, or a bot's own `bot_scores` row), so it needs no door of its own.
+
+    The two `pbp_*` tables are here for a different reason: they are the only
+    mutable rows on this board, and a seat token is the only thing that decides
+    who may move a seat's ships. An anon grant on either would hand that away, so
+    like `game_logs` they are reachable through one function and nowhere else."""
     public = _granted("anon")
     assert "insert" not in public.get(relation, set())
     assert "update" not in public.get(relation, set())
     assert "delete" not in public.get(relation, set())
-    if relation == "game_logs":
-        assert public.get(relation, set()) == set(), "an uploaded replay is not public"
+    if relation in ("game_logs", "public_watchable_replays", "pbp_matches", "pbp_orders",
+                    "admin_actions"):
+        assert public.get(relation, set()) == set(), f"{relation} is not directly public"
+
+
+def _view_columns(view: str) -> list[str]:
+    """The column list `create or replace view public.<view>` selects, in order,
+    as written (``l.rules_version`` -> ``rules_version``)."""
+    match = re.search(
+        rf"create or replace view public\.{view} as\s*\nselect(?: distinct on \([^)]*\))?\s*\n\s*(.+?)\n",
+        SCHEMA.read_text())
+    assert match is not None, f"{view} not found in {SCHEMA}"
+    return [col.strip().rsplit(".", 1)[-1] for col in match.group(1).split(",")]
+
+
+def test_a_views_new_columns_land_after_its_old_ones():
+    """`create or replace view` only accepts an *existing* view's columns back
+    unchanged in name, order and type; a new one has to be appended at the end or
+    Postgres refuses the whole statement (it reads as renaming/retyping whatever
+    column now sits where the new one was inserted). That already happened once
+    here: `rules_version` was added ahead of `log` in `public_replays`, which
+    would fail silently from a caller's point of view — the *old* view is left in
+    place, and every later query for the new column errors and is swallowed by
+    `game.mjs`'s `.catch(() => [])`, taking down every replay's Watch link, not
+    just a new one's.
+
+    Pinned against the shipped column order rather than history, since that is
+    the one thing a future column addition could get wrong the same way.
+    """
+    assert _view_columns("public_replays") == [
+        "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
+    ]
+    # public_watchable_replays unions this view with bot_scores, so its own
+    # column list is the same trap waiting for the same reason.
+    assert _view_columns("public_watchable_replays") == [
+        "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
+    ]
+
+
+def test_the_public_cannot_choose_when_a_score_was_posted():
+    """counted_scores and public_replays trust `scores.submitted_at`, so the
+    public's insert on scores is granted column by column and never on that one.
+    The table grant is revoked first, since a revoke after would take the column
+    grants with it, and every column the submit page sends is granted."""
+    text = SCHEMA.read_text()
+    table_grants = re.findall(r"^grant insert on (.+?) to ", text, re.MULTILINE | re.DOTALL)
+    assert not any("public.scores" in {r.strip() for r in rels.split(",")}
+                   for rels in table_grants)
+    revoke = text.index("revoke insert on public.scores from anon, authenticated;")
+    grant = re.search(r"^grant insert \(([^)]*)\) on public\.scores to anon, authenticated;",
+                      text, re.MULTILINE)
+    assert grant is not None and revoke < grant.start()
+    columns = {c.strip() for c in grant.group(1).split(",")}
+    assert "submitted_at" not in columns
+    submit = (ROOT / "leaderboard" / "js" / "submit.mjs").read_text()
+    body = re.search(r'insert\("scores", \{(.*?)\n\s*\}, \{', submit, re.DOTALL)
+    assert body is not None, "the submit page's score insert has moved"
+    sent = set(re.findall(r"^\s*(\w+):", body.group(1), re.MULTILINE))
+    assert sent and sent <= columns, f"not granted: {sorted(sent - columns)}"

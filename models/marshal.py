@@ -43,7 +43,127 @@ What it changes, in descending order of measured value:
   * **It prices a target against whoever will be holding it.** ``_required`` reads
     the fleets a *third* player already has on the lane, not just the owner's own
     reinforcements, so a system its owner has evacuated ahead of an incoming stack
-    is not mistaken for a free one. Structurally inert in a duel.
+    is not mistaken for a free one. Structurally inert in a duel. A bloc landing
+    on the same turn as us is priced as one we fight ourselves, since the
+    garrison fights last: correct, rare, and a measured null.
+
+  * **A doomed system isn't always doomed.** Re-tuned for production landing
+    before combat and a multi-owner pile-up folding attackers against each other
+    before the garrison: a turn's arrivals are folded by owner
+    (``_attacker_pileup``) instead of summed, and a system that can't clear the
+    safe margin but still matches its attackers at raw parity holds rather than
+    flees — a certain loss beats nothing next to a fight no worse than even.
+    Worth 52.0% (z = +2.31, pooled duels) against the bot without it, and a much
+    wider gap once a third owner is actually on the board to fold against.
+
+  * **A finished strike stops attracting reinforcements — for a neutral.**
+    Phase 3b used to keep pouring a source's whole remaining budget into any
+    ``struck`` target, even one already fully covered by a wave sent turns ago
+    and still travelling — a lone neutral several hops down an empty branch
+    could be re-flooded every turn until that wave landed. Gated on there being
+    a genuine gap (``shortfall > 0``) left beyond what is already inbound. The
+    same bookkeeping lets a frontier system whose only neighbours are
+    now-settled neutrals stop holding a reserve nothing can ever threaten, so
+    its surplus leapfrogs to a real front instead of idling. Deliberately
+    scoped to neutral targets only: gating a *rival*-held target the same way
+    measured a real regression at high ``DEFENDER_ADVANTAGE`` (down to 45.1%,
+    z = -2.91) — ``_enemy_margin`` prices a rival attack with no jitter cushion
+    of its own, and the old bug was accidentally supplying that cushion for
+    free on the (rarer, but advantage-correlated) fights that don't end in a
+    flee. A neutral has no such gap; ``_neutral_margin`` prices its jitter
+    honestly already. Small in a duel once correctly scoped (an honest ~50%
+    null); a real, repeatable gap in melees, where dead-end branches are more
+    common and the freed surplus has somewhere real to go (220 vs 179 in one
+    4-player cell). A rival siege is gated too once its strike is
+    ``RIVAL_REFLOOD_MIN_TURNS`` (5) turns out — a long-lane regime the
+    advantage regression never reached: 55.2% over the bot without it
+    (z = +4.05, three slow cells), structurally inert at the default speed.
+
+  * **Phase 4 does not flow surplus into a system Phase 2 is giving up this
+    same turn.** ``live_frontier``/``_flow_to_front`` used to seed and route
+    through the full ``doomed - saved`` set built at Phase 1/2, so a rear
+    system's surplus and a doomed garrison's retreat routinely crossed in
+    flight and the surplus landed on the enemy a turn or two later — 38
+    ships/player/game at 24 nodes / 6 ly-per-turn. ``giving_up`` is now
+    subtracted from both ``live_frontier`` and the ``owned`` set the BFS
+    routes through. Worth 60.6% pooled (z = 14.01, REPRODUCED) in combination
+    with the next two fixes — see "A non-oracle successor to marshal" below.
+
+  * **A visible strike is priced against the relief that could reach the
+    garrison.** ``_required`` priced a target against its own garrison, its
+    owner's in-flight reinforcements and its production over the flight, but
+    never against a calm neighbour the owner could still move in during the
+    turns the strike is visible — 81-84% of marshal's lost full-price strikes
+    met a garrison grown since launch. ``_relief_capacity`` sums the garrisons
+    of the target owner's systems that could reach it inside the strike's
+    visibility window (``dist - 1`` turns; a 1-turn strike is never visible at
+    all), weighted by ``RELIEF_AWARE`` against a rival target only, and
+    ``_relief_in_flight`` adds the owner's fleets landing next door that could
+    turn round and land first, weighted by ``RELIEF_IN_FLIGHT``. Board
+    facts only — never a rival's decision rule — so the bot still commits to
+    a strict non-oracle contract.
+
+  * **A guard across a 1-turn lane is a sunk cost, not a deterrent.**
+    ``_max_adjacent_enemy`` sized the frontier guard off the largest adjacent
+    rival garrison regardless of lane length, but a 1-turn strike lands the
+    turn it launches — the garrison it is sized against never sees it coming,
+    so the guard it funds cannot change the outcome. 73% of garrisons that
+    died to a 1-turn strike were at or under their own guard. A rival reachable
+    in exactly one turn is now weighted by ``FAST_GUARD_WEIGHT``; bit-identical
+    to the unweighted figure wherever no adjacent lane is 1 turn.
+
+  * **The surplus leaves the door shut behind it, on a long lane.** In about a
+    fifth of marshal's strikes on a rival, the target's owner launches out of
+    that target into our source on the same turn — neither sees the other's
+    orders — and both systems change hands. Phase 3b now pours surplus only
+    down to what the source needs to hold against the target's whole garrison
+    stepping in (``DENY_SWAP``), and only across a lane of at least
+    ``DENY_SWAP_MIN_TURNS``: 57% at 3 ly/turn, an honest null at the default
+    speed, bit-identical at 12. Capping Phase 3's priced strike as well reads
+    33% — see "Denying the swap" in `docs/design/marshal-flow.md`.
+
+  * **It feeds what it has just taken, on a board of short lanes.** Phase 4
+    used to flow the rear's surplus to whichever front was nearest; a front
+    short of the largest rival stack beside it now gets it first, and a front
+    with leftover budget tops up a short neighbour (``FEED``, ``FEED_FRONT``).
+    That is what the people who beat marshal on the leaderboard do, and it is
+    worth 54.0% (z = +4.04, REPRODUCED) where the median lane is two turns or
+    less. At ``FEED`` 3 or more nearly every front facing a rival counts as short, so
+    the rear feeds those alone, and it now runs on every board
+    (``FEED_MAX_TURNS`` 0): level with a three-turn cap against the roster, and
+    sooner against the weak bots. See "What the board's human wins say" in
+    `docs/design/marshal-flow.md`.
+
+  * **The pour leaves more at home than the strike does.** The guard is the
+    floor for every phase that spends, but Phase 3b's surplus pour is what
+    thins a front, so it stops at ``POUR_GUARD`` of the same rival stack, above
+    the guard the priced strike stops at. Re-tuned together with ``FEED``,
+    ``FEED_MAX_TURNS`` and ``RELIEF_AWARE`` against marshal, knower and actuary
+    at once (2026-10-17): +4.7 points over the bot before it (z = +15.1;
+    +2.9, +3.8 and +6.8 against each), and ahead in three- and four-seat
+    free-for-alls. See "Screening against the roster" in
+    `docs/design/marshal-joint.md`.
+
+  * **Nine constants are tuned jointly, by CMA-ES against the roster.**
+    ``tools/const_train.py`` searched twelve of them against marshal, knower
+    and actuary at once; the nine that carry the gain shipped (2026-10-20):
+    +5.5 points over the bot before it (z = +13.1; +3.9, +1.7 and +9.8
+    against each), and ahead in three- and four-seat free-for-alls. Most of it
+    is a pickier price on neutrals (``NEUTRAL_MARGIN``), more weight on relief
+    already in flight (``RELIEF_IN_FLIGHT``) and no defend pad. See
+    `docs/design/marshal-cma.md`.
+
+  * **A strike on a stack spends the guard kept against it.** The guard is a
+    share of the largest rival stack next door, and that stack is usually the
+    one being struck: held back from the strike on itself, by every source that
+    borders it, it deadlocked a front at any income ratio short of about 1.55.
+    ``SPARE_TARGET`` lets a priced strike on a rival spend the part of the guard
+    that only the target called for, and keeps the guard against every other
+    stack. Against heuristic, rusherplus and thinker it ends two thirds of the
+    games marshal left unfinished at turn 600; against stock marshal and knower
+    it gains, and against actuary it is level, where dropping the guard outright
+    loses 8.2 points. See "marshal: sparing the target and feeding on every
+    board" in `docs/design/win-turns.md`.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads state, never mutates it,
 and draws nothing from ``state.rng`` — every tie-break is deterministic. There is
@@ -51,16 +171,22 @@ no module state at all; never add any, because knower calls this function dozens
 of times per real turn on fictional boards (``_predict_seat``, ``_rollout_decide``)
 and would poison it.
 
-**Everything measured about this bot lives in `docs/bot-design.md` under
-"``models/marshal.py`` and what the measurements deleted"**: where it stands
+**Everything measured about this bot lives in `docs/design/marshal.md`,
+`marshal-pricing.md`, `marshal-flow.md` and `marshal-joint.md`** (the first says
+which holds what): where it stands
 against the roster, the guard and margin sweeps, why the attack margin no longer
 carries a jitter premium (garrisons evacuate rather than fight, so it was paid on
 a fight that mostly never happens), the ideas that were built, measured and then
-deleted, the known hole in its own guard, why — under "Two doomed neighbours" —
-the retreat rule leads on distance and the doomed are offered to each other
-before anyone else, and — under "Racing a third player for the same system" —
+deleted, why its empty interior is the retreat rule rather than a hole in the
+guard, why — under "Two doomed neighbours" — the retreat rule leads on distance
+and the doomed are offered to each other before anyone else, and — under "Racing a third player for the same system" —
 why the third-party reprice stops at rival-held targets and is deliberately not
-applied to neutral ones. Don't re-add one of those, or
+applied to neutral ones. **"A non-oracle successor to marshal"** covers the three
+most recent additions — the abandoned-flow fix, relief-aware pricing and the
+fast-guard weight — including the leave-one-out measurement confirming each
+contributes to the combination rather than one carrying the other two, and the
+cross-opponent checks against knower and thinker that ruled out relief-aware
+pricing making the bot too cautious. Don't re-add one of those, or
 re-tune a constant below, without a measurement — and read the note there on
 paired null cells before running one, because the older tables were measured
 against a null that drifted between 43% and 52%.
@@ -85,18 +211,28 @@ from starconquest.model import Order
 # advantage and nothing else, because a garrison that can be beaten evacuates
 # rather than fighting 86.7% of the time. See `_enemy_margin`.
 # `FRONTIER_GUARD` is marshal's own, no longer thinker's: see "The 2026-09 tuning
-# sweep" in `docs/bot-design.md` for what it was measured at, and note that its
-# gain is a default-ship-speed result.
+# sweep" in `docs/design/marshal.md` for what it was measured at, and note that its
+# gain is a default-ship-speed result. The values below were last tuned together
+# by CMA-ES: see `docs/design/marshal-cma.md`.
 TUNED_SWING = 1.1 / 0.9         # the +/-10% swing these margins were fitted at:
                                 # a floor under the live edge, never an answer
-DEFEND_PAD = 0.05
+DEFEND_PAD = 0.0
 NEUTRAL_PAD = 0.05
 
-NEUTRAL_MARGIN = 1.3            # neutrals are static — a flat cushion suffices
-OVERWHELM = 2.0                 # a doomed system only sorties if this out-numbered
+NEUTRAL_MARGIN = 1.53           # neutrals are static — a flat cushion suffices
+RISK_PARITY = 0.94              # last-resort fallback once a doomed system also
+                                 # can't be saved by Phase 2's consolidation: hold
+                                 # anyway at this share of raw parity, rather than
+                                 # evacuate for certain — see the Phase 1 loop and
+                                 # `_enemy_arrivals`.
+OVERWHELM = 1.08                # a doomed system only sorties if this out-numbered
 RESERVE_FLOOR = 0               # never strip an unthreatened system below this
-FRONTIER_GUARD = 0.55           # fraction of the scariest adjacent enemy held home
-BEYOND_DECAY = 0.35             # weight on the richest system one hop past a target
+FRONTIER_GUARD = 0.72           # fraction of the scariest adjacent enemy held home
+POUR_GUARD = 0.85               # ...and the floor a frontier source keeps under
+                                 # Phase 3b's surplus pour; only a value above
+                                 # FRONTIER_GUARD bites. See "Screening against the
+                                 # roster" in docs/design/marshal-joint.md
+BEYOND_DECAY = 0.64             # weight on the richest system one hop past a target
 
 RIVAL_WEDGE = 1.0               # penalty per rival past the first bordering a target
 WEDGE_MIN_PLAYERS = 4           # ...applied only in a field this crowded
@@ -105,6 +241,55 @@ RESERVE_PINCER = True           # hold a stagger's nearer wave for its own targe
 CONSOLIDATE = True              # Phase 2: the doomed relieve each other
 AVOID_ABANDONED = True          # ...and never retreat into one that is still doomed
 RETREAT_NEAREST = True          # ...and retreat by travel time, not garrison size
+
+# --- see "A non-oracle successor to marshal" in docs/design/marshal-flow.md - #
+FLOW_AVOIDS_ABANDONED = True    # Phase 4: don't flow surplus into a system
+                                 # Phase 2 is giving up this same turn
+RELIEF_AWARE = 0.85             # _required: price a rival target against a
+                                 # calm neighbour's garrison too, weighted by this
+RELIEF_IN_FLIGHT = 0.87         # ...and a fleet landing next door that could
+                                 # turn round and land first, weighted by this
+FAST_GUARD_WEIGHT = 0.0         # _max_adjacent_enemy: weight a 1-turn-lane
+                                 # rival by this — a strike across it is never
+                                 # visible, so 0.0 ignores it entirely
+DENY_SWAP = 1.0                # Phase 3b: a strike on a rival leaves its
+                                 # source able to hold this fraction of the
+                                 # target's garrison stepping back into it
+DENY_SWAP_SURPLUS_ONLY = True   # ...capping only the surplus pour, never
+                                 # Phase 3's priced strike (that reads 33%)
+DENY_SWAP_MIN_TURNS = 4         # ...and only across a lane at least this long
+RIVAL_REFLOOD_MIN_TURNS = 5     # Phase 3: stop re-flooding a covered *rival*
+                                 # siege too, when its horizon is at least this
+                                 # many turns; 0 = never (neutrals only). See
+                                 # "Phase 3b re-flooding" in docs/design/marshal-flow.md
+FEED = 3.73                     # Phase 4: rear surplus flows only to frontier
+                                 # systems short of this fraction of their
+                                 # largest rival neighbour, while any are; 0 = off.
+                                 # From about 2 up nearly every front facing a
+                                 # rival is short, so the ratio stops binding
+FEED_FRONT = True               # ...and a frontier system's own leftover tops up
+                                 # a short neighbour, up to its shortfall
+FEED_MAX_TURNS = 0              # ...only on a board whose median lane is at most
+                                 # this many turns; 0 = on any board. See "Feed
+                                 # what was just taken" in docs/design/marshal-flow.md,
+                                 # "Screening against the roster" in
+                                 # docs/design/marshal-joint.md for 3.0, and
+                                 # docs/design/win-turns.md for 0
+HOLD_FOLLOW = 0.0               # Phase 3c: while a strike is in flight, send a
+                                 # follow-up timed to land between the capture and
+                                 # the earliest counter, sized to hold this fraction
+                                 # of the largest rival stack next to the target;
+                                 # 0 = off. See "Holding a capture before the
+                                 # counter" in docs/design/marshal-flow.md
+REMNANT = True                  # _required: a neutral a rival breaks before we
+                                 # land is priced against the nominal remnant when
+                                 # that is cheaper...
+REMNANT_MAX_PLAYERS = 2         # ...while at most this many players are alive:
+                                 # significant in duels, leaning worse in 3-seat
+                                 # games with knower. See "Racing a third player
+                                 # for the same system" in docs/design/marshal-pricing.md
+SPARE_TARGET = True             # Phase 3: a priced strike on a rival spends the
+                                 # guard its source keeps against that same target
 
 
 # --------------------------------------------------------------------------- #
@@ -149,7 +334,7 @@ def _enemy_margin() -> float:
 
     This deletes `ENEMY_NEAR`, `ENEMY_FAR` and `NEAR_PAD`, all three of them
     measured figures — see "Garrisons run away, so the jitter premium buys almost
-    nothing" in `docs/bot-design.md` for the ten cells behind that, and note that
+    nothing" in `docs/design/marshal-pricing.md` for the ten cells behind that, and note that
     the ramp's own regime (3 ly/turn, where `ENEMY_FAR` was the only live term) is
     where removing it gains the *most*, at 63.1%.
     """
@@ -204,7 +389,7 @@ def _richness(state, pid, system, max_prod: int) -> float:
     a preference only binds when the budget forces a choice — 10.4% of the time.
     Inverting this sort entirely costs about two points, which caps what anything
     routed through it can be worth. See "Rushing the enemy" in
-    `docs/bot-design.md`, and note the cap applies to the *sort*: `_wedge` is
+    `docs/design/marshal-pricing.md`, and note the cap applies to the *sort*: `_wedge` is
     worth 12-14 points through this same function because it also steers
     `_front_pull` and the `_flow_to_front` seeding.
     """
@@ -229,14 +414,21 @@ def _first_strike(state, pid, sid) -> int:
 
 
 def _enemy_arrivals(state, pid, sid) -> list[tuple[int, int]]:
-    """Enemy ships reaching ``sid`` by each strike turn, as (turn, cumulative)."""
-    by_turn: dict[int, int] = defaultdict(int)
+    """Enemy ships reaching ``sid`` by each strike turn, as (turn, cumulative).
+
+    Same-turn arrivals from different owners fold against each other before
+    ever facing us — ``combat.resolve_arrival``'s multi-owner rule — so a
+    turn's own wave is ``_attacker_pileup`` of that turn's owners, not their
+    raw sum. Summing would price a fleet as if it landed intact when a rival's
+    fleet, landing the same turn, is what actually ground it down first.
+    """
+    by_turn: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
     for f in state.fleets:
         if f.dest_id == sid and f.owner_id != pid:
-            by_turn[max(1, f.turns_remaining)] += f.ships
+            by_turn[max(1, f.turns_remaining)][f.owner_id] += f.ships
     cum, out = 0, []
     for t in sorted(by_turn):
-        cum += by_turn[t]
+        cum += _attacker_pileup(list(by_turn[t].values()))
         out.append((t, cum))
     return out
 
@@ -255,13 +447,23 @@ def _production_by(s, turns: int) -> int:
     return (s.prod_progress + turns) // s.production
 
 
-def _max_adjacent_enemy(state, pid, sysobj) -> int:
-    """Largest garrison next door belonging to a real rival. Neutrals never attack."""
-    best = 0
+def _max_adjacent_enemy(state, pid, sysobj, skip=None) -> float:
+    """Largest garrison next door belonging to a real rival, ``skip`` aside.
+    Neutrals never attack.
+
+    A rival reachable in exactly one turn is weighted by ``FAST_GUARD_WEIGHT``:
+    a strike across a 1-turn lane lands the turn it launches, so the garrison
+    it is sized against never sees it coming and the guard it funds cannot
+    change the outcome. At weight 1.0 this is the unweighted figure.
+    """
+    best = 0.0
     for n in sysobj.neighbors:
         o = state.systems[n]
-        if o.owner_id != pid and o.owner_id != 0:
-            best = max(best, o.ships)
+        if o.owner_id != pid and o.owner_id != 0 and n != skip:
+            weight = 1.0
+            if FAST_GUARD_WEIGHT != 1.0 and (state.travel_turns(sysobj.id, n) or 99) == 1:
+                weight = FAST_GUARD_WEIGHT
+            best = max(best, o.ships * weight)
     return best
 
 
@@ -303,6 +505,91 @@ def _after_clash(garrison: int, striker: int) -> int:
     return max(p.nominal.survivors, p.best.survivors, p.worst.survivors)
 
 
+def _attacker_clash(a: int, b: int) -> int:
+    """Worst-case surviving ships when two *enemy* forces collide before either
+    reaches us. Nobody holds the ground yet — ``combat.resolve_arrival`` folds
+    attackers together with a ``defender_owner`` that matches neither of them —
+    so ``DEFENDER_ADVANTAGE`` applies to neither side. Same pessimistic corner
+    as ``_after_clash``, just with the advantage pinned at 1.0.
+    """
+    if a <= 0:
+        return b
+    if b <= 0:
+        return a
+    p = combat.preview_fight(a, b, config.COMBAT_JITTER, 1.0)
+    return max(p.nominal.survivors, p.best.survivors, p.worst.survivors)
+
+
+def _attacker_pileup(forces: list[int]) -> int:
+    """Worst-case ships left to face our garrison once every enemy owner
+    landing on ``sid`` this turn has folded strongest-first among themselves.
+
+    11 and 10 arriving together are not 21 at our gate: they are whatever
+    survives an 11-vs-10 clash first, and the loser's remnant (if any) then
+    faces that. Folded in the engine's own order — raw count, largest first —
+    since jitter only ever swings *who* wins a pairing, never which two fight.
+    """
+    ships = sorted(forces, reverse=True)
+    if not ships:
+        return 0
+    cur = ships[0]
+    for nxt in ships[1:]:
+        cur = _attacker_clash(cur, nxt)
+    return cur
+
+
+def _relief_capacity(state, target, warning: int) -> int:
+    """Ships the target's owner could still move in from a calm neighbour
+    before we land, given ``warning`` turns of visibility.
+
+    Board facts only — whose systems are calm and how far they are from the
+    target — never a rival's decision rule. A neighbour counts in full
+    regardless of whether it is itself threatened elsewhere: reading that
+    would mean re-deriving a rival's own defensive arithmetic, which the
+    non-oracle rule excludes. See ``RELIEF_AWARE`` and "A non-oracle successor
+    to marshal" in `docs/design/marshal-flow.md`.
+    """
+    if warning <= 0:
+        return 0
+    owner = target.owner_id
+    total = 0
+    for n in target.neighbors:
+        o = state.systems[n]
+        if o.owner_id == owner and (state.travel_turns(target.id, n) or 99) <= warning:
+            total += o.ships
+    return total
+
+
+def _relief_in_flight(state, target, warning: int) -> int:
+    """Ships the target's owner has on a lane into a neighbour that could land
+    there, take it if it must, and still come back before we land.
+
+    A fleet landing in ``r`` turns relaunches on turn ``r``, so it reaches the
+    target ``r + d`` turns out over a ``d``-turn lane back; our strike lands
+    ``warning + 1`` turns out. Fleets landing on one system on one turn pool, as
+    the engine pools them, and a neighbour the owner does not hold costs the
+    pool the fight it has there, read at ``_after_clash``'s corner (the one that
+    leaves the relief the most).
+    """
+    owner = target.owner_id
+    pools: dict[tuple[int, int], int] = defaultdict(int)
+    for f in state.fleets:
+        if f.owner_id == owner and f.dest_id != target.id and f.dest_id in target.neighbors:
+            back = state.travel_turns(f.dest_id, target.id) or 99
+            if f.turns_remaining + back <= warning + 1:
+                pools[(f.dest_id, f.turns_remaining)] += f.ships
+    total = 0
+    for (n, r), ships in pools.items():
+        held = state.systems[n]
+        if held.owner_id == owner:
+            total += ships
+            continue
+        garrison = held.ships + (_production_by(held, r) if held.owner_id != 0 else 0)
+        p = combat.preview_fight(ships, garrison, config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+        total += p.best.attacker_survivors
+    return total
+
+
 def _required(state, pid, target, dist: int) -> int:
     """Ships needed to be *sure* of taking ``target`` when arriving in ``dist`` turns.
 
@@ -338,24 +625,228 @@ def _required(state, pid, target, dist: int) -> int:
     freshly-emptied node on the same turn, which ``decide()`` cannot see for
     either side since every seat is priced against one shared, unmutated
     start-of-turn state. Repricing the strict remainder measures null. See
-    "Racing a third player for the same system" in `docs/bot-design.md`, which
+    "Racing a third player for the same system" in `docs/design/marshal-pricing.md`, which
     also records why a pessimistic remnant estimate hides the converse
     opportunity entirely.
+
+    A rival-held target at ``dist >= 2`` is priced against relief, too: a
+    strike is visible for ``dist - 1`` turns before it lands, which is exactly
+    the window a calm neighbour has to move in, and 81-84% of marshal's lost
+    full-price strikes met a garrison grown since launch. ``_relief_capacity``
+    reads only board facts (whose neighbouring systems are calm, how far they
+    are), never a rival's decision rule, so this stays inside the same
+    non-oracle contract as everything else here. Weighted by ``RELIEF_AWARE``;
+    see "A non-oracle successor to marshal" in `docs/design/marshal-flow.md`.
+
+    Third-party blocs follow the engine's pile-up rule. One landing *before* us
+    fights the garrison alone, so it is folded into ``defence``, per turn
+    through ``_attacker_pileup`` when several owners land together. One landing
+    on the *same* turn as us never meets the garrison first: attackers fold
+    among themselves and the garrison fights last, so it is fought by us, and
+    ``_through_pileup`` prices the strike that still arrives with enough.
+    Shipped for correctness at a measured null, since it changes about one price
+    in a thousand. See "The attack side of the pile-up" in
+    `docs/design/marshal-pricing.md`.
     """
     ships = target.ships
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
-        return max(ships + 1, math.ceil(ships * _neutral_margin()))
+        static = max(ships + 1, math.ceil(ships * _neutral_margin()))
+        if REMNANT and _alive_players(state) <= REMNANT_MAX_PLAYERS:
+            return min(static, _remnant_price(state, pid, target, dist))
+        return static
     defence = (ships + _inbound(state, target.id, target.owner_id, dist)
                + _production_by(target, dist))
-    for _turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
-        defence = _after_clash(defence, incoming)
-    return max(defence + 1, math.ceil(defence * _enemy_margin()))
+    if RELIEF_AWARE > 0:
+        defence += math.ceil(RELIEF_AWARE * _relief_capacity(state, target, dist - 1))
+    if RELIEF_IN_FLIGHT > 0:
+        defence += math.ceil(RELIEF_IN_FLIGHT * _relief_in_flight(state, target, dist - 1))
+    by_turn: dict[int, list[int]] = defaultdict(list)
+    for turn, _owner, incoming in _rival_waves(state, pid, target.id, dist):
+        by_turn[turn].append(incoming)
+    alongside = by_turn.pop(dist, [])
+    for turn in sorted(by_turn):
+        defence = _after_clash(defence, _attacker_pileup(by_turn[turn]))
+    need = max(defence + 1, math.ceil(defence * _enemy_margin()))
+    return _through_pileup(need, alongside)
+
+
+def _alive_players(state) -> int:
+    return sum(1 for p in state.players.values() if p.alive and not p.is_neutral)
+
+
+def _remnant_price(state, pid, target, dist: int) -> float:
+    """What a neutral costs if rival blocs land on it before we do: each
+    earlier turn's pile-up fights the garrison at the *nominal* roll, and a
+    rival that takes it builds from the turn after. The pessimistic corner
+    (``_after_clash``) would price the same dice twice under ``_enemy_margin``
+    and erase the opportunity, so this one branch reads the middle of the
+    square. Infinite when nobody lands first."""
+    blocs: dict[int, list[int]] = defaultdict(list)
+    for turn, _owner, incoming in _rival_waves(state, pid, target.id, dist - 1):
+        blocs[turn].append(incoming)
+    if not blocs:
+        return math.inf
+    garrison, held_since = target.ships, None
+    for turn in sorted(blocs):
+        p = combat.preview_fight(_attacker_pileup(blocs[turn]), garrison,
+                                 config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+        garrison = p.nominal.survivors
+        if p.nominal.winner == combat.ATTACKER:
+            held_since = turn if held_since is None else held_since
+    if held_since is None:
+        return max(garrison + 1, math.ceil(garrison * _neutral_margin()))
+    if target.production > 0:
+        garrison += (dist - held_since - 1) // target.production
+    return max(garrison + 1, math.ceil(garrison * _enemy_margin()))
+
+
+def _shortfalls(state, pid, fronts, sends) -> dict[int, int]:
+    """Frontier systems short of ``FEED`` times their largest rival neighbour,
+    counting this turn's sends in and out and our fleets already inbound.
+
+    A garrison sized to the stack beside it is what keeps a capture: a system
+    just taken from a rival usually borders the garrison that fled it, and
+    whatever is left on it after the strike moves on is what that garrison
+    counts. Neutral neighbours never strike, so a front facing only neutrals is
+    never short.
+    """
+    sysmap = state.systems
+    out_of: dict[int, int] = defaultdict(int)
+    into: dict[int, int] = defaultdict(int)
+    for (src, dst), n in sends.items():
+        out_of[src] += n
+        into[dst] += n
+    short: dict[int, int] = {}
+    for sid in fronts:
+        s = sysmap[sid]
+        threat = max((sysmap[n].ships for n in s.neighbors
+                      if sysmap[n].owner_id not in (pid, 0)), default=0)
+        if threat <= 0:
+            continue
+        have = (s.ships - out_of[sid] + into[sid]
+                + _incoming(state, sid, pid, hostile=False))
+        need = math.ceil(FEED * threat) - have
+        if need > 0:
+            short[sid] = need
+    return short
+
+
+def _short_lanes(state) -> bool:
+    """Whether the board's median lane is within ``FEED_MAX_TURNS`` — re-timed
+    for the current turn, so ship-speed growth can switch it on mid-match."""
+    if FEED_MAX_TURNS <= 0:
+        return True
+    turns = sorted(state.travel_turns(a, b) or 1
+                   for a, b in (tuple(key) for key in state.lanes))
+    return turns[len(turns) // 2] <= FEED_MAX_TURNS
+
+
+def _hold_follow(state, pid, budget, sends, threatened_set) -> None:
+    """Phase 3c: top up each capture still in flight so it holds the counter.
+
+    Phase 1 relieves only systems we own, against fleets already launched, so
+    its help lands in time only across a lane strictly shorter than the
+    attacker's. A capture is neither owned nor yet attacked while our strike is
+    in flight, and a counter launched the turn it lands is met by nothing. This
+    sends the follow-up ahead of the counter instead: from a neighbour whose
+    lane lands it no earlier than the strike (so it never arrives alone, ahead
+    of the strike) and no later than the earliest a rival stack next door could
+    land if it launched now, sized to ``HOLD_FOLLOW`` times the largest such
+    stack (or rival fleet already bound there), less what the strike is sure to
+    leave standing and what earlier follow-ups bring. Board facts only.
+    """
+    sysmap = state.systems
+    ours: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    theirs: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for f in state.fleets:
+        if sysmap[f.dest_id].owner_id == pid:
+            continue
+        side = ours if f.owner_id == pid else theirs
+        side[f.dest_id][max(1, f.turns_remaining)] += f.ships
+    for tid in sorted(ours):
+        target = sysmap[tid]
+        land = min(ours[tid])
+        stacks = [(state.travel_turns(n, tid) or 99, sysmap[n].ships)
+                  for n in target.neighbors
+                  if sysmap[n].owner_id not in (pid, 0) and sysmap[n].ships > 0]
+        late = sum(n for t, n in theirs[tid].items() if t > land)
+        threat = max([late] + [ships for _, ships in stacks])
+        if threat <= 0:
+            continue
+        soonest = min((t for t, _ in stacks), default=land)
+        deadline = max(land, soonest)
+        # What the strike is sure to leave: the garrison it lands on is the
+        # current one, plus its production and every rival ship landing with or
+        # before it (pessimistic: a third party's would fight the owner first).
+        garrison = target.ships + sum(n for t, n in theirs[tid].items() if t <= land)
+        if target.owner_id != 0:
+            garrison += _production_by(target, land)
+        p = combat.preview_fight(ours[tid][land], garrison,
+                                 config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE)
+        if p.worst.winner != combat.ATTACKER:
+            continue  # not a sure capture yet: Phase 3 is still pricing it
+        held = p.worst.survivors + sum(n for t, n in ours[tid].items()
+                                       if land < t <= deadline)
+        need = math.ceil(HOLD_FOLLOW * threat * _defend_margin()) - held
+        for sid in sorted((s for s in target.neighbors
+                           if sysmap[s].owner_id == pid and s not in threatened_set
+                           and budget.get(s, 0) > 0
+                           and land <= (state.travel_turns(s, tid) or 99) <= deadline),
+                          key=lambda s: (-budget[s], s)):
+            if need <= 0:
+                break
+            send = min(budget[sid], need)
+            sends[(sid, tid)] += send
+            budget[sid] -= send
+            need -= send
+
+
+def _pileup_survivors(ours: int, rivals: list[int]) -> int:
+    """Worst-case ships ``ours`` carries out of a same-turn attacker fold.
+
+    ``combat.resolve_arrival`` folds every attacker landing on a turn pairwise,
+    strongest-first, with no ``DEFENDER_ADVANTAGE`` between them, and only the
+    survivor meets the garrison. We are one of those attackers, so a rival bloc
+    landing *with* us is fought by us, not by the garrison. Our side takes the
+    unlucky corner of each clash it is in; a clash between two rivals leaves the
+    most behind (``_attacker_clash``). Ties sort us after a rival of equal size.
+    """
+    sides = sorted([(n, 1) for n in rivals] + [(ours, 0)], reverse=True)
+    cur, mine = sides[0][0], sides[0][1] == 0
+    for n, tag in sides[1:]:
+        if not mine and tag:
+            cur = _attacker_clash(cur, n)
+            continue
+        us, them = (cur, n) if mine else (n, cur)
+        roll = combat.preview_fight(us, them, config.COMBAT_JITTER, 1.0).worst
+        if roll.winner != combat.ATTACKER:
+            return 0
+        cur, mine = roll.survivors, True
+    return cur if mine else 0
+
+
+def _through_pileup(need: int, rivals: list[int]) -> int:
+    """Fewest ships that still bring ``need`` to the garrison after folding
+    through ``rivals`` — the blocs landing on the same turn as us."""
+    if not rivals:
+        return need
+    hi = need + 2 * sum(rivals) + 1
+    while _pileup_survivors(hi, rivals) < need:
+        hi *= 2
+    lo = need
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _pileup_survivors(mid, rivals) >= need:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
 
 
 # --------------------------------------------------------------------------- #
 # Movement
 # --------------------------------------------------------------------------- #
-def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
+def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset(), risk_ok: bool = False):
     """Route a doomed system's whole garrison to the most useful place — or hold.
 
     ``abandoned`` is the rest of this turn's doomed set (minus whatever
@@ -365,6 +856,14 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
     with the biggest garrison, which for each of two doomed neighbours is the
     other, so the pair trades garrisons down one lane and both systems end the
     turn empty in front of the fleets that were already coming.
+
+    ``risk_ok`` (see ``RISK_PARITY``) says the garrison already here, unaided,
+    matches or beats what's coming at every horizon — just not by the safe,
+    jitter-padded margin Phase 1 required to leave it alone outright. A capture
+    of our own (branch a) is still worth more than a coin flip at home and
+    keeps first claim; short of that, standing is a fight no worse than even,
+    which beats both retreating (a certain loss of the system) and (b)/(c)'s
+    reasoning about a fight that *is* lost.
     """
     sysmap = state.systems
     ships = s.ships
@@ -383,6 +882,9 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
         caps.sort(reverse=True)
         return Order(pid, s.id, caps[0][2], ships)
 
+    if risk_ok:
+        return None
+
     # (b) Retreat to the nearest refuge, then the most defensible one (biggest
     #     garrison, richest front). Distance leads because a retreat is the one
     #     move with no timing to it: the ships are not racing an arrival, they are
@@ -390,7 +892,7 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
     #     garrison size alone — so a whole garrison could be posted down a
     #     six-turn lane to the biggest stack we own while a refuge one turn away
     #     went unused. Worth more than the pooling below (52.0%, z = +3.34); see
-    #     "Two doomed neighbours" in `docs/bot-design.md`.
+    #     "Two doomed neighbours" in `docs/design/marshal-pricing.md`.
     friends = [n for n in s.neighbors
                if sysmap[n].owner_id == pid and n not in abandoned]
     if friends:
@@ -399,8 +901,8 @@ def _evacuate(state, pid, s, max_prod: int, abandoned=frozenset()):
             -sysmap[n].ships, -_front_pull(state, pid, n, max_prod), n))
         return Order(pid, s.id, friends[0], ships)
 
-    # (c) Cornered. Only sortie if truly overwhelmed; otherwise hold — a garrison
-    #     kills more attackers than a doomed strike on a weak neighbour would.
+    # (c) Cornered. Sortie at the weakest enemy neighbour once out-numbered by
+    #     ``OVERWHELM``; otherwise hold.
     enemy_in = _incoming(state, s.id, pid, hostile=True)
     friend_in = _incoming(state, s.id, pid, hostile=False)
     if enemy_in > OVERWHELM * (ships + friend_in):
@@ -513,6 +1015,20 @@ def _flow_to_front(state, owned, frontier, pid, max_prod) -> dict[int, int]:
 # --------------------------------------------------------------------------- #
 # The planner
 # --------------------------------------------------------------------------- #
+def _gates_reflood(target, horizon: int) -> bool:
+    """Whether a target already covered by inbound stops being fed in Phase 3b.
+
+    Always for a neutral. For a rival-held siege only once the strike's horizon
+    reaches `RIVAL_REFLOOD_MIN_TURNS`: gating every rival siege measured 45.1%
+    at `DEFENDER_ADVANTAGE 1.5` (the re-flood is the jitter cushion
+    `_enemy_margin` leaves out), but on a lane of 5+ turns the gate is worth
+    ~55% over `DENY_SWAP` alone, and no default-speed lane is that long.
+    """
+    if target.owner_id == 0:
+        return True
+    return 0 < RIVAL_REFLOOD_MIN_TURNS <= horizon
+
+
 def decide(state, pid):
     sysmap = state.systems
     owned = [sid for sid, s in sysmap.items() if s.owner_id == pid]
@@ -528,14 +1044,24 @@ def decide(state, pid):
     sends: dict[tuple[int, int], int] = defaultdict(int)
 
     # --- Phase 0: base budgets — spendable ships after each system's guard --- #
+    # The guard is the floor for every spending phase but Phase 3b's surplus
+    # pour, which stops at the higher `POUR_GUARD` of the same rival stack: the
+    # pour is what thins a front, and the priced strike wants the lower floor.
     budget: dict[int, int] = {}
+    pour_floor: dict[int, int] = {}
+    held: dict[int, int] = {}   # frontier sid -> ships its guard keeps out of budget
     for sid in owned:
         s = sysmap[sid]
+        threat = (_max_adjacent_enemy(state, pid, s)
+                  if sid in frontier and max(FRONTIER_GUARD, POUR_GUARD) > 0 else 0)
         if sid in frontier and FRONTIER_GUARD > 0:
-            guard = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(state, pid, s))
+            guard = math.ceil(FRONTIER_GUARD * threat)
             budget[sid] = max(0, s.ships - max(RESERVE_FLOOR, guard))
+            held[sid] = s.ships - budget[sid]
         else:
             budget[sid] = max(0, s.ships - RESERVE_FLOOR)
+        if sid in frontier and POUR_GUARD > FRONTIER_GUARD:
+            pour_floor[sid] = math.ceil(POUR_GUARD * threat)
 
     # --- Phase 1: arrival-aware defence -------------------------------------- #
     # A system hit along a long lane can amass defence over several turns, so
@@ -550,17 +1076,18 @@ def decide(state, pid):
                                      -_incoming(state, sid, pid, hostile=True)))
     doomed: list[int] = []
     deficits: dict[int, tuple[int, int]] = {}   # doomed sid -> (ships short, deadline)
+    risk_ok: set[int] = set()           # doomed, but safe to just hold — see Phase 3
     for sid in threatened:
         s = sysmap[sid]
         margin = _defend_margin()
-        worst, t_bind = 0, None
+        worst, worst_risk, t_bind = 0, 0, None
         for t, ecum in _enemy_arrivals(state, pid, sid):
-            deficit = (math.ceil(ecum * margin)
-                       - _production_by(s, t) - _inbound(state, sid, pid, t))
+            covered = _production_by(s, t) + _inbound(state, sid, pid, t)
+            deficit = math.ceil(ecum * margin) - covered
             if deficit > 0 and t_bind is None:
                 t_bind = t
-            if deficit > worst:
-                worst = deficit
+            worst = max(worst, deficit)
+            worst_risk = max(worst_risk, math.ceil(ecum * RISK_PARITY) - covered)
         if worst <= 0:
             continue  # production + ships already inbound cover it
         if worst <= s.ships:
@@ -579,9 +1106,17 @@ def decide(state, pid):
         if sum(budget[n] for n in helpers) < need:
             # Can't be saved out of the rear. Phase 2 gets one more go at it with
             # the doomed themselves as donors, so keep what it would have to
-            # cover and by when; failing that, it is abandoned there.
+            # cover and by when; failing that, it is abandoned there — unless
+            # the garrison already here, with no help borrowed from anywhere,
+            # clears the bare (un-padded) parity bar on its own, in which case
+            # Phase 3 holds rather than flees it. Recorded here and not acted on
+            # yet: a richer neighbour pooling this garrison in (Phase 2) is a
+            # deliberately measured, shipped tactic and must still get first
+            # claim on it, same as before this existed.
             doomed.append(sid)
             deficits[sid] = (need, deadline)
+            if worst_risk <= s.ships:
+                risk_ok.add(sid)
             continue
         budget[sid] = 0               # hold the whole garrison and pull the rest
         for h in helpers:
@@ -600,14 +1135,18 @@ def decide(state, pid):
     # to retreat into.
     saved, donated = _consolidate(state, pid, doomed, deficits,
                                   threatened_set, budget, sends)
-    abandoned = (frozenset(sid for sid in doomed if sid not in saved)
-                 if AVOID_ABANDONED else frozenset())
+    # Independent of AVOID_ABANDONED (which only governs where _evacuate will
+    # retreat to): this is every system this turn's Phase 2 is giving up,
+    # regardless, for Phase 4's FLOW_AVOIDS_ABANDONED below to see.
+    giving_up = frozenset(sid for sid in doomed if sid not in saved)
+    abandoned = giving_up if AVOID_ABANDONED else frozenset()
     for sid in doomed:
         if sid not in saved and sid not in donated:
-            order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned)
+            order = _evacuate(state, pid, sysmap[sid], max_prod, abandoned,
+                              risk_ok=sid in risk_ok)
             if order is not None:
                 sends[(order.source_id, order.dest_id)] += order.ships
-        budget[sid] = 0  # retreat or hold to inflict casualties — don't drain it
+        budget[sid] = 0  # retreat, hold to inflict casualties, or stand — don't drain it
 
     # --- Phase 3: focus fire with staggered pincers -------------------------- #
     targets = [sysmap[n] for n in
@@ -615,12 +1154,41 @@ def decide(state, pid):
                 if sysmap[n].owner_id != pid}]
     targets.sort(key=lambda t: (-_richness(state, pid, t, max_prod), t.ships, t.id))
 
+    def spendable(sid, target, surplus: bool = False) -> int:
+        """``budget[sid]``, less what ``sid`` must keep to hold against
+        ``target``'s own garrison stepping into it — see ``DENY_SWAP`` — and, for
+        the surplus pour, less what it keeps at ``POUR_GUARD``. With
+        ``SPARE_TARGET``, a strike on a rival may also spend the part of the
+        guard that only ``target`` itself called for."""
+        b = budget[sid]
+        if (SPARE_TARGET and target.owner_id != 0 and sid in held
+                and sid not in threatened_set):
+            rest = math.ceil(FRONTIER_GUARD * _max_adjacent_enemy(
+                state, pid, sysmap[sid], skip=target.id))
+            b = max(0, b + held[sid] - max(RESERVE_FLOOR, rest))
+        if surplus and sid in pour_floor:
+            left = sysmap[sid].ships - sum(n for (src, _dst), n in sends.items() if src == sid)
+            b = max(0, min(b, left - pour_floor[sid]))
+        if DENY_SWAP <= 0 or target.owner_id == 0 or target.ships <= 0:
+            return b
+        if DENY_SWAP_SURPLUS_ONLY and not surplus:
+            return b
+        back = state.travel_turns(target.id, sid) or 1
+        if back < DENY_SWAP_MIN_TURNS:
+            return b
+        hold = (math.ceil(DENY_SWAP * target.ships * _defend_margin())
+                - _production_by(sysmap[sid], back))
+        left = sysmap[sid].ships - sum(n for (src, _dst), n in sends.items() if src == sid)
+        return max(0, min(b, left - hold))
+
     struck: dict[int, int] = {}
     pincer_held: set[int] = set()
+    settled: set[int] = set()   # neutral targets already covered — see Phase 4
     for target in targets:
         nbrs = [(state.travel_turns(sid, target.id), sid) for sid in owned
                 if target.id in sysmap[sid].neighbors
-                and budget.get(sid, 0) > 0 and sid not in pincer_held]
+                and (budget.get(sid, 0) > 0 or spendable(sid, target) > 0)
+                and sid not in pincer_held]
         if not nbrs:
             continue
 
@@ -632,40 +1200,64 @@ def decide(state, pid):
         for h in sorted({d for d, _ in nbrs}):
             req = _required(state, pid, target, h)
             inbound = _inbound(state, target.id, pid, h)
-            committable = sum(budget[sid] for d, sid in nbrs if d <= h)
+            committable = sum(spendable(sid, target) for d, sid in nbrs if d <= h)
             if inbound + committable < req:
                 continue
             chosen_h, shortfall = h, req - inbound
             break
         if chosen_h is None:
             continue  # can't crack it even at full stretch — leave the ships to mass
+        if shortfall <= 0 and target.owner_id == 0:
+            # Fully covered by a wave dispatched an earlier turn — nothing left
+            # for Phase 3b to feed below, and (for a neutral, which cannot be
+            # reinforced by anyone else) nothing for a bordering frontier
+            # system to keep standing reserve against either. See Phase 4.
+            settled.add(target.id)
 
         # Launch only the far wave (dist == H) now, covering the part the nearer
         # waves won't; those launch on later turns and converge, because next turn
         # this fleet shows up in the target's inbound tally.
-        nearer = sum(budget[sid] for d, sid in nbrs if d < chosen_h)
+        nearer = sum(spendable(sid, target) for d, sid in nbrs if d < chosen_h)
         need = max(0, shortfall - nearer)
         for sid in sorted((sid for d, sid in nbrs if d == chosen_h),
-                          key=lambda s: (-budget[s], s)):
+                          key=lambda s: (-spendable(s, target), s)):
             if need <= 0:
                 break
-            send = min(budget[sid], need)
+            send = min(spendable(sid, target), need)
             sends[(sid, target.id)] += send
             budget[sid] -= send
             need -= send
 
-        struck[target.id] = chosen_h
-        if RESERVE_PINCER:
-            # Those nearer sources are promised to next turn's converging wave.
-            # Unreserved, a later and poorer target spends them and the stagger
-            # never materialises.
-            pincer_held.update(sid for d, sid in nbrs if d < chosen_h)
+        if shortfall > 0 or not _gates_reflood(target, chosen_h):
+            # A neutral already fully covered by a wave dispatched an earlier
+            # turn has nothing left for any of our systems to contribute, near
+            # or far, and must not be mistaken by Phase 3b below for an active
+            # strike to keep feeding — a neutral cannot reinforce itself, so
+            # there is nothing to be insured against.
+            #
+            # A *rival*-held target stays unconditional even at shortfall <= 0:
+            # `_enemy_margin` deliberately carries no jitter cushion of its own
+            # (see its docstring — a beatable garrison usually flees, so paying
+            # for the dice buys little), and measurement showed that dropping
+            # this margin's slack cost real games specifically where a garrison
+            # stands and fights anyway — a lot more of them at high
+            # DEFENDER_ADVANTAGE. Continuing to feed an already-"covered" siege
+            # is exactly where that missing cushion was coming from by accident.
+            # A long-horizon siege is the exception, gated like a neutral from
+            # `RIVAL_REFLOOD_MIN_TURNS` turns out; see `_gates_reflood`.
+            struck[target.id] = chosen_h
+            if RESERVE_PINCER:
+                # Those nearer sources are promised to next turn's converging
+                # wave. Unreserved, a later and poorer target spends them and
+                # the stagger never materialises.
+                pincer_held.update(sid for d, sid in nbrs if d < chosen_h)
 
     # --- Phase 3b: commit the surplus ---------------------------------------- #
     # By the square law a bigger strike costs fewer ships and holds the capture
     # afterwards, so ships with no other job this turn ride along with the wave
     # rather than parking. This raises no threshold: the target was already priced
-    # and is already being attacked.
+    # and is already being attacked — a covered neutral is the one exception
+    # (see the guard above), since there is nothing there to insure against.
     # Note this cannot cost us a second front: Phase 3 has already priced and
     # launched at *every* affordable target, so a system that has just broken
     # through takes all the weak systems in front of it either way. All that is
@@ -680,14 +1272,58 @@ def decide(state, pid):
                      if target.id in sysmap[sid].neighbors
                      and budget.get(sid, 0) > 0 and sid not in pincer_held
                      and (state.travel_turns(sid, target.id) or 99) == chosen_h),
-                    key=lambda s: (-budget[s], s)):
-                sends[(sid, target.id)] += budget[sid]
-                budget[sid] = 0
+                    key=lambda s: (-spendable(s, target, True), s)):
+                send = spendable(sid, target, True)
+                sends[(sid, target.id)] += send
+                budget[sid] -= send
+
+    # --- Phase 3c: hold what is about to be taken --------------------------- #
+    if HOLD_FOLLOW > 0:
+        _hold_follow(state, pid, budget, sends, threatened_set)
 
     # --- Phase 4: leapfrog / flow to the richest front ----------------------- #
-    parent = _flow_to_front(state, set(owned), frontier, pid, max_prod)
+    # A frontier system whose every non-owned neighbour is a `settled` neutral
+    # (see Phase 3) is a dead end, not a front: nothing there can reinforce, so
+    # there is nothing left to hold a standing reserve against, and its surplus
+    # is free to leapfrog onward exactly like a rear system's.
+    live_frontier = {sid for sid in frontier
+                     if any(sysmap[n].owner_id != pid and n not in settled
+                            for n in sysmap[sid].neighbors)}
+    flow_owned = set(owned)
+    if FLOW_AVOIDS_ABANDONED and giving_up:
+        # A system we are giving up this turn is not a front to feed and not
+        # a waypoint to route through — its own garrison is leaving it, or
+        # about to be overrun, on this exact turn. Left in, a rear system's
+        # surplus and the doomed garrison's retreat routinely cross in
+        # flight and the surplus lands on the enemy a turn or two later.
+        live_frontier -= giving_up
+        flow_owned -= giving_up
+    seeds = live_frontier
+    if FEED > 0 and _short_lanes(state):
+        # A front that cannot hold against the stack beside it is where the
+        # surplus goes first: that is how a capture is kept rather than taken
+        # back a few turns later. See `_shortfalls`.
+        short = _shortfalls(state, pid, live_frontier, sends)
+        if FEED_FRONT:
+            # A front with leftover budget tops up a short neighbour first:
+            # it is one hop away, and the rear's surplus is several.
+            for sid in sorted(live_frontier):
+                if sid in short:
+                    continue
+                for n in sorted((n for n in sysmap[sid].neighbors if n in short),
+                                key=lambda n: (-short[n], n)):
+                    send = min(budget.get(sid, 0), short[n])
+                    if send <= 0:
+                        continue
+                    sends[(sid, n)] += send
+                    budget[sid] -= send
+                    short[n] -= send
+            short = {sid: need for sid, need in short.items() if need > 0}
+        if short:
+            seeds = set(short)
+    parent = _flow_to_front(state, flow_owned, seeds, pid, max_prod)
     for sid in sorted(owned):
-        if sid in frontier:
+        if sid in live_frontier:
             continue  # the front's leftover stays home as the standing reserve
         b = budget.get(sid, 0)
         if b > 0 and sid in parent:

@@ -1,6 +1,6 @@
 """Handing a bot a position out of somebody else's game.
 
-The measurement this makes possible is the one `docs/bot-design.md` could not
+The measurement this makes possible is the one `docs/design/bots.md` could not
 take before: every figure there is a bot against another bot, so the roster is
 only ever judged on positions bots create. These exercise the mechanics of
 branching a recorded match — the position rebuilt must be the one that was
@@ -111,7 +111,7 @@ def test_a_win_gives_the_bot_something_to_be_measured_against(played):
 def test_a_lost_game_offers_no_baseline_but_is_still_a_question(played):
     """The positions worth having most: nobody finished, so there is nothing to
     compare — but "can a bot still take this board?" is answerable and hard."""
-    log, state = played
+    log, _state = played
     lost = replay.GameLog.from_dict(log.to_dict())
     lost.winner, lost.finished = 2, True          # an opponent took it instead
     with _preserve_config():
@@ -135,8 +135,8 @@ def test_positions_sample_the_whole_game_but_drop_the_endgame():
 
 
 def _result(**over):
-    base = dict(bot="b", match_id="a" * 16, turn=0, won=True, turns_from=10, lost=0,
-                human_won=True, human_turns_from=20, timed_out=False)
+    base = {"bot": "b", "match_id": "a" * 16, "turn": 0, "won": True, "turns_from": 10, "lost": 0,
+                "human_won": True, "human_turns_from": 20, "timed_out": False}
     return sim.PositionResult(**{**base, **over})
 
 

@@ -1,0 +1,154 @@
+"""The leaderboard bot column's own new behaviour: a win stores a real replay.
+
+No network here either (see ``test_verify_scores.py``'s note on the same
+point) — ``_row_for`` is the pure decision the worker makes once
+``sim.play_settings`` has already run, and that is what is worth pinning: a
+row must carry exactly what a Watch link needs on a win, and exactly nothing
+that could be mistaken for one on a loss.
+"""
+
+from __future__ import annotations
+
+import io
+import urllib.error
+import urllib.request
+
+from starconquest import ai, replay
+from starconquest.settings import Settings
+from tests import sim
+from tools import bot_replay
+
+
+def _job(**kw) -> bot_replay.Job:
+    cfg = Settings(mode="random", players=3, nodes=16, seed=12)
+    fields = {"game_key": "abc123", "cfg": cfg, "seed": 12, "bot": "marshal", "aux": 1.0, **kw}
+    return bot_replay.Job(**fields)
+
+
+def _play(job: bot_replay.Job, bot: str | None = None):
+    ai.load_models()
+    log = replay.new_log(job.cfg, job.seed)
+    result = sim.play_settings(job.cfg, job.seed, bot or job.bot, log=log)
+    return result, log
+
+
+def test_a_win_stores_the_exact_replay_a_watch_link_would_play():
+    job = _job()
+    result, log = _play(job)
+    assert result.won   # this map's seed 12 is a real marshal win (see test_sim.py)
+
+    row = bot_replay._row_for(job, result, log, rev="rev1")
+    assert row["match_id"] == log.match_id
+    assert row["rules_version"] == log.rules_version
+    assert row["log"] == log.encoded()
+
+    # The row is self-contained: decoding *only* what was stored reconstructs
+    # the same result the row's own won/turns/lost report, with nothing else
+    # consulted — the whole point of storing a log rather than a set of
+    # ingredients to re-decide from.
+    decoded = replay.GameLog.decode(row["log"])
+    state, _ = replay.reconstruct(decoded)
+    seat = state.human()
+    assert (state.winner == seat.id) == row["won"] == result.won
+    assert state.turn == row["turns"] == result.turns
+    assert seat.ships_lost == row["lost"] == result.lost
+    # ...and it names the bot that played the human's seat, not the setup's
+    # strategy for it, which is what a person would have been seated behind.
+    assert decoded.strategies[seat.id] == seat.ai_strategy == job.bot
+
+
+def test_a_loss_stores_no_replay():
+    """No Watch link is offered for a loss (`botOrder` doesn't even rank one),
+    so nothing is worth keeping — and the row must actively blank these
+    columns, not merely omit them, so a bot retuned into losing a map it used
+    to win doesn't leave last time's replay pointing at a result this row no
+    longer reports."""
+    job = _job(bot="heuristic")
+    # max_turns=1 guarantees a non-win regardless of this map's own balance.
+    log = replay.new_log(job.cfg, job.seed)
+    result = sim.play_settings(job.cfg, job.seed, "heuristic", max_turns=1, log=log)
+    assert not result.won
+
+    row = bot_replay._row_for(job, result, log, rev="rev1")
+    assert row["match_id"] == ""
+    assert row["log"] == ""
+    assert row["rules_version"] == 0
+
+
+def test_engine_rev_moves_if_the_replay_harness_changes():
+    """`sim.py` decides how a replay is played (seat handover, per-turn
+    stepping — and now, what gets recorded), so a change there must mark every
+    cached row stale exactly as a change to `engine.py` would. Pinned as a
+    property of `_OUTCOME_HARNESS` rather than a specific digest, so it survives
+    the file's own contents changing."""
+    assert bot_replay._OUTCOME_HARNESS == ("tests", "sim.py")
+    from pathlib import Path
+
+    sim_path = bot_replay.ROOT.joinpath(*bot_replay._OUTCOME_HARNESS)
+    assert isinstance(sim_path, Path) and sim_path.is_file()
+
+
+def test_a_tuned_profile_is_disclosed_by_its_stop_name():
+    """The board prints `aux_label`; a named stop must say what it is rather than
+    leave the reader to decode "oracle 2" (`format.mjs`'s `botProfile`)."""
+    ai.load_models()
+    assert bot_replay.aux_note("knower", 1.0) == ""                   # the default: nothing to say
+    assert bot_replay.aux_note("knower", bot_replay.replay_aux("knower")) == "Oracle: Council"
+    assert bot_replay.aux_note("knower", 12) == "Oracle: Search"      # an old depth (AUX_OVER)
+    assert bot_replay.aux_note("marshal", 4) == ""                    # ignores aux entirely
+
+
+def test_each_bot_replays_at_the_top_of_its_own_slider():
+    ai.load_models()
+    assert bot_replay.aux_note("knower", bot_replay.replay_aux("knower")) == "Oracle: Council"
+    assert bot_replay.aux_note("actuary", bot_replay.replay_aux("actuary")) == "Style: Hunt"
+    assert bot_replay.replay_aux("thinker") == 1.0                    # Thinker is its top
+    assert bot_replay.replay_aux("marshal") == 1.0                    # declares no knob
+    assert bot_replay.replay_aux("actuary", {"actuary": 1.0}) == 1.0  # --aux still wins
+
+
+def _answering(monkeypatch, *bodies: tuple[int, str]) -> list[int]:
+    """Serve each (status, body) in turn to the worker's client; count the calls."""
+    calls: list[int] = []
+
+    def fake(request, timeout):
+        code, body = bodies[len(calls)]
+        calls.append(code)
+        if code == 200:
+            return io.BytesIO(body.encode())
+        raise urllib.error.HTTPError(request.full_url, code, "", {}, io.BytesIO(body.encode()))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setattr(bot_replay.time, "sleep", lambda s: None)
+    return calls
+
+
+SKEW = '{"code":"PGRST303","message":"JWT issued at future"}'
+
+
+def test_a_clock_skewed_token_is_retried(monkeypatch):
+    calls = _answering(monkeypatch, (401, SKEW), (200, "[]"))
+    assert bot_replay.Supabase("https://x", "k").select("scores", "order=id.asc") == []
+    assert calls == [401, 200]
+
+
+def test_any_other_4xx_still_fails_at_once(monkeypatch):
+    calls = _answering(monkeypatch, (401, '{"code":"PGRST301","message":"JWT expired"}'))
+    try:
+        bot_replay.Supabase("https://x", "k").select("scores", "order=id.asc")
+    except bot_replay.ApiError as err:
+        assert "PGRST301" in str(err)
+    else:
+        raise AssertionError("a bad key must not be retried into success")
+    assert calls == [401]
+
+
+def test_a_skew_that_outlasts_the_retries_still_fails(monkeypatch):
+    calls = _answering(monkeypatch, *[(401, SKEW)] * bot_replay.RETRIES)
+    try:
+        bot_replay.Supabase("https://x", "k").select("scores", "order=id.asc")
+    except bot_replay.ApiError as err:
+        assert "PGRST303" in str(err)
+    else:
+        raise AssertionError("a lasting skew must still surface")
+    assert len(calls) == bot_replay.RETRIES

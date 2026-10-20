@@ -21,7 +21,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 from . import config
 from .model import Fleet, GameState
@@ -41,7 +40,7 @@ def _apply_advantage(
     a_eff: float,
     b_owner: int,
     b_eff: float,
-    defender_owner: Optional[int],
+    defender_owner: int | None,
     advantage: float,
 ) -> tuple[float, float]:
     """Scale whichever side is holding the system. Applied *after* jitter, so the
@@ -72,7 +71,7 @@ def _resolve_effective(
     b_owner: int,
     b_ships: int,
     b_eff: float,
-    defender_owner: Optional[int],
+    defender_owner: int | None,
 ) -> tuple[int, int]:
     """The whole of a fight *after* the dice and the advantage: strengths in,
     ``(owner, ships)`` out. ``a_eff``/``b_eff`` are post-``_apply_advantage``."""
@@ -98,7 +97,7 @@ def resolve_fight(
     a_ships: int,
     b_owner: int,
     b_ships: int,
-    defender_owner: Optional[int] = None,
+    defender_owner: int | None = None,
 ) -> tuple[int, int]:
     """One pairwise engagement. Returns (winning_owner, surviving_ships).
 
@@ -354,21 +353,30 @@ def resolve_lane_clash(state: GameState, a: Fleet, b: Fleet, rng=None) -> tuple[
 
 
 def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
-                    rng=None) -> tuple[int, int]:
+                    rng=None, on_step: list | None = None) -> tuple[int, int]:
     """Resolve every fleet arriving at ``node_id`` this turn against the defender.
 
     Handles reinforcement (single owner present), a straight attack (two owners),
-    and the rare 3+-owner pile-up (fold strongest-first). Mutates the system in
-    place and returns (final_owner, final_ships).
+    and the rare 3+-owner pile-up: attackers fold strongest-first among
+    themselves, and whoever survives that faces the defender last, regardless of
+    the defender's own size. Mutates the system in place and returns
+    (final_owner, final_ships).
 
     ``rng`` is the turn's dice — ``engine`` passes one that records what it deals
     (and, on a replay, deals back what was recorded). ``state.rng`` when omitted.
+
+    Given ``on_step``, each engagement of the fold is appended to it as
+    ``(carried_owner, carried_ships, owner, ships, winner, survivors)``. Those
+    values are otherwise locals, so a pile-up cannot be shown step by step without
+    them; nothing here reads the list back, and passing none changes nothing.
     """
     node = state.systems[node_id]
     rng = state.rng if rng is None else rng
     old_owner = node.owner_id
 
     # Total each owner's strength: existing garrison + all their arriving fleets.
+    # A reinforcement from the defender's own side lands in the same bucket as
+    # the garrison, which is exactly why it can defend the fight it arrives for.
     forces: dict[int, int] = defaultdict(int)
     forces[node.owner_id] += node.ships
     for f in arriving:
@@ -382,11 +390,26 @@ def resolve_arrival(state: GameState, node_id: int, arriving: list[Fleet],
     elif len(sides) == 1:
         node.owner_id, node.ships = sides[0]
     else:
-        # Fold strongest-first; defender breaks exact (zero-jitter) ties.
-        sides.sort(key=lambda s: s[1], reverse=True)
-        cur_owner, cur_ships = sides[0]
-        for owner, ships in sides[1:]:
-            cur_owner, cur_ships = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
+        # Attackers fold strongest-first among themselves; the defender's own
+        # side — if it's still standing — takes on whatever survives that, last,
+        # by right of holding the ground rather than by size. Ties (both among
+        # attackers and against the defender) break to the defender under zero
+        # jitter.
+        garrison = next((s for s in sides if s[0] == old_owner), None)
+        attackers = sorted((s for s in sides if s[0] != old_owner),
+                            key=lambda s: s[1], reverse=True)
+        cur_owner, cur_ships = attackers[0]
+        for owner, ships in attackers[1:]:
+            won, left = resolve_fight(rng, cur_owner, cur_ships, owner, ships, defender_owner=old_owner)
+            if on_step is not None:
+                on_step.append((cur_owner, cur_ships, owner, ships, won, left))
+            cur_owner, cur_ships = won, left
+        if garrison is not None:
+            g_owner, g_ships = garrison
+            won, left = resolve_fight(rng, cur_owner, cur_ships, g_owner, g_ships, defender_owner=old_owner)
+            if on_step is not None:
+                on_step.append((cur_owner, cur_ships, g_owner, g_ships, won, left))
+            cur_owner, cur_ships = won, left
         node.owner_id, node.ships = cur_owner, cur_ships
 
     _record_losses(state, forces, node.owner_id, node.ships)

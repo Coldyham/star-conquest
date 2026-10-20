@@ -7,9 +7,14 @@ a meaningful check here. Equal, rotationally identical sectors are.
 
 from __future__ import annotations
 
+import hashlib
+import itertools
+import json
 from collections import Counter
+from pathlib import Path
 
 from starconquest import config, mapgen
+from starconquest.geometry import point_segment_dist, segments_intersect
 
 
 def _sector_of(nid: int, per_player: int, num_players: int) -> int | None:
@@ -77,3 +82,166 @@ def test_travel_turns_positive_and_deterministic():
         assert lane.travel_turns >= 1
     assert [s.pos for s in a.systems.values()] == [s.pos for s in b.systems.values()]
     assert set(a.lanes.keys()) == set(b.lanes.keys())
+
+
+# --------------------------------------------------------------------------- #
+# Layouts: how the sectors are joined
+# --------------------------------------------------------------------------- #
+def _shared(layout: str, players: int) -> int:
+    """How many systems a layout adds beyond the sectors."""
+    return {"hub": 1, "wheel": 1, "core": players}.get(layout, 0)
+
+
+def _rotation(state, layout: str, players: int) -> dict[int, int]:
+    """Where each id lands when the board turns one sector: sector k to k+1,
+    the hub onto itself, core k onto core k+1."""
+    shared = _shared(layout, players)
+    per = (len(state.systems) - shared) // players
+    first = per * players
+    out = {}
+    for sid in state.systems:
+        if sid < first:
+            out[sid] = (sid + per) % first
+        elif layout == "core":
+            out[sid] = first + (sid - first + 1) % players
+        else:
+            out[sid] = sid
+    return out
+
+
+def _fingerprint(layout: str = mapgen.SYMMETRIC_LAYOUTS[0]) -> str:
+    rows = []
+    for seed, nodes, players in ((3, 18, 2), (11, 24, 3), (7, 40, 6), (5, 60, 4)):
+        s = mapgen.generate_symmetric(seed, nodes, players, layout)
+        rows.append([[sid, round(v.pos[0], 6), round(v.pos[1], 6), v.production, v.ships, v.owner_id, v.name]
+                     for sid, v in s.systems.items()])
+        rows.append(sorted([l.a, l.b, l.length_ly, l.travel_turns] for l in s.lanes.values()))
+    return hashlib.blake2s(json.dumps(rows).encode(), digest_size=8).hexdigest()
+
+
+def test_the_hub_layout_is_the_board_it_always_was():
+    """Pinned against the generator as it stood before layouts existed. A stored
+    symmetric game replays by regenerating its map from the seed, and
+    `RULES_VERSION` did not move when the other layouts joined — so if this
+    fails, either restore the hub's draws or bump `RULES_VERSION`."""
+    assert _fingerprint() == "75cad1b15cde46ad"
+
+
+def test_the_core_layout_is_the_board_the_worker_has_always_built():
+    """Pinned at UI scale 1.0, the scale `tools/bot_replay` and `verify_scores`
+    have built every core map at. Same rule as the hub: a change here re-deals
+    stored games, so it needs a `RULES_VERSION` bump."""
+    assert _fingerprint("core") == "448862aeb0b028e6"
+
+
+def test_a_map_does_not_depend_on_the_screen_it_is_built_on():
+    """A replay is rebuilt from its seed on whatever screen watches it, so the
+    UI scale (which every pixel size in `config` follows) must not reach mapgen."""
+    before = (config.ui_scale, config.touch_ui)
+    try:
+        prints = []
+        for scale in (1.0, 2.0, 0.75):
+            config.apply_ui_scale(scale)
+            prints.append([_fingerprint(layout) for layout in mapgen.SYMMETRIC_LAYOUTS])
+        assert prints[0] == prints[1] == prints[2]
+    finally:
+        config.apply_ui_scale(before[0], touch=before[1])
+
+
+def test_a_symmetric_map_has_the_size_symmetric_size_says():
+    for layout in mapgen.SYMMETRIC_LAYOUTS:
+        for players in range(config.MIN_PLAYERS, config.MAX_PLAYERS + 1):
+            for nodes in (players + 3, 10, 13, 21, 40, 41):
+                state = mapgen.generate_symmetric(1, nodes, players, layout)
+                assert len(state.systems) == mapgen.symmetric_size(nodes, players, layout), \
+                    (layout, players, nodes)
+
+
+def test_the_board_counts_systems_the_way_mapgen_builds_them():
+    """`leaderboard/js/format.mjs`'s `symmetricSize` is checked against this
+    table by `leaderboard/tests/format.test.mjs`; this checks the table against
+    mapgen. Regenerate it from `mapgen.symmetric_size` if this fails."""
+    path = Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures" / "symmetric-sizes.json"
+    table = json.loads(path.read_text())
+    assert table == {
+        layout: {str(players): [mapgen.symmetric_size(n, players, layout)
+                                for n in range(1, config.MAX_NODES + 1)]
+                 for players in range(config.MIN_PLAYERS, config.MAX_PLAYERS + 1)}
+        for layout in mapgen.SYMMETRIC_LAYOUTS
+    }
+
+
+def test_an_unknown_layout_is_the_hub():
+    a = mapgen.generate_symmetric(4, 20, 3, "spiral")
+    b = mapgen.generate_symmetric(4, 20, 3)
+    assert set(a.lanes) == set(b.lanes)
+    assert [s.pos for s in a.systems.values()] == [s.pos for s in b.systems.values()]
+
+
+def test_every_layout_is_connected_uncrossed_and_grazes_nothing():
+    clearance = config.LANE_NODE_CLEARANCE_FRAC * config.WORLD_SIZE
+    for layout in mapgen.SYMMETRIC_LAYOUTS:
+        for players in (2, 3, 4, 6):
+            for nodes in (8, 20, 40):
+                for seed in range(6):
+                    s = mapgen.generate_symmetric(seed, nodes, players, layout)
+                    where = f"{layout} {players}p {nodes}n seed {seed}"
+                    assert mapgen.is_connected(s), where
+                    edges = [(lane.a, lane.b) for lane in s.lanes.values()]
+                    pos = {sid: sys.pos for sid, sys in s.systems.items()}
+                    for (a, b), (c, d) in itertools.combinations(edges, 2):
+                        if len({a, b, c, d}) == 4:
+                            assert not segments_intersect(pos[a], pos[b], pos[c], pos[d]), where
+                    for a, b in edges:
+                        for sid, p in pos.items():
+                            if sid not in (a, b):
+                                assert point_segment_dist(p, pos[a], pos[b]) >= clearance, where
+
+
+def test_every_layout_turns_onto_itself():
+    """The fairness claim, whatever joins the sectors: one sector's turn maps
+    every lane onto a lane of the same length and every system onto one with the
+    same production, garrison and (rotated) owner."""
+    for layout in mapgen.SYMMETRIC_LAYOUTS:
+        for players in (2, 3, 4, 5):
+            for seed in range(6):
+                s = mapgen.generate_symmetric(seed, 22, players, layout)
+                turn = _rotation(s, layout, players)
+                for lane in s.lanes.values():
+                    other = s.lanes.get(frozenset((turn[lane.a], turn[lane.b])))
+                    assert other is not None, f"{layout} {players}p seed {seed}"
+                    assert other.travel_turns == lane.travel_turns
+                for sid, sys in s.systems.items():
+                    image = s.systems[turn[sid]]
+                    assert (image.production, image.ships) == (sys.production, sys.ships)
+                    if sys.owner_id:
+                        assert image.owner_id == sys.owner_id % players + 1
+
+
+def test_what_joins_the_sectors_is_what_the_layout_says():
+    players = 4
+    for seed in range(6):
+        boards = {layout: mapgen.generate_symmetric(seed, 24, players, layout)
+                  for layout in mapgen.SYMMETRIC_LAYOUTS}
+        for layout, s in boards.items():
+            shared = _shared(layout, players)
+            per = (len(s.systems) - shared) // players
+            first = per * players
+            sector = {sid: sid // per for sid in s.systems if sid < first}
+            across = [lane for lane in s.lanes.values()
+                      if lane.a in sector and lane.b in sector and sector[lane.a] != sector[lane.b]]
+            homes = [sid for sid, sys in s.systems.items() if sys.owner_id]
+            assert not any(h in s.adjacency[g] for h in homes for g in homes)
+            if layout == "hub":
+                assert not across and len(s.adjacency[first]) == players
+            elif layout == "ring":
+                assert shared == 0 and len(across) == players
+            elif layout == "wheel":
+                assert len(across) == players and len(s.adjacency[first]) == players
+            else:  # core: each core system meets two sectors and its two neighbours
+                assert not across
+                for core in range(first, first + players):
+                    nbrs = s.adjacency[core]
+                    assert len({sector[n] for n in nbrs if n in sector}) == 2
+                    assert sum(1 for n in nbrs if n >= first) == 2
+                    assert all(n not in homes for n in nbrs)

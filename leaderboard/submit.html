@@ -3,42 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Post a score · Star Conquest Leaderboard</title>
+<title>Post a score or setup · Star Conquest Leaderboard</title>
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0c14">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
 <header class="bar">
   <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <nav class="actions">
-    <a class="btn" href="index.html">All maps</a>
-  </nav>
+  <details class="menu">
+    <summary class="btn" aria-label="Menu">☰ Menu</summary>
+    <nav class="actions">
+      <a class="btn" href="../game/">▶ Play</a>
+      <a class="btn" href="index.html">All maps</a>
+      <a class="btn" href="campaign.html">Campaign</a>
+      <a class="btn" href="crowns.html">Crowns</a>
+      <a class="btn" href="pbp.html">Shared matches</a>
+      <a class="btn" href="submit.html">Enter score</a>
+    </nav>
+  </details>
 </header>
 
 <main>
   <a class="back" href="index.html">← All maps</a>
-  <h1>Enter your score</h1>
+  <h1>Enter a score, or share a setup</h1>
+  <!-- Two routes in, and the game's own button is the shorter one, so it leads:
+       the win overlay's "Enter on leaderboard" opens this page with the token
+       already in the fragment (main.post_to_leaderboard), leaving only a name to
+       fill in. "Challenge a friend" puts the same token on the clipboard instead.
+       A bare setup deliberately does not claim it will appear on the board:
+       home.mjs lists game_summary with score_count=gt.0, and config_summary
+       filters the same way, so until someone posts a score the only way to it is
+       the link. -->
   <p class="lede">
-    Win a game, press <strong>Challenge a friend</strong>, and the link on your
-    clipboard carries the map and your result. Paste it here to put it on the board.
+    Win a game and press <strong>Enter on leaderboard</strong> — this page opens
+    with your result already filled in, and you just add a name. Or press
+    <strong>Challenge a friend</strong> and paste the link it copies here.
+  </p>
+  <p class="lede">
+    A plain settings-share link works too, with nothing to post yet: it registers
+    the setup and gives you a page to link people to. It stays off the board
+    itself until someone posts a score on it.
   </p>
 
   <form id="form" class="form" autocomplete="off">
-    <label for="link">Challenge link</label>
+    <label for="link">Star Conquest link</label>
     <textarea id="link" name="link" rows="3" required
               placeholder="https://…/#eNoljE0OgjAQhe_y1rOw0Crpz…"></textarea>
 
-    <label for="name">Your name</label>
-    <input id="name" name="name" type="text" maxlength="60" required placeholder="Name">
-
     <p class="hint" id="preview" hidden></p>
 
+    <div id="score-fields">
+      <label for="name">Your name</label>
+      <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
+
+      <label for="tags">Tags (optional) — describing the settings, not the specific seed</label>
+      <input id="tags" name="tags" type="text" placeholder="Tags, comma separated">
+    </div>
+
+    <!-- Hidden outright once the pasted link resolves to a map already on the
+         board: `games.embargo_until` is set the one time a map's row is first
+         inserted (schema.sql) and never after, so on a known map this field
+         can only ever be ignored. submit.mjs's setEmbargoOffered does that,
+         and fails open — an unreachable board leaves it up rather than
+         silently dropping a real setter's one chance to use it. -->
+    <div id="embargo-fields">
+      <label for="embargo">Hide replays for this many days (optional)</label>
+      <input id="embargo" name="embargo" type="number" min="1" max="90" step="1" placeholder="e.g. 7">
+      <!-- Only shown once a number is actually in the box: until then there is
+           no embargo to explain, and this page's problem is too many boxes at
+           once rather than too few. -->
+      <p class="hint" id="embargo-hint" hidden>
+        Scores and rankings still post and rank normally — this hides replays
+        only, so nobody (you included) can watch one back until the embargo
+        lifts.
+      </p>
+    </div>
+
     <!-- Said here because this is where the decision is made. Posting a score
-         publishes that game's replay: `public_replays` is exactly the logs a
-         posted score points at, which is what puts a "Watch" link beside it. A
-         game that merely uploaded itself is not published by it. -->
-    <p class="hint">
+         publishes that game's replay (once any embargo above has lifted):
+         `public_replays` is exactly the logs a posted score points at, which
+         is what puts a "Watch" link beside it. A game that merely uploaded
+         itself is not published by it. -->
+    <p class="hint" id="score-hint">
       Posting a score also publishes that game's replay, so anyone can watch it
       back on the map's page.
     </p>

@@ -30,15 +30,23 @@ def _won_match(max_turns: int = 400):
         settings = Settings(players=3, nodes=14, seed=seed, autoplay=True)
         with _preserve_config():
             state = build_state(settings, seed)
-            log = replay.new_log(settings, seed)
-            hid = state.human().id
+            log = replay.new_log(settings, seed, state)
+            hid = replay.HUMAN_SEAT
             turns = 0
             while state.winner is None and turns < max_turns:
+                # `autoplay=True` above means there is no human seat to begin with
+                # (`settings.build_state`), and the first turn recorded as
+                # hand-played is what claims it — so the flags below are not free
+                # labelling: they have to be applied to the run as it happens, the
+                # way `main.resolve_turn` does, or the log describes a different
+                # game from the one being played.
+                by_hand = turns < 2
+                claim = hid if by_hand and state.human() is None else None
                 record = engine.end_turn(state, human_orders=ai.decide(state, hid),
-                                         decide=ai.decide)
+                                         decide=ai.decide, claim_seat=claim)
                 # Claim a couple of turns as hand-played: `hand` is disclosure, and
                 # the verifier recomputes it, so it has to be a real number here.
-                log.record_turn(record, human_ai=turns >= 2)
+                log.record_turn(record, human_ai=not by_hand)
                 turns += 1
         if state.winner == hid:
             log.mark_finished(state.winner)
@@ -100,9 +108,9 @@ def test_a_replay_of_another_map_cannot_back_a_score(posted):
 
 
 def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(posted):
-    """Postgres jsonb normalises ``12.0`` to ``12``, so `settings_json` reads back
-    with integer ``aux`` values whatever the game sent, while the uploaded log is
-    plain JSON and keeps the float. One setup, two reprs — and `challenge_key`
+    """The site writes `settings_json` from the browser, which turns ``12.0`` into
+    ``12``, so it reads back with integer ``aux`` values whatever the game sent,
+    while the uploaded log is the game's own JSON and keeps the float. One setup, two reprs — and `challenge_key`
     hashes JSON, so the comparison has to drop the distinction (`_aux_widened`)
     or every posted score carrying an aux reads as somebody else's map."""
     score, blob, setup = posted
@@ -110,6 +118,19 @@ def test_a_board_setup_that_lost_its_trailing_zeros_is_still_the_same_setup(post
     assert any(isinstance(seat["aux"], float) for seat in setup["ai"])  # a real difference
     with _preserve_config():
         assert verify_scores.verify(score, blob, as_jsonb).verdict == "verified"
+
+
+def test_a_log_that_left_its_seed_to_the_log_is_still_the_same_setup(posted):
+    """A game started on a fresh seed records ``seed: None`` in the log's settings
+    and the concrete seed on the log itself, which is the board it was built
+    from. `challenge_key` hashes the seed, so the comparison has to fill it in,
+    or every such score reads as somebody else's map (score 67 on
+    ``4222d9e81bd86a17``, a real 25-turn win, was filed as a mismatch this way)."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    log.settings = {**log.settings, "seed": None}
+    with _preserve_config():
+        assert verify_scores.verify(score, log.encoded(), setup).verdict == "verified"
 
 
 def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monkeypatch):
@@ -124,7 +145,7 @@ def test_a_rules_change_sets_a_score_aside_rather_than_accusing_it(posted, monke
                         verify_scores.engine.RULES_VERSION + 1)
     with _preserve_config():
         check = verify_scores.verify(score, blob, setup)
-    assert check.verdict == "outdated"
+    assert (check.verdict, check.outdated) == ("mismatch", True)
     assert "rules v" in check.detail and "replay gives" in check.detail
 
 
@@ -143,6 +164,132 @@ def test_a_wrong_score_played_under_current_rules_is_still_a_mismatch(posted):
     score = {**score, "lost": score["lost"] + 7}
     with _preserve_config():
         assert verify_scores.verify(score, blob, setup).verdict == "mismatch"
+
+
+def _rewritten(blob, edit):
+    """``blob``'s log with ``edit(turn_entry, index)`` applied to every turn."""
+    log = replay.GameLog.decode(blob)
+    for i, entry in enumerate(log.turns):
+        edit(entry, i)
+    return log
+
+
+def _as_replayed(score, log):
+    """``score`` with the numbers ``log`` really replays to, so only its dice
+    can be wrong."""
+    state, _ = replay.reconstruct(log)
+    human = state.human()
+    assert human is not None and state.winner == human.id
+    return {**score, "turns": state.turn, "lost": human.ships_lost, "hand": log.hand_turns}
+
+
+def test_dice_its_orders_do_not_roll_are_a_mismatch(posted):
+    """A lucky line: hand-picked rolls, posted with the numbers they replay to.
+    Before dice were keyed this verified; now every keyed turn is fought again."""
+    score, blob, setup = posted
+    fought = [i for i, e in enumerate(replay.GameLog.decode(blob).turns) if e["dice"]]
+    assert fought
+
+    def nudge(entry, i):
+        if i == fought[-1]:
+            entry["dice"][0] += 1e-9          # changes nothing on the board
+
+    log = _rewritten(blob, nudge)
+    with _preserve_config():
+        check = verify_scores.verify(_as_replayed(score, log), log.encoded(), setup)
+    assert check.verdict == "mismatch"
+    assert f"turn {fought[-1] + 1}'s dice" in check.detail
+
+
+def test_every_honest_turn_is_keyed_and_rerolls(posted):
+    _, blob, _ = posted
+    log = replay.GameLog.decode(blob)
+    audit = verify_scores._DiceAudit(log)
+    with _preserve_config():
+        replay.reconstruct(log, on_turn=audit)
+    assert all(log.keyed_for(i) for i in range(log.turn_count))
+    assert not audit.fault and audit.unchecked == 0
+
+
+def test_a_log_from_before_keyed_dice_verifies_with_its_dice_unchecked(posted):
+    """Its dice were drawn after its bots and cannot be re-rolled, which is a
+    limit of the evidence, not a sign of forgery."""
+    score, blob, setup = posted
+    log = _rewritten(blob, lambda entry, _: entry.pop("keyed"))
+    fought = sum(1 for e in log.turns if e["dice"])
+    with _preserve_config():
+        check = verify_scores.verify(score, log.encoded(), setup)
+    assert check.verdict == "verified"
+    assert check.detail == f"dice unchecked on {fought} fighting turn(s) played before keyed dice"
+
+
+def test_an_unkeyed_turn_after_a_keyed_one_is_a_mismatch(posted):
+    """A game under way when keying arrived is keyed from then on, so dropping
+    the flag from one later turn — to slip a forged roll past — is caught."""
+    score, blob, setup = posted
+
+    def drop_late(entry, i):
+        if i >= 5:
+            entry["keyed"] = False
+
+    log = _rewritten(blob, drop_late)
+    with _preserve_config():
+        check = verify_scores.verify(score, log.encoded(), setup)
+    assert check.verdict == "mismatch"
+    assert check.detail == "turn 6 rolled unkeyed dice after keyed turn 1"
+
+
+def _with_strategies(blob, strategies):
+    log = replay.GameLog.decode(blob)
+    log.strategies = strategies
+    return log.encoded()
+
+
+def test_a_score_dealt_a_different_lineup_is_set_aside(posted):
+    """A build dealing from another pool (one from before it was fixed, or before
+    an edit to it) played honestly against bots this map's other scores did not
+    face: it reproduces, but is not comparable with them."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    assert log.strategies, "the fixture records its lineup"
+    rival = next(pid for pid in log.strategies if pid != replay.HUMAN_SEAT)
+    drifted = _with_strategies(blob, {**log.strategies, rival: "rusherplus"})
+    with _preserve_config():
+        check = verify_scores.verify(score, drifted, setup)
+    assert (check.verdict, check.outdated) == ("verified", True)
+    assert f"seat {rival} faced rusherplus" in check.detail
+
+
+def test_a_random_seat_is_checked_against_the_pool(posted, monkeypatch):
+    """The case the check exists for: the setup says "random", so the lineup it
+    deals comes from its seed's pool, and a log dealt from another (a stale build)
+    is set aside."""
+    from starconquest import settings as settings_module
+    from starconquest.settings import RANDOM_STRATEGY
+    score, blob, setup = posted
+    setup = {**setup, "ai_strategy": [RANDOM_STRATEGY] * len(setup["ai_strategy"])}
+    log = replay.GameLog.decode(blob)
+    log.settings = setup
+    log.strategies = {pid: settings_module.resolve_strategy(RANDOM_STRATEGY, log.seed, pid)
+                      for pid in log.strategies}
+    blob = log.encoded()
+    with _preserve_config():
+        assert verify_scores.verify(score, blob, setup).verdict == "verified"
+        monkeypatch.setattr(settings_module, "RANDOM_POOLS", (("alpha",),))
+        check = verify_scores.verify(score, blob, setup)
+    assert (check.verdict, check.outdated) == ("verified", True)
+    assert "the setup deals alpha" in check.detail
+
+
+def test_the_human_seat_and_an_unrecorded_lineup_are_not_checked(posted):
+    """The human's seat was played by a person whatever it was built with, and a
+    log from before lineups were recorded has nothing to compare."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    human_renamed = _with_strategies(blob, {**log.strategies, replay.HUMAN_SEAT: "knower"})
+    with _preserve_config():
+        assert verify_scores.verify(score, human_renamed, setup).verdict == "verified"
+        assert verify_scores.verify(score, _with_strategies(blob, {}), setup).verdict == "verified"
 
 
 def test_a_score_with_no_uploaded_log_is_missing_not_suspect(posted):
@@ -188,7 +335,7 @@ def _scores(*ids):
 
 
 def test_a_decided_score_is_not_rechecked():
-    done = {1: {"verdict": "verified", "engine_rev": "abc"}}
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5, "game_digest": "ff"}}
     assert verify_scores.pending(_scores(1, 2), done, "abc") == [{"id": 2}]
 
 
@@ -199,9 +346,17 @@ def test_missing_is_always_retried_without_a_flag():
 
 
 def test_stale_picks_up_rows_decided_by_older_code():
-    done = {1: {"verdict": "verified", "engine_rev": "old"}}
+    done = {1: {"verdict": "verified", "engine_rev": "old", "log_id": 5, "game_digest": "ff"}}
     assert verify_scores.pending(_scores(1), done, "new") == []
     assert verify_scores.pending(_scores(1), done, "new", stale=True) == [{"id": 1}]
+
+
+def test_a_verdict_that_names_no_log_is_decided_again():
+    """Rows from before verdicts named their log: until one is named, the prune
+    can't tell which upload to keep."""
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": None},
+            2: {"verdict": "mismatch", "engine_rev": "abc"}}
+    assert verify_scores.pending(_scores(1, 2), done, "abc") == [{"id": 1}, {"id": 2}]
 
 
 def test_recheck_takes_everything():
@@ -220,3 +375,116 @@ def test_the_longest_upload_of_a_match_is_the_current_one():
     assert best["aa" * 8]["id"] == 2
     assert best["bb" * 8]["id"] == 3
     assert "" not in best
+
+
+# --------------------------------------------------------------------------- #
+# Which upload a score is judged on
+# --------------------------------------------------------------------------- #
+POSTED_AT = "2026-10-14T10:00:00+00:00"
+
+
+def _upload(i, blob, turns, at, match):
+    return {"id": i, "match_id": match, "turns": turns, "submitted_at": at, "log": blob}
+
+
+def test_a_longer_upload_after_the_score_cannot_displace_its_replay(posted):
+    """Anyone can upload under a match_id once a score makes it public, and the
+    longest upload used to be the one judged. Now the score is judged on the
+    upload that verifies, and the verdict names it."""
+    score, blob, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(10, blob, score["turns"], "2026-10-14T09:59:58Z", score["match_id"]),
+               _upload(11, "bogus", 99999, "2026-10-14T11:00:00Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("verified", 10)
+
+
+def test_an_upload_resent_after_the_score_still_backs_it(posted):
+    """A player whose first upload failed resends it by posting again, after
+    the score: it is tried, even behind somebody else's longer one."""
+    score, blob, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(11, blob, score["turns"], "2026-10-14T10:05:00Z", score["match_id"]),
+               _upload(12, "bogus", 99999, "2026-10-14T11:00:00Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("verified", 11)
+
+
+def test_with_nothing_that_verifies_the_first_candidate_is_the_verdict(posted):
+    score, _, setup = posted
+    score = {**score, "submitted_at": POSTED_AT}
+    uploads = [_upload(10, "bogus", 5, "2026-10-14T09:59:58Z", score["match_id"])]
+    with _preserve_config():
+        check = verify_scores.judge(score, uploads, setup)
+    assert (check.verdict, check.log_id) == ("unreadable", 10)
+    assert verify_scores.judge(score, [], setup).verdict == "missing"
+
+
+def test_a_flood_of_later_uploads_cannot_crowd_out_the_players_own():
+    match = "aa" * 8
+    score = {"id": 1, "match_id": match, "submitted_at": POSTED_AT}
+    flood = [_upload(100 + i, "x", 1000 + i, "2026-10-14T11:00:00Z", match) for i in range(50)]
+    own = _upload(7, "x", 30, "2026-10-14T09:59:00Z", match)
+    other = _upload(8, "x", 40, "2026-10-14T09:00:00Z", "bb" * 8)
+    tried = verify_scores.candidates(score, flood + [other, own])
+    assert tried[0]["id"] == 7
+    assert len(tried) == verify_scores.MAX_TRIES
+    assert all(row["match_id"] == match for row in tried)
+
+
+def test_a_game_reposted_under_another_match_id_digests_the_same(posted):
+    """counted_scores counts a game once by its digest, so a public replay
+    uploaded again under a fresh match_id has to digest as the original does,
+    and a game that went differently must not."""
+    score, blob, setup = posted
+    copy = replay.GameLog.decode(blob)
+    copy.match_id = "ab" * 8
+    cut = replay.GameLog.decode(blob)
+    cut.truncate(cut.turn_count - 1)
+    with _preserve_config():
+        first = verify_scores.verify(score, blob, setup)
+        again = verify_scores.verify({**score, "match_id": copy.match_id}, copy.encoded(), setup)
+        short = verify_scores.verify(score, cut.encoded(), setup)
+    assert first.verdict == again.verdict == "verified"
+    assert first.game_digest and first.game_digest == again.game_digest
+    assert short.verdict == "mismatch" and short.game_digest not in ("", first.game_digest)
+    assert verify_scores.verify(score, "bogus", setup).game_digest == ""
+
+
+def test_a_verified_row_without_a_digest_is_decided_again():
+    done = {1: {"verdict": "verified", "engine_rev": "abc", "log_id": 5, "game_digest": ""},
+            2: {"verdict": "verified", "engine_rev": "abc", "log_id": 6, "game_digest": "ff"},
+            3: {"verdict": "unreadable", "engine_rev": "abc", "log_id": 7, "game_digest": ""}}
+    assert verify_scores.pending(_scores(1, 2, 3), done, "abc") == [{"id": 1}]
+
+
+def test_a_verified_score_stays_verified_and_becomes_outdated():
+    """It reproduced under the code it was played under. If the engine has moved
+    since and it no longer does, that says nothing about the score."""
+    later = verify_scores.Check(1, "mismatch", "replay gives 30", log_id=11)
+    kept = verify_scores.settle(later, {"verdict": "verified", "log_id": 10})
+    assert (kept.verdict, kept.outdated, kept.log_id) == ("verified", True, 10)
+    assert verify_scores.settle(later, {"verdict": "verified", "log_id": None}).log_id == 11
+    again = verify_scores.Check(1, "verified", log_id=10)
+    assert verify_scores.settle(again, {"verdict": "verified", "log_id": 10}) is again
+    assert verify_scores.settle(later, {"verdict": "missing"}) is later
+    assert verify_scores.settle(later, None) is later
+
+
+def test_the_prune_keeps_every_log_a_verdict_names():
+    a, b, c = "aa" * 8, "bb" * 8, "cc" * 8
+    uploads = [
+        {"id": 1, "match_id": a, "turns": 30},   # verified for score 1
+        {"id": 2, "match_id": a, "turns": 99},   # somebody's longer upload
+        {"id": 3, "match_id": a, "turns": 10},   # a checkpoint: goes
+        {"id": 4, "match_id": b, "turns": 10},   # score 2 has no named log yet
+        {"id": 5, "match_id": b, "turns": 20},
+        {"id": 6, "match_id": c, "turns": 25},   # no score: an unposted game
+        {"id": 7, "match_id": c, "turns": 50},
+    ]
+    scores = [{"id": 1, "match_id": a}, {"id": 2, "match_id": b}]
+    checks = {1: {"verdict": "verified", "log_id": 1},
+              2: {"verdict": "verified", "log_id": None}}
+    assert verify_scores.keepers(uploads, scores, checks) == {1, 2, 4, 5, 7}

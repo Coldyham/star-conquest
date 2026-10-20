@@ -1,20 +1,46 @@
 # Star Conquest leaderboard
 
 A small public board for challenge links. Win a game, press **Challenge a friend**,
-paste the link here with a name, and the score joins the ranking for that map.
+paste the link here with a name, and the score joins the ranking for that map. A
+plain settings-share link works too, with no score yet: it registers the setup so
+others can play it and post their own — see "Sharing a setup with no score" below.
 
 Plain HTML/CSS/ES modules with no build step, talking straight to Supabase's REST
-API. It is a separate Netlify site from the game itself; nothing in the game or
-its `web/` build depends on it.
+API. It is served from the game's own Netlify site: `tools/build_web.sh` copies
+the pages into `web/board/` (the site root sends visitors here; the game is at
+`/game/`) and the root `netlify.toml` bundles
+`netlify/functions/` to answer at `/api/`. The game itself works without it.
 
 ## Pages
 
 | | |
 |---|---|
-| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config, filterable by clicking a config badge or bot chip |
+| [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card — see below |
-| [`submit.html`](submit.html) | paste a challenge link to post a score |
+| [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
+| [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
+| [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+
+The main list's search, sort and filters live in the URL, so every view is a
+link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
+`tests/listing.test.mjs`): search over a setup's name, its tags, the leader's name or
+a seed; sort by recent activity, scores, players, systems, best turns or when the map
+was added (maps, and the average of each map's best turns, grouped), either way round
+(`?dir=`, left out of the link when it's the sort's own direction); filter by player count, map mode and fog, and — per map only — to
+**contested** maps (two or more players with a counted score, exactly the maps a
+crown is held on), maps a **bot** is **unbeaten** on (leading or tied), this week's **campaign** nodes, and maps **unplayed by me** (the remembered
+name's own maps, excluded by key). `game_summary`'s `contenders`, `bot_leads` and
+`fog` columns exist for these, since PostgREST can filter on a column but not on a
+comparison between two; `tests/test_board_filters_sql.py` checks them. Fog is never
+hidden inside "N tweaks": an unnamed setup's label leads with it ("Fog · 3 tweaks"),
+and a named one carries a **Fog** badge. With a remembered name, a card also shows
+your own best there ("You: 25"). A config card is laid out like a game card: its
+setup line (mode, players, systems), its name in the config badge's magenta, and
+its map count as the headline figure.
+The grouped view's **Random setup** button picks one of the configs those filters
+allow, uniformly and never a hand-drawn map (the pool `tools/campaign.py` fills a
+campaign node from), and opens it in the game on a freshly rolled seed.
 
 A player card takes **repeated `u` params**, not one comma-joined list, because a
 name is free text and may contain a comma: `user.html?u=Ann&u=Bo` puts both on the
@@ -86,6 +112,71 @@ than rescue, and the folded-away key still works as a link: `js/game.mjs` reads
 an unknown key through `aliasFor` and forwards a bookmark to wherever its map
 now lives.
 
+## Sharing a setup with no score
+
+A challenge link is not the only thing `submit.html` takes. `js/token-decode.mjs`
+reads any Star Conquest link, and `challenge` comes back `null` for a plain
+settings-share link (or a challenge link with nothing on it — `Challenge`'s own
+`turns <= 0` sentinel). The form notices and switches shape: no name, no tags
+(a tag needs a posted score to attach to — `config_tags.score_id`), just the
+link and an optional embargo. Submitting registers the `games` row and sends you
+straight to the map's page — there to hand around, played on and posted to by
+whoever you share it with, the same as any other map on the board.
+
+The one thing it refuses is a setup with no seed pinned (`Settings.seed is
+None` — "roll a fresh map at start"): there would be no single map to register,
+so the form says so rather than silently hashing an ambiguous setup. Pin a seed
+in the game's Advanced menu before sharing a link this way.
+
+### Embargoed replays
+
+The same form takes an optional **days to hide replays**. Fill it in and, the
+*first* time that exact map reaches the board (whether that is this submission
+or a later score on it — `games` is append-only, so this can only ever be
+decided once, and is ignored on every insert after), `games.embargo_until` is
+set to that many days out.
+
+Until it passes, the map's page (`game.html`) shows a target, not a board: how
+many scores exist, who currently holds the best turn count, and that turn
+count itself — enough to know you're behind and by how much, which is the
+whole point of a deadline like this ("who can beat this before the embargo
+lifts" needs *something* to chase). Everything past that is gone: the full
+per-score list, ships lost, hand count, submission times, and every **Watch**
+link. `game.mjs` never even requests the per-score list while embargoed — only
+`game_summary`'s own aggregate (`best_turns`/`best_user_name`/`best_holders`/
+`score_count`), so there is nothing for the page (or its network tab) to leak
+beyond that one figure. `public_replays` (schema.sql) is the DB-level half of
+the same cut: it filters out a match whose map is still embargoed, which is
+the one place every replay read goes through, the game's own Watch link
+included — so unlike the score list (client-side only, matching how openly
+readable `scores` already is everywhere else on this board), a replay stays
+unreadable at the database, not just unrendered.
+
+This is deliberately narrower than hiding the map outright: with no accounts
+here, there is no way to let a submitter see their *own* early result without
+either trusting a client-held secret (which anyone who has the link could also
+hold) or making up an identity system this board has never needed. So the
+boundary is drawn at *how* a score was made — the moves, and the secondary
+detail (lost, hand, timing) that hints at them — never at the turn count
+itself, and it is drawn for everyone alike, the person who set it included.
+If you want to challenge friends to beat a score without anyone (yourself
+too) being able to see how it was done, while still leaving them a number to
+chase, this is that feature: register the map with an embargo before anyone
+plays it, or set one on your own first submission.
+
+The bound is a sanity cap (`games_embargo_bounds`, 90 days out from the map's
+own `first_seen_at`), not a promise about the *right* length — same spirit as
+the loose checks on every other column of that table.
+
+**Every map in the weekly campaign is embargoed until its week ends** (Monday
+00:00 UTC), with nothing to fill in. That one is not stored: `game_embargoes`
+(schema.sql) takes the later of a map's own `embargo_until` and the end of any
+live campaign week it is a node of, and both `public_replays` and
+`game_summary.embargo_until` read it — so the map page, its card and the Watch
+links treat a campaign node exactly like a map embargoed by hand. It has to be
+derived, since a node's `games` row doesn't exist until someone first posts on
+it, and nothing on the board may update that row afterwards.
+
 ## Same setup, different seed
 
 Every game with a `game_key` still gets its own row and its own board — a seed is
@@ -106,6 +197,17 @@ There's no bot dropdown any more: a bot chip on a card *is* the filter, linking 
 `index.html?bot=…` — clicking one narrows either list, by-game or by-config, to
 setups/maps that included that opponent.
 
+Above both sits **By family** (`?group=family`): configs linked into trees,
+each config's parent being the nearest older config at most a few edits away,
+with chips saying what changed (a slider, fog, the mode, a new opponent, a
+"Rescaled" systems-and-speed change that kept the lanes the same length). It is
+computed on the page from every config at once (`js/families.mjs`), so nothing
+about a family is stored. It reads `config_summary.first_seen`, and on a board
+not yet re-pasted derives the same thing from `game_summary`. Every card, on all
+three views, also carries a **pace** chip (`Standard · ~3t`): the median lane
+in turns, estimated from systems and ship speed. See
+`docs/design/setup-families.md`.
+
 A config's page offers **Play a new seed**: the same setup handed back to the
 game with its seed emptied, so the game rolls a fresh map from it
 (`Settings.seed = None`) instead of replaying one of the maps already on the
@@ -119,7 +221,7 @@ maps of unequal difficulty — so this one carries the setup alone.
 
 This key is computed here, on data the game already sends, rather than as a new
 field on `Settings` — deliberately, so that adding it never moves `Challenge.key`
-for a single existing map (see `docs/system-design.md`, "Keys outlive the schema
+for a single existing map (see `docs/design/core.md`, "Keys outlive the schema
 that made them"). The trade is the opposite fragility: **naming a config freezes
 it to `sc_config_key`'s current definition and to the game's current pruning
 rules.** Change either — the function's body, or a `config.DEFAULT_*` balance
@@ -128,14 +230,28 @@ posted. There's no in-site remedy for that, only the SQL editor: re-derive the o
 and new keys for the setups that matter and move the `configs` row across, the same
 way `fold-game-key.sql` moves `scores` rows after a `Challenge.key` split.
 
-Naming and tagging a config is **first name wins, permanently** — `configs` is
-append-only like every other table here (no UPDATE policy), so a typo can only be
-fixed from the SQL editor, the same trade `users.name` already makes. Since
-`config_key` is derived rather than stored, there's also no link between it and
-`games`: anyone can post a name for a config key nobody has played yet, or the
-wrong hex string entirely. Harmless — `game_summary`'s join only ever surfaces a
-name that actually matches a stored setup — but it's the same class of trust
-already extended to every other free-text field on this board.
+Naming a config is **first name wins, permanently** — `configs` is append-only
+like every other table here (no UPDATE policy), so a typo can only be fixed by
+the owner (`tools/admin.py delete-config-name`, see [Moderation](#moderation)),
+the same trade `users.name` already makes. Since `config_key` is
+derived rather than stored, there's also no link between it and `games`: anyone
+can post a name for a config key nobody has played yet, or the wrong hex string
+entirely. Harmless — `game_summary`'s join only ever surfaces a name that
+actually matches a stored setup — but it's the same class of trust already
+extended to every other free-text field on this board.
+
+**Tags are different: they accumulate, and only from someone who has posted a
+score.** `config_tags` is a second, append-only table — one row per (score, tag)
+— rather than the array `configs.tags` used to be the only way to write; posting
+a score is what [`submit.html`](submit.html) now also offers a tags field for,
+and `score_id` is the gate (a row naming no real score is refused by its foreign
+key). `config_tag_counts` ranks each config's tags by how many *distinct
+players* have entered them, folding in whatever a board already has in
+`configs.tags` at a flat weight of one apiece — so upgrading a board doesn't
+erase its existing tags, real submissions simply outrank that flat weight as
+they accumulate. `game_summary`/`config_summary` read this view rather than
+`configs.tags` directly now, but a config's *name* is unaffected — still
+untied to any score, still first-wins.
 
 ## How the bots did
 
@@ -151,7 +267,7 @@ setup, the seed and the code, so it only ever needs computing once and there is
 nothing to serve live: [`tools/bot_replay.py`](../tools/bot_replay.py) runs on a
 schedule in GitHub Actions and caches its answers in `public.bot_scores`. See
 [`.github/workflows/bot-replay.yml`](../.github/workflows/bot-replay.yml) for the
-job and `docs/system-design.md` ("Bot replays") for why it is a batch job rather
+job and `docs/design/leaderboard.md` ("Bot replays") for why it is a batch job rather
 than the small service this file used to ask for.
 
 The worker also lifts the bots' own per-decide wall-clock guards 100x. Those
@@ -167,11 +283,11 @@ no insert policy, no insert grant, and the worker's secret key bypassing
 RLS as its only writer. Human scores are unforgeable only in the sense that
 nobody bothers; these genuinely are.
 
-Each bot is replayed at its **best** profile, not its menu default: `REPLAY_AUX`
-in [`tools/bot_replay.py`](../tools/bot_replay.py) currently runs `knower` at
-search depth 12, the top of its own slider and a far stronger player than the
-depth 1 an untuned seat gets. The setting in force is stored on the row and shown
-beside the name ("knower · search depth 12"), so the board never quietly compares
+Each bot is replayed at its **best** profile, not its menu default: `replay_aux`
+in [`tools/bot_replay.py`](../tools/bot_replay.py) runs every bot at the top of
+its own aux slider, which today puts `knower` on Oracle: Search (a far stronger
+player than the Predict an untuned seat gets) and `actuary` on Style: Learning. The setting in force is stored on the row and shown
+beside the name ("knower · oracle: search"), so the board never quietly compares
 two different versions of one bot — and changing it refills those rows on the next
 ordinary run.
 
@@ -181,12 +297,83 @@ lasting 600 turns is not a better result than dying on turn 40. `js/standings.mj
 (`botOrder`, `bestBot`, `humanVsBots`) holds that logic, and
 `tests/standings.test.mjs` pins it.
 
-The main list carries the same verdict as a glance-able "Bot leads" badge on any
-map's card, rather than making a visitor open the map to find out nobody has
-beaten it yet. `game_summary`'s `bot_turns`/`bot_lost`/`bot_name` (schema.sql, a
+The main list carries the same verdict as a glance-able badge on any map's card —
+"Bot leads", or "Bot tied" when the board's best exactly matches it — rather than
+making a visitor open the map to find out nobody has beaten it yet. `game_summary`'s `bot_turns`/`bot_lost`/`bot_name` (schema.sql, a
 lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
+
+The same rows give every map an estimated difficulty: the share of bots that
+didn't take it (`game_summary.difficulty`, from `bot_wins`/`bot_runs`;
+`config_summary.avg_difficulty` for a setup). The main list sorts on it as
+"Difficulty (estimated)", easiest first, and `format.mjs`'s `difficultyBadge` shows
+it as Easy / Medium / Hard / Very hard on cards and the map page. See
+`docs/design/leaderboard.md`, "Estimated difficulty".
+
+### Watching a bot's replay
+
+A winning bot row carries a **Watch** link, and since the underlying change
+that added this section, it plays back a *recorded* replay — `#log=<match
+id>`, the exact link mechanism a human's posted score uses (see "Watching one
+back" below) — rather than asking the browser to re-decide the whole match
+live from the setup and seed.
+
+That used to be the only option, and the two could disagree. Re-deciding a
+match depends on exactly which commit is deployed where, and on how every
+*oracle* bot in the field is willing to treat the seat it is facing: a
+human-flagged seat is guessed at, never trusted (`models/knower.py`'s
+`_model_for`), while an AI one is resolved through `ai.STRATEGIES` and
+simulated exactly — a real advantage or disadvantage depending which side of
+it a bot lands on. `tools/bot_replay.py`'s worker used to clear that flag on
+the seat it replayed (the shortest way to make the engine decide it), so its
+opponents could simulate the bot exactly — while a live, token-driven Watch
+link could only ever turn `autoplay` on and leave the flag set, since nothing
+in a token can say "seat 1 is a bot". Two different games, one row: that
+asymmetry let a row say "lost" while the very link beside it, opened in a
+browser, played out a win.
+
+The fix was not to make the harness match the handicapped, flag-set version —
+that would have measured every bot under an artificial disadvantage this
+board's other yardstick, the roster's own ladder and swap tournaments, never
+imposes (there, every seat sees every other clearly). It was to stop asking a
+Watch link to compute anything at all. A stored *log* cannot disagree with
+itself: `replay.reconstruct` applies its recorded orders and dice verbatim,
+asking no seat to decide anything, so watching it *is* rewatching the exact
+game the row reports on — regardless of what any seat was flagged during the
+run that produced it. That is what let the harness go back to clearing the
+flag and measuring every bot on the same full-information footing as the rest
+of the roster, without reopening the original mismatch.
+
+`tools/bot_replay.py` builds this the same way `main.resolve_turn` builds a
+live match's own log — turn by turn, via `sim.play_settings`'s `log`
+parameter — and stores its encoded form directly on the `bot_scores` row
+(`match_id`/`rules_version`/`log`) the moment a replay wins. Only a win: a
+loss stores nothing, the same rule a human's own posted score follows (there
+is nothing to Watch for a game that went nowhere). `bot_scores` is already
+fully public — no consent to gate, no person's data in it — so this needs no
+new `scores`-style publishing step; storing it on the row *is* publishing it.
+`game.mjs`'s `botRow` reads `standings.mjs`'s `botWatchKind(row)` to decide
+which of three things to show: **current** (`#log=` on the stored match id),
+**outdated** (a replay was stored, but under rules this build no longer plays
+by — the same disclosure a human's outdated replay gets, rather than an
+offer that can no longer reconstruct), or **legacy** (a win computed before a
+row carried a replay at all — `js/token-encode.mjs`'s `botWatchSetup` is kept
+purely as that one fallback, reconstructing the match live the way every
+bot's Watch link used to). A loss offers nothing, at any kind.
+
+The lookup on the game's side goes through one more view,
+`public_watchable_replays` — the union `netlify/functions/replay.mjs` reads,
+of `public_replays` (a human's, gated as always on a posted score) with a
+winning bot's own stored log (gated on nothing further, since `bot_scores`
+already is public). Two different, unrelated consent rules meeting in one
+`union all` rather than a branch in the function itself, which is what keeps
+"what may be served is decided in SQL, not here" true of both halves.
+
+Existing rows computed before this shipped have no stored replay yet — they
+show as "legacy" until the worker replays their map again (an ordinary run
+only refills what's missing or stale, so a one-off `--recompute` is what
+backfills the rest at once).
 
 ## Checked scores
 
@@ -217,6 +404,19 @@ The pieces, in the order a submission touches them:
 
 **The verifier binds the replay to the setup** (`same_setup`), or an easy map's
 log could be attached to a hard map's score and would verify perfectly.
+
+**It checks the dice too**, on every turn the log marks `keyed`: each fight's
+dice follow from the board, so the turn is fought again from its recorded orders
+and a log whose dice differ (hand-picked rolls) is a `mismatch`. Turns played
+before dice were keyed (2026-10-08) can't be re-rolled and pass unchecked, and
+the verdict's detail says how many.
+
+**Playstyle readings ride the same worker.** `tools/playstyle_worker.py` reads
+every replay in `public_replays` into `playstyle_readings`, one row per match and
+none per name. The player page (`user.html`) pools a name's rows through that
+name's own `scores.match_id` and shows them next to the bots'
+(`js/playstyle-baseline.mjs`, generated by `tools/playstyle.py --baseline`),
+in a panel that stays collapsed until opened. Reasons: `docs/design/leaderboard.md`, "Playstyle readings".
 
 What this does *not* do: prove a human played the game. A bot driving the seat
 produces a log that verifies like any other — which is what `hand` discloses, and
@@ -258,8 +458,9 @@ moves. Grouping one person's games would need a durable client id, which is a
 tracking identifier by any other name.
 
 Uploads are append-only like everything else here, so a game that checkpoints
-repeatedly leaves several rows and the longest is the current one;
-`tools/verify_scores.py --prune` clears the rest.
+repeatedly leaves several rows. A score is judged on the upload that verifies,
+never just the longest, because anyone can upload under a match id once a score
+makes it public. `tools/verify_scores.py --prune` clears the rest.
 
 ### Watching one back
 
@@ -270,12 +471,20 @@ Python, so a JS viewer would be a second engine to keep in step with the first.
 The link is `<GAME_URL>#log=<match id>`; the game fetches the replay from
 `netlify/functions/replay.mjs` and opens history review on it.
 
-**Posting a score is what publishes that replay.** `public_replays` (schema.sql)
-is `game_logs` restricted to the matches a posted score points at, so a game that
-merely uploaded itself because *Share replays* was on stays unreadable. That rule
-lives in the view's `where` clause rather than in the function, which selects
-from the view and has no condition of its own to drift. `submit.html` says so on
-the form, since that is where the decision is actually made.
+(A winning bot's row gets a Watch link the same way now — `#log=` on its own
+`match_id` — with the ingredients-and-reconstruct method kept only as a
+fallback for a row with no stored replay yet; see "Watching a bot's replay"
+under "How the bots did" above.)
+
+**Posting a score is what publishes that replay** — unless the map it belongs to
+is still embargoed, in which case nothing is, whoever posted it. `public_replays`
+(schema.sql) is `game_logs` restricted to the matches a posted score points at
+*and* whose map's `games.embargo_until` has either passed or was never set, so a
+game that merely uploaded itself because *Share replays* was on stays unreadable
+either way. That rule lives in the view's `where` clause rather than in the
+function, which selects from the view and has no condition of its own to drift.
+`submit.html` says so on the form, since that is where the decision is actually
+made — see "Embargoed replays" above for how a map ends up embargoed at all.
 
 The link is only rendered for ids `public_replays` actually returns
 (`watchableIds` in `js/game.mjs`), so it can never lead to a 404 — a score can
@@ -288,15 +497,18 @@ paths and a folded key would make a `game_key` lookup quietly miss.
 1. **Create a Supabase project** (free tier is fine). Note its Project URL and
    `anon` public key from *Project Settings → API keys*.
 2. **Run [`schema.sql`](schema.sql)** in the project's SQL editor. It creates
-   `users`, `games`, `scores`, `configs`, `game_logs`, `score_checks`, the
-   `game_summary`/`config_summary`/`public_replays` views, and the row-level security policies that
+   `users`, `games`, `scores`, `configs`, `config_tags`, `game_logs`,
+   `score_checks`, `playstyle_readings`, the `game_summary`/`config_summary`/`config_tag_counts`/
+   `public_replays` views, and the row-level security policies that
    make everything append-only. The whole file
    is idempotent — paste it again after any change to it, and an existing board
    picks the change up without touching a row. If a page 404s on a new table or
    view right after pasting, PostgREST's schema cache hasn't caught up yet; the
    file's own final statement (`notify pgrst, 'reload schema';`) normally makes
-   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
-   here, run only when two keys need merging (see above).
+   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is another script
+   here, run only when two keys need merging (see above);
+   [`fold-bots.sql`](fold-bots.sql), run once, folds the bot column onto one row
+   per family (`docs/design/bot-families.md`).
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and the project's
    *publishable* key (`sb_publishable_…`; the older `anon` JWT is under Supabase's
    "Legacy API keys" tab and works too). That key belongs in git — it is designed
@@ -304,9 +516,10 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    the legacy `service_role`) must never go in this repo. `GAME_URL_FALLBACK` is
    where the game is deployed; on a `.netlify.app` host it is usually not used at
    all — see "Finding each other" below.
-4. **Create a second Netlify site** from this repo with **Base directory** set to
-   `leaderboard`. Netlify then reads `leaderboard/netlify.toml` and publishes these
-   files as-is. The root `netlify.toml` and the game's own site are untouched.
+4. **Nothing to create on Netlify.** The game's site (root `netlify.toml`)
+   publishes these pages at `/board/` and runs the functions at `/api/`. The
+   files are copied by an explicit list in `tools/build_web.sh`, so a new page
+   has to be added there too (`tests/test_web_build.py` fails until it is).
 5. **Optional — turn on the bot column and score checking.** Add two repository secrets under
    *Settings → Secrets and variables → Actions*: `SUPABASE_URL`, and
    `SUPABASE_SECRET_KEY` set to the project's **secret** key `sb_secret_…` (*not*
@@ -315,49 +528,62 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    keys" tab; it still works, under either that name or `SUPABASE_SERVICE_KEY`. The workflow skips itself cleanly while they are unset, so there is
    nothing to undo if you'd rather not. It runs hourly — Actions minutes are
    unmetered on a public repository, so the cadence answers to freshness, with
-   *Run workflow* for when you want it sooner. On a **private** fork every run
-   bills against the account's monthly allowance instead, so thin the schedule
-   there (`.github/workflows/bot-replay.yml`; daily is far sooner than a
-   leaderboard needs). Any run keeps a free Supabase project from idling into the
+   *Run workflow* for when you want it sooner. The workflow is four independent
+   jobs (bot scores, score checks, Playstyle readings, the weekly campaign map):
+   the schedule runs all four, and *Run workflow* runs only the ones ticked, each
+   with its own options. On a **private** fork every job bills against the
+   account's monthly allowance instead, each rounded up to a whole minute, so
+   thin the schedule there (`.github/workflows/bot-replay.yml`; daily is far
+   sooner than a leaderboard needs). Any run keeps a free Supabase project from idling into the
    pause noted under *Known limitations*.
 6. **Optional — accept replay uploads.** Set the *same two* values as
-   environment variables on this Netlify site (*Site configuration → Environment
-   variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_KEY`). That is what
-   both functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
+   environment variables on the game's Netlify site (*Site configuration →
+   Environment variables*): `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or
+   `SUPABASE_SERVICE_KEY`). Scoping the key to Functions needs a paid plan, so
+   the root `netlify.toml`'s build command unsets it before any build step runs
+   instead. Keep the
+   sensitive-variable policy on **Require approval**: a fork's deploy preview
+   runs the fork's own functions, and approval is the only thing between them and
+   the key (the root `netlify.toml` header has the reasoning). That is what
+   the functions here read (`log.mjs` stores an upload, `replay.mjs` serves one
    back); with either unset they answer 503, and the game's uploads simply go
    nowhere and no replay is watchable — a working board without replays rather
    than a broken one.
 
    Netlify's secret scanner would otherwise fail the build over `SUPABASE_URL`,
    because `js/config.mjs` ships that value to every visitor on purpose. It is
-   declared not-a-secret in [`netlify.toml`](netlify.toml)
+   declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log` and `/api/replay` on this site
-   — see `paths.LEADERBOARD_LOG_URL`/`LEADERBOARD_REPLAY_URL` if it is deployed
-   somewhere else.
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
+   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
+   (`campaign.mjs`) needs no key: it reads the same public campaign rows
+   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
+   them.
 
 ## Finding each other
 
-The game and the board are two Netlify sites whose names differ by exactly
-`-leaderboard`, and Netlify names every other deploy `<context>--<site>.netlify.app`
-— `deploy-preview-42--…` for a PR, `<branch>--…` for a branch deploy. Both sites
-build from this one repository, so a PR produces the *same* context on each.
+The game and the board are one Netlify site, so they find each other by being
+the same origin. On a `.netlify.app` host, `GAME_URL` in `js/config.mjs` is the
+page's own root, and the game's `webstore.leaderboard_origin` is the page's own
+origin. A deploy preview's board therefore links to that preview's game, and the
+preview's game uploads to that preview's functions, with no URL edited by hand.
+Any other host (a custom domain, localhost, a desktop build) falls back to the
+production constants. `allowedOrigin` in `netlify/functions/log.mjs` still
+admits every `star-conquest` deploy and localhost, for the local-server case.
 
-That makes the sibling derivable instead of configured. Each side edits the tag
-into or out of its own hostname:
+One origin also means one localStorage. The lobby reads the game's seat store
+(`sc_pbp_seats`) and the posting name is the game's `sc_pbp_name`.
+`tests/test_leaderboard_sync.py` pins both keys against `starconquest/paths.py`.
+Every board page has a **▶ Play** link back to the game (`../`), because inside
+the fullscreen home-screen app there is no address bar or Back button.
 
-    deploy-preview-42--star-conquest.netlify.app
-    deploy-preview-42--star-conquest-leaderboard.netlify.app
-
-So a deploy preview of the game uploads to, and watches replays from, the deploy
-preview of the board; a branch deploy pairs with its branch deploy; production
-with production — with no URL edited by hand between them. `sibling_host` in
-`starconquest/paths.py` is one direction (used by `webstore.leaderboard_origin`),
-`siblingGame` in `js/config.mjs` the other, and `allowedOrigin` in
-`netlify/functions/log.mjs` accepts the same shape so a preview is not refused by
-CORS. Any host the rule cannot read — a custom domain, localhost, a desktop
-build — falls back to the constant, which is the behaviour this always had.
+**The old host.** `star-conquest-leaderboard.netlify.app` was the board's own
+site until the merge. It is now a redirect shell built from
+[`legacy-board/`](../legacy-board/netlify.toml): pages 301 to the same path under
+`/board/`, and `/api/*` is *proxied*, since installed builds still POST there and
+neither urllib nor `fetch` carries a POST across a redirect. Its sunset review
+date is in that file.
 
 **A preview shares production's database.** Netlify gives deploy previews the
 site's environment variables, so a test upload from a preview lands in the real
@@ -365,18 +591,55 @@ site's environment variables, so a test upload from a preview lands in the real
 previews* context (Netlify supports per-context values) and point it at a scratch
 project.
 
+## Moderation
+
+Nothing on the site can remove or change a row, so moderation is a local
+command run by the owner with the project's secret key — the same
+`SUPABASE_URL`/`SUPABASE_SECRET_KEY` the worker uses. Nothing is deployed for
+it, and no admin credential exists anywhere a browser can reach.
+
+```sh
+uv run python tools/admin.py scores --user NAME      # look first
+uv run python tools/admin.py tags
+uv run python tools/admin.py matches                 # private matches included
+
+uv run python tools/admin.py delete-score 123 --reason "impossible score"
+uv run python tools/admin.py delete-score 123 --reason "impossible score" --yes
+```
+
+Each command that writes only describes what it would do until `--yes` is
+passed. An applied one first records itself in `admin_actions` (what, to what,
+the `--reason`, and a copy of every row it is about to remove or overwrite), so
+nothing is moderated without a trace and a deletion can be put back by hand.
+
+| Command | Does |
+|---|---|
+| `delete-score ID…` | Removes scores and the tags posted with them. Their replays stop being public; the uploads stay private. |
+| `delete-game KEY` | Removes a map with its scores, tags, bot results and uploaded replays. |
+| `rename-user NAME NEW` | Renames a player everywhere their name shows. |
+| `delete-tag TAG [--config KEY]` | Removes a tag everywhere, or from one config. |
+| `delete-config-name KEY` | Clears a config's name, so the next one posted sticks. |
+| `new-link MATCH SEAT` | Mints a play-by-post seat a new link and prints it once. The old link stops working and the seat stays claimed: the way to hand a seat on privately. `--game-url` points the link at a preview build. |
+| `open-seat MATCH SEAT` | Forgets a seat's token, so the next *Get link* on the lobby claims it. A private match is refused unless `--publish` lists it too, since otherwise nothing could claim the seat. |
+| `delete-match MATCH` | Removes a play-by-post match and its orders. |
+
+The *same* seat link can never be shown twice: only a hash of each token is
+stored.
+
 ## Local development
 
 ```sh
-cd leaderboard && python3 -m http.server 8000   # then open localhost:8000
-netlify dev                                     # ...or this, to run the function too
+cd leaderboard && python3 -m http.server 8000   # quickest: open localhost:8000
+./tools/build_web.sh && cd web && python3 -m http.server 8000   # as deployed: localhost:8000/board/
+netlify dev                                     # ...or this, from the repo root, to run the functions too
 ```
 
 A real Supabase URL in `config.mjs` works from localhost with no CORS setup —
 PostgREST accepts any origin for the publishable key. Without one, every page says so
 instead of failing obscurely. A plain static server does not run
-`netlify/functions/`, so uploads need `netlify dev` (with the two environment
-variables set); `localhost:8000` is in the function's CORS allowlist for that.
+`netlify/functions/`. From localhost the game falls back to the production
+`/api/` (`localhost:8000` is in the functions' CORS allowlist), and the board's
+`/api/pbp` needs `netlify dev` with the two environment variables set.
 
 ## Tests
 
@@ -404,10 +667,81 @@ query string, and answers "unpublished" and "missing" identically.
 best-of-several attempts, who leads a comparison, and the card's own totals — which
 is why that logic sits in a module with no DOM or fetch in it. It also covers the
 map board's two rankings (`scoreComparator`, `displayOrder`); `tests/setup.test.mjs`
-covers a config's derived label (`js/setup.mjs`). Neither `schema.sql` nor its
-functions have a test harness — verify a change to `sc_config_key`/`sc_bots` by
-pasting the file into a scratch Postgres or Supabase project and querying
-`game_summary`/`config_summary` directly.
+covers a config's derived label (`js/setup.mjs`), and `tests/tags.test.mjs` covers
+tag normalisation (`js/tags.mjs`'s `normalizeTags` — trim, lowercase, dedupe, the
+6-tag cap) the same way, with no DOM or database needed to exercise it. The crown views are
+the one part of `schema.sql` with a test (`tests/test_crowns_sql.py`, opt-in via
+`SC_TEST_PG`, which applies the whole file to a scratch Postgres). Otherwise
+`schema.sql` and its functions have no test harness — verify a change to
+`sc_config_key`/`sc_bots`/`config_tag_counts` by pasting the file into a scratch
+Postgres or Supabase project and querying `game_summary`/`config_summary`
+directly.
+
+## Crowns
+
+The one contest on the board, and it rewards *taking first place from somebody
+else* — a count of wins or of maps would pay out for grinding easy setups
+instead. A **crown** is a contested map (counted scores from two or more players)
+whose record you hold; a **steal** is a score that strictly beat the record it
+found, where that record was somebody else's. Tying never steals — the earliest
+to reach a result keeps it, as `game_summary` already credits — and beating your
+own record is just an improvement. Steals count in the week they were posted,
+Monday 00:00 UTC to the next; `?week=` browses back.
+
+All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
+is the eligibility rule (a verified score; one still waiting on its replay, for
+its first 24 hours; anything posted before 2026-10-15 but a mismatch; and only
+the first score posted for a match, or for the same game re-uploaded under
+another match),
+`crown_holders` and `crown_steals` read it. Deleting
+a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
+maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.
+It is as cheesable as any identity here — a second name can make a map
+"contested" — but a crown still needs a real record on a map, and a steal a real
+better score.
+
+## Campaign
+
+A new map every Monday 00:00 UTC. Each node is a fresh challenge: an unplayed
+seed on a config somebody has already played (so it is known to be playable),
+sometimes its symmetric variant (hub, ring, wheel or core, rolled unless the
+config already names one), and one or two "?" nodes with randomised
+settings. Hand-drawn maps are left out, since their seed changes only the star
+names and the dice. A node's circle is sized, and labelled, by its systems.
+
+- **Homes** ring the map, one lane each off an edge node. The first win on an
+  empty home, from a player without one, claims it for the week, and a home
+  can never be taken — so there is always a seat for a newcomer and a way back
+  for anyone who loses the field.
+- **Field nodes** fall to a win posted while you hold a neighbour; somebody
+  else's only to a strictly better score (a tie defends). Bettering your own
+  score on a node raises the bar for attackers.
+- **Half an hour's grace.** A win also counts if you held the node or a
+  neighbour at any point in the 30 minutes before posting it, so a node taken
+  from you while you were playing on or beside it doesn't void the game. Only
+  a game you started before losing it is covered: the game stamps what the
+  campaign said at Start onto the score (`scores.campaign_start`), and a blank
+  stamp (older scores, the desktop build, a hand-written link) is trusted.
+- **The game says so too.** On the web build, a setup that is one of this
+  week's nodes is looked up (`/api/campaign`, by the name this browser last
+  posted under). Start asks first if a win wouldn't be a move, or would only be
+  one inside the grace, and the top bar keeps a countdown while you play. A
+  live node's own page (`game.html`) shows the same status as the campaign
+  page above its "Play this map" button.
+- A score counts if it had at least one turn played by hand and its replay
+  wasn't found to be a `mismatch`. Anything else is just an ordinary score.
+- The week runs its full length; most field nodes held at the close wins.
+
+Only the map is stored (`campaigns`, written once per week by
+`tools/campaign.py` on the hourly job, with the secret key as its only writer).
+The standing is a replay of the week's scores in posting order
+(`campaign_scores` → `js/campaign.mjs`'s `fold`), so a deleted or re-checked
+score changes it on the next page load. `campaign_games` is the node-to-map
+match underneath it (seed plus the setup compared as jsonb, so `0.0` and `0`
+agree). It is also what puts a campaign badge on a map's page and its index
+row, linking back to that node on the campaign page. Tests: `tests/test_campaign.py` for the
+generator, `tests/campaign.test.mjs` for the rules, and the opt-in
+`tests/test_crowns_sql.py` for the view.
 
 ## Known limitations, accepted on purpose
 
@@ -416,17 +750,37 @@ pasting the file into a scratch Postgres or Supabase project and querying
   real one is. What answers that is the replay the game now uploads when you post
   (see "Checked scores" above) — but only for scores that carry one. Anything
   posted by hand, or before that existed, checks as `missing`: unverified rather
-  than suspect, and shown as such.
+  than suspect, and shown as such. From 2026-10-15 such a score holds no crown,
+  moves no campaign node, and is neither a map's record (`game_summary`'s best,
+  the card's headline, "Bot leads") nor its "Play this map" target once its
+  first 24 hours are out. It still appears in the map's list, without a ✓.
 - **Names are not identities.** No auth, keyed by name, so two people typing the
   same name share a row — and so share a player card. Anyone can also post under
   your name, which is the same trade the board makes everywhere else.
-- **Wins only.** The game only offers the challenge link when the human won and
-  played at least one turn by hand, so nothing else can be posted.
+- **A score is wins only.** The game only offers the challenge link when the
+  human won and played at least one turn by hand, so nothing else can be
+  posted as a score. A setup with no result behind it is the exception — see
+  "Sharing a setup with no score" above — but that registers a map, never a
+  score.
 - **A config's name is first-wins and permanent**, and a `config_key` can be
   squatted or posted for a setup nobody has played — see "Same setup, different
-  seed" above.
+  seed" above. Tags don't share that trade — they accumulate — but they do
+  share the trust model: whoever posts a score picks the tags that ride with
+  it, and "most frequent" only means "most distinct players have typed this,"
+  not "true."
 - **Supabase pauses free projects after about a week idle**, which needs a manual
   unpause. A weekly scheduled request against the REST API would prevent it.
+- **A replay recorded under rules the engine has since moved past loses its
+  Watch link rather than keeping it.** `GameLog.is_current` (a `rules_version`
+  claim, same shape as `finished`/`won`/`hand`) is compared against
+  `CURRENT_RULES_VERSION` before a replay is offered, since reconstructing an
+  outdated one can silently show a different game than the one actually played
+  — but nothing here regenerates or re-verifies it under the rules it *was*
+  played with, so a genuine rules change quietly retires every replay it
+  touches instead of preserving them. Storing a full board snapshot per turn
+  would survive any future rules change instead of just being caught by one;
+  set aside for now (see "Checked scores" in `docs/design/leaderboard.md`) rather
+  than ruled out.
 
 ## Not built yet
 

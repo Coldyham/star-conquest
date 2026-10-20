@@ -4,8 +4,9 @@ A match is fully determined by its ``Settings``, its concrete ``seed`` and, per
 turn, the orders every seat issued plus the combat draws they produced. So we
 never snapshot a ``GameState``; we record those inputs:
 
-    {settings, seed, turns: [{"ai": bool, "orders": [...], "dice": [...],
-                              "rules": {src: [dest, keep]}}, ...], ...}
+    {settings, seed, strategies: {pid: name},
+     turns: [{"ai": bool, "orders": [...], "dice": [...], "keyed": bool,
+              "rules": {src: {"hold": n, "to": {dest: pct}}}}, ...], ...}
 
 ``reconstruct`` feeds each turn straight back through ``engine.end_turn`` as a
 ``TurnRecord``, so the board is rebuilt without asking a single seat to decide
@@ -22,6 +23,11 @@ are recorded for the same reason, since skipping the AI leaves ``state.rng``
 somewhere other than where the battle found it. Version-1 logs can no longer be
 replayed faithfully and are skipped by ``latest_log``.
 
+``keyed`` says the turn's dice were rolled per fight (``engine._Dice``), so they
+follow from the board and the orders and can be rolled again to check them.
+Absent on a turn from before that, whose dice came off ``state.rng`` after the
+bots and are only what was recorded.
+
 Two consequences worth stating, because replays are now kept and shared. First,
 **a bot is never consulted**, so changing one — retuning it, rewriting it,
 deleting it — cannot alter any recorded game; the roster stays free to move.
@@ -33,7 +39,8 @@ today's rules" instead of "wrong".
 ``rules`` is the human's standing auto-forward rules as they stood that turn —
 shell state (``Ui.auto_forward``), not simulation, and carried so that resuming
 or rewinding hands the player back the routes they set up rather than an empty
-board (``main.resume_game``).
+board (``main.resume_game``). Logs from before shares stored ``[dest, keep]``,
+read back as holding ``keep`` and sending 100% to ``dest``.
 
 Pure core (no pygame): like ``settings``, this serializes trivially and drives
 the headless engine. Replay needs no AI at all now, which is a stronger form of
@@ -47,16 +54,18 @@ after each turn so the file on disk always reflects the live match.
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import json
 import re
 import zlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Optional
 
-from . import engine
-from .model import GameState, Order
+from . import engine, turnfilm
+from .model import ForwardRule, GameState, Order
 from .paths import data_dir
 from .settings import Settings, build_state, fresh_rng
 
@@ -76,7 +85,44 @@ _MATCH_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def board_digest(state: GameState) -> tuple:
+    """Everything about a board that a frame could show.
+
+    Lanes and adjacency are left out: nothing ever mutates them. ``lane_slot`` is
+    *in*, cosmetic though it is — a film that invented its own tracks would pop
+    every fleet sideways, so it is part of what two boards agreeing has to mean.
+
+    Two uses, both about catching a disagreement that should be impossible. The
+    film oracles compare a playback's board against the real one
+    (``tests/sim.check_film``), and play-by-post compares what each client
+    resolved a turn to: the board is a pure function of the settings, the seed
+    and every turn's orders and dice, so honest clients agree by construction and
+    a mismatch means a stale build or a genuine bug — never a player.
+    """
+    return (
+        tuple((sid, s.owner_id, s.ships, s.production, s.prod_progress)
+              for sid, s in sorted(state.systems.items())),
+        tuple((f.owner_id, f.source_id, f.dest_id, f.ships, f.turns_total,
+               f.turns_remaining, f.lane_slot) for f in state.fleets),
+        state.turn,
+        state.winner,
+        tuple((pid, p.alive, p.ships_lost) for pid, p in sorted(state.players.items())),
+    )
+
+
+def digest_hex(state: GameState) -> str:
+    """``board_digest`` as 32 hex characters, for putting on a wire.
+
+    ``repr`` of the tuple rather than JSON: it is only ever compared against
+    another digest produced by this same function, on the same build, so what
+    matters is that it is stable within a version — and ``blake2s`` of it is
+    small enough to sit on every submission without anyone noticing.
+    """
+    raw = repr(board_digest(state)).encode()
+    return hashlib.blake2s(raw, digest_size=16).hexdigest()
 
 
 def _new_match_id() -> str:
@@ -95,12 +141,68 @@ def _order_to_dict(o: Order) -> dict:
     return {"owner": o.owner_id, "src": o.source_id, "dest": o.dest_id, "ships": o.ships}
 
 
-def _order_from_dict(d: dict) -> Optional[Order]:
+def _order_from_dict(d: dict) -> Order | None:
     """Rebuild one Order, or None if the entry is malformed (skip, don't crash)."""
     try:
         return Order(int(d["owner"]), int(d["src"]), int(d["dest"]), int(d["ships"]))
     except (TypeError, ValueError, KeyError):
         return None
+
+
+def rules_to_dict(rules: dict[int, ForwardRule] | None) -> dict:
+    """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": {"hold":
+    n, "to": {"dest": pct}}}``, lanes in the order they were added. The one form
+    they are stored in, by a log turn and by play-by-post's local copy
+    (``pbp.remember_rules``) alike."""
+    return {
+        str(src): {"hold": rule.hold, "to": {str(dest): pct for dest, pct in rule.shares.items()}}
+        for src, rule in (rules or {}).items()
+    }
+
+
+def rules_from_dict(raw) -> dict[int, ForwardRule]:
+    """``rules_to_dict`` read back, shaped for ``Ui.auto_forward``. The older
+    ``[dest, keep]`` form reads as holding ``keep`` and sending 100% to ``dest``.
+    Malformed entries are dropped rather than raising, in keeping with the rest of
+    this format."""
+    rules: dict[int, ForwardRule] = {}
+    if not isinstance(raw, dict):
+        return rules
+    for src, rule in raw.items():
+        try:
+            sid = int(src)
+            if isinstance(rule, dict):
+                shares = {int(d): max(0, min(100, int(p))) for d, p in dict(rule["to"]).items()}
+                parsed = ForwardRule(shares, max(0, int(rule.get("hold", 0))))
+            else:
+                dest, keep = rule
+                parsed = ForwardRule({int(dest): 100}, max(0, int(keep)))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if parsed.shares and parsed.total() <= 100:
+            rules[sid] = parsed
+    return rules
+
+
+def seat_strategies(state: GameState) -> dict[int, str]:
+    """The strategy each seat of ``state`` is played by, neutral left out — what
+    ``GameLog.strategies`` records."""
+    return {pid: p.ai_strategy for pid, p in sorted(state.players.items()) if not p.is_neutral}
+
+
+def _strategies_from_dict(raw) -> dict[int, str]:
+    """``GameLog.strategies`` read back; malformed entries are dropped."""
+    out: dict[int, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for pid, name in raw.items():
+        try:
+            seat = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(name, str) and name:
+            out[seat] = name
+    return out
 
 
 @dataclass
@@ -120,16 +222,37 @@ class GameLog:
     # thing as `version`, which is the *format* of this file: one says how to read
     # the log, the other says whether replaying it still reproduces the game.
     rules_version: int = field(default_factory=lambda: engine.RULES_VERSION)
-    winner: Optional[int] = None
+    # Which strategy each seat was built with (`seat_strategies`), so a seat left
+    # to `settings.RANDOM_STRATEGY` keeps the bot it was dealt: the pick once
+    # depended on the roster loaded at Start, and a stale cached build may not
+    # know its seed's pool (`settings.pool_for`). Empty on a log written before
+    # the field existed, which rebuilds with today's picks as it always did.
+    strategies: dict[int, str] = field(default_factory=dict)
+    winner: int | None = None
     finished: bool = False
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
     version: int = FORMAT_VERSION
-    path: Optional[Path] = field(default=None, compare=False)
+    path: Path | None = field(default=None, compare=False)
 
     @property
     def turn_count(self) -> int:
         return len(self.turns)
+
+    @property
+    def is_current(self) -> bool:
+        """Whether this log's stamped rules still match the running engine.
+
+        `False` means `reconstruct` is no longer *this game's* reconstruction: the
+        phase order, a fight's resolution, or how the dice are consumed may have
+        moved since it was played, so replaying its recorded orders and dice back
+        through today's engine can land on a different board than the one that
+        was actually reached. `latest_log` and `main.open_replay` both decline
+        such a log rather than silently rebuilding the wrong game — resuming or
+        watching it exactly is no longer possible, only re-simulating a
+        plausible-looking one.
+        """
+        return self.rules_version == engine.RULES_VERSION
 
     @property
     def hand_turns(self) -> int:
@@ -144,7 +267,7 @@ class GameLog:
         return sum(1 for i in range(self.turn_count) if not self.turn_is_ai(i))
 
     def record_turn(self, record: engine.TurnRecord, human_ai: bool = False,
-                    rules: Optional[dict[int, tuple[int, int]]] = None) -> None:
+                    rules: dict[int, ForwardRule] | None = None) -> None:
         """Append one resolved turn exactly as ``engine.end_turn`` played it.
 
         ``human_ai`` records that the human seat was AI-driven this turn (autoplay)
@@ -157,12 +280,13 @@ class GameLog:
                 "ai": bool(human_ai),
                 "orders": [_order_to_dict(o) for o in record.orders],
                 "dice": list(record.dice),
-                "rules": {str(src): [dest, keep] for src, (dest, keep) in (rules or {}).items()},
+                "keyed": bool(record.keyed),
+                "rules": rules_to_dict(rules),
             }
         )
         self.updated_at = _now_iso()
 
-    def mark_finished(self, winner: Optional[int]) -> None:
+    def mark_finished(self, winner: int | None) -> None:
         self.winner = winner
         self.finished = True
         self.updated_at = _now_iso()
@@ -184,7 +308,7 @@ class GameLog:
         self.rules_version = engine.RULES_VERSION
         self.updated_at = _now_iso()
 
-    def fork(self, n: int) -> "GameLog":
+    def fork(self, n: int) -> GameLog:
         """A fresh log branching from turn ``n`` (finished-game rewind).
 
         Same seed and settings, ``turns[:n]``, outcome cleared, and a brand-new
@@ -196,6 +320,7 @@ class GameLog:
             seed=self.seed,
             settings=self.settings,
             turns=list(self.turns[:n]),
+            strategies=dict(self.strategies),
             version=self.version,   # the turns come with it, so the format does too
             path=_game_path(self.seed),
         )   # `match_id` and `rules_version` are deliberately left to their
@@ -223,26 +348,24 @@ class GameLog:
         raw = entry.get("dice", []) if isinstance(entry, dict) else []
         return [float(d) for d in raw if isinstance(d, (int, float))]
 
+    def keyed_for(self, turn_index: int) -> bool:
+        """Whether turn ``turn_index`` rolled its dice per fight (``engine._Dice``)."""
+        entry = self.turns[turn_index]
+        return isinstance(entry, dict) and entry.get("keyed") is True
+
     def script_for(self, turn_index: int) -> engine.TurnRecord:
         """Turn ``turn_index`` in the form ``engine.end_turn`` replays."""
-        return engine.TurnRecord(self.orders_for(turn_index), self.dice_for(turn_index))
+        return engine.TurnRecord(self.orders_for(turn_index), self.dice_for(turn_index),
+                                 keyed=self.keyed_for(turn_index))
 
-    def rules_for(self, turn_index: int) -> dict[int, tuple[int, int]]:
+    def rules_for(self, turn_index: int) -> dict[int, ForwardRule]:
         """The human's standing auto-forward rules in force on ``turn_index``.
 
         Shaped for ``Ui.auto_forward``; malformed entries are dropped rather than
         raising, in keeping with the rest of this format.
         """
         entry = self.turns[turn_index]
-        raw = entry.get("rules", {}) if isinstance(entry, dict) else {}
-        rules: dict[int, tuple[int, int]] = {}
-        for src, rule in (raw or {}).items():
-            try:
-                dest, keep = rule
-                rules[int(src)] = (int(dest), int(keep))
-            except (TypeError, ValueError):
-                continue
-        return rules
+        return rules_from_dict(entry.get("rules", {}) if isinstance(entry, dict) else {})
 
     # -- serialization ------------------------------------------------------- #
     def to_dict(self) -> dict:
@@ -251,6 +374,7 @@ class GameLog:
             "seed": self.seed,
             "match_id": self.match_id,
             "rules_version": self.rules_version,
+            "strategies": {str(pid): name for pid, name in sorted(self.strategies.items())},
             "settings": self.settings,
             "turns": self.turns,
             "winner": self.winner,
@@ -260,7 +384,7 @@ class GameLog:
         }
 
     @classmethod
-    def from_dict(cls, data: dict, path: Optional[Path] = None) -> "GameLog":
+    def from_dict(cls, data: dict, path: Path | None = None) -> GameLog:
         """Rebuild from parsed JSON, tolerantly (missing keys keep defaults)."""
         turns_raw = data.get("turns")
         turns = list(turns_raw) if isinstance(turns_raw, list) else []
@@ -279,6 +403,7 @@ class GameLog:
             # A log written before the field existed predates any rules bump by
             # definition, so version 1 is the honest reading of its absence.
             rules_version=int(data.get("rules_version", 1) or 1),
+            strategies=_strategies_from_dict(data.get("strategies")),
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
             created_at=str(data.get("created_at", "")),
@@ -326,7 +451,7 @@ class GameLog:
         return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
 
     @classmethod
-    def decode(cls, blob: str) -> "GameLog":
+    def decode(cls, blob: str) -> GameLog:
         """The inverse of ``encoded`` (raises ``ValueError`` on anything else).
 
         Tolerates the uncompressed form the same way ``Settings.from_token`` does
@@ -335,25 +460,50 @@ class GameLog:
         """
         try:
             raw = base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4))
-            if not raw[:1] == b"{":
+            if raw[:1] != b"{":
                 raw = zlib.decompress(raw)
             data = json.loads(raw.decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001 — one bad blob, one message
+        except Exception as exc:
             raise ValueError(f"unreadable game log: {exc}") from exc
         if not isinstance(data, dict):
-            raise ValueError("unreadable game log: not an object")
+            raise ValueError("unreadable game log: not an object")  # noqa: TRY004
         return cls.from_dict(data)
 
 
 def _game_path(seed: int) -> Path:
     """A fresh, sortable filename for a new match (timestamp keeps them ordered)."""
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
     return GAMES_DIR / f"game_{stamp}_{seed}.json"
 
 
-def new_log(settings: Settings, seed: int) -> GameLog:
-    """Start a log for a new match; ``save`` writes it once the first turn lands."""
-    return GameLog(seed=seed, settings=settings.to_dict(), path=_game_path(seed))
+def reseed(state: GameState) -> None:
+    """Put ``state.rng`` where a live turn's decisions start from.
+
+    Derived from the seed and the turn rather than carried over from the turn
+    before, so a rewound board decides what the board played straight through
+    decided. ``reconstruct`` asks no bot to decide, so a rebuilt board's rng never
+    moves from where map generation left it, and a carried rng would hand every
+    rewind a fresh set of tie-breaks on the turn it lands on. Every bot seat then
+    decides from this same start (``engine.decide_seat``). The dice are not drawn
+    from it at all: ``engine._Dice`` keys them per fight. `pbp.reseed` is the same
+    rule for a shared match, under its own salt.
+
+    Called by whatever resolves a live turn (`main.resolve_turn`, `tests.sim`,
+    `tools/par_search`), never inside `engine.end_turn`: a predicting bot plays
+    `end_turn` on copies with a private rng of its own.
+    """
+    state.rng.seed(f"{state.seed}:turn:{state.turn}")
+
+
+def new_log(settings: Settings, seed: int, state: GameState | None = None) -> GameLog:
+    """Start a log for a new match; ``save`` writes it once the first turn lands.
+
+    ``state`` is the board the match was built as, whose seat strategies the log
+    records. A caller that builds it later (``tests/sim.play_settings``) records
+    them itself.
+    """
+    return GameLog(seed=seed, settings=settings.to_dict(), path=_game_path(seed),
+                   strategies=seat_strategies(state) if state is not None else {})
 
 
 def list_logs() -> list[Path]:
@@ -370,27 +520,62 @@ def load(path: Path) -> GameLog:
         return GameLog.from_dict(json.load(fh), path=path)
 
 
-def latest_log() -> Optional[GameLog]:
+def latest_log() -> GameLog | None:
     """The most recently updated saved match that can still be replayed exactly.
 
     Skips files that fail to load (corrupt / hand-broken) rather than crashing, so
-    one bad file never blocks startup, and skips older formats: a version-1 log
-    holds no record of what the AI seats did, so resuming one would silently hand
-    the player a different game than the one they left (see the module doc).
+    one bad file never blocks startup; skips older formats, since a version-1 log
+    holds no record of what the AI seats did; and skips a log stamped under rules
+    the engine has since moved past (`GameLog.is_current`) — either way, resuming
+    one would silently hand the player a different game than the one they left
+    (see the module doc). No message for any of it: the caller only asks whether
+    there is something to offer resuming, same as it always has for a skipped
+    version-1 log.
     """
     for path in list_logs():
         try:
             log = load(path)
         except (OSError, ValueError):
             continue
-        if log.version >= FORMAT_VERSION:
+        if log.version >= FORMAT_VERSION and log.is_current:
             return log
     return None
 
 
+# Which seat a person holds. `mapgen._make_players` stamps pid 1, and nothing in
+# the setup can move it, so a match rebuilt with the flag cleared knows where to
+# put it back (`share.py` reads it the same way, for the same reason).
+#
+# Deliberately still a constant now that a match may seat people elsewhere: the
+# one place it is read reclaims a seat for a match that *began in autoplay* and
+# was taken over mid-game, which only the single-player shell can produce (the
+# demo, plus Take control). A game seating people from the start arrives here
+# with `is_human` already stamped, so `claimed` is true before the loop and this
+# never fires. If an all-bot match ever becomes claimable by more than one
+# person, this has to become a question the log answers per turn rather than one
+# seat named up front.
+HUMAN_SEAT = 1
+
+
+def dice_follow(state: GameState, record: engine.TurnRecord) -> bool:
+    """Whether ``record``'s dice are what its orders really roll on ``state``.
+
+    The turn is fought again on a copy, with the recorded orders and no recorded
+    dice, so every fight rolls the dice keyed to it (``engine._Dice``) and the two
+    lists are compared. Only meaningful for a keyed turn: one from before keying
+    drew its dice off ``state.rng`` after its bots, which nothing can repeat.
+    ``pbp.verify_turn`` asks it of a shared match's live turn, and
+    ``tools/verify_scores.py`` of every keyed turn behind a posted score.
+    """
+    scratch = copy.deepcopy(state)
+    rolled = engine.end_turn(scratch, script=engine.TurnRecord(list(record.orders), []))
+    return rolled.dice == list(record.dice)
+
+
 def reconstruct(
     log: GameLog,
-    on_turn: Optional[Callable[[GameState], object]] = None,
+    on_turn: Callable[[GameState], object] | None = None,
+    on_event: turnfilm.EventFn | None = None,
 ) -> tuple[GameState, Settings]:
     """Replay a log's turns through the engine to rebuild its current state.
 
@@ -406,15 +591,46 @@ def reconstruct(
     ``on_turn`` (if given) is invoked with the state at the opening position and
     again after each replayed turn — the shell uses it to rebuild fog-of-war
     memory across the whole game, not just the final frame.
+
+    ``on_event`` is handed straight to the engine, so a caller that also passes
+    ``on_turn`` gets each turn's playback events cut at that turn's boundary
+    (`main.build_history`). Neither costs anything when not asked for.
+
+    A match recorded from autoplay is rebuilt with *no* human seat (that is what
+    ``settings.autoplay`` stamps in ``build_state``), so the seat has to be
+    claimed back here too, at the same turn it was claimed in the live match. The
+    per-turn ``"ai"`` flag is already the record of that: the first turn it is
+    False is the first turn a person decided for themselves. Deriving it rather
+    than storing a second flag is what keeps an *old* log replaying correctly —
+    and a scripted turn asks no seat to decide, so nothing else here would ever
+    have flipped it back.
+
+    Each seat gets the strategy ``log.strategies`` recorded, not the one today's
+    roster would deal it, so a resumed match plays on against the bots it began
+    with and a watched one names them. A log with no turns and nothing recorded
+    (a play-by-post match nobody has resolved yet) records the seats built here:
+    nothing has been played, so this board is the match's start.
     """
     settings = Settings.from_dict(log.settings)
     state = build_state(settings, log.seed)
+    if log.strategies:
+        for pid, name in log.strategies.items():
+            if pid in state.players and not state.players[pid].is_neutral:
+                state.players[pid].ai_strategy = name
+    elif not log.turns:
+        log.strategies = seat_strategies(state)
+    claimed = state.human() is not None
     if on_turn is not None:
         on_turn(state)
     for i in range(log.turn_count):
         if state.winner is not None:
             break
-        engine.end_turn(state, script=log.script_for(i))
+        claim = None
+        if not claimed and not log.turn_is_ai(i):
+            claim = HUMAN_SEAT
+            claimed = True
+        engine.end_turn(state, script=log.script_for(i), on_event=on_event,
+                        claim_seat=claim)
         if on_turn is not None:
             on_turn(state)
     return state, settings

@@ -92,7 +92,7 @@ def test_disconnected_systems_stay_hidden():
 def test_monotonic_in_range():
     s = _line(8, owned={0})
     prev: set[int] = set()
-    for r in range(0, 6):
+    for r in range(6):
         visible, scouted = fog.observe(s, 1, sight=r, scout=r)
         seen = visible | scouted
         assert prev <= seen          # a wider range never un-reveals a system

@@ -12,20 +12,57 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import hashlib
 import itertools
 import json
+import math
 import os
 import random
 import time
 import zlib
 from dataclasses import asdict, dataclass, field, fields, replace
-from typing import Optional
 
-from . import config, mapgen
+from . import ai, config, mapgen
+from .custommap import CustomMap
 from .model import AiParams, GameState
 
 MODES = ("random", "symmetric")
+
+# A seat's strategy name meaning "surprise me": `build_state` replaces it with a
+# concrete bot drawn from the seed, so the setup records the *choice to not
+# choose* while the live game holds a real strategy name. Deliberately resolved
+# here rather than by a `models/` dispatcher bot: everything downstream that
+# reasons about who it is playing — `models/knower.py`'s oracle, which asks a
+# module `is_oracle_seat(player)` and gets no seed with which to answer for a
+# dispatcher, `botio`'s seat reveal, the leaderboard's bot column — then sees the
+# bot that is really deciding. It is a key into `ai.STRATEGIES` only by absence:
+# a model file must never be named this.
+RANDOM_STRATEGY = "random"
+
+# Every pool a seat left to `RANDOM_STRATEGY` has been dealt from, oldest first,
+# and the seed says which (`pool_for`): seed // `POOL_ERA` names its pool,
+# counting from 1, and every seed below the second pool's era deals from the
+# first, which is every seed rolled or typed before the pools were numbered. A
+# seed rolled now lands in the newest pool's era (`roll_seed`).
+#
+# Append-only. The pick indexes a pool by length and position, so editing one
+# that has shipped (adding, removing or reordering a bot) re-deals nearly every
+# random seat in its era. To change what a random seat deals, append a pool:
+# only seeds rolled from then on deal from it, and every map ever shared keeps
+# dealing what it dealt (`docs/design/core.md`, "A seat left to the seed").
+#
+# An entry is a strategy, which keeps the seat's own aux, or a profile
+# ``name:stop``, which deals the stop too (`resolve_profile`). The first pool
+# names bots since folded into a family; they still play (`ai.LEGACY`).
+POOL_ERA = 10_000_000
+RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
+    ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+    # Every stop of every family, a seat's own aux never carried.
+    ("knower:0", "knower:1", "knower:2", "knower:3",
+     "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+     "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
+)
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
 _roll_count = itertools.count()
@@ -56,6 +93,60 @@ _GLOBAL_KNOBS = (
 )
 
 
+# The Advanced-tab knobs as slider specs: (key, label, attr, lo, hi, step, is_int).
+# Here rather than in `menu` so pure code can use the same ranges: the menu draws
+# and edits them, and `randomise_knobs` rolls them for its dice button and for
+# the weekly campaign's "?" maps (tools/campaign.py), which has no pygame.
+ADV_MAP = (
+    ("adv_node_jitter", "Node jitter", "node_jitter", 0.0, 1.0, 0.05, False),
+    ("adv_relax", "Relax min-sep", "relax_min_sep_frac", 0.0, 1.2, 0.05, False),
+    ("adv_lloyd", "Relax passes", "lloyd_passes", 0, 5, 1, True),
+    ("adv_extra_edges", "Extra edges", "extra_edge_fraction", 0.0, 1.0, 0.05, False),
+    ("adv_max_edge", "Max edge len", "max_edge_length_frac", 0.1, 1.0, 0.05, False),
+)
+ADV_TRAVEL = (
+    ("adv_ship_speed", "Ship speed (ly/turn)", "ship_ly_per_turn", 1.0, config.SHIP_SPEED_MAX, 0.5, False),
+    ("adv_speed_growth", "Speed gain %/turn", "ship_speed_growth_pct", 0.0, 2.0, 0.05, False),
+)
+ADV_ECON = (
+    ("adv_home_ships", "Home ships", "home_start_ships", 1, 50, 1, True),
+    ("adv_home_prod", "Home production", "home_production", 1, 8, 1, True),
+    ("adv_garr_base", "Garrison base", "garrison_base", 0, 20, 1, True),
+    ("adv_garr_k", "Garrison scale", "garrison_k", 0, 40, 1, True),
+    ("adv_garr_jit", "Garrison jitter", "garrison_jitter", 0, 10, 1, True),
+)
+
+
+# Drawn on the Combat tab (beside the demo they govern), not on Advanced — but
+# still `adv_`-keyed and still writing `Settings`, since the prefix tracks the
+# namespace written to, not the tab drawn on.
+ADV_COMBAT = (
+    ("adv_combat_jitter", "Combat jitter", "combat_jitter", 0.0, 0.5, 0.02, False),
+    # Topped out at 1.5, not 2.0: past there the knob stops being a balance
+    # setting and becomes a stalemate. Both sides produce symmetrically, so a
+    # fortress bonus that large grows the defence as fast as any assault can be
+    # massed — at 2.0 only 3 of 40 sim games ever finish, and the rest do not
+    # resolve at a 3000-turn cap either. See docs/design/bots.md for the measurements.
+    ("adv_defender_adv", "Defender advantage", "defender_advantage", 0.75, config.DEFENDER_ADVANTAGE_MAX, 0.05, False),
+)
+# Fog of war (human view). Sight bottoms out at 0 (only your own systems in full
+# detail); scout floors at 1 so immediate neighbours stay visible enough to target
+# (you couldn't expand otherwise). At FOG_MAX_HOPS a range means "unlimited" (off).
+ADV_FOG = (
+    ("adv_fog_sight", "Sight range", "fog_sight", 0, config.FOG_MAX_HOPS, 1, True),
+    ("adv_fog_scout", "Scout range", "fog_scout", 1, config.FOG_MAX_HOPS, 1, True),
+)
+
+
+def randomise_knobs(target, specs, rng: random.Random) -> None:
+    """Set every knob in ``specs`` on ``target`` to a random in-bounds value,
+    snapped to its step and clamped the way the menu's sliders are."""
+    for _key, _label, attr, lo, hi, step, is_int in specs:
+        snapped = round(rng.uniform(lo, hi) / step) * step
+        snapped = max(lo, min(hi, snapped))
+        setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
+
+
 # Token fields always emitted, even at their default value. Everything else is
 # pruned and inferred by the reader, but these four *are* the identity of the
 # match: pruning makes a token depend on the reader's defaults, so if a
@@ -81,8 +172,10 @@ _TOKEN_ALWAYS = ("mode", "players", "nodes", "seed")
 # entry below. Worth knowing before adding a per-bot knob here rather than
 # through `AiParams.aux`, which every seat dict already carries.
 _LEGACY_KEY_DROPS: tuple[tuple[str, ...], ...] = (
-    ("in_lane_battles",),
-    ("in_lane_battles", "defender_advantage"),
+    ("layout",),
+    ("layout", "custom_map"),
+    ("layout", "custom_map", "in_lane_battles"),
+    ("layout", "custom_map", "in_lane_battles", "defender_advantage"),
 )
 
 
@@ -121,6 +214,13 @@ class Challenge:
     # drops `challenge` before hashing, so unlike a new `Settings` field this moves
     # no setup digest and needs no `_LEGACY_KEY_DROPS` entry.
     log: str = ""
+    # What the weekly campaign said about this node for this player when the
+    # match was started (an attemptStatus reason, `campaign.Status.why`), so the
+    # board can tell a game begun with access to the node from one begun after
+    # losing it: only the first is covered by the grace. Blank when nobody
+    # asked (not a node, off the web, offline), which the board takes on trust.
+    # Free for the same reason as `log`.
+    campaign: str = ""
 
     def summary(self) -> str:
         """One line: the target, as shown on the menu banner and win overlay."""
@@ -129,7 +229,7 @@ class Challenge:
             out += f" ({self.hand} by hand)"
         return out
 
-    def matches(self, settings: "Settings") -> bool:
+    def matches(self, settings: Settings) -> bool:
         """True if ``settings`` is still the setup this score was made on.
 
         A blank ``key`` is taken on trust — a hand-written or pre-``key`` challenge
@@ -145,9 +245,14 @@ class Settings:
     """A game configuration. ``seed is None`` means "roll a fresh seed at start"."""
 
     mode: str = "random"
+    # How a symmetric map's sectors are joined (`mapgen.SYMMETRIC_LAYOUTS`).
+    # Inert on any other map: `layout_inert` says when, and then the setup's
+    # digest and shared link read it as the default, so a random map keeps one
+    # key whatever this was last left at.
+    layout: str = mapgen.SYMMETRIC_LAYOUTS[0]
     players: int = config.DEFAULT_PLAYERS
     nodes: int = config.DEFAULT_NODES
-    seed: Optional[int] = None
+    seed: int | None = None
     autoplay: bool = False
 
     # -- Advanced: global balance knobs (defaults mirror config) ------------- #
@@ -176,17 +281,28 @@ class Settings:
     # others come from drop-in files the menu discovers. Same seat-1 indexing.
     ai_strategy: list[str] = field(default_factory=lambda: ["heuristic" for _ in range(config.MAX_PLAYERS)])
 
+    # -- A hand-authored map, or None to generate one from the seed ---------- #
+    # Embedded here rather than stored beside a Settings, so it travels through
+    # every piece of plumbing a generated map already uses — save/load, share and
+    # challenge links, resume, replay, the leaderboard and the offline bot column
+    # — with nothing downstream needing to know a map was drawn by hand. `mode`,
+    # `players` and `nodes` still describe it: `from_dict` reconciles the latter
+    # two to the recipe, and `mode` stays "random"/"symmetric" because
+    # `leaderboard/schema.sql` constrains the column (the *state* is stamped
+    # "custom", not the setup).
+    custom_map: CustomMap | None = None
+
     # -- A score to beat on this exact setup, or None for an ordinary config --- #
     # Presentation context only: `build_state` ignores it, and it is excluded from
     # `challenge_key` so a config and the same config-plus-a-target agree.
-    challenge: Optional[Challenge] = None
+    challenge: Challenge | None = None
 
     @classmethod
-    def defaults(cls) -> "Settings":
+    def defaults(cls) -> Settings:
         return cls()
 
     @classmethod
-    def from_args(cls, args) -> "Settings":
+    def from_args(cls, args) -> Settings:
         """Build from the argparse namespace so CLI flags pre-fill the menu.
 
         Only the Basic fields come from argv; the Advanced/AI fields keep their
@@ -194,15 +310,29 @@ class Settings:
         """
         return cls(
             mode=args.mode,
+            layout=getattr(args, "layout", mapgen.SYMMETRIC_LAYOUTS[0]),
             players=args.players,
             nodes=args.nodes,
             seed=args.seed,
             autoplay=args.autoplay,
         )
 
+    def layout_inert(self) -> bool:
+        """True when ``layout`` cannot shape the map: it is not a symmetric one,
+        or a hand-drawn recipe replaces whatever would have been generated."""
+        return self.mode != "symmetric" or self.custom_map is not None
+
     def min_nodes(self) -> int:
         """Fewest systems this player count allows (mapgen enforces the same floor)."""
         return self.players + 3
+
+    def system_count(self) -> int:
+        """How many systems this setup's map has. ``nodes`` is only what was asked
+        for: a generated symmetric map builds whole sectors around it
+        (``mapgen.symmetric_size``). Shown wherever the setup's size is."""
+        if self.layout_inert():
+            return self.nodes
+        return mapgen.symmetric_size(self.nodes, self.players, self.layout)
 
     def seat_params(self, seat: int) -> AiParams:
         """The AiParams for a 1-based seat id (defaults if out of range)."""
@@ -216,11 +346,20 @@ class Settings:
 
     # -- save / load (see module docstring) ---------------------------------- #
     def to_dict(self) -> dict:
-        """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts)."""
-        return asdict(self)
+        """A plain, JSON-serialisable dict (``ai`` becomes a list of dicts).
+
+        Not a bare ``asdict``: that would write ``custom_map`` as its keyed
+        dataclass form, roughly trebling the length of every shared link and
+        giving the setup digest a second shape nothing else reads. ``CustomMap``
+        owns its own compact, canonical wire form — use it everywhere this dict
+        goes (hashed, tokenised *and* saved).
+        """
+        out = asdict(self)
+        out["custom_map"] = None if self.custom_map is None else self.custom_map.to_dict()
+        return out
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Settings":
+    def from_dict(cls, data: dict) -> Settings:
         """Rebuild from a plain dict (e.g. parsed JSON), tolerantly.
 
         Unknown keys are ignored, missing keys keep their default, values are
@@ -238,6 +377,8 @@ class Settings:
 
         if out.mode not in MODES:
             out.mode = "random"
+        if out.layout not in mapgen.SYMMETRIC_LAYOUTS:
+            out.layout = mapgen.SYMMETRIC_LAYOUTS[0]
         out.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, out.players))
         out.nodes = max(out.min_nodes(), min(config.MAX_NODES, out.nodes))
         # Not cosmetic like the other knobs' ranges: above this the map cannot be
@@ -260,6 +401,17 @@ class Settings:
             out.ai_strategy.append("heuristic")
 
         out.challenge = _challenge_from_dict(data.get("challenge"))
+
+        # Deliberately after the clamps above, and overriding them. A hand map may
+        # legitimately sit below `min_nodes()`, and `players` must agree with the
+        # seats actually placed or `token_dict`'s seat truncation and
+        # `challenge_keys`' seat blanking would disagree with the sender's.
+        # `CustomMap.from_dict` is total: a recipe it cannot use lands at None and
+        # this setup plays a generated map of the stated size instead.
+        out.custom_map = CustomMap.from_dict(data.get("custom_map"))
+        if out.custom_map is not None:
+            out.players = out.custom_map.seats()
+            out.nodes = len(out.custom_map.nodes)
         return out
 
     def save(self, path) -> None:
@@ -268,7 +420,7 @@ class Settings:
             json.dump(self.to_dict(), fh, indent=2)
 
     @classmethod
-    def load(cls, path) -> "Settings":
+    def load(cls, path) -> Settings:
         """Read a config from ``path`` (raises on missing/invalid JSON)."""
         with open(path) as fh:
             return cls.from_dict(json.load(fh))
@@ -294,6 +446,8 @@ class Settings:
         for f in fields(self):
             if f.name in _TOKEN_ALWAYS or f.name in _STRUCTURED:
                 continue
+            if f.name == "layout" and self.layout_inert():
+                continue
             if full[f.name] != getattr(blank, f.name):
                 out[f.name] = full[f.name]
 
@@ -304,6 +458,8 @@ class Settings:
         strategies = _trim_trailing(full["ai_strategy"][:seats], "heuristic")
         if strategies:
             out["ai_strategy"] = strategies
+        if self.custom_map is not None:
+            out["custom_map"] = full["custom_map"]
         if self.challenge is not None:
             out["challenge"] = full["challenge"]
         return out
@@ -316,7 +472,7 @@ class Settings:
         return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
 
     @classmethod
-    def from_token(cls, token: str) -> "Settings":
+    def from_token(cls, token: str) -> Settings:
         """Rebuild from a ``to_token`` string, tolerantly (via ``from_dict``).
 
         Reads both the current deflated form and the original uncompressed one, so
@@ -335,7 +491,7 @@ class Settings:
         except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, zlib.error, ValueError) as e:
             raise ValueError(f"invalid settings token: {e}") from e
 
-    def without_challenge(self) -> "Settings":
+    def without_challenge(self) -> Settings:
         """A copy of this config with any attached score dropped.
 
         What gets *stored* and put in the address bar: a remembered challenge token
@@ -375,6 +531,8 @@ class Settings:
         data = self.to_dict()
         for skip in ("challenge", "autoplay"):
             data.pop(skip, None)
+        if self.layout_inert():
+            data["layout"] = mapgen.SYMMETRIC_LAYOUTS[0]
         # A seat beyond `players` is inert, and `token_dict` truncates `ai`/
         # `ai_strategy` there — so it never travels in a shared link, and a
         # decode always pads it back with fresh defaults. Blank it here the same
@@ -400,7 +558,7 @@ class Settings:
                 keys.append(key)
         return tuple(keys)
 
-    def copy_from(self, other: "Settings") -> None:
+    def copy_from(self, other: Settings) -> None:
         """Overwrite every field from ``other`` in place (copying its lists).
 
         Lets a caller holding this instance (e.g. ``main.py``) adopt a loaded
@@ -413,6 +571,8 @@ class Settings:
                 self.ai_strategy = list(other.ai_strategy)
             elif f.name == "challenge":
                 self.challenge = replace(other.challenge) if other.challenge else None
+            elif f.name == "custom_map":
+                self.custom_map = other.custom_map.copy() if other.custom_map else None
             else:
                 setattr(self, f.name, getattr(other, f.name))
 
@@ -420,7 +580,7 @@ class Settings:
 # Fields `from_dict`'s scalar loop and `token_dict`'s prune loop both skip, each
 # handling them explicitly instead (nested dataclasses, per-seat lists, and `seed`
 # whose Optional[int] defeats `_coerce`'s type-of-default dispatch).
-_STRUCTURED = ("ai", "ai_strategy", "challenge", "seed")
+_STRUCTURED = ("ai", "ai_strategy", "challenge", "custom_map", "seed")
 
 
 def _trim_trailing(items: list, default) -> list:
@@ -480,7 +640,7 @@ def _ai_from_dict(d) -> AiParams:
     return out
 
 
-def _challenge_from_dict(d) -> Optional[Challenge]:
+def _challenge_from_dict(d) -> Challenge | None:
     """A Challenge from a dict, or None if absent/malformed/scoreless.
 
     A zero ``turns`` is not a result anyone can beat, so it reads as "no
@@ -521,8 +681,43 @@ def fresh_rng() -> random.Random:
 
 
 def random_seed() -> int:
-    """A fresh, unpredictable map seed."""
-    return fresh_rng().randrange(config.SEED_MAX)
+    """A fresh, unpredictable map seed, in the newest pool's era (`roll_seed`)."""
+    return roll_seed(fresh_rng())
+
+
+def roll_seed(rng: random.Random) -> int:
+    """A seed drawn from ``rng`` in the newest pool's era, so a seat it leaves to
+    chance deals from the newest of ``RANDOM_POOLS``. The first pool's era starts
+    at 0, so while it is the only one a seed rolls as it always did."""
+    newest = len(RANDOM_POOLS)
+    return (newest * POOL_ERA if newest > 1 else 0) + rng.randrange(config.SEED_MAX)
+
+
+def pool_for(seed: int) -> tuple[str, ...]:
+    """The pool a seat this seed leaves to chance is dealt from: the one its era
+    names (seed // `POOL_ERA`, counting from 1), the first for any seed below the
+    second's era, and the newest for a seed from an era this build has no pool
+    for yet (a stale cached build, which `tools/verify_scores.py` sets aside)."""
+    era = max(1, min(seed // POOL_ERA, len(RANDOM_POOLS)))
+    return RANDOM_POOLS[era - 1]
+
+
+def seed_top() -> int:
+    """The largest seed whose era has a pool. A seed typed past it would deal
+    from today's newest pool and then from whichever is appended for its era, so
+    the menu's seed field stops here."""
+    return (len(RANDOM_POOLS) + 1) * POOL_ERA - 1
+
+
+def apply_globals(settings: Settings) -> None:
+    """Public face of ``_apply_globals``, for callers outside generation.
+
+    The map creator's Auto-lanes button runs ``mapgen._planar_edges``, which reads
+    ``config.EXTRA_EDGE_FRACTION``/``MAX_EDGE_LENGTH_FRAC`` live — so those knobs
+    have to reach ``config`` first, and this is the one sanctioned writer. Nothing
+    outside this module may ``setattr(config, ...)`` itself.
+    """
+    _apply_globals(settings)
 
 
 def _apply_globals(settings: Settings) -> None:
@@ -535,17 +730,164 @@ def _apply_globals(settings: Settings) -> None:
         setattr(config, const, getattr(settings, attr))
 
 
+def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[str]:
+    """What the bots in this setup want said before it starts (`ai.setup_warning`).
+
+    ``people`` is which seats a person will hold: seat 1 alone by default, none
+    under autoplay, a play-by-post roster when there is one. Every other seat up
+    to ``players`` is a bot, asked once per strategy with all the seats it plays.
+    A ``random`` seat is resolved when the seed is already fixed, and otherwise
+    left out, since nobody yet knows what it will be.
+    """
+    if people is None:
+        people = set() if settings.autoplay else {1}
+    by_strategy: dict[str, list[int]] = {}
+    bots = settings
+    for seat in range(1, settings.players + 1):
+        if seat in people:
+            continue
+        name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY and settings.seed is None:
+            continue
+        stop = settings.seat_params(seat).aux
+        if name == RANDOM_STRATEGY:
+            name, stop = resolve_profile(name, stop, settings.seed, seat)
+        family, stop = ai.canonical(name, stop)
+        if (family, stop) != (settings.seat_strategy(seat), settings.seat_params(seat).aux):
+            # A dealt profile or a legacy name: the hook reads the seat as it plays.
+            if bots is settings:
+                bots = copy.deepcopy(settings)
+            bots.ai_strategy[seat - 1] = family
+            bots.ai[seat - 1] = replace(bots.ai[seat - 1], aux=stop)
+        by_strategy.setdefault(family, []).append(seat)
+    lines: list[str] = []
+    for name, seats in by_strategy.items():
+        lines.extend(ai.setup_warning(name, bots, seats, people=sorted(people)))
+    return lines
+
+
+def resolve_strategy(name: str, seed: int, pid: int) -> str:
+    """A seat's concrete strategy name: ``name`` itself, unless it is
+    ``RANDOM_STRATEGY``, in which case one is drawn for it from the match seed.
+
+    Derived, never drawn — the same rule ``botio.decide_seed`` follows, and for
+    the same reason. Taking a pick from ``state.rng`` would shift every seat's
+    battle dice, so the same seed would lay out the same map and then fight it
+    differently depending on how many seats were left to chance. Seeding a
+    throwaway ``Random`` off the match seed and the seat instead leaves the
+    engine's stream untouched, gives each seat an independent pick, and still
+    reproduces exactly: the same setup and seed always face the same opponents.
+
+    The pool is the one the seed's era names (``pool_for``), never what happens
+    to be registered, so every build deals a seed the same bots whatever its
+    ``models/`` holds, and appending a pool deals no seed from an earlier era
+    differently. A pick that is not registered here plays as the heuristic,
+    which is the degradation ``ai.decide`` already applies to an unrecognised
+    strategy name.
+    """
+    return resolve_profile(name, 0.0, seed, pid)[0]
+
+
+def resolve_profile(name: str, aux: float, seed: int, pid: int) -> tuple[str, float]:
+    """``(strategy, aux)`` for a seat set to ``name`` at ``aux``: as it is,
+    unless it is ``RANDOM_STRATEGY``, in which case a pool entry is drawn as in
+    `resolve_strategy`. An entry ``name:stop`` deals its stop; a bare name keeps
+    the seat's own ``aux``."""
+    if name != RANDOM_STRATEGY:
+        return name, aux
+    pool = pool_for(seed)
+    pick = pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+    strategy, _, stop = pick.partition(":")
+    return strategy, float(stop) if stop else aux
+
+
 def build_state(settings: Settings, seed: int) -> GameState:
     """Generate a game from a settings object and a concrete seed.
 
     The single funnel from menu/CLI to a GameState: apply the global knobs, build
     the map, then stamp each non-neutral seat with its own strategy and AI params
-    (params a copy, so later menu edits don't reach into a live game).
+    (params a copy, so later menu edits don't reach into a live game). A seat set
+    to ``RANDOM_STRATEGY`` is resolved to a real bot here (``resolve_strategy``),
+    so the rest of the game never sees the placeholder.
+
+    A match that *starts* in autoplay has no human seat at all: ``mapgen`` flags
+    pid 1, and this un-flags it. An all-bot game must have no preferred seat, or
+    the seat a bot is measured through is the one seat every oracle opponent has
+    to guess blind at — which is a handicap no other bot on the board carries,
+    and which makes the same setup play differently in the app than it does in
+    the offline harness. The seat is claimed back by the first turn a person
+    actually decides (``engine.claim_seat``), not by the press of Take control,
+    so Take control doubles as a pause on a demo nobody means to play.
     """
     _apply_globals(settings)
-    state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players)
+    if settings.custom_map is not None:
+        state = mapgen.generate_custom(seed, settings.custom_map)
+    else:
+        state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players, settings.layout)
     for player in state.players.values():
         if not player.is_neutral:
-            player.ai_strategy = settings.seat_strategy(player.id)
-            player.ai_params = replace(settings.seat_params(player.id))
+            params = settings.seat_params(player.id)
+            player.ai_strategy, aux = resolve_profile(settings.seat_strategy(player.id), params.aux,
+                                                      seed, player.id)
+            player.ai_params = replace(params, aux=aux)
+        if settings.autoplay:
+            player.is_human = False
     return state
+
+
+# --------------------------------------------------------------------------- #
+# Lane survey: what a setup does to travel time, for the menu's readout
+# --------------------------------------------------------------------------- #
+_LANE_SHAPERS = ("mode", "layout", "players", "nodes", "seed", "node_jitter", "relax_min_sep_frac",
+                 "lloyd_passes", "extra_edge_fraction", "max_edge_length_frac")
+
+
+def lane_survey_key(settings: Settings) -> tuple:
+    """Every field that decides where a setup's lanes run, and so how long they
+    are. Ship speed is deliberately absent: it only divides the lengths, so the
+    menu re-times a cached survey on every drag of that slider for nothing."""
+    recipe = settings.custom_map
+    drawn = json.dumps(recipe.to_dict(), sort_keys=True) if recipe is not None else None
+    return tuple(getattr(settings, attr) for attr in _LANE_SHAPERS) + (drawn,)
+
+
+def lane_lengths(settings: Settings) -> list[float]:
+    """Length in light-years of every lane this setup generates.
+
+    With a fixed seed that is the map you will play; left to chance it is a
+    sample over ``config.LANE_SURVEY_SEEDS`` fixed seeds, so the readout is stable
+    rather than re-rolled each time it is asked. A hand map is its own answer.
+
+    Generation reads the knobs live off ``config``, so they are pushed there for
+    the survey and put back after it: the menu asking a question must leave
+    nothing behind for whatever reads ``config`` next.
+    """
+    saved = [(const, getattr(config, const)) for _attr, const in _GLOBAL_KNOBS]
+    _apply_globals(settings)
+    try:
+        if settings.custom_map is not None:
+            if settings.custom_map.blockers():
+                return []
+            states = [mapgen.generate_custom(0, settings.custom_map)]
+        else:
+            seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
+            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players,
+                                    settings.layout)
+                      for s in seeds]
+    finally:
+        for const, value in saved:
+            setattr(config, const, value)
+    return [
+        math.dist(st.systems[lane.a].pos, st.systems[lane.b].pos) * config.LY_PER_WORLD_UNIT
+        for st in states
+        for lane in st.lanes.values()
+    ]
+
+
+def lane_turns(lengths: list[float], speed: float) -> tuple[int, int, int] | None:
+    """(shortest, median, longest) lane in turns at ``speed`` ly/turn -- the same
+    ``ceil`` mapgen bakes into ``Lane.travel_turns`` -- or None for no lanes."""
+    if not lengths:
+        return None
+    turns = sorted(max(1, math.ceil(ly / speed)) for ly in lengths)
+    return turns[0], turns[len(turns) // 2], turns[-1]

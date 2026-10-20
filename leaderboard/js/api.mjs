@@ -22,7 +22,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, options = {}) {
+/** Fetch a path and hand back the parsed body plus the raw response, for the
+ * one caller that reads a header (selectPage's total). */
+async function send(path, options = {}) {
   if (!configured()) {
     throw new ApiError("The leaderboard is not connected to its database yet.", 0, "unconfigured");
   }
@@ -50,7 +52,11 @@ async function request(path, options = {}) {
   // A `return=minimal` insert answers 201 with no body at all, so this cannot
   // just be res.json() — that throws on empty input.
   const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  return { body: text ? JSON.parse(text) : null, res };
+}
+
+async function request(path, options = {}) {
+  return (await send(path, options)).body;
 }
 
 /** GET a PostgREST query string, e.g. `games?select=*&game_key=eq.abc`. */
@@ -58,13 +64,68 @@ export function select(query) {
   return request(query);
 }
 
-/** POST one row. `returning` asks for the inserted row back (needed for ids). */
-export function insert(table, row, { returning = false } = {}) {
-  return request(table, {
+/**
+ * One page of a list query: `size` rows starting at `offset`, plus whether
+ * anything lies past them. It asks for one row more than it keeps, so "is there
+ * more?" costs no second request and no count(*). The query must order on a
+ * unique key, since offset paging over a tied order can repeat or skip rows at
+ * a page boundary.
+ *
+ * `count` asks PostgREST for the number of rows the whole query matches as
+ * well (`Prefer: count=exact`, read back from `Content-Range`), returned as
+ * `total` — null when the answer didn't come back. It costs the database a
+ * count over the filtered query, so only the first page of a list asks.
+ */
+export async function selectPage(query, { offset = 0, size, count = false }) {
+  const path = `${query}&limit=${size + 1}&offset=${offset}`;
+  if (!count) {
+    const rows = await select(path);
+    return { rows: rows.slice(0, size), more: rows.length > size };
+  }
+  const { body: rows, res } = await send(path, { headers: { Prefer: "count=exact" } });
+  return { rows: rows.slice(0, size), more: rows.length > size, total: rangeTotal(res.headers.get("Content-Range")) };
+}
+
+/** The total from a `Content-Range` like `0-50/123` (or `*\/0` for none), or
+ * null when it is missing or unknown (`/*`). */
+export function rangeTotal(header) {
+  const match = /\/(\d+)$/.exec(header || "");
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * POST one row (or an array of rows — PostgREST accepts either as the JSON
+ * body unchanged). `returning` asks for the inserted row(s) back (needed for
+ * ids). `onConflict` + `ignoreDuplicates` compile to `ON CONFLICT ... DO
+ * NOTHING` against that constraint's columns — unlike `resolution=merge-
+ * duplicates` (`DO UPDATE`), `ignore-duplicates` needs no UPDATE policy, so
+ * it's safe to use against a table that (like every append-only one here)
+ * doesn't have one. Useful for a bulk insert where some rows in the batch may
+ * already exist: without it, one duplicate fails the *whole* request.
+ */
+export function insert(table, row, { returning = false, onConflict, ignoreDuplicates = false } = {}) {
+  const path = onConflict ? `${table}?on_conflict=${onConflict}` : table;
+  const prefer = [
+    returning ? "return=representation" : "return=minimal",
+    ignoreDuplicates ? "resolution=ignore-duplicates" : null,
+  ].filter(Boolean).join(",");
+  return request(path, {
     method: "POST",
     body: JSON.stringify(row),
-    headers: { Prefer: returning ? "return=representation" : "return=minimal" },
+    headers: { Prefer: prefer },
   });
+}
+
+/**
+ * Call a granted SQL function via PostgREST's `/rpc/<name>` endpoint — the
+ * only way from here to ask the database to compute something (`sc_config_key`)
+ * rather than recompute it in JS, which for that function is not even possible:
+ * it hashes Postgres's own `jsonb::text` cast, and nothing in JS reproduces
+ * that byte-for-byte. A scalar-returning function's response is the bare JSON
+ * value, not a wrapped row/array, which `request()` already parses as-is.
+ */
+export function rpc(name, args) {
+  return request(`rpc/${name}`, { method: "POST", body: JSON.stringify(args) });
 }
 
 export const eq = (value) => `eq.${encodeURIComponent(value)}`;

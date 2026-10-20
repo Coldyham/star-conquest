@@ -6,130 +6,53 @@ triangles for fleets, numbers for ship counts.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, paths, uifont
+from . import config, fog, matchnames, model, paths, widgets
 from .geometry import lerp
-from .model import GameState, lane_key
+from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
 
-_FONTS: dict[str, pygame.font.Font] = {}
-_FONTS_SCALE = 0.0   # the config.ui_scale _FONTS was built at
+# The measured-layout kit lives in `widgets` now that the map creator draws with
+# it too. Bound to module-level names here rather than called qualified, because
+# this module's body resolves them as bare globals at call time — which is what
+# lets a test swap one out (`render._text = spy`) and see the drawing code use it.
+# `_FONTS` is the same dict object, so `render._FONTS.clear()` still works.
+_FONTS = widgets._FONTS
+_fonts = widgets.fonts
+_text = widgets.text
+_row_h = widgets.row_h
+_btn_w = widgets.btn_w
+_tap_size = widgets.tap_size
+_btn = widgets.btn
+_key_hint = widgets.key_hint
+_wrap = widgets.wrap
+_draw_slider = widgets.slider
+_draw_step_button = widgets.step_button
+_lane_style = widgets.lane_style
+_pill_rect = widgets.pill_rect
+_label_pill = widgets.label_pill
+_brighten = widgets.brighten
+_modal_buttons = widgets.modal_buttons
+_draw_modal = widgets.draw_modal
+confirm_labels = widgets.confirm_labels
 
-
-def _fonts() -> dict[str, pygame.font.Font]:
-    """The three UI fonts at the current scale, rebuilt if the scale has moved
-    (a resized window re-fits the UI, so these sizes are not fixed for the run)."""
-    global _FONTS_SCALE
-    if not _FONTS or _FONTS_SCALE != config.ui_scale:
-        _FONTS.clear()
-        _FONTS["small"] = uifont.load(config.FONT_SIZE_SMALL)
-        _FONTS["normal"] = uifont.load(config.FONT_SIZE)
-        _FONTS["big"] = uifont.load(config.FONT_SIZE_BIG, bold=True)
-        _FONTS_SCALE = config.ui_scale
-    return _FONTS
-
-
-def _text(surface, font, s, color, center=None, topleft=None, midleft=None, midright=None):
-    img = font.render(s, True, color)
-    rect = img.get_rect()
-    if center:
-        rect.center = center
-    elif topleft:
-        rect.topleft = topleft
-    elif midleft:
-        rect.midleft = midleft
-    elif midright:
-        rect.midright = midright
-    surface.blit(img, rect)
-    return rect
-
-
-# --------------------------------------------------------------------------- #
-# Layout helpers
-#
-# Everything that holds text is measured rather than given a fixed pixel size: a
-# constant width or row pitch is only ever right at one font size, and the UI font
-# grows with config.ui_scale (up to ~2x on a phone). The helpers below are what keep
-# labels inside their buttons and rows clear of each other at any scale — plus the
-# two that adapt to a touch build (see config.touch_ui).
-# --------------------------------------------------------------------------- #
-# HUD button palette — (fill, edge) pairs, kept local like the scrubber's below.
-_BTN_BLUE = ((40, 52, 78), (110, 140, 200))  # ordinary action
-_BTN_ACTIVE = ((92, 70, 46), (190, 150, 96))  # a toggle that is currently on
-_BTN_AMBER = ((120, 86, 46), (200, 150, 96))  # new map / rewind
-_BTN_VIOLET = ((52, 46, 78), (150, 130, 200))  # history / review
-_BTN_RED = ((92, 46, 52), (200, 96, 104))  # quit
-_BTN_DANGER = ((120, 46, 52), (200, 96, 104))  # ...and its brighter modal confirm
-_BTN_GREEN = ((46, 92, 60), (96, 190, 120))  # end turn / confirm
-_BTN_TEAL = ((44, 62, 74), (120, 180, 200))  # share a challenge
-_BTN_GOLD = ((92, 76, 36), (210, 180, 80))  # post to the public leaderboard
+_BTN_BLUE = widgets.BTN_BLUE
+_BTN_ACTIVE = widgets.BTN_ACTIVE
+_BTN_AMBER = widgets.BTN_AMBER
+_BTN_VIOLET = widgets.BTN_VIOLET
+_BTN_RED = widgets.BTN_RED
+_BTN_DANGER = widgets.BTN_DANGER
+_BTN_GREEN = widgets.BTN_GREEN
+_BTN_TEAL = widgets.BTN_TEAL
+_BTN_GOLD = widgets.BTN_GOLD
 
 # Challenge verdict, on the win overlay: target beaten, dead-heated, missed.
 _VERDICT_BEAT = (130, 200, 150)
 _VERDICT_TIE = (190, 205, 225)
 _VERDICT_MISS = (214, 172, 92)
-
-
-def _row_h(kind: str = "small") -> int:
-    """Pitch for one line of stacked text in ``kind``'s font: the font's own line
-    height plus a gap. Derived, so rows stay legibly apart instead of colliding
-    once the font outgrows a hardcoded pitch."""
-    return _fonts()[kind].get_height() + config.ROW_GAP
-
-
-def _btn_w(font, label: str, min_w: int = 0) -> int:
-    """Width of a button that has to fit ``label``: measured text plus padding."""
-    return max(min_w, font.size(label)[0] + 2 * config.BTN_PAD_X)
-
-
-def _tap_size(px: int) -> int:
-    """``px``, raised to ``config.TOUCH_MIN_TARGET`` on a touch build so a control
-    that is merely small with a mouse doesn't become un-tappable with a finger."""
-    return max(px, config.TOUCH_MIN_TARGET) if config.touch_ui else px
-
-
-def _btn(surface, rect: pygame.Rect, label: str, fill, edge, font=None, color=None) -> tuple[int, int, int, int]:
-    """Draw a filled, outlined, centre-labelled button; return its hit-rect tuple
-    for storing on ``ui`` (the store-rect-then-test handoff input relies on).
-    Every HUD button comes through here so they share one look."""
-    radius = config.s(6)
-    pygame.draw.rect(surface, fill, rect, border_radius=radius)
-    pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=radius)
-    _text(surface, font or _fonts()["normal"], label, color or config.COLOR_TEXT, center=rect.center)
-    return (rect.x, rect.y, rect.w, rect.h)
-
-
-def _key_hint(label: str, key: str) -> str:
-    """``label`` with its keyboard shortcut appended. Dropped on a touch build:
-    there is no key to press there, and the suffix is both noise and the thing
-    that pushes these labels out of their buttons at touch scale."""
-    return label if config.touch_ui else f"{label} ({key})"
-
-
-def _wrap(font, text: str, width: int) -> list[str]:
-    """``text`` broken into lines that each fit ``width`` px in ``font``.
-
-    Paragraphs are separated by a blank line and kept as one blank line in the
-    output; line breaks *within* a paragraph are just whitespace, so the source can
-    be written at whatever width reads well and still reflow to the real panel.
-    """
-    lines: list[str] = []
-    for para in text.strip().split("\n\n"):
-        if lines:
-            lines.append("")
-        line = ""
-        for word in para.split():
-            trial = f"{line} {word}" if line else word
-            if line and font.size(trial)[0] > width:
-                lines.append(line)
-                line = word
-            else:
-                line = trial
-        if line:
-            lines.append(line)
-    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -144,6 +67,9 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.popup_rect = (0, 0, 0, 0)
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
+    ui.hold_minus_rect = ui.hold_plus_rect = (0, 0, 0, 0)
+    ui.even_split_rect = ui.delete_all_rect = (0, 0, 0, 0)
+    ui.share_rows = []
     ui.clear_forward_rect = (0, 0, 0, 0)
     ui.clear_dangerous_rect = (0, 0, 0, 0)
     # route mode's confirm; _draw_hud re-records it once the plan has something in it
@@ -165,6 +91,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_route_preview(surface, state, ui)  # the route plan being composed
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    _draw_film_flashes(surface, state, ui)
     _draw_node_names(surface, state, ui)
     if not ui.history and ui.drag_active and ui.drag_src is not None:
         _draw_drag(surface, state, ui)
@@ -174,6 +101,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         # the send popup draws last of the map layer so nodes/fleets never occlude
         # it (it must stay visible and clickable); it early-outs when closed
         _draw_send_popup(surface, state, ui)
+    _draw_film_caption(surface, ui)
     surface.set_clip(None)
     if not ui.history:
         _draw_zoom_controls(surface, ui)
@@ -184,6 +112,12 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_scrubber(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
+    elif ui.pbp_invite:
+        _draw_invite_overlay(surface, ui)
+    elif ui.awaiting_others(state):
+        _draw_waiting_overlay(surface, state, ui)
+    elif ui.in_pbp and ui.pbp_msg:
+        _draw_pbp_notice(surface, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -193,8 +127,12 @@ def _fog_state(ui: Ui, sid: int) -> str:
     """Fog-of-war state of a system from the human's viewpoint: ``"visible"`` (full
     detail), ``"fogged"`` (grey "?" — currently scouted or remembered), or
     ``"hidden"`` (never seen, not drawn). With fog off, ``visible`` holds every
-    system so this is always ``"visible"``."""
-    if sid in ui.visible:
+    system so this is always ``"visible"``.
+
+    Asks `Ui.sees` rather than reading `visible`, so a turn playback also shows
+    what was visible when that turn began — the map layer's one rule for this,
+    shared with the fleets and the fight bursts."""
+    if ui.sees(sid):
         return "visible"
     if sid in ui.seen:
         return "fogged"
@@ -247,20 +185,6 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
             _label_pill(surface, _fonts()["small"], str(turns), config.COLOR_TEXT_DIM, mid)
 
 
-def _lane_style(travel_turns: int) -> tuple[int, tuple[int, int, int]]:
-    """Width (px) and colour for a lane from its travel time. Fast = thin+bright.
-
-    Thickness tracks travel time directly (clamped) so the spread reads at a
-    glance; colour brightens the quick lanes and mutes the slow ones.
-    """
-    width = config.s(max(2, min(6, travel_turns)))  # 2px (fast) .. 6px (slow)
-    f = (min(6, max(1, travel_turns)) - 1) / 5.0  # 0 fast .. 1 slow
-    scale = 1.3 - 0.6 * f  # 1.3x (bright) .. 0.7x (dim)
-    r, g, b = config.COLOR_LANE
-    color = (min(255, int(r * scale)), min(255, int(g * scale)), min(255, int(b * scale)))
-    return width, color
-
-
 def _lane_unit(pa, pb) -> tuple[float, float, float]:
     """Unit vector from ``pa`` toward ``pb``, plus the lane's on-screen length."""
     dx, dy = pb[0] - pa[0], pb[1] - pa[1]
@@ -268,10 +192,10 @@ def _lane_unit(pa, pb) -> tuple[float, float, float]:
     return dx / length, dy / length, length
 
 
-def _rule_label_center(pa, pb, font) -> tuple[int, int]:
-    """Where an auto-forward rule's label sits on its lane: just past the *sending*
-    system, offset clear of the line itself. "keep N" is a fact about that garrison,
-    so it belongs at the end it constrains — and it leaves the lane's own
+def _rule_label_center(pa, pb, font, avoid: pygame.Rect | None = None, text: str = "") -> tuple[int, int]:
+    """Where an auto-forward rule's share label sits on its lane: just past the
+    *sending* system, offset clear of the line itself. A share is cut from that
+    garrison, so it belongs at the end it constrains — and it leaves the lane's own
     travel-time pill (centred on the midpoint) readable, which is the other number
     you judge a rule by (see also ``_panel_lane``).
 
@@ -281,68 +205,92 @@ def _rule_label_center(pa, pb, font) -> tuple[int, int]:
     too short for that clamp to clear the node, the perpendicular offset grows to
     make up the difference — the label leans out into space rather than onto the
     system it belongs to.
+
+    ``avoid`` is the source's hold badge, if it has one: the label (``text``) tries
+    the lane's other side, then further along it, before settling on top of it.
     """
     ux, uy, length = _lane_unit(pa, pb)
     px, py = (-uy, ux) if ux >= 0 else (uy, -ux)   # perpendicular, biased screen-down
     clear = config.node_clearance() + config.RULE_LABEL_GAP
-    along = min(clear, length * config.RULE_LABEL_MAX_FRAC)
-    off = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
-    off = max(off, math.sqrt(max(0.0, clear * clear - along * along)))
-    return (int(pa[0] + ux * along + px * off), int(pa[1] + uy * along + py * off))
+    base = min(clear, length * config.RULE_LABEL_MAX_FRAC)
+    lift = (_fonts()["small"].get_height() + font.get_height()) // 2 + config.s(8)
+
+    def at(along: float, side: int) -> tuple[int, int]:
+        off = max(lift, math.sqrt(max(0.0, clear * clear - along * along)))
+        return (int(pa[0] + ux * along + side * px * off), int(pa[1] + uy * along + side * py * off))
+
+    first = at(base, 1)
+    if avoid is None:
+        return first
+    for along in (base, base * 1.6, base * 2.2):
+        for side in (1, -1):
+            spot = at(min(along, length / 2), side)
+            if not _pill_rect(font, text, spot).colliderect(avoid):
+                return spot
+    return first
 
 
-def _pill_rect(font, s: str, center) -> pygame.Rect:
-    """Bounds of the plate ``_label_pill`` would draw. Measured separately because
-    the star-name pass has to treat these labels as occupied space."""
-    rect = pygame.Rect((0, 0), font.size(s))
-    rect.center = center
-    return rect.inflate(config.s(8), config.s(4))
+def _travel(ui: Ui) -> float:
+    """How far through the turn's step to draw the fleets.
+
+    1.0 unless a film is mid-move, which is what makes this a no-op for the live
+    board and for a history snapshot: both already carry the schedule they mean.
+    """
+    if ui.film is None:
+        return 1.0
+    return ui.film.travel(ui.film_ms)
 
 
-def _label_pill(surface, font, s: str, color, center) -> None:
-    """Draw text centred on a small dark rounded rect so it reads over any line."""
-    img = font.render(s, True, color)
-    rect = img.get_rect(center=center)
-    pygame.draw.rect(surface, config.COLOR_BG, _pill_rect(font, s, center), border_radius=config.s(5))
-    surface.blit(img, rect)
+def _fleet_at(state: GameState, ui: Ui, f: Fleet,
+              travel: float) -> tuple[float, float, float, float]:
+    """Where a fleet is drawn this frame and which way it points, in screen
+    space: ``(x, y, ux, uy)``, its lane track already applied.
 
-
-def _lane_offsets(state: GameState) -> dict[int, tuple[int, int]]:
-    """Assign each in-transit fleet a small perpendicular offset so stacks split."""
-    groups: dict[frozenset[int], list[int]] = {}
-    for i, f in enumerate(state.fleets):
-        groups.setdefault(frozenset((f.source_id, f.dest_id)), []).append(i)
-    offset: dict[int, tuple[int, int]] = {}
-    for idxs in groups.values():
-        for rank, i in enumerate(idxs):
-            offset[i] = (rank - (len(idxs) - 1) / 2, 0)  # perpendicular rank, scaled later
-    return offset
+    Split out of the drawing so the approach can be checked on its own — an
+    arriving fleet has to close on its destination and stop, never reach the
+    centre and be pushed back off it.
+    """
+    a = state.systems[f.source_id].pos
+    b = state.systems[f.dest_id].pos
+    x, y = ui.view.to_screen(lerp(a, b, f.progress_at(travel)))
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    # A fleet that reaches its destination sits on the node and would cover its
+    # garrison count, so its approach stops at the rim. Clamped over the last few
+    # pixels rather than applied once it has landed: the triangle closes on the
+    # centre for the whole glide, so subtracting the gap only at the end jumps it
+    # backwards by a whole radius on the move beat's last frame. Only a film ever
+    # draws an arrived fleet — the engine takes one off the board the same turn.
+    if f.turns_remaining <= 0:
+        bx, by = ui.view.to_screen(b)
+        gap = (config.node_radius(state.systems[f.dest_id].production)
+               + config.FILM_ARRIVAL_GAP)
+        if math.hypot(bx - x, by - y) < gap:
+            x, y = bx - ux * gap, by - uy * gap
+    # Hold each fleet off the lane's centre line by the track it was given at
+    # launch (`model.free_lane_slot`) — read off the fleet rather than ranked
+    # here, so a lane-mate launching or arriving cannot shift it.
+    spread = config.FLEET_SIZE + config.s(3)
+    return x - uy * f.lane_slot * spread, y + ux * f.lane_slot * spread, ux, uy
 
 
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
-    offsets = _lane_offsets(state)
-    for i, f in enumerate(state.fleets):
+    travel = _travel(ui)
+    for f in state.fleets:
         # your own fleets always show; an enemy fleet shows only where at least
         # one end of its lane is in full view, so rival movements appear only as
         # they near your space
-        if f.owner_id != ui.human_id and f.source_id not in ui.visible and f.dest_id not in ui.visible:
+        if f.owner_id != ui.human_id and not ui.sees(f.source_id) and not ui.sees(f.dest_id):
             continue
-        a = state.systems[f.source_id].pos
-        b = state.systems[f.dest_id].pos
-        wp = lerp(a, b, f.progress())
-        x, y = ui.view.to_screen(wp)
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        length = math.hypot(dx, dy) or 1.0
-        ux, uy = dx / length, dy / length
-        px, py = -uy, ux  # perpendicular
-        # split stacked fleets, and sit the count clear of the triangle — both
-        # offsets scale, so the label never lands on the glyph on a big display
-        spread = config.FLEET_SIZE + config.s(3)
-        rank = offsets.get(i, (0, 0))[0]
-        x += int(px * rank * spread)
-        y += int(py * rank * spread)
+        fx, fy, ux, uy = _fleet_at(state, ui, f, travel)
+        x, y = int(fx), int(fy)
         _draw_triangle(surface, (x, y), (ux, uy), config.player_color(f.owner_id))
-        _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT, center=(x + int(px * spread), y + int(py * spread)))
+        # The count sits clear of the triangle; both offsets scale, so the label
+        # never lands on the glyph on a big display.
+        spread = config.FLEET_SIZE + config.s(3)
+        _text(surface, _fonts()["small"], str(f.ships), config.COLOR_TEXT,
+              center=(x - int(uy * spread), y + int(ux * spread)))
 
 
 def _draw_triangle(surface, center, direction, color) -> None:
@@ -444,38 +392,64 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
-    """Standing auto-forward rules as a persistent chevron flow (human colour).
+    """Standing auto-forward rules as a persistent chevron flow (human colour), one
+    per lane labelled with its share where that is less than everything, and a
+    "hold N" badge under a system that keeps ships back — under the system, since
+    the hold is the system's, whichever lanes it splits down.
 
-    The rule being edited is drawn in the select colour, brighter+thicker, and is
-    the only one whose chevrons crawl — same convention as `_draw_pending`'s
+    The system being edited is drawn in the select colour, brighter+thicker, and
+    only the lane the popup is on crawls — same convention as `_draw_pending`'s
     selected queued order.
 
-    A rule pointing at a system we *don't* hold is tinted as dangerous. Nothing
+    A lane pointing at a system we *don't* hold is tinted as dangerous. Nothing
     stops one (`rule_is_live` doesn't care who owns the far end, and aiming a rule
-    at an enemy on purpose is a real move), but it means the whole surplus charges
-    into enemy guns every turn — and a route chain that loses a middle system
-    leaves its upstream neighbour doing exactly that without anyone choosing to.
+    at an enemy on purpose is a real move), but it means that share charges into
+    enemy guns every turn — and a route chain that loses a middle system leaves its
+    upstream neighbour doing exactly that without anyone choosing to.
     """
-    for src, (dest, keep) in ui.auto_forward.items():
+    editing = ui.selected if ui.mode == CHOOSING and ui.forward_armed else ui.sel_forward
+    small = _fonts()["small"]
+    for src, rule in ui.auto_forward.items():
         s = state.systems.get(src)
-        if s is None or s.owner_id != ui.human_id or dest not in state.systems:
+        if s is None or s.owner_id != ui.human_id:
             continue
-        selected = src == ui.sel_forward
-        hostile = state.systems[dest].owner_id != ui.human_id
-        if selected:
-            color = config.COLOR_SELECT
-        elif hostile:
-            color = _BTN_DANGER[1]
-        else:
-            color = config.player_color(ui.human_id)
+        selected = src == editing
         pa = ui.view.to_screen(s.pos)
-        pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_rule_flow(surface, pa, pb, config.node_radius(s.production),
-                        config.node_radius(state.systems[dest].production),
-                        color, config.s(3 if selected else 2), animate=selected)
-        if keep:  # 0 is the default; the chevron flow already says a rule is there
-            small = _fonts()["small"]
-            _label_pill(surface, small, f"keep {keep}", config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM, _rule_label_center(pa, pb, small))
+        badge = _hold_badge(small, state, ui, src)
+        avoid = _pill_rect(small, *badge) if badge is not None else None
+        for dest, pct in rule.shares.items():
+            if dest not in state.systems:
+                continue
+            focused = selected and (dest == ui.dest or ui.mode != CHOOSING)
+            if selected:
+                color = config.COLOR_SELECT
+            elif ui.lane_is_hostile(state, dest):
+                color = _BTN_DANGER[1]
+            else:
+                color = config.player_color(ui.human_id)
+            pb = ui.view.to_screen(state.systems[dest].pos)
+            _draw_rule_flow(surface, pa, pb, config.node_radius(s.production),
+                            config.node_radius(state.systems[dest].production),
+                            color, config.s(3 if focused else 2), animate=focused)
+            if pct < 100:  # all of it is the default; the chevrons already say so
+                _label_pill(surface, small, f"{pct}%", config.COLOR_TEXT if selected else config.COLOR_TEXT_DIM,
+                            _rule_label_center(pa, pb, small, avoid, f"{pct}%"))
+        if badge is not None:
+            _label_pill(surface, small, badge[0], config.COLOR_TEXT if selected else _forward_accent(), badge[1])
+
+
+def _hold_badge(font, state: GameState, ui: Ui, sid: int) -> tuple[str, tuple[int, int]] | None:
+    """Text and centre of a holding system's "hold N" badge, just under its disc —
+    where its star name would go, so `_draw_node_names` moves the name down a slot.
+    None for a system holding nothing (or not ours)."""
+    rule = ui.auto_forward.get(sid)
+    sys = state.systems.get(sid)
+    if rule is None or not rule.hold or sys is None or sys.owner_id != ui.human_id:
+        return None
+    text = f"hold {rule.hold}"
+    pos = ui.view.to_screen(sys.pos)
+    half = _pill_rect(font, text, (0, 0)).h // 2
+    return text, (pos[0], pos[1] + config.node_radius(sys.production) + config.NODE_LABEL_GAP + half)
 
 
 def _draw_choosing_preview(surface, state: GameState, ui: Ui) -> None:
@@ -521,23 +495,32 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
     # 1. rules about to be overwritten, under everything else
     for src in ui.route_replaces:
         old = ui.auto_forward.get(src)
-        if old is None or src not in state.systems or old[0] not in state.systems:
+        if old is None or src not in state.systems:
             continue
         pa = ui.view.to_screen(state.systems[src].pos)
-        pb = ui.view.to_screen(state.systems[old[0]].pos)
-        _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
-                        config.node_radius(state.systems[old[0]].production),
-                        _BTN_DANGER[1], config.s(2), animate=False)
+        for dest in old.shares:
+            if dest not in state.systems:
+                continue
+            pb = ui.view.to_screen(state.systems[dest].pos)
+            _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
+                            config.node_radius(state.systems[dest].production),
+                            _BTN_DANGER[1], config.s(2), animate=False)
 
     # 2. the planned chain
-    for src, (dest, _keep) in ui.route_plan.items():
-        if src not in state.systems or dest not in state.systems:
+    small = _fonts()["small"]
+    for src, rule in ui.route_plan.items():
+        if src not in state.systems:
             continue
         pa = ui.view.to_screen(state.systems[src].pos)
-        pb = ui.view.to_screen(state.systems[dest].pos)
-        _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
-                        config.node_radius(state.systems[dest].production),
-                        accent, config.s(3), animate=True)
+        for dest, pct in rule.shares.items():
+            if dest not in state.systems:
+                continue
+            pb = ui.view.to_screen(state.systems[dest].pos)
+            _draw_rule_flow(surface, pa, pb, config.node_radius(state.systems[src].production),
+                            config.node_radius(state.systems[dest].production),
+                            accent, config.s(3), animate=True)
+            if pct < 100:  # a tie split evenly — say so, as a committed rule would
+                _label_pill(surface, small, f"{pct}%", config.COLOR_TEXT, _rule_label_center(pa, pb, small))
 
     # 3. one ring per source pick, plus one on anything that can't be served. In
     #    chain mode the unservable are always picks, so that second loop is empty
@@ -634,9 +617,17 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     destination is picked and when an already-queued order or standing rule is
     reopened (see Ui.edit_order / Ui.edit_forward). Send/Forward tabs choose between
     a one-shot send (auto-committed, default send-all, retuned with the slider, −/+,
-    Half, All) and a standing forward rule (the same controls set ships to keep). The
-    button at the bottom discards whichever is live — labelled Cancel while composing,
-    Delete when the popup was opened on something that already existed.
+    Half, All) and a lane of the source's standing rule.
+
+    The Forward tab has two shapes. With one lane it edits that lane's share the way
+    the Send tab edits a count (slider, −/+, 50%/100%), plus the system's hold. Once
+    the system forwards down two or more lanes it becomes the system's split panel:
+    one row per lane with its own −/+, what stays home, the split as a bar, and Even
+    split / Delete all. The row for `ui.dest` is the lane the bottom button, the
+    wheel and the map highlight are about; tapping another row moves it.
+
+    The button at the bottom discards whichever is live — labelled Cancel while
+    composing, Delete when the popup was opened on something that already existed.
     Records every control's hit-rect on ``ui`` for input (store-rect-then-test)."""
     if ui.mode != CHOOSING or ui.selected not in state.systems or ui.dest not in state.systems:
         return
@@ -647,14 +638,17 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     dest = state.systems[ui.dest]
     src = state.systems[ui.selected]
     garrison = src.ships
+    rule = ui.edited_rule()
+    split = rule is not None and len(rule.shares) > 1
     font = _fonts()["small"]
     pad, gap = config.SEND_POPUP_PAD, config.SEND_POPUP_GAP
     # rows are tall enough to hold their own label, and to be tapped on a phone
     bh = _tap_size(max(config.SEND_POPUP_BTN_H, font.get_height() + config.ROW_GAP))
-    w = config.SEND_POPUP_W
-    # Fixed layout — the same seven rows on either tab so the box never resizes:
-    # tabs, title, effect caption, stepper, slider, two presets, cancel.
-    rows = 7
+    w = config.SPLIT_POPUP_W if split else config.SEND_POPUP_W
+    # Send: tabs, title, effect, stepper, slider, presets, cancel. One forwarding
+    # lane adds the hold row; a split swaps stepper and slider for a row per lane,
+    # what stays home and the bar.
+    single_rows = 8
     sw, sh = surface.get_size()
     # On a short screen at touch scale the stack can outgrow the band it is placed
     # in, and since the clamp below pins an oversized panel to the top, what falls
@@ -664,19 +658,57 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     # The budget is the placement band itself, not the viewport, so the two agree.
     y_lo = config.HUD_TOP_H + 2
     budget = sh - config.HUD_BOTTOM_H - y_lo
+    bh_min = font.get_height() + config.ROW_GAP
+
+    def fits(n_rows: int) -> bool:
+        return pad * 2 + bh_min * n_rows + gap * (n_rows - 1) <= budget
+
+    layout = _SplitLayout([], True, True)
+    if rule is None:
+        rows = 7
+    elif split:
+        # A split that still doesn't fit sheds what the numbers already say — the
+        # bar, then the "stays" row — and then whole lanes, keeping a window round
+        # the one being edited; the rest are a tap on their lane away.
+        lanes = list(rule.shares)
+        shown = len(lanes)
+        bar = stays = True
+
+        def split_rows() -> int:
+            return 6 + shown + bar + stays + (shown < len(lanes))
+
+        while not fits(split_rows()):
+            if bar:
+                bar = False
+            elif stays:
+                stays = False
+            elif shown > 1:
+                shown -= 1
+            else:
+                break
+        at = lanes.index(ui.dest) if ui.dest in lanes else 0
+        first = max(0, min(at - shown // 2, len(lanes) - shown))
+        layout = _SplitLayout(lanes[first:first + shown], bar, stays)
+        rows = split_rows()
+    else:
+        rows = single_rows
     if pad * 2 + bh * rows + gap * (rows - 1) > budget:
-        bh = max(font.get_height() + config.ROW_GAP, (budget - pad * 2 - gap * (rows - 1)) // rows)
+        bh = max(bh_min, (budget - pad * 2 - gap * (rows - 1)) // rows)
     h = pad * 2 + bh * rows + gap * (rows - 1)
 
     # placement: honour a user-dragged position (clamped to stay reachable),
-    # else auto-anchor to whichever side of the lane covers the fewest nodes
+    # else auto-anchor to whichever side of the lane covers the fewest nodes. The
+    # anchor is chosen for the taller of the two single-lane shapes, so flipping
+    # between Send and Forward doesn't make the panel jump to another side.
     x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
     y_hi = sh - config.HUD_BOTTOM_H - h
     if ui.popup_pos is not None:
         x = _clamp(ui.popup_pos[0], x_lo, x_hi)
         y = _clamp(ui.popup_pos[1], y_lo, y_hi)
     else:
-        x, y = _popup_anchor(surface, state, ui, mid, w, h)
+        h_anchor = max(h, pad * 2 + bh * single_rows + gap * (single_rows - 1))
+        x, y = _popup_anchor(surface, state, ui, mid, w, h_anchor)
+        y = _clamp(y, y_lo, y_hi)
     ui.popup_rect = (x, y, w, h)
 
     panel = pygame.Rect(x, y, w, h)
@@ -704,108 +736,236 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.forward_tab_rect = (fwd_tab.x, fwd_tab.y, fwd_tab.w, fwd_tab.h)
     cy += bh + gap
 
-    # title: source -> destination on the left, destination garrison right-aligned.
-    # Star names where they fit the box beside that garrison, ids where they don't —
-    # the flavour is worth a line only while it stays inside the panel.
-    ships_lbl = f"{dest.ships}sh"
-    title = f"{src.short} -> {dest.short}"
-    if font.size(title)[0] > iw - font.size(ships_lbl)[0] - gap:
-        title = f"Sys {ui.selected} -> {ui.dest}"
+    # title: what the panel is about on the left, a garrison right-aligned — the
+    # destination's for a lane, the source's own for a whole split system
+    if split:
+        ships_lbl = f"{garrison}sh"
+        room = iw - font.size(ships_lbl)[0] - gap
+        title = f"{_fit_name(font, src, room - font.size(' splits')[0])} splits"
+        ships_col = config.player_color(src.owner_id)
+    else:
+        ships_lbl = f"{dest.ships}sh"
+        title = _fit_route(font, src, dest, iw - font.size(ships_lbl)[0] - gap)
+        ships_col = config.player_color(dest.owner_id)
     _text(surface, font, title, accent, midleft=(inner, cy + bh // 2))
-    _text(surface, font, ships_lbl, config.player_color(dest.owner_id), midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
+    _text(surface, font, ships_lbl, ships_col, midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
 
-    # effect caption: what this actually does, in plain words (dim)
-    if ui.forward_armed:
-        effect = f"~{max(0, garrison - ui.keep)}/turn  ·  keep {ui.keep}"
-    else:
-        effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
-    _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
-    cy += bh + gap
-
-    # stepper row: [−]  value  [+]  — the send count, or (Forward) how many to keep
     s = _tap_size(config.STEPPER_SIZE)
-    minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
-    plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
-    _draw_step_button(surface, minus, "-", accent)
-    _draw_step_button(surface, plus, "+", accent)
-    label = f"keep {ui.keep}" if ui.forward_armed else str(ui.chosen)
-    _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=(inner + iw // 2, cy + bh // 2))
-    ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
-    ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
-    cy += bh + gap
+    if rule is not None:
+        # hold row: ships the system keeps back before any lane takes its share. It
+        # belongs to the system, so on a split it covers every row below it.
+        label = "holds"
+        row = pygame.Rect(inner, cy, iw, bh)
+        pygame.draw.rect(surface, (12, 14, 22), row, border_radius=config.s(5))
+        ui.hold_minus_rect, ui.hold_plus_rect = _draw_mini_stepper(
+            surface, font, row, s, label, str(rule.hold), config.COLOR_TEXT_DIM,
+            config.COLOR_TEXT if rule.hold else config.COLOR_TEXT_DIM, accent)
+        cy += bh + gap
 
-    # slider row: the coarse move −/+ can't make. The whole row is the grab target
-    # (a dead zone at either end would fall through to the popup-drag underneath),
-    # and it is recorded from this frame's panel position, so it follows the popup
-    # wherever the player drags it.
-    track = pygame.Rect(inner, cy, iw, bh)
-    lo, hi, value = ui.slider_range(state)
-    t = 0.0 if hi <= lo else max(0.0, min(1.0, (value - lo) / (hi - lo)))
-    _draw_slider(surface, track, t, accent, config.COLOR_TEXT)
-    ui.slider_rect = (track.x, track.y, track.w, track.h)
-    cy += bh + gap
+    this_turn = ui.forward_this_turn(state, ui.selected) if rule is not None else {}
+    stay = max(0, ui.available(state, ui.selected) - sum(this_turn.values()))
 
-    # preset row: Half/All (Send) or Keep half/Keep 0 (Forward) — left, right map
-    # to send_half_rect / send_all_rect on both tabs (input reads the mode). The
-    # preset matching the current value lights up in the mode accent.
-    left = pygame.Rect(inner, cy, tw, bh)
-    right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-    if ui.forward_armed:
-        half_keep = garrison // 2
-        _draw_popup_button(surface, left, "Keep half", ui.keep == half_keep, accent=accent)
-        _draw_popup_button(surface, right, "Keep 0", ui.keep == 0, accent=accent)
+    if split and rule is not None:
+        cy = _draw_split_rows(surface, font, ui, state, rule, layout, inner, cy, iw, bh, gap, s, accent)
+        effect = f"{sum(this_turn.values())} go  ·  {stay} stay"
+        _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
+        cy += bh + gap
+        left = pygame.Rect(inner, cy, tw, bh)
+        right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+        _draw_popup_button(surface, left, "Even split", rule.shares == model.shares_even(rule.shares), accent=accent)
+        _draw_popup_button(surface, right, "Delete all", danger=True)
+        ui.even_split_rect = (left.x, left.y, left.w, left.h)
+        ui.delete_all_rect = (right.x, right.y, right.w, right.h)
+        cy += bh + gap
     else:
-        cap = ui._active_cap(state)
-        _draw_popup_button(surface, left, "Half", ui.chosen == max(1, cap // 2), accent=accent)
-        _draw_popup_button(surface, right, "All", ui.chosen == cap, accent=accent)
-    ui.send_half_rect = (left.x, left.y, left.w, left.h)
-    ui.send_all_rect = (right.x, right.y, right.w, right.h)
-    cy += bh + gap
+        # effect caption: what this actually does this turn, in plain words (dim)
+        if ui.forward_armed:
+            effect = f"{this_turn.get(ui.dest, 0)} go  ·  {stay} stay"
+        else:
+            effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
+        _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
+        cy += bh + gap
 
-    # Discard row (both tabs): drop the active send / forward rule. It reads
-    # "Cancel" only while composing — reopened on something that was already on the
-    # board, the same press is a deletion, and should say so.
+        # stepper row: [−]  value  [+]  — the send count, or (Forward) the lane's share
+        minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
+        plus = pygame.Rect(inner + iw - s, cy + (bh - s) // 2, s, s)
+        _draw_step_button(surface, minus, "-", accent)
+        _draw_step_button(surface, plus, "+", accent)
+        label = f"send {ui.edited_share()}%" if ui.forward_armed else str(ui.chosen)
+        _text(surface, _fonts()["normal"], label, config.COLOR_TEXT, center=(inner + iw // 2, cy + bh // 2))
+        ui.minus_rect = (minus.x, minus.y, minus.w, minus.h)
+        ui.plus_rect = (plus.x, plus.y, plus.w, plus.h)
+        cy += bh + gap
+
+        # slider row: the coarse move −/+ can't make. The whole row is the grab target
+        # (a dead zone at either end would fall through to the popup-drag underneath),
+        # and it is recorded from this frame's panel position, so it follows the popup
+        # wherever the player drags it.
+        track = pygame.Rect(inner, cy, iw, bh)
+        lo, hi, value = ui.slider_range(state)
+        t = 0.0 if hi <= lo else max(0.0, min(1.0, (value - lo) / (hi - lo)))
+        _draw_slider(surface, track, t, accent, config.COLOR_TEXT)
+        ui.slider_rect = (track.x, track.y, track.w, track.h)
+        cy += bh + gap
+
+        # preset row: Half/All (Send) or 50%/100% (Forward) — left, right map to
+        # send_half_rect / send_all_rect on both tabs (input reads the mode). The
+        # preset matching the current value lights up in the mode accent.
+        left = pygame.Rect(inner, cy, tw, bh)
+        right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+        if ui.forward_armed:
+            share = ui.edited_share()
+            _draw_popup_button(surface, left, "50%", share == 50, accent=accent)
+            _draw_popup_button(surface, right, "100%", share == 100, accent=accent)
+        else:
+            cap = ui._active_cap(state)
+            _draw_popup_button(surface, left, "Half", ui.chosen == max(1, cap // 2), accent=accent)
+            _draw_popup_button(surface, right, "All", ui.chosen == cap, accent=accent)
+        ui.send_half_rect = (left.x, left.y, left.w, left.h)
+        ui.send_all_rect = (right.x, right.y, right.w, right.h)
+        cy += bh + gap
+
+    # Discard row: drop the active send, or the forwarding lane being edited. It
+    # reads "Cancel" only while composing — reopened on something that was already
+    # on the board, the same press is a deletion, and should say so.
     cancel = pygame.Rect(inner, cy, iw, bh)
     if ui.editing_existing:
-        discard = "Delete rule" if ui.forward_armed else "Delete order"
+        discard = ("Delete lane" if split else "Delete rule") if ui.forward_armed else "Delete order"
     else:
         discard = "Cancel"
     _draw_popup_button(surface, cancel, discard, danger=True)
     ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
 
 
+def _draw_mini_stepper(surface, font, row: pygame.Rect, s: int, label: str, value: str,
+                       label_col, value_col, accent) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """``label`` on the left of ``row`` and ``[−] value [+]`` on its right, the
+    value column wide enough for "100%" so a column of these lines up. Returns the
+    −/+ hit-rects."""
+    vw = font.size("100%")[0]
+    inset = config.s(4)
+    plus = pygame.Rect(row.right - inset - s, row.y + (row.h - s) // 2, s, s)
+    minus = pygame.Rect(plus.x - 2 * inset - vw - s, plus.y, s, s)
+    _text(surface, font, label, label_col, midleft=(row.x + config.s(6), row.centery))
+    _draw_step_button(surface, minus, "-", accent)
+    _draw_step_button(surface, plus, "+", accent)
+    _text(surface, font, value, value_col, center=((minus.right + plus.left) // 2, row.centery))
+    return (minus.x, minus.y, minus.w, minus.h), (plus.x, plus.y, plus.w, plus.h)
+
+
+class _SplitLayout(NamedTuple):
+    """What a split panel has room for: the lanes it lists (a window round the one
+    being edited, when not all fit), and whether the bar and "stays" rows made it."""
+    lanes: list[int]
+    bar: bool
+    stays: bool
+
+
+def _draw_split_rows(surface, font, ui: Ui, state: GameState, rule, layout: _SplitLayout,
+                     inner: int, cy: int, iw: int, bh: int, gap: int, s: int, accent) -> int:
+    """A split system's lanes, one row each with its own −/+, then what stays home
+    and the split as a bar in the rows' own colours. The row for ``ui.dest`` is
+    outlined: it is the lane the bottom button, the wheel and the map highlight act
+    on. Lanes the panel had no room for are counted in a row of their own. Records
+    ``ui.share_rows``; returns the y below the last row."""
+    colour = dict(zip(rule.shares, _lane_swatches(len(rule.shares))))
+    sw = config.s(8)
+    name_room = iw - config.s(6) - sw - config.s(6) - (2 * s + 4 * config.s(4) + font.size("100%")[0])
+    ui.share_rows = []
+    names = _fit_names(font, [state.systems[d] for d in layout.lanes], name_room)
+    for dest, name in zip(layout.lanes, names):
+        pct, col = rule.shares[dest], colour[dest]
+        row = pygame.Rect(inner, cy, iw, bh)
+        if dest == ui.dest:
+            pygame.draw.rect(surface, tuple(c * 2 // 10 for c in accent), row, border_radius=config.s(5))
+            pygame.draw.rect(surface, accent, row, config.s(1), border_radius=config.s(5))
+        swatch = pygame.Rect(row.x + config.s(6), row.centery - sw // 2, sw, sw)
+        pygame.draw.rect(surface, col, swatch, border_radius=config.s(2))
+        name_col = _BTN_DANGER[1] if ui.lane_is_hostile(state, dest) else config.COLOR_TEXT
+        label_row = pygame.Rect(swatch.right, row.y, row.w - (swatch.right - row.x), row.h)
+        minus, plus = _draw_mini_stepper(surface, font, label_row, s, name, f"{pct}%",
+                                         name_col, config.COLOR_TEXT, accent)
+        ui.share_rows.append((dest, (row.x, row.y, row.w, row.h), minus, plus))
+        cy += bh + gap
+
+    hidden = len(rule.shares) - len(layout.lanes)
+    if hidden:
+        _text(surface, font, f"+{hidden} more · tap a lane", config.COLOR_TEXT_DIM,
+              center=(inner + iw // 2, cy + bh // 2))
+        cy += bh + gap
+
+    if layout.stays:
+        home = max(0, 100 - rule.total())
+        row = pygame.Rect(inner, cy, iw, bh)
+        swatch = pygame.Rect(row.x + config.s(6), row.centery - sw // 2, sw, sw)
+        pygame.draw.rect(surface, _SPLIT_HOME, swatch, border_radius=config.s(2))
+        _text(surface, font, "stays", config.COLOR_TEXT_DIM, midleft=(swatch.right + config.s(6), row.centery))
+        vw = font.size("100%")[0]
+        _text(surface, font, f"{home}%", config.COLOR_TEXT_DIM,
+              center=(row.right - config.s(4) - s - config.s(4) - vw // 2, row.centery))
+        cy += bh + gap
+
+    if layout.bar:
+        bar = pygame.Rect(inner, cy + bh // 4, iw, bh // 2)
+        pygame.draw.rect(surface, _SPLIT_HOME, bar, border_radius=config.s(4))
+        bx = bar.x
+        for dest, pct in rule.shares.items():
+            seg = bar.w * pct // 100
+            if seg > 0:
+                pygame.draw.rect(surface, colour[dest], pygame.Rect(bx, bar.y, seg, bar.h))
+            bx += seg
+        cy += bh + gap
+    return cy
+
+
+_SPLIT_HOME = (42, 48, 68)  # what stays home, in the split panel's rows and bar
+
+
+def _lane_swatches(n: int) -> list[tuple[int, int, int]]:
+    """One colour per lane of a split, from a light to a dark teal: told apart by
+    lightness, not just hue, so they survive any colour vision."""
+    light, dark = (190, 240, 234), (40, 112, 106)
+    if n <= 1:
+        return [_forward_accent()]
+
+    def mix(a: int, b: int, t: float) -> int:
+        return round(a + (b - a) * t)
+
+    return [(mix(light[0], dark[0], i / (n - 1)), mix(light[1], dark[1], i / (n - 1)),
+             mix(light[2], dark[2], i / (n - 1))) for i in range(n)]
+
+
+def _fit_name(font, sys, width: int) -> str:
+    """A system's name for a slot ``width`` wide: name and id ("Vega (7)") where
+    that fits, the name alone where only it does, else the bare id."""
+    for text in (sys.label, sys.short):
+        if font.size(text)[0] <= width:
+            return text
+    return str(sys.id)
+
+
+def _fit_names(font, systems, width: int) -> list[str]:
+    """``_fit_name`` for a column: the richest form every row fits, so a list never
+    mixes "Vega (7)" with a bare name."""
+    for form in (lambda s: s.label, lambda s: s.short):
+        names = [form(s) for s in systems]
+        if all(font.size(n)[0] <= width for n in names):
+            return names
+    return [str(s.id) for s in systems]
+
+
+def _fit_route(font, a, b, width: int) -> str:
+    """``a -> b`` for a slot ``width`` wide, by the same steps as ``_fit_name``
+    taken by both ends together, so a title never mixes the two forms."""
+    for text in (f"{a.label} -> {b.label}", f"{a.short} -> {b.short}"):
+        if font.size(text)[0] <= width:
+            return text
+    return f"{a.id} -> {b.id}"
+
+
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v)) if hi >= lo else lo
-
-
-# Slider track colour, shared by the popup's count slider and the scrubber — kept
-# local to the drawing module like the HUD button palette above.
-_SLIDER_TROUGH = (40, 44, 60)
-
-
-def _draw_slider(surface, rect: pygame.Rect, t: float, fill_col, knob_col) -> None:
-    """A horizontal slider filling ``rect``: trough, filled portion, round knob at
-    fraction ``t``. Shared by the send popup's count slider and history mode's turn
-    scrubber, which are the same widget at different sizes.
-
-    The knob *travels* over ``rect`` inset by its own radius at each end, so it
-    never overhangs the box it sits in — and callers mapping a pointer x back to a
-    value must invert exactly that (see ``Ui.set_slider_from_x``), or the knob
-    drifts away from the finger at the extremes.
-    """
-    thick = config.SLIDER_TRACK_H
-    knob = config.SLIDER_KNOB_R
-    cy = rect.centery
-    travel = max(0, rect.w - 2 * knob)
-    trough = pygame.Rect(rect.x + knob, cy - thick // 2, travel, thick)
-    pygame.draw.rect(surface, _SLIDER_TROUGH, trough, border_radius=max(1, thick // 2))
-    fill_w = int(travel * max(0.0, min(1.0, t)))
-    if fill_w > 0:
-        pygame.draw.rect(surface, fill_col, pygame.Rect(trough.x, trough.y, fill_w, thick), border_radius=max(1, thick // 2))
-    hx = trough.x + fill_w
-    pygame.draw.circle(surface, knob_col, (hx, cy), knob)
-    pygame.draw.circle(surface, fill_col, (hx, cy), knob, config.s(2))
 
 
 def _draw_popup_button(surface, rect: pygame.Rect, label: str, active: bool = False, danger: bool = False, accent=config.COLOR_SELECT) -> None:
@@ -845,18 +1005,6 @@ def _draw_tab(surface, rect: pygame.Rect, label: str, active: bool, accent) -> N
     _text(surface, _fonts()["small"], label, col, center=rect.center)
 
 
-def _draw_step_button(surface, rect: pygame.Rect, sign: str, color) -> None:
-    """A small filled −/+ button glyph inside ``rect``."""
-    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
-    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
-    cx, cy = rect.center
-    r = rect.w // 4
-    lw = config.s(2)
-    pygame.draw.line(surface, color, (cx - r, cy), (cx + r, cy), lw)  # − (and +'s bar)
-    if sign == "+":
-        pygame.draw.line(surface, color, (cx, cy - r), (cx, cy + r), lw)
-
-
 def _draw_return_glyph(surface, rect, color) -> None:
     """A drawn ⏎ return/enter arrow inside ``rect`` (x, y, w, h). Drawn rather
     than typed because the monospace font lacks the ⏎ glyph on many platforms."""
@@ -868,6 +1016,187 @@ def _draw_return_glyph(surface, rect, color) -> None:
     pygame.draw.lines(surface, color, False, [(x + w, y), (x + w, by), (x, by)], lw)
     # arrowhead pointing left
     pygame.draw.lines(surface, color, False, [(x + a, by - a), (x, by), (x + a, by + a)], lw)
+
+
+def _faded(color: tuple[int, int, int], fade: float) -> tuple[int, int, int]:
+    """``color`` blended toward the background by ``fade`` (0 untouched, 1 gone).
+
+    A dissolve rather than true alpha: the main surface has no per-pixel alpha, and
+    a pill's own background is already `config.COLOR_BG`, so fading its text toward
+    the same colour reads as it sinking into its own backing rather than a colour
+    shift. Used for a burst's stroke too, where it reads as sinking into the map.
+    """
+    bg = config.COLOR_BG
+    return tuple(round(c + (b - c) * fade) for c, b in zip(color, bg))
+
+
+def _draw_burst(surface, center, color, phase: float) -> None:
+    """A fight, marked where it happened.
+
+    Neither of this file's two established glyphs: a filled wedge means real ships
+    and an open chevron means an intention, so a fight is an expanding open ring
+    with radial spokes — it cannot be mistaken for either, nor for a node.
+    ``phase`` runs 0..1 over `config.FILM_FLASH_MS`, so it thins as it grows.
+    """
+    reach = config.FILM_BURST_R * (0.35 + 0.65 * phase)
+    width = max(1, round(config.FILM_BURST_W * (1.0 - phase * 0.5)))
+    cx, cy = center
+    pygame.draw.circle(surface, color, (int(cx), int(cy)), int(reach), width)
+    for i in range(config.FILM_BURST_SPOKES):
+        angle = math.tau * i / config.FILM_BURST_SPOKES + phase
+        ux, uy = math.cos(angle), math.sin(angle)
+        pygame.draw.line(
+            surface, color,
+            (cx + ux * reach, cy + uy * reach),
+            (cx + ux * (reach + config.FILM_BURST_R * 0.4),
+             cy + uy * (reach + config.FILM_BURST_R * 0.4)), width)
+
+
+def _mark_center(center) -> tuple[int, int]:
+    """Where a playback writes a number about a place: a fixed step above it.
+
+    Fixed rather than measured off the burst's current reach, which grows over the
+    flash — a label riding that outward would read as a second moving thing.
+    """
+    return (int(center[0]),
+            int(center[1]) - config.FILM_BURST_R - config.FILM_LOSS_GAP)
+
+
+def _mark_slot(font, center) -> pygame.Rect:
+    """The space over a system a playback writes numbers into: a mark's own row
+    and the row a second number stacks into above it (`_film_labels`).
+
+    Sized off a representative label rather than a real one, because the star-name
+    pass reserves this whether or not anything is showing there right now. A name
+    allowed into the gap between fights would be pushed off the map the moment one
+    fired, which reads as the name flickering rather than as the number arriving.
+    """
+    base = _pill_rect(font, "+00", _mark_center(center))
+    return base.union(base.move(0, -_row_h("small")))
+
+
+class _Mark(NamedTuple):
+    """One fight a playback is currently showing, placed on screen."""
+
+    center: tuple[float, float]
+    color: tuple[int, int, int]
+    phase: float
+    fade: float                 # 0 fresh, 1 dissolved into the background
+    cost: int                   # what it cost whoever came out of it
+    victor: int | None       # ...and who that was; None when nobody did
+    node_id: int | None      # the system it happened at, if it was not in open space
+
+
+def _mark_phase(age_ms: float) -> float:
+    """A burst's own pop-in geometry: rings settle and spokes retract over
+    `config.FILM_FLASH_MS`, counted from when the mark fired."""
+    return min(1.0, max(0.0, age_ms / max(1, config.FILM_FLASH_MS)))
+
+
+def _mark_fade(age_ms: float) -> float:
+    """How far a mark has dissolved toward invisible, 0 fresh, 1 gone.
+
+    Fully visible for `config.FILM_FLASH_MS` (matching how long a burst took to
+    settle before this cut ever faded anything), then fades over the next
+    `config.FILM_FADE_MS` — both counted from when the mark fired and neither
+    tied to any film's own length, which is what lets one keep dissolving on top
+    of whatever the next turn's glide is doing.
+    """
+    if age_ms <= config.FILM_FLASH_MS:
+        return 0.0
+    return min(1.0, (age_ms - config.FILM_FLASH_MS) / max(1, config.FILM_FADE_MS))
+
+
+def _flash_marks(state: GameState, ui: Ui):
+    """Every fading fight, as `_Mark`s.
+
+    The one place `Ui.fading_fights` is turned into places on screen, so the
+    bursts, the labels over them and the star-name pass all agree about where
+    they are. A fight is never dropped early, only faded toward invisible
+    (`fade`) — pruning is `Ui.age_fading_marks`' job, not this one's, and it runs
+    whether or not a playback is currently active.
+    """
+    for f in ui.fading_fights:
+        phase, fade = _mark_phase(f.age_ms), _mark_fade(f.age_ms)
+        if f.node_id is None:
+            a = state.systems[f.low_id].pos
+            b = state.systems[f.high_id].pos
+            center = ui.view.to_screen(lerp(a, b, f.at))
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, None)
+        else:
+            center = ui.view.to_screen(state.systems[f.node_id].pos)
+            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, f.node_id)
+
+
+def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, tuple[int, int, int]]]:
+    """Every number a playback writes over the map this frame, already placed:
+    ``(centre, text, colour)``.
+
+    Two kinds share that spot above a system. A fight's cost is the *victor's* own
+    losses, in the victor's colour — not both sides' together: the beaten side is
+    wiped out by definition and its garrison or triangle visibly goes, so a
+    combined figure mostly restates what the board already shows while burying the
+    one number the square law makes hard to guess. And a hull finished this turn is
+    ``+N`` in its owner's colour, which is what makes production visible at all
+    without ever stopping the board to say it: `config.FILM_PRODUCE_MS` is a lead
+    borrowed from the glide (`turnfilm.film`), not a dwell. Each fades toward the
+    background on its own fixed clock (`_mark_fade`) rather than being cut off, or
+    tied to how long any particular turn's film runs.
+
+    They can still collide, on purpose: production now runs *before* combat, so a
+    hull finished this turn defends the system it was built at and its ``+N``
+    credits whoever held the system going in — the defender, not whoever ends up
+    with it. When the extra ship still isn't enough the system falls right after,
+    and the two marks land moments apart rather than the same instant, but neither
+    expires early, so the gain reliably stacks a row above the cost whenever both
+    are still up. One list, because the star-name pass has to treat these as
+    occupied space (the same rule that already keeps names off lane times and a
+    rule's share) and must not have to re-derive where they went.
+    """
+    labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
+    charged: set[int] = set()
+    for mark in _flash_marks(state, ui):
+        if mark.cost > 0 and mark.victor is not None:
+            color = _faded(config.player_color(mark.victor), mark.fade)
+            labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
+            if mark.node_id is not None:
+                charged.add(mark.node_id)
+    for h in ui.fading_hulls:
+        system = state.systems[h.node_id]
+        x, y = _mark_center(ui.view.to_screen(system.pos))
+        if h.node_id in charged:
+            y -= _row_h("small")
+        color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
+        labels.append(((x, y), f"+{h.hulls}", color))
+    return labels
+
+
+def _draw_film_flashes(surface, state: GameState, ui: Ui) -> None:
+    """Mark every still-fading fight, and write the numbers that go with them
+    (plus any hull finished — see `_film_labels`). Independent of whether a film
+    is currently playing: a mark keeps showing on top of live/history play alike
+    until `Ui.age_fading_marks` prunes it."""
+    for mark in _flash_marks(state, ui):
+        _draw_burst(surface, mark.center, _faded(mark.color, mark.fade), mark.phase)
+    for center, text, color in _film_labels(state, ui):
+        _label_pill(surface, _fonts()["small"], text, color, center)
+
+
+def _draw_film_caption(surface, ui: Ui) -> None:
+    """Name the phase being shown. A gliding fleet does not say which part of the
+    turn it belongs to, and that is the whole point of the animation.
+
+    On the map layer rather than the top bar: a caption there would shift the
+    measured scoreboard in and out as its width changed.
+    """
+    if ui.film is None:
+        return
+    label = ui.film.label(ui.film_ms)
+    if not label:
+        return
+    x, y, w, h = config.play_rect()
+    _label_pill(surface, _fonts()["small"], label, config.COLOR_TEXT_DIM,
+                (x + w // 2, y + h - config.FILM_CAPTION_GAP))
 
 
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:
@@ -940,8 +1269,10 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         pos = ui.view.to_screen(sys.pos)
         r = config.node_radius(sys.production)
         taken.append(pygame.Rect(pos[0] - r, pos[1] - r, r * 2, r * 2))
+        taken.append(_mark_slot(font, pos))   # ...and so is the space a playback
+                                              # writes its numbers into, always
     # ...and so is every label already on the map: a name landing on a lane's
-    # travel time or a rule's "keep N" makes both of them unreadable, and those
+    # travel time or a rule's share makes both of them unreadable, and those
     # carry information a name doesn't.
     for lane in state.lanes.values():
         if _fog_state(ui, lane.a) == "hidden" or _fog_state(ui, lane.b) == "hidden":
@@ -949,15 +1280,28 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         pa, pb = ui.view.to_screen(state.systems[lane.a].pos), ui.view.to_screen(state.systems[lane.b].pos)
         turns = state.travel_turns(lane.a, lane.b) or lane.travel_turns
         taken.append(_pill_rect(font, str(turns), ((pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2)))
+    name_floor: dict[int, int] = {}  # a held system's name goes under its badge
     if not ui.history:
-        for src, (dest, keep) in ui.auto_forward.items():
-            if not keep:  # nothing drawn for the default — see _draw_forward_rules
+        for src, rule in ui.auto_forward.items():
+            a = state.systems.get(src)
+            if a is None or a.owner_id != ui.human_id:
                 continue
-            a, b = state.systems.get(src), state.systems.get(dest)
-            if a is None or b is None or a.owner_id != ui.human_id:
-                continue
-            pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
-            taken.append(_pill_rect(font, f"keep {keep}", _rule_label_center(pa, pb, font)))
+            badge = _hold_badge(font, state, ui, src)
+            avoid = _pill_rect(font, *badge) if badge is not None else None
+            if avoid is not None:
+                taken.append(avoid)
+                name_floor[src] = avoid.bottom
+            for dest, pct in rule.shares.items():
+                b = state.systems.get(dest)
+                if b is None or pct >= 100:  # nothing drawn — see _draw_forward_rules
+                    continue
+                pa, pb = ui.view.to_screen(a.pos), ui.view.to_screen(b.pos)
+                taken.append(_pill_rect(font, f"{pct}%", _rule_label_center(pa, pb, font, avoid, f"{pct}%")))
+    # ...and a playback's own numbers where they are not over a system at all: an
+    # open-space clash is marked at the lane fraction it happened at, which no
+    # node's reserved slot covers.
+    for center, text, _color in _film_labels(state, ui):
+        taken.append(_pill_rect(font, text, center))
 
     def rank(sys) -> tuple[int, int]:
         if sys.id == ui.selected:
@@ -973,10 +1317,14 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         r = config.node_radius(sys.production)
         pad = config.NODE_LABEL_PAD
         placement = None
-        # below the node by preference, above it when that side is taken or off-map
+        # Below the node, which is where a name belongs: the space above is held
+        # for a playback's numbers (`_mark_slot`), so the fallback above only
+        # opens up if that slot is ever tuned smaller than the label gap.
         for side in (1, -1):
             rect = pygame.Rect((0, 0), font.size(sys.name))
             edge = pos[1] + side * (r + config.NODE_LABEL_GAP)
+            if side > 0 and sys.id in name_floor:
+                edge = name_floor[sys.id] + pad + config.NODE_LABEL_GAP
             rect.midtop = (pos[0], edge) if side > 0 else (pos[0], edge - rect.h)
             rect.clamp_ip(clip)  # a name at the map's edge slides in rather than being cut
             if clip.contains(rect) and rect.inflate(pad * 2, pad * 2).collidelist(taken) == -1:
@@ -993,10 +1341,6 @@ def _draw_node_names(surface, state: GameState, ui: Ui) -> None:
         else:
             color = config.COLOR_TEXT_DIM
         _text(surface, font, sys.name, color, topleft=rect.topleft)
-
-
-def _brighten(color, amount=60):
-    return tuple(min(255, c + amount) for c in color)
 
 
 def _draw_hatch(surface, center, radius, color, step=6) -> None:
@@ -1066,7 +1410,9 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
-    _draw_scoreboard(surface, state, ui, w, turn.right + config.HUD_PAD * 2)
+    turn = _draw_ships_lost(surface, state, ui, turn)
+    scoreboard_right = _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w))
+    _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
     # bottom bar
     by = h - config.HUD_BOTTOM_H
@@ -1084,8 +1430,8 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # End-turn button: the single biggest, easiest touch target in the HUD — the
     # full width of the right info panel, reaching up above the ordinary bottom
-    # bar (_draw_side_panel/_draw_order_list reserve the same config.END_TURN_H
-    # so the queued-orders list never draws underneath it).
+    # bar (_draw_side_panel reserves the same config.END_TURN_H so the panel's
+    # details never draw underneath it).
     ebw, ebh = config.HUD_RIGHT_W, config.END_TURN_H
     br = pygame.Rect(w - ebw, h - ebh, ebw, ebh)
     fill, edge = _BTN_GREEN
@@ -1120,7 +1466,19 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         _draw_footer_buttons(surface, state, ui, by)
         return
 
-    ui.end_turn_rect = (br.x, br.y, br.w, br.h)
+    # A film is a playback of a turn already resolved, so the button that would
+    # resolve the next one goes away for its duration — the same take-it-away
+    # rather than guard-it treatment route mode gets just above. A play-by-post
+    # turn we have already submitted is the same case for a different reason: the
+    # turn advances when the last seat is in, and nothing anyone presses here
+    # brings that forward.
+    _gone = ui.film is not None or ui.awaiting_others(state)
+    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
+    if _gone and ui.awaiting_others(state):
+        _text(surface, _fonts()["normal"], "Orders sent", config.COLOR_TEXT_DIM,
+              center=br.center)
+        _draw_footer_buttons(surface, state, ui, by)
+        return
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
     pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
     if ui.autoplay:
@@ -1161,8 +1519,8 @@ _FOOTER_RECTS = (
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     """The bottom bar's button strip, left of the sidebar / End Turn column: touch
-    equivalents of the P / A / H / R / M / X keys plus Quit/Esc, so every live-play
-    action is reachable without a keyboard.
+    equivalents of the P / A / H / N / G / F / M / X keys plus Quit/Esc, so every
+    live-play action is reachable without a keyboard.
 
     Each button is sized to its own measured label. The strip is two independently
     anchored clusters rather than one row: the buttons that leave this game (Quit,
@@ -1177,7 +1535,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     rather than drawn overlapping. The ranking matters because a touch player has
     no keys to fall back on: Menu survives longest, since it reaches the setup
     screen and Quit from there, and Clear goes first, since the popup's own Cancel
-    and the × on a queued row already do its job. Fast forward ranks just below
+    and Delete already do its job. Fast forward ranks just below
     those two, because it is only ever offered in the one situation it is the
     point of the screen — watching a match you are out of.
 
@@ -1191,7 +1549,8 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # (ui attribute, label, fill, edge, how long it survives a squeeze, which
     # cluster it's pinned to), in visual order within its cluster — left to right.
     # play/pause is hidden under autoplay, which drives turns on its own timer and
-    # would make it a no-op; history needs a recorded turn to scrub through.
+    # would make it a no-op; history needs a recorded turn to scrub through, and
+    # under ironman a decided game (`Ui.can_review`).
     specs: list[tuple[str, str, tuple, tuple, int, str]] = []
 
     # Route mode replaces the strip wholesale rather than adding to it: the shared
@@ -1224,9 +1583,10 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
     specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
-    # matching the R key exactly.
+    # matching the N key exactly. (R is reset-view, and has no button here: the
+    # on-map zoom cluster carries it.)
     specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
-    if state.turn > 0:
+    if ui.can_review(state):
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
@@ -1237,10 +1597,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause.
-    specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
-    if not ui.autoplay:
-        specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
+    # shown either way, unlike play/pause. Neither is offered in a shared match:
+    # a play-by-post turn advances when the last seat submits, so there is no
+    # clock here for either control to run, and a client that ran one anyway
+    # would resolve a turn the others had not agreed to. Taken away rather than
+    # guarded, the same treatment End Turn gets while we are waiting — and
+    # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
+    if not ui.in_pbp:
+        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
+        if not ui.autoplay:
+            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means
@@ -1303,6 +1669,60 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 _DEAD_COLOR = (92, 96, 110)
 
 
+def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> pygame.Rect:
+    """Our seat's ships lost so far, just right of the turn counter: the score's
+    tie-break (`Player.ships_lost`, the number the win overlay and a posted score
+    report), so someone chasing a posted result can see where they stand on it
+    without waiting for the end. Our own losses are never fogged.
+
+    Returns the rect the scoreboard must start clear of, in place of the turn
+    counter's.
+    """
+    player = state.players.get(ui.human_id)
+    if player is None:
+        return turn
+    label = _text(surface, _fonts()["small"], f"{player.ships_lost} lost", config.COLOR_TEXT_DIM,
+                  midleft=(turn.right + config.HUD_PAD, config.HUD_TOP_H // 2))
+    return turn.union(label)
+
+
+def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
+    """The score to beat, pinned in the top bar's right corner for as long as the
+    match runs — not just on the win overlay at the end of it, since the point of
+    a persistent reminder is not having to hold the number in your head (or reopen
+    a finished game to recall it). Teal ties it to the same accent as the
+    "Challenge a friend" button that made this a challenge in the first place.
+
+    Returns the x the scoreboard must stay clear of (``w`` when there is nothing
+    to draw), the same measured-not-hardcoded handoff the turn counter gives it.
+    """
+    if ui.challenge_target is None:
+        return w
+    turns, lost = ui.challenge_target
+    who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+    text = f"Beat {who}{turns}t / {lost} lost"
+    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
+                  midright=(w - config.HUD_PAD, config.HUD_TOP_H // 2))
+    return label.left - config.HUD_PAD
+
+
+def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
+    """The weekly campaign's reminder ("Node 3: post within 12 min"), just left of
+    the challenge target, in gold like the campaign page's timers. `main` writes
+    the text once a frame, so the countdown moves without this module reading
+    any clock or knowing the rules.
+
+    Returns the x the scoreboard must stay clear of, the same handoff
+    `_draw_challenge_target` makes.
+    """
+    if not ui.campaign_label:
+        return right
+    edge = w - config.HUD_PAD if right >= w else right
+    label = _text(surface, _fonts()["small"], ui.campaign_label, config.COLOR_CAMPAIGN,
+                  midright=(edge, config.HUD_TOP_H // 2))
+    return label.left - config.HUD_PAD
+
+
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
     """Per-player standings in the top bar: swatch, systems, ships, production.
 
@@ -1338,12 +1758,16 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
 
     def label(pid: int, v: str, with_name: bool) -> str:
         p = state.players[pid]
+        # A shared match can seat a person at any colour, so the scoreboard is the
+        # one place that says outright which swatch is yours — a solo game has no
+        # such ambiguity (it is always the seat you are looking at), hence `in_pbp`.
+        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
         if v == "out":
-            return f"{p.name} out" if with_name else "out"
+            return f"{p.name} out{you}" if with_name else f"out{you}"
         systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
         name = f"{p.name} " if with_name else ""
         mark = "" if v == "live" else " ?"  # stale, last-known intel
-        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}"
+        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}{you}"
 
     def row_width(with_name: bool) -> int:
         return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
@@ -1384,34 +1808,27 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
     pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), config.s(1))
 
-    # queued-orders list occupies the bottom of the panel (always visible so
-    # orders can be reviewed / removed); details fill the space above it. Hidden
-    # in history mode — those orders belong to the live turn, not the past board.
-    # `content_bottom` is where the details above have to stop: the top of the
-    # queued-orders block when there is one, else the panel's own floor.
-    # Route mode suppresses them for a different reason than history: their × and
-    # row buttons would mutate `auto_forward` underneath the plan being previewed,
-    # and the panel's space is better spent on what confirming would do.
-    if ui.history or ui.mode == ROUTING:
-        ui.order_hitboxes = []
-        ui.forward_hitboxes = []
-        ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
-        content_bottom = py + ph - config.s(8)
-    else:
-        content_bottom = _draw_order_list(surface, state, ui)
+    # `content_bottom` is where the details have to stop: the panel's own floor.
+    content_bottom = py + ph - config.s(8)
 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
+    if ui.in_pbp:
+        y = _panel_you_are(surface, ui, x, y)
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
         ui.clear_dangerous_rect = (0, 0, 0, 0)
         _panel_route(surface, state, ui, x, y, content_bottom)
         return
-    # persistent "clear all forwarding" button, shown whenever any rule exists
-    if ui.auto_forward:
-        y = _draw_clear_forward_button(surface, ui, px, py + config.s(10))
+    # persistent "clear all forwarding" button, shown whenever any rule exists.
+    # Not while reviewing history: `input._handle_history_event` is modal and never
+    # hit-tests them, so drawing them there offers a destructive press that does
+    # nothing — the same reason route mode zeroes them just above, arrived at from
+    # the other side (there they must not fire, here they cannot).
+    if ui.auto_forward and not ui.history:
+        y = _draw_clear_forward_button(surface, ui, px, y)
     # below it, a narrower button for just the rules currently tinted dangerous
     # (pointed at a system we don't hold) — shown only while at least one exists
-    dangerous = [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
+    dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
     if dangerous:
         y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     # A highlighted rule wins the panel's focus over a plain hover; while the popup
@@ -1422,7 +1839,7 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
     if focus is None or focus not in state.systems:
-        _panel_legend(surface, x, y, content_bottom)
+        _panel_legend(surface, x, y, content_bottom, history=ui.history)
         return
 
     y = _panel_system(surface, state, ui, x, y, state.systems[focus])
@@ -1440,7 +1857,7 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     """A slim panel-top button that clears every standing forward rule; records
     its hit-rect on ``ui``. Returns the y below it for the details that follow."""
     font = _fonts()["small"]
-    label = f"Clear all forwarding ({len(ui.auto_forward)})"
+    label = f"Clear all forwarding ({ui.forward_lanes()})"
     h = font.get_height() + config.s(10)
     r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
     pygame.draw.rect(surface, (58, 38, 42), r, border_radius=config.s(5))
@@ -1465,143 +1882,11 @@ def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -
     return y + h + config.s(10)
 
 
-_ORDER_ROW_H = 22  # normal row pitch
-_ORDER_ROW_SEL_H = 36  # a selected row grows, so its × delete button is easy to hit
-
-
-def _draw_order_list(surface, state: GameState, ui: Ui) -> int:
-    """Bottom-of-panel list of queued orders, followed by standing auto-forward
-    rules. Records an (index, row, delete) hit-rect per order on
-    ``ui.order_hitboxes`` and a (source_id, row, delete) hit-rect per rule on
-    ``ui.forward_hitboxes``, both for input to test clicks against. The
-    currently-selected row is drawn taller with a bigger delete button, so it can
-    be removed by tap on touch (where the keyboard X shortcut isn't available).
-
-    The block is capped at part of the panel so the system details above it are
-    never pushed off the top, and scrolls (``ui.order_scroll``, driven by the ▲/▼
-    buttons or the wheel over the panel) when there is more than fits — every entry
-    stays reachable, which a bare "+N more" line could not promise.
-
-    Returns the y this block starts at — the floor for whatever the panel draws
-    above it, so the help text can't run down into the list."""
-    ui.order_hitboxes = []
-    ui.forward_hitboxes = []
-    ui.order_up_rect = ui.order_down_rect = (0, 0, 0, 0)
-    w, h = surface.get_size()
-    px = w - config.HUD_RIGHT_W
-    # the panel's footer is the big End Turn button, not the ordinary bottom bar
-    bottom = h - config.END_TURN_H
-    floor = bottom - config.s(8)
-    rules = sorted(ui.auto_forward.items())  # stable order across frames
-    if not ui.pending and not rules:
-        ui.order_scroll_max = 0
-        return floor
-
-    font = _fonts()["small"]
-    x = px + config.s(12)
-    row_w = config.HUD_RIGHT_W - config.s(24)
-    gap = config.s(2)
-    # a row is at least tall enough for its own text, whatever the scale does
-    rh = max(config.s(_ORDER_ROW_H), font.get_height() + config.ROW_GAP)
-    rh_sel = max(config.s(_ORDER_ROW_SEL_H), rh + config.s(10))
-    arrow = _tap_size(config.s(18))
-    title_h = max(_row_h(), arrow + config.s(4))
-
-    # orders first, then rules; each order carries its own index into `pending`, so
-    # a scrolled window still deletes and selects the right one.
-    entries = [("order", i) for i in range(len(ui.pending))] + [("rule", src) for src, _ in rules]
-    n = len(entries)
-
-    def selected_of(kind, key) -> bool:
-        return key == (ui.sel_order if kind == "order" else ui.sel_forward)
-
-    def row_h(kind, key) -> int:
-        return rh_sel if selected_of(kind, key) else rh
-
-    # Half the panel at most: the details above are about whatever you have
-    # selected right now, and used to get overrun by a long list.
-    panel_h = bottom - config.HUD_TOP_H
-    avail = max(rh, panel_h // 2 - title_h - config.s(8))
-
-    def page_from(start: int) -> list:
-        """The entries that fit when the window starts at ``start``."""
-        out, used = [], 0
-        for e in entries[start:]:
-            if used + row_h(*e) > avail:
-                break
-            out.append(e)
-            used += row_h(*e)
-        return out
-
-    # Furthest useful scroll: the first start whose page still reaches the last
-    # entry, so scrolling can't strand you on a part-empty window past the end.
-    max_scroll = max(0, n - 1)
-    for start in range(n):
-        if start + len(page_from(start)) >= n:
-            max_scroll = start
-            break
-    ui.order_scroll_max = max_scroll
-    first = max(0, min(ui.order_scroll, max_scroll))  # tolerate a stale offset
-    shown = page_from(first)
-
-    block_h = title_h + sum(row_h(*e) for e in shown)
-    top = bottom - config.s(8) - block_h
-    rule_y = top - config.s(6)
-    pygame.draw.line(surface, (40, 44, 60), (px + config.s(8), rule_y), (px + config.HUD_RIGHT_W - config.s(8), rule_y), config.s(1))
-    title = f"Queued ({n})" if max_scroll == 0 else f"Queued ({first + 1}-{first + len(shown)}/{n})"
-    _text(surface, font, title, config.COLOR_TEXT_DIM, midleft=(x, top + title_h // 2))
-    if max_scroll > 0:
-        down = pygame.Rect(x + row_w - arrow, top + (title_h - arrow) // 2, arrow, arrow)
-        up = pygame.Rect(down.x - arrow - config.s(4), down.y, arrow, arrow)
-        _draw_arrow_button(surface, up, up=True, enabled=first > 0)
-        _draw_arrow_button(surface, down, up=False, enabled=first < max_scroll)
-        ui.order_up_rect = (up.x, up.y, up.w, up.h)
-        ui.order_down_rect = (down.x, down.y, down.w, down.h)
-
-    y = top + title_h
-    hcolor = config.player_color(ui.human_id)
-    for kind, key in shown:
-        selected = selected_of(kind, key)
-        this_h = rh_sel if selected else rh
-        row = (x, y, row_w, this_h - gap)
-        if kind == "order":
-            o = ui.pending[key]
-            label = f"{o.source_id}->{o.dest_id}   {o.ships} sh"
-        else:
-            dest, keep = ui.auto_forward[key]
-            label = f"{key}->{dest}   keep {keep}"
-        if selected:
-            pygame.draw.rect(surface, (40, 46, 66), pygame.Rect(*row), border_radius=config.s(4))
-        dsz = config.s(26) if selected else config.s(16)
-        dr = (x + row_w - dsz - config.s(2), y + (this_h - gap - dsz) // 2, dsz, dsz)
-        _draw_x_button(surface, dr, boxed=selected)
-        _text(surface, font, label, config.COLOR_SELECT if selected else hcolor, midleft=(x + config.s(6), y + (this_h - gap) // 2))
-        if kind == "order":
-            ui.order_hitboxes.append((key, row, dr))
-        else:
-            ui.forward_hitboxes.append((key, row, dr))
-        y += this_h
-    return rule_y - config.s(6)
-
-
-def _draw_arrow_button(surface, rect: pygame.Rect, up: bool, enabled: bool) -> None:
-    """A ▲/▼ scroll button for the queued list — drawn rather than typed, since the
-    monospace font has no arrow glyph (same reason as ``_draw_return_glyph``). A
-    disabled one still draws, dimmed, so the pair doesn't jump about as you scroll.
-    """
-    color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
-    pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
-    pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
-    cx, cy = rect.center
-    r = max(2, rect.w // 5)
-    pts = [(cx - r, cy + r // 2), (cx + r, cy + r // 2), (cx, cy - r)] if up else [(cx - r, cy - r // 2), (cx + r, cy - r // 2), (cx, cy + r)]
-    pygame.draw.polygon(surface, color, pts)
-
-
 def _draw_h_arrow_button(surface, rect: pygame.Rect, left: bool, enabled: bool) -> None:
-    """A ◀/▶ step button for the history scrubber — the same drawn-triangle idiom
-    as ``_draw_arrow_button``, just turned sideways. A disabled one (at either end
-    of the history) still draws, dimmed, so the pair doesn't shift as you scrub."""
+    """A ◀/▶ step button for the history scrubber — drawn rather than typed, since
+    the monospace font has no arrow glyph (same reason as ``_draw_return_glyph``).
+    A disabled one (at either end of the history) still draws, dimmed, so the
+    pair doesn't shift as you scrub."""
     color = config.COLOR_TEXT_DIM if enabled else (58, 62, 78)
     pygame.draw.rect(surface, config.COLOR_BG, rect, border_radius=config.s(4))
     pygame.draw.rect(surface, color, rect, config.s(1), border_radius=config.s(4))
@@ -1610,21 +1895,6 @@ def _draw_h_arrow_button(surface, rect: pygame.Rect, left: bool, enabled: bool) 
     pts = ([(cx + r // 2, cy - r), (cx + r // 2, cy + r), (cx - r, cy)] if left
            else [(cx - r // 2, cy - r), (cx - r // 2, cy + r), (cx + r, cy)])
     pygame.draw.polygon(surface, color, pts)
-
-
-def _draw_x_button(surface, rect, boxed: bool = False) -> None:
-    """A × delete glyph inside ``rect`` (x, y, w, h). ``boxed`` draws a framed
-    background so an enlarged (selected-row) delete target reads as a button."""
-    rx, ry, rw, rh = rect
-    if boxed:
-        radius = config.s(4)
-        pygame.draw.rect(surface, (60, 40, 46), pygame.Rect(rx, ry, rw, rh), border_radius=radius)
-        pygame.draw.rect(surface, (150, 90, 96), pygame.Rect(rx, ry, rw, rh), config.s(1), border_radius=radius)
-    pad = max(3, rw // 4)
-    lw = max(2, rw // 8)
-    col = config.COLOR_TEXT if boxed else config.COLOR_TEXT_DIM
-    pygame.draw.line(surface, col, (rx + pad, ry + pad), (rx + rw - pad, ry + rh - pad), lw)
-    pygame.draw.line(surface, col, (rx + rw - pad, ry + pad), (rx + pad, ry + rh - pad), lw)
 
 
 def _row(surface, x, y, text, color) -> int:
@@ -1638,6 +1908,19 @@ def _head(surface, x, y, text, color) -> int:
     """A panel section heading, in the larger font; returns the y below it."""
     _text(surface, _fonts()["normal"], text, color, topleft=(x, y))
     return y + _row_h("normal")
+
+
+def _panel_you_are(surface, ui: Ui, x, y) -> int:
+    """'You are {seat}', in that seat's own colour — the one line that says
+    outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
+    shared match can seat a person at any colour, but a solo game has no such
+    ambiguity, since it is always the one seat you are looking at. Under it,
+    the match's title, or its pass-phrase name where it has none — whichever the
+    lobby headlines it by."""
+    y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+             config.player_color(ui.human_id))
+    label = ui.pbp_title or matchnames.phrase(ui.pbp_match)
+    return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
 
 def _panel_w() -> int:
@@ -1704,26 +1987,36 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     else:
         y = _row(surface, x, y, "Target: ? · ?sh", config.COLOR_TEXT_DIM)
     if ui.mode == CHOOSING and ui.forward_armed:
-        y = _row(surface, x, y, f"Forwarding · keep {ui.keep}", config.COLOR_SELECT)
+        go = ui.forward_this_turn(state, src).get(dest, 0)
+        y = _rows_named(surface, x, y, f"Forwarding {ui.edited_share()}% · {go} go", config.COLOR_SELECT)
     elif ui.mode == CHOOSING:
         y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
     return y
 
 
 def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
-    dest, keep = ui.auto_forward[src]
-    editing = src == ui.sel_forward
+    """The focused system's standing rule: its hold, then each lane with its share
+    and the ships that share sends this turn. The lane the popup is on is picked
+    out in the select colour."""
+    rule = ui.auto_forward[src]
+    editing = src == ui.sel_forward or (ui.mode == CHOOSING and ui.forward_armed and src == ui.selected)
     color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
     y = _head(surface, x, y, "Auto-forward", color)
-    # a rule can outlive its destination for a frame (the system was taken and the
-    # map rebuilt); name it when it is still there, fall back to the bare id when not
-    d = state.systems.get(dest)
-    y = _rows_named(surface, x, y, f"-> {d.label if d else f'System {dest}'}, keep {keep}", config.COLOR_SELECT if editing else config.COLOR_TEXT)
+    if rule.hold:
+        y = _row(surface, x, y, f"holds {rule.hold}", _forward_accent())
+    this_turn = ui.forward_this_turn(state, src)
+    for dest, pct in rule.shares.items():
+        # a rule can outlive its destination for a frame (the system was taken and
+        # the map rebuilt); name it when it is still there, fall back to the bare id
+        d = state.systems.get(dest)
+        line = f"-> {d.label if d else f'System {dest}'}  {pct}% · {this_turn.get(dest, 0)}"
+        lit = editing and (dest == ui.dest or ui.mode != CHOOSING)
+        y = _rows_named(surface, x, y, line, config.COLOR_SELECT if lit else config.COLOR_TEXT)
     if config.touch_ui:
-        hint = "−/+ sets keep  ·  × removes" if editing else "tap to edit"
+        hint = "−/+: share · Delete: remove" if editing else "tap a lane to edit"
     else:
-        hint = "wheel or −/+: keep  ·  X: remove" if editing else "click to edit  ·  X: clear"
-    y = _row(surface, x, y, hint, config.COLOR_TEXT_DIM)
+        hint = "wheel: share · X: remove" if editing else "click a lane · X: clear"
+    y = _rows_named(surface, x, y, hint, config.COLOR_TEXT_DIM)
     return y
 
 
@@ -1731,41 +2024,63 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
 # as prose that `_wrap` reflows to the panel's width. The touch build gets the same
 # rules in tap language and none of the keyboard shortcuts — there is no keyboard to
 # use them from, and every one of them has a button in the bottom bar.
+#
+# Kept short on purpose, and measured rather than guessed. `_panel_legend` cuts
+# this off at `content_bottom` rather than spilling, with no ellipsis and no
+# scroll, so every line past the panel's floor is prose nobody ever reads the end
+# of. An empty panel holds 23 rows on the touch build and 28-35 on a desktop or
+# browser one, and the touch text is the binding case, which is the wrong way
+# round — it is the build with no keyboard shortcuts to fall back on. So only what has to be taught lives here (the goal, the send, the
+# standing rule), ordered with the most droppable line last, and anything a
+# control already explains at the point of use stays there instead: route mode's
+# two sub-modes are described by `_panel_route` once it is open, and the actions
+# with a footer button (History, Autoplay, Fast forward, Menu, New map) name
+# their own key on the button itself via `_key_hint`.
+# `test_help_text_fits_the_empty_panel_whole` is what holds the length.
 _LEGEND_TOUCH = """Take every system to win.
 
-Tap a system to inspect it.
+Tap one of your systems, then a neighbour, to send its garrison down that lane
+— or drag between the two.
 
-Tap one of yours, then a neighbour, to send its garrison down that lane — or drag
-between the two.
+The popup retunes the count; its Forward tab turns the send into a standing
+rule instead.
 
-Then: the slider, −/+, Half or All retune the count. The Forward tab makes it a standing rule
-instead — everything past 'keep' flows on, every turn.
-
-Tap a queued arrow, or its row below, to change it.
-
-Route sets up many rules at once. Chain: pick a group of your systems (drag a
-box), choose a destination, and every system along the way forwards toward it.
-Rally: pick the systems to gather at, and everything else you hold forwards to
-the nearest one.
+Route plans a whole front's worth of rules at once.
 
 Drag to pan, −/+ to zoom."""
 
 _LEGEND_KEYS = """Take every system to win.
 
-Click a system to inspect it.
+Click one of your systems, then a neighbour, to send its garrison down that
+lane — or drag between the two.
 
-Click one of yours, then a neighbour, to send its garrison down that lane — or
-drag between the two.
+The popup retunes the count; its Forward tab turns the send into a standing
+rule instead, and Shift+click arms one without opening it.
 
-Then: the slider, −/+, Half or All. The Forward tab makes a standing rule
-instead — everything past 'keep' flows on, every turn. Shift+click arms one
-directly.
+Route (G) plans a whole front's worth of rules at once.
 
-Click a queued arrow, or its row below, to change it; X clears it.
+Drag to pan, wheel to zoom."""
 
-G opens Route mode, which sets up many rules at once
+# History review is a different scene with different controls, so it gets its own
+# pair rather than the live-play text above: none of the live legend's verbs work
+# while scrubbing (there is no turn to end and no order to give —
+# `input._handle_history_event` is modal and answers nothing else), and none of the controls that *do* work here are named there.
+_LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
-Drag to pan, wheel to zoom, R resets the view. Enter/space ends the turn, P plays on."""
+Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
+
+Rewind to here restarts play from the turn on screen. Exit returns to the live
+board."""
+
+_LEGEND_HISTORY_KEYS = """Reviewing turns already played — nothing here changes the game.
+
+Drag the scrubber or press ←/→ to step a turn; Home/End jump to either end. P
+plays it back.
+
+Point at a system to see it as it was then.
+
+Rewind to here restarts play from the turn on screen. Esc returns to the live
+board."""
 
 
 def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
@@ -1822,14 +2137,28 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     return y
 
 
-def _panel_legend(surface, x, y, bottom: int) -> int:
+def _legend_text(history: bool) -> str:
+    """The legend for the scene and the input modality — the one place the four
+    variants are chosen between, so the test that measures whether a legend fits
+    the panel measures the same string the panel draws."""
+    if history:
+        return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
+    return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
+
+
+def _panel_legend(surface, x, y, bottom: int, history: bool = False) -> int:
     """How to play, shown whenever no system is in focus. Reflowed to the panel's
     width and cut off at ``bottom`` rather than spilling under the End Turn button
-    — at a big UI scale the panel simply hasn't room for every line."""
-    y = _head(surface, x, y, "Star Conquest", config.COLOR_TEXT)
+    — at a big UI scale the panel simply hasn't room for every line.
+
+    ``history`` swaps in the review scene's own controls. It is a parameter rather
+    than a `Ui` read because this is the one panel drawer that needs nothing else
+    off the state, and the test that measures the reflow has no `Ui` to hand.
+    """
+    y = _head(surface, x, y, "History" if history else "Star Conquest", config.COLOR_TEXT)
     font = _fonts()["small"]
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-    for line in _wrap(font, _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS, width):
+    for line in _wrap(font, _legend_text(history), width):
         if y + _row_h() > bottom:  # a whole row, so the returned y clears it too
             break
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
@@ -1841,8 +2170,8 @@ def _panel_lane_target(state: GameState, ui: Ui, focus: int):
     — failing both — the destination of a standing rule on the focused system.
 
     That last case is why a rule shows its lane at all: on the map the rule's own
-    'keep' label sits on the lane it uses, so the panel is where you read that
-    lane's length and travel time. (A queued order reopened for editing takes the
+    label sits on the lane it uses, so the panel is where you read that lane's
+    length and travel time (a split shows its first lane). (A queued order reopened for editing takes the
     first case instead — the popup sets ``ui.dest`` to its destination.)
     """
     if ui.mode == CHOOSING and ui.dest is not None:
@@ -1850,8 +2179,9 @@ def _panel_lane_target(state: GameState, ui: Ui, focus: int):
     if ui.selected is not None and ui.hover is not None and ui.hover != ui.selected and state.are_adjacent(ui.selected, ui.hover):
         return ui.hover
     rule = ui.auto_forward.get(focus)
-    if rule is not None and rule[0] in state.systems:
-        return rule[0]
+    first = next(iter(rule.shares), None) if rule is not None else None
+    if first is not None and first in state.systems:
+        return first
     return None
 
 
@@ -1876,48 +2206,6 @@ def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
     return friendly, enemy
 
 
-def _modal_buttons(surface, labels: tuple[str, str]) -> tuple[pygame.Rect, pygame.Rect]:
-    """The (confirm, cancel) rects for a two-button modal, sized to fit the wider
-    of ``labels`` — shared by every modal's drawer and its hit-tester, so the two
-    can never disagree about where the buttons are."""
-    w, h = surface.get_size()
-    font = _fonts()["normal"]
-    bw = max(_btn_w(font, s, config.s(200)) for s in labels)
-    bh = max(config.s(42), font.get_height() + config.s(16))
-    gap = config.s(12)
-    y = h // 2 + config.s(24)
-    return (pygame.Rect(w // 2 - bw - gap, y, bw, bh), pygame.Rect(w // 2 + gap, y, bw, bh))
-
-
-def _draw_modal(surface, title: str, detail: str, buttons) -> None:
-    """A confirm modal: veil, title, an optional detail line, and two buttons.
-    ``buttons`` is ((label, fill, edge), (label, fill, edge)) — confirm then cancel.
-    """
-    w, h = surface.get_size()
-    big, normal = _fonts()["big"], _fonts()["normal"]
-    veil = pygame.Surface((w, h), pygame.SRCALPHA)
-    veil.fill((5, 6, 12, 200))
-    surface.blit(veil, (0, 0))
-    # Stacked upward from the button row so the title and detail always clear it.
-    detail_h = _row_h() if detail else 0
-    y = h // 2 - config.s(12) - detail_h - big.get_height()
-    _text(surface, big, title, config.COLOR_TEXT, center=(w // 2, y + big.get_height() // 2))
-    if detail:
-        y += _row_h("big")
-        _text(surface, _fonts()["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, y + _fonts()["small"].get_height() // 2))
-    for rect, (label, fill, edge) in zip(_modal_buttons(surface, (buttons[0][0], buttons[1][0])), buttons):
-        _btn(surface, rect, label, fill, edge, normal)
-
-
-def confirm_labels(confirm: str) -> tuple[str, str]:
-    """(confirm, cancel) labels for a two-button modal, with the Y/N key hints
-    dropped on a touch build. Shared with ``menu``'s resume prompt so every modal
-    in the game words its answers the same way."""
-    if config.touch_ui:
-        return (confirm, "Cancel")
-    return (f"{confirm} (Y/Enter)", "Cancel (N/Esc)")
-
-
 def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
     """(quit, cancel) button rects — shared by the drawer and the hit-tester."""
     return _modal_buttons(surface, confirm_labels("Quit"))
@@ -1937,6 +2225,168 @@ def draw_confirm_quit(surface) -> None:
     )
 
 
+def _draw_invite_overlay(surface, ui: Ui) -> None:
+    """Play-by-post: the match we just created, one row per seat — including our
+    own — and its own Copy button: 'a modal listing the seats with a Copy button
+    each', replacing a status line over a clipboard blob nobody thought to check.
+
+    Our own row is in it too, not just remembered in this browser's local
+    storage: a reload, a cleared profile or opening on another device has
+    nothing else to recover the seat from, so it needs to be copyable exactly
+    like everyone else's.
+
+    Shown exactly once (`ui.pbp_invite`, set only by the creation path); the
+    clipboard write itself is main's job (`ui.pbp_copy_seat` names the row,
+    `input` sets it and this only reads `pbp_invite_copied` back for the
+    row's own feedback). Continue is the only way to dismiss it, and it never
+    reappears once dismissed.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 190))
+    surface.blit(veil, (0, 0))
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    title = "Match created — copy each seat's link"
+    # The one and only time these links are ever shown: `main.pbp_open` mints
+    # the tokens and hands them over right here, and nothing stores them again
+    # (`pbp.create`'s own docstring — "the reply is the one and only time the
+    # seat tokens exist in the clear"). A missed one has no second chance.
+    subtitle = "Save these somewhere — they won't be shown again"
+    copy_w = _btn_w(small, "Copy", config.s(64))
+    copy_h = max(config.s(28), small.get_height() + config.s(10))
+    sw = config.s(14)   # colour swatch side
+    row_gap = config.s(8)
+    row_h = max(normal.get_height(), copy_h) + config.s(4)
+
+    def seat_label(seat: int) -> str:
+        return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+
+    name_w = max((normal.size(seat_label(seat))[0] for seat, _ in ui.pbp_invite), default=0)
+
+    pad = config.s(24)
+    inner_w = sw + config.s(10) + name_w + config.s(28) + copy_w
+    # The title can run longer than any row — measured and wrapped in the same
+    # font it is drawn in (a mismatch here is exactly what let it overflow the
+    # panel before), and capped so the panel never claims more width than the
+    # window actually has to give it.
+    cap = min(max(inner_w, config.s(280)), w - 2 * pad - config.s(48))
+    title_lines = _wrap(big, title, cap)
+    subtitle_lines = _wrap(small, subtitle, cap)
+    title_w = max((big.size(line)[0] for line in title_lines), default=0)
+    subtitle_w = max((small.size(line)[0] for line in subtitle_lines), default=0)
+    pw = max(inner_w, title_w, subtitle_w) + 2 * pad
+    done_w = _btn_w(normal, "Continue", config.s(140))
+    done_h = copy_h + config.s(6)
+    title_h = len(title_lines) * _row_h("big")
+    subtitle_h = len(subtitle_lines) * _row_h("small")
+    ph = (pad + title_h + config.s(6) + subtitle_h + config.s(18)
+          + len(ui.pbp_invite) * (row_h + row_gap)
+          + config.s(10) + done_h + pad)
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+    pygame.draw.rect(surface, (18, 20, 30), panel, border_radius=config.s(10))
+    pygame.draw.rect(surface, (60, 66, 90), panel, config.s(2), border_radius=config.s(10))
+
+    y = panel.y + pad
+    for line in title_lines:
+        _text(surface, big, line, config.COLOR_TEXT, center=(panel.centerx, y + big.get_height() // 2))
+        y += _row_h("big")
+    y += config.s(6)
+    for line in subtitle_lines:
+        _text(surface, small, line, _VERDICT_MISS, center=(panel.centerx, y + small.get_height() // 2))
+        y += _row_h("small")
+    y += config.s(18)
+
+    ui.pbp_invite_rects = {}
+    for seat, link in ui.pbp_invite:
+        color = config.player_color(seat)
+        swatch = pygame.Rect(panel.x + pad, y + (row_h - sw) // 2, sw, sw)
+        pygame.draw.rect(surface, color, swatch, border_radius=config.s(3))
+        _text(surface, normal, seat_label(seat), color,
+              midleft=(swatch.right + config.s(10), y + row_h // 2))
+        r = pygame.Rect(panel.right - pad - copy_w, y + (row_h - copy_h) // 2, copy_w, copy_h)
+        copied = ui.pbp_invite_copied == seat
+        fill, edge = _BTN_ACTIVE if copied else _BTN_BLUE
+        ui.pbp_invite_rects[seat] = _btn(surface, r, "Copied" if copied else "Copy",
+                                         fill, edge, small)
+        y += row_h + row_gap
+
+    y += config.s(10)
+    done = pygame.Rect(panel.centerx - done_w // 2, y, done_w, done_h)
+    ui.pbp_invite_close_rect = _btn(surface, done, "Continue", *_BTN_GREEN, normal)
+
+
+def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
+    """Play-by-post: our orders are in, and the turn is waiting on somebody else.
+
+    A veil rather than a modal — the board stays readable underneath, because the
+    position is exactly what you want to look at while you wait, and there is
+    nothing here to answer. The whole stack is measured and then centred, in the
+    same shape ``_draw_win_overlay`` uses, so a line that is not drawn tightens it
+    up rather than leaving a hole.
+    """
+    w, h = surface.get_size()
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    # Lighter than the win overlay's: that one ends a game, this one is a pause in
+    # the middle of it and the board underneath still has to be legible.
+    veil.fill((5, 6, 12, 140))
+    surface.blit(veil, (0, 0))
+
+    # Centred on the *map*, not the window, and wrapped to it. The side panel is
+    # still being drawn and still has to be readable, and at a large UI scale a
+    # centred line long enough to say two players' names runs straight across it.
+    px, py, pw, ph = config.play_rect()
+    cx = px + pw // 2
+    width = pw - config.s(48)
+
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
+    if not names:
+        headline, detail = "Resolving the turn...", ""
+    elif len(names) == 1:
+        headline, detail = "Waiting for " + names[0], "Your orders are in."
+    else:
+        headline = f"Waiting for {len(names)} players"
+        detail = ", ".join(names)
+
+    # Measured, then centred — a line that is not drawn tightens the stack up
+    # rather than leaving a hole, and one too long for the map wraps rather than
+    # spilling out of it.
+    stack: list[tuple[pygame.font.Font, str, tuple[int, int, int]]] = []
+    for font, line, color in ((big, headline, config.COLOR_TEXT),
+                              (normal, detail, config.COLOR_TEXT_DIM),
+                              (small, ui.pbp_msg, config.COLOR_TEXT_DIM)):
+        if not line:
+            continue
+        stack.extend((font, part, color) for part in _wrap(font, line, width))
+
+    total = sum(font.get_height() + config.s(6) for font, _, _ in stack)
+    y = py + ph // 2 - total // 2
+    for font, line, color in stack:
+        _text(surface, font, line, color, center=(cx, y + font.get_height() // 2))
+        y += font.get_height() + config.s(6)
+
+
+def _draw_pbp_notice(surface, ui: Ui) -> None:
+    """What the last call to a shared match said, once there is no veil to say it.
+
+    A refused submission hands the board back, which drops the waiting overlay
+    in the same frame — so the reason it was refused needs somewhere of its own,
+    or the press reads as having done nothing at all. Top of the map, clear of
+    the film caption at the bottom.
+    """
+    x, y, w, _ = config.play_rect()
+    _label_pill(surface, _fonts()["small"], ui.pbp_msg, config.COLOR_TEXT,
+                (x + w // 2, y + config.FILM_CAPTION_GAP))
+
+
+def _seat_name(state: GameState, seat: int) -> str:
+    """What to call a seat we are waiting on. Its player name, which is already
+    how every other readout names a side."""
+    player = state.players.get(seat)
+    return player.name if player is not None else f"Seat {seat}"
+
+
 def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     """The game-over veil: who won, the score, and the four (or five) things you
     can do next. The whole stack is measured and then centred, so a hidden hint or
@@ -1951,7 +2401,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     if state.winner == 0:
         msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
     else:
-        msg = f"{config.player_name(state.winner)} wins!"
+        msg = f"{_winner_label(state)} wins!"
         color = config.player_color(state.winner)
 
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
@@ -2028,6 +2478,36 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
+def _winner_label(state: GameState) -> str:
+    """"Verdant (Knower)" — the winning seat, and the bot that was driving it.
+
+    Named only for a seat no person was playing: a human seat says who won and
+    stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
+    human seat by then, so a game somebody took over is credited to them rather
+    than to the strategy it opened under. The whole board is a bot's under
+    autoplay, which is exactly when this is worth reading.
+
+    Neutral is excluded explicitly. It is a real player (``id == 0``) carrying the
+    default ``ai_strategy`` like any other, but nothing ever asks it to decide —
+    and it reaches here on the one path that can name it, a mutual annihilation,
+    where "Neutral (Heuristic)" would credit a bot that never played.
+
+    Read straight off ``Player.ai_strategy``; ``render`` imports no ``ai`` and
+    needs none here. That field holds the *resolved* strategy, so a seat set to
+    ``settings.RANDOM_STRATEGY`` is revealed here — which is the point, and costs
+    nothing, since there is no turn left to play with the knowledge.
+
+    Capitalised rather than title-cased, so a drop-in keeps whatever shape its
+    author gave its filename (``claudeBot`` stays ``ClaudeBot``, not ``Claudebot``).
+    """
+    name = config.player_name(state.winner)
+    player = state.players.get(state.winner)
+    if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
+        return name
+    bot = player.ai_strategy
+    return f"{name} ({bot[:1].upper()}{bot[1:]})"
+
+
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:
     """(font kind, text, colour) for the score under the win message: turns first,
     ships lost as the tiebreak, then the verdict against any challenge.
@@ -2074,7 +2554,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     return note + lines
 
 
-# Scrubber fill — a bright blue on the shared _SLIDER_TROUGH, echoing the play button.
+# Scrubber fill — a bright blue on the shared slider trough, echoing the play button.
 _SCRUB_FILL = (110, 140, 200)
 
 
@@ -2112,7 +2592,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     rww = _btn_w(font, rewind_label)
     rw = pygame.Rect(w - rww - config.HUD_PAD, y, rww, bh)
     right_limit = rw.x - config.HUD_PAD
-    if ui.history_turn >= ui.history_max:
+    # Never offered in a shared match: rewinding rebuilds a fresh, un-networked
+    # `Ui` (`resume_game`), which would quietly fork the local view away from a
+    # match the server and every other seat still think is at a later turn.
+    if ui.history_turn >= ui.history_max or ui.in_pbp:
         ui.rewind_button_rect = (0, 0, 0, 0)
     else:
         ui.rewind_button_rect = _btn(surface, rw, rewind_label, *_BTN_AMBER, font)

@@ -68,11 +68,14 @@ from __future__ import annotations
 import json
 import threading
 
-from typing import Optional
-
 from . import webstore
-from .paths import (LEADERBOARD_LOG_PATH, LEADERBOARD_REPLAY_PATH,
-                    WEB_REPLAY_BODY_KEY, WEB_REPLAY_STATE_KEY, is_web)
+from .paths import (
+    LEADERBOARD_LOG_PATH,
+    LEADERBOARD_REPLAY_PATH,
+    WEB_REPLAY_BODY_KEY,
+    WEB_REPLAY_STATE_KEY,
+    is_web,
+)
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
@@ -89,6 +92,11 @@ CHECKPOINT_TURNS = 25
 # The seat the player holds. `mapgen._make_players` stamps `is_human` on pid 1, so
 # a log's `winner` names a human win by being this — reconstructing the whole
 # match just to ask `state.human()` would be an absurd price for one boolean.
+#
+# Scoped to the leaderboard, which is the only thing that reads it: a posted
+# score is a single-player result on a fixed setup, and a match seating several
+# people is never posted at all. So this stays "did the player win" for the one
+# kind of match that can carry a score, rather than becoming a per-seat question.
 _HUMAN_SEAT = 1
 
 # Long enough for a slow phone on a bad connection, short enough that the daemon
@@ -100,7 +108,7 @@ def log_url() -> str:
     """The upload endpoint, resolved now rather than at import.
 
     Resolved per call because on the web it depends on where the page is being
-    served from — a deploy preview posts to the matching preview of the board
+    served from — a deploy preview posts to its own functions
     (``webstore.leaderboard_origin``).
     """
     return webstore.leaderboard_url(LEADERBOARD_LOG_PATH)
@@ -151,7 +159,10 @@ def row_for(log: GameLog, game_key: str) -> dict:
     so a replay can be found by the map it was played on without decoding every
     blob to ask. ``finished``/``won``/``hand`` are the same kind of index — a
     caller can pick out completed games, or wins, or games actually played by
-    hand, without opening them. They are claims by the client and the schema says
+    hand, without opening them. ``rules_version`` is one more: the board can
+    decide whether a replay is still watchable exactly (``GameLog.is_current``,
+    same rule the game itself uses to gate ``Watch``/resume) without decoding the
+    blob to find out. All of them are claims by the client and the schema says
     so; the verifier trusts none of them, it replays the log.
     """
     return {
@@ -161,6 +172,7 @@ def row_for(log: GameLog, game_key: str) -> dict:
         "finished": bool(log.finished),
         "won": bool(log.finished and log.winner == _HUMAN_SEAT),
         "hand": log.hand_turns,
+        "rules_version": log.rules_version,
         "log": log.encoded(),
     }
 
@@ -201,16 +213,16 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     Two things this leans on, both worth knowing before changing them. ``eval`` is
     available because pygbag's own bridge needs it — a Content-Security-Policy
     strict enough to block it would stop the game booting long before this line,
-    and neither ``netlify.toml`` sets one. And the request is cross-origin (the
-    game's site to the leaderboard's), which is why the function answers the
-    preflight and names the game's origin in its CORS headers.
+    and ``netlify.toml`` sets none. And on a deployed page the request is
+    same-origin (the functions are the game site's own), but from a local server
+    it goes to production cross-origin, which is why the function still answers
+    the preflight and names an allowed origin in its CORS headers.
     """
     import platform as _platform
 
     try:
         _platform.window.eval(
-            "fetch(%s,{method:'POST',headers:%s,body:%s}).catch(function(){})"
-            % (json.dumps(log_url()), json.dumps(headers), json.dumps(body))
+            f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
         )
         return True
     except Exception:  # noqa: BLE001 — a bridge that isn't there is not an error
@@ -268,6 +280,13 @@ class Download:
         self._web = web
         self._result: list[tuple[str, str]] = []   # a one-slot mailbox for the thread
 
+    @classmethod
+    def ready(cls, body: str) -> Download:
+        """A download that has already arrived: a replay read off disk."""
+        download = cls(web=False)
+        download._result.append((OK, body))
+        return download
+
     def poll(self) -> tuple[str, str]:
         if self._web:
             return self._poll_web()
@@ -304,7 +323,7 @@ def _clear_web_slot() -> None:
     webstore.set(WEB_REPLAY_BODY_KEY, "")
 
 
-def fetch_log(match_id: str) -> Optional[Download]:
+def fetch_log(match_id: str) -> Download | None:
     """Start fetching the replay named ``match_id``. None if it cannot be tried.
 
     The id is checked here rather than trusted: it arrives from a URL fragment, so
@@ -323,7 +342,7 @@ def fetch_log(match_id: str) -> Optional[Download]:
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 
-def _fetch_web(url: str) -> Optional[Download]:
+def _fetch_web(url: str) -> Download | None:
     """Kick off a ``fetch`` that parks its own result on ``window``.
 
     The handlers are written to leave the slot in exactly one of the three states
@@ -347,7 +366,7 @@ def _fetch_web(url: str) -> Optional[Download]:
         return None
 
 
-def _fetch_desktop(url: str) -> Optional[Download]:
+def _fetch_desktop(url: str) -> Download | None:
     """The same download on a daemon thread, posting into the mailbox when done."""
     import urllib.error
     import urllib.request

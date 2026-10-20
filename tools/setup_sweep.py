@@ -46,11 +46,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tests import sim  # noqa: E402 — the shared headless harness
-from tools import config_census  # noqa: E402
+import itertools
+
+from starconquest import ai
+from starconquest import settings as settings_mod
+from starconquest.settings import Settings
+from tests import sim
+from tools import config_census
 
 # Lifted the same 100x and for the same reason as tools/bot_replay.py: a bot's
 # wall-clock guard is sized for the browser, and tripping one is the only thing
@@ -183,7 +185,7 @@ def report(rows: list[dict], setups: dict[str, Settings], bots: list[str]) -> No
             print(f"  {rank}. {bot:<12} win {rate * 100:5.1f}% ({wins}/{total})  turns {pace}")
 
     names = list(setups)
-    pairs = [(names[0], names[-1]), *zip(names, names[1:])]
+    pairs = [(names[0], names[-1]), *itertools.pairwise(names)]
     starred = 0
     for before, after in pairs:
         print(f"\n=== {before} -> {after}: change in win rate ===")
@@ -239,6 +241,17 @@ def main(argv: list[str] | None = None) -> int:
     chosen = entry["row"]
     played = chosen["config"]
     opponents = args.opponents if args.opponents is not None else list(chosen["bots"])
+    if played.custom_map is not None:
+        # The whole method here is reseeding — does the ranking hold across
+        # boards? A hand-authored map is one board: every value in it is
+        # concrete, so the seed drives combat dice and star names only and every
+        # "seed" would replay the same layout. Worse, `arms` builds a fresh
+        # Settings with no recipe, so the map/played arms would silently measure
+        # a generated board nobody played.
+        print(f"Setup {chosen['game_key']} carries a hand-authored map, which no "
+              "seed re-rolls — there is nothing for this sweep to vary.",
+              file=sys.stderr)
+        return 1
 
     bots = args.bots or ai.available_strategies()
     seeds = list(range(args.start, args.start + args.seeds))

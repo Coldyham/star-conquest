@@ -31,11 +31,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen                       # noqa: E402
-from starconquest.model import GameState, Order                    # noqa: E402
-from tests import sim                                              # noqa: E402
+from starconquest import ai, engine, mapgen
+from starconquest.model import GameState, Order
+from tests import sim
 
-BOARD = dict(mode="random", nodes=18, players=3)
+BOARD = {"mode": "random", "nodes": 18, "players": 3}
 SEAT = 1
 
 
@@ -137,7 +137,7 @@ def _resolve(name: str) -> bool:
     ai.load_models()
     if name in ai.STRATEGIES:
         return True
-    from tests import botproc          # imported late: it owns the subprocesses
+    from tests import botproc  # imported late: it owns the subprocesses
     if name in [m.name for m in botproc.load_manifests()]:
         botproc.register_external([name])
     return name in ai.STRATEGIES
@@ -148,7 +148,7 @@ def check(name: str, games: int, opponent: str) -> int:
     print(f"Checking `{name}`\n")
 
     if not _resolve(name):
-        print(f"  FAIL  loads")
+        print("  FAIL  loads")
         print(f"\nNothing named `{name}` is registered. A Python bot is "
               f"`models/{name}.py` defining `decide(state, pid)`; an external "
               f"bot is `bots/{name}.bot.json`. A Python file that fails to "

@@ -18,7 +18,7 @@ import json
 import pytest
 
 from starconquest import ai, config, engine, replay
-from starconquest.model import Order
+from starconquest.model import ForwardRule, Order
 from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state
 
 
@@ -55,11 +55,11 @@ def _manual_order(state, hid):
     if not owned:
         return []
     s = owned[0]
-    return [Order(hid, s.id, sorted(s.neighbors)[0], s.ships // 2)]
+    return [Order(hid, s.id, min(s.neighbors), s.ships // 2)]
 
 
 def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
-          policy="pass", strategies=None):
+          policy="pass", strategies=None, opens_in_autoplay=None):
     """Play a full game while recording, returning (final_state, log).
 
     ``policy`` chooses how the human seat acts each turn:
@@ -67,14 +67,20 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
       "manual"  – issues one hand order every other turn (draws no rng)
       "autoplay"– AI-driven every turn (draws rng, flagged human_ai=True)
       "mixed"   – flips autoplay on/off every few turns
+
+    ``opens_in_autoplay`` overrides ``Settings.autoplay``, which is what decides
+    whether the match *starts* with a human seat at all (`settings.build_state`).
+    A "mixed" game opened that way is a demo somebody then takes over — the case
+    where the seat is claimed partway through.
     """
+    opens = (policy == "autoplay") if opens_in_autoplay is None else opens_in_autoplay
     settings = Settings(mode=mode, players=players, nodes=nodes, seed=seed,
-                        autoplay=(policy == "autoplay"))
+                        autoplay=opens)
     if strategies is not None:
         settings.ai_strategy[:len(strategies)] = strategies
     state = build_state(settings, seed)
-    log = replay.new_log(settings, seed)
-    hid = state.human().id
+    log = replay.new_log(settings, seed, state)
+    hid = replay.HUMAN_SEAT
     turns = 0
     while state.winner is None and turns < max_turns:
         if policy == "autoplay":
@@ -86,7 +92,15 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
             autoplay, orders = False, (_manual_order(state, hid) if turns % 2 == 0 else [])
         else:  # pass
             autoplay, orders = False, []
-        record = engine.end_turn(state, human_orders=orders, decide=ai.decide)
+        # Mirrors `main.resolve_turn`: a match begun in autoplay has no human seat
+        # until somebody plays a turn by hand, and that turn is what claims it. The
+        # seat then decides for itself, so its orders must not also be passed in —
+        # that would run its strategy twice. See `engine._claim_seat`.
+        claim = hid if not autoplay and state.human() is None else None
+        if state.human() is None and claim is None:
+            orders = None
+        record = engine.end_turn(state, human_orders=orders, decide=ai.decide,
+                                 claim_seat=claim)
         log.record_turn(record, human_ai=autoplay)
         turns += 1
     log.mark_finished(state.winner)
@@ -130,20 +144,35 @@ def test_record_turn_stores_every_seat_not_just_the_human():
 
 
 def test_record_turn_stores_standing_rules():
+    rules = {3: ForwardRule({7: 100}, 2), 4: ForwardRule({9: 34, 1: 33, 5: 33}, 0)}
     log = replay.new_log(Settings(seed=1), 1)
-    log.record_turn(_record([]), rules={3: (7, 2), 4: (1, 0)})
-    assert log.rules_for(0) == {3: (7, 2), 4: (1, 0)}
-    # ...and survives the JSON round trip, where the keys become strings
+    log.record_turn(_record([]), rules=rules)
+    assert log.rules_for(0) == rules
+    # ...and survives the JSON round trip, where the keys become strings, with a
+    # split's lanes still in the order they were added (ties are broken by it)
     clone = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
-    assert clone.rules_for(0) == {3: (7, 2), 4: (1, 0)}
+    assert clone.rules_for(0) == rules
+    assert list(clone.rules_for(0)[4].shares) == [9, 1, 5]
+
+
+def test_rules_for_reads_the_old_keep_form():
+    """Logs from before shares stored ``[dest, keep]``: hold ``keep``, send all."""
+    log = replay.GameLog.from_dict(
+        {"seed": 0, "settings": {}, "version": 2,
+         "turns": [{"orders": [], "rules": {"3": [7, 2]}}]}
+    )
+    assert log.rules_for(0) == {3: ForwardRule({7: 100}, 2)}
 
 
 def test_rules_for_drops_malformed_entries():
     log = replay.GameLog.from_dict(
         {"seed": 0, "settings": {}, "version": 2,
-         "turns": [{"orders": [], "rules": {"3": [7, 2], "4": "nonsense", "x": [1, 1]}}]}
+         "turns": [{"orders": [], "rules": {
+             "3": {"hold": 2, "to": {"7": 60}}, "4": "nonsense", "x": [1, 1],
+             "5": {"hold": 0, "to": {}}, "6": {"hold": 0, "to": {"1": 70, "2": 70}},
+             "8": {"to": {"1": "lots"}}}}]}
     )
-    assert log.rules_for(0) == {3: (7, 2)}
+    assert log.rules_for(0) == {3: ForwardRule({7: 60}, 2)}
 
 
 def test_to_from_dict_round_trip():
@@ -192,6 +221,29 @@ def test_reconstruct_matches_original(policy, seed):
     assert _snapshot(rebuilt) == before
 
 
+def test_a_turn_records_whether_its_dice_were_keyed():
+    with _preserve_config():
+        _, log = _play(777, policy="pass", max_turns=30)
+        again = replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict())))
+    assert log.turn_count and all(again.keyed_for(i) for i in range(again.turn_count))
+    assert again.script_for(0).keyed
+
+
+def test_a_log_from_before_keyed_dice_still_rebuilds():
+    """An older turn carries no ``keyed``, and its dice were drawn in walk order
+    off `state.rng`. Recorded dice are dealt back in that same walk order
+    whichever fight asks, so the board it rebuilds is the one that was played."""
+    with _preserve_config():
+        original, log = _play(54321, policy="mixed")
+        data = log.to_dict()
+        for entry in data["turns"]:
+            entry.pop("keyed")
+        older = replay.GameLog.from_dict(data)
+        rebuilt, _ = replay.reconstruct(older)
+    assert not any(older.keyed_for(i) for i in range(older.turn_count))
+    assert _snapshot(rebuilt) == _snapshot(original)
+
+
 @pytest.fixture
 def unreproducible_bot():
     """A registered strategy that decides differently every time it is asked the
@@ -210,7 +262,7 @@ def unreproducible_bot():
         if not owned:
             return []
         s = owned[calls[0] % len(owned)]      # the drift: same board, different move
-        return [Order(pid, s.id, sorted(s.neighbors)[0], s.ships // 2)]
+        return [Order(pid, s.id, min(s.neighbors), s.ships // 2)]
 
     ai.register("wobbly", wobbly)
     try:
@@ -237,7 +289,7 @@ def test_reconstruct_survives_an_unreproducible_bot(unreproducible_bot):
 def test_reconstruct_unfinished_stops_at_recorded_turn():
     """A partial (unfinished) log rebuilds to exactly where recording stopped."""
     with _preserve_config():
-        state, log = _play(999, policy="autoplay", max_turns=20)
+        _state, log = _play(999, policy="autoplay", max_turns=20)
         # cut the log short to simulate a game abandoned mid-match
         log.turns = log.turns[:12]
         log.finished = False
@@ -283,7 +335,7 @@ def test_truncate_drops_later_turns_and_reopens():
     """Mid-game rewind: keep turns[:n] and clear the finished/winner outcome so
     the reconstructed board is exactly the one after n turns."""
     with _preserve_config():
-        original, log = _play(1234, policy="autoplay", max_turns=30)
+        _original, log = _play(1234, policy="autoplay", max_turns=30)
         assert log.finished
         full = log.turn_count
         log.truncate(5)
@@ -343,7 +395,8 @@ def test_list_and_latest_log_newest_first(games_dir):
     old = replay.new_log(Settings(seed=1), 1); old.record_turn(_record([])); old.save()
     new = replay.new_log(Settings(seed=2), 2); new.record_turn(_record([])); new.save()
     # make ``new`` unambiguously the more recently modified file
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(old.path, (t - 100, t - 100))
     os.utime(new.path, (t, t))
@@ -358,11 +411,37 @@ def test_latest_log_skips_older_format(games_dir):
     current.record_turn(_record([])); current.save()
     stale = replay.new_log(Settings(seed=9), 9)
     stale.record_turn(_record([])); stale.version = 1; stale.save()
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(current.path, (t - 100, t - 100))
     os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
     assert replay.latest_log().seed == 8
+
+
+def test_latest_log_skips_outdated_rules(games_dir):
+    """A log stamped under rules the engine has since moved past can no longer be
+    reconstructed exactly (`GameLog.is_current`), so it is not offered — same
+    silent skip as an older format, and for the same reason."""
+    current = replay.new_log(Settings(seed=8), 8)
+    current.record_turn(_record([])); current.save()
+    stale = replay.new_log(Settings(seed=9), 9)
+    stale.record_turn(_record([]))
+    stale.rules_version = engine.RULES_VERSION - 1
+    stale.save()
+    import os
+    import time
+    t = time.time()
+    os.utime(current.path, (t - 100, t - 100))
+    os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
+    assert replay.latest_log().seed == 8
+
+
+def test_is_current_tracks_the_running_engines_rules_version():
+    log = replay.new_log(Settings(seed=1), 1)
+    assert log.is_current is True
+    log.rules_version = engine.RULES_VERSION + 1
+    assert log.is_current is False
 
 
 def test_latest_log_none_when_empty(games_dir):
@@ -373,7 +452,8 @@ def test_latest_log_skips_corrupt_file(games_dir):
     good = replay.new_log(Settings(seed=8), 8); good.record_turn(_record([])); good.save()
     bad = games_dir / "game_99999999_999999_0.json"
     bad.write_text("{ this is not valid json ")
-    import os, time
+    import os
+    import time
     t = time.time()
     os.utime(good.path, (t - 100, t - 100))
     os.utime(bad, (t, t))          # corrupt file is "newest" but must be skipped
@@ -535,3 +615,185 @@ def test_hand_turns_counts_the_turns_the_human_drove():
     for autoplayed in (False, False, True, False, True):
         log.record_turn(_record([]), human_ai=autoplayed)
     assert log.hand_turns == 3 and log.turn_count == 5
+
+
+# --------------------------------------------------------------------------- #
+# The seat claim: an all-bot game has no human seat until somebody plays a turn
+# --------------------------------------------------------------------------- #
+def test_a_match_begun_in_autoplay_has_no_human_seat():
+    """An all-bot game must have no preferred seat.
+
+    Left flagged, seat 1 is the one seat every oracle opponent has to guess blind
+    at (`models/knower.py`'s `_model_for`) while simulating all the others exactly
+    — a handicap no other bot on the board carries, and the reason the in-app
+    autoplay demo and the offline bot column used to play the same setup
+    differently."""
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=True), 5)
+    assert state.human() is None
+    assert not any(p.is_human for p in state.players.values())
+
+
+def test_a_match_begun_by_hand_still_has_one():
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=False), 5)
+    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+
+
+def test_the_first_hand_played_turn_claims_the_seat():
+    """Take control alone does not claim it — ending a turn under manual control
+    does. That is what lets Take control double as a pause on a demo nobody means
+    to play: pausing, looking, and resuming autoplay leaves the seat as it was."""
+    settings = Settings(players=3, nodes=14, seed=5, autoplay=True)
+    state = build_state(settings, 5)
+    engine.end_turn(state, decide=ai.decide)               # still autoplayed
+    assert state.human() is None
+    engine.end_turn(state, human_orders=[], decide=ai.decide,
+                    claim_seat=replay.HUMAN_SEAT)          # ...ended by hand
+    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+
+
+def test_claiming_a_seat_is_idempotent_and_skips_neutral():
+    state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=True), 5)
+    engine._claim_seat(state, replay.HUMAN_SEAT)
+    engine._claim_seat(state, replay.HUMAN_SEAT)
+    assert state.human().id == replay.HUMAN_SEAT
+    engine._claim_seat(state, 0)                # neutral is a real player (id 0)
+    assert not state.players[0].is_human
+
+
+def test_reconstruct_reclaims_the_seat_at_the_turn_it_was_claimed():
+    """The claim has to be replayable. A scripted turn asks no seat to decide, so
+    nothing in a reconstruction would otherwise flip the flag back — and a match
+    somebody demonstrably took over would come back exposed to prediction on every
+    turn after the resume point."""
+    state, log = _play(4242, policy="mixed", max_turns=24, opens_in_autoplay=True)
+    assert log.turn_is_ai(0)                                           # opened as a demo
+    assert any(not log.turn_is_ai(i) for i in range(log.turn_count))   # ...then taken over
+    rebuilt, _ = replay.reconstruct(log)
+    assert rebuilt.human() is not None and rebuilt.human().id == replay.HUMAN_SEAT
+    # ...and on the very board the live run reached, claim included.
+    assert rebuilt.turn == state.turn and rebuilt.winner == state.winner
+    assert all(rebuilt.systems[i].owner_id == state.systems[i].owner_id
+               and rebuilt.systems[i].ships == state.systems[i].ships
+               for i in state.systems)
+
+
+def test_rewinding_past_every_hand_played_turn_un_claims_the_seat():
+    """Derived from the per-turn "ai" flag rather than stored as a flag of its
+    own, so `truncate` drops the claim along with the turns that made it — rewind
+    to before anybody took over and the match is an all-bot game again, exactly as
+    it was the first time through."""
+    _, log = _play(4242, policy="mixed", max_turns=24, opens_in_autoplay=True)
+    first_hand = next(i for i in range(log.turn_count) if not log.turn_is_ai(i))
+
+    kept = replay.GameLog.from_dict(log.to_dict())
+    kept.truncate(first_hand + 1)              # one hand-played turn survives
+    assert replay.reconstruct(kept)[0].human() is not None
+
+    dropped = replay.GameLog.from_dict(log.to_dict())
+    dropped.truncate(first_hand)               # ...and now none do
+    assert replay.reconstruct(dropped)[0].human() is None
+
+
+# --------------------------------------------------------------------------- #
+# Seat strategies: a random seat keeps the bot it was dealt
+# --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def _pool(*names):
+    """Deal random seats from ``names``, each registered as a strategy that
+    issues no orders."""
+    from starconquest import settings as settings_module
+    saved_pool, saved = settings_module.RANDOM_POOLS, dict(ai.STRATEGIES)
+    try:
+        settings_module.RANDOM_POOLS = (tuple(names),)
+        for name in names:
+            ai.register(name, lambda state, pid: [])
+        yield
+    finally:
+        settings_module.RANDOM_POOLS = saved_pool
+        ai.STRATEGIES.clear()
+        ai.STRATEGIES.update(saved)
+
+
+def _random_setup(seed):
+    """Seats 2 and 3 left to chance; the seed is one whose picks move when a
+    third bot joins a pool of two (checked, so a reseed can't hide it)."""
+    from starconquest.settings import RANDOM_STRATEGY, resolve_strategy
+    s = Settings(mode="random", players=3, nodes=16, seed=seed)
+    s.ai_strategy[1] = s.ai_strategy[2] = RANDOM_STRATEGY
+    with _pool("alpha", "beta"):
+        before = [resolve_strategy(RANDOM_STRATEGY, seed, pid) for pid in (2, 3)]
+    with _pool("alpha", "beta", "gamma"):
+        after = [resolve_strategy(RANDOM_STRATEGY, seed, pid) for pid in (2, 3)]
+    assert before != after
+    return s
+
+
+def test_new_log_records_the_strategy_each_seat_was_built_with():
+    with _preserve_config(), _pool("alpha", "beta"):
+        s = _random_setup(7)
+        state = build_state(s, 7)
+        log = replay.new_log(s, 7, state)
+    assert 0 not in log.strategies, "neutral is not a seat"
+    assert log.strategies == {pid: p.ai_strategy for pid, p in state.players.items() if pid}
+    assert set(log.strategies.values()) <= {"heuristic", "alpha", "beta"}, "resolved, never 'random'"
+
+
+def test_strategies_round_trip_and_drop_junk():
+    log = replay.GameLog(seed=1, settings={}, strategies={2: "marshal", 3: "knower"})
+    assert replay.GameLog.from_dict(json.loads(json.dumps(log.to_dict()))).strategies == log.strategies
+    junk = {"strategies": {"2": "marshal", "x": "knower", "3": "", "4": 5}}
+    assert replay.GameLog.from_dict(junk).strategies == {2: "marshal"}
+    assert replay.GameLog.from_dict({"strategies": ["marshal"]}).strategies == {}
+
+
+def test_reconstruct_keeps_the_bots_a_match_was_dealt_after_the_pool_moves():
+    """A pool edited since a match was played deals its seed different bots; a
+    resumed or watched match must still face the ones it was played against."""
+    with _preserve_config():
+        s = _random_setup(7)
+        with _pool("alpha", "beta"):
+            state = build_state(s, 7)
+            log = replay.new_log(s, 7, state)
+            log.record_turn(engine.end_turn(state, human_orders=[], decide=ai.decide))
+        dealt = replay.seat_strategies(state)
+        with _pool("alpha", "beta", "gamma"):
+            assert replay.seat_strategies(build_state(s, 7)) != dealt   # today's picks differ
+            rebuilt, _ = replay.reconstruct(replay.GameLog.decode(log.encoded()))
+    assert replay.seat_strategies(rebuilt) == dealt
+
+
+def test_an_old_log_without_strategies_rebuilds_as_it_always_did():
+    """Nothing recorded means nothing to restore: the seats get today's picks,
+    and the log is not back-filled with a guess at what it was played against."""
+    with _preserve_config():
+        s = _random_setup(7)
+        with _pool("alpha", "beta"):
+            state = build_state(s, 7)
+            log = replay.new_log(s, 7)
+            log.record_turn(engine.end_turn(state, human_orders=[], decide=ai.decide))
+        assert log.strategies == {}
+        with _pool("alpha", "beta", "gamma"):
+            today = replay.seat_strategies(build_state(s, 7))
+            rebuilt, _ = replay.reconstruct(log)
+    assert replay.seat_strategies(rebuilt) == today
+    assert log.strategies == {}
+
+
+def test_a_turnless_log_records_its_seats_when_first_rebuilt():
+    """A play-by-post match starts as a log with no turns (`pbp.match_log`), built
+    by whichever client gets there first; that build is the match's start, so the
+    log the resolver uploads carries its picks and every other client adopts them."""
+    with _preserve_config(), _pool("alpha", "beta"):
+        s = _random_setup(7)
+        log = replay.GameLog(seed=7, settings=s.to_dict())
+        state, _ = replay.reconstruct(log)
+    assert log.strategies == replay.seat_strategies(state)
+
+
+def test_fork_and_truncate_keep_the_strategies():
+    log = replay.GameLog(seed=9, settings=Settings(seed=9).to_dict(), strategies={2: "marshal"})
+    for _ in range(4):
+        log.record_turn(_record([]))
+    assert log.fork(2).strategies == {2: "marshal"}
+    log.truncate(1)
+    assert log.strategies == {2: "marshal"}

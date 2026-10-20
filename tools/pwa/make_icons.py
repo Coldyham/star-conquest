@@ -14,7 +14,6 @@ smoothscaled down so the shapes get anti-aliasing pygame.draw won't give directl
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import pygame

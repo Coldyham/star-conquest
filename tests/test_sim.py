@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
+import math
 import time
 from collections import Counter
+from dataclasses import replace
 
-from starconquest import ai, settings as settings_mod
+import pytest
+
+from starconquest import ai, engine, replay
+from starconquest import settings as settings_mod
 from starconquest.model import AiParams
 from starconquest.settings import Settings
 from tests import sim
+from tools.bot_replay import replay_aux
 
 
 def test_invariants_hold_and_most_games_terminate():
@@ -19,6 +26,15 @@ def test_invariants_hold_and_most_games_terminate():
     assert len(finished) / len(results) >= 0.6  # the vast majority should resolve
     for r in finished:
         assert r.winner in (0, 1, 2, 3)
+
+
+def test_the_film_rebuilds_every_turns_board():
+    """The playback oracle at volume: `sim.play(film=True)` asserts, every turn of
+    every game, that applying that turn's events to the board it started from
+    lands exactly on the board it ended on."""
+    results = [sim.play(seed, nodes=16, players=3, max_turns=300, film=True)
+               for seed in range(8)]
+    assert results and all(r.turns > 0 for r in results)
 
 
 def test_deterministic_from_seed():
@@ -52,6 +68,53 @@ def test_ladder_credits_the_winning_strategy():
     wins, draws, timeouts = sim._tally(games, roster)
     assert sum(wins.values()) + draws + timeouts == len(games)
     assert wins["heuristic"] > wins["_test_passive"]
+
+
+def test_aux_reaches_only_the_named_strategy_s_seats():
+    """--aux stamps every seat a strategy holds and leaves the rest default."""
+    ai.load_models()
+    seen: dict[str, list[float]] = {}
+
+    def spy(state, pid):
+        p = state.players[pid]
+        seen.setdefault(p.ai_strategy, []).append(p.ai_params.aux)
+        return []
+
+    ai.register("_test_spy", spy)
+    ai.register("_test_spy2", spy)
+    try:
+        sim.play(3, nodes=12, players=3, max_turns=2,
+                 strategies=["_test_spy", "_test_spy2", "_test_spy"], aux={"_test_spy": 2.0})
+    finally:
+        ai.STRATEGIES.pop("_test_spy", None)
+        ai.STRATEGIES.pop("_test_spy2", None)
+    assert set(seen["_test_spy"]) == {2.0}
+    assert set(seen["_test_spy2"]) == {AiParams().aux}
+
+
+def test_aux_changes_a_ladder_game_and_default_aux_does_not():
+    ai.load_models()
+    roster = ["knower", "thinker"]
+
+    def run(aux):
+        return [(g.result.winner, g.result.turns)
+                for g in sim.run_ladder(range(1, 3), "random", 12, roster, 300, aux=aux)]
+
+    plain = run(None)
+    assert run({"knower": 1.0}) == plain
+    assert run({"knower": 2.0}) != plain
+
+
+def test_parse_aux_refuses_what_would_silently_do_nothing(capsys):
+    ap = argparse.ArgumentParser()
+    ai.load_models()
+    assert sim._parse_aux(ap, ["knower=2"], ["knower", "thinker"]) == {"knower": 2.0}
+    assert "Oracle: Search" in capsys.readouterr().out
+    for bad, roster in ((["knower"], ["knower"]), (["knower=x"], ["knower"]),
+                        (["knower=nan"], ["knower"]), (["knower=2"], ["thinker"]),
+                        (["knower=0", "knower=1"], ["knower"])):
+        with pytest.raises(SystemExit):
+            sim._parse_aux(ap, bad, roster)
 
 
 def test_avg_turns_excludes_timeouts():
@@ -98,7 +161,7 @@ def test_no_seat_is_systematically_doomed():
 # play_settings: the leaderboard's bot-replay column (tools/bot_replay.py)
 # --------------------------------------------------------------------------- #
 def _setup(**kw) -> Settings:
-    base = dict(mode="random", players=3, nodes=16, seed=11)
+    base = {"mode": "random", "players": 3, "nodes": 16, "seed": 11}
     return Settings(**{**base, **kw})
 
 
@@ -122,9 +185,10 @@ def test_replay_lands_on_the_same_map_the_human_played():
 
 
 def test_the_bot_actually_drives_the_human_seat():
-    # engine._collect_orders skips the human seat, so a replay that forgot to
-    # clear is_human would sit still and lose every time. Seat 1 must be taking
-    # ground, which is only possible if `decide` ran for it.
+    # `_hand_over` clears `is_human`, so `engine._collect_orders` decides seat 1
+    # the ordinary way; a replay that forgot to clear it would sit still (the
+    # engine skips a human seat with no orders queued) and lose every time.
+    # Seat 1 must be taking ground, which is only possible if `decide` ran for it.
     cfg = _setup()
     result = sim.play_settings(cfg, 11, "heuristic", max_turns=40)
     assert result.turns > 0
@@ -151,6 +215,148 @@ def test_the_replayed_seat_ignores_the_setup_s_own_ai_params():
     assert sim.play_settings(tuned, 11, "heuristic") == sim.play_settings(_setup(), 11, "heuristic")
 
 
+def test_the_replayed_seat_is_handed_over_outright():
+    """`play_settings` clears `is_human` on the seat it takes over, so an oracle
+    opponent resolves it through `ai.STRATEGIES` and simulates it exactly — the
+    same full-information footing every other bot-vs-bot measurement in this
+    codebase already stands on (`sim.play`'s ladder/swap tournaments clear the
+    flag on every seat), rather than a hobbled one where opponents must guess
+    blind at a seat that was never actually a person.
+
+    A version of this that left the flag set existed briefly, reasoning that a
+    leaderboard row had to match what a live, token-driven Watch link would
+    compute — and a token can only ever say `autoplay: true`, never "seat 1 is
+    a bot", so the harness had to pretend too. That reasoning is gone along
+    with the mechanism it was protecting: the Watch link for a win now plays
+    back a stored `replay.GameLog` (see the reconstruct-exactness tests below),
+    which asks no seat to decide anything and so cannot be affected by this flag
+    either way. Nothing is left forcing the harness away from the same
+    full-information footing the rest of the roster is measured on."""
+    cfg = _setup()
+    seen: list[bool] = []
+
+    def watcher(state, pid):
+        seen.append(state.players[1].is_human)
+        return []
+
+    ai.register("_watcher", watcher)
+    try:
+        cfg.ai_strategy = ["heuristic", "_watcher", "heuristic"] + ["heuristic"] * 3
+        sim.play_settings(cfg, 11, "heuristic", max_turns=3)
+    finally:
+        ai.STRATEGIES.pop("_watcher", None)
+    assert seen and not any(seen)
+
+
+def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
+    """The whole point of an all-bot game having no preferred seat.
+
+    Watching a setup autoplay in the app and computing the same setup offline
+    (`tools/bot_replay.py`, via this function) have to be the same game, or a
+    leaderboard row describes a match its own Watch link never plays. They used
+    not to be: `_hand_over` cleared `is_human` here, while the app left seat 1
+    flagged, so every oracle opponent (`models/knower.py`) guessed blind at the
+    one seat being measured and simulated all the others exactly. Measured on
+    this setup, that handicap was worth 77 turns.
+
+    A `knower` opponent is what gives this teeth — it is the only fielded
+    strategy whose output depends on what a seat is flagged at all.
+    """
+    ai.load_models()
+    cfg = _setup(seed=7)
+    cfg.ai_strategy = ["marshal", "knower", "heuristic"]
+
+    # The app's own autoplay path: no human seat at all, every seat decided by
+    # the engine's own loop (`main.resolve_turn` passes no `human_orders`), each
+    # turn's rng derived as `main.resolve_turn` derives it.
+    state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
+    assert state.human() is None
+    turns = 0
+    while state.winner is None and turns < 600:
+        replay.reseed(state)
+        engine.end_turn(state, decide=ai.decide)
+        turns += 1
+
+    result = sim.play_settings(cfg, 7, "marshal", max_turns=600)
+    assert (state.winner == 1) == result.won
+    assert state.turn == result.turns
+
+
+def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
+    """The property the leaderboard's stored bot replays rest on: a `log` filled
+    in alongside `play_settings` is not a second opinion that can drift from the
+    cached row the way re-simulating one always could (see
+    `test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything` below for
+    exactly what that buys) — it is a recording, so `replay.reconstruct` must
+    land on the exact board the run actually reached, orders and dice both
+    applied verbatim."""
+    ai.load_models()
+    cfg = _setup(seed=12)
+    log = replay.new_log(cfg, 12)
+    result = sim.play_settings(cfg, 12, "marshal", max_turns=600, log=log)
+    assert result.won and not result.timed_out    # this map's seed 12 is a real win
+
+    assert log.finished and log.winner == 1        # seat 1 is always the replayed seat
+    assert log.hand_turns == 0                     # AI-driven the whole match
+    assert log.turn_count == result.turns
+
+    state, _ = replay.reconstruct(log)
+    seat = state.human()
+    assert (state.winner == seat.id) == result.won
+    assert state.turn == result.turns
+    assert seat.ships_lost == result.lost
+
+
+def test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything():
+    """The reason `_hand_over` is free to clear `is_human` (above): a stored log
+    is replayed by `engine.end_turn(state, script=...)`, which applies the
+    recorded orders and deals the recorded dice verbatim and never calls
+    `decide` for any seat at all — so nothing an oracle would have read off a
+    seat's flags during the *original* run can possibly matter to how the log
+    plays back. `replay.build_state` stamps `is_human` fresh on every
+    reconstruction (seat 1, always, regardless of what the run that produced
+    the log had it set to), and that has no bearing here either: the seat the
+    engine is deciding for during replay is none of them, ever.
+
+    Proven rather than asserted from the mechanism: an oracle that peeks at
+    `is_human` and changes its actual output based on it would, if consulted
+    during reconstruction, diverge from the recorded game — and it does not,
+    because it is never called."""
+    def peeker(state, pid):
+        # A blatant tripwire: if this ever runs during reconstruction, the
+        # board it produces is nothing like the one that was actually played.
+        return [] if state.players[1].is_human else list(ai.compute_orders(state, pid))
+
+    ai.load_models()
+    ai.register("_peeker", peeker)
+    try:
+        cfg = _setup()
+        cfg.ai_strategy = ["heuristic", "_peeker", "_peeker"] + ["heuristic"] * 3
+        log = replay.new_log(cfg, 11)
+        result = sim.play_settings(cfg, 11, "marshal", max_turns=600, log=log)
+
+        state, _ = replay.reconstruct(log)
+        seat = state.human()
+        assert (state.winner == seat.id) == result.won
+        assert state.turn == result.turns
+        assert seat.ships_lost == result.lost
+    finally:
+        ai.STRATEGIES.pop("_peeker", None)
+
+
+def test_an_unresolved_log_is_left_unfinished():
+    """A run that hits max_turns without a winner (a draw counts as a winner —
+    `state.winner == 0` — so this is genuinely unresolved) must not be recorded
+    as finished with no winner, the same guard `main.resolve_turn` applies."""
+    cfg = _setup()
+    log = replay.new_log(cfg, 11)
+    result = sim.play_settings(cfg, 11, "heuristic", max_turns=2, log=log)
+    assert result.timed_out
+    assert log.turn_count == 2
+    assert not log.finished
+    assert log.winner is None
+
+
 def test_a_bot_that_never_wins_still_reports_a_result():
     # `won` is the discriminator, not `turns`: a replay cut off by the turn cap
     # is a real answer ("no win"), not a missing one.
@@ -172,11 +378,10 @@ def test_balance_knobs_from_the_setup_reach_the_generated_map():
 
 
 def test_aux_reaches_the_replayed_seat_and_changes_how_it_plays():
-    # models/knower.py reads aux as search depth, and the leaderboard replays it
-    # at 12 (bot_replay.REPLAY_AUX) because that is its own slider's top end and
-    # the setting its measurements favour. If aux stopped reaching the seat the
-    # board would quietly be showing the depth-1 bot instead, which is a
-    # materially weaker player — so assert the two actually differ.
+    # models/knower.py reads aux as its Oracle mode, and the leaderboard replays it
+    # on Search (bot_replay.replay_aux), the top of its own slider. If aux stopped
+    # reaching the seat the board would quietly be showing the Predict bot
+    # instead, which is a materially weaker player — so assert the two differ.
     ai.load_models()
     cfg = _setup()
     default = sim.play_settings(cfg, 11, "knower")
@@ -193,13 +398,31 @@ def test_aux_none_is_the_documented_untuned_profile():
 
 
 def test_a_tuned_replay_is_still_reproducible():
-    # The whole premise of caching. knower's search is iteration-bounded, so depth
-    # 12 plans the same way twice; only its SEARCH_BUDGET_S catastrophe guard
-    # could break that, and it is sized not to fire.
+    # The whole premise of caching, so the depth is read from the worker rather
+    # than chosen here: the configuration worth asserting about is the one that
+    # actually gets cached. The search is iteration-bounded and plans the same way
+    # twice at *any* depth — but only with its two wall-clock catastrophe guards
+    # out of the way, which is the state the worker caches from
+    # (`tools/bot_replay.BUDGET_SCALE`). Lifted to inf rather than the worker's
+    # 100x: a guard that *cannot* fire keeps this an assertion about the search,
+    # where one that merely has headroom is an assertion about how busy the
+    # machine is. Headroom at scale 1 is under 2x — a decide measures ~86 ms
+    # against the 150 ms guard — so a loaded runner trips it on one run of the
+    # pair and not the other, which is a flake rather than a finding.
+    #
+    # Played out in full deliberately. `ReplayResult` compares two numbers, and a
+    # capped game fixes one of them: at 20 turns the *squeezed* run below lands on
+    # the same (turns, lost) as the base, so a cap buys seconds by making a
+    # genuinely different plan indistinguishable.
     ai.load_models()
     cfg = _setup()
-    assert sim.play_settings(cfg, 11, "knower", aux=12) == \
-           sim.play_settings(cfg, 11, "knower", aux=12)
+    depth = replay_aux("knower")
+    try:
+        ai.set_budget_scale(math.inf)
+        assert sim.play_settings(cfg, 11, "knower", aux=depth) == \
+               sim.play_settings(cfg, 11, "knower", aux=depth)
+    finally:
+        ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
 
 
 def test_budget_scale_is_wired_and_only_matters_when_it_bites():
@@ -209,14 +432,24 @@ def test_budget_scale_is_wired_and_only_matters_when_it_bites():
     # Squeezing the scale must change the answer — that is what proves the knob
     # reaches the guard at all — while raising it must not, since a guard that
     # never fires cannot influence anything.
+    #
+    # Depth 12 is load-bearing here rather than borrowed from the worker: the
+    # squeeze only bites from depth 4 up on this board, since below that the whole
+    # search finishes inside the 3 ms guard and the knob has nothing to cut. That
+    # floor rises with machine speed, so the depth-12 decide's ~69 ms is the margin
+    # keeping the assertion true on a fast runner.
     ai.load_models()
     cfg = _setup()
     try:
+        # Both ends of the comparison are taken with no guard able to fire: at the
+        # 1.0 default one *can* (see the test above), so a `base` measured there
+        # would be the loaded machine's answer rather than the search's.
+        ai.set_budget_scale(math.inf)
         base = sim.play_settings(cfg, 11, "knower", aux=12)
         ai.set_budget_scale(0.02)
         assert sim.play_settings(cfg, 11, "knower", aux=12) != base, \
             "a 3ms guard changed nothing — BUDGET_SCALE is not reaching the search"
-        ai.set_budget_scale(100)
+        ai.set_budget_scale(100)   # the worker's own lift: 15 s and 5 s guards
         assert sim.play_settings(cfg, 11, "knower", aux=12) == base
     finally:
         ai.set_budget_scale(1)  # process-wide; never leave it raised for other tests
@@ -224,10 +457,10 @@ def test_budget_scale_is_wired_and_only_matters_when_it_bites():
 
 def test_set_budget_scale_only_touches_bots_that_declare_one():
     # Opt-in and declarative, like aux_spec: a bot with no wall-clock guard has
-    # nothing to scale and must be left alone.
+    # nothing to scale and must be left alone. actuary's guard is on Hunt's look-ahead.
     ai.load_models()
     try:
-        assert ai.set_budget_scale(50) == ["knower"]
+        assert ai.set_budget_scale(50) == ["actuary", "evolved", "knower"]
     finally:
         ai.set_budget_scale(1)
 
@@ -238,3 +471,18 @@ def test_budget_scale_is_one_in_an_ordinary_game():
     ai.load_models()
     import sys
     assert sys.modules["sc_model_knower"].BUDGET_SCALE == 1.0
+
+
+def test_a_hand_authored_map_plays_a_whole_game():
+    """The cheapest proof the whole custom-map funnel holds: a recipe on a
+    `Settings`, through `build_state`, into a real game that reaches a result with
+    `check_invariants` running every turn."""
+    from starconquest import custommap, mapgen
+
+    cfg = Settings()
+    cfg.custom_map = custommap.from_state(mapgen.generate(4, "random", 16, 3))
+    cfg.players, cfg.nodes = cfg.custom_map.seats(), len(cfg.custom_map.nodes)
+
+    result = sim.play_settings(cfg, seed=4, bot="heuristic", max_turns=600)
+    assert result.turns > 0
+    assert result.won or result.timed_out or result.lost >= 0

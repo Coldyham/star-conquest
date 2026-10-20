@@ -8,6 +8,8 @@
 // {gameKey, playerKey, turns, lost, hand, at}, a field row {gameKey, turns, lost},
 // and a roster member {key, name}. user.mjs does the flattening.
 
+import { CURRENT_RULES_VERSION } from "./config.mjs";
+
 /** Fewest turns, then fewest ships lost — the game's own rule (settings.py). */
 export function compareScores(a, b) {
   return a.turns - b.turns || a.lost - b.lost;
@@ -152,11 +154,12 @@ export function tally(rows, roster) {
 }
 
 /**
- * The measured full-roster ladder (docs/bot-design.md "Full roster ladder" in
+ * The measured full-roster ladder (docs/design/marshal.md "Full roster ladder" in
  * the Python repo, mirrored here since JS can't import it), strongest to
- * weakest. Keep in sync with `starconquest/ai.py`'s `LADDER_ORDER`.
+ * weakest, one entry per family. Keep in sync with `starconquest/ai.py`'s
+ * `LADDER_ORDER`.
  */
-export const LADDER_ORDER = ["knower", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
+export const LADDER_ORDER = ["knower", "actuary", "marshal", "evolved", "thinker", "heuristic", "rusherplus"];
 
 /** Ladder order first, any bot missing from it (a fresh drop-in) alphabetical after. */
 function byLadderOrder(a, b) {
@@ -215,4 +218,28 @@ export function humanVsBots(score, rows) {
   if (!score || !best) return null;
   const delta = compareScores(score, best);
   return delta < 0 ? "ahead" : delta > 0 ? "behind" : "tied";
+}
+
+/**
+ * What one `bot_scores` row can offer for a Watch link, pure over the row
+ * alone so `game.mjs`'s DOM wiring never has to make this call itself:
+ *
+ * - "current": a stored replay (`match_id`) under today's rules — `#log=`
+ *   plays it back exactly, the same link a human score's Watch button is.
+ * - "outdated": a replay was stored, but under rules this build no longer
+ *   plays by (`GameLog.is_current`'s own check, mirrored here the way
+ *   `scoreRow`'s already does for a human score) — disclosed rather than
+ *   silently offered as if it still reconstructed the game.
+ * - "legacy": a win with no stored replay at all — a row computed before a
+ *   bot's replay was stored on it (`tools/bot_replay.py`, before this field
+ *   existed). Reconstructible live as a best-effort fallback, the way every
+ *   bot's Watch link used to work.
+ * - "none": a loss. `bot_scores` never stores a replay for one (only a win
+ *   is worth a Watch link, the same rule a human's own posted score follows),
+ *   so there is nothing here to offer either way.
+ */
+export function botWatchKind(row) {
+  if (!row.won) return "none";
+  if (!row.match_id) return "legacy";
+  return row.rules_version === CURRENT_RULES_VERSION ? "current" : "outdated";
 }

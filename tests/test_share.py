@@ -127,6 +127,14 @@ def test_row_carries_the_match_id_turns_and_encoded_log(configured):
     assert replay.GameLog.decode(row["log"]).to_dict() == log.to_dict()
 
 
+def test_row_carries_rules_version_as_a_claim(configured):
+    """So the board can tell an outdated replay apart from a current one
+    (`GameLog.is_current`) without decoding the blob to find out."""
+    log = _log(turns=3)
+    log.rules_version = 7
+    assert share.row_for(log, "abc123")["rules_version"] == 7
+
+
 def test_row_flags_an_unfinished_game_as_neither_finished_nor_won(configured):
     row = share.row_for(_log(turns=3), "abc123")
     assert row["finished"] is False and row["won"] is False
@@ -158,7 +166,7 @@ def test_web_backend_hands_javascript_a_quoted_payload(configured, monkeypatch):
     scripts: list[str] = []
 
     class _Window:
-        def eval(self, script):        # noqa: A003 - the JS bridge's own name
+        def eval(self, script):
             scripts.append(script)
 
     monkeypatch.setattr(share, "is_web", lambda: True)
@@ -179,7 +187,7 @@ def test_web_backend_hands_javascript_a_quoted_payload(configured, monkeypatch):
 
 def test_a_broken_bridge_is_not_an_error(configured, monkeypatch):
     class _Window:
-        def eval(self, script):        # noqa: A003
+        def eval(self, script):
             raise RuntimeError("no DOM here")
 
     monkeypatch.setattr(share, "is_web", lambda: True)
@@ -223,7 +231,7 @@ class _EvalWindow:
     def __init__(self):
         self.scripts = []
 
-    def eval(self, script):        # noqa: A003 - the bridge's own name
+    def eval(self, script):
         self.scripts.append(script)
 
 

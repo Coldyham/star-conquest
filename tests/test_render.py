@@ -8,17 +8,32 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
-import pytest  # noqa: E402
+import itertools
 
-from starconquest import ai, config, engine, fog, mapgen, render, starnames  # noqa: E402
-from starconquest.geometry import WorldView  # noqa: E402
-from starconquest.model import Order  # noqa: E402
-from starconquest.viewstate import CHOOSING, SELECTED, Ui  # noqa: E402
+import pygame
+import pytest
+
+from starconquest import (
+    ai,
+    config,
+    engine,
+    fog,
+    mapgen,
+    matchnames,
+    model,
+    render,
+    starnames,
+    turnfilm,
+)
+from starconquest import settings as settings_mod
+from starconquest.geometry import WorldView
+from starconquest.model import Fleet, ForwardRule, Order
+from starconquest.viewstate import CHOOSING, SELECTED, Ui
 
 
 def _make_ui(state):
@@ -50,7 +65,7 @@ def test_render_all_ui_states_no_crash():
         ui.chosen = 3
         ui.hover = nbr
         ui.pending.append(Order(1, home, nbr, 2))
-        ui.auto_forward[home] = (nbr, 2)   # exercise the rule chevron flow + panel rule section
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)   # exercise the rule chevron flow + panel rule section
         render.draw(screen, state, ui)
 
         assert ui.minus_rect[2] > 0 and ui.plus_rect[2] > 0 and ui.slider_rect[2] > 0
@@ -73,7 +88,7 @@ def test_render_all_ui_states_no_crash():
 
         # route mode: every stage, plus a replaced rule, an unreachable pick, a
         # loop, and a live selection box — the whole preview in one frame
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         ui.begin_route()
         render.draw(screen, state, ui)                  # empty group, "select"
         ui.route_sel = {sid for sid, s in state.systems.items() if s.owner_id == 1}
@@ -202,6 +217,50 @@ def test_win_overlay_draws_every_challenge_verdict():
         pygame.quit()
 
 
+def test_the_win_message_names_the_bot_that_won():
+    """"Verdant (Knower) wins!" — which bot took the board is the one thing the
+    overlay could say and didn't, and it is unreadable from the map."""
+    state = mapgen.generate_random(1, num_nodes=18, num_players=4)
+    state.players[3].is_human = False
+    state.players[3].ai_strategy = "knower"
+    state.winner = 3
+    assert render._winner_label(state) == "Verdant (Knower)"
+
+    # A drop-in keeps its own capitalisation rather than being title-cased.
+    state.players[3].ai_strategy = "claudeBot"
+    assert render._winner_label(state) == "Verdant (ClaudeBot)"
+
+    # A human seat is credited to the person, not to whatever it was set to —
+    # including one claimed part-way through (`engine.claim_seat`).
+    state.players[3].is_human = True
+    assert render._winner_label(state) == "Verdant"
+
+    state.winner = 0                      # the draw branch names nobody
+    assert render._winner_label(state) == "Neutral"
+
+
+def test_a_seat_left_to_the_seed_is_revealed_by_the_win_message():
+    """`settings.RANDOM_STRATEGY` resolves on `Player`, never on `Settings`, so
+    the overlay reads the bot that actually played rather than the placeholder.
+    Revealing it at game over is the payoff, and costs nothing: there is no turn
+    left to play with the knowledge."""
+    from starconquest.settings import RANDOM_STRATEGY, Settings, build_state
+
+    saved = {const: getattr(config, const) for _, const in settings_mod._GLOBAL_KNOBS}
+    try:
+        cfg = Settings(players=3, nodes=18)
+        cfg.ai_strategy[1] = RANDOM_STRATEGY          # seat 2
+        state = build_state(cfg, 5)
+        state.winner = 2
+        label = render._winner_label(state)
+        assert label.startswith("Crimson (")
+        assert RANDOM_STRATEGY not in label.lower()
+        assert state.players[2].ai_strategy in ai.available_strategies()
+    finally:
+        for const, val in saved.items():
+            setattr(config, const, val)
+
+
 def test_result_lines_verdict_is_three_way():
     """A dead heat on turns *and* ships lost reads as a match, not a near miss."""
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
@@ -256,6 +315,32 @@ def test_scoreboard_full_table_and_eliminated():
         pygame.quit()
 
 
+def test_challenge_target_shown_throughout_play_not_only_on_win():
+    """The score to beat sits in the top bar's right corner for the whole match,
+    not just the win overlay's after-the-fact verdict — so it survives an
+    in-progress frame with no winner set, and makes room for the scoreboard
+    rather than drawing under it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        assert state.winner is None
+
+        w = screen.get_width()
+        assert render._draw_challenge_target(screen, ui, w) == w   # nothing set
+
+        ui.challenge_target = (137, 412)
+        ui.challenge_by = "Ada"
+        right = render._draw_challenge_target(screen, ui, w)
+        assert right < w - config.HUD_PAD   # the scoreboard must stay clear of it
+
+        render.draw(screen, state, ui)   # the whole frame, mid-game, no crash
+    finally:
+        pygame.quit()
+
+
 def test_render_fogged_states_no_crash():
     """Fogged silhouettes, hidden systems, a "?" panel, and a frozen scoreboard row
     all draw without a crash."""
@@ -305,7 +390,7 @@ def test_selected_forward_rule_reports_its_lane():
         # no rule, nothing hovered or chosen: there is no lane to report
         assert render._panel_lane_target(state, ui, home) is None
 
-        ui.auto_forward[home] = (nbr, 2)
+        ui.auto_forward[home] = ForwardRule({nbr: 100}, 2)
         assert render._panel_lane_target(state, ui, home) == nbr
         ui.sel_forward = home
         assert render._panel_lane_target(state, ui, home) == nbr
@@ -318,7 +403,7 @@ def test_selected_forward_rule_reports_its_lane():
 
         # and a rule whose destination has gone is not reported at all
         ui.selected = ui.hover = None
-        ui.auto_forward[home] = (max(state.systems) + 99, 2)
+        ui.auto_forward[home] = ForwardRule({max(state.systems) + 99: 100}, 2)
         assert render._panel_lane_target(state, ui, home) is None
         render.draw(screen, state, ui)      # still draws
     finally:
@@ -381,7 +466,7 @@ def test_rule_chevrons_fill_the_whole_lane():
                 assert ds[0] == pytest.approx(head), f"run starts short of the source: {at}"
                 assert ds[-1] == pytest.approx(tail), f"run stops short of the destination: {at}"
                 step = (tail - head) / (len(ds) - 1)
-                assert all(b - a == pytest.approx(step) for a, b in zip(ds, ds[1:])), \
+                assert all(b - a == pytest.approx(step) for a, b in itertools.pairwise(ds)), \
                     f"uneven spacing: {at}"
 
                 # mid-cycle the run has walked forward by that spacing, one chevron
@@ -409,7 +494,7 @@ def test_only_the_selected_forward_rule_animates(monkeypatch):
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = _make_ui(state)
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        ui.auto_forward[home] = (state.systems[home].neighbors[0], 2)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 2)
 
         def frame(ms: int) -> bytes:
             monkeypatch.setattr(pygame.time, "get_ticks", lambda: ms)
@@ -426,10 +511,39 @@ def test_only_the_selected_forward_rule_animates(monkeypatch):
 
 
 def _popup_rects(ui):
-    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
+    """The send popup's recorded hit-rects, as pygame Rects (skipping zeroed ones).
+    A split lane's own −/+ are included; its row rect is not, since it holds them."""
     names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
-             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect")
-    return {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+             "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect",
+             "hold_minus_rect", "hold_plus_rect", "even_split_rect", "delete_all_rect")
+    rects = {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
+    for dest, _row, minus, plus in ui.share_rows:
+        rects[f"lane {dest} -"] = pygame.Rect(*minus)
+        rects[f"lane {dest} +"] = pygame.Rect(*plus)
+    return rects
+
+
+def _popup_shapes(state, ui, home):
+    """Put the popup through its three shapes in turn — the Send tab, a Forward tab
+    with one lane, and a system split down every lane it has (up to four) — yielding
+    a name for each once it is set up."""
+    nbrs = state.systems[home].neighbors[:4]
+    assert len(nbrs) >= 2, "pick a home that can split"
+    ui.pending.clear()
+    ui.auto_forward.clear()
+    ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbrs[0], 2
+    ui.forward_armed = False
+    ui.pending.append(Order(1, home, nbrs[0], 2))
+    yield "send"
+    ui.pending.clear()
+    ui.forward_armed = True
+    ui.auto_forward[home] = ForwardRule({nbrs[0]: 100}, 2)
+    yield "one lane"
+    shares: dict[int, int] = {}
+    for n in nbrs:
+        shares = model.shares_with(shares, n)
+    ui.auto_forward[home] = ForwardRule(shares, 2)
+    yield f"split {len(nbrs)} ways"
 
 
 def test_send_popup_stays_inside_the_map_viewport():
@@ -451,61 +565,64 @@ def test_send_popup_stays_inside_the_map_viewport():
             render._FONTS.clear()
             state = mapgen.generate_random(1, num_nodes=18, num_players=3)
             ui = _make_ui(state)
-            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-            nbr = state.systems[home].neighbors[0]
-            ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
-            ui.pending.append(Order(1, home, nbr, 2))
+            home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+            state.systems[home].owner_id = 1
 
-            for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
-                ui.popup_pos = corner       # auto-placed, then dragged hard each way
-                render.draw(screen, state, ui)
-                play = pygame.Rect(*config.play_rect())
-                assert play.contains(pygame.Rect(*ui.popup_rect)), (
-                    f"popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
-                rects = _popup_rects(ui)
-                assert len(rects) == 8, f"the popup drew only {sorted(rects)}"
-                for name, r in rects.items():
-                    assert play.contains(r), f"{name} is outside the viewport: {r}"
+            for shape in _popup_shapes(state, ui, home):
+                for corner in (None, (0, 0), (config.SCREEN_W, config.SCREEN_H)):
+                    ui.popup_pos = corner       # auto-placed, then dragged hard each way
+                    render.draw(screen, state, ui)
+                    play = pygame.Rect(*config.play_rect())
+                    assert play.contains(pygame.Rect(*ui.popup_rect)), (
+                        f"{shape} popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
+                    rects = _popup_rects(ui)
+                    assert "cancel_rect" in rects, f"the {shape} popup drew only {sorted(rects)}"
+                    for name, r in rects.items():
+                        assert play.contains(r), f"{shape}: {name} is outside the viewport: {r}"
     finally:
         _desktop_scale()
         pygame.quit()
 
 
 def test_popup_rows_tile_without_overlapping():
-    """Seven rows laid out by hand from one running y — a slip in the arithmetic
-    would stack two controls, so one of them could never be pressed. The slider's
-    knob must also stay inside the panel at both ends of its travel."""
+    """Rows laid out by hand from one running y — a slip in the arithmetic would
+    stack two controls, so one of them could never be pressed. The slider's knob
+    must also stay inside the panel at both ends of its travel."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = _make_ui(state)
-        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.mode, ui.selected, ui.dest, ui.chosen = CHOOSING, home, nbr, 2
-        ui.pending.append(Order(1, home, nbr, 2))
+        home = max(state.systems.values(), key=lambda s: len(s.neighbors)).id
+        state.systems[home].owner_id = 1
 
-        for armed in (False, True):
-            ui.forward_armed = armed
+        for shape in _popup_shapes(state, ui, home):
             render.draw(screen, state, ui)
             panel = pygame.Rect(*ui.popup_rect)
             rects = _popup_rects(ui)
             pairs = list(rects.items())
             for i, (na, ra) in enumerate(pairs):
-                assert panel.contains(ra), f"{na} sits outside the popup: {ra}"
+                assert panel.contains(ra), f"{shape}: {na} sits outside the popup: {ra}"
                 for nb, rb in pairs[i + 1:]:
-                    assert not ra.colliderect(rb), f"{na} overlaps {nb} ({ra} / {rb})"
-            knob = config.SLIDER_KNOB_R
-            sx, _sy, sw, _sh = ui.slider_rect
-            assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+                    assert not ra.colliderect(rb), f"{shape}: {na} overlaps {nb} ({ra} / {rb})"
+            rows = [pygame.Rect(*row) for _d, row, _m, _p in ui.share_rows]
+            for i, ra in enumerate(rows):
+                assert panel.contains(ra), f"{shape}: a lane row sits outside the popup"
+                assert not any(ra.colliderect(rb) for rb in rows[i + 1:]), f"{shape}: lane rows overlap"
+            if ui.slider_rect[2]:
+                knob = config.SLIDER_KNOB_R
+                sx, _sy, sw, _sh = ui.slider_rect
+                assert sx + knob >= panel.left and sx + sw - knob <= panel.right
+        assert len(ui.share_rows) >= 2, "the last shape should be a split"
     finally:
         pygame.quit()
 
 
 def test_popup_slider_survives_a_source_with_nothing_to_send():
-    """`lo == hi` is the ordinary state on an empty system (a plain tap arms Forward
-    there), and the knob's value->position maths must not divide by it."""
+    """`lo == hi` is the Send tab's state on an empty system, and the knob's
+    value->position maths must not divide by it. The Forward tab sizes a share, so
+    an empty system's range is the whole 0-100%."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -517,9 +634,11 @@ def test_popup_slider_survives_a_source_with_nothing_to_send():
         state.systems[home].ships = 0
         ui.mode, ui.selected, ui.dest = CHOOSING, home, nbr
 
+        ui.auto_forward[home] = ForwardRule({nbr: 100})
         for armed in (True, False):
             ui.forward_armed = armed
-            assert ui.slider_range(state)[0] == ui.slider_range(state)[1]
+            lo, hi, _value = ui.slider_range(state)
+            assert (lo, hi) == ((0, 100) if armed else (0, 0))
             render.draw(screen, state, ui)
             assert ui.slider_rect[2] > 0
     finally:
@@ -538,6 +657,17 @@ def _touch_scale():
 def _desktop_scale():
     config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H
     config.apply_ui_scale(1.0)
+    render._FONTS.clear()
+
+
+def _web_desktop_scale():
+    """The third shipping geometry, between the two above: the browser framebuffer
+    with no touch boost — a desktop browser, which `main`'s probe leaves as a
+    keyboard build. Its 1.5x fonts buy proportionally less panel than the touch
+    build's 2.1x, so the three together bracket what a row of panel text costs."""
+    config.SCREEN_W, config.SCREEN_H = config.WEB_FB_W, config.WEB_FB_H
+    config.apply_ui_scale(min(config.WEB_FB_W / config.BASE_SCREEN_W,
+                              config.WEB_FB_H / config.BASE_SCREEN_H))
     render._FONTS.clear()
 
 
@@ -649,6 +779,60 @@ def test_fast_forward_button_only_exists_while_spectating():
         pygame.quit()
 
 
+def test_ironman_hides_history_until_the_game_is_decided():
+    """The footer offers History exactly when ``Ui.can_review`` does: under ironman
+    not while the game is undecided (even once knocked out — rewinding is the
+    point of hiding it), and again once there is a winner."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        state.turn = 3
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] > 0
+
+        ui.ironman = True
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0
+        state.players[1].alive = False
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0, "a spectator could still rewind"
+
+        state.winner = 2
+        assert ui.can_review(state)
+    finally:
+        pygame.quit()
+
+
+def test_top_bar_shows_our_ships_lost():
+    """The tie-break, in view all game rather than only on the win overlay."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        drawn: list[str] = []
+        real = render._text
+
+        def spy(surface, font, text, *args, **kwargs):
+            drawn.append(text)
+            return real(surface, font, text, *args, **kwargs)
+
+        render._text = spy
+        try:
+            state.players[1].ships_lost = 17
+            state.players[2].ships_lost = 5
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real
+        assert "17 lost" in drawn and "5 lost" not in drawn
+    finally:
+        pygame.quit()
+
+
 def test_touch_build_drops_keyboard_only_text():
     """A phone has no keyboard, so the '(Esc)' suffixes and the shortcut lines in
     the help panel are dropped there — they were also what overflowed the labels."""
@@ -661,6 +845,10 @@ def test_touch_build_drops_keyboard_only_text():
         assert render._key_hint("Quit", "Esc") == "Quit"
         assert render.confirm_labels("Quit") == ("Quit", "Cancel")
         assert "Shift" not in render._LEGEND_TOUCH and "Enter" not in render._LEGEND_TOUCH
+        # ...and the review scene's own legend, which names the scrubber's
+        # buttons rather than the arrow/Home/End/Esc keys behind them
+        for key in ("←", "Home/End", "Esc", " P "):
+            assert key not in render._LEGEND_HISTORY_TOUCH
     finally:
         _desktop_scale()
         pygame.quit()
@@ -676,13 +864,287 @@ def test_wrapped_help_text_fits_the_panel():
             scale()
             font = render._fonts()["small"]
             width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-            for text in (render._LEGEND_TOUCH, render._LEGEND_KEYS):
+            for text in (render._LEGEND_TOUCH, render._LEGEND_KEYS,
+                         render._LEGEND_HISTORY_TOUCH, render._LEGEND_HISTORY_KEYS):
                 for line in render._wrap(font, text, width):
                     assert font.size(line)[0] <= width, f"{line!r} overruns the panel"
             bottom = config.HUD_TOP_H + 200
             assert render._panel_legend(screen, 0, config.HUD_TOP_H, bottom) <= bottom
     finally:
         _desktop_scale()
+        pygame.quit()
+
+
+def test_help_text_fits_the_empty_panel_whole():
+    """Not merely cut off cleanly (above) but short enough to be read in full.
+
+    The cut is silent — there is no ellipsis and no scroll — so a legend longer
+    than the panel is prose nobody ever sees the end of, and the end is where the
+    trailing lines that matter least were deliberately put. An empty panel is the
+    floor this has to clear: the queued list only eats into it once the player is
+    already giving orders, which is the point they have stopped reading.
+    """
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            # what `_draw_side_panel` passes when nothing is queued
+            ph = config.SCREEN_H - config.HUD_TOP_H - config.END_TURN_H
+            bottom = config.HUD_TOP_H + ph - config.s(8)
+            y = config.HUD_TOP_H + config.PANEL_PAD
+            font = render._fonts()["small"]
+            width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+            for history in (False, True):
+                text = render._legend_text(history)
+                drawn = render._panel_legend(screen, 0, y, bottom, history=history)
+                lines = render._wrap(font, text, width)
+                room = (bottom - y - render._row_h("normal")) // render._row_h()
+                assert room >= len(lines), (
+                    f"{'history' if history else 'live'} legend needs {len(lines)} "
+                    f"rows, panel holds {room}"
+                )
+                assert drawn <= bottom
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_the_pbp_you_are_line_does_not_land_under_clear_forwarding():
+    """`_draw_clear_forward_button` used to be called with a hardcoded y near the
+    panel top, ignoring however far `_panel_you_are`'s "You are ..." / title
+    lines had already pushed the cursor down — so in a play-by-post match with
+    any standing forward rule, the button was drawn back over that text instead
+    of below it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_match = "00112233445566ff"
+        ui.pbp_title = "Friday night"
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
+
+        render.draw(screen, state, ui)
+        assert ui.clear_forward_rect != (0, 0, 0, 0)
+
+        px = config.SCREEN_W - config.HUD_RIGHT_W
+        py = config.HUD_TOP_H
+        you_are_bottom = render._panel_you_are(screen, ui, px + config.PANEL_PAD, py + config.PANEL_PAD)
+        assert ui.clear_forward_rect[1] >= you_are_bottom, (
+            "the button must be drawn below the pbp You-are/title text, not over it"
+        )
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
+    """Review mode is a different scene, so the panel must not teach live play in it.
+
+    `input._handle_history_event` is modal: it answers the scrubber, rewind and
+    exit and nothing else. So the live legend's verbs are all dead here, and the
+    two "Clear ... forwarding" buttons are a destructive-looking press that no
+    handler would ever receive — they must not be drawn at all.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
+
+        render.draw(screen, state, ui)
+        assert ui.clear_forward_rect != (0, 0, 0, 0)   # offered during live play
+
+        ui.history = True
+        ui.history_max = 3
+        ui.history_turn = 1
+        drawn = []
+        real_text = render._text
+        render._text = lambda surf, font, text, col, **kw: (
+            drawn.append(text), real_text(surf, font, text, col, **kw))[1]
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        assert ui.clear_forward_rect == (0, 0, 0, 0)
+        assert ui.clear_dangerous_rect == (0, 0, 0, 0)
+        assert "History" in drawn
+        blob = " ".join(drawn)
+        assert "Rewind to here" in blob
+        for live_only in ("Take every system", "standing", "Route"):
+            assert live_only not in blob, f"live-play help leaked into review: {live_only}"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_shared_match_never_offers_rewind():
+    """Rewinding rebuilds a fresh, un-networked `Ui` (`main.resume_game`), which
+    would silently fork the local view away from a match the server and every
+    other seat still think is at a later turn — so play-by-post must never offer
+    the button, however far back the scrubber sits."""
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.history = True
+        ui.history_max = 3
+        ui.history_turn = 1   # short of the latest turn — offered in an ordinary game
+        render.draw(screen, state, ui)
+        assert ui.rewind_button_rect != (0, 0, 0, 0)
+
+        ui.pbp_match = "abc123def456"
+        render.draw(screen, state, ui)
+        assert ui.rewind_button_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+def test_pbp_shows_which_seat_is_yours():
+    """A shared match can seat a person at any colour, so the HUD says outright
+    which one is 'you' — a solo game has no such ambiguity (it is always the one
+    seat you are looking at) and shows neither marker."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+
+    def drawn_text(state, ui) -> str:
+        out: list[str] = []
+        real_text = render._text
+        render._text = lambda surf, font, text, col, **kw: (
+            out.append(text), real_text(surf, font, text, col, **kw))[1]
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+        return " ".join(out)
+
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+
+        blob = drawn_text(state, ui)
+        assert "(you)" not in blob
+        assert "You are" not in blob
+
+        ui.pbp_match = "00112233445566ff"
+        blob = drawn_text(state, ui)
+        assert "(you)" in blob
+        assert f"You are {config.player_name(1)}" in blob
+        assert matchnames.phrase(ui.pbp_match) in blob, "untitled: the pass-phrase"
+
+        ui.pbp_title = "Friday night"
+        blob = drawn_text(state, ui)
+        assert "Friday night" in blob
+        assert matchnames.phrase(ui.pbp_match) not in blob
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_draws_a_copy_button_per_seat_including_our_own():
+    """One row per seat — our own included, not just the others — each with its
+    own Copy button: 'a modal listing the seats with a Copy button each' rather
+    than a status line over a clipboard blob nobody thought to check. Our own
+    row is there too because a reload, a cleared profile or another device has
+    nothing else to recover the seat from. Win/waiting overlays must stand down
+    while it is up, since a match this fresh has no winner and nothing
+    submitted yet to wait on anyway."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_match = "abc123def456"
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"),
+                         (3, "https://game/#pbp=x:z"))
+
+        render.draw(screen, state, ui)
+        assert set(ui.pbp_invite_rects) == {1, 2, 3}
+        for rect in ui.pbp_invite_rects.values():
+            assert rect[2] and rect[3]   # actually drawn, not zeroed
+        assert ui.pbp_invite_close_rect[2]
+
+        # No two rows' rects overlap, and neither does Continue.
+        rects = list(ui.pbp_invite_rects.values()) + [ui.pbp_invite_close_rect]
+        pairs = [pygame.Rect(r) for r in rects]
+        for i, a in enumerate(pairs):
+            for b in pairs[i + 1:]:
+                assert not a.colliderect(b)
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_warns_the_links_are_a_one_time_show():
+    """`pbp.create`'s own docstring says it: the reply is the one and only time
+    the tokens exist in the clear. Nothing here stores them again, so the
+    overlay has to say so plainly rather than let someone click past it and
+    assume they can come back for a link later."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"))
+
+        drawn: list[str] = []
+        real_text = render._text
+        render._text = lambda surf, font, text, col, **kw: (
+            drawn.append(text), real_text(surf, font, text, col, **kw))[1]
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        blob = " ".join(drawn)
+        assert "won't be shown again" in blob
+    finally:
+        pygame.quit()
+
+
+def test_the_invite_overlay_title_never_overflows_the_panel():
+    """Regression: the title used to be *measured* in `normal` (to size the
+    panel) but *drawn* in `big` (which is wider), so the rendered line ran
+    past the panel border it was supposedly centred in. Wrapping now measures
+    and draws in the same font, and the wrap width itself is capped to what a
+    narrow window actually has to give it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((640, 480))
+    try:
+        state = mapgen.generate_random(4, num_nodes=14, num_players=3)
+        ui = _make_ui(state)
+        ui.pbp_invite = ((1, "https://game/#pbp=x:w"), (2, "https://game/#pbp=x:y"))
+
+        big = render._fonts()["big"]
+        drawn_big: list[str] = []
+        real_text = render._text
+
+        def spy(surf, font, text, col, **kw):
+            if font is big and text:
+                drawn_big.append(text)
+            return real_text(surf, font, text, col, **kw)
+
+        render._text = spy
+        try:
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real_text
+
+        assert drawn_big, "the title never drew at all"
+        cap = screen.get_width() - 2 * config.s(24) - config.s(48)
+        for line in drawn_big:
+            assert big.size(line)[0] <= cap, f"{line!r} is wider than the panel can be: {big.size(line)[0]} > {cap}"
+    finally:
         pygame.quit()
 
 
@@ -743,6 +1205,79 @@ def test_star_name_labels_stay_in_the_map_and_off_the_nodes():
         pygame.quit()
 
 
+def test_a_star_name_keeps_off_the_space_a_playback_writes_into():
+    """A fight's cost and a finished hull's `+N` land in a fixed slot above a
+    system (`render._mark_slot`), so that slot is reserved whether or not one is
+    showing: a name allowed into the gap between fights would be shoved off the
+    map the moment one fired, which reads as the name flickering rather than as
+    the number arriving. Names go below their system instead, or nowhere.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=24, num_players=3)
+        ui = _make_ui(state)
+        drawn: list[tuple[str, pygame.Rect]] = []
+        real_text = render._text
+        names = {sys.name: sys for sys in state.systems.values()}
+
+        def spy(surface, font, s, color, **kw):
+            if "topleft" in kw and s in names:
+                drawn.append((s, pygame.Rect(kw["topleft"], font.size(s))))
+            return real_text(surface, font, s, color, **kw)
+
+        try:
+            render._text = spy
+            screen.set_clip(pygame.Rect(config.play_rect()))
+            render._draw_node_names(screen, state, ui)
+        finally:
+            render._text = real_text
+            screen.set_clip(None)
+
+        font = render._fonts()["small"]
+        slots = [render._mark_slot(font, ui.view.to_screen(sys.pos))
+                 for sys in state.systems.values()]
+        assert drawn, "no star names were drawn at all"
+        for name, rect in drawn:
+            centre = ui.view.to_screen(names[name].pos)
+            assert rect.top > centre[1], f"{name} is labelled above its system"
+            assert rect.collidelist(slots) == -1, f"{name} sits where a mark goes"
+    finally:
+        pygame.quit()
+
+
+def test_an_arriving_fleets_approach_stops_instead_of_snapping_back():
+    """A fleet closing on its destination has to *stop* at the rim. Drawing it at
+    the node's centre until the move beat's last frame and only then holding it
+    off jumps the triangle backwards by a whole radius, which is the one place a
+    playback ever moves a fleet the wrong way."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        lane = next(iter(state.lanes.values()))
+        # mid-film: the advance has already landed, so the fleet arrives this step
+        f = Fleet(owner_id=1, source_id=lane.a, dest_id=lane.b, ships=3,
+                  turns_total=3, turns_remaining=0, lane_slot=0)
+        dest = ui.view.to_screen(state.systems[lane.b].pos)
+        gap = (config.node_radius(state.systems[lane.b].production)
+               + config.FILM_ARRIVAL_GAP)
+
+        away = []
+        for step in range(21):
+            x, y, _, _ = render._fleet_at(state, ui, f, step / 20)
+            away.append(math.hypot(dest[0] - x, dest[1] - y))
+
+        assert away == sorted(away, reverse=True), "the approach went backwards"
+        assert away[-1] == pytest.approx(gap), "it must park clear of the rim"
+        assert away[0] > away[-1], "...having actually moved to get there"
+    finally:
+        pygame.quit()
+
+
 def test_every_star_name_fits_the_info_panel():
     """The panel heading holds a name whose length we don't control, so it drops to
     the small font when the normal one would overrun — and at that size every name
@@ -767,32 +1302,415 @@ def test_every_star_name_fits_the_info_panel():
         pygame.quit()
 
 
-def test_a_resized_window_refits_the_ui():
-    """The UI scale is fitted to the surface on every resize, not just at boot, so a
-    window that grows gets a proportionally bigger HUD, map and font instead of
-    keeping the size it opened at — and the font cache follows the scale on its own,
-    with no manual clear. Never scaled below the design baseline, and never
-    compounding: the same size always yields the same numbers."""
-    import main
-    pygame.init()
-    try:
-        render._FONTS.clear()   # an earlier test quit pygame; drop its stale fonts
-        base_size = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
-        measured = []
-        for size in (base_size, (config.BASE_SCREEN_W * 2, config.BASE_SCREEN_H * 2),
-                     (800, 600), base_size):
-            screen = pygame.display.set_mode(size)
-            main.fit_ui(screen, False)
-            measured.append((config.ui_scale, config.FONT_SIZE, config.HUD_RIGHT_W,
-                             config.NODE_MAX_RADIUS,
-                             render._fonts()["normal"].get_height()))
+def _filmed_turn(state, ui):
+    """Resolve one turn on a copy, returning the reel the shell would draw."""
+    before = turnfilm.copy_board(state)
+    events: list[turnfilm.Event] = []
+    engine.end_turn(state, decide=ai.decide, on_event=events.append)
+    film = turnfilm.film(events)
+    ui.film, ui.film_ms = film, 0.0
+    return turnfilm.Reel(before, film)
 
-        base, big, small, again = measured
-        assert base[0] == 1.0 and big[0] == 2.0
-        for grew, was in zip(big[1:], base[1:]):
-            assert grew > was, f"a doubled window kept its baseline sizes: {big}"
-        assert small == base, "the fit scaled below the baseline"
-        assert again == base, f"the scale compounded across resizes: {again} != {base}"
+
+def test_a_fleet_glides_rather_than_jumping():
+    """Two moments inside the move beat must draw different pixels — that is the
+    whole feature. Note there is no clock to monkeypatch: `film_ms` is a `Ui`
+    field, so a test drives a frame by setting it."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        reel = None
+        for _ in range(30):     # play on until a turn actually moves something
+            reel = _filmed_turn(state, ui)
+            if any(b.kind == "move" for b in reel.film.beats):
+                break
+            reel.run()
+        move = next(b for b in reel.film.beats if b.kind == "move")
+
+        def frame(ms: float) -> bytes:
+            reel.run_to(ms)          # as the loop does: advance, then draw
+            ui.film_ms = ms
+            render.draw(screen, reel.board, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        # early in the beat the fleets are barely off their sources; late in it
+        # they have covered a whole turn's step
+        assert frame(move.start + 1) != frame(move.end - 1)
     finally:
-        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_film_frame_draws_in_every_beat():
+    """Every beat, plus the hold at the end, has to survive being drawn — bursts,
+    caption, landed fleets held off their node, the lot."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(5, num_nodes=16, num_players=3)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        drawn = 0
+        for _ in range(40):
+            reel = _filmed_turn(state, ui)
+            ms = 0.0
+            while ms <= reel.film.total_ms:
+                reel.run_to(ms)
+                ui.film_ms = ms
+                render.draw(screen, reel.board, ui)
+                drawn += 1
+                ms += 24.0
+            reel.run()
+            ui.stop_film()
+        assert drawn > 100
+    finally:
+        pygame.quit()
+
+
+def test_end_turn_is_unreachable_while_a_film_plays():
+    """Taking the button away rather than guarding the action, the way route mode
+    does — a press during a playback must not be able to resolve another turn."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(7, num_nodes=14, num_players=2)
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0
+        reel = _filmed_turn(state, ui)
+        render.draw(screen, reel.board, ui)
+        assert ui.end_turn_rect[2] == 0
+        ui.stop_film()
+        render.draw(screen, state, ui)
+        assert ui.end_turn_rect[2] > 0      # ...and comes straight back
+    finally:
+        pygame.quit()
+
+
+def test_a_fleets_track_is_read_off_the_fleet_and_moves_it():
+    """render's whole share of lane tracks: multiply the fleet's own `lane_slot`
+    by the spread. Two boards differing only in that field must draw differently,
+    and a fleet on track 0 must sit on the lane's centre line."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        src = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        dst = state.systems[src].neighbors[0]
+        state.systems[src].ships = 30
+        engine.apply_order(state, Order(1, src, dst, 4))
+        fleet = state.fleets[0]
+        assert fleet.lane_slot == 0        # alone on the lane, so down the middle
+        # ...and out into the lane, since a fleet still on its source is drawn
+        # under that node's circle, where no offset this small is visible
+        fleet.turns_total, fleet.turns_remaining = 4, 2
+
+        def frame(slot: int) -> bytes:
+            fleet.lane_slot = slot
+            render.draw(screen, state, ui)
+            return pygame.image.tobytes(screen, "RGB")
+
+        centred = frame(0)
+        assert frame(-1) != centred
+        assert frame(1) != centred
+        assert frame(0) == centred          # ...and nothing else moved it
+    finally:
+        pygame.quit()
+
+
+def _flash_frame(screen, state, ui, landed) -> bytes:
+    """Just the burst layer, over a blank field, at the instant the event fires."""
+    ui.archive_marks(state, [landed])
+    screen.fill((0, 0, 0))
+    render._draw_film_flashes(screen, state, ui)
+    ui.clear_fading_marks()
+    return pygame.image.tobytes(screen, "RGB")
+
+
+def test_a_reinforcement_is_not_marked_as_a_fight():
+    """Your own fleet arriving at your own system is not combat, so it must not
+    draw combat's burst. `Landed.steps` holds the engagements that happened, and
+    is empty exactly when nothing fought."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        def landed(steps):
+            return turnfilm.Landed(node_id=node, fleets=(), was_owner=1, was_ships=4,
+                                   owner_id=1, ships=9, prod_progress=0, steps=steps)
+
+        blank = pygame.Surface((config.SCREEN_W, config.SCREEN_H))
+        blank.fill((0, 0, 0))
+        nothing = pygame.image.tobytes(blank, "RGB")
+
+        assert _flash_frame(screen, state, ui, landed(())) == nothing
+        fight = (turnfilm.Fold(attacker=2, attacker_ships=7, defender=1,
+                               defender_ships=4, winner=1, survivors=2),)
+        assert _flash_frame(screen, state, ui, landed(fight)) != nothing
+    finally:
+        pygame.quit()
+
+
+def test_a_playback_still_shows_what_the_turn_began_with():
+    """`visible` is not monotone: a system lost this turn drops out of it. Without
+    the union the fight that took it would play out under a grey "?" — the map
+    layer's fog is both turns' (`Ui.sees`)."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(4, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        lost = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        # seen but no longer in sight: exactly the system a fight just took
+        ui.visible = set(state.systems) - {lost}
+        ui.seen = set(state.systems)
+        landed = turnfilm.Landed(node_id=lost, fleets=(), was_owner=1, was_ships=4,
+                                 owner_id=2, ships=3, prod_progress=0,
+                                 steps=(turnfilm.Fold(attacker=2, attacker_ships=7,
+                                                      defender=1, defender_ships=4,
+                                                      winner=2, survivors=3),))
+        film = turnfilm.film([landed])
+        ui.film_ms = next(at for at, e in film.cues if e is landed) + 1
+
+        def frame(film_visible) -> bytes:
+            ui.film, ui.film_visible = film, film_visible
+            render.draw(screen, state, ui)
+            ui.stop_film()
+            return pygame.image.tobytes(screen, "RGB")
+
+        assert frame(frozenset()) != frame(frozenset({lost})), \
+            "the film must draw a system it could see when the turn began"
+        # ...and the union is additive, so nothing has to be put back afterwards
+        assert ui.film_visible == frozenset()
+        assert lost not in ui.visible
+    finally:
+        pygame.quit()
+
+
+def test_a_fight_is_labelled_with_what_it_cost():
+    """The victor's own losses, over the burst. Two fights differing only in their
+    survivors must draw differently — otherwise the label isn't reading `cost` at
+    all."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        ui.visible, ui.seen = set(state.systems), set(state.systems)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        def cost(survivors: int) -> bytes:
+            fold = turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=survivors)
+            return _flash_frame(screen, state, ui,
+                                turnfilm.Landed(node_id=node, fleets=(), was_owner=1,
+                                                was_ships=6, owner_id=2,
+                                                ships=survivors, prod_progress=0,
+                                                steps=(fold,)))
+
+        assert cost(2) != cost(7)
+    finally:
+        pygame.quit()
+
+
+def test_which_fights_get_a_mark_and_what_it_says():
+    """`_flash_marks` is the one place a film's fights become places on screen —
+    the bursts draw from it, and the star-name pass avoids what it reports. So the
+    fog gate, the reinforcement gate and the loss figure all live here."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        fold = turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                             defender_ships=6, winner=2, survivors=7)
+
+        def marks(steps, visible):
+            landed = turnfilm.Landed(node_id=node, fleets=(), was_owner=1,
+                                     was_ships=6, owner_id=2, ships=7,
+                                     prod_progress=0, steps=steps)
+            ui.visible, ui.seen = visible, set(state.systems)
+            ui.archive_marks(state, [landed])
+            out = list(render._flash_marks(state, ui))
+            ui.clear_fading_marks()
+            return out
+
+        every = set(state.systems)
+        # the attacker brought 9 and kept 7, so the label is its own 2 — not the
+        # 8 that died between them, most of which is the beaten garrison
+        assert [(m.cost, m.victor, m.node_id) for m in marks((fold,), every)] == [(2, 2, node)]
+        assert marks((), every) == []                  # a reinforcement is no fight
+        assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
+    finally:
+        pygame.quit()
+
+
+def test_a_loss_label_keeps_its_ground_through_its_hold_and_fade():
+    """The name pass avoids the loss pill for the same reason it avoids lane times
+    and a rule's "keep N" — for as long as one is up. A fight stays fully visible
+    for `FILM_FLASH_MS` and then fades over `FILM_FADE_MS` (`render._mark_fade`),
+    entirely on its own clock — independent of any film's length, so it dissolves
+    the same way whether or not the next turn has already started gliding on top
+    of it. `_flash_marks` itself never drops one early or late; pruning a fully
+    dissolved mark is `Ui.age_fading_marks`' job, not this one's.
+
+    Both halves matter. Reserved space and the fading mark cannot come apart (the
+    name pass and `_draw_film_flashes` share `_flash_marks`), and nothing is
+    reserved once a mark is cleared (leaving history, scrubbing, or simply never
+    having fired one).
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        ui.archive_marks(state, [landed])
+        fight = ui.fading_fights[0]
+        assert fight.age_ms == 0.0
+
+        assert list(render._flash_marks(state, ui))            # fresh: reserve it
+
+        ui.fading_fights[0] = replace(fight, age_ms=config.FILM_FLASH_MS)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 0.0    # still fully up at the hold's edge
+
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS / 2)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and 0.0 < marks[0].fade < 1.0    # mid-fade, not dropped
+
+        ui.fading_fights[0] = replace(
+            fight, age_ms=config.FILM_FLASH_MS + config.FILM_FADE_MS)
+        marks = list(render._flash_marks(state, ui))
+        assert marks and marks[0].fade == 1.0    # fully dissolved, but still handed
+                                                  # back — `_flash_marks` doesn't prune
+
+        ui.clear_fading_marks()
+        assert list(render._flash_marks(state, ui)) == []
+    finally:
+        pygame.quit()
+
+
+def _labels(state, ui, events):
+    """The placed labels a playback is writing, the instant ``events`` fire —
+    fresh, as `Ui.archive_marks` leaves them (age 0), mirroring what one
+    `Reel.run_to` call hands it when several land on the same instant."""
+    ui.archive_marks(state, events)
+    out = [(text, color) for _, text, color in render._film_labels(state, ui)]
+    placed = {text: center for center, text, _ in render._film_labels(state, ui)}
+    ui.clear_fading_marks()
+    return out, placed
+
+
+def test_a_finished_hull_is_marked_over_its_system():
+    """The production half of the labels: `+N` in the owner's colour, which is
+    what makes the tick visible without giving production a dwell of its own."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 4, 0, 1),))
+        events = [turnfilm.Advanced(((0, 2),)), produced]
+
+        out, _ = _labels(state, ui, events)
+        assert out == [("+1", config.player_color(1))]   # fresh: no fade yet
+
+        # a rival's yard is not ours to report, so fog gates it like a burst
+        ui.visible = set(state.systems) - {node}
+        out, _ = _labels(state, ui, events)
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_progress_with_no_hull_to_show_is_left_to_the_ring():
+    """Most ticks are a system inching toward its next ship. The ring in
+    `_draw_systems` draws those; labelling every one would bury the map."""
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        produced = turnfilm.Produced(((node, 3, 2, 0),))     # progress, no hull
+        out, _ = _labels(state, ui, [turnfilm.Advanced(((0, 2),)), produced])
+        assert out == []
+    finally:
+        pygame.quit()
+
+
+def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
+    """Production now runs *before* combat, so a hull finished this turn is
+    credited to whoever held the system going in — the defender — per
+    `Ui.archive_marks`' own rule that a `Produced` mark's colour reads the board
+    *at the time*, before any later `Landed` gets a chance to hand the system to
+    someone else. When the extra ship still isn't enough, the very same system
+    earns a combat mark right after.
+
+    The two never land on the same instant — `config.FILM_PRODUCE_MS` of lead,
+    borrowed from the glide, is what lets the `+1` register as having contributed
+    to the fight rather than blurring into it — so this archives them one call
+    apart, the way two separate `Reel.run_to` calls would. Neither expires
+    quickly, so both are still up together and must not be drawn on top of each
+    other.
+    """
+    pygame.init()
+    render._FONTS.clear()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(2, num_nodes=16, num_players=2)
+        ui = _make_ui(state)
+        node = next(s.id for s in state.systems.values() if s.owner_id == 1)
+
+        produced = turnfilm.Produced(((node, 8, 0, 1),))
+        ui.archive_marks(state, [produced])    # still owner 1: the defender's hull
+
+        state.systems[node].owner_id = 2       # ...then the fight takes it anyway
+        landed = turnfilm.Landed(
+            node_id=node, fleets=(), was_owner=1, was_ships=6, owner_id=2, ships=7,
+            prod_progress=0,
+            steps=(turnfilm.Fold(attacker=2, attacker_ships=9, defender=1,
+                                 defender_ships=6, winner=2, survivors=7),))
+        ui.archive_marks(state, [landed])
+
+        out = [(text, color) for _, text, color in render._film_labels(state, ui)]
+        placed = {text: center for center, text, _ in render._film_labels(state, ui)}
+        ui.clear_fading_marks()
+
+        assert sorted(t for t, _ in out) == ["+1", "−2"]
+        assert placed["+1"][0] == placed["−2"][0], "same column"
+        assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
+        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
+        # the hull is the defender's, in its colour; the fight is the attacker's —
+        # the two need not agree, since the hull was built before the system
+        # changed hands
+        assert dict(out) == {"+1": config.player_color(1), "−2": config.player_color(2)}
+    finally:
         pygame.quit()

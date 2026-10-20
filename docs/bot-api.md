@@ -3,7 +3,7 @@
 A wire protocol so a bot can be written in any language, judged in the ladder,
 and never need to be Python. Why it takes this shape — and why the in-app
 rule-builder it replaces was not merged — is in
-[`bot-design.md`](bot-design.md) under "Bots that aren't Python".
+[`design/bots.md`](design/bots.md) under "Bots that aren't Python".
 
 **Built:** the schema (`starconquest/botio.py`, pure core), the transport
 (`tests/botproc.py`), a worked example (`bots/rusherwire`, a port of
@@ -56,7 +56,7 @@ drop-in file that fails to import.
 `budget_ms` is the in-game figure the bot wants — the same thing a model's own
 `SEARCH_BUDGET_S` is — and `budget_scale` is its opt-in to having that lifted by
 a batch runner, exactly as a module-level `BUDGET_SCALE` is (see
-`ai.set_budget_scale`, and bot-design's "Replaying a bot for the leaderboard").
+`ai.set_budget_scale`, and `design/bots.md`, "Replaying a bot for the leaderboard").
 The runner sends the *product*; the bot never computes it.
 
 `version` is load-bearing and not decoration. `bot_replay.engine_rev()` digests
@@ -96,8 +96,21 @@ sent nothing further until turn 0.
 and `autoplay`, which are presentation and play-style rather than setup. Sending
 all of it rather than a curated subset is deliberate: a posted leaderboard map
 carries tuned knobs, `nodes` and `ship_ly_per_turn` together move lane length
-over an order of magnitude (bot-design, "Lane length across the parameter
+over an order of magnitude (`design/bots.md`, "Lane length across the parameter
 space"), and a bot that cannot see which regime it is in cannot price anything.
+
+`setup.mode` has a **third value, `"custom"`**: the board was drawn by hand in the
+map creator rather than generated. Treat it as "assume nothing structural". A
+generated map is planar, gives every seat a peripheral start and exactly one
+system, and spaces its systems evenly; a hand map may do none of that — lanes can
+cross, systems can sit close together, a seat may start with several systems or a
+central one, and production and garrisons follow no distribution. Everything a bot
+actually needs is still in `map` below, measured from the real board. The seed
+also stops meaning what it usually does: every value in a hand map is concrete, so
+the seed drives combat dice and star names only.
+
+`PROTOCOL` does **not** bump for this. It moves when a message's *meaning*
+changes, not when an existing field gains a value.
 
 **`rules`** is the derived arithmetic a Python bot reads live off `config` and
 `combat`, computed once and handed over:
@@ -213,7 +226,7 @@ offers a way to run a rival's `decide` — no `simulate` call back into the engi
 and `ai.STRATEGIES` is not on the wire. Predicting what an opponent *might* do is
 fair game and a bot is welcome to model the rules itself; reading what one
 actually did this turn is not on offer to anyone, since turns resolve
-simultaneously (bot-design, "`models/knower.py` and simultaneous resolution").
+simultaneously (`design/knower.md`, "`models/knower.py` and simultaneous resolution").
 
 That leaves rival identity, which is a policy switch rather than a fact:
 

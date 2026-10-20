@@ -7,7 +7,7 @@
     uv run python tools/position_suite.py --supabase           # the shared corpus
     uv run python tools/position_suite.py --csv out.csv        # every row, for later
 
-Every bot measurement in ``docs/bot-design.md`` is a bot against another bot, and
+Every bot measurement in ``docs/design/bots.md`` is a bot against another bot, and
 that is a real limit rather than a stylistic one: a roster playing itself only
 ever visits positions bots create. A stored replay is a position a *person*
 built — a different shape, with different mistakes in it — and it comes with a
@@ -34,7 +34,7 @@ Where the games come from:
 
 Read the output as a *direction*, never as a verdict. The sample is however many
 games happen to exist, drawn from whoever played them, on whatever setups they
-chose — see "Sweep the speed and node knobs" in bot-design for why a measurement
+chose — see "Lane length across the parameter space" in docs/design/bots.md for why a measurement
 taken in one corner of the parameter space says nothing about the others. What
 this is good for is finding where a bot is worse than a person, which is a
 hypothesis worth a proper paired sweep afterwards.
@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import signal
 import statistics
 import sys
 import time
@@ -53,8 +54,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, replay  # noqa: E402
-from tests import sim  # noqa: E402 — the shared headless harness
+from starconquest import ai, replay
+from tests import sim
 
 # A position is only worth playing if there is a game left to play from it. The
 # defaults sample every 20 turns and drop the last 20, where a decided match is a
@@ -63,13 +64,31 @@ DEFAULT_EVERY = 20
 DEFAULT_SKIP_LAST = 20
 
 
+class _Cancelled(BaseException):
+    """Raised from the SIGTERM handler below, never caught as an ordinary error.
+
+    A CI timeout kills the process a fixed, short grace period after asking it to
+    stop (GitHub Actions: SIGINT then SIGTERM, ~7.5s apart before SIGKILL), and a
+    single position can cost over a hundred seconds — so waiting for the current
+    position to finish before checking a flag can miss that whole window. Raising
+    immediately, the same way Python's own SIGINT-to-KeyboardInterrupt already
+    does, is what makes a slow position interruptible rather than merely the gaps
+    between them. Subclassing ``BaseException`` (not ``Exception``) keeps it out
+    of ``except Exception`` — a genuine cancellation must never be logged and
+    swallowed as "one bad position, skipped".
+    """
+
+
 def local_logs(directory: Path | None = None) -> list[replay.GameLog]:
     """Every replayable match saved on this machine, newest first.
 
     Version-1 logs are skipped for the same reason ``replay.latest_log`` skips
     them: they recorded the human's orders alone and re-ran the AI, so they cannot
     be replayed faithfully and the position they rebuild is not the one that was
-    played (see ``replay``'s module docstring).
+    played (see ``replay``'s module docstring). A log stamped under rules the
+    engine has since moved past (``GameLog.is_current``) is skipped for the same
+    reason: the position ``sim.play_from`` would branch from is not the one that
+    was actually reached.
     """
     paths = replay.list_logs() if directory is None else sorted(
         directory.glob("game_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -79,7 +98,7 @@ def local_logs(directory: Path | None = None) -> list[replay.GameLog]:
             log = replay.load(path)
         except (OSError, ValueError):
             continue
-        if log.version >= replay.FORMAT_VERSION and log.turn_count:
+        if log.version >= replay.FORMAT_VERSION and log.turn_count and log.is_current:
             out.append(log)
     return out
 
@@ -90,9 +109,12 @@ def supabase_logs(limit: int = 0) -> list[replay.GameLog]:
     Imported lazily so the local path — the one that needs no credentials — does
     not depend on the worker's HTTP client at all.
     """
-    from tools.bot_replay import (MISSING_CREDENTIALS, Supabase,  # noqa: PLC0415
-                                  credentials)
-    from tools.verify_scores import best_logs      # noqa: PLC0415
+    from tools.bot_replay import (
+        MISSING_CREDENTIALS,
+        Supabase,
+        credentials,
+    )
+    from tools.verify_scores import best_logs
 
     url, key = credentials()
     if not url or not key:
@@ -179,15 +201,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="read the shared corpus instead of local games")
     parser.add_argument("--bot-timeout", type=float, default=0.0,
                         help="seconds per decide() before a seat forfeits the turn")
+    parser.add_argument("--aux", nargs="*", default=[], metavar="BOT=VALUE",
+                        help="override a bot's aux for this run, e.g. --aux knower=8 "
+                             "(default: tools.bot_replay.replay_aux, the same profile "
+                             "the leaderboard's bot column replays each bot at)")
+    parser.add_argument("--budget-scale", type=float, default=None,
+                        help="multiply the bots' own per-decide wall-clock guards by "
+                             "this (default: tools.bot_replay.BUDGET_SCALE). Sized for "
+                             "the browser build; nothing here waits on a frame, and a "
+                             "guard that never trips is what keeps a result "
+                             "reproducible. 1 restores the in-game behaviour")
     parser.add_argument("--csv", type=Path, default=None,
                         help="also write every row here, for analysis elsewhere")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Lazy, and read even off the local path: this is a batch tool with nothing
+    # waiting on a frame, so — same reasoning as tools/bot_replay.py — a bot's own
+    # wall-clock guard is worth lifting out of the way, and each bot is worth
+    # measuring at its best profile rather than at its untuned default.
+    from tools.bot_replay import BUDGET_SCALE, replay_aux
+
     args = parse_args(argv)
+    try:
+        overrides = dict(item.split("=", 1) for item in args.aux)
+        overrides = {bot: float(value) for bot, value in overrides.items()}
+    except ValueError:
+        print(f"--aux wants BOT=VALUE pairs, got: {' '.join(args.aux)}", file=sys.stderr)
+        return 2
+
     loaded = ai.load_models()
     roster = args.bots or ai.available_strategies()
+    aux_for = lambda bot: replay_aux(bot, overrides)
+    profile = ", ".join(f"{bot}@{aux_for(bot):g}" for bot in roster if aux_for(bot) != 1.0)
+    scale = BUDGET_SCALE if args.budget_scale is None else args.budget_scale
+    widened = ai.set_budget_scale(scale)
 
     logs = supabase_logs(args.games) if args.supabase else local_logs(args.dir)
     if args.games > 0:
@@ -200,31 +249,50 @@ def main(argv: list[str] | None = None) -> int:
     plan = [(log, turn) for log in logs
             for turn in sim.positions(log, args.every, args.skip_last)]
     print(f"models {', '.join(loaded) or 'none'}")
+    print(f"replay profile: {profile or 'every bot at its default aux'}"
+          + (f" · wall-clock guards x{scale:g} on {', '.join(widened)}"
+             if widened and scale != 1 else ""))
     print(f"{len(logs)} games · {len(plan)} positions · {len(roster)} bots "
           f"= {len(plan) * len(roster)} runs")
 
+    def _cancel(signum, frame):
+        raise _Cancelled()
+
+    signal.signal(signal.SIGTERM, _cancel)
+
     by_bot: dict[str, list[sim.PositionResult]] = {bot: [] for bot in roster}
     started = time.time()
-    for index, (log, turn) in enumerate(plan, 1):
-        for bot in roster:
-            try:
-                by_bot[bot].append(
-                    sim.play_from(log, turn, bot, max_turns=args.max_turns,
-                                  bot_timeout=args.bot_timeout))
-            except Exception as err:  # noqa: BLE001 — one bad position, not a dead run
-                print(f"  {log.match_id[:8]}@{turn} {bot}: skipped ({err})")
-        print(f"  [{index}/{len(plan)}] {log.match_id[:8]} turn {turn}"
-              f" · {time.time() - started:.0f}s", end="\r", flush=True)
+    index = 0
+    stopped = False
+    try:
+        for index, (log, turn) in enumerate(plan, 1):
+            for bot in roster:
+                try:
+                    by_bot[bot].append(
+                        sim.play_from(log, turn, bot, aux=aux_for(bot), max_turns=args.max_turns,
+                                      bot_timeout=args.bot_timeout))
+                except Exception as err:  # noqa: BLE001 — one bad position, not a dead run
+                    print(f"  {log.match_id[:8]}@{turn} {bot}: skipped ({err})")
+            print(f"  [{index}/{len(plan)}] {log.match_id[:8]} turn {turn}"
+                  f" · {time.time() - started:.0f}s", end="\r", flush=True)
+    except (KeyboardInterrupt, _Cancelled):
+        # A CI timeout, or a person losing patience — either way the roster still
+        # played `index` real positions, and discarding that in favour of nothing
+        # is a worse outcome than a smaller, honestly-labelled sample.
+        stopped = True
     print(" " * 70, end="\r")
+    if stopped:
+        print(f"stopped after {index}/{len(plan)} positions — reporting on what finished")
 
     report(by_bot)
     if args.csv:
         rows = [asdict(r) | {"gain": r.gain} for rows in by_bot.values() for r in rows]
-        with open(args.csv, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"wrote {len(rows)} rows to {args.csv}")
+        if rows:
+            with open(args.csv, "w", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"wrote {len(rows)} rows to {args.csv}")
     return 0
 
 

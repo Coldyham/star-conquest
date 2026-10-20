@@ -6,7 +6,7 @@
     uv run python tools/config_census.py --csv out.csv   # a row per game, for later
 
 Every bot in ``models/`` is fitted at whatever knobs the person fitting it
-happened to pick, and "Sweep the speed and node knobs" in ``docs/bot-design.md``
+happened to pick, and "Lane length across the parameter space" in ``docs/design/bots.md``
 is the standing warning about what that costs: ``WORLD_SIZE`` is fixed, so a
 lane's length in light-years rises as the node count falls, and
 ``config.SHIP_LY_PER_TURN`` rescales every lane on top. A margin keyed off travel
@@ -46,9 +46,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
-from tools.bot_replay import Supabase  # noqa: E402 — the same paged PostgREST client
+from starconquest import settings as settings_mod
+from starconquest.settings import Settings
+from tools.bot_replay import Supabase
 
 # Where the board keeps its own project details. The anon key is public by
 # design (RLS is the boundary, not the key), so this is a read of a committed
@@ -74,6 +74,14 @@ def anon_credentials() -> tuple[str, str]:
     if not url or not key:
         raise SystemExit(f"{CONFIG_MJS} has no SUPABASE_URL/SUPABASE_ANON_KEY to read.")
     return url, key
+
+
+def public_rows(table: str, query: str) -> list[dict]:
+    """Every row of a public query, read with the publishable key. The one door
+    for that from another tool, so tests/test_schema_grants.py checks these reads
+    against anon's grants rather than the worker's."""
+    url, key = anon_credentials()
+    return Supabase(url, key).select(table, query)
 
 
 def fetch(url: str, key: str) -> tuple[list[dict], list[dict]]:

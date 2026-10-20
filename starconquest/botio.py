@@ -3,7 +3,7 @@
 Pure core (no pygame, and deliberately no ``subprocess``): this module only
 *shapes* the messages. Spawning a bot and talking to it is the transport's job
 (``tests/botproc.py``), which keeps the schema testable with no child process
-anywhere near it. ``docs/bot-api.md`` is the protocol; ``docs/bot-design.md``
+anywhere near it. ``docs/bot-api.md`` is the protocol; ``docs/design/bots.md``
 under "Bots that aren't Python" is why each field is here.
 
 Two messages, and the split between them is what a bot can and cannot expect to
@@ -16,9 +16,11 @@ only what moves. Nothing here reads the wall clock, and nothing draws from
 from __future__ import annotations
 
 import random
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
-from . import combat, config, settings as settings_mod
+from . import combat, config
+from . import settings as settings_mod
 from .model import GameState, Order
 
 # Bumped when a message's meaning changes, not when a field is added: a bot that
@@ -73,7 +75,7 @@ def setup(state: GameState) -> dict[str, Any]:
     ``Settings`` reaches the wire with no second edit here.
 
     Sent in full rather than curated because ``nodes`` and ``ship_ly_per_turn``
-    together move lane length over an order of magnitude (see bot-design, "Lane
+    together move lane length over an order of magnitude (see docs/design/bots.md, "Lane
     length across the parameter space"), and a posted leaderboard map carries
     tuned knobs: a bot that cannot see which regime it is in cannot price
     anything. ``challenge``/``autoplay`` are excluded — presentation and
@@ -160,7 +162,7 @@ def decide_seed(seed: int, turn: int, pid: int) -> int:
 
 
 def turn_payload(state: GameState, pid: int, budget_ms: int,
-                 rng_seed: Optional[int] = None) -> dict[str, Any]:
+                 rng_seed: int | None = None) -> dict[str, Any]:
     """What moved since the handshake, plus this decision's seed and budget.
 
     ``lane_turns`` rides along **only** when ship-speed growth is switched on,
@@ -193,7 +195,7 @@ def turn_payload(state: GameState, pid: int, budget_ms: int,
     return payload
 
 
-def _as_int(value: Any) -> Optional[int]:
+def _as_int(value: Any) -> int | None:
     """An exact integer, or None. Rejects bools, floats with a fraction, and NaN."""
     if isinstance(value, bool):
         return None

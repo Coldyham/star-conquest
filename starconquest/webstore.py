@@ -20,11 +20,19 @@ quota and a read-only disk all fail here, and every caller carries on regardless
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from . import paths
-from .paths import (WEB_BESTS_KEY, WEB_SHARE_GAMES_KEY, WEB_SHARED_SETTINGS_KEY,
-                    data_dir, is_web)
+from .paths import (
+    WEB_ANIMATE_TURNS_KEY,
+    WEB_BESTS_KEY,
+    WEB_IRONMAN_KEY,
+    WEB_PBP_NAME_KEY,
+    WEB_SHARE_GAMES_KEY,
+    WEB_SHARED_SETTINGS_KEY,
+    WEB_UI_SIZE_KEY,
+    data_dir,
+    is_web,
+)
 
 _FILE = "kv.json"  # desktop/Android backing file, beside saves/ and games/
 
@@ -56,7 +64,7 @@ def get(key: str) -> str:
         return ""
 
 
-def set(key: str, value: str) -> bool:  # noqa: A001 - deliberate storage verb
+def set(key: str, value: str) -> bool:
     """Store ``value`` under ``key``. True if it landed."""
     if not is_web():
         try:
@@ -103,7 +111,76 @@ def set_share_games(on: bool) -> bool:
     return set(WEB_SHARE_GAMES_KEY, "1" if on else "")
 
 
-def best(challenge_key: str, *legacy: str) -> Optional[tuple[int, int]]:
+def pbp_name() -> str:
+    """The name last given in the play-by-post prompt, or ``""``."""
+    return (get(WEB_PBP_NAME_KEY) or "").strip()
+
+
+def set_pbp_name(name: str) -> bool:
+    """Remember it for next time. False if the store refused."""
+    return set(WEB_PBP_NAME_KEY, name.strip())
+
+
+def animate_turns() -> bool:
+    """Whether the player has the animated end of turn switched on.
+
+    On unless it has been explicitly switched off: an absent key, an unreadable
+    store and a fresh install all read as True, so the encoding is tri-state here
+    (unlike ``share_games``, which defaults off and can use a plain ``""``-for-off
+    encoding) — only a stored ``"0"`` reads False; a legacy ``"1"`` from before this
+    default flipped, and the ``""`` an absent key reads as, both still read True.
+    """
+    return get(WEB_ANIMATE_TURNS_KEY) != "0"
+
+
+def set_animate_turns(on: bool) -> bool:
+    """Store the preference. False if the store refused it, which the menu says out
+    loud rather than letting a setting quietly forget itself."""
+    return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
+
+
+def ironman() -> bool:
+    """Whether the player has ironman mode on: no History button while a game is
+    undecided, so no rewinding a turn that went badly. Honour-based (nothing is
+    recorded or posted about it) and off unless switched on, like `share_games`."""
+    return get(WEB_IRONMAN_KEY) == "1"
+
+
+def set_ironman(on: bool) -> bool:
+    """Store the preference. False if the store refused it."""
+    return set(WEB_IRONMAN_KEY, "1" if on else "")
+
+
+# The sizes the UI-size control steps through, as percentages of the fitted scale.
+UI_SIZES = (75, 90, 100, 110, 125, 150, 175, 200)
+
+
+def ui_size() -> int:
+    """The player's UI size, a percentage from ``UI_SIZES``; 100 by default.
+
+    Anything stored that is not one of the steps (a hand-edited file, a step list
+    that has since changed) reads as the nearest step, so the control always has
+    a position to step from.
+    """
+    try:
+        pct = int(get(WEB_UI_SIZE_KEY))
+    except ValueError:
+        return 100
+    return min(UI_SIZES, key=lambda step: abs(step - pct))
+
+
+def set_ui_size(pct: int) -> bool:
+    """Store the preference. False if the store refused it."""
+    return set(WEB_UI_SIZE_KEY, str(pct))
+
+
+def step_ui_size(pct: int, by: int) -> int:
+    """The size ``by`` steps from ``pct`` (a ``UI_SIZES`` entry), clamped to the ends."""
+    i = UI_SIZES.index(pct) + by
+    return UI_SIZES[max(0, min(len(UI_SIZES) - 1, i))]
+
+
+def best(challenge_key: str, *legacy: str) -> tuple[int, int] | None:
     """Your best ``(turns, lost)`` on this setup, or None if you've not won it.
 
     ``legacy`` are superseded ids for the same setup (``Settings.challenge_keys``
@@ -151,26 +228,23 @@ def record_best(challenge_key: str, turns: int, lost: int, *legacy: str) -> bool
 def leaderboard_origin() -> str:
     """Where the leaderboard lives, from where *we* are.
 
-    On the web the two sites' names differ by one string, and Netlify names every
-    deploy of both from the same context — so the board that matches this build is
-    derivable rather than configured (see ``paths.sibling_host``). A deploy
-    preview of the game therefore talks to the deploy preview of the board, with
-    nothing to edit by hand between them.
+    On a ``.netlify.app`` page it is this page's own origin: the board and its
+    functions are served by the game's site, so every deploy — production, a
+    deploy preview, a branch deploy — answers for itself.
 
-    Everywhere else, and for any host the rule cannot read — a custom domain,
-    localhost, desktop, Android — the configured production origin, which is what
-    the feature has always used.
+    Everywhere else — a custom domain, localhost, desktop, Android — the
+    configured production origin, ``paths.LEADERBOARD_ORIGIN``. (Localhost can
+    call it: the functions' CORS allow-list admits a local server.)
     """
     if is_web():
         import platform as _platform
 
         try:
             host = str(_platform.window.location.hostname)
-        except Exception:  # noqa: BLE001 — no DOM, no derivation
+        except Exception:  # no DOM, nothing to read
             host = ""
-        sibling = paths.sibling_host(host, paths.LEADERBOARD_TAG, add=True)
-        if sibling:
-            return f"https://{sibling}"
+        if host.endswith(paths.NETLIFY_SUFFIX):
+            return f"https://{host}"
     return paths.LEADERBOARD_ORIGIN
 
 
@@ -223,13 +297,14 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def open_url(url: str) -> bool:
-    """Open ``url`` in a browser tab, best-effort.
+    """Navigate to ``url``, best-effort.
 
-    On the web that is ``window.open`` in a new tab, so the finished game stays
-    where it is; elsewhere it is the platform's default browser, because a desktop
+    On the web that is a same-tab navigation (``window.location``), so bouncing
+    between the game and the board — routine on a leaderboard visit, not just a
+    one-off score post — doesn't pile up tabs; the back button is what returns to
+    the game. Elsewhere it is the platform's default browser, because a desktop
     player has just as much reason to post a score. True means the call was
-    accepted, not that a tab definitely appeared — a popup blocker can still
-    refuse it, the same contract as ``copy_to_clipboard``.
+    accepted, not that navigation definitely happened.
     """
     if not url:
         return False
@@ -237,10 +312,8 @@ def open_url(url: str) -> bool:
         import platform as _platform
 
         try:
-            # A blocked popup is reported as a null window rather than an error,
-            # and pygame's click reaches us too late to always count as a user
-            # gesture — so test the result instead of assuming it worked.
-            return _platform.window.open(url, "_blank") is not None
+            _platform.window.location = url
+            return True
         except Exception:
             return False
     try:

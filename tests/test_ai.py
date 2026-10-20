@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from starconquest import ai, mapgen
+from starconquest import ai, engine, mapgen
 from starconquest.model import AiParams, Order
 
 
@@ -103,7 +103,7 @@ def _register_aux_bot(name: str, **attrs):
     module = type(ai)(modname)
     for key, value in attrs.items():
         setattr(module, key, value)
-    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn = lambda st, pid: []
     fn.__module__ = modname
     sys.modules[modname] = module
     ai.register(name, fn)
@@ -113,6 +113,85 @@ def _register_aux_bot(name: str, **attrs):
 def _drop_aux_bot(name: str, modname: str) -> None:
     ai.STRATEGIES.pop(name, None)
     sys.modules.pop(modname, None)
+
+
+def test_setup_warning_is_empty_without_a_hook():
+    modname = _register_aux_bot("warn_none_test")
+    try:
+        assert ai.setup_warning("warn_none_test", None, [2]) == []
+        assert ai.setup_warning("no_such_strategy", None, [2]) == []
+    finally:
+        _drop_aux_bot("warn_none_test", modname)
+
+
+def test_setup_warning_passes_the_seats_and_keeps_only_real_lines():
+    seen = []
+
+    def hook(settings, seats):
+        seen.append(seats)
+        return ["too big", "", 7, "  "]
+
+    modname = _register_aux_bot("warn_test", setup_warning=hook)
+    try:
+        assert ai.setup_warning("warn_test", "cfg", (2, 3)) == ["too big"]
+        assert seen == [[2, 3]]
+    finally:
+        _drop_aux_bot("warn_test", modname)
+
+
+def test_a_broken_setup_warning_never_blocks_a_start():
+    def boom(settings, seats):
+        raise RuntimeError("bug in a drop-in")
+
+    for name, hook in (("warn_boom", boom), ("warn_junk", lambda s, q: "not a list")):
+        modname = _register_aux_bot(name, setup_warning=hook)
+        try:
+            assert ai.setup_warning(name, None, [2]) == []
+        finally:
+            _drop_aux_bot(name, modname)
+
+
+def test_setup_warning_tells_a_hook_who_the_people_are_only_if_it_asks():
+    seen = []
+
+    def asks(settings, seats, people=()):
+        seen.append(people)
+        return []
+
+    modname = _register_aux_bot("warn_people", setup_warning=asks)
+    try:
+        ai.setup_warning("warn_people", None, [2], people={3, 1})
+        ai.setup_warning("warn_people", None, [2])
+        assert seen == [[1, 3], []]
+    finally:
+        _drop_aux_bot("warn_people", modname)
+    # ...and a hook written before `people` existed is called exactly as before.
+    modname = _register_aux_bot("warn_old", setup_warning=lambda s, q: ["old"])
+    try:
+        assert ai.setup_warning("warn_old", None, [2], people=[1]) == ["old"]
+    finally:
+        _drop_aux_bot("warn_old", modname)
+
+
+def test_decide_ms_reads_the_hook_and_says_nothing_otherwise():
+    modname = _register_aux_bot("cost_test", decide_ms=lambda settings, seat: 4.5 + seat)
+    try:
+        assert ai.decide_ms("cost_test", None, 2) == 6.5
+    finally:
+        _drop_aux_bot("cost_test", modname)
+    assert ai.decide_ms("heuristic", None, 2) == 0.0
+    assert ai.decide_ms("no_such_strategy", None, 2) == 0.0
+
+    def boom(settings, seat):
+        raise RuntimeError("bug in a drop-in")
+
+    for i, hook in enumerate((boom, lambda s, q: "slow", lambda s, q: -3.0,
+                              lambda s, q: float("nan"), lambda s, q: float("inf"))):
+        modname = _register_aux_bot(f"cost_junk{i}", decide_ms=hook)
+        try:
+            assert ai.decide_ms(f"cost_junk{i}", None, 2) == 0.0
+        finally:
+            _drop_aux_bot(f"cost_junk{i}", modname)
 
 
 def test_aux_spec_is_none_without_a_declaration():
@@ -134,6 +213,35 @@ def test_aux_spec_reads_label_range_and_int():
         assert ai.aux_spec("aux_bot_test") == ("Search depth", 0.0, 4.0, 1.0, True)
     finally:
         _drop_aux_bot("aux_bot_test", modname)
+
+
+def test_aux_names_name_each_stop_of_an_integer_knob():
+    modname = _register_aux_bot("aux_named_test", AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1),
+                                AUX_INT=True, AUX_NAMES=("Off", " Predict ", "Search"))
+    try:
+        assert ai.aux_names("aux_named_test") == ("Off", "Predict", "Search")
+        assert ai.aux_stop_name("aux_named_test", 0) == "Off"
+        assert ai.aux_stop_name("aux_named_test", 1.0) == "Predict"
+        assert ai.aux_stop_name("aux_named_test", 9) == "Search"     # clamped, as the slider is
+    finally:
+        _drop_aux_bot("aux_named_test", modname)
+
+
+def test_aux_names_are_ignored_unless_they_fit_the_slider():
+    """A bad tuple costs the bot its names and nothing else: the number shows."""
+    good = dict(AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1), AUX_INT=True)
+    for extra in ({"AUX_NAMES": ("Off", "On")},                    # one short
+                  {"AUX_NAMES": ("Off", "", "Search")},             # a blank stop
+                  {"AUX_NAMES": "OffPredictSearch"},                # not a sequence
+                  {"AUX_NAMES": ("a", "b", "c"), "AUX_INT": False},  # a float knob
+                  {"AUX_NAMES": ("a", "b", "c"), "AUX_RANGE": (0, 1, 0.5)}):
+        modname = _register_aux_bot("aux_badnames_test", **{**good, **extra})
+        try:
+            assert ai.aux_names("aux_badnames_test") is None, extra
+            assert ai.aux_stop_name("aux_badnames_test", 1) is None
+        finally:
+            _drop_aux_bot("aux_badnames_test", modname)
+    assert ai.aux_names("heuristic") is None
 
 
 def test_aux_spec_defaults_and_tolerates_junk():
@@ -179,6 +287,11 @@ def _decisions(state, pid, fn):
         state.rng.setstate(saved)
 
 
+# Always a Search, which plays fights out at the real jitter, so its plan follows
+# the jitter by design (as knower's does at aux 2; knower is checked at Predict).
+_ROLLS_OUT_FIGHTS = {"council"}
+
+
 def test_a_gentler_jitter_never_thins_a_tuned_margin():
     """At jitter below its tuning every bot must plan exactly as it does at 0.10.
 
@@ -192,6 +305,8 @@ def test_a_gentler_jitter_never_thins_a_tuned_margin():
     before = config.COMBAT_JITTER
     try:
         for name in names:
+            if name in _ROLLS_OUT_FIGHTS:
+                continue
             fn = ai.STRATEGIES[name]
             state = mapgen.generate(4, "random", 24, 3)
             for p in state.players.values():
@@ -240,3 +355,69 @@ def test_a_wilder_jitter_does_still_widen_the_ask():
         assert moved, "no bot reacted to a jitter well past its tuning"
     finally:
         config.COMBAT_JITTER = before
+
+
+# --------------------------------------------------------------------------- #
+# Legacy names: a bot folded into a family as one of its stops
+# --------------------------------------------------------------------------- #
+def test_a_legacy_name_is_its_family_at_its_stop():
+    """`ai.LEGACY` is the one place a stored name becomes a family and stop."""
+    assert ai.canonical("council", 1.0) == ("knower", 3.0)
+    assert ai.canonical("council", 0.0) == ("knower", 2.0)
+    assert ai.canonical("council", 12.0) == ("knower", 3.0), "council read any 1+ as On"
+    assert ai.canonical("council", "junk") == ("knower", 3.0), "unreadable was On"
+    assert ai.canonical("claudebot", 7.0) == ("thinker", 0.0)
+    assert ai.canonical("knower", 12.0) == ("knower", 12.0), "a family is itself"
+    assert ai.family("council") == "knower" and ai.family("marshal") == "marshal"
+
+
+def test_a_legacy_name_is_never_registered_and_plays_through_its_family():
+    ai.load_models()
+    for name, (family, _) in ai.LEGACY.items():
+        assert name not in ai.STRATEGIES, f"{name} would shadow its fold"
+        assert family in ai.STRATEGIES and ai.known(name)
+        assert name not in ai.available_strategies()
+    assert not ai.known("no_such_bot")
+
+
+def test_a_legacy_seat_decides_as_its_family_and_keeps_its_name():
+    """claudebot was thinker's Claudebot stop exactly (tools/fold_check.py), and
+    the seat is shown to thinker as a seat of its own only for the call."""
+    ai.load_models()
+    seen = []
+    real = ai.STRATEGIES["thinker"]
+
+    def spy(state, pid):
+        p = state.players[pid]
+        seen.append((p.ai_strategy, p.ai_params.aux))
+        return real(state, pid)
+
+    for name, aux in (("claudebot", 1.0), ("thinker", 0.0)):
+        state = mapgen.generate_random(3, num_nodes=18, num_players=2)
+        state.players[2].ai_strategy, state.players[2].ai_params.aux = name, aux
+        for _ in range(8):
+            engine.end_turn(state, decide=ai.decide)
+        if name == "claudebot":
+            legacy = [(o.source_id, o.dest_id, o.ships) for o in ai.decide(state, 2)]
+            ai.STRATEGIES["thinker"] = spy
+            try:
+                ai.decide(state, 2)
+            finally:
+                ai.STRATEGIES["thinker"] = real
+            assert seen == [("thinker", 0.0)]
+            assert (state.players[2].ai_strategy, state.players[2].ai_params.aux) == ("claudebot", 1.0)
+        else:
+            assert [(o.source_id, o.dest_id, o.ships) for o in ai.decide(state, 2)] == legacy
+
+
+def test_a_value_past_a_new_top_stop_reads_as_the_old_top():
+    """knower's old depth slider ran to 12: a carried 12 must not become Council,
+    nor an actuary 12 Hunt (`AUX_OVER`)."""
+    ai.load_models()
+    assert ai.aux_over("knower") == 2.0 and ai.aux_over("actuary") == 2.0
+    assert ai.aux_over("thinker") is None and ai.aux_over("marshal") is None
+    assert ai.aux_reads_as("knower", 12.0) == 2.0 and ai.aux_reads_as("knower", 3.0) == 3.0
+    assert ai.aux_stop_name("actuary", 12.0) == "Learning"
+    assert ai.aux_stop_name("actuary", 3.0) == "Hunt"
+    assert ai.aux_stop_name("thinker", 12.0) == "Thinker"
+    assert ai.aux_stop_name("claudebot", 1.0) == "Claudebot"

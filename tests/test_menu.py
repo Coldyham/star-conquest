@@ -12,11 +12,11 @@ import sys
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
+import pygame
 
-from starconquest import ai, combat, config, menu  # noqa: E402
-from starconquest.menu import MenuState  # noqa: E402
-from starconquest.settings import Challenge, Settings  # noqa: E402
+from starconquest import ai, combat, config, mapgen, menu
+from starconquest.menu import MenuState
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, seed_top
 
 
 def _setup():
@@ -47,25 +47,61 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
-def test_file_row_never_overlaps_on_the_web_layout():
-    """The web File row carries an extra 'Get Link' button, which used to leave the
-    name field narrower than its own default value — so a long name ran out over
-    Save/Load. The field is now sized from what the buttons leave, and its text is
-    clipped to the box."""
+def test_web_file_row_is_get_link_and_recently_played():
+    """The web build's data dir is an in-memory virtual filesystem that doesn't
+    survive a reload, so a file Save/Load there would silently vanish — the web
+    File row instead offers 'Get Link' (the URL-token path that actually
+    persists) and 'Recently played' (the board's by-config listing), with no
+    filename field or Save/Load buttons to click."""
     screen, ms, settings = _setup()
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
+        menu.draw(screen, ms, settings)
+        assert "get_link" in ms.rects
+        assert "browse_configs" in ms.rects
+        assert not ms.rects["get_link"].colliderect(ms.rects["browse_configs"])
+        for key in ("filename_field", "save_settings", "load_settings"):
+            assert key not in ms.rects
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
+def test_recently_played_opens_the_leaderboards_main_list(monkeypatch):
+    """Clicking 'Recently played' opens the board's main list, newest activity
+    first, not its "By config" grouping — the button names that list. A Save/Load
+    row could never have offered it on the web, where a saved file silently
+    vanishes on reload."""
+    opened = []
+    monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
+    screen, ms, settings = _setup()
+    real_is_web = menu.is_web
+    menu.is_web = lambda: True
+    try:
+        assert _click_key(screen, ms, settings, "browse_configs") is None
+        assert opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_RECENT_PATH)]
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
+def test_desktop_file_row_has_no_get_link():
+    """Desktop keeps the file-backed Save/Load row; Get Link and Recently played
+    are web-only."""
+    screen, ms, settings = _setup()
+    try:
         ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted
         menu.draw(screen, ms, settings)
+        assert "get_link" not in ms.rects
+        assert "browse_configs" not in ms.rects
         field = ms.rects["filename_field"]
         assert field.width > 0
-        for key in ("get_link", "save_settings", "load_settings"):
+        for key in ("save_settings", "load_settings"):
             assert not field.colliderect(ms.rects[key]), f"name field runs into {key}"
         # ...and the default name has room without needing to be clipped at all
         assert menu._fonts()["normal"].size(menu._DEFAULT_FILENAME)[0] < field.width
     finally:
-        menu.is_web = real_is_web
         pygame.quit()
 
 
@@ -96,6 +132,26 @@ def test_node_stepper_clamps():
         for _ in range(100):
             _click_key(screen, ms, settings, "nodes_dec")
         assert settings.nodes == settings.min_nodes()
+    finally:
+        pygame.quit()
+
+
+def test_the_layout_stepper_cycles_and_only_offers_itself_on_a_symmetric_map():
+    screen, ms, settings = _setup()
+    try:
+        menu.draw(screen, ms, settings)
+        assert "layout_inc" not in ms.rects            # random: nothing to shape
+        _click_key(screen, ms, settings, "mode_symmetric")
+        seen = [settings.layout]
+        for _ in range(len(mapgen.SYMMETRIC_LAYOUTS)):
+            _click_key(screen, ms, settings, "layout_inc")
+            seen.append(settings.layout)
+        assert seen == [*mapgen.SYMMETRIC_LAYOUTS, mapgen.SYMMETRIC_LAYOUTS[0]]
+        _click_key(screen, ms, settings, "layout_dec")
+        assert settings.layout == mapgen.SYMMETRIC_LAYOUTS[-1]
+        assert menu._tab_changed("basic", settings)
+        _click_key(screen, ms, settings, "mode_random")  # left over, and inert
+        assert not menu._tab_changed("basic", settings)
     finally:
         pygame.quit()
 
@@ -144,6 +200,210 @@ def test_start_via_click_and_enter():
         pygame.quit()
 
 
+def test_play_by_post_opens_the_roster_prompt_then_the_match():
+    """A sibling of Start, not a setting: it plays this setup, and everything on
+    the page describes it exactly as it would a game of your own — but it opens
+    a roster prompt first ('every player is a person' is the default it starts
+    from, not the only option), and only confirming that returns the action."""
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+        assert not ms.rects["play_by_post"].colliderect(ms.rects["start"])
+        assert not ms.rects["play_by_post"].colliderect(ms.rects["quit"])
+        assert ms.pbp_prompt
+        assert ms.pbp_roster == set(range(1, settings.players + 1))
+
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+        assert not ms.pbp_prompt
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
+    """Unchecking any other seat is fine; seat 1 has no checkbox to press at
+    all, since the creator ends up seated there regardless."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert "pbp_seat_1" not in ms.rects
+        menu.draw(screen, ms, settings)
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                pos=ms.rects["pbp_seat_2"].center, button=1)
+        menu.handle_event(ev, ms, settings)
+        assert ms.pbp_roster == {1, 3}
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_public_checkbox_toggles_and_resets(monkeypatch):
+    """Off by default, toggled by its checkbox, and off again the next time
+    the prompt opens."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+        _click_key(screen, ms, settings, "pbp_public")
+        assert ms.pbp_public is True
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_public is False
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_deadline_stepper_moves_in_whole_days(monkeypatch):
+    """Starts at `pbp.DEADLINE_HOURS`, moves a day (24h) per press, and is
+    clamped to the endpoint's own bounds — a day at the low end, its 336h
+    ceiling at the high end."""
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert ms.pbp_deadline_hours == menu.pbp.DEADLINE_HOURS
+
+        menu.draw(screen, ms, settings)
+        dec = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                 pos=ms.rects["pbp_deadline_dec"].center, button=1)
+        menu.handle_event(dec, ms, settings)
+        assert ms.pbp_deadline_hours == menu.pbp.DEADLINE_HOURS - 24
+
+        for _ in range(20):   # walk past the ceiling from the other side
+            menu.draw(screen, ms, settings)
+            inc = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                     pos=ms.rects["pbp_deadline_inc"].center, button=1)
+            menu.handle_event(inc, ms, settings)
+        assert ms.pbp_deadline_hours == 336
+
+        ms.pbp_deadline_hours = 24
+        menu.draw(screen, ms, settings)
+        dec = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                 pos=ms.rects["pbp_deadline_dec"].center, button=1)
+        menu.handle_event(dec, ms, settings)
+        assert ms.pbp_deadline_hours == 24   # floored, not 0 or negative
+
+        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
+    finally:
+        pygame.quit()
+
+
+def _press_field(screen, ms, settings, which):
+    menu.draw(screen, ms, settings)
+    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                            pos=ms.rects[f"pbp_{which}_field"].center, button=1)
+    return menu.handle_event(ev, ms, settings)
+
+
+def test_the_roster_prompt_takes_an_optional_name_and_title(monkeypatch, tmp_path):
+    """Two free-text rows: the name starts as the one used last time, the title
+    blank. Tab moves between them, Esc leaves the field rather than the prompt,
+    and Enter still confirms."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    menu.webstore.set_pbp_name("Alice")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert (ms.pbp_name, ms.pbp_title, ms.pbp_editing) == ("Alice", "", None)
+
+        _press_field(screen, ms, settings, "name")
+        assert ms.pbp_editing == "name"
+        _keydown(ms, settings, pygame.K_BACKSPACE)
+        _textinput(ms, settings, "x\n")
+        assert ms.pbp_name == "Alicx", "a control character is not text"
+
+        _keydown(ms, settings, pygame.K_TAB)
+        assert ms.pbp_editing == "title"
+        _textinput(ms, settings, "y" * 80)
+        assert ms.pbp_title == "y" * menu.pbp.TITLE_MAX
+
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert ms.pbp_prompt and ms.pbp_editing is None
+        _textinput(ms, settings, "z")
+        assert ms.pbp_title == "y" * menu.pbp.TITLE_MAX, "no field has the caret"
+
+        _press_field(screen, ms, settings, "name")
+        assert _keydown(ms, settings, pygame.K_RETURN) == "play_by_post"
+        assert not ms.pbp_prompt and ms.pbp_editing is None
+    finally:
+        pygame.quit()
+
+
+def test_the_roster_prompt_fields_sit_inside_the_panel_and_clear_of_each_other():
+    screen, ms, settings = _setup()
+    try:
+        settings.players = 6
+        _click_key(screen, ms, settings, "play_by_post")
+        menu.draw(screen, ms, settings)
+        keys = ["pbp_name_field", "pbp_title_field", "pbp_public", "pbp_deadline_inc",
+                "pbp_confirm", "pbp_cancel"] + [f"pbp_seat_{s}" for s in range(2, 7)]
+        rects = [ms.rects[k] for k in keys]
+        for i, a in enumerate(rects):
+            for b in rects[i + 1:]:
+                assert not a.colliderect(b)
+    finally:
+        pygame.quit()
+
+
+def test_shared_matches_opens_the_lobby_and_hands_it_nothing(monkeypatch, tmp_path):
+    """The lobby shares our origin and reads the seat store itself, so the link
+    carries no fragment — least of all a token."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
+    token = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    menu.pbp.remember(menu.pbp.Seat("00112233445566ff", 2, token))
+    opened = []
+    monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
+    screen, ms, settings = _setup()
+    real_is_web = menu.is_web
+    menu.is_web = lambda: True
+    try:
+        menu.draw(screen, ms, settings)
+        for other in ("get_link", "browse_configs"):
+            assert not ms.rects["browse_matches"].colliderect(ms.rects[other])
+        assert _click_key(screen, ms, settings, "browse_matches") is None
+        assert opened == [menu.webstore.leaderboard_url(
+            menu.LEADERBOARD_LOBBY_PATH)]
+        assert "#" not in opened[0]
+        assert token not in opened[0]
+    finally:
+        menu.is_web = real_is_web
+        pygame.quit()
+
+
+def test_cancelling_the_roster_prompt_opens_no_match():
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "play_by_post")
+        assert _click_key(screen, ms, settings, "pbp_cancel") is None
+        assert not ms.pbp_prompt
+    finally:
+        pygame.quit()
+
+
+def test_play_by_post_is_not_offered_without_a_board(monkeypatch):
+    """Blanking the leaderboard origin switches every networked feature off, and
+    a shared match is one. A button that could not work must not be drawn — and
+    Quit closes the gap it leaves rather than sitting out in space."""
+    monkeypatch.setattr(menu.webstore, "leaderboard_origin", lambda: "")
+    screen, ms, settings = _setup()
+    try:
+        menu.draw(screen, ms, settings)
+        assert "play_by_post" not in ms.rects
+        assert ms.rects["quit"].x == ms.rects["start"].right + 14
+    finally:
+        pygame.quit()
+
+
+def test_a_hand_map_that_cannot_build_is_refused_by_post_too(monkeypatch):
+    """The same gate Start goes through. Finding out a map won't build *after*
+    the match was opened and the links sent would be the worst possible order."""
+    screen, ms, settings = _setup()
+    monkeypatch.setattr(menu, "_start",
+                        lambda m, st, action="start": None)   # what a blocker does
+    try:
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+    finally:
+        pygame.quit()
+
+
 def test_quit_button_click_returns_quit():
     """Touch/web equivalent of Esc: there's no keyboard on a phone, so without
     this a touch user has no way to leave the setup menu at all."""
@@ -170,7 +430,7 @@ def test_web_scale_boost_enlarges_menu(monkeypatch):
         monkeypatch.setattr(menu, "is_web", lambda: True)
         menu.draw(screen, ms, settings)
         assert ms.canvas_scale > base_scale
-        cw, ch = menu._get_canvas().get_size()
+        cw, _ch = menu._get_canvas().get_size()
         sw, _ = screen.get_size()
         assert ms.canvas_scale <= sw / cw
     finally:
@@ -335,20 +595,108 @@ def test_combat_knobs_are_gone_from_advanced():
         pygame.quit()
 
 
+# Everything drawn *outside* the tab panel: the title row's seed control and the
+# footer's own rows. Named once, because both panel-fit tests below have to agree
+# about what counts as chrome or one of them starts policing the other's buttons.
+_CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
+           "filename_field", "get_link", "browse_configs", "seed_field",
+           "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc"}
+
+
+def test_the_node_stepper_takes_big_steps_past_a_standard_board():
+    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
+    assert menu._node_step(big - 1, up=True) == big
+    assert menu._node_step(big, up=True) == big + step
+    assert menu._node_step(big + step, up=False) == big
+    assert menu._node_step(big, up=False) == big - 1
+    # an off-grid count (a hand-edited token) rejoins the grid either way
+    assert menu._node_step(big + 3, up=True) == big + step
+    assert menu._node_step(big + 3, up=False) == big
+
+
+def test_the_node_stepper_moves_a_symmetric_map_between_sizes_it_can_build():
+    settings = Settings.defaults()
+    settings.mode, settings.layout, settings.players, settings.nodes = "symmetric", "core", 6, 10
+    assert settings.system_count() == 18          # what the row shows, not the 10 asked
+    menu._step_systems(settings, up=True)
+    assert (settings.nodes, settings.system_count()) == (24, 24)
+    menu._step_systems(settings, up=False)
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    menu._step_systems(settings, up=False)        # nothing smaller at six seats
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    for _ in range(100):
+        menu._step_systems(settings, up=True)
+    assert settings.nodes <= config.MAX_NODES
+    assert mapgen.symmetric_size(settings.nodes, 6, "core") == settings.system_count()
+    # a random map builds exactly what it is asked for, one system at a time
+    settings.mode, settings.nodes = "random", 10
+    menu._step_systems(settings, up=True)
+    assert settings.nodes == settings.system_count() == 11
+
+
+def test_the_lane_readout_describes_the_setup_being_shown():
+    screen, ms, settings = _setup()
+    try:
+        assert menu._lane_readout_lines(ms, settings) == []   # nothing surveyed yet
+        menu.pump(ms, settings)
+        lines = menu._lane_readout_lines(ms, settings)
+        assert len(lines) == 1 and lines[0].startswith("Lanes: ")
+        settings.nodes = config.MAX_NODES
+        assert menu._lane_readout_lines(ms, settings) == []   # stale: never shown
+        menu.pump(ms, settings)
+        assert menu._lane_readout_lines(ms, settings)[1].startswith("Map: ")
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_fits_its_column_at_its_longest():
+    """Slowest ships on the sparsest map give the widest figures; the line must
+    still stop short of the Advanced tab's right-hand column."""
+    screen, ms, settings = _setup()
+    try:
+        settings.players, settings.nodes = config.MIN_PLAYERS, settings.min_nodes()
+        settings.ship_ly_per_turn = 1.0
+        menu.pump(ms, settings)
+        col_w = (560 - 22 * 3) // 2
+        for line in menu._lane_readout_lines(ms, settings):
+            assert menu._fonts()["small"].size(line)[0] <= col_w, line
+    finally:
+        pygame.quit()
+
+
+def test_the_lane_readout_waits_for_a_slider_drag_to_end():
+    screen, ms, settings = _setup()
+    try:
+        menu.pump(ms, settings)
+        key = ms.lane_key
+        ms.drag_key = "adv_node_jitter"
+        settings.node_jitter = 0.2
+        menu.pump(ms, settings)
+        assert ms.lane_key == key
+        ms.drag_key = None
+        menu.pump(ms, settings)
+        assert ms.lane_key != key
+    finally:
+        pygame.quit()
+
+
 def test_tab_content_stays_inside_the_panel():
     """Every tab's widgets must fit the fixed 560x496 panel — the menu has no
     scrolling, and the Advanced tab silently overflowed it before the Combat page
     took the combat knobs off it."""
     screen, ms, settings = _setup()
     panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
-    chrome = {"start", "quit", "save_settings", "load_settings", "filename_field",
-              "get_link", "seed_field", "seed_random"}
+    chrome = _CHROME
     try:
         for tab in ("basic", "combat", "advanced", "ai"):
             ms.tab = tab
             for a, d, jit, adv in ((1, 1, 0.0, 0.75), (50, 50, 0.5, 2.0)):
                 ms.preview_attacker, ms.preview_defender = a, d
                 settings.combat_jitter, settings.defender_advantage = jit, adv
+                # The biggest map shows the lane readout at its tallest (two lines),
+                # which pushes the Advanced tab's die down the left column.
+                settings.nodes = config.MAX_NODES
+                menu.pump(ms, settings)
                 menu.draw(screen, ms, settings)
                 for key, rect in ms.rects.items():
                     if key.startswith("tab_") or key in chrome:
@@ -485,6 +833,29 @@ def test_ai_tab_strategy_dropdown_select():
         pygame.quit()
 
 
+def test_random_is_offered_last_and_declares_no_aux_knob():
+    """A seat can be left to the seed. It sits after the measured ladder order
+    because it is not one of the strategies — `settings.build_state` turns it
+    into one — and it labels no `aux` knob, since which bot will read that knob
+    is exactly what has not been decided yet."""
+    screen, ms, settings = _setup()   # 3 players by default -> AI seats 2,3
+    ms.tab = "ai"
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        _click_key(screen, ms, settings, "strategy")
+        assert ms.strategies[-1] == RANDOM_STRATEGY
+        assert ms.strategies.count(RANDOM_STRATEGY) == 1, "not a registered strategy too"
+        i = ms.strategies.index(RANDOM_STRATEGY)
+        _click_key(screen, ms, settings, f"strategy_opt_{i}")
+        assert settings.ai_strategy[1] == RANDOM_STRATEGY
+
+        menu.draw(screen, ms, settings)
+        assert "ai_aux" not in ms.rects
+        assert menu._ai_specs(ms, settings) == menu._AI_PARAMS
+    finally:
+        pygame.quit()
+
+
 def _register_aux_bot(name, **attrs):
     """Register a strategy whose module declares `attrs` (AUX_LABEL and friends),
     as a real drop-in file would."""
@@ -492,11 +863,38 @@ def _register_aux_bot(name, **attrs):
     module = type(menu)(modname)
     for key, value in attrs.items():
         setattr(module, key, value)
-    fn = lambda st, pid: []          # noqa: E731 — a stand-in decide
+    fn = lambda st, pid: []
     fn.__module__ = modname
     sys.modules[modname] = module
     ai.register(name, fn)
     return modname
+
+
+def test_ai_tab_aux_slider_shows_a_named_stop_instead_of_its_number(monkeypatch):
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    modname = _register_aux_bot("aux_names_menu_test", AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1),
+                                AUX_INT=True, AUX_NAMES=("Off", "Predict", "Search"))
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1] = "aux_names_menu_test"
+        settings.ai[1].aux = 2
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        # the slider draws its label, then its value, back to back
+        assert drawn[drawn.index("Oracle") + 1] == "Search", "a named stop should replace the number"
+    finally:
+        ai.STRATEGIES.pop("aux_names_menu_test", None)
+        sys.modules.pop(modname, None)
+        pygame.quit()
 
 
 def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
@@ -529,6 +927,61 @@ def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
     finally:
         ai.STRATEGIES.pop("aux_menu_test", None)
         sys.modules.pop(modname, None)
+        pygame.quit()
+
+
+def test_choosing_another_strategy_starts_it_at_its_default_stop():
+    """An aux carried from the last strategy would mean something else to the
+    next (knower's old depth slider left 12s that would read as a top stop)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('knower')}")
+        assert settings.ai[1].aux == 12.0, "re-picking the same strategy changes nothing"
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('actuary')}")
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("actuary", config.AI_AUX)
+    finally:
+        pygame.quit()
+
+
+def test_a_legacy_seat_shows_its_family_and_stop_until_its_stop_is_edited(monkeypatch):
+    """A seat stored as a bot since folded into a family (`ai.LEGACY`) keeps
+    its name, so its link's key never moves, and reads as the family at its
+    stop; a value past a knob's top shows the stop it plays (`ai.aux_over`)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert "knower · Council" in drawn
+        assert drawn[drawn.index("Oracle") + 1] == "Council"
+        assert settings.ai_strategy[1] == "council", "drawing never rewrites the seat"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert drawn[drawn.index("Oracle") + 1] == "Search"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        _drag_slider(screen, ms, settings, "ai_aux", 0.0)
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("knower", 0)
+    finally:
         pygame.quit()
 
 
@@ -592,7 +1045,13 @@ def test_pump_reads_soft_keyboard_text_and_filters_it(monkeypatch):
 
         fake.text = "9" * (menu._SEED_MAX_LEN + 4)
         menu.pump(ms, settings)
-        assert len(ms.seed_text) == menu._SEED_MAX_LEN
+        assert len(ms.seed_text) == menu._SEED_MAX_LEN - 1, "no seed from an era with no pool"
+        assert settings.seed == int("9" * (menu._SEED_MAX_LEN - 1))
+
+        top = str(seed_top())
+        fake.text = top + "1"
+        menu.pump(ms, settings)
+        assert ms.seed_text == top and settings.seed == seed_top()
 
         fake.gone = True                         # the keyboard's Done key
         menu.pump(ms, settings)
@@ -765,6 +1224,23 @@ def test_share_replays_toggles_the_stored_preference(monkeypatch, tmp_path):
         pygame.quit()
 
 
+def test_ironman_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """Off until switched on, and like the other local rows it never touches the
+    setup, so it cannot move `challenge_key()`."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.ironman() is False
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is True
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is False
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
 def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_path):
     monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "no" / "kv.json")
     screen, ms, settings = _setup()
@@ -772,5 +1248,352 @@ def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_
         _click_key(screen, ms, settings, "share_games")
         assert menu.webstore.share_games() is False
         assert "private" in ms.status and not ms.status_ok
+    finally:
+        pygame.quit()
+
+
+def test_animate_turns_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """The second Basic-tab row that is not a Settings field. It must not move the
+    setup: a display preference on `Settings` would change `challenge_key()` for
+    every map that has ever existed and travel in every shared link."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.animate_turns() is True
+        _click_key(screen, ms, settings, "animate_turns")
+        assert menu.webstore.animate_turns() is False
+        _click_key(screen, ms, settings, "animate_turns")
+        assert menu.webstore.animate_turns() is True
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
+def test_ui_size_stepper_stores_the_preference_and_leaves_the_setup(monkeypatch, tmp_path):
+    """Like the two rows above, the UI size belongs to this screen: it writes the
+    local store and `MenuState.ui_size` (which `main` rescales from), never Settings."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert ms.ui_size == 100
+        _click_key(screen, ms, settings, "ui_size_inc")
+        assert ms.ui_size == menu.webstore.ui_size() == 110
+        _click_key(screen, ms, settings, "ui_size_dec")
+        _click_key(screen, ms, settings, "ui_size_dec")
+        assert ms.ui_size == menu.webstore.ui_size() == 90
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
+def test_ui_size_stepper_is_not_offered_on_touch(monkeypatch):
+    screen, ms, settings = _setup()
+    try:
+        monkeypatch.setattr(config, "touch_ui", True)
+        menu.draw(screen, ms, settings)
+        assert "ui_size_inc" not in ms.rects
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# What a hand-drawn map hides
+# --------------------------------------------------------------------------- #
+def _drawn_map():
+    from starconquest.custommap import CustomMap, MapNode
+    return CustomMap(
+        nodes=[MapNode(200, 200, 3, 10, 1), MapNode(600, 600, 4, 8, 2)],
+        lanes=[(0, 1)],
+    ).normalised()
+
+
+def _with_map():
+    screen, ms, settings = _setup()
+    settings.custom_map = _drawn_map()
+    settings.players, settings.nodes = 2, 2
+    return screen, ms, settings
+
+
+def test_a_custom_map_hides_the_controls_it_decides():
+    """Inert by construction: `_draw_menu` clears `ms.rects` every frame, so a
+    control that isn't drawn cannot be clicked — no disabled flag to forget."""
+    screen, ms, settings = _with_map()
+    try:
+        ms.tab = "basic"
+        menu.draw(screen, ms, settings)
+        for key in ("players_dec", "players_inc", "nodes_dec", "nodes_inc",
+                    "mode_random", "mode_symmetric"):
+            assert key not in ms.rects, key
+        # ...and the rows that still mean something are untouched.
+        for key in ("seed_field", "autoplay", "fog_of_war", "share_games",
+                    "animate_turns", "ironman"):
+            assert key in ms.rects, key
+    finally:
+        pygame.quit()
+
+
+def test_a_custom_map_hides_the_advanced_groups_the_creator_owns():
+    screen, ms, settings = _with_map()
+    try:
+        ms.tab = "advanced"
+        menu.draw(screen, ms, settings)
+        hidden = {spec[0] for spec in menu._ADV_MAP + menu._ADV_ECON}
+        assert not (hidden & set(ms.rects))
+        kept = {spec[0] for spec in menu._ADV_TRAVEL + menu._ADV_FOG}
+        assert kept <= set(ms.rects)
+        assert "neutral_produces" in ms.rects
+    finally:
+        pygame.quit()
+
+
+def test_the_generated_map_menu_is_unchanged():
+    """The hiding is conditional, so the ordinary setup must still offer all of it."""
+    screen, ms, settings = _setup()
+    try:
+        ms.tab = "basic"
+        menu.draw(screen, ms, settings)
+        assert {"players_inc", "nodes_inc", "mode_random"} <= set(ms.rects)
+        ms.tab = "advanced"
+        menu.draw(screen, ms, settings)
+        assert {spec[0] for spec in menu._ADV_MAP + menu._ADV_ECON} <= set(ms.rects)
+    finally:
+        pygame.quit()
+
+
+def test_players_and_nodes_are_interlocked_against_the_recipe():
+    """A nudge from any path would desync them from the map until the next
+    `from_dict` reconciled them back — moving the setup digest in between."""
+    _screen, _ms, settings = _with_map()
+    try:
+        menu._set_players(settings, 5)
+        menu._set_nodes(settings, 30)
+        assert (settings.players, settings.nodes) == (2, 2)
+    finally:
+        pygame.quit()
+
+
+def test_randomise_leaves_the_hidden_groups_alone():
+    _screen, _ms, settings = _with_map()
+    try:
+        before = {spec[2]: getattr(settings, spec[2])
+                  for spec in menu._ADV_MAP + menu._ADV_ECON}
+        menu._randomise_sliders(settings, menu._visible_adv(settings))
+        assert all(getattr(settings, attr) == value for attr, value in before.items())
+    finally:
+        pygame.quit()
+
+
+def test_the_basic_tab_marks_a_hand_map_as_a_change():
+    _screen, _ms, settings = _with_map()
+    try:
+        assert menu._tab_changed("basic", settings)
+    finally:
+        pygame.quit()
+
+
+def test_a_hand_map_setup_still_fits_the_panel():
+    """`test_tab_content_stays_inside_the_panel` draws the default setup; this is
+    the other state the same panel has to hold."""
+    screen, ms, settings = _with_map()
+    panel = pygame.Rect(config.BASE_SCREEN_W // 2 - 280, 208, 560, 496)
+    chrome = _CHROME
+    try:
+        for tab in ("basic", "combat", "advanced", "ai"):
+            ms.tab = tab
+            menu.draw(screen, ms, settings)
+            for key, rect in ms.rects.items():
+                if key.startswith("tab_") or key in chrome:
+                    continue
+                assert panel.contains(rect), f"{tab}: {key} {tuple(rect)} escapes the panel"
+    finally:
+        pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Dropping a hand-drawn map
+# --------------------------------------------------------------------------- #
+def test_clearing_a_drawn_map_asks_first():
+    """A drawn map is the only thing on this screen that cannot be got back from
+    the seed, and the x sits one button away from Edit map."""
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        assert ms.confirm_clear_map and settings.custom_map is not None
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.custom_map is None and not ms.confirm_clear_map
+    finally:
+        pygame.quit()
+
+
+def test_declining_keeps_the_drawn_map():
+    screen, ms, settings = _with_map()
+    drawn = settings.custom_map.to_dict()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_no")
+        assert not ms.confirm_clear_map
+        assert settings.custom_map is not None
+        assert settings.custom_map.to_dict() == drawn
+    finally:
+        pygame.quit()
+
+
+def test_escape_keeps_the_map_and_y_clears_it():
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        _keydown(ms, settings, pygame.K_ESCAPE)     # Esc would otherwise quit
+        assert not ms.confirm_clear_map and settings.custom_map is not None
+        _click_key(screen, ms, settings, "clear_map")
+        _keydown(ms, settings, pygame.K_y)
+        assert settings.custom_map is None
+    finally:
+        pygame.quit()
+
+
+def test_the_clear_map_modal_swallows_every_other_control():
+    screen, ms, settings = _with_map()
+    try:
+        _click_key(screen, ms, settings, "clear_map")
+        assert _click_key(screen, ms, settings, "start") is None
+        assert _click_key(screen, ms, settings, "create_map") is None
+        assert ms.confirm_clear_map and settings.custom_map is not None
+    finally:
+        pygame.quit()
+
+
+def test_clearing_the_map_still_puts_nodes_back_in_generated_range():
+    """`nodes` was reconciled to the recipe and may sit below the generated floor,
+    so a generator that now has to honour it needs it back in range."""
+    screen, ms, settings = _with_map()
+    try:
+        assert settings.nodes < settings.min_nodes()
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.nodes >= settings.min_nodes()
+    finally:
+        pygame.quit()
+
+
+def test_clearing_a_challenges_map_still_raises_the_unchallenge_modal():
+    """The confirm sits inside `_dispatch`, so the edit it lets through is checked
+    against the challenge exactly as any other edit is."""
+    screen, ms, settings = _with_map()
+    try:
+        settings.challenge = Challenge(turns=20, lost=3, hand=20, by="someone",
+                                       key=settings.challenge_keys()[0])
+        _click_key(screen, ms, settings, "clear_map")
+        _click_key(screen, ms, settings, "clear_map_yes")
+        assert settings.custom_map is None and ms.confirm_unchallenge
+    finally:
+        pygame.quit()
+
+
+def test_start_refuses_a_hand_map_the_builder_would_assert_on():
+    """`mapgen.generate_custom` is the strict builder behind the one tolerant
+    gate, so a half-built recipe — which `mapmaker.commit` deliberately lets
+    through, since it must survive a trip back here — has to be stopped at Start
+    rather than reaching the assert."""
+    from starconquest.custommap import CustomMap, MapNode
+    screen, ms, settings = _setup()
+    try:
+        settings.custom_map = CustomMap(nodes=[MapNode(200, 200, 3, 10, 1),
+                                               MapNode(600, 600, 4, 8, 2)])   # no lanes
+        assert _click_key(screen, ms, settings, "start") is None
+        assert ms.status and not ms.status_ok
+        assert _keydown(ms, settings, pygame.K_RETURN) is None
+    finally:
+        pygame.quit()
+
+
+def test_start_is_unaffected_by_a_playable_hand_map():
+    screen, ms, settings = _with_map()
+    try:
+        assert _click_key(screen, ms, settings, "start") == "start"
+    finally:
+        pygame.quit()
+
+
+def _warns(monkeypatch, lines=("Knower would search 3 turns deep, not 12",)):
+    """Stand in for `settings.setup_warnings`, recording who it was told holds a
+    seat — the flow is under test here, not any bot's numbers."""
+    asked: list = []
+
+    def fake(settings, people=None):
+        asked.append(people)
+        return list(lines)
+
+    monkeypatch.setattr(menu, "setup_warnings", fake)
+    return asked
+
+
+def test_start_asks_before_a_setup_a_bot_warns_about(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") is None
+        assert ms.confirm_slow
+        # The modal swallows everything else until answered.
+        assert _keydown(ms, settings, pygame.K_SPACE) is None and ms.confirm_slow
+        assert _click_key(screen, ms, settings, "slow_go") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_going_back_from_the_slow_warning_starts_nothing(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        assert _keydown(ms, settings, pygame.K_RETURN) is None and ms.confirm_slow
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert not ms.confirm_slow
+        # Not acknowledged, so the next press asks again.
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_a_warning_played_through_once_is_not_asked_again(monkeypatch):
+    _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "start")
+        assert _keydown(ms, settings, pygame.K_y) == "start"
+        assert _click_key(screen, ms, settings, "start") == "start"
+        # Different text means a different setup, which asks afresh.
+        _warns(monkeypatch, ("Knower would search 2 turns deep, not 12",))
+        assert _click_key(screen, ms, settings, "start") is None and ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_no_warning_no_modal(monkeypatch):
+    _warns(monkeypatch, ())
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "start") == "start"
+        assert not ms.confirm_slow
+    finally:
+        pygame.quit()
+
+
+def test_play_by_post_asks_on_confirm_with_the_roster_as_the_people(monkeypatch):
+    """Which seats are bots is only known once the roster is confirmed, so that
+    is where the warning is asked — not on the first press."""
+    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
+    asked = _warns(monkeypatch)
+    screen, ms, settings = _setup()
+    try:
+        settings.players = 4
+        assert _click_key(screen, ms, settings, "play_by_post") is None
+        assert ms.pbp_prompt and not ms.confirm_slow and asked == []
+        _click_key(screen, ms, settings, "pbp_seat_3")   # seat 3 left to its bot
+        assert _click_key(screen, ms, settings, "pbp_confirm") is None
+        assert ms.confirm_slow and asked == [{1, 2, 4}]
+        assert _click_key(screen, ms, settings, "slow_go") == "play_by_post"
+        assert ms.pbp_roster == {1, 2, 4}   # what main opens the match with
     finally:
         pygame.quit()

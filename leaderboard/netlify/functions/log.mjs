@@ -12,7 +12,8 @@
  * What it does, in order: reject anything but a POST, rate-limit the caller,
  * check the row's shape and size, then forward it under the secret key.
  *
- * Environment (set in the Netlify site's settings, never committed):
+ * Environment (set in the game's Netlify site settings, never committed; the
+ * build command unsets the key before any build step runs):
  *   SUPABASE_URL         https://<project>.supabase.co
  *   SUPABASE_SECRET_KEY  Supabase's secret key (`sb_secret_…`) — the same one the
  *                        GitHub Actions worker uses, and just as much not-in-git.
@@ -23,15 +24,17 @@
  * same "configured or cleanly inert" shape the rest of the board has.
  */
 
-// A browser upload is cross-origin (the game is a separate Netlify site), so the
-// preflight has to be answered with an origin the browser will accept. `*` would
-// do; this keeps the surface to the game's own deploys instead.
+// These functions are served by the game's own site, so a deployed page's upload
+// is same-origin. The browser still sends `Origin` on a POST, and a page on a
+// local server (`python -m http.server` in `web/`) posts to production
+// cross-origin, so the preflight still has to be answered with an origin the
+// browser will accept. `*` would do; this keeps the surface to the game's own
+// deploys instead.
 //
 // Matched by shape rather than listed, because the deploys that matter are
 // contextual: `deploy-preview-42--star-conquest.netlify.app` is as real a caller
-// as production, and a preview of the game posts to the preview of this site
-// (see `config.mjs`, and `paths.sibling_host` in the game). A desktop build sends
-// no Origin header at all, and CORS has nothing to say about it.
+// as production. A desktop build sends no Origin header at all, and CORS has
+// nothing to say about it.
 const GAME_SITE = "star-conquest";
 const LOCAL = ["http://localhost:8000", "http://127.0.0.1:8000"];
 
@@ -110,13 +113,15 @@ export function rateLimited(key, now = Date.now(), store = seen) {
  *
  * Everything is checked rather than trusted: this is an unauthenticated endpoint,
  * and `match_id` in particular is the column the verifier keys scores against, so
- * a value of the wrong shape must never reach it. `finished`, `won` and `hand`
- * are claims by the client and are stored as claims — an index for finding logs,
- * never evidence, since replaying the log settles all three.
+ * a value of the wrong shape must never reach it. `finished`, `won`, `hand` and
+ * `rules_version` are claims by the client and are stored as claims — an index
+ * for finding logs (or, for `rules_version`, telling a replay that can still be
+ * reconstructed exactly from one that can't) without decoding every blob, never
+ * evidence, since replaying the log settles the first three.
  */
 export function validate(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "not an object";
-  const { match_id: matchId, game_key: gameKey, turns, log, hand } = body;
+  const { match_id: matchId, game_key: gameKey, turns, log, hand, rules_version: rulesVersion } = body;
 
   if (typeof matchId !== "string" || !MATCH_ID.test(matchId)) return "bad match_id";
   if (typeof gameKey !== "string" || !gameKey || gameKey.length > 64) return "bad game_key";
@@ -128,6 +133,11 @@ export function validate(body) {
   if (hand !== undefined && (!Number.isInteger(hand) || hand < 0 || hand > turns)) {
     return "bad hand";
   }
+  // Absent (an older game build) means "the only version there has ever been
+  // until now" — the same historical default `schema.sql`'s own column carries.
+  if (rulesVersion !== undefined && (!Number.isInteger(rulesVersion) || rulesVersion < 1)) {
+    return "bad rules_version";
+  }
   return {
     match_id: matchId,
     game_key: gameKey,
@@ -135,6 +145,7 @@ export function validate(body) {
     finished: body.finished === true,
     won: body.won === true,
     hand: hand === undefined ? 0 : hand,
+    rules_version: rulesVersion === undefined ? 1 : rulesVersion,
     log,
   };
 }

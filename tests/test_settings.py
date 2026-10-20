@@ -6,14 +6,28 @@ Pure/headless (settings.py imports no pygame), so this needs no display.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 
 import pytest
 
 from starconquest import config
+from starconquest.custommap import CustomMap, MapNode
 from starconquest.model import AiParams
-from starconquest.settings import (_GLOBAL_KNOBS, _LEGACY_KEY_DROPS, Challenge,
-                                   Settings, _hash_setup, build_state,
-                                   random_seed, resolve_seed)
+from starconquest.settings import (
+    _GLOBAL_KNOBS,
+    _LEGACY_KEY_DROPS,
+    POOL_ERA,
+    RANDOM_POOLS,
+    RANDOM_STRATEGY,
+    Challenge,
+    Settings,
+    _hash_setup,
+    build_state,
+    random_seed,
+    resolve_seed,
+    resolve_profile,
+    resolve_strategy,
+)
 
 
 @contextlib.contextmanager
@@ -33,7 +47,8 @@ def test_resolve_seed_uses_explicit():
 
 def test_resolve_seed_random_when_none():
     v = resolve_seed(Settings(seed=None))
-    assert isinstance(v, int) and 0 <= v < 1_000_000
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert isinstance(v, int) and base <= v < base + config.SEED_MAX
 
 
 def test_from_args_maps_fields():
@@ -104,6 +119,15 @@ def test_node_jitter_changes_the_map():
 # --------------------------------------------------------------------------- #
 # save / load
 # --------------------------------------------------------------------------- #
+def _tiny_map() -> CustomMap:
+    """The smallest playable hand map: two seats, one lane, well clear of the
+    separation and graze rules."""
+    return CustomMap(
+        nodes=[MapNode(200, 200, 3, 10, 1), MapNode(600, 600, 4, 8, 2)],
+        lanes=[(0, 1)],
+    ).normalised()
+
+
 def _customised() -> Settings:
     s = Settings(mode="symmetric", players=5, nodes=30, seed=42, autoplay=True,
                  home_start_ships=25, combat_jitter=0.3, ship_ly_per_turn=9.5)
@@ -303,7 +327,7 @@ def test_challenge_key_is_stable():
     entry below it lacked its fields too) and updating the literal here, so links
     already in circulation keep resolving to the setup they describe.
     """
-    assert Settings().challenge_key() == "770ba09210f6127a"
+    assert Settings().challenge_key() == "d97dee091d86d379"
 
 
 def test_challenge_keys_lead_with_the_canonical_one():
@@ -313,6 +337,20 @@ def test_challenge_keys_lead_with_the_canonical_one():
     assert len(set(keys)) == len(keys) == 1 + len(_LEGACY_KEY_DROPS)
 
 
+def _moved(field: str):
+    """A value for ``field`` that differs from its default.
+
+    Both tests below are written against *whichever* `_LEGACY_KEY_DROPS` entry is
+    newest, so they cannot assume the field is a number — `custom_map` is a
+    dataclass whose default is None, and `default + 0.2` raises on it.
+    """
+    if field == "custom_map":
+        return _tiny_map()
+    if field == "layout":
+        return "ring"
+    return getattr(Settings(), field) + 0.2
+
+
 def test_a_legacy_key_is_dropped_once_its_own_field_is_moved():
     """The dropped field is the one a legacy digest cannot see, so a setup that
     moved it is not one that version could have stamped."""
@@ -320,7 +358,7 @@ def test_a_legacy_key_is_dropped_once_its_own_field_is_moved():
     s = _customised()
     assert len(s.challenge_keys()) == 1 + len(_LEGACY_KEY_DROPS)
 
-    setattr(s, field, getattr(Settings(), field) + 0.2)
+    setattr(s, field, _moved(field))
     assert s.challenge_keys() == (s.challenge_key(),)
 
 
@@ -346,7 +384,7 @@ def test_an_old_link_still_detects_an_edit_to_the_field_it_predates():
     s.challenge = Challenge(turns=10, key=_hash_setup(older))
     assert s.challenge.matches(s)
 
-    setattr(s, field, getattr(Settings(), field) + 0.2)
+    setattr(s, field, _moved(field))
     assert not s.challenge.matches(s)
 
 
@@ -380,6 +418,44 @@ def test_challenge_key_survives_a_round_trip_of_an_int_aux():
     s.ai_strategy[4] = "knower"
     assert Settings.from_dict(s.to_dict()).challenge_key() == s.challenge_key()
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
+
+
+def _through_a_browser(value):
+    """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
+    one number type, so an integral float comes back an int."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _through_a_browser(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_through_a_browser(v) for v in value]
+    return value
+
+
+def test_a_browser_round_trip_moves_the_challenge_key_only_through_aux():
+    """Every float knob, scalar and per-seat, at a whole-number value no default
+    holds, then through the leaderboard's JavaScript. `from_dict` coerces each
+    field back to its type, so the digest survives, except for `aux`, whose int
+    form is kept on purpose. That leaves `aux` as the only thing
+    `verify_scores._aux_widened` has to cover. A new field `from_dict` does not
+    coerce fails here, instead of as a verifier mismatch or a split map."""
+    s = Settings(seed=7)
+    for f in dataclasses.fields(Settings):
+        value = getattr(s, f.name)
+        if isinstance(value, float):
+            setattr(s, f.name, float(int(value)) + 1.0)
+    whole = {f.name: float(int(getattr(AiParams(), f.name))) + 1.0
+             for f in dataclasses.fields(AiParams)
+             if isinstance(getattr(AiParams(), f.name), float) and f.name != "aux"}
+    s.ai[1] = AiParams(**whole)
+    s = Settings.from_dict(s.to_dict())            # the clamps, applied once
+    back = Settings.from_dict(_through_a_browser(s.token_dict()))
+    assert back.challenge_key() != s.challenge_key()   # the default aux 1.0 came back as 1
+
+    for cfg in (s, back):
+        for params in cfg.ai:
+            params.aux = float(params.aux)
+    assert back.challenge_key() == s.challenge_key()
 
 
 def test_a_challenge_link_with_an_int_aux_still_matches():
@@ -482,11 +558,193 @@ def test_build_state_stamps_per_seat_strategy():
         assert state.players[3].ai_strategy == "heuristic"
 
 
-def test_random_seed_is_in_range_and_not_a_fixed_sequence():
+@contextlib.contextmanager
+def _roster(*names):
+    """Register throwaway strategies, so a test doesn't ride on models/."""
+    from starconquest import ai
+    saved = dict(ai.STRATEGIES)
+    try:
+        ai.STRATEGIES.clear()
+        for name in names:
+            ai.register(name, lambda state, pid: [])
+        yield
+    finally:
+        ai.STRATEGIES.clear()
+        ai.STRATEGIES.update(saved)
+
+
+@contextlib.contextmanager
+def _pool(*names):
+    """Deal every random seat from ``names`` instead of the shipped pools."""
+    from starconquest import settings as settings_module
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = (tuple(names),)
+    try:
+        yield
+    finally:
+        settings_module.RANDOM_POOLS = saved
+
+
+def test_a_random_seat_resolves_to_a_real_bot():
+    """The whole point: the placeholder never reaches a live game, so every
+    oracle, `botio`'s seat reveal and the bot column see the bot that is really
+    deciding rather than a dispatcher they cannot see through."""
+    with _preserve_config(), _pool("alpha", "beta"):
+        s = Settings(players=3, nodes=18)
+        s.ai_strategy[1] = RANDOM_STRATEGY
+        state = build_state(s, 5)
+        assert state.players[2].ai_strategy in ("alpha", "beta")
+        assert s.ai_strategy[1] == RANDOM_STRATEGY, "the setup keeps the placeholder"
+
+
+def test_a_random_seat_is_the_same_bot_every_time_that_seed_is_played():
+    """A seed reproduces the opponents as surely as it reproduces the map — which
+    is what lets a challenge link be raced fairly, and a match be resumed."""
+    with _pool("alpha", "beta", "gamma", "delta"):
+        picks = [resolve_strategy(RANDOM_STRATEGY, 7, 2) for _ in range(20)]
+        assert len(set(picks)) == 1
+
+
+def test_random_seats_are_drawn_independently_of_each_other():
+    with _pool("alpha", "beta", "gamma", "delta"):
+        # Over enough seeds, two seats must disagree at least sometimes; a shared
+        # draw would make them identical on every one.
+        pairs = [(resolve_strategy(RANDOM_STRATEGY, n, 2),
+                  resolve_strategy(RANDOM_STRATEGY, n, 3)) for n in range(40)]
+        assert any(a != b for a, b in pairs)
+
+
+def test_resolving_a_random_seat_never_touches_the_engine_dice():
+    """Derived, never drawn (`botio.decide_seed`'s rule). Leaving a seat to chance
+    must not shift `state.rng`, or the same seed would fight the same map
+    differently depending on how many seats were left to it."""
+    with _preserve_config(), _pool("alpha", "beta", "gamma"):
+        fixed = Settings(players=3, nodes=18)
+        fixed.ai_strategy[1] = "alpha"
+        chance = Settings(players=3, nodes=18)
+        chance.ai_strategy[1] = RANDOM_STRATEGY
+        rolls = []
+        for cfg in (fixed, chance):
+            state = build_state(cfg, 11)
+            rolls.append([state.rng.random() for _ in range(8)])
+        assert rolls[0] == rolls[1]
+
+
+def test_a_named_strategy_passes_through_resolution_untouched():
+    with _pool("alpha", "beta"):
+        assert resolve_strategy("beta", 3, 2) == "beta"
+        assert resolve_strategy("not_registered", 3, 2) == "not_registered"
+
+
+def test_the_pick_ignores_what_is_registered():
+    """Two builds with different `models/` (a stale cached web build, a desktop
+    with a drop-in) must still deal a seed the same bots."""
+    with _roster():
+        bare = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
+    with _roster("heuristic", "alpha", "beta", "gamma"):
+        busy = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
+    assert bare == busy
+    assert set(bare) <= set(RANDOM_POOLS[0])
+
+
+def test_every_bot_in_every_pool_ships():
+    """A pool name with no model behind it would play as the heuristic, silently,
+    and a past pool deals its era for good, so a bot any pool names must keep
+    shipping, registered or as a legacy name its family plays (`ai.LEGACY`). A
+    dealt stop must be one its knob has."""
+    from starconquest import ai
+    ai.load_models()
+    for pool in RANDOM_POOLS:
+        for entry in pool:
+            name, _, stop = entry.partition(":")
+            assert ai.known(name), entry
+            if stop:
+                spec = ai.aux_spec(name)
+                assert spec is not None and spec[1] <= float(stop) <= spec[2], entry
+        assert len(set(pool)) == len(pool)
+        assert RANDOM_STRATEGY not in pool, "random names no decision function"
+
+
+def test_a_shipped_pool_is_never_edited():
+    """The pools are append-only: editing one that has shipped (adding, removing
+    or reordering a bot) re-deals nearly every random seat in its era. Append a
+    pool instead, and add it here. (The second was rewritten once, on
+    2026-10-19, before any build dealt from it.)"""
+    assert RANDOM_POOLS == (
+        ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+        ("knower:0", "knower:1", "knower:2", "knower:3",
+         "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+         "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
+    )
+
+
+def test_each_pool_still_deals_what_it_dealt():
+    """Pins one deal per era, so an edit is never made in passing. Map
+    ea1d2a0bf0a95ba4 is the one where two players on different rosters were dealt
+    different lineups, from before the pools were numbered."""
+    assert [resolve_strategy(RANDOM_STRATEGY, 626502, pid) for pid in (2, 3, 4, 5)] == [
+        "heuristic", "claudebot", "claudebot", "rusherplus"]
+    assert [resolve_profile(RANDOM_STRATEGY, 1.0, 20000015, pid) for pid in (2, 3, 4, 5)] == [
+        ("heuristic", 1.0), ("evolved", 0.0), ("heuristic", 1.0), ("heuristic", 1.0)]
+
+
+def test_a_dealt_profile_sets_the_seats_stop_and_a_bare_name_keeps_its_own():
+    """A ``name:stop`` entry deals the stop too, so a carried aux (12 from
+    knower's old depth slider) never reaches a random seat dealt from it; the
+    first pool's bare names still keep the seat's own aux, as they always did."""
+    from starconquest.model import AiParams
+    seed = next(n for n in range(2 * POOL_ERA, 2 * POOL_ERA + 500)
+                if resolve_profile(RANDOM_STRATEGY, 12.0, n, 2) == ("knower", 3.0))
+    cfg = Settings(players=2, nodes=12)
+    cfg.ai_strategy[1] = RANDOM_STRATEGY
+    cfg.ai[1] = AiParams(aux=12.0)
+    seat = build_state(cfg, seed).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 3.0)
+    old = next(n for n in range(500) if resolve_strategy(RANDOM_STRATEGY, n, 2) == "knower")
+    seat = build_state(cfg, old).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 12.0)
+
+
+def test_a_seed_deals_from_the_pool_its_era_names():
+    """Every seed below the second pool's era is the first pool's: every seed
+    rolled (under `SEED_MAX`) or typed (seven digits) before the pools were
+    numbered. A seed from an era with no pool yet deals from the newest."""
+    from starconquest.settings import pool_for
+    first, newest = RANDOM_POOLS[0], RANDOM_POOLS[-1]
+    for seed in (0, 626502, config.SEED_MAX - 1, 9_999_999, 2 * POOL_ERA - 1):
+        assert pool_for(seed) == first
+    assert pool_for(2 * POOL_ERA) == RANDOM_POOLS[1]
+    assert pool_for(len(RANDOM_POOLS) * POOL_ERA + config.SEED_MAX) == newest
+    assert pool_for(10 ** 9) == newest
+
+
+def test_appending_a_pool_re_deals_no_seed_from_before():
+    """The point of numbering the pools: a new one deals only its own era."""
+    from starconquest import settings as settings_module
+    seeds = list(range(0, 3000, 97)) + [2 * POOL_ERA + n for n in range(0, 3000, 97)]
+
+    def deal():
+        return [resolve_strategy(RANDOM_STRATEGY, s, pid) for s in seeds for pid in (2, 3)]
+
+    before = deal()
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = saved + (("alpha", "beta"),)
+    try:
+        assert deal() == before
+        assert settings_module.pool_for(settings_module.random_seed()) == ("alpha", "beta")
+    finally:
+        settings_module.RANDOM_POOLS = saved
+
+
+def test_random_seed_is_in_the_newest_era_and_not_a_fixed_sequence():
     """Rolled seeds must differ *within* a run even if the clock is coarse (the
-    browser blunts it), which is what a repeated roll on the web build hit."""
+    browser blunts it), which is what a repeated roll on the web build hit, and
+    land where a random seat deals from the newest pool."""
+    from starconquest.settings import pool_for, seed_top
     seeds = [random_seed() for _ in range(50)]
-    assert all(0 <= s < config.SEED_MAX for s in seeds)
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert all(base <= s < base + config.SEED_MAX for s in seeds)
+    assert all(pool_for(s) == RANDOM_POOLS[-1] and s <= seed_top() for s in seeds)
     assert len(set(seeds)) > 45           # collisions vanishingly unlikely
 
 
@@ -499,3 +757,309 @@ def test_random_seed_ignores_the_global_random_state():
     first = [random_seed() for _ in range(5)]
     _random.seed(1234)
     assert [random_seed() for _ in range(5)] != first
+
+
+# --------------------------------------------------------------------------- #
+# Hand-authored maps riding along in the setup
+# --------------------------------------------------------------------------- #
+def _with_map() -> Settings:
+    s = Settings()
+    s.custom_map = _tiny_map()
+    s.players, s.nodes = s.custom_map.seats(), len(s.custom_map.nodes)
+    return s
+
+
+def test_a_custom_map_survives_to_dict_to_token_and_save(tmp_path):
+    """Three round trips, not one: `to_dict` is no longer a bare `asdict`, and a
+    forgotten override there half-breaks the save file silently while the token
+    keeps working."""
+    s = _with_map()
+    assert Settings.from_dict(s.to_dict()).custom_map == s.custom_map
+    assert Settings.from_token(s.to_token()).custom_map == s.custom_map
+    path = tmp_path / "hand.json"
+    s.save(path)
+    assert Settings.load(path).custom_map == s.custom_map
+
+
+def test_to_dict_writes_the_compact_wire_form_not_the_dataclass():
+    """A bare `asdict` would write a keyed object per node, roughly trebling every
+    shared link and giving the setup digest a second shape nothing else reads."""
+    data = _with_map().to_dict()
+    assert set(data["custom_map"]) == {"v", "n", "l"}
+    assert data["custom_map"]["n"][0] == [200, 200, 3, 10, 1]
+
+
+def test_from_dict_reconciles_nodes_and_players_to_the_recipe():
+    """They must agree with the seats actually placed, or `token_dict`'s seat
+    truncation and `challenge_keys`' seat blanking disagree with the sender's."""
+    data = _with_map().to_dict()
+    data["players"], data["nodes"] = 6, 30      # a token that disagrees with its map
+    out = Settings.from_dict(data)
+    assert out.players == 2 and out.nodes == 2
+
+
+def test_a_hand_map_may_sit_below_the_generated_node_floor():
+    """The reconciliation is deliberately after the clamps and overrides them: a
+    two-system map is a legitimate thing to draw, and `min_nodes()` only governs
+    what the *generator* is asked for."""
+    s = _with_map()
+    assert s.nodes < s.min_nodes()
+    assert Settings.from_dict(s.to_dict()).nodes == 2
+
+
+def test_a_broken_recipe_lands_at_none_and_the_setup_still_builds():
+    """Rejection is never silent even though nothing is raised: `challenge_key()`
+    no longer matches the key a sender stamped, so the menu's existing "this setup
+    has been edited" banner fires with nothing added."""
+    data = _with_map().to_dict()
+    data["custom_map"]["l"] = []               # two systems, no lane: disconnected
+    out = Settings.from_dict(data)
+    assert out.custom_map is None
+    assert build_state(out, 3) is not None
+
+
+def test_a_custom_setup_offers_only_the_keys_of_versions_that_had_hand_maps():
+    """A version whose `_LEGACY_KEY_DROPS` entry names `custom_map` could not
+    have described a hand map, so only the versions since it joined (the current
+    one, and those whose entries leave it out) offer a key for one."""
+    since = sum(1 for drops in _LEGACY_KEY_DROPS if "custom_map" not in drops)
+    assert len(_with_map().challenge_keys()) == 1 + since
+
+
+def test_copy_from_deep_copies_the_recipe():
+    s = _with_map()
+    other = Settings()
+    other.copy_from(s)
+    other.custom_map.nodes[0].x = 999
+    assert s.custom_map.nodes[0].x == 200
+
+
+def test_build_state_takes_the_custom_branch():
+    state = build_state(_with_map(), 11)
+    assert state.mode == "custom"
+    assert len(state.systems) == 2
+
+
+def test_a_setup_without_a_map_prunes_the_key_from_its_token():
+    """So a generated map's shared link is byte-identical either side of this
+    change, and the leaderboard needs no KEY_ALIASES entry for it."""
+    assert "custom_map" not in Settings().token_dict()
+
+
+def test_no_core_module_imports_pygame():
+    """The hard split the whole layout rests on — it is what lets `tests/sim` and
+    most of the suite run with no display. There is no violation today, and this
+    change adds both a new core module (`custommap`) and a new shell one
+    (`mapmaker`), so pin it rather than rely on nobody noticing.
+
+    Parsed rather than grepped: every one of these modules says "no pygame" in its
+    own docstring, so a substring search passes nothing and fails everything.
+    """
+    import ast
+    import pathlib
+
+    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
+            "campaign")
+    pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
+    for name in core:
+        tree = ast.parse((pkg / f"{name}.py").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            assert not any(n.split(".")[0] == "pygame" for n in names), \
+                f"{name}.py is core and must not import pygame"
+
+
+def test_no_core_module_reads_a_screen_size():
+    """Every pixel figure in `config` follows the UI scale, which differs between
+    the browser, the desktop and the headless worker. A core module reading one
+    makes the same seed build a different board on a different screen, and a
+    replay then plays its orders onto the wrong map."""
+    import ast
+    import pathlib
+
+    from starconquest import config
+
+    scaled = set(config._BASE_VALUES) | {
+        "ui_scale", "touch_ui", "s", "apply_ui_scale", "node_clearance",
+        "map_fit_padding", "map_pan_padding", "play_rect", "node_radius", "SCREEN_W", "SCREEN_H",
+    }
+    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
+            "campaign")
+    root = pathlib.Path(__file__).resolve().parent.parent
+    paths = [root / "starconquest" / f"{name}.py" for name in core]
+    paths += sorted((root / "models").glob("*.py"))
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id == "config"):
+                assert node.attr not in scaled, \
+                    f"{path.name} reads config.{node.attr}, which follows the screen"
+
+
+def test_the_lane_survey_leaves_config_as_it_found_it():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    s.ship_ly_per_turn, s.node_jitter = 2.0, 0.3
+    before = (config.SHIP_LY_PER_TURN, config.NODE_JITTER)
+    assert settings_mod.lane_lengths(s)
+    assert (config.SHIP_LY_PER_TURN, config.NODE_JITTER) == before
+
+
+def test_the_lane_survey_is_stable_and_matches_the_map_it_describes():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    assert settings_mod.lane_lengths(s) == settings_mod.lane_lengths(s)   # seed left to chance
+    s.seed = 7
+    state = build_state(s, 7)
+    turns = sorted(lane.travel_turns for lane in state.lanes.values())
+    assert settings_mod.lane_turns(settings_mod.lane_lengths(s), s.ship_ly_per_turn) == (
+        turns[0], turns[len(turns) // 2], turns[-1])
+    assert settings_mod.lane_turns([], 6.0) is None
+
+
+def test_ship_speed_does_not_move_the_lane_survey_key():
+    from starconquest import settings as settings_mod
+    s = Settings.defaults()
+    key = settings_mod.lane_survey_key(s)
+    s.ship_ly_per_turn = 12.0
+    assert settings_mod.lane_survey_key(s) == key
+    s.nodes += 1
+    assert settings_mod.lane_survey_key(s) != key
+
+
+@contextlib.contextmanager
+def _warning_bot(name, record):
+    """A strategy whose module warns, recording the seats it was asked about."""
+    import sys
+    from starconquest import ai
+    modname = f"sc_model_{name}"
+    module = type(ai)(modname)
+    module.setup_warning = lambda settings, seats: (record.append(seats), [f"{name} {seats}"])[1]
+    fn = lambda state, pid: []
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register(name, fn)
+    try:
+        yield
+    finally:
+        ai.STRATEGIES.pop(name, None)
+        sys.modules.pop(modname, None)
+
+
+def test_setup_warnings_asks_each_strategy_once_about_its_bot_seats():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=4)
+    s.ai_strategy[1:4] = ["warn_a", "heuristic", "warn_a"]
+    with _warning_bot("warn_a", asked):
+        assert setup_warnings(s) == ["warn_a [2, 4]"]
+        assert asked == [[2, 4]]
+
+
+def test_setup_warnings_counts_seat_one_only_when_no_person_holds_it():
+    from starconquest.settings import setup_warnings
+    asked: list = []
+    s = Settings(players=3)
+    s.ai_strategy[:3] = ["warn_b"] * 3
+    with _warning_bot("warn_b", asked):
+        setup_warnings(s)
+        s.autoplay = True
+        setup_warnings(s)
+        setup_warnings(s, people={1, 3})    # a play-by-post roster
+    assert asked == [[2, 3], [1, 2, 3], [2]]
+
+
+def test_setup_warnings_tells_each_hook_who_the_people_are():
+    import sys
+    from starconquest import ai
+    from starconquest.settings import setup_warnings
+    told: list = []
+    modname = "sc_model_warn_p"
+    module = type(ai)(modname)
+    module.setup_warning = lambda settings, seats, people=(): (told.append(people), [])[1]
+    fn = lambda state, pid: []
+    fn.__module__ = modname
+    sys.modules[modname] = module
+    ai.register("warn_p", fn)
+    try:
+        s = Settings(players=3)
+        s.ai_strategy[1:3] = ["warn_p", "warn_p"]
+        setup_warnings(s)
+        setup_warnings(s, people={3, 1})
+        s.autoplay = True
+        setup_warnings(s)
+    finally:
+        ai.STRATEGIES.pop("warn_p", None)
+        sys.modules.pop(modname, None)
+    assert told == [[1], [1, 3], []]
+
+
+def test_setup_warnings_resolves_a_random_seat_only_once_the_seed_is_fixed():
+    from starconquest.settings import resolve_strategy, setup_warnings
+    asked: list = []
+    s = Settings(players=2)
+    s.ai_strategy[1] = RANDOM_STRATEGY
+    with _roster("warn_c"), _pool("warn_c"), _warning_bot("warn_c", asked):
+        assert setup_warnings(s) == []          # no seed: nobody knows the bot yet
+        s.seed = 17
+        assert resolve_strategy(RANDOM_STRATEGY, 17, 2) == "warn_c"
+        assert setup_warnings(s) == ["warn_c [2]"]
+
+
+# --------------------------------------------------------------------------- #
+# Symmetric layout
+# --------------------------------------------------------------------------- #
+def test_a_hub_setup_still_matches_a_key_stamped_before_layouts():
+    """`38c8...` is the default setup's key before `layout` joined: an old link
+    to a symmetric (hub) map must still read as unedited."""
+    assert "38c8b7ba470f6f4c" in Settings().challenge_keys()
+    s = Settings(mode="symmetric")
+    older = s.to_dict()
+    for skip in ("challenge", "autoplay", "layout"):
+        older.pop(skip)
+    assert _hash_setup(older) in s.challenge_keys()
+
+
+def test_a_layout_moves_a_symmetric_setups_key_and_link():
+    hub = Settings(mode="symmetric", seed=3)
+    ring = Settings(mode="symmetric", seed=3, layout="ring")
+    assert hub.challenge_key() != ring.challenge_key()
+    assert "layout" not in hub.token_dict()
+    assert ring.token_dict()["layout"] == "ring"
+    assert Settings.from_token(ring.to_token()).layout == "ring"
+
+
+def test_a_layout_is_inert_where_it_cannot_shape_the_map():
+    """Left over from a symmetric setup, it must not split a random map's key or
+    ride in its link, nor a hand-drawn map's."""
+    for mode, recipe in (("random", None), ("symmetric", _tiny_map())):
+        plain = Settings(mode=mode, seed=3, custom_map=recipe)
+        stale = Settings(mode=mode, seed=3, custom_map=recipe, layout="core")
+        assert stale.layout_inert()
+        assert stale.challenge_keys() == plain.challenge_keys()
+        assert stale.token_dict() == plain.token_dict()
+
+
+def test_an_unknown_layout_loads_as_the_hub():
+    assert Settings.from_dict({"mode": "symmetric", "layout": "spiral"}).layout == "hub"
+    assert Settings.from_dict({"mode": "symmetric", "layout": 7}).layout == "hub"
+
+
+def test_the_layout_reaches_the_board():
+    ring = build_state(Settings(mode="symmetric", players=3, nodes=18, layout="ring"), 5)
+    hub = build_state(Settings(mode="symmetric", players=3, nodes=18), 5)
+    assert set(ring.lanes) != set(hub.lanes)
+
+
+def test_system_count_is_the_map_that_gets_built():
+    s = Settings(mode="symmetric", layout="core", players=6, nodes=10, seed=603346)
+    assert s.system_count() == 18 == len(build_state(s, 603346).systems)
+    s.mode = "random"
+    assert s.system_count() == 10 == len(build_state(s, 603346).systems)

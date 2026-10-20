@@ -70,6 +70,39 @@ guard can be lifted right out of the way and your search runs to its natural,
 iteration-bounded end. It stays 1.0 in every real game, so declaring it changes
 nothing about how your bot plays. Bots without it are simply left alone.
 
+### Optional: warn about a setup before it starts
+
+If some setups are more than your bot can play in the time it has (a huge map,
+a deep search), say so before the match exists rather than stalling once it
+does. Define:
+
+```python
+def setup_warning(settings, seats) -> list[str]:
+    """Short lines for the menu's confirm, or [] when this setup is fine."""
+```
+
+`settings` is the menu's `Settings`; `seats` is every seat your bot will play,
+so the lines can count the whole cost. When it returns anything, Start (and the
+play-by-post confirm) shows a "This setup may play slowly" modal with those
+lines and a *Play anyway* button. A hook that raises or returns junk is ignored.
+`models/knower.py` is the worked example. Add a `people=()` parameter and you
+are also told which seats a person holds; every other seat is a bot.
+
+### Optional: say what a decide costs
+
+If your bot takes milliseconds rather than microseconds, say so:
+
+```python
+def decide_ms(settings, seat) -> float:
+    """Typical CPU ms of one decide on this setup (native Python)."""
+```
+
+An oracle that runs your `decide` while it thinks pays for it many times over:
+knower on Search runs every rival bot on each turn of each line it looks ahead,
+and its setup warning counts what you declare here (`ai.decide_ms`). Leave it
+out if you answer in microseconds; a missing or broken hook counts as free.
+`models/actuary.py` is the worked example.
+
 ## What you can read off `state`
 
 Import what you need from `starconquest.model`:
@@ -114,19 +147,27 @@ slider must still play well. Being per-seat, it is also readable on *rivals*, so
 bot can tell a shallow opponent from a deep one.
 
 Tell the AI tab what yours means and it gets a properly labelled slider whenever
-your bot holds the seat — three optional module-level names, all read by
-`ai.aux_spec`:
+your bot holds the seat — four optional module-level names, read by
+`ai.aux_spec` and `ai.aux_names`:
 
 ```python
 AUX_LABEL = "Search depth"   # required to show the slider at all
 AUX_RANGE = (0, 8, 1)        # (lo, hi, step); defaults to (0.0, 8.0, 1.0)
 AUX_INT = True               # show/store whole numbers (default: 2dp floats)
+AUX_NAMES = ("Off", ...)     # one name per stop, shown instead of the number
 ```
+
+`AUX_NAMES` applies only to a whole-number knob stepping by one, and only with
+exactly one name per stop (`AUX_NAMES[i]` is `lo + i`); anything else is ignored
+and the number shows. The leaderboard's bot column says a named stop in words too
+("knower · oracle: search").
 
 Declare no `AUX_LABEL` and the slider is simply hidden for your bot, which is the
 right answer if you ignore `aux`. `models/knower.py` is the worked example: it
-labels it *Search depth* and reads it as exactly that (0 = no prediction, 1 =
-predict one turn, N = predict then search N−1 plies forward).
+labels it *Oracle* with three named stops — Off (no prediction), Predict (predict
+this turn), Search (predict, then play the board forward until every lane has
+landed). It was a 0-12 depth once; knower clamps any stored value above 2 to
+Search, which is how an old link keeps its meaning when a knob is narrowed.
 
 `Fleet` fields: `owner_id`, `source_id`, `dest_id`, `ships`, `turns_remaining`.
 
@@ -175,11 +216,13 @@ their `ai_params` applied for free, because their own function reads them.
 
 - **Clone the state first.** `decide` is contractually read-only, but you cannot
   assume a rival honours that, and you need your own `rng` anyway (below).
-- **Draw nothing from `state.rng`.** Seats decide in ascending player id, so the
-  seats after you will find the stream exactly where you leave it. Leave it alone
-  and their orders are reproducible bit-for-bit; draw once and they aren't. Use a
-  private `random.Random` seeded from `state.seed`/`state.turn` — never the clock,
-  or a seed will stop reproducing its match.
+- **Draw nothing from `state.rng`.** Every seat decides from the same start of
+  the turn's stream (`engine.decide_seat`), and that start is where the rng stands
+  when you are asked, so a copy of it predicts any rival bit-for-bit. Draw from it
+  and you move the start you are predicting from. Use a private `random.Random`
+  seeded from `state.seed`/`state.turn` — never the clock, or a seed will stop
+  reproducing its match. Combat dice never come from `state.rng`: `end_turn` on a
+  copy of the board rolls the fights the real turn will roll.
 - **Read `ai.STRATEGIES` lazily, inside `decide`.** Model files are imported in
   sorted filename order, so at *your* import time the registry is still incomplete.
 - **Never call `ai.load_models()` from a model.** It imports every file in this
@@ -200,6 +243,12 @@ To make that last one detectable, a predicting bot should advertise itself:
   knower defines it as "depth ≥ 1", so its depth-0 seats correctly report `False`
   and get predicted for real rather than approximated. Keep the flag as well, for
   anything that only checks it.
+- **`stand_in_params(player) -> AiParams`** — optional: the params of this seat's
+  nearest version that *doesn't* predict (knower's is Oracle: Off, actuary's is
+  Field for a Learning seat). An oracle then runs your `decide` at those params
+  on its copy of the board, rather than guessing at you with a planner of its own.
+  Return a copy, never the seat's own params. Params that still answer
+  `is_oracle_seat` true, `None`, or a raise all mean "no stand-in".
 
 Recursion is still your own responsibility: guard re-entry into your `decide` (a
 module-level depth counter is enough in this single-threaded codebase) rather than
@@ -235,11 +284,46 @@ For the full built-in strategy to study, see `starconquest/ai.py` (`compute_orde
 
 ## The roster
 
-The bots already here, weakest to strongest: `rusherplus.py` (the above, plus
-arrival arithmetic), `claudebot.py` (focus fire, one turn deep), `thinker.py`
-(scheduled defence and staggered pincers), `marshal.py` (thinker's phases, but it
-commits its surplus instead of parking it), `knower.py` (the oracle — it runs every
-rival's own `decide` before the engine asks for it).
+The bots already here, one per family, weakest to strongest; a variant of a
+bot is a stop of its knob, not a file of its own: `rusherplus.py` (the above,
+plus arrival arithmetic), `thinker.py` (scheduled defence and staggered
+pincers; its *Style* knob's other stop, Claudebot, is the bot it was tuned
+against: focus fire, one turn deep), `evolved.py` (no hand-written
+tactics: a menu of priced moves, each naming its principle, scored by weights
+evolved offline, plus a short look-ahead that plans for rivals holding and
+vetoes what an all-out strike would punish; it beats thinker and loses to
+marshal, and plays unlike any of the others), `marshal.py` (thinker's phases, but it
+commits its surplus instead of parking it), `actuary.py` (no phases: it projects
+every system's future, values the board in ships and greedily commits whichever
+launch raises that value most; its *Style* knob picks the pull on its ships:
+Greedy sends them to every front alike, Field, the default, to where the
+balance of force is closest, Learning is Field reading each rival's habits
+into its risk, and Hunt, its strongest, counts a threat only if a rival would
+launch it: a system next door, or several landing on the same turn, that wins
+the worst roll, with a short look-ahead over a few postures and every rival
+modelled by Hunt's own plain plan), `knower.py` (the oracle — it runs every
+rival's own `decide` before the engine asks for it; at *Oracle: Council*, its
+strongest, its Search is judged by a small network fitted on roster self-play,
+actuary and evolved join the openings it compares, and each borrowed opening is played
+forward by the bot that proposed it). At *Learning* actuary also keeps a model
+of each rival, read off the boards it has seen, and prices the threat next door
+by how often that rival strikes a garrison as thin as ours will be: the one
+seat here that remembers anything between turns, so knower models it rather
+than running it (`is_oracle_seat`), as Field (`stand_in_params`).
+
+A seat stored under a name since folded into a family (`council`, `claudebot`)
+still plays, as that family at its stop (`ai.LEGACY`); don't name a file of
+yours after one, or it will shadow the fold.
+
+The dropdown carries one entry that is **not** a bot and cannot be one: `random`
+leaves the seat's bot to the match seed, and `settings.build_state` resolves it to
+one of the above before the game starts. It is deliberately not a model file that
+forwards to another — a forwarding bot would have to answer `is_oracle_seat` for a
+seat whose bot it does not yet know (see *Predicting the other seats*), and every
+answer it could give is wrong for some pick. The pools are fixed lists
+(`settings.RANDOM_POOLS`, append-only, the seed's era picking one), so every copy
+of the game deals a seed the same bots; a drop-in of yours is never dealt. Don't
+name one `random.py`.
 
 `marshal.py` is worth reading for its docstring as much as its code: it records
 three plausible ideas that were built, measured and then *deleted* for not beating

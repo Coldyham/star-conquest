@@ -1,74 +1,70 @@
-import { configured, contains, eq, insert, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, eq, inList, insert, select, selectPage, UNIQUE_VIOLATION } from "./api.mjs";
+import { campaignMark } from "./campaign.mjs";
 import { GAME_URL } from "./config.mjs";
+import { weekParam, weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botLeadBadge, clear, configBadge, el, mapSummary, relativeTime, showError,
+  botChips, botLeadBadge, campaignBadge, clear, configBadge, difficultyBadge, el, embargoBadge, embargoNote, fogBadge,
+  leaderCredit, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
+import {
+  familyQueries, filtersFromParams, FIRST_SEEN_QUERY, isFiltered, listQuery, MAX_EXCLUDED, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
+  urlFor, viewKind,
+} from "./listing.mjs";
+import { families, familyForest, paceLabel, withFirstSeen } from "./families.mjs";
 import { mountMyScores, myName } from "./me.mjs";
+import { mountNav } from "./nav.mjs";
 import { configTitle } from "./setup.mjs";
+import { compareScores } from "./standings.mjs";
 import { encodeToken, newSeedSetup } from "./token-encode.mjs";
-
-// Columns spelled out rather than `select=*`: game_summary now carries
-// settings_json for the badge label, and that's a real payload increase for a
-// 50-row list — worth it, but worth stating rather than growing silently the
-// next time a column is appended.
-const COLUMNS = [
-  "game_key", "mode", "players", "nodes", "seed", "last_activity", "score_count",
-  "best_turns", "best_lost", "best_hand", "best_by_name", "best_user_name", "best_holders",
-  "settings_json", "config_key", "bots", "config_name", "config_tags",
-  "bot_turns", "bot_lost", "bot_name",
-].join(",");
-
-// config_summary's columns are already a curated, fixed set (schema.sql), so
-// select=* is fine here unlike game_summary above.
-const CONFIG_COLUMNS = "*";
 
 const target = document.getElementById("games");
 const groupTarget = document.getElementById("group-toggle");
 const filterTarget = document.getElementById("filters");
 const headTarget = document.getElementById("config-head");
 
-/** The filter state this view is showing — the only state home.mjs has, and it
- * lives entirely in the URL so every filtered view is a shareable link. */
-function filtersFromUrl() {
-  const params = new URLSearchParams(location.search);
-  return {
-    config: params.get("config") || "",
-    bot: params.get("bot") || "",
-    group: params.get("group") === "config" ? "config" : "game",
-  };
-}
-
-function urlFor(filters) {
-  const params = new URLSearchParams();
-  if (filters.config) params.set("config", filters.config);
-  if (filters.bot) params.set("bot", filters.bot);
-  if (filters.group === "config") params.set("group", "config");
-  const qs = params.toString();
-  return qs ? `index.html?${qs}` : "index.html";
-}
+// How many cards one press of "Show more" adds (and the first load shows).
+const PAGE_SIZE = 50;
 
 /**
- * "By config" only means something above a single config's own game list, so
- * a `config` filter always falls back to the plain per-game query regardless
- * of what `?group=` says — that keeps a hand-edited URL from landing on a
- * grouped view of one group.
+ * The "Show more" control under the list. Each press fetches the next page and
+ * appends it. A card already on screen is skipped rather than drawn twice:
+ * the list is ordered by last activity, so a score posted since the last page
+ * moves its map to the top and pushes everything below it down one row.
+ * Offsets count rows fetched, not rows drawn, which keeps the paging lined up
+ * with the server. A failed page leaves the list alone and lets you retry.
+ * `keep` drops a row the server couldn't (see myMaps), and `prepare` fetches
+ * whatever the new cards need before they are drawn (see addMyBests).
  */
-async function fetchGames(filters) {
-  if (filters.group === "config" && !filters.config) {
-    let query = `config_summary?select=${CONFIG_COLUMNS}&order=last_activity.desc.nullslast&limit=50`;
-    if (filters.bot) query += `&bots=${contains([filters.bot])}`;
-    return { kind: "config", rows: await select(query) };
-  }
-  let query = `game_summary?select=${COLUMNS}&score_count=gt.0&order=last_activity.desc.nullslast&limit=50`;
-  if (filters.config) query += `&config_key=${eq(filters.config)}`;
-  if (filters.bot) query += `&bots=${contains([filters.bot])}`;
-  return { kind: "game", rows: await select(query) };
+function showMore(list, { kind, query }, render, offset, { keep, prepare }) {
+  const keyOf = (r) => r[kind === "config" ? "config_key" : "game_key"];
+  const seen = new Set(list.map(keyOf));
+  const button = el("button", { class: "mini", type: "button", text: "Show more" });
+  const status = el("span", { class: "name-status" });
+  const wrap = el("div", { class: "show-more" }, [button, status]);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "";
+    try {
+      const page = await selectPage(query, { offset, size: PAGE_SIZE });
+      offset += page.rows.length;
+      const fresh = page.rows.filter((r) => !seen.has(keyOf(r)) && seen.add(keyOf(r)) && keep(r));
+      await prepare(fresh);
+      wrap.before(...fresh.map(render));
+      if (page.more) button.disabled = false;
+      else wrap.remove();
+    } catch (err) {
+      button.disabled = false;
+      status.textContent = err.message;
+    }
+  });
+  return wrap;
 }
 
-/** By-game vs. by-config, styled like game.mjs's turns/lost ranking toggle.
+/** By game, by config or by family, styled like game.mjs's turns/lost ranking toggle.
  * Hidden once already narrowed to one config — there is nothing left to
- * group there. */
+ * group there. Every other filter rides along. */
 function groupToggle(filters) {
   if (filters.config) return null;
   const linkFor = (value, label) => el("a", {
@@ -76,32 +72,222 @@ function groupToggle(filters) {
     href: urlFor({ ...filters, group: value }),
     text: label,
   });
-  return el("div", { class: "sorts" }, [linkFor("game", "By game"), linkFor("config", "By config")]);
-}
-
-/** Bot filtering has no picker any more — a bot chip on a card is the only way
- * in (format.mjs's botChips already links to `?bot=`). This bar just states
- * which bot is active, if any, and offers a way out of every filter at once. */
-function filterBar(filters) {
-  if (!filters.config && !filters.bot) return null;
-  const children = [];
-  if (filters.bot) children.push(el("span", { class: "current", text: `Vs ${filters.bot}` }));
-  children.push(el("a", { class: "clear", href: "index.html", text: "Clear filters" }));
-  return el("div", { class: "filters" }, children);
+  const children = [linkFor("game", "By game"), linkFor("config", "By config"), linkFor("family", "By family")];
+  if (filters.group === "config") children.push(randomSetupButton(filters));
+  return el("div", { class: "sorts" }, children);
 }
 
 /**
- * Post a name (and optional tags) for a config nobody has named yet. First
- * post wins — configs.config_key is the primary key and there's no UPDATE
- * policy — so a race here just means someone beat you to it, reported the
- * same way ensureUser() in submit.mjs reports a race on a user's name.
+ * "Random setup": one existing config picked at random from those the current
+ * filters allow, opened in the game on a freshly rolled seed — the door
+ * newSeedLink() is on one config's page, with the config left to chance, the
+ * way tools/campaign.py fills a campaign node. Absent with no GAME_URL.
  */
-async function nameConfig(configKey, name, tagsRaw) {
-  const tags = [...new Set(
-    tagsRaw.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
-  )].slice(0, 6);
+function randomSetupButton(filters) {
+  if (!GAME_URL) return null;
+  const button = el("button", {
+    class: "btn play", type: "button", text: "Random setup",
+    title: isFiltered(filters)
+      ? "Open the game on a random setup matching these filters, on a fresh map"
+      : "Open the game on a random setup from the board, on a fresh map",
+  });
+  const status = el("span", { class: "name-status" });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "";
+    try {
+      const pick = pickRandom(await select(randomPoolQuery(filters)));
+      if (!pick) {
+        status.textContent = "No setups match these filters.";
+        button.disabled = false;
+        return;
+      }
+      location.assign(`${GAME_URL}#${await encodeToken(newSeedSetup(pick.settings_json), deflate)}`);
+    } catch (err) {
+      status.textContent = err.message;
+      button.disabled = false;
+    }
+  });
+  return el("div", { class: "random-setup" }, [button, status]);
+}
+
+function picker(name, label, value, options) {
+  const select = el("select", { name, "aria-label": label },
+    options.map(([optValue, optLabel]) => {
+      const option = el("option", { value: optValue, text: optLabel });
+      if (String(optValue) === String(value)) option.selected = true;
+      return option;
+    }));
+  return el("label", { class: "pick" }, [el("span", { text: label }), select]);
+}
+
+/**
+ * Which way round the sort reads, worded for it ("Fewest first"). The sort's
+ * own direction submits blank, so it stays out of the URL (listing.mjs).
+ */
+function dirPicker(filters) {
+  const sort = sortFor(filters);
+  const other = sort.dir === "desc" ? "asc" : "desc";
+  return picker("dir", "Order", filters.dir,
+    [["", sort.arrows[sort.dir]], [other, sort.arrows[other]]]);
+}
+
+function toggle(name, label, on, title) {
+  const box = el("input", { type: "checkbox", name, value: "1" });
+  box.checked = on;
+  return el("label", { class: "toggle", title }, [box, label]);
+}
+
+/**
+ * Search, sort and the filters, as one GET form whose fields are the URL's own
+ * params — so a change just navigates to the view it names, and the back
+ * button, a bookmark and a pasted link all work with no state of our own. A
+ * select or a checkbox applies the moment it changes; the search box on Enter
+ * or its button. The bot and config filters have no field of their own (a
+ * card's chip or badge is the way in), so they ride along as hidden inputs.
+ */
+function controls(filters) {
+  const kind = viewKind(filters);
+  const form = el("form", { class: "list-controls", method: "get", action: "index.html", role: "search" });
+  for (const name of ["config", "bot", "group"]) {
+    if (filters[name] && !(name === "group" && filters.group === "game")) {
+      form.append(el("input", { type: "hidden", name, value: filters[name] }));
+    }
+  }
+  const search = el("input", {
+    type: "text", name: "q", value: filters.q, maxlength: "40", "aria-label": "Search",
+    placeholder: kind === "game" ? "Setup, tag, leader or seed" : "Setup name or tag",
+  });
+  form.append(el("div", { class: "search-row" }, [
+    search, el("button", { class: "mini", type: "submit", text: "Search" }),
+  ]));
+
+  const picks = el("div", { class: "picks" }, [
+    picker("sort", "Sort", filters.sort, SORTS[kind].map((s) => [s.value, s.label])),
+    dirPicker(filters),
+    picker("players", "Players", filters.players || "",
+      [["", "Any"], ...PLAYER_COUNTS.map((n) => [n, `${n}`])]),
+    picker("mode", "Map", filters.mode, [["", "Any"], ...MODES.map((m) => [m, m[0].toUpperCase() + m.slice(1)])]),
+    picker("fog", "Fog", filters.fog, [["", "Any"], ["on", "On"], ["off", "Off"]]),
+  ]);
+  form.append(picks);
+
+  // The per-map filters: a config has no single record to be contested or
+  // led, so the grouped view leaves them out (listing.mjs drops them too).
+  if (kind === "game") {
+    const toggles = [
+      toggle("contested", "Contested", filters.contested,
+        "Maps two or more players have a counted score on — the ones a crown can be held on"),
+      toggle("botlead", "Bot unbeaten", filters.botlead,
+        "Maps where no human score beats the best bot yet — a bot leading or tied"),
+      toggle("campaign", "Campaign", filters.campaign, "This week's campaign maps that have a score on the board"),
+    ];
+    if (myName()) {
+      toggles.push(toggle("unplayed", "Unplayed by me", filters.unplayed,
+        `Maps ${myName()} has no score on yet`));
+    }
+    form.append(el("div", { class: "toggles" }, toggles));
+  }
+
+  const go = () => location.assign(urlFor(filtersFromParams(new URLSearchParams(new FormData(form)))));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    go();
+  });
+  form.addEventListener("change", (event) => {
+    if (event.target === search) return;
+    // A new sort starts in its own direction: "Most first" carried over from
+    // Scores would put the slowest wins first under Best turns.
+    if (event.target.name === "sort") form.elements.dir.value = "";
+    go();
+  });
+  return form;
+}
+
+/** What the controls can't show: which bot is filtered on, if any, and a way
+ * out of every filter at once — keeping the grouping and the sort. */
+function filterBar(filters) {
+  if (!isFiltered(filters)) return null;
+  const children = [];
+  if (filters.bot) children.push(el("span", { class: "current", text: `Vs ${filters.bot}` }));
+  const reset = urlFor({ group: filters.config ? "game" : filters.group, sort: filters.sort, dir: filters.dir });
+  children.push(el("a", { class: "clear", href: reset, text: "Clear filters" }));
+  return el("div", { class: "filters" }, children);
+}
+
+/** How many maps, setups or families the list holds under these filters —
+ * the whole list, not just the page drawn. `upTo` marks a count that may run
+ * high: "Unplayed by me" past MAX_EXCLUDED of your maps drops the rest only as
+ * rows arrive, so the server counted some of them. Nothing when the count
+ * didn't come back, or for an empty list, which already says so. */
+function matchCount(total, [one, many], filters, { upTo = false } = {}) {
+  if (!total) return null;
+  const noun = total === 1 ? one : many;
+  const text = isFiltered(filters)
+    ? `${upTo ? "Up to " : ""}${total} ${noun} ${total === 1 ? "matches" : "match"} these filters`
+    : `${total} ${noun}`;
+  return el("p", { class: "match-count", text });
+}
+
+/**
+ * Every map this browser's player has a score on, for "Unplayed by me" —
+ * newest score first, so `listQuery`'s capped `not.in` excludes the ones most
+ * likely to be on the first page. Empty with no remembered name, and quiet on
+ * failure.
+ */
+async function myMaps() {
+  const name = myName();
+  if (!name) return new Set();
+  const rows = await select(
+    `scores?select=game_key,users!inner(name_key)` +
+      `&users.name_key=${eq(name.toLowerCase())}&order=submitted_at.desc&limit=2000`,
+  ).catch(() => []);
+  return new Set(rows.map((r) => r.game_key));
+}
+
+/**
+ * This browser's player's best on each of `rows`' maps, merged into `into` for
+ * the "You: 25" badge — asked a page at a time, for the cards about to be
+ * drawn, rather than for every map they have ever played. Quiet on failure: a
+ * card without the marker is still the card.
+ */
+async function addMyBests(into, rows) {
+  const name = myName();
+  if (!name || !rows.length) return;
+  const scores = await select(
+    `scores?select=game_key,turns,lost,users!inner(name_key)` +
+      `&users.name_key=${eq(name.toLowerCase())}&game_key=${inList(rows.map((r) => r.game_key))}`,
+  ).catch(() => []);
+  for (const r of scores) {
+    const held = into.get(r.game_key);
+    if (!held || compareScores(r, held) < 0) into.set(r.game_key, { turns: r.turns, lost: r.lost });
+  }
+}
+
+/** "You: 25" on a map this browser's player has a score on. */
+function mineBadge(score) {
+  if (!score) return null;
+  return el("span", {
+    class: "badge mine",
+    title: `Your best here: ${score.turns} turns · ${score.lost} lost`,
+    text: `You: ${score.turns}`,
+  });
+}
+
+/**
+ * Post a name for a config nobody has named yet. First post wins —
+ * configs.config_key is the primary key and there's no UPDATE policy — so a
+ * race here just means someone beat you to it, reported the same way
+ * ensureUser() in submit.mjs reports a race on a user's name.
+ *
+ * Tags used to travel with this form too; they don't any more. A tag is now
+ * gated on having actually posted a score (`config_tags.score_id`), so it's
+ * entered on submit.html alongside the score itself instead — see
+ * `submitTags` there. This form stays name-only, still ungated, still
+ * first-wins, exactly as before.
+ */
+async function nameConfig(configKey, name) {
   const row = { config_key: configKey, name: name.trim() };
-  if (tags.length) row.tags = tags;
   const by = myName();
   if (by) row.by_name = by;
   await insert("configs", row);
@@ -109,10 +295,9 @@ async function nameConfig(configKey, name, tagsRaw) {
 
 function nameForm(configKey) {
   const nameField = el("input", { type: "text", maxlength: "40", "aria-label": "Name this setup", placeholder: "Name this setup" });
-  const tagsField = el("input", { type: "text", "aria-label": "Tags", placeholder: "Tags, comma separated" });
   const status = el("span", { class: "name-status" });
   const button = el("button", { class: "mini", type: "submit", text: "Name it" });
-  const form = el("form", { class: "compare" }, [nameField, tagsField, button, status]);
+  const form = el("form", { class: "compare" }, [nameField, button, status]);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -123,7 +308,7 @@ function nameForm(configKey) {
     button.disabled = true;
     status.textContent = "";
     try {
-      await nameConfig(configKey, nameField.value, tagsField.value);
+      await nameConfig(configKey, nameField.value);
       location.reload();
     } catch (err) {
       button.disabled = false;
@@ -131,7 +316,7 @@ function nameForm(configKey) {
         status.textContent = "Someone just named this setup — reloading…";
         setTimeout(() => location.reload(), 900);
       } else if (err.code === "23514") {
-        status.textContent = "That name or tag list is too long.";
+        status.textContent = "That name is too long.";
       } else {
         status.textContent = err.message;
       }
@@ -166,16 +351,16 @@ async function newSeedLink(game) {
   return el("a", {
     class: "btn play",
     href: `${GAME_URL}#${token}`,
-    target: "_blank",
-    rel: "noopener",
     title: "Open the game on this setup, with a freshly rolled map",
     text: "Play a new seed",
   });
 }
 
 /** The header strip shown once the list is filtered to one config: its title
- * and the way to play it, its tags, and — while it has none — the form to give
- * it a name. */
+ * and the way to play it, its tags (now sourced from `config_tag_counts` via
+ * `game_summary`/`config_summary`'s `config_tags` column — ranked by how many
+ * distinct players entered each one when posting a score, not entered here),
+ * and — while it has no name yet — the form to give it one. */
 async function configHead(game) {
   const title = el("h2", { class: "config-title", text: configTitle(game) });
   const play = await newSeedLink(game);
@@ -189,19 +374,49 @@ async function configHead(game) {
   return wrap;
 }
 
-function row(game) {
-  const name = (game.best_user_name || "").trim() || "anonymous";
-  // A dead heat on turns *and* lost is a shared record, so credit all of it.
-  // best_holders is absent unless the game_summary view is current; treat a
-  // missing count as the one leading name.
-  const others = Math.max(0, Number(game.best_holders || 1) - 1);
-  const holder = others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
-  const detail = [
-    `${game.best_lost} lost`,
-    game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
-    `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`,
-    relativeTime(game.last_activity),
-  ].filter(Boolean).join(" · ");
+/**
+ * This week's campaign nodes that have a map on the board, by game_key. Quiet
+ * on failure: a board without the campaign views just shows no badge.
+ */
+async function campaignMarks() {
+  const thisWeek = weekStart(new Date());
+  const rows = await select(
+    `campaign_games?select=game_key,week_start,node_id,kind&week_start=${eq(weekParam(thisWeek))}`,
+  ).catch(() => []);
+  return new Map(rows.map((entry) => [entry.game_key, campaignMark(entry, thisWeek)]));
+}
+
+/**
+ * The setup's pace, "Standard · ~3t": the estimated median lane in turns, which
+ * systems and ship speed set between them (families.mjs's paceOf). Not a link:
+ * it states a fact, like .difficulty. None on a hand-drawn map.
+ */
+function paceBadge(game) {
+  const pace = paceLabel(game);
+  return pace ? el("span", { class: "badge pace", title: pace.title, text: pace.text }) : null;
+}
+
+function row(game, campaigns, mine) {
+  // game_summary's best is the best *counted* score, so a map whose scores
+  // all wait on a check (or failed one) has scores but no record.
+  const ranked = game.best_turns != null;
+  const holder = ranked ? leaderCredit(game) : "No verified score yet";
+  const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
+  // While embargoed, the card keeps the leader and the turn count next to
+  // them (the headline figure below) — a target to chase — but drops every
+  // other detail this line would otherwise carry: lost/hand say more about
+  // *how* a score was made than the bare turn count does, and last activity
+  // is exactly the kind of "who's trying, and when" signal an embargo is
+  // meant to keep from the rest of the group. See game.mjs's renderEmbargoed
+  // for the same cut on the map's own page.
+  const detail = embargoNote(game.embargo_until)
+    ? scoreCount
+    : [
+        ranked ? `${game.best_lost} lost` : null,
+        ranked && game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,
+        scoreCount,
+        relativeTime(game.last_activity),
+      ].filter(Boolean).join(" · ");
 
   const body = el("a", { class: "card-body", href: `game.html?key=${encodeURIComponent(game.game_key)}` }, [
     el("div", { class: "card-main" }, [
@@ -211,74 +426,193 @@ function row(game) {
     ]),
     // The headline figure, cabinet-style: the score alone, big.
     el("div", { class: "card-score" }, [
-      el("strong", { text: `${game.best_turns}` }),
+      el("strong", { text: ranked ? `${game.best_turns}` : "—" }),
       el("span", { class: "card-score-label", text: "turns" }),
     ]),
   ]);
 
   return el("div", { class: "card" }, [
     body,
-    el("div", { class: "card-tags" }, [configBadge(game), botLeadBadge(game), ...botChips(game)]),
+    el("div", { class: "card-tags" }, [
+      difficultyBadge(game), paceBadge(game), configBadge(game), fogBadge(game), mineBadge(mine.get(game.game_key)),
+      campaignBadge(campaigns.get(game.game_key)), botLeadBadge(game), embargoBadge(game),
+      ...botChips(game),
+    ]),
   ]);
 }
 
 /** A config-grouped row: no single score to headline (its games may be
  * different seeds of unequal difficulty), so the card states the setup and
  * how much has been played on it, and drills into the per-game list on click
- * — the same place a config badge already goes. */
+ * — the same place a config badge already goes. System count is a config-wide
+ * fact (every game in the group shares the same node count, since `nodes` is
+ * part of what `sc_config_key` groups by), unlike an embargo, which is set per
+ * map and would be misleading to show at this level — see game.mjs/row()
+ * above for where that belongs instead. */
 function configRow(config) {
   const detail = [
-    `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}`,
     `${config.score_count} ${config.score_count === 1 ? "score" : "scores"}`,
     relativeTime(config.last_activity),
   ].join(" · ");
 
+  // Laid out like a game card (row() above): the setup line, the name where a
+  // game card names its leader, the counts, and a headline figure — here the
+  // number of maps, since a config has no single score to headline.
   const body = el("a", { class: "card-body", href: `index.html?config=${encodeURIComponent(config.config_key)}` }, [
     el("div", { class: "card-main" }, [
-      el("div", { class: "setup", text: configTitle(config) }),
+      el("div", { class: "setup", text: setupSummary(config) }),
+      el("div", { class: "credit config-name", text: configTitle(config) }),
       el("div", { class: "card-meta", text: detail }),
+    ]),
+    el("div", { class: "card-score" }, [
+      el("strong", { text: `${config.game_count}` }),
+      el("span", { class: "card-score-label", text: config.game_count === 1 ? "map" : "maps" }),
     ]),
   ]);
 
-  return el("div", { class: "card" }, [body, el("div", { class: "card-tags" }, botChips(config))]);
+  return el("div", { class: "card" }, [
+    body, el("div", { class: "card-tags" }, [
+      difficultyBadge(config, config.avg_difficulty), paceBadge(config), fogBadge(config, "config"), ...botChips(config),
+    ]),
+  ]);
+}
+
+/**
+ * One family (families.mjs): a card headed by its name and totals, then one row
+ * per config in tree order, indented by depth, each saying what changed from
+ * its parent and linking to that config's own list — where a config card goes.
+ * A member the filters would hide stays, dimmed, so the tree reads whole.
+ */
+function familyCard(family, matches) {
+  const configs = family.members.length;
+  const maps = family.members.reduce((sum, m) => sum + (m.config.game_count || 0), 0);
+  const meta = [
+    `${configs} ${configs === 1 ? "config" : "configs"}`,
+    `${maps} ${maps === 1 ? "map" : "maps"}`,
+    relativeTime(family.lastActivity),
+  ].join(" · ");
+  const rows = family.members.map((member) => {
+    const { config } = member;
+    const dim = matches && !matches.has(config.config_key);
+    const link = el("a", { class: "family-link", href: `index.html?config=${encodeURIComponent(config.config_key)}` }, [
+      el("span", { class: "setup", text: setupSummary(config) }),
+      el("span", { class: "credit config-name", text: configTitle(config) }),
+    ]);
+    const edits = member.edits.map((edit) => el("span", { class: `edit edit-${edit.kind}`, text: edit.text }));
+    return el("div", {
+      class: `family-member${dim ? " dim" : ""}`,
+      style: `--depth: ${Math.min(member.depth, 6)}`,
+    }, [
+      el("div", { class: "family-member-main" }, [
+        link,
+        edits.length ? el("div", { class: "edits" }, edits) : null,
+        el("div", { class: "card-tags" }, [paceBadge(config), fogBadge(config, "config"), ...botChips(config)]),
+      ]),
+      el("span", { class: "family-maps", text: `${config.game_count} ${config.game_count === 1 ? "map" : "maps"}` }),
+    ]);
+  });
+  return el("div", { class: "card family" }, [
+    el("div", { class: "family-head" }, [
+      el("span", { class: "family-name", text: family.name }),
+      el("span", { class: "card-meta", text: meta }),
+    ]),
+    ...rows,
+  ]);
+}
+
+/** "By family": every config fetched at once, built into trees on the page. */
+async function loadFamilies(filters) {
+  const { all, match } = familyQueries(filters);
+  let [configs, matched] = await Promise.all([select(all), match ? select(match) : null]);
+  // A board not yet re-pasted with config_summary.first_seen: derive it.
+  if (configs.length && !("first_seen" in configs[0])) configs = withFirstSeen(configs, await select(FIRST_SEEN_QUERY));
+  const matches = matched ? new Set(matched.map((r) => r.config_key)) : null;
+  let shown = families(familyForest(configs));
+  if (matches) shown = shown.filter((f) => f.members.some((m) => matches.has(m.config.config_key)));
+  if (filters.dir === "asc") shown.reverse();
+  target.classList.remove("loading");
+  const count = matchCount(shown.length, ["family", "families"], filters);
+  if (count) filterTarget.append(count);
+  if (!shown.length) {
+    clear(target).append(el("p", { class: "empty" }, isFiltered(filters)
+      ? ["No setups match this filter. ", el("a", { href: urlFor({ group: filters.group }), text: "Clear filters" }), "."]
+      : ["No scores posted yet. ", el("a", { href: "submit.html", text: "Be the first" }), "."]));
+    return;
+  }
+  clear(target).append(...shown.map((family) => familyCard(family, matches)));
 }
 
 async function load() {
+  mountNav();
   mountMyScores();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
     return;
   }
-  const filters = filtersFromUrl();
+  const filters = filtersFromParams(new URLSearchParams(location.search));
+  if (viewKind(filters) === "family") {
+    clear(groupTarget).append(groupToggle(filters));
+    clear(filterTarget).append(controls(filters));
+    const bar = filterBar(filters);
+    if (bar) filterTarget.append(bar);
+    try {
+      await loadFamilies(filters);
+    } catch (err) {
+      target.classList.remove("loading");
+      showError(target, err.message);
+    }
+    return;
+  }
   try {
-    // Filtering happens server-side, on purpose: filtering only the visible
-    // 50 client-side would silently hide older matches instead.
-    const { kind, rows } = await fetchGames(filters);
+    // Your own maps and the week's campaign nodes are only on the critical
+    // path when they shape the query.
+    const marks = campaignMarks();
+    const played = filters.unplayed ? await myMaps() : new Set();
+    const nodes = filters.campaign ? [...(await marks).keys()] : [];
+    const list = listQuery(filters, { played: [...played], nodes });
+    const { kind } = list;
+    const [{ rows: fetched, more, total }, campaigns] = await Promise.all([
+      selectPage(list.query, { size: PAGE_SIZE, count: true }), marks,
+    ]);
+    // listQuery excludes only the first MAX_EXCLUDED of a player's maps by key;
+    // anything past that is dropped here as it arrives.
+    const keep = (r) => !(kind === "game" && filters.unplayed && played.has(r.game_key));
+    const rows = fetched.filter(keep);
+    // Under "Unplayed by me" every card is one you have no score on.
+    const mine = new Map();
+    const prepare = kind === "game" && !filters.unplayed
+      ? (page) => addMyBests(mine, page)
+      : async () => {};
+    await prepare(rows);
     target.classList.remove("loading");
 
     clear(groupTarget);
-    const toggle = groupToggle(filters);
-    if (toggle) groupTarget.append(toggle);
+    const groups = groupToggle(filters);
+    if (groups) groupTarget.append(groups);
 
-    clear(filterTarget);
+    clear(filterTarget).append(controls(filters));
     const bar = filterBar(filters);
     if (bar) filterTarget.append(bar);
+    const count = matchCount(total, kind === "config" ? ["setup", "setups"] : ["map", "maps"], filters,
+      { upTo: kind === "game" && filters.unplayed && played.size > MAX_EXCLUDED });
+    if (count) filterTarget.append(count);
 
     clear(headTarget);
     if (filters.config && kind === "game" && rows.length) {
       headTarget.append(await configHead(rows[0]));
     }
 
-    if (!rows.length) {
-      const filtered = filters.config || filters.bot;
+    const render = (r) => (kind === "config" ? configRow(r) : row(r, campaigns, mine));
+    if (!rows.length && !more) {
       clear(target).append(
-        el("p", { class: "empty" }, filtered
-          ? ["No scores match this filter. ", el("a", { href: "index.html", text: "Clear filters" }), "."]
+        el("p", { class: "empty" }, isFiltered(filters)
+          ? ["No maps match this filter. ", el("a", { href: urlFor({ group: filters.group }), text: "Clear filters" }), "."]
           : ["No scores posted yet. ", el("a", { href: "submit.html", text: "Be the first" }), "."]),
       );
       return;
     }
-    clear(target).append(...rows.map(kind === "config" ? configRow : row));
+    clear(target).append(...rows.map(render));
+    if (more) target.append(showMore(fetched, list, render, fetched.length, { keep, prepare }));
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

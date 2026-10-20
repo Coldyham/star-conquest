@@ -13,6 +13,13 @@ import math
 # --------------------------------------------------------------------------- #
 WORLD_SIZE = 1000.0            # game is laid out in a WORLD_SIZE x WORLD_SIZE box
 WORLD_MARGIN = 80.0            # keep nodes this far from the world edge
+# Hand-authored maps get a wider box than the square one `mapgen` generates into.
+# Nothing generated moves -- `_play_bounds()` is still square, so every seed lays
+# out the board it always did -- but a recipe stores concrete coordinates and
+# `main.build_view` fits the node bounding box at play time, so a map drawn to
+# these bounds fills a widescreen window instead of being letterboxed. Widening
+# `WORLD_SIZE` itself would re-roll every seed and cost a RULES_VERSION bump.
+CUSTOM_WORLD_W = 1600.0        # hand-drawn maps are laid out in CUSTOM_WORLD_W x WORLD_SIZE
 
 LY_PER_WORLD_UNIT = 0.1        # cosmetic: a lane's length in light-years
 SHIP_LY_PER_TURN = 6.0         # how many light-years a fleet crosses per turn
@@ -35,18 +42,36 @@ SHIP_SPEED_GROWTH_PCT = 0.0    # compounding % gained each game turn (0 == fixed
 DEFAULT_NODES = 18
 DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
-SEED_MAX = 1_000_000          # rolled seeds are 0..SEED_MAX-1 (short enough to read out)
+SEED_MAX = 1_000_000          # a rolled seed is 0..SEED_MAX-1 past its pool's era
+                              # (short enough to read out; settings.roll_seed)
 
 # Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
 MIN_PLAYERS = 2               # a game needs at least two sides
 MAX_PLAYERS = 6               # == distinct entries in PLAYER_COLORS below
-MAX_NODES = 40                # cap: edge build is O(n^2), keep map-gen responsive
+MAX_NODES = 120               # cap: edge build is O(n^2), keep map-gen responsive
+# Up to this many systems fill the fixed WORLD_SIZE box, as every map always has;
+# past it the box grows with the node count (`world_side`) so spacing, and so lane
+# length, holds steady instead of the board just getting denser. Also the map
+# creator's authoring ceiling: its canvas is CUSTOM_WORLD_W x WORLD_SIZE, sized
+# for a standard board, and a scaled one would not fit it.
+STANDARD_MAX_NODES = 40
+NODES_BIG_STEP = 5            # the Systems stepper moves this far at a time past it
+LANE_SURVEY_SEEDS = 3         # maps the menu's lane readout samples when the seed is random
+# World units a core layout keeps between neighbouring seam systems, and between
+# them and the sectors behind. A world figure, never a pixel one: a map must be a
+# function of its setup and seed alone, whatever screen it is generated on.
+CORE_GAP = 90.0
 
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
 MAX_EDGE_LENGTH_FRAC = 0.5     # prune non-MST candidate edges longer than this * WORLD_SIZE
 LANE_NODE_CLEARANCE_FRAC = 0.045  # reject an extra edge passing closer than this * WORLD_SIZE
 #   to an unrelated node's centre -> it would render as if running underneath that system
+CUSTOM_MIN_NODE_SEP_FRAC = 0.045  # hand-placed systems must sit this far * WORLD_SIZE apart
+#   deliberately equal to LANE_NODE_CLEARANCE_FRAC: one clearance figure then governs
+#   both node-vs-node and node-vs-lane. Must stay below the tightest pair mapgen
+#   itself produces (measured: 53.6 units), or loading a generated map lights up
+#   with violations -- test_mapgen's separation sweep pins that.
 LLOYD_PASSES = 1              # relaxation passes to even out random node placement
 NODE_JITTER = 0.85           # placement spread within a grid cell (0..1); higher == more length variety
 RELAX_MIN_SEP_FRAC = 0.6     # relaxation only pushes apart nodes closer than this * ideal spacing
@@ -64,12 +89,34 @@ GARRISON_JITTER = 3         # ships += rng.randint(0, GARRISON_JITTER)
 
 NEUTRAL_PRODUCES = False    # neutrals are static garrisons by default
 
+# Ceilings on a hand-authored system, for the map creator's steppers and the
+# recipe parser's clamps. Generous rather than balanced: the author is the one
+# deciding, and a value past these is a typo or a hand-edited token.
+CUSTOM_MAX_PRODUCTION = 12  # turns per ship (0 is legal too -- engine skips it)
+CUSTOM_MAX_SHIPS = 99       # starting garrison
+
+# The creator's Garrison slider tops out here for a comfortable drag range; the
+# stepper +/- beside it stays uncapped up to CUSTOM_MAX_SHIPS for anything bigger.
+CUSTOM_GARRISON_SLIDER_MAX = 50
+
+# The recipe parser's structural ceiling -- what bounds a malformed blob, not a
+# game rule. It must sit above anything the generator itself can produce, and
+# STANDARD_MAX_NODES is *not* that bound: `generate_symmetric` rounds the node count up to
+# a whole number per sector and adds the shared centre, so it returns
+# `players * round((nodes-1)/players) + 1` -- 41 systems at 40 nodes, and up to
+# STANDARD_MAX_NODES + MAX_PLAYERS/2 + 1 for any board the creator adopts. Capping
+# the parser there would make such a map un-importable into the creator.
+# The authoring ceiling is separate and *is* STANDARD_MAX_NODES: the editor
+# refuses the 41st hand-placed system, and "start from a generated map" caps the
+# node count there too, since a larger board is laid out in a larger box.
+CUSTOM_MAX_NODES = STANDARD_MAX_NODES + MAX_PLAYERS
+
 # --------------------------------------------------------------------------- #
 # Combat  (Lanchester square law + jitter)
 # --------------------------------------------------------------------------- #
 COMBAT_JITTER = 0.10        # +/- 10% random swing applied to each side's strength
 DEFENDER_ADVANTAGE = 1.0    # multiplier on the defender's effective strength (1.0 == none)
-DEFENDER_ADVANTAGE_MAX = 1.5  # slider ceiling: past here conquest stalemates (see bot-design)
+DEFENDER_ADVANTAGE_MAX = 1.5  # slider ceiling: past here conquest stalemates (see docs/design/bots.md)
 COMBAT_PREVIEW_MAX = 50     # menu Combat page: ceiling on its two demo sliders
 IN_LANE_BATTLES = False     # opposing fleets sharing a lane fight in transit
 
@@ -85,7 +132,7 @@ AI_REINFORCE_MARGIN = 2     # only reinforce a neighbour this many ships more ex
 
 AI_AUX = 1.0                # generic per-seat knob, meaning defined by the strategy
 #   Ignored by the built-in heuristic. 1.0 is the neutral "untuned" value, so a bot
-#   can treat it as absent; `models/knower.py` reads it as its search depth. See
+#   can treat it as absent; `models/knower.py` reads it as its Oracle mode. See
 #   models/README.md.
 
 # --------------------------------------------------------------------------- #
@@ -113,6 +160,7 @@ COLOR_NEUTRAL = (122, 128, 140)
 COLOR_SELECT = (250, 240, 150)
 COLOR_FOG = (58, 62, 82)            # fogged systems/lanes — cool grey, distinct from NEUTRAL
 COLOR_ROUTE = (250, 120, 200)       # route-mode planning accent — magenta, the one hue no seat uses
+COLOR_CAMPAIGN = (255, 210, 63)     # the weekly campaign's timers — the board's own gold (--gold)
 
 # Index 0 is neutral; 1 is the human by convention; 2+ are AI opponents.
 PLAYER_COLORS = [
@@ -126,7 +174,7 @@ PLAYER_COLORS = [
 ]
 
 PLAYER_NAMES = [
-    "Neutral", "Human", "Crimson", "Verdant", "Amber", "Violet", "Gold",
+    "Neutral", "Azure", "Crimson", "Verdant", "Amber", "Violet", "Gold",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -140,9 +188,19 @@ HUD_RIGHT_W = 240            # reserved right column for the system/lane info pa
 # The end-turn button is the single most-tapped control, so it gets its own big
 # zone: the full width of the right info panel, reaching above the ordinary
 # bottom bar (see render._draw_side_panel, which reserves this same height so
-# the queued-orders list never draws underneath it).
+# the panel's details never draw underneath it).
 END_TURN_H = 96
 FOOTER_BTN_H = 40            # height of the smaller bottom-bar buttons (play/pause, etc.)
+
+# Map creator chrome (mapmaker.py). Its viewport is derived from these rather
+# than from play_rect(), which reserves HUD_RIGHT_W and both bars for a HUD the
+# editor doesn't have.
+EDIT_TOP_H = 44              # tool-mode strip across the top
+EDIT_SIDE_W = 260            # right-hand sidebar: selection editors, sliders, problems
+EDIT_PALETTE_MIN_H = 96      # floor on the bottom palette band (it is measured, not fixed)
+# Deliberately *not* in _SCALABLE below: it is a count of remembered edits, not a
+# pixel size, so the UI scale has nothing to say about it.
+EDIT_UNDO_DEPTH = 64         # how many edits back the creator's Undo reaches
 
 # Shared layout metrics. Text-bearing boxes are sized from the *measured* label
 # plus BTN_PAD_X, and text rows from the font's own line height plus ROW_GAP, so
@@ -192,15 +250,90 @@ LANE_PICK_DIST = 10         # px: click within this of a queued order's lane sel
 DRAG_THRESHOLD = 8          # px: pointer travel past which a press becomes a drag
 STEPPER_SIZE = 18           # px: side of the −/+ ship-count buttons on the active lane
 
+# Turn playback (see `turnfilm.py`): the optional animated end of turn, on unless
+# switched off (`webstore.animate_turns`). Presentation only — none of it can move a
+# result and none of it is recorded. The events inside a beat are spread across it,
+# so a turn with forty orders compresses rather than running long. Only movement
+# spends time: every other beat is an instant, and its number here is a *lead* —
+# how far ahead of what follows it fires, borrowed from the stretch it lands in
+# rather than added to the film (`turnfilm.film`).
+FILM_LAUNCH_MS = 0       # ms of lead for a launch. 0, and nothing to borrow
+                         # anyway: launches open a turn, so there is no stretch
+                         # behind them — and none is wanted, since
+                         # `Fleet.progress_at` with `Film.travel` already starts
+                         # a launched fleet's glide at progress 0
+FILM_MOVE_MS = 560       # ms fleets take to glide one turn's step. The one beat
+                         # that spends time of its own, so a film's length is
+                         # this — clashes firing where the triangles meet inside
+                         # it, and every other beat borrowing from it
+FILM_PRODUCE_MS = 200    # ms of lead for production: the `+1`s land this far
+                         # ahead of whatever follows, *during* the glide rather
+                         # than stopping it. Production runs before arrivals, so
+                         # a hull finished this turn defends the system it was
+                         # built at, and this is the gap that lets it register
+                         # before the fight it fed. A turn with no movement to
+                         # borrow from spends nothing and still resolves instantly
+FILM_COMBAT_MS = 0       # ms of lead for arrival fights — 0, and it has to stay
+                         # 0: a fight cannot be shown before the fleets that
+                         # fought it have arrived. So fights land on the film's
+                         # closing instant, which is the frame the next turn's
+                         # glide starts on; `Ui.fading_fights` keeps the burst up
+                         # across the join. `FILM_LINGER_COMBAT_MS` is the
+                         # opposite choice, for a turn ended by hand
+FILM_LINGER_COMBAT_MS = 300   # ms of *dwell* — time added to the film, not
+                         # borrowed — that the fights of a turn ended *by hand*
+                         # get instead of the instant above, shown one node after
+                         # another (`turnfilm.film`'s `linger` flag, which
+                         # `main.resolve_turn` sets as `not ui.playing`). Neither
+                         # continuous run asks for it — live play or history
+                         # playback — since it would put a stop-start back
+                         # exactly where continuous movement matters most
+FILM_LINGER_HOLD_MS = 250     # ms held on the resolved board after the last
+                         # beat of a hand-ended turn, for the same reason
+                         # `FILM_LINGER_COMBAT_MS` exists — watching your own move
+                         # resolve is worth a pause before control returns. A run
+                         # of turns chains straight through instead;
+                         # `Ui.fading_fights` / `fading_hulls` keep marks up
+                         # regardless of which of these a turn used
+FILM_FLASH_MS = 260      # ms a mark (its burst, and the number with it) stays
+                         # fully up before it starts to fade — also how long the
+                         # burst's own rings take to settle and its spokes to
+                         # retract, since the two coincide. Counted from the
+                         # moment the mark fires and unrelated to any film's own
+                         # length (`Ui.fading_fights`/`fading_hulls`,
+                         # `Ui.age_fading_marks`), so it stays lit exactly this
+                         # long whether or not the next turn's film has already
+                         # started gliding on top of it
+FILM_FADE_MS = 500       # ms a mark then takes to dissolve into the background,
+                         # after its `FILM_FLASH_MS` hold — `render._faded`
+                         # blends its colour toward `COLOR_BG` over this window.
+                         # Also independent of any film's length, for the same
+                         # reason: it is what lets movement carry on underneath
+                         # a fading mark instead of pausing for it to be read
+FILM_BURST_R = 22        # px a burst reaches past whatever it marks
+FILM_BURST_W = 2         # px: its stroke
+FILM_BURST_SPOKES = 6    # radial strokes in one
+FILM_LOSS_GAP = 12       # px above a burst's centre for the ships it cost. Fixed
+                         # rather than measured off the burst's reach, which grows
+                         # with the flash — a label that drifted outward with it
+                         # would read as a second moving thing
+FILM_ARRIVAL_GAP = 4     # px between a landed fleet's tip and its node, so the
+                         # garrison count underneath stays readable
+FILM_CAPTION_GAP = 22    # px clearance between the phase caption and the map's floor
+
 # Send popup: the little action panel that opens on the map when a destination
 # is picked (commit send-all, then retune count / forward / cancel).
 SEND_POPUP_W = 184          # px: panel width
 SEND_POPUP_BTN_H = 22       # px: height of each button row
 SEND_POPUP_GAP = 5          # px: vertical gap between rows
 SEND_POPUP_PAD = 8          # px: inner padding
+SPLIT_POPUP_W = 216         # px: panel width once a system forwards down 2+ lanes
+FORWARD_STEP_PCT = 10       # %: one −/+ press or wheel notch on a forwarding share
+FORWARD_SNAP_PCT = 5        # %: the share slider's resolution
+FORWARD_HOLD_MAX = 99       # ships: the most a forwarding system can be told to hold
 
 # Sliders (the send popup's count slider and history mode's turn scrubber — the
-# same widget, drawn by render._draw_slider). The knob is inset by its radius at
+# same widget, drawn by widgets.slider). The knob is inset by its radius at
 # both ends of the track, so it never overhangs the box it sits in.
 SLIDER_TRACK_H = 6          # px: thickness of the track
 SLIDER_KNOB_R = 7           # px: radius of the knob
@@ -218,6 +351,24 @@ FONT_SIZE_SMALL = 14
 FONT_SIZE_BIG = 30
 
 FPS = 60
+
+# Ceiling on how much time one frame may hand the loop (`main`'s `dt`).
+#
+# A frame is not always a frame's worth of wall clock: resolving a turn is the
+# loop's one genuinely expensive step — every seat's `decide`, plus rewriting the
+# log — and under autoplay or play mode it happens in the very frame that lands
+# one film and starts the next, where it can run to hundreds of ms with a search
+# bot on the board. `clock.tick` hands that whole stretch to the *next* frame,
+# which without a ceiling is charged straight to the fresh film: the fleets
+# teleport a third of the way down their lanes before the glide takes over, which
+# is the stutter a chained run of turns is supposed not to have (history playback
+# has nothing to resolve, so it never sees this). Tab switches and GC pauses do
+# the same thing on a smaller scale.
+#
+# Three frames at the target rate. Capping means a long frame makes the animation
+# fall behind the wall clock rather than jump — the right trade for a playback
+# that is a fixed-length glide synchronised to nothing.
+MAX_FRAME_MS = 50
 
 # --------------------------------------------------------------------------- #
 # UI scaling (DPI / touch)
@@ -259,6 +410,7 @@ touch_ui = False
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
     "HUD_TOP_H", "HUD_BOTTOM_H", "HUD_RIGHT_W", "END_TURN_H", "FOOTER_BTN_H",
+    "EDIT_TOP_H", "EDIT_SIDE_W", "EDIT_PALETTE_MIN_H",
     "HUD_PAD", "PANEL_PAD", "BTN_PAD_X", "BTN_GAP", "ROW_GAP", "TOUCH_MIN_TARGET",
     "MAP_FIT_PADDING", "MAP_PAN_PADDING", "NODE_RING_PAD",
     "NODE_LABEL_GAP", "NODE_LABEL_PAD",
@@ -266,7 +418,10 @@ _SCALABLE = (
     "ARROWHEAD_SIZE", "ARROW_GAP", "RULE_CHEVRON_SIZE", "RULE_CHEVRON_GAP",
     "RULE_LABEL_GAP",
     "LANE_PICK_DIST", "DRAG_THRESHOLD", "STEPPER_SIZE", "MAP_ZOOM_BTN_SIZE",
+    "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
+    "FILM_LOSS_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
+    "SPLIT_POPUP_W",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )
@@ -297,6 +452,18 @@ def s(px: float) -> int:
     (e.g. the menu's row pitches), so they scale with everything else.
     """
     return max(1, round(px * ui_scale))
+
+
+def world_side(nodes: int) -> float:
+    """Side of the square box a generated map of ``nodes`` systems is laid out in.
+
+    Exactly ``WORLD_SIZE`` up to ``STANDARD_MAX_NODES``, so every board that could
+    be generated before larger maps existed is laid out as it always was (no seed
+    re-rolls, no ``RULES_VERSION`` bump). Past that the *area* grows with the node
+    count, which keeps the spacing between neighbours -- and so the lane lengths --
+    where a full standard board has them.
+    """
+    return WORLD_SIZE * max(1.0, math.sqrt(nodes / STANDARD_MAX_NODES))
 
 
 def ship_speed(turn: int) -> float:
@@ -407,6 +574,22 @@ def text_on(bg: tuple[int, int, int]) -> tuple[int, int, int]:
     if _contrast_ratio(COLOR_TEXT_DARK, bg) >= _contrast_ratio(COLOR_TEXT, bg):
         return COLOR_TEXT_DARK
     return COLOR_TEXT
+
+
+def garrison_for(production: int, jitter_roll: int) -> int:
+    """A neutral system's starting garrison: scaled by desirability, plus a roll.
+
+    Takes the *already-drawn* jitter rather than drawing it, so the one caller
+    that must not move an rng stream (`mapgen._assign_production_and_garrisons`)
+    keeps its `state.rng.randint` exactly where it was, and the map creator can
+    pass a roll from its own throwaway generator.
+
+    A production of 0 never yields a ship, so the "richer -> bigger" scaling has
+    nothing to price: it gets the base garrison alone. mapgen never asks for one
+    — only a hand-authored map can.
+    """
+    scaled = round(GARRISON_K / production) if production > 0 else 0
+    return GARRISON_BASE + scaled + jitter_roll
 
 
 def node_radius(production: int) -> int:

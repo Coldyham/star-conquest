@@ -190,8 +190,8 @@ def test_preview_nominal_matches_resolve_fight_at_zero_jitter():
     rng = random.Random(0)
     for adv in _ADVANTAGES:
         with jitter(0.0), advantage(adv):
-            for a in range(0, 31):
-                for d in range(0, 31):
+            for a in range(31):
+                for d in range(31):
                     nominal = combat.preview_fight(a, d, 0.0, adv).nominal
                     assert (nominal.winner, nominal.survivors) == _real_fight(rng, a, d), (a, d, adv)
 
@@ -248,7 +248,7 @@ def test_preview_monotone_in_attackers():
         for adv in (0.75, 1.0, 1.5, 2.0):
             for d in (0, 5, 12, 30, 50):
                 previous = [0, 0, 0]
-                for a in range(0, 51):
+                for a in range(51):
                     p = combat.preview_fight(a, d, j, adv)
                     for i, roll in enumerate((p.nominal, p.best, p.worst)):
                         assert roll.attacker_survivors >= previous[i], (a, d, j, adv, i)
@@ -261,7 +261,7 @@ def test_preview_never_creates_ships():
     assert combat.preview_fight(50, 1, 0.1, 1.0).nominal.survivors == 50
     assert combat.preview_fight(30, 10, 0.1, 1.0).best.survivors == 30
     for adv in _ADVANTAGES:
-        for a in range(0, 51):
+        for a in range(51):
             for d in (0, 3, 17, 50):
                 p = combat.preview_fight(a, d, 0.3, adv)
                 for roll in (p.nominal, p.best, p.worst):

@@ -3,27 +3,25 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share') or None.
+'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat') or None.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
 import pygame
 
-from .geometry import dist, point_segment_dist
 from . import config
+from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
 
-def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> Optional[int]:
+def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> int | None:
     """The system under ``pos`` — the *nearest* one within reach, so overlapping
     or clustered nodes resolve to the closest rather than whichever draws first.
     Tiny systems get a minimum tap reach (``config.NODE_TAP_MIN``) so they stay
     comfortably tappable on touch screens."""
-    best: Optional[int] = None
+    best: int | None = None
     best_d = 0.0
     for sid, sys in state.systems.items():
         sp = ui.view.to_screen(sys.pos)
@@ -46,10 +44,12 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     """Map a click/drag x within the scrubber track to a turn index (0..max).
 
     The travel is the recorded rect inset by the knob's radius at each end, which
-    is where ``render._draw_slider`` puts the knob — invert anything else and the
+    is where ``widgets.slider`` puts the knob — invert anything else and the
     knob drifts away from the pointer toward the extremes."""
     x, _y, w, _h = ui.scrubber_rect
     travel = w - 2 * config.SLIDER_KNOB_R
+    ui.clear_fading_marks()   # jumping, not stepping: a mark from wherever we
+                              # were scrubbing away from would be stale here
     if travel <= 0 or ui.history_max <= 0:
         ui.history_turn = 0
         return
@@ -57,7 +57,7 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     ui.history_turn = round(t * ui.history_max)
 
 
-def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
     """Modal history-review input: scrub the turn, rewind, or exit. Mutates only
     the scrub position / drag flag; enter/exit and rewind are returned to main."""
     if event.type == pygame.KEYDOWN:
@@ -68,15 +68,19 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
+            ui.clear_fading_marks()   # jumping, not stepping: they'd be stale here
         elif event.key == pygame.K_RIGHT:
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_HOME:
             ui.history_turn = 0
             ui.playing = False
+            ui.clear_fading_marks()
         elif event.key == pygame.K_END:
             ui.history_turn = ui.history_max
             ui.playing = False
+            ui.clear_fading_marks()
         return None
     if event.type == pygame.MOUSEMOTION:
         ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
@@ -93,10 +97,12 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> Optional[str]:
         if ui.history_prev_rect[2] and _point_in_rect(event.pos, ui.history_prev_rect):
             ui.history_turn = max(0, ui.history_turn - 1)  # touch/mouse equivalent of Left
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.history_next_rect[2] and _point_in_rect(event.pos, ui.history_next_rect):
             ui.history_turn = min(ui.history_max, ui.history_turn + 1)  # ...and Right
             ui.playing = False
+            ui.clear_fading_marks()
             return None
         if ui.scrubber_rect[2] and _point_in_rect(event.pos, ui.scrubber_rect):
             ui.dragging_scrubber = True
@@ -118,7 +124,124 @@ def _over_side_panel(pos) -> bool:
     return pos[0] >= config.SCREEN_W - config.HUD_RIGHT_W
 
 
-def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def _toggles_play(ui: Ui, event) -> bool:
+    """Is ``event`` the Play/Pause control (the P key, or a click on its button)?
+
+    The one press during a running film that must not skip it — see the note in
+    `handle_event`. Checked ahead of the blanket "any press skips" rule so pausing
+    can freeze a playback in place instead of discarding it.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_p
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        return bool(ui.play_pause_rect[2]) and _point_in_rect(event.pos, ui.play_pause_rect)
+    return False
+
+
+def _moves_camera(ui: Ui, event) -> bool:
+    """Is ``event`` a camera-only control (the R key, or the on-map Reset / -/+)?
+
+    The other exemption from the blanket "any press skips a film", and for a
+    plainer reason than Play/Pause's: where the camera is pointed changes nothing
+    about the turn being played back, so a look around has no business discarding
+    it. The wheel is already exempt by falling outside the press types the rule
+    names at all, and this brings the buttons and the key that do the same job
+    into line with it.
+
+    It matters most under autoplay, where films chain back to back with no gap
+    between them (see `main`'s chaining): every one of these presses would land on
+    a running film, be spent skipping it, and leave the whole cluster looking
+    dead — the next turn's film starts immediately, so the second press meets one
+    too. Each rect test is guarded on its width, so the cluster is simply absent
+    (history mode zeroes all three) rather than matching a stale hit-box.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_r
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return False
+    return any(rect[2] and _point_in_rect(event.pos, rect)
+               for rect in (ui.reset_view_rect, ui.zoom_minus_rect, ui.zoom_plus_rect))
+
+
+def _toggles_autoplay(ui: Ui, event) -> bool:
+    """Is ``event`` the Autoplay / Take control control (the A key, or a click
+    on its button)?
+
+    A third exemption from the blanket "any press skips a film", and the one
+    that most needs it: under autoplay, films chain with no gap between them
+    (see `main`'s chaining), so a press that only skips would spend itself on
+    whichever turn happens to be playing and never reach `main`'s
+    ``"toggle_autoplay"`` handler at all — the next turn's film is already up
+    by the time a second press arrives. Play/Pause is hidden under autoplay
+    (it would be a no-op — see the footer's own comment), which makes this the
+    *only* way to stop the automatic advance, and it has to work in one press
+    or there is none.
+
+    Nothing here needs freezing the way Play/Pause does: turning autoplay off
+    doesn't need the running film to stop, only the *next* one not to start —
+    `main`'s chaining re-reads `ui.autoplay` fresh at the moment each film
+    lands, so the turn already showing plays out to the end exactly as it
+    would have, and control is back the instant it does.
+    """
+    if event.type == pygame.KEYDOWN:
+        return event.key == pygame.K_a
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        return bool(ui.autoplay_button_rect[2]) and _point_in_rect(event.pos, ui.autoplay_button_rect)
+    return False
+
+
+def _handle_invite_event(event, ui: Ui) -> str | None:
+    """Answer the play-by-post invite overlay: copy one seat's link, or dismiss
+    it for good.
+
+    The clipboard write is main's job — this module never reaches `webstore` —
+    so a Copy row only names the seat (`ui.pbp_copy_seat`) and returns the
+    action that asks for it. Continue needs nothing from main at all: clearing
+    `ui.pbp_invite` is a plain `Ui` mutation, so it happens right here.
+    """
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return None
+    if ui.pbp_invite_close_rect[2] and _point_in_rect(event.pos, ui.pbp_invite_close_rect):
+        ui.pbp_invite = ()
+        ui.pbp_invite_rects = {}
+        ui.pbp_invite_close_rect = (0, 0, 0, 0)
+        ui.pbp_invite_copied = 0
+        return None
+    for seat, rect in ui.pbp_invite_rects.items():
+        if rect[2] and _point_in_rect(event.pos, rect):
+            ui.pbp_copy_seat = seat
+            return "pbp_copy_seat"
+    return None
+
+
+def handle_event(event, state: GameState, ui: Ui) -> str | None:
+    # Play-by-post's invite overlay is modal too, and ahead of everything below:
+    # a match this fresh (right after we created it) can be running no film and
+    # holds no history or win to check first.
+    if ui.pbp_invite:
+        return _handle_invite_event(event, ui)
+
+    # A turn playback is running: any press skips it — except Play/Pause, which
+    # must freeze it in place rather than lose it (`main` does the freezing; this
+    # is only about not discarding the film here), the camera controls, which
+    # only decide where you are looking from (`_moves_camera`), and Autoplay /
+    # Take control, the one way to stop autoplay's automatic advance at all
+    # (`_toggles_autoplay`). Checked before everything else, and the two scenes
+    # differ on purpose for every other press.
+    #
+    # In live play the press is *consumed*. The footer strip is still drawn during
+    # a film (the film board's winner stays None until the turn closes), so a
+    # press that fell through could resolve a second turn underneath a running
+    # one. In history the press falls through instead, because there the film is
+    # a transition between turns and the controls are a scrubber: swallowing it
+    # would mean a drag never started.
+    if (ui.film is not None and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)
+            and not _toggles_play(ui, event) and not _moves_camera(ui, event)
+            and not _toggles_autoplay(ui, event)):
+        ui.stop_film()
+        if not ui.history:
+            return None
+
     # History mode is a modal review scene (entered mid-game or after a win):
     # scrub / rewind / exit only, no board interaction. Checked first so it wins
     # over the game-over branch when reviewing a finished match.
@@ -200,11 +323,7 @@ def handle_event(event, state: GameState, ui: Ui) -> Optional[str]:
         pos = pygame.mouse.get_pos()
         if ui.count_adjust_active():
             ui.step_count(state, event.y)
-        elif _over_side_panel(pos):
-            # over the info panel the wheel belongs to the queued list, not the map
-            # (zooming the map from off-map was disorienting anyway)
-            ui.scroll_orders(-event.y)
-        else:
+        elif not _over_side_panel(pos):  # zooming the map from off-map is disorienting
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -293,13 +412,21 @@ def _clear_selected(ui: Ui) -> None:
         ui.clear_forward(ui.selected)
 
 
-def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_key(event, state: GameState, ui: Ui) -> str | None:
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        return "end_turn"
-    if event.key == pygame.K_p:
-        return "toggle_play"
-    if event.key == pygame.K_a:
-        return "toggle_autoplay"
+        # A play-by-post turn we have already submitted is not ours to end again:
+        # the turn advances when the last seat is in, not when anyone presses a
+        # key. Suppressed rather than swallowed further up so every other control
+        # — panning, looking, opening history — keeps working while you wait.
+        return None if ui.awaiting_others(state) else "end_turn"
+    if event.key in (pygame.K_p, pygame.K_a):
+        # Play and autoplay both resolve turns on a clock of their own, which a
+        # shared match has no room for: its turns advance when the last seat
+        # submits. Dead here exactly as their footer buttons are (`render`), so
+        # the key and the button cannot disagree about it.
+        if ui.in_pbp:
+            return None
+        return "toggle_play" if event.key == pygame.K_p else "toggle_autoplay"
     if event.key == pygame.K_f:
         # main gates this on the human actually being knocked out (see
         # Ui.can_fast_forward); from here it is just another action string.
@@ -326,7 +453,7 @@ def _handle_key(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
     """Route mode's whole event stream: build a proposal, confirm it or drop it.
 
     No stages: a tap on a system means exactly one thing given what is on screen
@@ -355,7 +482,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
 
     if event.type == pygame.MOUSEWHEEL:
         pos = pygame.mouse.get_pos()
-        if not _over_side_panel(pos):  # the panel holds the route summary, not a list
+        if not _over_side_panel(pos):  # the panel holds the route summary, not the map
             ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
 
@@ -382,7 +509,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
+def _handle_route_click(state: GameState, ui: Ui, pos) -> str | None:
     """A left-press in route mode: a control, a system, or empty space."""
     handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
@@ -417,7 +544,7 @@ def _handle_route_click(state: GameState, ui: Ui, pos) -> Optional[str]:
     return None
 
 
-def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
+def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     """Keys in route mode. Enter confirms rather than ending the turn — the turn
     can't be ended from here at all (render records no end_turn_rect), so the most
     obvious key keeps pointing at the most obvious action."""
@@ -453,7 +580,7 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> Optional[str]:
     return None
 
 
-def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, Optional[str]]:
+def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
     """The bar/on-map buttons that mean the same thing in every interaction scene.
 
     Returns ``(handled, action)``. Shared by live play and route mode rather than
@@ -492,15 +619,18 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, Optiona
     return False, None
 
 
-def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Optional[str]:
+def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> str | None:
     # Tested before the autoplay early-out so these stay clickable under autoplay
     # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
     handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
         return action
-    if _point_in_rect(pos, ui.end_turn_rect):
-        return "end_turn"
-    if _point_in_rect(pos, ui.play_pause_rect):
+    # Guarded on the width like every other rect test: render zeroes both of these
+    # (route mode borrows the End Turn block, a running film takes it away), and a
+    # zeroed rect still contains the point (0, 0).
+    if ui.end_turn_rect[2] and _point_in_rect(pos, ui.end_turn_rect):
+        return None if ui.awaiting_others(state) else "end_turn"
+    if ui.play_pause_rect[2] and _point_in_rect(pos, ui.play_pause_rect):
         return "toggle_play"
     if ui.autoplay:
         return None
@@ -525,8 +655,8 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         ui.step_count(state, 1)
         return None
 
-    # Send popup (CHOOSING): Send/Forward tabs pick the mode, Half/All retune the
-    # count, and Cancel discards the active send/forward rule.
+    # Send popup (CHOOSING): Send/Forward tabs pick the mode, the presets retune
+    # the count, and Cancel discards the active send or forwarding lane.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
         if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
             ui.set_forward_mode(state, False)
@@ -534,12 +664,34 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
             ui.set_forward_mode(state, True)
             return None
-        # the two preset buttons: Half/All (Send) or Keep-half/Keep-0 (Forward)
+        # the two preset buttons: Half/All (Send) or 50%/100% (Forward, one lane)
         if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
-            ui.keep_half(state) if ui.forward_armed else ui.send_half(state)
+            ui.set_share(50) if ui.forward_armed else ui.send_half(state)
             return None
         if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
-            ui.keep_none(state) if ui.forward_armed else ui.send_all(state)
+            ui.set_share(100) if ui.forward_armed else ui.send_all(state)
+            return None
+        if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
+            ui.step_hold(-1)
+            return None
+        if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
+            ui.step_hold(1)
+            return None
+        # a split system's lanes: −/+ retune that lane; anywhere else on its row
+        # makes it the lane the popup (and the map highlight) is about
+        for dest, row, minus, plus in ui.share_rows:
+            if _point_in_rect(pos, minus) or _point_in_rect(pos, plus):
+                ui.focus_lane(dest)
+                ui.step_share(-1 if _point_in_rect(pos, minus) else 1)
+                return None
+            if _point_in_rect(pos, row):
+                ui.focus_lane(dest)
+                return None
+        if ui.even_split_rect[2] and _point_in_rect(pos, ui.even_split_rect):
+            ui.even_split()
+            return None
+        if ui.delete_all_rect[2] and _point_in_rect(pos, ui.delete_all_rect):
+            ui.delete_all_forward()
             return None
         if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
             ui.cancel_send()
@@ -560,42 +712,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
             ui.popup_pos = (px, py)
             return None
 
-    # Scroll the queued list — the touch route to entries past the visible window
-    # (the wheel does it too, see handle_event). Tested before the rows below so a
-    # tap on a button never falls through to whatever row sits under it.
-    if ui.order_up_rect[2] and _point_in_rect(pos, ui.order_up_rect):
-        ui.scroll_orders(-1)
-        return None
-    if ui.order_down_rect[2] and _point_in_rect(pos, ui.order_down_rect):
-        ui.scroll_orders(1)
-        return None
-
-    # Clicks in the queued-orders panel take priority: a delete button removes
-    # its order, a row selects it for editing (scroll adjusts, X removes). Each row
-    # carries its own index into `pending`, since only a window of the list is drawn.
-    for idx, row, delete in ui.order_hitboxes:
-        if idx >= len(ui.pending):
-            continue
-        if _point_in_rect(pos, delete):
-            del ui.pending[idx]
-            ui.sel_order = None
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_order(state, idx)
-            return None
-
-    # Same panel, standing auto-forward rules: a delete button clears the
-    # rule, a row selects it for editing (scroll adjusts `keep`, X removes).
-    for src, row, delete in ui.forward_hitboxes:
-        if src not in ui.auto_forward:
-            continue
-        if _point_in_rect(pos, delete):
-            ui.clear_forward(src)
-            return None
-        if _point_in_rect(pos, row):
-            ui.edit_forward(state, src)
-            return None
-
     node = pick_node(state, ui, pos)
     if node is None:
         # Empty space near a lane selects the order or rule drawn there; repeat
@@ -607,7 +723,7 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
         elif hit[0] == "order":
             ui.edit_order(state, hit[1])
         else:
-            ui.edit_forward(state, hit[1])
+            ui.edit_forward(state, hit[1], hit[2])
         return None
 
     ui.sel_order = None  # selecting a system is composing, not editing an order/rule
@@ -642,34 +758,39 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> Op
     return None
 
 
-def _pick_lane(state: GameState, ui: Ui, pos) -> Optional[tuple[str, int]]:
-    """The queued order or standing rule whose lane is under ``pos``, tagged as
-    ``("order", index)`` / ``("rule", source_id)`` — or None.
+def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int, int] | None:
+    """The queued order or standing-rule lane under ``pos``, tagged as
+    ``("order", index, -1)`` / ``("rule", source_id, dest_id)`` — or None.
 
     Orders and rules can share one lane (including opposite directions), so when
     more than one is in range a repeat click cycles through them all rather than
-    always grabbing the same one — the list panel can still target any directly.
+    always grabbing the same one — this is the only way in to any of them.
     """
-    hits: list[tuple[float, tuple[str, int]]] = []
+    hits: list[tuple[float, tuple[str, int, int]]] = []
     for i, o in enumerate(ui.pending):
         a = ui.view.to_screen(state.systems[o.source_id].pos)
         b = ui.view.to_screen(state.systems[o.dest_id].pos)
         d = point_segment_dist(pos, a, b)
         if d <= config.LANE_PICK_DIST:
-            hits.append((d, ("order", i)))
-    for src, (dest, _keep) in ui.auto_forward.items():
+            hits.append((d, ("order", i, -1)))
+    for src, rule in ui.auto_forward.items():
         if not ui.rule_is_live(state, src):
             continue  # only the rules that render are pickable
-        s = state.systems[src]
-        a = ui.view.to_screen(s.pos)
-        b = ui.view.to_screen(state.systems[dest].pos)
-        d = point_segment_dist(pos, a, b)
-        if d <= config.LANE_PICK_DIST:
-            hits.append((d, ("rule", src)))
+        a = ui.view.to_screen(state.systems[src].pos)
+        for dest in rule.shares:
+            b = ui.view.to_screen(state.systems[dest].pos)
+            d = point_segment_dist(pos, a, b)
+            if d <= config.LANE_PICK_DIST:
+                hits.append((d, ("rule", src, dest)))
     if not hits:
         return None
-    order = [tag for _, tag in sorted(hits)]  # nearest first, then order-before-rule
-    current = ("order", ui.sel_order) if ui.sel_order is not None else (("rule", ui.sel_forward) if ui.sel_forward is not None else None)
+    order = [tag for _, tag in sorted(hits, key=lambda h: h[0])]  # nearest first, then order-before-rule
+    if ui.sel_order is not None:
+        current = ("order", ui.sel_order, -1)
+    elif ui.mode == CHOOSING and ui.forward_armed and ui.selected is not None and ui.dest is not None:
+        current = ("rule", ui.selected, ui.dest)
+    else:
+        current = None
     if current in order:  # cycle to the next item on this lane
         return order[(order.index(current) + 1) % len(order)]
     return order[0]
