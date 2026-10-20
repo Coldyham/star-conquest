@@ -35,6 +35,7 @@ import importlib.util
 import json
 import math
 import multiprocessing
+import os
 import pickle
 import random
 import sys
@@ -280,7 +281,14 @@ def train(args) -> None:
                "mean": decode(es.mean), "best_consts": decode(xs[best])}
         with open(log_path, "a") as fh:
             fh.write(json.dumps(row) + "\n")
-        es_path.write_bytes(pickle.dumps((es, gen)))
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp = es_path.with_suffix(".tmp")
+        with open(tmp, "wb") as fh:
+            fh.write(pickle.dumps((es, gen)))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, es_path)
         print(f"gen {gen:3d}  avg {100 * (row['avg'] - stock):+5.2f}  "
               f"best {b_mean:+5.2f}±{b_se:.2f}  sigma {es.sigma:.2f}  {row['secs']}s", flush=True)
 
