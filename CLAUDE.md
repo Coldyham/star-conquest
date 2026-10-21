@@ -75,6 +75,15 @@ one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
 has `tests/test_council.py`). Run the full suite after a change to
 `starconquest/`, and before opening a PR on a code change.
 
+**Every tool or script that runs for more than a minute records as it goes.**
+Append each finished game or unit to a file under `results/` the moment it
+finishes (one JSON line, flushed), print progress as it runs, and resume from
+that file when rerun, never repeating finished work. Never hold results in
+memory to write at the end, or print only a final summary: background runs get
+killed and sessions end, and a run that dies must keep everything it finished.
+Send a background run's output to a file under `results/`, not only the task's
+scratch output.
+
 ## Architecture
 
 A hard split between a **pure simulation core** and a **thin pygame shell**, so
