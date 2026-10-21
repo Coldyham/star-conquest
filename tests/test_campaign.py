@@ -182,3 +182,14 @@ def test_cut_nodes_hold_the_biggest_maps_and_never_a_mystery():
 
 
 SIZED = [_game(f"s{n}", 200 + n, nodes=n) for n in (7, 10, 13, 18, 24, 30)]
+
+
+def test_no_node_is_dealt_sight_zero():
+    """Sight 0 is opt-in only: a "?" never rolls it, and a played config with it
+    (an earlier week's "?", say) is never a node."""
+    blind = [_game("z", 9, fog_sight=0, fog_scout=3)]
+    assert campaign.families(blind, START) == []
+    for seed in range(40):
+        graph = _graph(games=GAMES + blind, seed=seed)
+        for node in graph["nodes"]:
+            assert Settings.from_dict(dict(node["settings"])).fog_sight >= campaign.FOG_MIN_SIGHT
