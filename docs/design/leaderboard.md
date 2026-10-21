@@ -599,7 +599,9 @@ built.
   of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
   120-system test game was enough to put big maps in a week, and a big map is
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
-  `settings.randomise_knobs`; a symmetric node whose config names no `layout`
+  `settings.randomise_knobs` — the menu's dice, so never below a
+  `settings.ROLL_FLOORS` entry (sight 0 is opt-in only), and a played config
+  below one is never a node either; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A *cut node* (`cut_nodes`: one whose
   loss splits the field, so a single par-tight score there walls off what lies

@@ -1714,3 +1714,64 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
         assert dict(out) == {"+1": config.player_color(1), "−2": config.player_color(2)}
     finally:
         pygame.quit()
+
+
+def test_a_fleet_shown_from_an_unseen_system_draws_its_lane(monkeypatch):
+    """Sight at or past scout leaves no fogged ring, so an enemy fleet heading into
+    view comes from a system never seen — its lane still draws, or the fleet would
+    fly through empty space. A lane with no shown fleet to an unseen system stays
+    hidden."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        ui.visible = {home}
+        ui.seen = {home}
+        far = sorted(state.systems[home].neighbors)
+        state.fleets.append(Fleet(owner_id=2, ships=3, source_id=far[0], dest_id=home,
+                                  turns_total=2, turns_remaining=1))
+        drawn: list[tuple] = []
+        real_line = pygame.draw.line
+        monkeypatch.setattr(pygame.draw, "line",
+                            lambda surf, col, a, b, *rest: drawn.append((tuple(a), tuple(b))) or real_line(surf, col, a, b, *rest))
+        render._draw_lanes(screen, state, ui)
+        to_screen = lambda sid: tuple(ui.view.to_screen(state.systems[sid].pos))
+        ends = {frozenset(e) for e in drawn}
+        assert frozenset((to_screen(home), to_screen(far[0]))) in ends
+        for other in far[1:]:
+            assert frozenset((to_screen(home), to_screen(other))) not in ends
+    finally:
+        pygame.quit()
+
+
+def test_send_popup_hides_a_fogged_destinations_garrison(monkeypatch):
+    """At sight 0 a neighbour is only scouted: the popup must not print its ship
+    count or colour it by owner, any more than the map's "?" does."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        dest = min(state.systems[home].neighbors)
+        ui.visible = {home}
+        ui.seen = {home, dest}
+        ui.mode, ui.selected, ui.dest = CHOOSING, home, dest
+        ui.chosen = state.systems[home].ships
+        texts: list[str] = []
+        real_text = render._text
+        monkeypatch.setattr(render, "_text",
+                            lambda surf, font, s, *a, **k: texts.append(s) or real_text(surf, font, s, *a, **k))
+        render._draw_send_popup(screen, state, ui)
+        assert "?sh" in texts
+        assert f"{state.systems[dest].ships}sh" not in texts
+        texts.clear()
+        ui.visible = {home, dest}
+        render._draw_send_popup(screen, state, ui)
+        assert f"{state.systems[dest].ships}sh" in texts
+    finally:
+        pygame.quit()

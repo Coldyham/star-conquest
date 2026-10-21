@@ -43,7 +43,7 @@ sys.path.insert(0, str(ROOT))
 from starconquest import config, mapgen
 from starconquest.settings import (
     ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY, Settings, apply_globals,
-    build_state, randomise_knobs, roll_seed,
+    ROLL_FLOORS, build_state, randomise_knobs, roll_seed,
 )
 from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials
 
@@ -100,7 +100,9 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
     """Every config family with a map registered before ``before``, hand-drawn
     maps excluded (their seed changes only the star names and the dice), and so
     is any config past ``FAMILY_MAX_NODES`` systems: a big map is a long sitting,
-    and one played once as a test would otherwise turn up week after week."""
+    and one played once as a test would otherwise turn up week after week. A
+    config below a ``settings.ROLL_FLOORS`` entry is left out too: the dice never
+    deal it, so neither does the week."""
     cutoff = dt.datetime.combine(before, dt.time(), dt.timezone.utc)
     out: dict[str, Family] = {}
     for row in games:
@@ -108,6 +110,9 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
         if setup.get("custom_map"):
             continue
         if int(setup.get("nodes", config.DEFAULT_NODES)) > FAMILY_MAX_NODES:
+            continue
+        parsed = Settings.from_dict(dict(setup))
+        if any(getattr(parsed, attr) < floor for attr, floor in ROLL_FLOORS.items()):
             continue
         seen = dt.datetime.fromisoformat(str(row["first_seen_at"]).replace("Z", "+00:00"))
         if seen >= cutoff:

@@ -155,11 +155,21 @@ def _draw_drag(surface, state: GameState, ui: Ui) -> None:
         pygame.draw.circle(surface, config.COLOR_SELECT, tp, r, max(2, config.s(2)))
 
 
+def _fleet_shown(ui: Ui, f: Fleet) -> bool:
+    """Whether the map draws fleet ``f``: your own always, an enemy only where at
+    least one end of its lane is in full view, so rival movements appear only as
+    they near your space."""
+    return f.owner_id == ui.human_id or ui.sees(f.source_id) or ui.sees(f.dest_id)
+
+
 def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
-    for lane in state.lanes.values():
+    # a fleet on the map shows the lane it travels, even where the far end was
+    # never seen (sight at or past scout leaves no fogged ring to draw it to)
+    carrying = {lane_key(f.source_id, f.dest_id) for f in state.fleets if _fleet_shown(ui, f)}
+    for key, lane in state.lanes.items():
         sa, sb = _fog_state(ui, lane.a), _fog_state(ui, lane.b)
         # a lane to a never-seen system is itself unknown — don't draw it
-        if sa == "hidden" or sb == "hidden":
+        if (sa == "hidden" or sb == "hidden") and key not in carrying:
             continue
         pa = ui.view.to_screen(state.systems[lane.a].pos)
         pb = ui.view.to_screen(state.systems[lane.b].pos)
@@ -278,10 +288,7 @@ def _fleet_at(state: GameState, ui: Ui, f: Fleet,
 def _draw_fleets(surface, state: GameState, ui: Ui) -> None:
     travel = _travel(ui)
     for f in state.fleets:
-        # your own fleets always show; an enemy fleet shows only where at least
-        # one end of its lane is in full view, so rival movements appear only as
-        # they near your space
-        if f.owner_id != ui.human_id and not ui.sees(f.source_id) and not ui.sees(f.dest_id):
+        if not _fleet_shown(ui, f):
             continue
         fx, fy, ux, uy = _fleet_at(state, ui, f, travel)
         x, y = int(fx), int(fy)
@@ -744,9 +751,15 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         title = f"{_fit_name(font, src, room - font.size(' splits')[0])} splits"
         ships_col = config.player_color(src.owner_id)
     else:
-        ships_lbl = f"{dest.ships}sh"
+        # a destination out of full view keeps its garrison and owner hidden,
+        # the same as the map's "?" for it
+        if ui.sees(dest.id):
+            ships_lbl = f"{dest.ships}sh"
+            ships_col = config.player_color(dest.owner_id)
+        else:
+            ships_lbl = "?sh"
+            ships_col = config.COLOR_FOG
         title = _fit_route(font, src, dest, iw - font.size(ships_lbl)[0] - gap)
-        ships_col = config.player_color(dest.owner_id)
     _text(surface, font, title, accent, midleft=(inner, cy + bh // 2))
     _text(surface, font, ships_lbl, ships_col, midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
