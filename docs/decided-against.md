@@ -38,6 +38,7 @@ the measured result was indistinguishable from the baseline.
 - Reinforceability-scaled guards: 46%. Splitting a breakthrough's surplus: null. Dropping the guard against a neighbour our fleets take this turn: 48.4-49.5%, since a capture is often retaken and the guard is what holds it. *More ideas measured and deleted.*
 - A flat garrison floor (`RESERVE_FLOOR` 1 or 2): catastrophic. Opening the wedge gate at 3 players: a wash. Raising `RIVAL_WEDGE`: on its plateau. Propagating threat through neutral buffers: 26.7% in slow cells. *The 2026-09 tuning sweep.*
 - `ENEMY_NEAR`/`ENEMY_FAR`/`NEAR_PAD` and the distance ramp: removed later (see *Garrisons run away*).
+- In four- and five-seat free-for-alls (2026-10-21, `tools/mp_tactics.py`): a richness bonus on the leader's targets (pooled -0.1 / -0.3) or the weak rival's (-0.9 / -1.3, worse in every group); the guard scaled by each rival's standing (0.5-1.5: -2.1, z -2.3; weak rivals only: level); a blind bait, a wall between two rivals left half or wholly unguarded (-0.6 / -0.8). None leans better; the bonuses change under 2% of orders. *Multiplayer tactics: four quick checks*.
 
 ## marshal: [`design/marshal-pricing.md`](design/marshal-pricing.md)
 - Repricing a contested neutral against the rival's survivor: worse in duels, because the price is a gate. *Racing a third player.*
