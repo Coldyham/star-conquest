@@ -25,8 +25,11 @@ values with sigma 1, one scale step per constant.
 constants before the 2026-10-17 ship, and random genomes one sigma from stock,
 and reports seconds per game and the paired standard error per arm.
 
-Each run lives in ``results/const/<run>/``: ``es.pkl`` (resumable) and
-``log.jsonl`` (one line per generation).
+Each run lives in ``results/const/<run>/``: ``es.pkl`` (resumable),
+``log.jsonl`` (one line per generation) and ``games/`` (one line per game). Every
+mode appends each game to its file as it finishes and, rerun, plays only the
+games not already there; a generation cut short resumes on the candidates it
+asked for (``pending.pkl``).
 """
 from __future__ import annotations
 
@@ -41,7 +44,7 @@ import random
 import sys
 import time
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 
@@ -174,14 +177,62 @@ def games(gen: int, n_seeds: int, cells, opps) -> list[tuple]:
     return [(c, s, o, seat) for s in seeds for c in cells for o in opps for seat in (1, 2)]
 
 
-def run_arms(jobs: int, arms: dict[str, dict], gs, cap: int):
+def run_arms(jobs: int, arms: dict[str, dict], gs, cap: int, out: Path):
     """Every arm on every game, on a pool of its own: workers start fresh each
-    call, so nothing an opponent keeps between games outlives one batch."""
-    tasks = [(a, consts, *g, cap) for a, consts in arms.items() for g in gs]
+    call, so nothing an opponent keeps between games outlives one batch. Each
+    game is appended to ``out`` as it finishes; one already there is read back,
+    not played again. ``out``'s ``.arms.json`` holds the constants each arm
+    played, so a file played with others (stock has moved, say) is refused,
+    never mixed in."""
+    stock = stock_values()
+    played = json.loads(json.dumps({a: {**stock, **consts} for a, consts in arms.items()}))
+    arms_path = out.with_name(out.stem + ".arms.json")
+    known = json.loads(arms_path.read_text()) if arms_path.exists() else {}
+    if out.exists():
+        moved = [a for a in played if a in known and known[a] != played[a]]
+        if not known or moved:
+            why = f"arms {', '.join(moved)} played other constants" if moved else \
+                f"no {arms_path.name} says what its arms played"
+            sys.exit(f"{out}: {why}; move it aside to play these")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    arms_path.write_text(json.dumps({**known, **played}, indent=1) + "\n")
+    wanted = {(a, *g) for a in arms for g in gs}
+    rows = {}
+    if out.exists():
+        for line in out.read_text().splitlines():
+            if line.strip():
+                r = json.loads(line)
+                if tuple(r[:5]) in wanted:
+                    rows[tuple(r[:5])] = r
+        print(f"{len(rows)} of {len(wanted)} games already in {out}", flush=True)
+    tasks = [(a, consts, *g, cap) for a, consts in arms.items() for g in gs
+             if (a, *g) not in rows]
     random.Random(0).shuffle(tasks)   # mix slow and fast games across workers
-    ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(jobs, mp_context=ctx) as pool:
-        return list(pool.map(_play_task, tasks, chunksize=2))
+    if tasks:
+        every = max(1, len(tasks) // 10)
+        t0 = time.perf_counter()
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(jobs, mp_context=ctx) as pool, open(out, "a") as fh:
+            futs = [pool.submit(_play_task, t) for t in tasks]
+            for i, f in enumerate(as_completed(futs), 1):
+                r = list(f.result())
+                fh.write(json.dumps(r) + "\n")
+                fh.flush()
+                rows[tuple(r[:5])] = r
+                if i % every == 0 or i == len(tasks):
+                    el = time.perf_counter() - t0
+                    print(f"  {i}/{len(tasks)} games in {el:.0f}s, "
+                          f"~{el / i * (len(tasks) - i):.0f}s left", flush=True)
+    return list(rows.values())
+
+
+def _save(path: Path, obj) -> None:
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        fh.write(pickle.dumps(obj))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 def paired(rows, arm: str, base: str = "stock"):
@@ -219,13 +270,8 @@ def pilot(args) -> None:
         arms[f"step{i}"] = decode([rnd.gauss(0, 1) for _ in GENOME])
     gs = games(0, args.seeds, args.cell or CELLS, args.opp or OPPONENTS)
     t0 = time.perf_counter()
-    rows = run_arms(args.jobs, arms, gs, args.cap)
+    rows = run_arms(args.jobs, arms, gs, args.cap, RESULTS / f"pilot_cap{args.cap}.jsonl")
     wall = time.perf_counter() - t0
-    out = RESULTS / "pilot.jsonl"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "a") as fh:
-        for r in rows:
-            fh.write(json.dumps(r) + "\n")
 
     print(f"\n{len(rows)} games in {wall:.0f}s wall on {args.jobs} workers "
           f"({wall / len(rows) * args.jobs:.2f} worker-s a game)\n")
@@ -303,10 +349,7 @@ def confirm(args) -> None:
     fields = [(c, s, o, seat) for c, o, base, n in field_specs for s in range(base, base + n)
               for seat in range(1, 2 + o.count("+") + 1)]
     t0 = time.perf_counter()
-    out = run_arms(args.jobs, arms, duels + fields, args.cap)
-    with open(folder / f"confirm{suffix}.jsonl", "w") as fh:
-        for r in out:
-            fh.write(json.dumps(r) + "\n")
+    out = run_arms(args.jobs, arms, duels + fields, args.cap, folder / f"confirm{suffix}.jsonl")
     print(f"{len(out)} games in {time.perf_counter() - t0:.0f}s\n")
 
     for label, as_loss in (("timeout tilt", False), ("timeout as loss", True)):
@@ -376,10 +419,7 @@ def ablate(args) -> None:
     gs = [(c, s, o, seat) for s in seeds for c in CONFIRM_DUELS for o in OPPONENTS
           for seat in (1, 2)]
     t0 = time.perf_counter()
-    out = run_arms(args.jobs, arms, gs, args.cap)
-    with open(folder / "ablate.jsonl", "w") as fh:
-        for r in out:
-            fh.write(json.dumps(r) + "\n")
+    out = run_arms(args.jobs, arms, gs, args.cap, folder / "ablate.jsonl")
     print(f"{len(out)} games in {time.perf_counter() - t0:.0f}s\n")
     print("what each part is worth: the candidate's points over the arm that puts it back")
     print(f"{'arm':22} {'weighted':>14}   " + "   ".join(f"{o:>14}" for o in OPPONENTS))
@@ -397,6 +437,7 @@ def train(args) -> None:
     folder = RESULTS / args.run
     folder.mkdir(parents=True, exist_ok=True)
     es_path, log_path = folder / "es.pkl", folder / "log.jsonl"
+    pending_path = folder / "pending.pkl"
     if es_path.exists():
         es, gen = pickle.loads(es_path.read_bytes())
         print(f"resuming {args.run} at generation {gen}")
@@ -410,11 +451,20 @@ def train(args) -> None:
             print(f"stopping at generation {gen}: --hours {args.hours} reached", flush=True)
             break
         t0 = time.perf_counter()
-        xs = es.ask()
+        games_path = folder / "games" / f"gen{gen + 1:03d}.jsonl"
+        pending = pickle.loads(pending_path.read_bytes()) if pending_path.exists() else None
+        if pending and pending[1] == gen:
+            es, _gen, xs = pending
+            print(f"generation {gen + 1}: resuming on the candidates it asked for", flush=True)
+        else:
+            xs = es.ask()
+            games_path.unlink(missing_ok=True)
+            games_path.with_name(games_path.stem + ".arms.json").unlink(missing_ok=True)
+            _save(pending_path, (es, gen, xs))
         arms = {"stock": {}}
         arms.update({f"c{i}": decode(x) for i, x in enumerate(xs)})
         rows = run_arms(args.jobs, arms, games(gen, args.seeds, args.cell or CELLS,
-                                          args.opp or OPPONENTS), args.cap)
+                                          args.opp or OPPONENTS), args.cap, games_path)
         stock = fitness(rows, "stock")
         fits = [fitness(rows, f"c{i}") for i in range(len(xs))]
         es.tell(xs, [-f for f in fits])
@@ -430,12 +480,8 @@ def train(args) -> None:
             fh.write(json.dumps(row) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
-        tmp = es_path.with_suffix(".tmp")
-        with open(tmp, "wb") as fh:
-            fh.write(pickle.dumps((es, gen)))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, es_path)
+        _save(es_path, (es, gen))
+        pending_path.unlink(missing_ok=True)
         print(f"gen {gen:3d}  avg {100 * (row['avg'] - stock):+5.2f}  "
               f"best {b_mean:+5.2f}±{b_se:.2f}  sigma {es.sigma:.2f}  {row['secs']}s", flush=True)
 
