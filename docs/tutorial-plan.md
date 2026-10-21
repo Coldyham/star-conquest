@@ -1,10 +1,11 @@
 # Tutorial ladder, built as a data-driven gauntlet
 
-Status: **planned, not started.** This is a plan to pick up later. It was
-written on 2026-10-21 against `main` at `0f85960`. Once it is built, its
-reasoning moves into `docs/design/gauntlet.md` (as the plan's "Docs" step
-describes), and this file is deleted or marked implemented, the way
-`site-merge-plan.md` was.
+Status: **implemented.** The reasoning now lives in
+`docs/design/gauntlet.md`, which is the file to read; this plan is kept as the
+brief it was built from. Two things changed on the way: Next stage is the one
+neighbour further from the start rather than the one open, uncleared neighbour
+(so replaying a cleared stage still offers a way on), and the tutorial has ten
+stages. It was written on 2026-10-21 against `main` at `0f85960`.
 
 ## Context
 

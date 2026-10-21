@@ -5,7 +5,7 @@ function or topic to find which file and heading to read; don't read it whole.
 The file index is [`README.md`](README.md).
 
 ## design/rules.md
-- One section per `CLAUDE.md` heading (Architecture, Turn resolution, Animated end of turn, Persistence, Play-by-post, Key conventions, Map generation, Hand-authored maps), each rule in its full wording.
+- One section per `CLAUDE.md` heading (Architecture, Turn resolution, Animated end of turn, Persistence, Play-by-post, Key conventions, Map generation, Hand-authored maps, Gauntlets), each rule in its full wording.
 
 ## design/core.md
 - **Settings tokens.** Pruned, then deflated. Mode, players, nodes and seed are always emitted.
@@ -49,6 +49,13 @@ only for a fight; what is deliberately not animated.
 - **Hand-authored maps**, with subsections: the recipe on `Settings` (and its `_LEGACY_KEY_DROPS` cost); a recipe rather than a `GameState` as the editor's model; the geometric rules as hard blocks (mapgen's own figures); `CUSTOM_MAX_NODES` versus `MAX_NODES`; Auto-lanes replaces rather than merges; a crossing warns while a graze blocks; two gestures, one commit path; no deselect gesture in Systems; the seat rows as one control; auto-relane skips a drag; seats gap-free without forced renumbering; what the menu hides; the wider box; opening on a blank canvas.
 
 - **The rules in one place**: the full rule list behind `CLAUDE.md`'s short version.
+## design/gauntlet.md
+- **The tutorial ladder.** A gauntlet is data, never `Settings`; progress derived from `webstore.best`; a stage active only while the setup matches (`menu.active_stage`); every field pinned; the stash and Leave tutorial; no New map in a stage, Next stage by depth (`gauntlet.next_stage`); the briefing card and the hint's row budget (`HINT_MAX`).
+  - *The stages*: the ten, and how their seeds were picked (`tools/gauntlet_check.py`, loss share 0 to 86%).
+- **The file format.** For authors: `stages`/`lanes`/`start`, the menu's Save as a stage's `settings`, the text limits, user gauntlets (desktop only).
+- **Relation to the weekly campaign.** Uncontested, so no server; the graph shape and the bordering rule shared in spirit.
+- **The gauntlet: proposed, not built.** A seeded run graph via `tools/campaign.py`'s `_layout`/`cut_nodes`, stages dealt like `_from_family`/`_mystery`, difficulty by depth through `LADDER_ORDER`.
+- **Carry-over.** The open problem: boons via `custommap.from_state`, and the cost on the board.
 ## design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
   - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*; *estimated difficulty* (the share of bots that lose a map, as a sort and an Easy-to-Very-hard badge).

@@ -15,7 +15,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`. `tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
@@ -498,3 +498,33 @@ rules in one place"; the ones easiest to break:
 - **`custom_map` has its `_LEGACY_KEY_DROPS` entry**, and
   `tools/bot_replay._OUTCOME_MODULES` includes `custommap`.
   `tools/setup_sweep` refuses hand maps.
+
+### Gauntlets (gauntlet.py)
+
+A gauntlet is an ordered string of pinned setups, each with a briefing card and
+a side-panel hint; the tutorial is one (`starconquest/assets/gauntlets/tutorial.json`).
+Reasons: `docs/design/gauntlet.md`.
+
+- **A gauntlet is data, never `Settings`.** A stage is its setup, identified by
+  `challenge_key()`; no `Settings` field, no `_LEGACY_KEY_DROPS` entry, and a
+  stage posts to the leaderboard as an ordinary game.
+- **Progress is derived, never stored**: a stage is cleared when
+  `webstore.best(*stage_settings.challenge_keys())` holds a by-hand win
+  (`gauntlet.cleared`). No progress key. `gauntlet.open_stages` is the
+  bordering rule, mirrored from the campaign in spirit over local bests; the
+  campaign's own rule stays behind `/api/campaign`.
+- **A stage is active only while the setup still matches it**
+  (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
+  A challenge link's setup is never a stage.
+- **Built-in stages pin every `Settings` field**
+  (`test_every_builtin_stage_pins_every_settings_field`) and a fixed seed.
+- **`Gauntlet.from_dict` never raises**; it drops bad stages and lanes and
+  clamps text (`HINT_MAX` is what `test_a_stage_hint_fits_the_empty_panel`
+  holds).
+- **Render never sees a `Gauntlet`**: `main.stage_ui` copies a stage onto `Ui`
+  as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`).
+  A stage offers no New map (its seed is pinned); Next stage appears only for a
+  win that cleared it (`Ui.offers_next_stage`).
+- **User gauntlets are desktop only** (`data_dir()/gauntlets`), read when the
+  Tutorial list opens. `tools/gauntlet_check.py` checks a gauntlet rises in
+  difficulty.

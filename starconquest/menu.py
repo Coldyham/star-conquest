@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, campaign, combat, config, mapgen, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, gauntlet, mapgen, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -326,6 +326,21 @@ class MenuState:
     # never by `draw`, which only shows it while the key still matches.
     lane_key: tuple | None = None
     lane_ly: list[float] = field(default_factory=list)
+    # A gauntlet stage (the tutorial's, by default) picked from the Tutorial list:
+    # `(gauntlet id, stage id)`, or None when no gauntlet is being played. Never a
+    # `Settings` field (`gauntlet` module docstring): the stage is active only
+    # while the setup still is that stage, judged by challenge key
+    # (`active_stage`), so moving a knob warns rather than locks. `stash` is the
+    # player's own setup from before the first stage was picked, put back by
+    # Leave tutorial, since picking a stage overwrites every field.
+    stage_at: tuple[str, int] | None = None
+    stash: dict | None = None
+    tutorial_open: bool = False
+    gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.builtin)
+    gauntlet_pick: int = 0
+    # Each gauntlet's bests by stage, read when the list opens rather than once
+    # a frame (a desktop `webstore.get` is a file read).
+    stage_bests: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -432,6 +447,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
     _text(surface, f["title"], "STAR CONQUEST", config.COLOR_TEXT, center=(w // 2, 92))
     if settings.challenge is not None:
         _draw_challenge(surface, settings, w)
+    elif ms.stage_at is not None:
+        _draw_stage_banner(surface, ms, settings, w)
     else:
         _text(surface, f["small"], "configure your galaxy, then conquer it", config.COLOR_TEXT_DIM, center=(w // 2, 130))
 
@@ -464,6 +481,8 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
         _draw_clear_map(surface, ms, w, surface.get_height())
     if ms.pbp_prompt:
         _draw_pbp_prompt(surface, ms, settings, w, surface.get_height())
+    if ms.tutorial_open:
+        _draw_tutorial(surface, ms, settings, w, surface.get_height())
     if ms.confirm_slow:
         _draw_slow(surface, ms, w, surface.get_height())
     if ms.confirm_unchallenge:  # last, so the modal veils every widget above
@@ -518,6 +537,240 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
     _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
+
+
+def active_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
+    """The gauntlet stage the menu's setup still is, or None.
+
+    Public because `main` asks it at Start (and on a Retry or rewind) which
+    stage the match is playing. A stage of the gauntlet being played, matched
+    by challenge key (`gauntlet.stage_of`): one knob moved and it is your own
+    setup again. A challenge link's setup is never a stage, even one that
+    happens to match, because its banner has the subtitle slot.
+    """
+    if ms.stage_at is None or settings.challenge is not None:
+        return None
+    g = gauntlet.find(ms.gauntlets, ms.stage_at[0])
+    if g is None:
+        return None
+    sid = gauntlet.stage_of(g, settings)
+    stage = g.stage(sid) if sid is not None else None
+    return (g, stage) if stage is not None else None
+
+
+def next_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
+    """Move the menu onto the stage after the one being played and return it, or
+    None at the end (or a fork). Public for the win overlay's Next stage, so
+    going back to the menu afterwards lands on the stage just started."""
+    found = active_stage(ms, settings)
+    if found is None:
+        return None
+    g, stage = found
+    nxt = gauntlet.next_stage(g, stage.id)
+    if nxt is None:
+        return None
+    return _load_stage(ms, settings, g, nxt)
+
+
+def _load_stage(ms: MenuState, settings: Settings, g: gauntlet.Gauntlet,
+                sid: int) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
+    stage = g.stage(sid)
+    if stage is None:
+        return None
+    if ms.stash is None and active_stage(ms, settings) is None:
+        ms.stash = settings.to_dict()   # the player's own setup, once
+    settings.copy_from(gauntlet.stage_settings(stage))
+    ms.stage_at = (g.id, sid)
+    ms.seed_text = "" if settings.seed is None else str(settings.seed)
+    return g, stage
+
+
+def _leave_gauntlet(ms: MenuState, settings: Settings) -> None:
+    """Stop playing the gauntlet. Your own setup comes back if the menu is still
+    on a stage; if you have already changed it, what is there now stays."""
+    if active_stage(ms, settings) is not None and ms.stash is not None:
+        settings.copy_from(Settings.from_dict(ms.stash))
+        ms.seed_text = "" if settings.seed is None else str(settings.seed)
+    ms.stage_at, ms.stash = None, None
+    ms.tutorial_open = False
+    set_status(ms, "Left the tutorial — this is your own setup", True)
+
+
+def _stage_bits(settings: Settings) -> list[str]:
+    """What the stage is, in a line: its size, whether it is fogged, and who it
+    is against — a bot at a named stop of its knob says which."""
+    bots = []
+    for seat in range(2, settings.players + 1):
+        name = settings.seat_strategy(seat)
+        stop = ai.aux_stop_name(name, settings.seat_params(seat).aux)
+        bots.append(f"{name} · {stop}" if stop else name)
+    bits = [f"{settings.system_count()} systems", "no fog" if _fog_off(settings) else "fog of war"]
+    if bots:
+        bits.append("vs " + ", ".join(bots))
+    return bits
+
+
+def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> None:
+    """The subtitle slot while a gauntlet is being played, as the challenge
+    banner uses it: which stage, then the setup and your best on it — or, once a
+    knob has moved, a warning that this is no longer the stage. It warns rather
+    than locks, for the reason `_draw_challenge` gives."""
+    f = _fonts()
+    g = gauntlet.find(ms.gauntlets, ms.stage_at[0]) if ms.stage_at else None
+    found = active_stage(ms, settings)
+    if g is None:
+        return
+    if found is None:
+        _text(surface, f["small"], f"{g.name.upper()} — settings changed", _WARN, center=(w // 2, 124))
+        _text(surface, f["small"], "this isn't the stage any more — open Tutorial to pick one, or leave",
+              _WARN, center=(w // 2, 144))
+        return
+    _g, stage = found
+    head = f"{g.name.upper()} {g.position(stage.id)}/{len(g.stages)} — {stage.title}"
+    _text(surface, f["small"], head, _START_BORDER, center=(w // 2, 124))
+    bits = _stage_bits(settings)
+    mine = webstore.best(*settings.challenge_keys())
+    if mine is not None:
+        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
+    _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
+
+
+def _open_tutorial(ms: MenuState, settings: Settings) -> None:
+    ms.gauntlets = gauntlet.every()     # a user gauntlet dropped in since shows now
+    ms.stage_bests = {}
+    ids = [g.id for g in ms.gauntlets]
+    ms.gauntlet_pick = ids.index(ms.stage_at[0]) if ms.stage_at and ms.stage_at[0] in ids else 0
+    ms.tutorial_open = bool(ms.gauntlets)
+    if not ms.gauntlets:
+        set_status(ms, "No tutorial found in this build", False)
+
+
+def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:
+    if not ms.gauntlets:
+        return None
+    return ms.gauntlets[max(0, min(len(ms.gauntlets) - 1, ms.gauntlet_pick))]
+
+
+def _tutorial_labels() -> tuple[str, str]:
+    if config.touch_ui:
+        return ("Leave tutorial", "Close")
+    return ("Leave tutorial", "Close (Esc)")
+
+
+_STAGE_ROW_H = 36
+_TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_")
+
+
+def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
+    """Modal: the gauntlet's stages in order, each with its best once cleared.
+
+    A stage is open if it is a start, is cleared, or borders a cleared one
+    (`gauntlet.open_stages`); a locked one is greyed and is no hit target. A
+    picker row appears only when there is more than one gauntlet to choose.
+    Measured rows, like `_draw_pbp_prompt`.
+    """
+    g = _picked(ms)
+    if g is None:
+        return
+    f = _fonts()
+    pad, gap = 28, 10
+    if g.id not in ms.stage_bests:
+        ms.stage_bests[g.id] = gauntlet.bests(g)
+    bests = ms.stage_bests[g.id]
+    opened = gauntlet.open_stages(g, set(bests))
+    found = active_stage(ms, settings)
+    here = found[1].id if found is not None and found[0].id == g.id else None
+
+    leave, close = _tutorial_labels()
+    bw = max(f["normal"].size(s)[0] for s in (leave, close)) + 2 * 18
+    bh = 40
+    status_w = f["small"].size("✓ 999 turns / 999 lost")[0]
+    title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(g.stages))
+    pw = max(title_w + status_w + 3 * pad, 2 * bw + gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
+    picker = len(ms.gauntlets) > 1
+    ph = (pad + f["normal"].get_height() + gap + (_CH + gap if picker else 0)
+          + len(g.stages) * _STAGE_ROW_H + gap + bh + pad)
+    panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=10)
+    pygame.draw.rect(surface, _HL_BORDER, panel, 2, border_radius=10)
+
+    y = panel.y + pad
+    heading = "Pick a stage" if not picker else "Pick a gauntlet, then a stage"
+    _text(surface, f["normal"], heading, config.COLOR_TEXT,
+          center=(panel.centerx, y + f["normal"].get_height() // 2))
+    y += f["normal"].get_height() + gap
+    if picker:
+        _text(surface, f["normal"], g.name, config.COLOR_TEXT, midleft=(panel.x + pad, y + _CH // 2))
+        _stepper(surface, ms, "gauntlet_pick", f"{ms.gauntlet_pick + 1}/{len(ms.gauntlets)}",
+                 panel.right - pad, y)
+        y += _CH + gap
+
+    for i, stage in enumerate(g.stages):
+        row = pygame.Rect(panel.x + pad // 2, y, pw - pad, _STAGE_ROW_H - 4)
+        open_ = stage.id in opened
+        key = f"stage_{stage.id}"
+        if stage.id == here:
+            pygame.draw.rect(surface, _HL_FILL, row, border_radius=6)
+            pygame.draw.rect(surface, _HL_BORDER, row, 1, border_radius=6)
+        if open_:
+            ms.rects[key] = row
+        else:
+            ms.rects.pop(key, None)
+        colour = config.COLOR_TEXT if open_ else _DISABLED_TEXT
+        _text(surface, f["normal"], f"{i + 1:>2}  {stage.title}", colour,
+              midleft=(row.x + pad // 2, row.centery))
+        mine = bests.get(stage.id)
+        if mine is not None:
+            status, scol = f"✓ {mine[0]} turns / {mine[1]} lost", _START_BORDER
+        elif open_:
+            status, scol = "next" if bests else "start here", _HL_BORDER
+        else:
+            status, scol = "locked", _DISABLED_TEXT
+        _text(surface, f["small"], status, scol, midright=(row.right - pad // 2, row.centery))
+        y += _STAGE_ROW_H
+
+    by = panel.bottom - pad - bh
+    if ms.stage_at is not None:
+        go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
+        stay = pygame.Rect(panel.centerx + gap // 2, by, bw, bh)
+        _button(surface, ms, "tutorial_leave", go, leave, fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT)
+    else:
+        ms.rects.pop("tutorial_leave", None)
+        stay = pygame.Rect(panel.centerx - bw // 2, by, bw, bh)
+    _button(surface, ms, "tutorial_close", stay, close, fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM)
+
+
+def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
+    """Answer the stage list: pick an open stage (it loads and starts, through
+    the same gate Start goes through), step the gauntlet picker, leave, or close."""
+    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+        ms.tutorial_open = False
+        return None
+    if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+        return None
+    # Only the modal's own rects: the menu's widgets under the veil keep theirs,
+    # and one of them must not take a press aimed at a stage row above it.
+    hit = next((key for key, rect in ms.rects.items()
+                if key.startswith(_TUTORIAL_KEYS) and rect.collidepoint(event.pos)), None)
+    g = _picked(ms)
+    if hit == "tutorial_close":
+        ms.tutorial_open = False
+    elif hit == "tutorial_leave":
+        _leave_gauntlet(ms, settings)
+    elif hit in ("gauntlet_pick_dec", "gauntlet_pick_inc") and ms.gauntlets:
+        step = 1 if hit.endswith("inc") else -1
+        ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
+    elif hit is not None and hit.startswith("stage_") and g is not None:
+        sid = int(hit[len("stage_"):])
+        if sid in gauntlet.open_stages(g, set(ms.stage_bests.get(g.id, {}))):
+            if _load_stage(ms, settings, g, sid) is not None:
+                ms.tutorial_open = False
+                return _start(ms, settings)
+    return None
 
 
 def _unchallenge_labels() -> tuple[str, str]:
@@ -1471,6 +1724,13 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     enough what the row is for)."""
     f = _fonts()
     lx, rx = w // 2 - 280, w // 2 + 280
+    # The tutorial sits outside the row's left end, the same on every build.
+    if ms.gauntlets:
+        tw = f["normal"].size("Tutorial")[0] + 36
+        _button(surface, ms, "tutorial", pygame.Rect(lx - 14 - tw, y, tw, _CH), "Tutorial",
+                fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
+    else:
+        ms.rects.pop("tutorial", None)
 
     if is_web():
         for key in ("filename_field", "save_settings", "load_settings"):
@@ -1910,6 +2170,8 @@ def _dispatch(event, ms: MenuState, settings: Settings):
         return _handle_clear_map(event, ms, settings)
     if ms.pbp_prompt:  # modal: swallows everything until confirmed or cancelled
         return _handle_pbp_prompt(event, ms, settings)
+    if ms.tutorial_open:  # modal: a stage, the picker, Leave or Close
+        return _handle_tutorial(event, ms, settings)
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
@@ -2112,6 +2374,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_scout = config.FOG_ON_SCOUT
         else:  # on -> off: full visibility
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
+    elif hit == "tutorial":
+        _open_tutorial(ms, settings)
     elif hit == "create_map":
         return _open_creator(ms, settings)
     elif hit == "clear_map":

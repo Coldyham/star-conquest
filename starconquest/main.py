@@ -24,6 +24,7 @@ from starconquest import (
     config,
     engine,
     fog,
+    gauntlet,
     mapgen,
     mapmaker,
     menu,
@@ -174,13 +175,32 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
     ui.visible = _accumulate_fog(state, ui.human_id, ui.seen, ui.player_intel)
 
 
-def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
+def _begin_game(settings: Settings, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None = None
+                ) -> tuple[GameState, Ui, GameLog, int]:
     """Roll the seed and open a fresh match — the single start path, shared by the
     menu's Start Game and the map creator's Play so the two cannot drift apart."""
     ai.load_models()   # pick up files added since launch / named by a loaded config
     seed = resolve_seed(settings)
-    state, ui, log = start_game(settings, seed, settings.autoplay)
+    state, ui, log = start_game(settings, seed, settings.autoplay, stage)
     return state, ui, log, seed
+
+
+def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
+             briefing: bool = True) -> None:
+    """Copy a gauntlet stage onto ``ui`` as plain values, so render never sees a
+    `Gauntlet`. ``stage`` is what `menu.active_stage` found for the setup being
+    played: None for an ordinary match, which leaves every stage field blank.
+    A Retry or a rewind keeps the stage but not the briefing, which was read
+    the first time round (B or the hint brings it back)."""
+    if stage is None:
+        return
+    g, s = stage
+    ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_title = s.title
+    ui.briefing = s.briefing
+    ui.briefing_open = briefing and bool(s.briefing)
+    ui.stage_hint = s.hint or None
+    ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -208,10 +228,14 @@ def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
     ui.campaign_start = campaign.stamp(watch.status)
 
 
-def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
+def start_game(settings: Settings, seed: int, autoplay: bool,
+               stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None = None
+               ) -> tuple[GameState, Ui, GameLog]:
     """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
-    return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed, state)
+    ui = new_ui(state, autoplay, settings)
+    stage_ui(ui, stage)
+    return state, ui, replay.new_log(settings, seed, state)
 
 
 def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameState, Ui]:
@@ -1797,6 +1821,7 @@ async def main() -> None:
                     stamped = ui.campaign_start   # the same match, so the same start
                     state, ui = apply_rewind(log, settings, ui.history_turn)
                     ui.campaign_start = stamped
+                    stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     confirm_rewind = False
                     auto_accum = 0
@@ -1854,7 +1879,8 @@ async def main() -> None:
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
-                    state, ui, log, current_seed = _begin_game(settings)
+                    state, ui, log, current_seed = _begin_game(
+                        settings, menu.active_stage(menu_state, settings))
                     stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
@@ -1949,10 +1975,19 @@ async def main() -> None:
             elif action == "toggle_fast_forward":
                 toggle_fast_forward(state, ui)   # spectating only; else a no-op
                 auto_accum = play_accum = 0
-            elif action == "restart":
+            elif action == "restart" and not ui.in_stage:
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed,
                                             carry_autoplay(ui))
+            elif action == "next_stage" and ui.offers_next_stage(state):
+                # The stage after this one, briefing and all. The menu's setup
+                # becomes that stage's, so going back to the menu lands on it.
+                found = menu.next_stage(menu_state, settings)
+                if found is not None:
+                    state, ui, log, current_seed = _begin_game(settings, found)
+                    stamp_campaign(ui, menu_state.campaign_watch)
+                    history_states, history_fog, history_events, live_fog = [], [], [], None
+                    auto_accum = 0
             elif action == "retry":
                 # Replay this exact match from the opening position: fork the
                 # log at turn 0 so the completed record stays intact, then
@@ -1969,6 +2004,7 @@ async def main() -> None:
                 state, ui = resume_game(log, settings)
                 if not was_watched:
                     stamp_campaign(ui, menu_state.campaign_watch)
+                    stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                 history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":
@@ -2014,6 +2050,7 @@ async def main() -> None:
                     state, ui = resume_game(log, settings)
                     if not was_watched:
                         stamp_campaign(ui, menu_state.campaign_watch)
+                        stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
                 else:
