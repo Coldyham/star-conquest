@@ -74,3 +74,6 @@ are written for outside developers building their own bots, and
 published documents, not working notes. [`site-merge-plan.md`](site-merge-plan.md)
 is the planning brief for merging the game and board sites. That merge is
 implemented, and the brief is kept for its reasoning.
+[`tutorial-plan.md`](tutorial-plan.md) is the plan for a tutorial ladder built
+as a data-driven gauntlet. It is not started yet, and moves into
+`design/gauntlet.md` once it is built.
