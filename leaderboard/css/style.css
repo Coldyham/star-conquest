@@ -967,6 +967,8 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   /* Stacked, the menu button sits at the left, so the panel hangs from its left
    * edge; pinned right, it would grow off the screen. */
   .menu > .actions { left: 0; right: auto; }
+  /* ...and Menu leads, so it keeps the screen's edge as it does on desktop. */
+  .bar-end { flex-direction: row-reverse; }
   .brand { font-size: 1.05rem; }
   main { padding-top: 1.5rem; }
   h1 { font-size: 1.15rem; }
