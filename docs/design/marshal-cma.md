@@ -161,12 +161,24 @@ as the bot before it with B's constants set (336 of 336 games in seven cells
 against knower, actuary and thinker). The guard and the pour floor are still
 split (0.72 under 0.85).
 
-**knower at Search.** Pending. Search and Council borrow marshal as one of
+**knower at Search: unchanged.** Search and Council borrow marshal as one of
 their candidate openings (`EXTERNAL_CANDIDATES`), so the ship changes them;
-Predict, which every measurement above played, borrows nothing. The A/B running
-is knower at Search against actuary, knower (Predict) and thinker, with the
-registry's marshal the bot before the ship or after it, on the same seeds
-(7,800,000 onward, five cells, both seatings).
+Predict, which every measurement above played, borrows nothing. knower at Search
+against actuary, knower (Predict) and thinker, with the registry's marshal the
+bot before the ship or after it, on the same seeds (7,800,000 to 7,800,099, the
+five cells 11/11, 13/3, 18/6, 24/12 and 24/3, both seatings; 6,000 games):
+
+                     points against the bot before (z)    halves       won, before -> after
+    actuary          -1.84 ± 1.36  z -1.36                -3.5 / -0.2   66.2% -> 64.4%
+    knower           +0.85 ± 0.71  z +1.21                +1.2 / +0.5   94.5% -> 95.4%
+    thinker          +0.09 ± 0.18  z +0.50                +0.2 / +0.0   99.5% -> 99.6%
+    all, equal       -0.30 ± 0.51  z -0.58
+
+Timeouts scored as losses read the same (-0.27 ± 0.52). 1,287 of the 1,500
+seed-cell-opponent units came out identical under both, so Search rarely takes
+the borrowed opening where the two marshals differ. The lean against actuary is
+the one to watch (worst at 18/6, -4.0, and 24/3, -2.7), but it is under 1.5
+standard errors and fades in the second half of the seeds.
 
 **The roster ladder**, re-run with the bot before the ship beside it on the same
 seeds ([`marshal.md`](marshal.md), "Where marshal stands"). At 18 nodes, marshal
