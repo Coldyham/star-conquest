@@ -188,6 +188,26 @@ rest readable.
   there is no per-turn losses or kills view (a fight's dead are recorded per
   owner, not per killer).
 
+## Naming each seat's bot (`Ui.bot_label`)
+
+Pointing at (or tapping) a scoreboard entry in the top bar opens a tooltip
+under it: the seat, who plays it, and its standings in words (or the last-known
+ones, or that it is out). The graph legend names the same after each seat.
+
+- **Labels are worked out once, in `main.new_ui`** (`seat_bot_labels`): the
+  family (`ai.canonical`, so a legacy name reads as its family) and the stop its
+  knob sits on (`ai.aux_stop_name`). Render imports no `ai`, so it reads them
+  off `Ui.seat_bots`.
+- **A random seat stays secret until the game is decided.** `Ui.random_seats`
+  comes from the `Settings` (`RANDOM_STRATEGY`), since `Player` only ever holds
+  the resolved bot. It reads "Random" until `Ui.bots_revealed`: a winner on the
+  board, or review of a finished game. A knocked-out spectator still waits,
+  because the bot is half of what the remaining seats are playing against.
+- **A person's seat is never a bot**: `Player.is_human` on the board being drawn,
+  so a seat claimed part-way through reads as its bot on the turns before.
+- The tooltip goes through the scoreboard's own fog (`_score_vis`): a rival
+  never sighted has no entry to hover.
+
 ## Route mode (`viewstate.ROUTING`)
 
 Everything else in the game commits on click; this doesn't. It writes a dozen

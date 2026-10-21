@@ -83,6 +83,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_hud(surface, state, ui)
         _draw_scrubber(surface, state, ui)
         _draw_history_graph(surface, state, ui)
+        _draw_score_tooltip(surface, state, ui)
         return
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
     # (unlike the old fixed fit-to-bounds view, which always fit inside it by
@@ -130,6 +131,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_waiting_overlay(surface, state, ui)
     elif ui.in_pbp and ui.pbp_msg:
         _draw_pbp_notice(surface, ui)
+    _draw_score_tooltip(surface, state, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -1766,16 +1768,10 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
     cy = config.HUD_TOP_H // 2
     sw_size = config.s(12)  # colour swatch side
     gap, sw_w = config.s(22), sw_size + config.s(6)
+    ui.score_rects = []
 
     def vis(pid: int) -> str:
-        """live | frozen | out | hidden."""
-        p = state.players[pid]
-        live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
-        if not (live or pid in ui.player_intel):
-            return "hidden"  # never sighted — you don't know it exists
-        if not p.alive:
-            return "out"
-        return "live" if live else "frozen"
+        return _score_vis(state, ui, pid)
 
     seats = [pid for pid in sorted(state.players) if not state.players[pid].is_neutral and vis(pid) != "hidden"]
     if not seats:
@@ -1809,7 +1805,63 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         txt = label(pid, v, with_name)
         tcolor = config.COLOR_TEXT_DIM if v == "frozen" else color
         _text(surface, font, txt, tcolor, midleft=(x + sw_w, cy))
+        ui.score_rects.append((pid, (x, 0, sw_w + font.size(txt)[0], config.HUD_TOP_H)))
         x += sw_w + font.size(txt)[0] + gap
+
+
+def _score_vis(state: GameState, ui: Ui, pid: int) -> str:
+    """How much the scoreboard knows of ``pid``: live | frozen | out | hidden."""
+    p = state.players[pid]
+    live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
+    if not (live or pid in ui.player_intel):
+        return "hidden"  # never sighted — you don't know it exists
+    if not p.alive:
+        return "out"
+    return "live" if live else "frozen"
+
+
+def _seat_who(state: GameState, ui: Ui, pid: int) -> str:
+    """Who is playing ``pid``, for a tooltip or a key: its bot (`Ui.bot_label`),
+    "you", or "a person" for someone else's seat in a shared match."""
+    bot = ui.bot_label(state, pid)
+    if bot is not None:
+        return bot
+    if pid == ui.human_id:
+        return "you"
+    return "a person"
+
+
+def _draw_score_tooltip(surface, state: GameState, ui: Ui) -> None:
+    """The hovered scoreboard entry spelled out under the top bar: who plays the
+    seat, then its standings in words (or the last-known ones, or that it is out).
+    Drawn last of the frame, so nothing below the bar covers it."""
+    pid = ui.score_hover
+    rect = next((r for p, r in ui.score_rects if p == pid), None)
+    if pid is None or rect is None or pid not in state.players:
+        return
+    v = _score_vis(state, ui, pid)
+    if v == "hidden":
+        return
+    p = state.players[pid]
+    lines = [f"{p.name} · {_seat_who(state, ui, pid)}"]
+    if v == "out":
+        lines.append("Knocked out")
+    else:
+        systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
+        stats_line = f"{systems} systems · {ships} ships · {prod:.1f} ships/turn"
+        lines.append(stats_line if v == "live" else f"Last seen: {stats_line}")
+    font = _fonts()["small"]
+    pad = config.s(8)
+    w = max(font.size(line)[0] for line in lines) + 2 * pad
+    h = len(lines) * _row_h() + 2 * pad - (_row_h() - font.get_height())
+    x = max(config.HUD_PAD, min(rect[0], surface.get_width() - w - config.HUD_PAD))
+    box = pygame.Rect(x, config.HUD_TOP_H + config.s(4), w, h)
+    pygame.draw.rect(surface, (24, 26, 38), box, border_radius=config.s(6))
+    pygame.draw.rect(surface, config.player_color(pid), box, config.s(1), border_radius=config.s(6))
+    y = box.y + pad
+    for i, line in enumerate(lines):
+        _text(surface, font, line, config.COLOR_TEXT if i == 0 else config.COLOR_TEXT_DIM, topleft=(box.x + pad, y))
+        y += _row_h()
 
 
 def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
@@ -2837,12 +2889,15 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
     rows = [(pid, state.players[pid].name if pid in state.players else config.player_name(pid),
              _graph_value(key, value_at(pid)))
             for pid in seats]
+    # who played each seat, dim after its name — where the row has room for it
+    who = {pid: f" · {_seat_who(state, ui, pid)}" for pid in seats}
     sw = config.s(12)
     # Sized for every tab's widest figure, so switching metric never moves the plot.
     val_w = max([font.size(_graph_value(k, chart.peak(k, seats)))[0] for k, _t, _u in stats.METRICS]
                 + [font.size(u)[0] for _k, _t, u in stats.METRICS])
-    name_w = max([font.size(n)[0] for _p, n, _v in rows] + [font.size("Unclaimed")[0]])
+    name_w = max([font.size(n + who[p])[0] for p, n, _v in rows] + [font.size("Unclaimed")[0]])
     legend_w = min(int(box.w * 0.4), sw + config.s(6) + name_w + config.s(12) + val_w)
+    name_room = legend_w - sw - config.s(6) - config.s(12) - val_w
     lx = box.right - pad - legend_w
     ly = body_top
     _text(surface, font, unit, config.COLOR_TEXT_DIM, topleft=(box.right - pad - font.size(unit)[0], ly))
@@ -2860,7 +2915,9 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
         else:
             pygame.draw.rect(surface, color_of(pid), swatch, config.s(1), border_radius=config.s(2))
         ink = config.COLOR_TEXT if shown else config.COLOR_TEXT_DIM
-        _text(surface, font, name, ink, midleft=(lx + sw + config.s(6), cy))
+        drawn = _text(surface, font, name, ink, midleft=(lx + sw + config.s(6), cy))
+        if font.size(name + who[pid])[0] <= name_room:
+            _text(surface, font, who[pid], config.COLOR_TEXT_DIM, midleft=(drawn.right, cy))
         _text(surface, font, val, ink, midright=(box.right - pad, cy))
         trace_rects.append((pid, (lx, ly, legend_w, row_h)))
         ly += row_h

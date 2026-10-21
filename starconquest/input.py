@@ -286,7 +286,17 @@ def _handle_invite_event(event, ui: Ui) -> str | None:
     return None
 
 
+def _track_score_hover(event, ui: Ui) -> None:
+    """Note which scoreboard entry is under the pointer, for its tooltip. A
+    press counts too, so a tap reaches it where there is no hover; nothing is
+    consumed, whatever scene the event goes on to."""
+    if event.type not in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+        return
+    ui.score_hover = next((pid for pid, rect in ui.score_rects if _point_in_rect(event.pos, rect)), None)
+
+
 def handle_event(event, state: GameState, ui: Ui) -> str | None:
+    _track_score_hover(event, ui)
     # Play-by-post's invite overlay is modal too, and ahead of everything below:
     # a match this fresh (right after we created it) can be running no film and
     # holds no history or win to check first.

@@ -183,6 +183,16 @@ class Ui:
     # by default on a finished game. `dragging_graph` is a held drag across the
     # plot, which scrubs the turn like the track does.
     history_chart: stats.Chart | None = None
+    # Which bot drives each seat, for the top bar's hover tooltip and the graph
+    # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`
+    # (render imports no `ai` to name a stop with). `random_seats` were left to
+    # `settings.RANDOM_STRATEGY` and read "Random" until `bots_revealed`.
+    seat_bots: dict[int, str] = field(default_factory=dict)
+    random_seats: frozenset[int] = frozenset()
+    # The scoreboard entry under the pointer (or last tapped), and the entries'
+    # hit-rects as ``(pid, rect)``, rebuilt by render each frame.
+    score_hover: int | None = None
+    score_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
     history_graph: bool = False
     graph_full: bool = False
     graph_metric: int = 0
@@ -532,6 +542,28 @@ class Ui:
         if self.history_reveal:
             return chart.seats
         return tuple(pid for pid in chart.seats if pid == self.human_id)
+
+    def bots_revealed(self, state: GameState) -> bool:
+        """May a random seat's bot be named? Only once the game is decided — on
+        the board itself, or in review of a finished game, whose boards are all
+        undecided but one. A knocked-out spectator still waits: the bot is half
+        of what the remaining seats are playing against."""
+        return state.winner is not None or (self.history and self.history_reveal)
+
+    def bot_label(self, state: GameState, pid: int) -> str | None:
+        """What drives ``pid`` as the HUD names it, or None for neutral and for a
+        seat a person holds (on this board: one claimed later still read as a bot
+        on the turns before). A random seat reads "Random" until
+        `bots_revealed`, then its bot with "(random)" after it."""
+        player = state.players.get(pid)
+        if player is None or player.is_neutral or player.is_human:
+            return None
+        bot = self.seat_bots.get(pid)
+        if pid in self.random_seats:
+            if not self.bots_revealed(state):
+                return "Random"
+            return f"{bot} (random)" if bot else "Random"
+        return bot
 
     def graph_traces(self) -> tuple[int, ...]:
         """The seats whose lines the graphs draw: offered and not hidden."""
