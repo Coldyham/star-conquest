@@ -132,7 +132,13 @@ a { color: var(--cyan); }
 .actions { display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; }
 .actions .btn { text-align: center; }
 
-/* Every page's own links (Play, All maps, Shared matches, Enter score, plus a
+/* Play stays out of the menu, beside it: the site root opens the board, so a
+ * first visit lands here, and the game (and its Tutorial button) must be one
+ * tap away rather than behind a dropdown or a challenge link. It wears `.play`,
+ * the board's gold door back into the game. */
+.bar-end { display: flex; align-items: center; gap: 0.75rem; }
+
+/* Every page's other links (All maps, Shared matches, Enter score, plus a
  * runtime "My scores") collapse into one `<details>` menu rather than a row of
  * buttons — a row grows with every feature that earns its own page, and on a
  * phone it wrapped onto a second line under the brand. Native <details> needs
@@ -662,6 +668,7 @@ h1::after {
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
+.bar-end .play { margin-top: 0; }   /* the header's Play, beside the menu */
 .map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 
 /* game.html on a live campaign node: the campaign panel's lines (js/campaign.mjs's
