@@ -138,10 +138,18 @@ ADV_FOG = (
 )
 
 
+# The lowest value a roll may land on, where it sits above the slider's own floor:
+# a setting fine to choose by hand but not to be dealt. Sight 0 shows only your
+# own systems, so every send goes into a "?" you cannot price.
+ROLL_FLOORS = {"fog_sight": 1}
+
+
 def randomise_knobs(target, specs, rng: random.Random) -> None:
     """Set every knob in ``specs`` on ``target`` to a random in-bounds value,
-    snapped to its step and clamped the way the menu's sliders are."""
+    snapped to its step and clamped the way the menu's sliders are, never below
+    its `ROLL_FLOORS` entry."""
     for _key, _label, attr, lo, hi, step, is_int in specs:
+        lo = max(lo, ROLL_FLOORS.get(attr, lo))
         snapped = round(rng.uniform(lo, hi) / step) * step
         snapped = max(lo, min(hi, snapped))
         setattr(target, attr, round(snapped) if is_int else round(snapped, 4))

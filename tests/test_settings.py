@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import random
 
 import pytest
 
@@ -1063,3 +1064,18 @@ def test_system_count_is_the_map_that_gets_built():
     assert s.system_count() == 18 == len(build_state(s, 603346).systems)
     s.mode = "random"
     assert s.system_count() == 10 == len(build_state(s, 603346).systems)
+
+
+def test_a_roll_never_lands_below_its_floor_but_the_slider_still_reaches_it():
+    """Sight 0 can be chosen by hand, so the slider keeps it; the dice (the menu's
+    and the campaign's "?" nodes alike) never deal it."""
+    from starconquest.settings import ADV_FOG, ROLL_FLOORS, randomise_knobs
+    assert dict((attr, lo) for _k, _l, attr, lo, *_ in ADV_FOG)["fog_sight"] < ROLL_FLOORS["fog_sight"]
+    rng = random.Random(0)
+    rolled = set()
+    for _ in range(300):
+        target = Settings.defaults()
+        randomise_knobs(target, ADV_FOG, rng)
+        rolled.add(target.fog_sight)
+    assert min(rolled) == ROLL_FLOORS["fog_sight"]
+    assert max(rolled) == config.FOG_MAX_HOPS

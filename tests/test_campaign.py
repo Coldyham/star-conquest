@@ -7,7 +7,7 @@ import random
 from collections import deque
 
 from starconquest import config
-from starconquest.settings import Settings, build_state
+from starconquest.settings import ROLL_FLOORS, Settings, build_state
 from tools import campaign
 
 START = dt.date(2026, 9, 28)   # a Monday
@@ -192,4 +192,4 @@ def test_no_node_is_dealt_sight_zero():
     for seed in range(40):
         graph = _graph(games=GAMES + blind, seed=seed)
         for node in graph["nodes"]:
-            assert Settings.from_dict(dict(node["settings"])).fog_sight >= campaign.FOG_MIN_SIGHT
+            assert Settings.from_dict(dict(node["settings"])).fog_sight >= ROLL_FLOORS["fog_sight"]
