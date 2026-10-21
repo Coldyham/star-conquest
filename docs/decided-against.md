@@ -18,6 +18,7 @@ the measured result was indistinguishable from the baseline.
 - The all-in and push-for-depth postures inside the search width: stopped paying once real rushers were candidates. *Borrowed candidates.*
 - Any fixed search depth: replaced by longest lane + 5. Depth past 5 was noise. *How far to look.*
 - Modelling a person with marshal or actuary (Planned) instead of `_blind`: worse forecasts (Brier +0.021, +0.025). Assuming a person holds (`GUESS_HUMAN`, built, removed): worse against bots flagged as people (z -3.33), a test that favours the guess. *Seats it cannot run.*
+- **Open, not rejected:** bait openings at Search, emptying a wall between two rivals (2026-10-21, `tools/bait_bench.py`): pooled +2.25 pt (z +2.07) on screening seeds, +5.5 at five seats against the strong field; awaiting confirmation on fresh seeds and a Council reading. *Baiting in a free-for-all*.
 
 ## council ([`design/council.md`](design/council.md))
 - Synchronised strike openings: a gain that did not replicate on fresh seeds. Staggered strikes, decoys, double strikes: null or worse. *Built, measured, dropped.*
