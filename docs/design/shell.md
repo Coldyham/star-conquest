@@ -174,6 +174,19 @@ the trace selector: a click on a seat's row (or 1-9) shows or hides its line,
 and the y scale fits the lines shown, so hiding a runaway leader makes the
 rest readable.
 
+On a landscape screen the legend is a column right of the plot, as wide as its
+names (bot names included) up to 40% of the panel, past which the bot names
+drop and give their room back to the plot. On a portrait one it runs under the
+plot instead, full width, in as many columns as fit a whole row, and a docked
+panel grows to hold it: a column beside the plot there left it half the width
+and still clipped the bot names. The tabs wrap short of the caret.
+
+The camera is as free in review as in live play: drag the map to pan, wheel or
+−/+ to zoom, Reset (R) to re-frame. The Reset/−/+ cluster sits at the map's
+foot, lifted above the docked chart when it is open; full screen there is no
+map, so no cluster. A press on the reviewed map is always a pan, since there is
+nothing to select.
+
 - **Read off the history boards, never the log.** `stats.chart` runs once in
   `main.open_history` over the boards `build_history` already reconstructed, so
   a curve can never disagree with the map at the same turn, and nothing decides
