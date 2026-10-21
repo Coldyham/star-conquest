@@ -11,7 +11,7 @@ the measured result was indistinguishable from the baseline.
 - A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. Storing the exact median lane per game: a column, and blank until the job runs. *Decided against.*
 
 ## knower ([`design/knower.md`](design/knower.md))
-- Pricing three-way pile-ups with the oracle: a wash, possibly worse. *Built, measured, removed.*
+- Pricing three-way pile-ups with the oracle (attack side, 2026-08-05, one-turn knower, the old pile-up rule where the garrison queued by size): a wash, possibly worse. Predates the garrison-fights-last rule (2026-09-10). Re-measured under it (2026-10-21, `tools/pileup_bench.py`, two posted 4- and 5-seat configs, rivals all exactly predicted or two by stand-ins): folding rival arrivals in defence and overpaying for a third seat's same-turn strike are both null at Predict (4,000 pairs), Search and Council (about 340 each). *Built, measured, removed*; *Pile-ups under the garrison-fights-last rule*.
 - Striking perishable (vacating) targets first: no change. *Built, measured, removed.*
 - Branching every ply of the search, cut per opening: replaced by root-only branching, which is even at a quarter of the cost. *The depth search.*
 - Rolling every line on until its fleets land: lost head-to-head. *The depth search.*

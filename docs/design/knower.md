@@ -129,12 +129,19 @@ What it says:
 
 ## Built, measured, removed
 
-- **Pricing three-way pile-ups.** The oracle knows who else lands on a node this
-  turn, so knower can fold the pile-up with the jitter pinned against it and
-  demand enough mass to survive it. 71% vs 72% head-to-head over 200 games, and
-  33 vs 35 wins in a 3-player free-for-all: a wash, if anything worse. It makes
-  knower skip attacks it cannot overpay for, and this game rewards the leaner
-  strike (the same finding that set thinker's margins).
+- **Pricing three-way pile-ups (2026-08-05).** The oracle knows who else lands
+  on a node this turn, so knower can fold the pile-up with the jitter pinned
+  against it and demand enough mass to survive it. 71% vs 72% head-to-head over
+  200 games, and 33 vs 35 wins in a 3-player free-for-all: a wash, if anything
+  worse. It makes knower skip attacks it cannot overpay for, and this game
+  rewards the leaner strike (the same finding that set thinker's margins). This
+  was the attack side only, measured on the one-turn knower (before the depth
+  search) and **under the old pile-up rule**, where the garrison queued by size
+  among the attackers. Since 2026-09-10 the attackers fold among themselves and
+  the survivor faces the garrison last, so this result says nothing about the
+  current rule. Re-measured under it, with the defensive side too, in *Pile-ups
+  under the garrison-fights-last rule* (2026-10-21): null at Predict, Search
+  and Council.
 - **Striking perishable targets first.** A vacated garrison refills, so ordering
   targets by how much of theirs is leaving looks obviously right. It changes
   nothing: 118-45 vs 119-45 over 200 games, 35 vs 36 in the free-for-all.
@@ -772,3 +779,72 @@ leaned worse on the posted maps.
   sent on an earlier turn cannot be recalled, so the check belongs where it is
   launched. knower's Phase 1 makes that check for its own plan, and a borrowed
   opening does not. Unmeasured.
+
+## Pile-ups under the garrison-fights-last rule (2026-10-21)
+
+The 2026-08-05 measurement in *Built, measured, removed* was taken under the old
+pile-up rule, on the one-turn knower, and priced only the attack. Since
+2026-09-10 a pile-up's attackers fold among themselves, strongest first, and the
+survivor faces the garrison last (`combat.resolve_arrival`). knower's planner
+predates that in two places, and `tools/pileup_bench.py` changes each one, for
+the seat under test only:
+
+- **defend.** Phase 1 sums every hostile fleet landing on one of our systems
+  on a turn (`_enemy_arrivals`). The arm folds each turn's owners against each
+  other first (`_fold`, as `_flee` already does), so a system two rivals strike
+  together is priced at the remnant it will face and held, not abandoned. This
+  is the oracle form of marshal's 2026-09-11 re-tune
+  ([`marshal-pricing.md`](marshal-pricing.md), "Re-tuned for
+  production-before-combat and the garrison-fights-last pile-up").
+- **attack.** Phase 3 prices a strike off the target's own defence
+  (`_required`) and ignores a third seat landing there the same turn. The arm
+  asks for enough to win that fold at the jitter's worst roll and still have the
+  garrison's price left: the old measurement, re-run under the rule.
+
+**How it was measured.** Two posted configs at fresh seeds from 8,100,000:
+`8631540e085666d9` (five seats, 31 systems, 3 ly/turn, speed growth 0.15,
+jitter 0.08, defender advantage 1.05) and `2f484ae051214d3f` (four seats, 23
+systems, 8 ly/turn). Two line-ups, so the oracle's two situations read apart:
+*sole*, every rival a bot knower runs exactly (actuary at Field, marshal,
+rusherplus, heuristic), and *rivals*, two of them oracle seats it can only
+model by their stand-ins (knower at Predict, actuary at Learning); the
+four-seat config takes the first three of each. The seat under test turns
+through every seat with the seed, and every arm plays each seed on the same
+seating. The wrappers are keyed by pid, so a rival knower predicting the seat
+under test runs the arm for it, as it would if the arm shipped. Guards lifted.
+Each arm is paired with stock as `tools/win_turns.py` pairs two arms (*beats*,
+Δwon, Δturns over the games both won), since Council wins 85-95% of these
+fields. Predict ran 1,000 seeds a group; Search was stopped at about 84 and
+Council run to 85, at 20-120 s a game.
+
+Each stop's four groups pooled:
+
+| | pairs | defend: beats | Δwon | attack: beats | Δwon | Δturns |
+| --- | --- | --- | --- | --- | --- | --- |
+| Predict | 4,000 | 50.0% (z +0.27) | +0.1 pt | 50.1% (z +0.27) | +0.1 pt | +0.2% |
+| Search | 336 | 51.3% (z +1.04) | -1.2 pt | 48.2% (z -0.91) | -2.4 pt (z -1.16) | +0.7% |
+| Council | 340 | 50.7% (z +0.82) | 0.0 pt | 52.5% (z +1.34) | +1.2 pt (z +1.64) | +0.4% |
+
+Stock won 8-14% at Predict, 40-71% at Search and 85-95% at Council. No group
+of the 24 reads past z 2.2 either way. The two that pass 2 are attack readings
+of opposite sign in the same line-up: at Search, -8.4 pt on the five-seat
+config against *rivals* (z -2.16, 2 games gained and 9 lost); at Council, +2.4
+pt on each config against *rivals* (2 gained, none lost, each). *sole* and
+*rivals* read alike.
+
+**What this says.**
+
+- **The defensive fold almost never decides anything.** It changes the threat
+  on 1.3-2.8% of Phase 1 calls and the result of 4% of Predict games. Two
+  rivals landing on one of our systems on the same turn is rare even with five
+  seats, and when it happens the summed price mostly leads to the same move.
+  Under Search and Council `_flee` already folds the certain arrivals.
+- **The attack fold is still a wash under the new rule.** Overpaying for a
+  third seat's same-turn strike changes about 1% of Phase 3 prices and moves a
+  fifth to a half of the games, in both directions. It is the old result:
+  knower skips strikes it cannot overpay for, and the leaner strike does as
+  well.
+- **Not built:** the opposite use of the same knowledge, striking a turn
+  *after* a rival lands to take the remnant (marshal's `REMNANT`, gated to a
+  duel), and a person's guessed launch folded as uncertain (no person in the
+  bench).
