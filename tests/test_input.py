@@ -2559,3 +2559,72 @@ def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
         assert (ui.selected, ui.dest) == (home, b)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Web canvas: the framebuffer follows the browser viewport
+# --------------------------------------------------------------------------- #
+def test_the_web_framebuffer_takes_the_viewports_shape():
+    """pygbag letterboxes a framebuffer into the page keeping its aspect, so a fixed
+    16:9 one never filled any other window; the canvas takes the viewport's shape
+    at device resolution instead, held to the WEB_FB pixel budget."""
+    budget = config.WEB_FB_W * config.WEB_FB_H
+    assert main.web_framebuffer(1920, 1080, 1.0) == (1920, 1080)     # native, unscaled
+    assert main.web_framebuffer(844, 390, 3.0) == (2532, 1170)       # landscape phone
+    w, h = main.web_framebuffer(390, 844, 3.0)                       # ...rotated
+    assert h > w and abs(w / h - 390 / 844) < 0.01
+    w, h = main.web_framebuffer(1920, 1080, 2.0)                     # 4K: capped
+    assert (w, h) == (config.WEB_FB_W, config.WEB_FB_H)
+    w, h = main.web_framebuffer(1600, 1200, 2.0)                     # 4:3, capped
+    assert abs(w / h - 4 / 3) < 0.01 and w * h <= budget * 1.01
+    assert main.web_framebuffer(640, 480, 0.5) == (640, 480)         # dpr floored at 1
+
+
+def test_a_browser_resize_reshapes_the_surface(monkeypatch):
+    """The surface only changes size when the game resizes it, so a browser resize
+    must come through `fit_web_canvas` for the loop's reflow to see anything."""
+    pygame.init()
+    try:
+        pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        view = [(1600, 1200, 1.0)]
+        monkeypatch.setattr(main.webstore, "viewport", lambda: view[0])
+
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (1600, 1200)
+        assert not main.fit_web_canvas(), "an unchanged viewport must not set_mode again"
+
+        view[0] = (900, 1600, 1.0)                    # rotated to portrait
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+
+        view[0] = None                                # DOM unreadable: keep what we have
+        assert not main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+    finally:
+        pygame.quit()
+
+
+def test_the_game_owns_the_canvas_box_it_measures(monkeypatch):
+    """pygbag's own fit keeps the framebuffer's aspect, so left in charge it
+    letterboxes or, racing a resize, stretches the picture. `viewport` takes the
+    canvas over, makes it fill the page, and reports the box it is *shown* at."""
+    import sys
+    import types
+    from starconquest import webstore
+
+    style = types.SimpleNamespace()
+    canvas = types.SimpleNamespace(
+        style=style,
+        getBoundingClientRect=lambda: types.SimpleNamespace(width=844.6, height=390.2))
+    window = types.SimpleNamespace(
+        canvas=canvas, devicePixelRatio=3,
+        python=types.SimpleNamespace(config=types.SimpleNamespace(user_canvas_managed=0)))
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setitem(sys.modules, "platform", types.SimpleNamespace(window=window))
+
+    assert webstore.viewport() == (844, 390, 3.0)
+    assert window.python.config.user_canvas_managed == 1
+    assert (style.position, style.width, style.height) == ("fixed", "100%", "100%")
+
+    canvas.getBoundingClientRect = lambda: types.SimpleNamespace(width=0, height=0)
+    assert webstore.viewport() is None, "a canvas not laid out yet has no size to fit"

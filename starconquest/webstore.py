@@ -405,6 +405,49 @@ def trigger_resize() -> bool:
         return False
 
 
+# The canvas fills the page; the framebuffer is then sized from its measured box.
+_CANVAS_STYLE = {"position": "fixed", "left": "0", "top": "0", "right": "0",
+                 "bottom": "0", "margin": "0", "width": "100%", "height": "100%"}
+
+
+def viewport() -> tuple[int, int, float] | None:
+    """Web only: the canvas's on-screen size in CSS pixels, and the device pixel ratio.
+
+    What ``main.web_framebuffer`` sizes the framebuffer from. The game manages the
+    canvas itself: pygbag's own fit keeps the framebuffer's aspect, so it would
+    letterbox (or, racing a resize, stretch) any other shape. Each call tells
+    pygbag to keep its hands off (``user_canvas_managed``), styles the canvas to
+    fill the page, and *measures* the box that results, so the framebuffer always
+    has the shape it is shown at whatever the page's viewport meta says.
+    None off the web or if the DOM can't be read; the caller keeps its size.
+    """
+    if not is_web():
+        return None
+    import platform as _platform
+
+    try:
+        win = _platform.window
+        canvas = win.canvas
+    except Exception:
+        return None
+    try:
+        win.python.config.user_canvas_managed = 1
+    except Exception:
+        pass
+    try:
+        for prop, value in _CANVAS_STYLE.items():
+            setattr(canvas.style, prop, value)
+    except Exception:
+        pass
+    try:
+        rect = canvas.getBoundingClientRect()
+        w, h = int(rect.width), int(rect.height)
+        dpr = float(win.devicePixelRatio or 1.0)
+    except Exception:
+        return None
+    return (w, h, dpr) if w > 0 and h > 0 else None
+
+
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
     if not is_web():

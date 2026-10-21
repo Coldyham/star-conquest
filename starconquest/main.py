@@ -50,6 +50,10 @@ PLAY_MS = 350      # delay between turns while play/pause (P) is running
 # ...and while fast-forwarding: no wait at all, so the loop resolves a turn every
 # frame (config.FPS turns/second) instead of one per delay above.
 FAST_FORWARD_MS = 0
+# Web only: how often the loop re-reads the browser viewport to refit the canvas.
+# A poll rather than an event because pygbag swallows the page's resize itself
+# (it only restyles the canvas), and throttled because every read crosses into JS.
+WEB_VIEWPORT_POLL_MS = 250
 
 
 def build_view(state: GameState) -> WorldView:
@@ -1222,6 +1226,40 @@ def ui_scale_for(size: tuple[int, int], touch: bool, pct: int) -> float:
     return fit * config.TOUCH_UI_SCALE if touch else fit * pct / 100
 
 
+def web_framebuffer(css_w: int, css_h: int, dpr: float) -> tuple[int, int]:
+    """The canvas framebuffer for a canvas shown at ``css_w`` x ``css_h``.
+
+    The box's own shape, at its device resolution (so nothing is scaled and
+    text stays crisp) but never more pixels than ``WEB_FB_W`` x ``WEB_FB_H``,
+    which bounds the per-frame draw cost on a big high-DPI screen. pygbag fits
+    the canvas to the page keeping the framebuffer's aspect, so a fixed 16:9
+    surface was letterboxed in any other window and never reflowed at all; this
+    one fills it, and a resize or a rotation changes the surface size the main
+    loop already reflows on.
+    """
+    budget = (config.WEB_FB_W * config.WEB_FB_H / (css_w * css_h)) ** 0.5
+    k = min(max(dpr, 1.0), budget)
+    return max(1, round(css_w * k)), max(1, round(css_h * k))
+
+
+def fit_web_canvas() -> bool:
+    """Web only: resize the framebuffer to the browser viewport if it has moved.
+
+    Returns True if it changed. The new surface is picked up by the loop's reflow.
+    The canvas's on-screen box is ours, not pygbag's (``webstore.viewport``), so
+    nothing else needs telling.
+    """
+    view = webstore.viewport()
+    if view is None:
+        return False
+    size = web_framebuffer(*view)
+    screen = pygame.display.get_surface()
+    if screen is not None and screen.get_size() == size:
+        return False
+    pygame.display.set_mode(size)
+    return True
+
+
 def ui_size_key(event, pct: int) -> int | None:
     """The UI size a Ctrl +/−/0 press asks for, or None if ``event`` isn't one."""
     if not event.mod & pygame.KMOD_CTRL:
@@ -1276,9 +1314,12 @@ async def main() -> None:
         # size can misbehave on mobile. The loop reads the actual size below.
         pygame.display.set_mode((0, 0))
     elif paths.is_web():
-        # Match pygbag's canvas framebuffer exactly so nothing is clipped; the
-        # browser scales this surface to fill the window/phone.
+        # Start at pygbag's own canvas size (the build's --width/--height), then
+        # take the viewport's shape: a framebuffer of any other aspect is
+        # letterboxed by pygbag rather than filling the window (see
+        # `web_framebuffer`). The loop keeps refitting it as the page resizes.
         pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        fit_web_canvas()
         # The canvas can land squashed to the wrong aspect ratio on first paint
         # (pygbag's own resize handler is what fits it, and that only runs on a
         # genuine `resize` event, never proactively) — nudge it once, after
@@ -1421,6 +1462,7 @@ async def main() -> None:
     # real input event; already "spent" (never fires) off the web build, so nothing
     # here needs its own is_web() check.
     resize_kicked = not paths.is_web()
+    viewport_accum = 0
     while running:
         # Capped, not raw: the frame that resolves a turn can run far longer than
         # a frame, and handing that whole stretch to the film it just started
@@ -1671,6 +1713,13 @@ async def main() -> None:
                         and pbp_last.turn == state.turn else None)
                 pbp_poll = pbp.fetch_state(ui.pbp_match, have)
 
+        # Web: the surface only changes size when we resize it, so follow the page
+        # (not while F11's fullscreen mode owns it).
+        if paths.is_web() and not fullscreen:
+            viewport_accum += dt
+            if viewport_accum >= WEB_VIEWPORT_POLL_MS:
+                viewport_accum = 0
+                fit_web_canvas()
         # Reflow to fill the window whenever its size, or the UI size, changes.
         screen = pygame.display.get_surface()
         scale = ui_scale_for(screen.get_size(), touch, menu_state.ui_size)

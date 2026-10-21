@@ -381,20 +381,20 @@ BASE_SCREEN_W = 1440
 BASE_SCREEN_H = 960
 TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
 
-# Browser (pygbag) framebuffer size. Must match the pygbag canvas (--width/--height
-# passed to `pygbag --build` in tools/build_web.sh) so the surface fills the canvas
-# exactly (no clipping); the browser then scales this whole surface to fit the
-# window/phone, which enlarges touch targets for free — so the web build needs no
-# separate touch boost. Rendering at this native resolution (rather than a small
-# framebuffer the browser upscales) is what keeps text and edges crisp; the whole
-# UI scales up to fill it via apply_ui_scale, so keep it a clean multiple of the
-# baseline aspect and bump both these constants and the build flags together.
+# Browser (pygbag) framebuffer: the boot size, matching the pygbag canvas
+# (--width/--height passed to `pygbag --build` in tools/build_web.sh), and the
+# pixel budget the live canvas is held to. Once running, `main.web_framebuffer`
+# reshapes the surface to the browser viewport at its device resolution, capped
+# at this many pixels — pygbag letterboxes a framebuffer of any other aspect, so
+# a fixed one never filled a non-16:9 window or reflowed on a resize. Rendering
+# near native resolution (rather than a small framebuffer the browser upscales)
+# keeps text and edges crisp; the UI scales up to fill it via apply_ui_scale.
 WEB_FB_W = 2560
 WEB_FB_H = 1440
 
 # Extra zoom applied to the setup menu's own letterbox fit on web (see
-# menu.draw): its fixed 3:2 design canvas otherwise pillarboxes against the
-# 16:9 WEB_FB frame above, wasting width and shrinking every touch target.
+# menu.draw): its fixed 3:2 design canvas otherwise pillarboxes against a
+# landscape browser frame, wasting width and shrinking every touch target.
 WEB_MENU_BOOST = 1.12
 
 ui_scale = 1.0              # current factor; 1.0 == the baseline above
