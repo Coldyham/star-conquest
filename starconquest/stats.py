@@ -16,6 +16,7 @@ from .model import GameState
 # (key, tab label, legend unit). Order is the tab order.
 METRICS: tuple[tuple[str, str, str], ...] = (
     ("systems", "Systems", "systems"),
+    ("share", "Map share", "% of systems"),
     ("ships", "Ships", "ships"),
     ("income", "Income", "ships/turn"),
     ("losses", "Losses", "ships lost"),
@@ -26,6 +27,11 @@ METRICS: tuple[tuple[str, str, str], ...] = (
 # a turn's bar is everything destroyed that turn, split by whose it was.
 STACKED: frozenset[str] = frozenset({"lost_turn"})
 
+# Metrics drawn as stacked bands that always fill 0-100%: a seat's band is its
+# share of the map, with the unclaimed (neutral, `NEUTRAL`) share on top.
+AREA: frozenset[str] = frozenset({"share"})
+NEUTRAL = 0
+
 
 @dataclass(frozen=True)
 class Chart:
@@ -34,7 +40,8 @@ class Chart:
     ``values[metric][pid]`` has ``turns + 1`` entries: turn 0 is the opening
     position. ``losses`` is cumulative (`Player.ships_lost`), the figure a
     score's tie-break uses; ``lost_turn`` is the same count turn by turn (0 at
-    the opening position).
+    the opening position). ``share`` is a percentage of every system on the
+    map, and alone carries a `NEUTRAL` series too: what nobody holds.
     """
 
     turns: int
@@ -60,7 +67,16 @@ def chart(states: list[GameState]) -> Chart:
         return Chart(0, (), {key: {} for key, _, _ in METRICS})
     seats = tuple(sorted(p.id for p in states[0].non_neutral_players()))
     cols: dict[str, dict[int, list[float]]] = {key: {pid: [] for pid in seats} for key, _, _ in METRICS}
+    cols["share"][NEUTRAL] = []
     for s in states:
+        total = max(1, len(s.systems))
+        held = {pid: 0 for pid in seats}
+        for sys in s.systems.values():
+            if sys.owner_id in held:
+                held[sys.owner_id] += 1
+        for pid in seats:
+            cols["share"][pid].append(100.0 * held[pid] / total)
+        cols["share"][NEUTRAL].append(100.0 * (total - sum(held.values())) / total)
         for pid in seats:
             systems, ships, income = fog.player_totals(s, pid)
             player = s.players.get(pid)

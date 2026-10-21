@@ -2685,7 +2685,11 @@ def _nice_ceil(v: float) -> float:
 
 
 def _graph_value(metric: str, v: float) -> str:
-    return f"{v:.1f}" if metric == "income" else str(int(round(v)))
+    if metric == "income":
+        return f"{v:.1f}"
+    if metric in stats.AREA:
+        return f"{v:.0f}%"
+    return str(int(round(v)))
 
 
 def _turn_ticks(turns: int, width: int, label_w: int) -> list[int]:
@@ -2708,6 +2712,34 @@ def _draw_caret(surface, rect: pygame.Rect, up: bool) -> None:
     rise = half // 2 if up else -(half // 2)
     pts = [(cx - half, cy + rise), (cx, cy - rise), (cx + half, cy + rise)]
     pygame.draw.lines(surface, config.COLOR_TEXT, False, pts, config.s(2))
+
+
+def _draw_stacked_area(surface, chart: stats.Chart, key: str, bands, plot: pygame.Rect,
+                       top: float, color_of) -> None:
+    """Bands stacked from the axis up in ``bands`` order, each the region between
+    the running total before and after it, drawn as one polygon a band. Filled
+    dimmed with a full-colour top edge, so neighbours stay distinct."""
+    if chart.turns <= 0 or top <= 0:
+        return
+
+    def x_at(t: int) -> int:
+        return plot.x + round(t / chart.turns * plot.w)
+
+    def y_at(v: float) -> int:
+        return plot.bottom - round(min(v, top) / top * plot.h)
+
+    base = [0.0] * (chart.turns + 1)
+    for pid in bands:
+        series = chart.series(key, pid)
+        if len(series) != len(base):
+            continue
+        upper = [b + v for b, v in zip(base, series)]
+        lower_pts = [(x_at(t), y_at(v)) for t, v in enumerate(base)]
+        upper_pts = [(x_at(t), y_at(v)) for t, v in enumerate(upper)]
+        color = color_of(pid)
+        pygame.draw.polygon(surface, tuple(c * 3 // 5 for c in color), upper_pts + lower_pts[::-1])
+        pygame.draw.lines(surface, color, False, upper_pts, config.s(1))
+        base = upper
 
 
 def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
@@ -2740,7 +2772,8 @@ def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
 def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
     """The end-of-game graphs: one metric (`stats.METRICS`) per tab, a line per
     seat across every recorded turn (a stacked bar per turn for
-    `stats.STACKED`), and a cursor on the turn the map shows.
+    `stats.STACKED`, stacked 0-100% bands for `stats.AREA`), and a cursor on
+    the turn the map shows.
 
     Docked over the lower part of the map, so the replay plays on above it — the
     Civilization-style map-and-graphs pairing — or, with ``ui.graph_full`` (the
@@ -2808,7 +2841,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
     # Sized for every tab's widest figure, so switching metric never moves the plot.
     val_w = max([font.size(_graph_value(k, chart.peak(k, seats)))[0] for k, _t, _u in stats.METRICS]
                 + [font.size(u)[0] for _k, _t, u in stats.METRICS])
-    name_w = max([font.size(n)[0] for _p, n, _v in rows] + [font.size("Show all")[0]])
+    name_w = max([font.size(n)[0] for _p, n, _v in rows] + [font.size("Unclaimed")[0]])
     legend_w = min(int(box.w * 0.4), sw + config.s(6) + name_w + config.s(12) + val_w)
     lx = box.right - pad - legend_w
     ly = body_top
@@ -2832,6 +2865,14 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
         trace_rects.append((pid, (lx, ly, legend_w, row_h)))
         ly += row_h
     ui.graph_trace_rects = trace_rects
+    if key in stats.AREA and ui.history_reveal and ly + row_h <= body_bottom + font.get_height():
+        # the unclaimed band's row: always drawn, so not a trace to toggle
+        cy = ly + row_h // 2
+        pygame.draw.rect(surface, config.COLOR_NEUTRAL, (lx, cy - sw // 2, sw, sw), border_radius=config.s(2))
+        _text(surface, font, "Unclaimed", config.COLOR_TEXT_DIM, midleft=(lx + sw + config.s(6), cy))
+        val = _graph_value(key, value_at(stats.NEUTRAL))
+        _text(surface, font, val, config.COLOR_TEXT_DIM, midright=(box.right - pad, cy))
+        ly += row_h
     ui.graph_all_rect = (0, 0, 0, 0)
     if len(traces) < len(seats) and ly + row_h <= body_bottom + font.get_height():
         r = pygame.Rect(lx, ly + config.s(4), _btn_w(font, "Show all"), _tap_size(font.get_height() + config.s(8)))
@@ -2839,9 +2880,11 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
 
     # The plot, left of the legend, its scale fitted to the lines shown.
     stacked = key in stats.STACKED
+    area = key in stats.AREA
     peak = chart.stack_peak(key, traces) if stacked else chart.peak(key, traces)
-    # a whole-number metric never gets a fractional gridline: its axis starts at 5
-    top = _nice_ceil(peak if key == "income" else max(peak, 5))
+    # a whole-number metric never gets a fractional gridline: its axis starts at 5;
+    # a share always spans the whole map
+    top = 100.0 if area else _nice_ceil(peak if key == "income" else max(peak, 5))
     # 1x and 5x tops split into fifths, 2x into quarters: every line a round figure
     parts = 4 if f"{top:g}".lstrip("0.")[:1] == "2" else 5
     labels = [_graph_value(key, top * i / parts) for i in range(parts + 1)]
@@ -2869,8 +2912,15 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
         _text(surface, font, tick, config.COLOR_TEXT_DIM,
               topleft=(min(max(plot.x, x - tw // 2), plot.right - tw), label_y))
 
+    if area:
+        # the unclaimed band only once rivals are revealed: mid-game it would say
+        # how much the fog's other side holds
+        bands = list(traces) + ([stats.NEUTRAL] if ui.history_reveal else [])
+        _draw_stacked_area(surface, chart, key, bands, plot, top,
+                           lambda pid: config.COLOR_NEUTRAL if pid == stats.NEUTRAL else color_of(pid))
     if stacked:
         _draw_stacked_bars(surface, chart, key, traces, turn, plot, top, color_of)
+    if area or stacked:
         cx = at(turn, 0)[0]
         pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
         return

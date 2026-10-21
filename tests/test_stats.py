@@ -50,6 +50,13 @@ def test_a_chart_reads_every_board_it_is_given(tmp_path, monkeypatch):
             per_turn = chart.series("lost_turn", pid)
             assert per_turn[0] == 0 and len(per_turn) == len(losses)
             assert sum(per_turn) == losses[-1]
+        # every board's shares, unclaimed included, make up the whole map
+        for t, board in enumerate(states):
+            held = sum(chart.series("share", pid)[t] for pid in chart.seats)
+            assert abs(held + chart.series("share", stats.NEUTRAL)[t] - 100.0) < 1e-9
+            for pid in chart.seats:
+                owned = sum(1 for sys in board.systems.values() if sys.owner_id == pid)
+                assert abs(chart.series("share", pid)[t] - 100.0 * owned / len(board.systems)) < 1e-9
         tallest = max(sum(chart.series("lost_turn", pid)[t] for pid in chart.seats)
                       for t in range(chart.turns + 1))
         assert chart.stack_peak("lost_turn", chart.seats) == tallest
@@ -197,14 +204,19 @@ def test_a_rival_cannot_be_toggled_mid_game(tmp_path, monkeypatch):
         pygame.quit()
 
 
-def test_the_stacked_tab_draws_in_both_sizes(tmp_path, monkeypatch):
-    """Lost/turn draws bars rather than lines, docked and full screen alike."""
+def test_the_stacked_tabs_draw_in_both_sizes(tmp_path, monkeypatch):
+    """Lost/turn draws bars and Map share bands rather than lines, docked and
+    full screen alike, revealed or not, and with a seat hidden."""
     try:
         screen, board, ui = _open_graphs(tmp_path, monkeypatch)
-        ui.graph_metric = [k for k, _t, _u in stats.METRICS].index("lost_turn")
-        for full in (False, True):
-            ui.graph_full = full
-            render.draw(screen, board, ui)
-            assert ui.graph_plot_rect[2] > 0
+        keys = [k for k, _t, _u in stats.METRICS]
+        for metric in ("lost_turn", "share"):
+            ui.graph_metric = keys.index(metric)
+            for full in (False, True):
+                for reveal in (True, False):
+                    ui.graph_full, ui.history_reveal = full, reveal
+                    ui.graph_hidden = {ui.graph_seats()[0]}
+                    render.draw(screen, board, ui)
+                    assert ui.graph_plot_rect[2] > 0
     finally:
         pygame.quit()
