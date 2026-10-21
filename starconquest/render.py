@@ -2480,7 +2480,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     if state.winner == 0:
         msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
     else:
-        msg = f"{_winner_label(state)} wins!"
+        msg = f"{_winner_label(state, ui)} wins!"
         color = config.player_color(state.winner)
 
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
@@ -2557,8 +2557,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
-def _winner_label(state: GameState) -> str:
-    """"Verdant (Knower)" — the winning seat, and the bot that was driving it.
+def _winner_label(state: GameState, ui: Ui) -> str:
+    """"Verdant (Knower · Predict)" — the winning seat, and the bot that was
+    driving it, as the top bar's tooltip and the graph legend name it
+    (`Ui.seat_bots`). A seat left to random says so: "(Marshal, random)".
 
     Named only for a seat no person was playing: a human seat says who won and
     stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
@@ -2571,20 +2573,21 @@ def _winner_label(state: GameState) -> str:
     and it reaches here on the one path that can name it, a mutual annihilation,
     where "Neutral (Heuristic)" would credit a bot that never played.
 
-    Read straight off ``Player.ai_strategy``; ``render`` imports no ``ai`` and
-    needs none here. That field holds the *resolved* strategy, so a seat set to
-    ``settings.RANDOM_STRATEGY`` is revealed here — which is the point, and costs
-    nothing, since there is no turn left to play with the knowledge.
-
-    Capitalised rather than title-cased, so a drop-in keeps whatever shape its
-    author gave its filename (``claudeBot`` stays ``ClaudeBot``, not ``Claudebot``).
+    A random seat is revealed here — which is the point, and costs nothing, since
+    there is no turn left to play with the knowledge. A seat `Ui.seat_bots` has
+    no label for falls back to ``Player.ai_strategy`` itself, capitalised rather
+    than title-cased, so a drop-in keeps the shape its author gave its filename
+    (``claudeBot`` stays ``ClaudeBot``).
     """
     name = config.player_name(state.winner)
     player = state.players.get(state.winner)
     if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
         return name
-    bot = player.ai_strategy
-    return f"{name} ({bot[:1].upper()}{bot[1:]})"
+    raw = player.ai_strategy
+    bot = ui.seat_bots.get(state.winner) or f"{raw[:1].upper()}{raw[1:]}"
+    if state.winner in ui.random_seats:
+        bot += ", random"
+    return f"{name} ({bot})"
 
 
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:

@@ -192,7 +192,9 @@ rest readable.
 
 Pointing at (or tapping) a scoreboard entry in the top bar opens a tooltip
 under it: the seat, who plays it, and its standings in words (or the last-known
-ones, or that it is out). The graph legend names the same after each seat.
+ones, or that it is out). The graph legend names the same after each seat,
+and the win line uses the same label (`render._winner_label`): "Verdant
+(Knower · Predict) wins!", or "(Marshal, random)" for a seat dealt at random.
 
 - **Labels are worked out once, in `main.new_ui`** (`seat_bot_labels`): the
   family (`ai.canonical`, so a legacy name reads as its family) and the stop its
