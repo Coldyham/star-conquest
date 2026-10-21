@@ -43,10 +43,17 @@ def test_a_chart_reads_every_board_it_is_given(tmp_path, monkeypatch):
                 assert chart.series("ships", pid)[t] == ships
                 assert chart.series("income", pid)[t] == income
                 assert chart.series("losses", pid)[t] == board.players[pid].ships_lost
-        # losses are cumulative, so never fall
+        # losses are cumulative, so never fall, and per turn they sum back up
         for pid in chart.seats:
             losses = chart.series("losses", pid)
             assert all(a <= b for a, b in zip(losses, losses[1:]))
+            per_turn = chart.series("lost_turn", pid)
+            assert per_turn[0] == 0 and len(per_turn) == len(losses)
+            assert sum(per_turn) == losses[-1]
+        tallest = max(sum(chart.series("lost_turn", pid)[t] for pid in chart.seats)
+                      for t in range(chart.turns + 1))
+        assert chart.stack_peak("lost_turn", chart.seats) == tallest
+        assert chart.stack_peak("lost_turn", ()) == 0.0
     finally:
         pygame.quit()
 
@@ -78,7 +85,7 @@ def test_g_toggles_the_graphs_and_tab_cycles_the_metric(tmp_path, monkeypatch):
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_g, mod=0), state, ui)
         assert ui.history_graph is not shown
         ui.history_graph = True
-        for want in (1, 2, 3, 0):
+        for want in [*range(1, len(stats.METRICS)), 0]:
             game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_TAB, mod=0), state, ui)
             assert ui.graph_metric == want
     finally:
@@ -186,5 +193,18 @@ def test_a_rival_cannot_be_toggled_mid_game(tmp_path, monkeypatch):
         rival = next(pid for pid in ui.history_chart.seats if pid != ui.human_id)
         ui.toggle_trace(rival)
         assert ui.graph_hidden == set() and ui.graph_traces() == (ui.human_id,)
+    finally:
+        pygame.quit()
+
+
+def test_the_stacked_tab_draws_in_both_sizes(tmp_path, monkeypatch):
+    """Lost/turn draws bars rather than lines, docked and full screen alike."""
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        ui.graph_metric = [k for k, _t, _u in stats.METRICS].index("lost_turn")
+        for full in (False, True):
+            ui.graph_full = full
+            render.draw(screen, board, ui)
+            assert ui.graph_plot_rect[2] > 0
     finally:
         pygame.quit()

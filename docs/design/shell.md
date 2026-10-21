@@ -156,10 +156,12 @@ someone chasing a posted result would otherwise only learn it at the end.
 ## End-of-game graphs (`stats`, `render._draw_history_graph`)
 
 History review can lay a chart over the lower part of the map, after the
-Civilization games' map-replay-plus-graphs end screen: four tabs (systems,
-ships including in transit, income in ships/turn, cumulative ships lost), a
-line per seat across every recorded turn, and a cursor on the turn the map is
-showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
+Civilization games' map-replay-plus-graphs end screen: tabs for systems, ships
+including in transit, income in ships/turn and cumulative ships lost, each a
+line per seat across every recorded turn, plus *Lost/turn*, a bar per turn
+stacked by seat (`stats.STACKED`) — as a line it is all spikes, while a
+stacked bar shows at once when the big fights were and who paid for them. A
+cursor marks the turn the map is showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
 and a click or drag across the plot seeks a turn as the track does. The ^
 caret (F) at its top right makes it full screen, filling everything between
 the bars with the scrubber kept, and the v caret docks it again. The legend is

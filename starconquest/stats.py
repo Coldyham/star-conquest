@@ -19,7 +19,12 @@ METRICS: tuple[tuple[str, str, str], ...] = (
     ("ships", "Ships", "ships"),
     ("income", "Income", "ships/turn"),
     ("losses", "Losses", "ships lost"),
+    ("lost_turn", "Lost/turn", "ships lost"),
 )
+
+# Metrics drawn as a bar per turn, stacked by seat, rather than a line per seat:
+# a turn's bar is everything destroyed that turn, split by whose it was.
+STACKED: frozenset[str] = frozenset({"lost_turn"})
 
 
 @dataclass(frozen=True)
@@ -28,7 +33,8 @@ class Chart:
 
     ``values[metric][pid]`` has ``turns + 1`` entries: turn 0 is the opening
     position. ``losses`` is cumulative (`Player.ships_lost`), the figure a
-    score's tie-break uses, rather than a per-turn spike.
+    score's tie-break uses; ``lost_turn`` is the same count turn by turn (0 at
+    the opening position).
     """
 
     turns: int
@@ -41,6 +47,11 @@ class Chart:
     def peak(self, metric: str, seats: tuple[int, ...] | list[int]) -> float:
         """The largest value any of ``seats`` reaches on ``metric`` (0 if none)."""
         return max((v for pid in seats for v in self.series(metric, pid)), default=0.0)
+
+    def stack_peak(self, metric: str, seats: tuple[int, ...] | list[int]) -> float:
+        """The tallest stack of ``seats`` on ``metric`` across turns (0 if none)."""
+        return max((sum(self.series(metric, pid)[t] for pid in seats) for t in range(self.turns + 1)),
+                   default=0.0) if seats else 0.0
 
 
 def chart(states: list[GameState]) -> Chart:
@@ -57,5 +68,8 @@ def chart(states: list[GameState]) -> Chart:
             cols["ships"][pid].append(float(ships))
             cols["income"][pid].append(income)
             cols["losses"][pid].append(float(player.ships_lost if player else 0))
+    for pid in seats:
+        losses = cols["losses"][pid]
+        cols["lost_turn"][pid] = [0.0] + [b - a for a, b in zip(losses, losses[1:])]
     values = {key: {pid: tuple(v) for pid, v in by_seat.items()} for key, by_seat in cols.items()}
     return Chart(len(states) - 1, seats, values)

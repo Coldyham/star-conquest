@@ -2710,9 +2710,37 @@ def _draw_caret(surface, rect: pygame.Rect, up: bool) -> None:
     pygame.draw.lines(surface, config.COLOR_TEXT, False, pts, config.s(2))
 
 
+def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
+                       plot: pygame.Rect, top: float, color_of) -> None:
+    """A bar per turn, centred where the line charts put that turn, stacked from
+    the axis up in seat order. The viewed turn's bar is drawn at full colour and
+    the rest dimmed, so the cursor reads on a chart with no curves to dot."""
+    if chart.turns <= 0 or top <= 0:
+        return
+    step = plot.w / chart.turns
+    bar_w = max(1, int(step * 0.8))
+    for t in range(1, chart.turns + 1):
+        cx = plot.x + round(t / chart.turns * plot.w)
+        x0 = max(plot.x, cx - bar_w // 2)
+        x1 = min(plot.right, x0 + bar_w)
+        base = 0.0
+        for pid in traces:
+            v = chart.series(key, pid)[t]
+            if v <= 0:
+                continue
+            y0 = plot.bottom - round(min(base, top) / top * plot.h)
+            base += v
+            y1 = plot.bottom - round(min(base, top) / top * plot.h)
+            color = color_of(pid)
+            if t != turn:
+                color = tuple(c * 3 // 5 for c in color)
+            pygame.draw.rect(surface, color, (x0, y1, max(1, x1 - x0), max(1, y0 - y1)))
+
+
 def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
     """The end-of-game graphs: one metric (`stats.METRICS`) per tab, a line per
-    seat across every recorded turn, and a cursor on the turn the map shows.
+    seat across every recorded turn (a stacked bar per turn for
+    `stats.STACKED`), and a cursor on the turn the map shows.
 
     Docked over the lower part of the map, so the replay plays on above it — the
     Civilization-style map-and-graphs pairing — or, with ``ui.graph_full`` (the
@@ -2810,7 +2838,8 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
         ui.graph_all_rect = _btn(surface, r, "Show all", *_BTN_BLUE, font)
 
     # The plot, left of the legend, its scale fitted to the lines shown.
-    peak = chart.peak(key, traces)
+    stacked = key in stats.STACKED
+    peak = chart.stack_peak(key, traces) if stacked else chart.peak(key, traces)
     # a whole-number metric never gets a fractional gridline: its axis starts at 5
     top = _nice_ceil(peak if key == "income" else max(peak, 5))
     # 1x and 5x tops split into fifths, 2x into quarters: every line a round figure
@@ -2839,6 +2868,12 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
         tw = font.size(tick)[0]
         _text(surface, font, tick, config.COLOR_TEXT_DIM,
               topleft=(min(max(plot.x, x - tw // 2), plot.right - tw), label_y))
+
+    if stacked:
+        _draw_stacked_bars(surface, chart, key, traces, turn, plot, top, color_of)
+        cx = at(turn, 0)[0]
+        pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
+        return
 
     # Ours last, and thicker, so it is never buried under a rival's curve.
     order = sorted(traces, key=lambda pid: pid == ui.human_id)
