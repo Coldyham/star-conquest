@@ -30,6 +30,17 @@ posting. There is no new webstore key. Editing a stage's setup in a later releas
 makes it a new, uncleared stage, which is the honest answer: the old best was
 scored on a different map.
 
+**Where progress lives.** Bests are `localStorage` on the web build
+(`webstore.get`/`set`) and `kv.json` under `data_dir()` elsewhere, never
+pygbag's MEMFS, so tutorial progress survives a reload and a restart. What it
+does not survive is cleared site data, a private window, or a move to another
+browser or device. A board page for gauntlets, like the campaign's, would carry
+progress across all of those, but only by posting scores, and a beginner should
+not have to publish a game to keep a tutorial. If carrying progress between
+devices is wanted later, the middle ground is an opt-in "restore from my posted
+scores", read from verified `scores` by name, which leaves the local reading as
+the default.
+
 **A stage is active only while the menu's settings still match it**, judged by
 challenge key (`gauntlet.stage_of`, read through `menu.active_stage`), the way
 `Challenge.matches` judges a link. Moving one knob means you are no longer
