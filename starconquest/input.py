@@ -57,6 +57,16 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     ui.history_turn = round(t * ui.history_max)
 
 
+def _over_graph(ui: Ui, pos) -> bool:
+    """Is ``pos`` on the docked graph panel? It spans the map's width from the
+    top of its tabs to the bottom bar, so the plot rect's foot and the first
+    tab's top bound it."""
+    if not ui.graph_tab_rects:
+        return False
+    _x, top, _w, _h = ui.graph_tab_rects[0]
+    return top <= pos[1] < config.SCREEN_H - config.HUD_BOTTOM_H and pos[0] < config.SCREEN_W - config.HUD_RIGHT_W
+
+
 def _seek_graph(ui: Ui, pos) -> None:
     """Map a click/drag x across the graph's plot to the nearest turn. The plot
     spans turn 0 at its left edge to ``history_max`` at its right, exactly as
@@ -86,6 +96,16 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             step = -1 if event.mod & pygame.KMOD_SHIFT else 1
             ui.graph_metric = (ui.graph_metric + step) % len(stats.METRICS)
             return None
+        if event.key == pygame.K_f and ui.history_graph:
+            ui.graph_full = not ui.graph_full
+            return None
+        if ui.history_graph and pygame.K_1 <= event.key <= pygame.K_9:
+            # the legend's rows, top to bottom
+            seats = ui.graph_seats()
+            n = event.key - pygame.K_1
+            if n < len(seats):
+                ui.toggle_trace(seats[n])
+            return None
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
@@ -104,7 +124,11 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             ui.clear_fading_marks()
         return None
     if event.type == pygame.MOUSEMOTION:
-        ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
+        # hover still drives the detail panel, wherever the map is showing
+        if ui.history_graph and (ui.graph_full or _over_graph(ui, event.pos)):
+            ui.hover = None
+        else:
+            ui.hover = pick_node(state, ui, event.pos)
         if ui.dragging_scrubber:
             _seek_scrubber(ui, event.pos)
         elif ui.dragging_graph:
@@ -118,10 +142,20 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             ui.dragging_graph = False
             return None
         if ui.history_graph:
+            if ui.graph_full_rect[2] and _point_in_rect(event.pos, ui.graph_full_rect):
+                ui.graph_full = not ui.graph_full
+                return None
             for i, rect in enumerate(ui.graph_tab_rects):
                 if rect[2] and _point_in_rect(event.pos, rect):
                     ui.graph_metric = i
                     return None
+            for pid, rect in ui.graph_trace_rects:
+                if rect[2] and _point_in_rect(event.pos, rect):
+                    ui.toggle_trace(pid)
+                    return None
+            if ui.graph_all_rect[2] and _point_in_rect(event.pos, ui.graph_all_rect):
+                ui.graph_hidden.clear()
+                return None
             if ui.graph_plot_rect[2] and _point_in_rect(event.pos, ui.graph_plot_rect):
                 ui.dragging_graph = True
                 ui.playing = False  # same as grabbing the scrubber

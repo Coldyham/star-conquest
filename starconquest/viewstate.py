@@ -174,14 +174,19 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
-    # End-of-game graphs over the reviewed map (`render._draw_history_graph`).
-    # `history_chart` is read off the history boards once, on entering review
-    # (`stats.chart`), and dropped on leaving it; `graph_metric` indexes
-    # `stats.METRICS`. Open by default on a finished game. `dragging_graph` is a
-    # held drag across the plot, which scrubs the turn like the track does.
+    # End-of-game graphs over the reviewed map (`render._draw_history_graph`),
+    # docked over the map's lower part or, with `graph_full`, filling the whole
+    # space between the bars; the scrubber stays either way. `history_chart` is
+    # read off the history boards once, on entering review (`stats.chart`), and
+    # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
+    # `graph_hidden` is the seats whose lines the legend has switched off. Open
+    # by default on a finished game. `dragging_graph` is a held drag across the
+    # plot, which scrubs the turn like the track does.
     history_chart: stats.Chart | None = None
     history_graph: bool = False
+    graph_full: bool = False
     graph_metric: int = 0
+    graph_hidden: set[int] = field(default_factory=set)
     dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
     # being replayed and `film_ms` where in it we are — the read-only half, so a
@@ -286,11 +291,16 @@ class Ui:
     # once a match has a long history.
     history_prev_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     history_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # The graph overlay's hit-rects: the bar's Graphs toggle, the plot (click or
-    # drag to seek a turn) and one tab per `stats.METRICS` entry.
+    # The graphs' hit-rects: the bar's Graphs toggle, the ^/v fullscreen caret,
+    # the plot (click or drag to seek a turn), one tab per `stats.METRICS`
+    # entry, one legend row per seat as ``(pid, rect)`` (click to show or hide
+    # its line), and Show all.
     graph_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_full_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_plot_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_tab_rects: list[tuple[int, int, int, int]] = field(default_factory=list)
+    graph_trace_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    graph_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
     # rebuilt by render each frame and tested by input like the rects above.
     # `retry_button_rect` replays the very same match from the opening position
@@ -513,15 +523,26 @@ class Ui:
         self.view.fit_to(points)
 
     def graph_seats(self) -> tuple[int, ...]:
-        """The seats the history graphs draw: every seat once review is revealed
-        (a finished game), else ours alone — a rival's curve mid-game would show
-        exactly what the fog hides on the map beside it."""
+        """The seats the graphs' legend offers: every seat once review is
+        revealed (a finished game), else ours alone — a rival's curve mid-game
+        would show exactly what the fog hides on the map."""
         chart = self.history_chart
         if chart is None:
             return ()
         if self.history_reveal:
             return chart.seats
         return tuple(pid for pid in chart.seats if pid == self.human_id)
+
+    def graph_traces(self) -> tuple[int, ...]:
+        """The seats whose lines the graphs draw: offered and not hidden."""
+        return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
+
+    def toggle_trace(self, pid: int) -> None:
+        """Show or hide ``pid``'s line on the graphs."""
+        if pid in self.graph_hidden:
+            self.graph_hidden.discard(pid)
+        elif pid in self.graph_seats():
+            self.graph_hidden.add(pid)
 
     # -- spectating --------------------------------------------------------- #
     def can_review(self, state: GameState) -> bool:

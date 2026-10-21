@@ -160,7 +160,12 @@ Civilization games' map-replay-plus-graphs end screen: four tabs (systems,
 ships including in transit, income in ships/turn, cumulative ships lost), a
 line per seat across every recorded turn, and a cursor on the turn the map is
 showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
-and a click or drag across the plot seeks a turn as the track does.
+and a click or drag across the plot seeks a turn as the track does. The ^
+caret (F) at its top right makes it full screen, filling everything between
+the bars with the scrubber kept, and the v caret docks it again. The legend is
+the trace selector: a click on a seat's row (or 1-9) shows or hides its line,
+and the y scale fits the lines shown, so hiding a runaway leader makes the
+rest readable.
 
 - **Read off the history boards, never the log.** `stats.chart` runs once in
   `main.open_history` over the boards `build_history` already reconstructed, so
@@ -172,7 +177,7 @@ and a click or drag across the plot seeks a turn as the track does.
 - **Open by default on a finished game**, where it is the summary review is
   for; closed in a mid-game review, where the board is the point.
 - **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
-- Not yet: the camera does not reframe into the space above the chart, and
+- Not yet: the camera does not reframe into the space above the docked chart, and
   there is no per-turn losses or kills view (a fight's dead are recorded per
   owner, not per killer).
 

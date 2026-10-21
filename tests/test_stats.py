@@ -121,3 +121,70 @@ def test_closed_graphs_leave_no_hit_rects(tmp_path, monkeypatch):
         assert ui.graph_button_rect[2] > 0
     finally:
         pygame.quit()
+
+
+def _open_graphs(tmp_path, monkeypatch):
+    screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
+    states, _f, _e, _l = main.open_history(state, ui, log)
+    ui.history_reveal = True          # every seat offered, as on a finished game
+    ui.history_graph = True
+    return screen, states[-1], ui
+
+
+def _press(state, ui, pos):
+    game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui)
+
+
+def test_the_caret_switches_between_docked_and_full_screen(tmp_path, monkeypatch):
+    """Docked, the chart leaves the map's upper part showing; full, it covers
+    everything between the bars. The scrubber is drawn either way."""
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        render.draw(screen, board, ui)
+        docked = ui.graph_plot_rect
+        x, y, w, h = ui.graph_full_rect
+        assert w > 0 and y > config.play_rect()[1] + config.play_rect()[3] // 2
+        _press(board, ui, (x + w // 2, y + h // 2))
+        assert ui.graph_full
+        render.draw(screen, board, ui)
+        assert ui.graph_plot_rect[3] > docked[3] and ui.graph_plot_rect[2] > docked[2]
+        assert ui.graph_full_rect[1] < config.HUD_TOP_H + config.s(40)
+        assert ui.scrubber_rect[2] > 0
+        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_f, mod=0), board, ui)
+        assert not ui.graph_full
+    finally:
+        pygame.quit()
+
+
+def test_the_legend_shows_and_hides_each_trace(tmp_path, monkeypatch):
+    """A click on a seat's row hides its line, another brings it back, and Show
+    all appears only while something is hidden. The 1-9 keys do the same."""
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        render.draw(screen, board, ui)
+        assert [pid for pid, _r in ui.graph_trace_rects] == list(ui.graph_seats())
+        assert ui.graph_all_rect == (0, 0, 0, 0)
+        pid, (x, y, w, h) = ui.graph_trace_rects[0]
+        _press(board, ui, (x + 2, y + h // 2))
+        assert pid not in ui.graph_traces() and pid in ui.graph_seats()
+        render.draw(screen, board, ui)
+        ax, ay, aw, ah = ui.graph_all_rect
+        assert aw > 0
+        _press(board, ui, (ax + 2, ay + 2))
+        assert ui.graph_traces() == ui.graph_seats()
+        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_2, mod=0), board, ui)
+        assert ui.graph_seats()[1] not in ui.graph_traces()
+    finally:
+        pygame.quit()
+
+
+def test_a_rival_cannot_be_toggled_mid_game(tmp_path, monkeypatch):
+    """Mid-game only our seat is offered; a rival can't be toggled into view."""
+    try:
+        _screen, _board, ui = _open_graphs(tmp_path, monkeypatch)
+        ui.history_reveal = False
+        rival = next(pid for pid in ui.history_chart.seats if pid != ui.human_id)
+        ui.toggle_trace(rival)
+        assert ui.graph_hidden == set() and ui.graph_traces() == (ui.human_id,)
+    finally:
+        pygame.quit()
