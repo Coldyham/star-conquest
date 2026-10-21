@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import config
+from . import config, stats
 from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -57,6 +57,19 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     ui.history_turn = round(t * ui.history_max)
 
 
+def _seek_graph(ui: Ui, pos) -> None:
+    """Map a click/drag x across the graph's plot to the nearest turn. The plot
+    spans turn 0 at its left edge to ``history_max`` at its right, exactly as
+    `render._draw_history_graph` lays the curves out."""
+    x, _y, w, _h = ui.graph_plot_rect
+    ui.clear_fading_marks()   # a jump, as with the scrubber
+    if w <= 0 or ui.history_max <= 0:
+        ui.history_turn = 0
+        return
+    t = max(0.0, min(1.0, (pos[0] - x) / w))
+    ui.history_turn = round(t * ui.history_max)
+
+
 def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
     """Modal history-review input: scrub the turn, rewind, or exit. Mutates only
     the scrub position / drag flag; enter/exit and rewind are returned to main."""
@@ -65,6 +78,14 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             return "toggle_history"
         if event.key == pygame.K_p:
             return "toggle_play"  # play/pause the replay at sim speed
+        if event.key == pygame.K_g and ui.history_chart is not None:
+            ui.history_graph = not ui.history_graph
+            ui.dragging_graph = False
+            return None
+        if event.key == pygame.K_TAB and ui.history_graph:
+            step = -1 if event.mod & pygame.KMOD_SHIFT else 1
+            ui.graph_metric = (ui.graph_metric + step) % len(stats.METRICS)
+            return None
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
@@ -86,10 +107,26 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
         ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
         if ui.dragging_scrubber:
             _seek_scrubber(ui, event.pos)
+        elif ui.dragging_graph:
+            _seek_graph(ui, event.pos)
         return None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         if ui.exit_history_rect[2] and _point_in_rect(event.pos, ui.exit_history_rect):
             return "toggle_history"
+        if ui.graph_button_rect[2] and _point_in_rect(event.pos, ui.graph_button_rect):
+            ui.history_graph = not ui.history_graph
+            ui.dragging_graph = False
+            return None
+        if ui.history_graph:
+            for i, rect in enumerate(ui.graph_tab_rects):
+                if rect[2] and _point_in_rect(event.pos, rect):
+                    ui.graph_metric = i
+                    return None
+            if ui.graph_plot_rect[2] and _point_in_rect(event.pos, ui.graph_plot_rect):
+                ui.dragging_graph = True
+                ui.playing = False  # same as grabbing the scrubber
+                _seek_graph(ui, event.pos)
+                return None
         if ui.play_pause_rect[2] and _point_in_rect(event.pos, ui.play_pause_rect):
             return "toggle_play"
         if ui.rewind_button_rect[2] and _point_in_rect(event.pos, ui.rewind_button_rect):
@@ -111,6 +148,7 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
         return None
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ui.dragging_scrubber = False
+        ui.dragging_graph = False
     return None
 
 

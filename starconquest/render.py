@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, matchnames, model, paths, widgets
+from . import config, fog, matchnames, model, paths, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -74,6 +74,9 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.clear_dangerous_rect = (0, 0, 0, 0)
     # route mode's confirm; _draw_hud re-records it once the plan has something in it
     ui.route_confirm_rect = (0, 0, 0, 0)
+    # the history graph's; _draw_history_graph re-records them while it is open
+    ui.graph_plot_rect = (0, 0, 0, 0)
+    ui.graph_tab_rects = []
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
     # (unlike the old fixed fit-to-bounds view, which always fit inside it by
     # construction), so clip it to the viewport here rather than let it bleed
@@ -110,6 +113,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         # the scrubber owns the bottom bar; suppress the win overlay so a finished
         # game's final-turn snapshot doesn't veil the board being reviewed
         _draw_scrubber(surface, state, ui)
+        if ui.history_graph:
+            _draw_history_graph(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
     elif ui.pbp_invite:
@@ -2081,6 +2086,7 @@ Drag to pan, wheel to zoom."""
 _LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
 Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
+Graphs charts every seat's systems, ships, income and losses.
 
 Rewind to here restarts play from the turn on screen. Exit returns to the live
 board."""
@@ -2090,7 +2096,8 @@ _LEGEND_HISTORY_KEYS = """Reviewing turns already played — nothing here change
 Drag the scrubber or press ←/→ to step a turn; Home/End jump to either end. P
 plays it back.
 
-Point at a system to see it as it was then.
+Point at a system to see it as it was then. G shows graphs of every seat's
+systems, ships, income and losses; Tab changes graph.
 
 Rewind to here restarts play from the turn on screen. Esc returns to the live
 board."""
@@ -2598,6 +2605,16 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     pp = pygame.Rect(ex.right + gap, y, max(_btn_w(font, _key_hint(s, "P")) for s in ("Play", "Pause")), bh)
     ui.play_pause_rect = _btn(surface, pp, play_label, *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), font)
 
+    # Graphs toggle, lit while the overlay is open.
+    graph_label = _key_hint("Graphs", "G")
+    gb = pygame.Rect(pp.right + gap, y, _btn_w(font, graph_label), bh)
+    if ui.history_chart is None:
+        gb.w = 0
+        ui.graph_button_rect = (0, 0, 0, 0)
+    else:
+        ui.graph_button_rect = _btn(surface, gb, graph_label,
+                                    *(_BTN_ACTIVE if ui.history_graph else _BTN_VIOLET), font)
+
     # Rewind button (far right). Its footprint is reserved even when hidden so the
     # track width and label position stay fixed as you scrub — the button only
     # appears for turns before the latest (when there is something to leave behind).
@@ -2625,7 +2642,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Step-one-turn buttons flank the track — the mouse/touch equivalent of the
     # Left/Right arrow keys, so picking an exact turn doesn't rely on a fiddly drag
     # once a match has run long. Square, sized to the bar's own button height.
-    prev = pygame.Rect(pp.right + gap, y, bh, bh)
+    prev = pygame.Rect((gb.right if gb.w else pp.right) + gap, y, bh, bh)
     next_ = pygame.Rect(label_x - config.HUD_PAD - bh, y, bh, bh)
     _draw_h_arrow_button(surface, prev, left=True, enabled=ui.history_turn > 0)
     _draw_h_arrow_button(surface, next_, left=False, enabled=ui.history_turn < ui.history_max)
@@ -2639,6 +2656,141 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     ui.scrubber_rect = (track.x, track.y, track.w, track.h)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
     _draw_slider(surface, track, t, _SCRUB_FILL, config.COLOR_TEXT)
+
+
+# The graph overlay's palette: a dark panel over the map, faint gridlines.
+_GRAPH_BG = (14, 16, 26)
+_GRAPH_EDGE = (60, 66, 90)
+_GRAPH_GRID = (40, 44, 60)
+_GRAPH_CURSOR = (200, 206, 220)
+
+
+def _nice_ceil(v: float) -> float:
+    """``v`` rounded up to 1, 2 or 5 times a power of ten — an axis top a reader
+    can divide by eye. Never below 1, so an all-zero series still has an axis."""
+    if v <= 1:
+        return 1.0
+    mag = 10 ** math.floor(math.log10(v))
+    for step in (1, 2, 5, 10):
+        if v <= step * mag:
+            return step * mag
+    return 10 * mag
+
+
+def _graph_value(metric: str, v: float) -> str:
+    return f"{v:.1f}" if metric == "income" else str(int(round(v)))
+
+
+def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
+    """The end-of-game graphs: one metric (`stats.METRICS`) per tab, a line per
+    seat across every recorded turn, and a cursor on the turn the map shows.
+
+    Drawn over the lower part of the map rather than in the side panel, so the
+    replay plays on above it and the curves are wide enough to read — the
+    Civilization-style map-and-graphs pairing. Records the tab and plot rects on
+    ``ui``; input maps a click or drag across the plot to a turn.
+    """
+    chart = ui.history_chart
+    seats = ui.graph_seats()
+    if chart is None:
+        return
+    key, _title, unit = stats.METRICS[ui.graph_metric % len(stats.METRICS)]
+    font = _fonts()["small"]
+    pad = config.s(10)
+    vx, vy, vw, vh = config.play_rect()
+    box_h = max(config.s(180), min(int(vh * 0.42), config.s(320)))
+    box = pygame.Rect(vx + pad, vy + vh - box_h - pad, vw - 2 * pad, box_h)
+    pygame.draw.rect(surface, _GRAPH_BG, box, border_radius=config.s(8))
+    pygame.draw.rect(surface, _GRAPH_EDGE, box, config.s(1), border_radius=config.s(8))
+
+    # Tabs along the top.
+    tab_h = _tap_size(font.get_height() + config.s(10))
+    tx, ty = box.x + pad, box.y + pad
+    rects = []
+    for i, (_k, label, _u) in enumerate(stats.METRICS):
+        r = pygame.Rect(tx, ty, _btn_w(font, label), tab_h)
+        on = i == ui.graph_metric % len(stats.METRICS)
+        rects.append(_btn(surface, r, label, *(_BTN_ACTIVE if on else _BTN_BLUE), font))
+        tx = r.right + config.s(6)
+    ui.graph_tab_rects = rects
+    note = ("" if ui.history_reveal else "Your seat only until the game is decided")
+    if not note and not config.touch_ui:
+        note = "Tab: next graph  ·  click the plot to jump to a turn"
+    if note and tx + pad + font.size(note)[0] <= box.right - pad:
+        _text(surface, font, note, config.COLOR_TEXT_DIM, midright=(box.right - pad, ty + tab_h // 2))
+
+    body_top = ty + tab_h + pad
+    body_bottom = box.bottom - pad - font.get_height() - config.s(4)  # room for turn labels
+    turn = max(0, min(ui.history_turn, chart.turns))
+
+    # Legend on the right: swatch, seat name, value at the viewed turn.
+    def value_at(pid: int) -> float:
+        series = chart.series(key, pid)
+        return series[min(turn, len(series) - 1)] if series else 0.0
+
+    rows = [(pid, state.players[pid].name if pid in state.players else config.player_name(pid),
+             _graph_value(key, value_at(pid)))
+            for pid in seats]
+    sw = config.s(12)
+    # Sized for every tab's widest figure, so switching metric never moves the plot.
+    val_w = max([font.size(_graph_value(k, chart.peak(k, seats)))[0] for k, _t, _u in stats.METRICS]
+                + [font.size(u)[0] for _k, _t, u in stats.METRICS])
+    name_w = max([font.size(n)[0] for _p, n, _v in rows] + [0])
+    legend_w = min(int(box.w * 0.4), sw + config.s(6) + name_w + config.s(12) + val_w)
+    lx = box.right - pad - legend_w
+    ly = body_top
+    _text(surface, font, unit, config.COLOR_TEXT_DIM, topleft=(box.right - pad - font.size(unit)[0], ly))
+    ly += _row_h()
+    for pid, name, val in rows:
+        if ly + _row_h() > body_bottom + font.get_height():
+            break
+        color = state.players[pid].color if pid in state.players else config.player_color(pid)
+        pygame.draw.rect(surface, color, (lx, ly + (font.get_height() - sw) // 2, sw, sw),
+                         border_radius=config.s(2))
+        _text(surface, font, name, config.COLOR_TEXT, topleft=(lx + sw + config.s(6), ly))
+        _text(surface, font, val, config.COLOR_TEXT, topleft=(box.right - pad - font.size(val)[0], ly))
+        ly += _row_h()
+
+    # The plot, left of the legend, with the y axis labelled at its top and zero.
+    top = _nice_ceil(chart.peak(key, seats))
+    top_label = _graph_value(key, top)
+    axis_w = max(font.size(top_label)[0], font.size("0")[0]) + config.s(6)
+    plot = pygame.Rect(box.x + pad + axis_w, body_top + font.get_height() // 2,
+                       max(1, lx - config.s(16) - (box.x + pad + axis_w)),
+                       max(1, body_bottom - body_top - font.get_height() // 2))
+    ui.graph_plot_rect = (plot.x, plot.y, plot.w, plot.h)
+    for i in range(5):
+        gy = plot.bottom - round(plot.h * i / 4)
+        pygame.draw.line(surface, _GRAPH_GRID, (plot.x, gy), (plot.right, gy), config.s(1))
+    _text(surface, font, top_label, config.COLOR_TEXT_DIM, midright=(plot.x - config.s(6), plot.y))
+    _text(surface, font, "0", config.COLOR_TEXT_DIM, midright=(plot.x - config.s(6), plot.bottom))
+    label_y = plot.bottom + config.s(4)
+    _text(surface, font, "Turn 0", config.COLOR_TEXT_DIM, topleft=(plot.x, label_y))
+    end_label = f"Turn {chart.turns}"
+    _text(surface, font, end_label, config.COLOR_TEXT_DIM, topleft=(plot.right - font.size(end_label)[0], label_y))
+
+    def at(t: int, v: float) -> tuple[int, int]:
+        fx = 0.0 if chart.turns <= 0 else t / chart.turns
+        return (plot.x + round(fx * plot.w), plot.bottom - round(min(v, top) / top * plot.h))
+
+    # Ours last, and thicker, so it is never buried under a rival's curve.
+    order = sorted(seats, key=lambda pid: pid == ui.human_id)
+    for pid in order:
+        series = chart.series(key, pid)
+        color = state.players[pid].color if pid in state.players else config.player_color(pid)
+        width = config.s(3) if pid == ui.human_id else config.s(2)
+        points = [at(t, v) for t, v in enumerate(series)]
+        if len(points) >= 2:
+            pygame.draw.lines(surface, color, False, points, width)
+
+    # The cursor: the turn on the map, with a dot where each curve crosses it.
+    cx = at(turn, 0)[0]
+    pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
+    for pid in order:
+        series = chart.series(key, pid)
+        if turn < len(series):
+            color = state.players[pid].color if pid in state.players else config.player_color(pid)
+            pygame.draw.circle(surface, color, at(turn, series[turn]), config.s(4))
 
 
 def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:

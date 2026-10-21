@@ -153,6 +153,29 @@ The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
 someone chasing a posted result would otherwise only learn it at the end.
 
+## End-of-game graphs (`stats`, `render._draw_history_graph`)
+
+History review can lay a chart over the lower part of the map, after the
+Civilization games' map-replay-plus-graphs end screen: four tabs (systems,
+ships including in transit, income in ships/turn, cumulative ships lost), a
+line per seat across every recorded turn, and a cursor on the turn the map is
+showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
+and a click or drag across the plot seeks a turn as the track does.
+
+- **Read off the history boards, never the log.** `stats.chart` runs once in
+  `main.open_history` over the boards `build_history` already reconstructed, so
+  a curve can never disagree with the map at the same turn, and nothing decides
+  or rolls again. `stats` is core (no pygame), drawing nothing from `state.rng`.
+- **Fog holds.** `Ui.graph_seats` draws every seat only once review is revealed
+  (a finished game); a mid-game review charts our seat alone, since a rival's
+  ship curve is exactly what the fog hides on the map beside it.
+- **Open by default on a finished game**, where it is the summary review is
+  for; closed in a mid-game review, where the board is the point.
+- **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
+- Not yet: the camera does not reframe into the space above the chart, and
+  there is no per-turn losses or kills view (a fight's dead are recorded per
+  owner, not per killer).
+
 ## Route mode (`viewstate.ROUTING`)
 
 Everything else in the game commits on click; this doesn't. It writes a dozen

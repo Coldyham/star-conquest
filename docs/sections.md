@@ -28,6 +28,7 @@ The file index is [`README.md`](README.md).
 - **Combat rules page.** It teaches the square law from the real code (`preview_fight`): parameters rather than `config`, corners rather than samples, demo sliders on `MenuState`, hand-broken prose, the jitter matrix.
 - **Losing / spectator mode.** Keyed on defeat, plus how the reset view frames the map.
 - **Ironman and the ships-lost readout.** Ironman is a local preference that hides History (and so rewind) until a game is decided (`Ui.can_review`). The top bar shows our `ships_lost`, the score's tie-break.
+- **End-of-game graphs (`stats`, `render._draw_history_graph`).** History review's chart of systems, ships, income and losses per seat, read off the history boards; rivals shown only once review is revealed.
 - **Route mode.** A proposal plus a confirm. Owned-only paths are forced. A plan can't contradict itself, but it can loop with existing rules.
   - *Two sub-modes.* Chain and rally share `flow_field`. Distance is travel turns, not hops. One Mode button. Ties split evenly. Auto-route. A tap always aims (two rejected shapes). A plan keeps a system's hold.
 

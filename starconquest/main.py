@@ -33,6 +33,7 @@ from starconquest import (
     replay,
     share,
     softkeyboard,
+    stats,
     turnfilm,
     viewstate,
     webstore,
@@ -862,6 +863,11 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # changes rather than as a position already arrived at.
     ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
+    # The end-of-game graphs: read once off the boards just built, and open by
+    # default on a finished game, where they are the summary the review is for.
+    ui.history_chart = stats.chart(history_states)
+    ui.history_graph = ui.history_reveal
+    ui.dragging_graph = False
     return history_states, history_fog, history_events, live_fog
 
 
@@ -1985,6 +1991,9 @@ async def main() -> None:
                     # (the live board is untouched while reviewing, so no recompute).
                     ui.history = False
                     ui.dragging_scrubber = False
+                    ui.dragging_graph = False
+                    ui.history_chart = None
+                    ui.history_graph = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended
                     history_states, history_fog, history_events = [], [], []

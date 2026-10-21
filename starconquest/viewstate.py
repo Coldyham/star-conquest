@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from . import config, model, turnfilm
+from . import config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -174,6 +174,15 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
+    # End-of-game graphs over the reviewed map (`render._draw_history_graph`).
+    # `history_chart` is read off the history boards once, on entering review
+    # (`stats.chart`), and dropped on leaving it; `graph_metric` indexes
+    # `stats.METRICS`. Open by default on a finished game. `dragging_graph` is a
+    # held drag across the plot, which scrubs the turn like the track does.
+    history_chart: stats.Chart | None = None
+    history_graph: bool = False
+    graph_metric: int = 0
+    dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
     # being replayed and `film_ms` where in it we are — the read-only half, so a
     # frame stays a pure function of GameState + Ui + time. `film_ms` is advanced by
@@ -277,6 +286,11 @@ class Ui:
     # once a match has a long history.
     history_prev_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     history_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The graph overlay's hit-rects: the bar's Graphs toggle, the plot (click or
+    # drag to seek a turn) and one tab per `stats.METRICS` entry.
+    graph_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_plot_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_tab_rects: list[tuple[int, int, int, int]] = field(default_factory=list)
     # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
     # rebuilt by render each frame and tested by input like the rects above.
     # `retry_button_rect` replays the very same match from the opening position
@@ -497,6 +511,17 @@ class Ui:
         else:
             points = [s.pos for sid, s in state.systems.items() if sid in self.seen]
         self.view.fit_to(points)
+
+    def graph_seats(self) -> tuple[int, ...]:
+        """The seats the history graphs draw: every seat once review is revealed
+        (a finished game), else ours alone — a rival's curve mid-game would show
+        exactly what the fog hides on the map beside it."""
+        chart = self.history_chart
+        if chart is None:
+            return ()
+        if self.history_reveal:
+            return chart.seats
+        return tuple(pid for pid in chart.seats if pid == self.human_id)
 
     # -- spectating --------------------------------------------------------- #
     def can_review(self, state: GameState) -> bool:
