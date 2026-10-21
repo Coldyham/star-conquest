@@ -659,6 +659,7 @@ def _tutorial_labels() -> tuple[str, str]:
 
 _STAGE_ROW_H = 36
 _TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_")
+_PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 
 
 def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
@@ -688,8 +689,15 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(g.stages))
     pw = max(title_w + status_w + 3 * pad, 2 * bw + gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
     picker = len(ms.gauntlets) > 1
+    # Progress is the bests in `localStorage` (`webstore`), so on the web say
+    # where it lives: it outlasts a reload but not cleared site data, a private
+    # window or another browser. Desktop keeps it in a file nobody clears by
+    # accident, so there is nothing to warn about there.
+    note = _PROGRESS_NOTE if is_web() else ""
+    if note:
+        pw = max(pw, f["small"].size(note)[0] + 2 * pad)
     ph = (pad + f["normal"].get_height() + gap + (_CH + gap if picker else 0)
-          + len(g.stages) * _STAGE_ROW_H + gap + bh + pad)
+          + len(g.stages) * _STAGE_ROW_H + gap + (_NOTE_H + gap if note else 0) + bh + pad)
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -732,6 +740,10 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
             status, scol = "locked", _DISABLED_TEXT
         _text(surface, f["small"], status, scol, midright=(row.right - pad // 2, row.centery))
         y += _STAGE_ROW_H
+
+    if note:
+        _text(surface, f["small"], note, config.COLOR_TEXT_DIM,
+              center=(panel.centerx, y + gap + _NOTE_H // 2))
 
     by = panel.bottom - pad - bh
     if ms.stage_at is not None:

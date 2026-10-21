@@ -1707,3 +1707,31 @@ def test_a_stage_row_wins_over_the_widget_under_the_veil(monkeypatch, tmp_path):
         assert menu.handle_event(ev, ms, settings) == "start"
     finally:
         pygame.quit()
+
+
+def test_the_stage_list_says_where_progress_lives_on_the_web(monkeypatch, tmp_path):
+    """Bests are `localStorage` on the web: kept across a reload, gone with the
+    site's data. The list says so there, and fits; desktop has nothing to say."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, s, *a, **k):
+        drawn.append(s)
+        return real(surface, font, s, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    screen, ms, settings = _setup()
+    try:
+        for web in (False, True):
+            monkeypatch.setattr(menu, "is_web", lambda web=web: web)
+            ms.tutorial_open = False
+            _click_key(screen, ms, settings, "tutorial")
+            drawn.clear()
+            menu.draw(screen, ms, settings)
+            assert (menu._PROGRESS_NOTE in drawn) == web
+            canvas = pygame.Rect(0, 0, config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+            assert all(canvas.contains(r) for k, r in ms.rects.items()
+                       if k.startswith(menu._TUTORIAL_KEYS))
+    finally:
+        pygame.quit()

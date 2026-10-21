@@ -34,7 +34,8 @@ scored on a different map.
 (`webstore.get`/`set`) and `kv.json` under `data_dir()` elsewhere, never
 pygbag's MEMFS, so tutorial progress survives a reload and a restart. What it
 does not survive is cleared site data, a private window, or a move to another
-browser or device. A board page for gauntlets, like the campaign's, would carry
+browser or device, which the stage list says on the web build (the same
+storage remembers a play-by-post name, `webstore.pbp_name`). A board page for gauntlets, like the campaign's, would carry
 progress across all of those, but only by posting scores, and a beginner should
 not have to publish a game to keep a tutorial. If carrying progress between
 devices is wanted later, the middle ground is an opt-in "restore from my posted
