@@ -24,6 +24,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 # on the next launch — the one place that key is named, shared by main/menu.
 WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 
+# Gauntlets opened from a `#g=<id>` link (or an inline `#gauntlet=` one), kept as
+# their files so the Tutorial list still has them after the installed app
+# relaunches without the fragment, and offline. Newest first, a few at most
+# (`gauntlet.remember`). Never progress: that is `WEB_BESTS_KEY`, as for any game.
+WEB_GAUNTLETS_KEY = "sc_gauntlets"
+
 # Storage key for your best result per challenge setup (see `webstore.best`),
 # so replaying a shared link can show what you already managed.
 WEB_BESTS_KEY = "sc_bests"
@@ -120,6 +126,7 @@ LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
 LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`campaign`)
+LEADERBOARD_GAUNTLET_PATH = "/api/gauntlet"  # a gauntlet built on the board, by id
 # The board's main list (`leaderboard/js/home.mjs`): every map somebody has
 # posted a score on, newest activity first — what the menu's "Recently played"
 # button says it opens. Its "By config" toggle is one press away from there.

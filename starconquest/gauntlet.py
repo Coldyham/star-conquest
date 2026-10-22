@@ -2,9 +2,11 @@
 hint — pure core, no pygame.
 
 The tutorial is one (``assets/gauntlets/tutorial.json``) and nothing about it is
-special code: a gauntlet is a *file*, and a player can write their own in the
-same format (``data_dir()/gauntlets/*.json``, desktop only). Reasons, the file
-format and the branching run this shape is meant to carry later:
+special code: a gauntlet is a *file*. A player can write their own in the same
+format (``data_dir()/gauntlets/*.json``, desktop), or build one on the board's
+gauntlet page, which stores it and hands out a ``#g=<id>`` link; the game fetches
+that once and keeps the file (``remember``). Reasons, the file format, storage
+and the branching run this shape is meant to carry later:
 ``docs/design/gauntlet.md``.
 
 Three rules this module exists to keep:
@@ -32,12 +34,16 @@ a malformed stage or lane and clamps text to what the screen can show.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import re
+import zlib
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import paths, webstore
+from . import paths, pbp, webstore
 from .settings import Settings
 
 # Package-relative, like `uifont._ASSETS`, so the web build ships the files with
@@ -276,13 +282,18 @@ def user_dir() -> Path:
 
 
 def user() -> list[Gauntlet]:
-    """A player's own gauntlets. Desktop only: the web build's files live in
-    MEMFS, which does not survive a reload. Read fresh each call, so a file
-    dropped in while the game runs shows the next time the list opens."""
-    if paths.is_web():
-        return []
+    """A player's own gauntlets: the ones opened from a link (``remembered``),
+    newest first, then on desktop the files in ``user_dir()``. The web build has
+    no folder to read, its files living in MEMFS, which does not survive a
+    reload. Read fresh each call, so a file dropped in while the game runs shows
+    the next time the list opens. A built-in's id is never shadowed."""
     taken = {g.id for g in builtin()}
-    return [g for g in _load_dir(user_dir()) if g.id not in taken]
+    out: list[Gauntlet] = []
+    for g in remembered() + ([] if paths.is_web() else _load_dir(user_dir())):
+        if g.id not in taken:
+            taken.add(g.id)
+            out.append(g)
+    return out
 
 
 def every() -> list[Gauntlet]:
@@ -291,3 +302,97 @@ def every() -> list[Gauntlet]:
 
 def find(gauntlets: list[Gauntlet], gid: str) -> Gauntlet | None:
     return next((g for g in gauntlets if g.id == gid), None)
+
+
+# --------------------------------------------------------------------------- #
+# Gauntlets from a link
+# --------------------------------------------------------------------------- #
+# A gauntlet built on the board's gauntlet page is stored by
+# `leaderboard/netlify/functions/gauntlet.mjs` and opened with `#g=<id>`; the id
+# is a name slug plus a hash of the file, minted there. `#gauntlet=<payload>`
+# carries the whole file instead (deflated JSON, base64url, as a settings token
+# is), for a build with no board to ask and for tests. Either way the file is
+# kept (`remember`), so the Tutorial list still has it after a relaunch without
+# the fragment, and offline. Rows never change, so a kept copy never goes stale.
+LINK_FRAGMENT = "g="
+INLINE_FRAGMENT = "gauntlet="
+# `gauntlets.gauntlet_id`'s check in schema.sql (and gauntlet-build.mjs).
+_ID_RE = re.compile(r"^[a-z0-9-]{1,19}-[0-9a-f]{12}$")
+# How many opened gauntlets the store keeps. Up to 64 KiB each, so a few hundred
+# KiB at most, well inside a browser's localStorage.
+REMEMBER_MAX = 8
+
+
+def link_id(fragment: str) -> str | None:
+    """The stored id a ``#g=<id>`` fragment names, or None for anything else."""
+    if not fragment.startswith(LINK_FRAGMENT):
+        return None
+    gid = fragment[len(LINK_FRAGMENT):].strip()
+    return gid if _ID_RE.match(gid) else None
+
+
+def inline_data(fragment: str) -> dict | None:
+    """The gauntlet file a ``#gauntlet=<payload>`` fragment carries, or None.
+    Tolerant like ``Settings.from_token``: plain JSON or deflated, and anything
+    that will not decode to a gauntlet is simply not one."""
+    if not fragment.startswith(INLINE_FRAGMENT):
+        return None
+    token = fragment[len(INLINE_FRAGMENT):].strip()
+    try:
+        raw = base64.urlsafe_b64decode((token + "=" * (-len(token) % 4)).encode("ascii"))
+        if raw[:1] != b"{":
+            raw = zlib.decompress(raw)
+        data = json.loads(raw.decode("utf-8"))
+    except (binascii.Error, UnicodeError, ValueError, zlib.error):
+        return None
+    return data if Gauntlet.from_dict(data) is not None else None
+
+
+def link_fragment(data: dict) -> str:
+    """``data`` as an inline ``#gauntlet=`` fragment (without the ``#``)."""
+    raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    return INLINE_FRAGMENT + base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
+
+
+def _kept() -> list[dict]:
+    try:
+        data = json.loads(webstore.get(paths.WEB_GAUNTLETS_KEY) or "[]")
+    except ValueError:
+        return []
+    return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+
+
+def remembered() -> list[Gauntlet]:
+    """The gauntlets opened from links, newest first."""
+    return [g for g in (Gauntlet.from_dict(d) for d in _kept()) if g is not None]
+
+
+def remember(data: dict) -> Gauntlet | None:
+    """Keep a gauntlet file opened from a link, newest first, and answer it as a
+    ``Gauntlet`` (None, and nothing kept, if it is not one). Opening one already
+    kept moves it to the front."""
+    g = Gauntlet.from_dict(data)
+    if g is None:
+        return None
+    kept = [d for d in _kept() if _text(d.get("id"), NAME_MAX) != g.id]
+    webstore.set(paths.WEB_GAUNTLETS_KEY, json.dumps([data] + kept[:REMEMBER_MAX - 1],
+                                                     separators=(",", ":")))
+    return g
+
+
+def fetch(gid: str) -> pbp.Request | None:
+    """Start fetching a stored gauntlet. None when there is no board to ask."""
+    endpoint = webstore.leaderboard_url(paths.LEADERBOARD_GAUNTLET_PATH)
+    if not endpoint or not _ID_RE.match(gid):
+        return None
+    return pbp.request(f"{endpoint}?id={gid}")
+
+
+def from_reply(body: str) -> dict | None:
+    """The gauntlet file in ``/api/gauntlet``'s answer, or None."""
+    try:
+        reply = json.loads(body)
+    except ValueError:
+        return None
+    data = reply.get("gauntlet") if isinstance(reply, dict) else None
+    return data if isinstance(data, dict) and Gauntlet.from_dict(data) is not None else None
