@@ -378,6 +378,14 @@ no re-timing, no moving. That is what keeps the rule checkable from the map, and
 it is the invariant worth keeping if this is ever touched again — every fight is
 between two fleets whose gap actually reached zero.
 
+It is also why same-turn launches down one lane stay separate fleets here and
+nowhere else. With the option off, `end_turn` tops up the fleet an owner already
+launched down a lane that turn rather than putting another beside it: the pieces
+would land together and pool per owner, so only the map's clutter differed (a
+stack sent as single-ship orders read as a column of 1s). With it on, the pieces
+fight one at a time, so splitting is a real move, and merging them would move
+every game stored with the option on.
+
 **Ship-speed growth mostly switches the feature off**, which is worth knowing
 before tuning either knob. A fleet is exposed to the lane-battle phase exactly
 `turns_total` times, so as growth drives lanes toward a single turn the window

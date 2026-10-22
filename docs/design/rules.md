@@ -59,6 +59,15 @@ attack off `target.ships` alone can meet one more ship than it counted —
 
 - `apply_order` deducts ships at launch, so a fleet in transit is off the board
   and order-issuing has no bearing on outcomes.
+- **One lane, one turn, one fleet.** Within an `end_turn`, a second order by the
+  same owner from the same system to the same neighbour tops up the fleet the
+  first launched (`apply_order`'s `launched`), still clamped order by order, and
+  the film re-sends that fleet's `Launched` with its new total. They would land
+  together and pool per owner anyway, so no fight, die or score moves and
+  `RULES_VERSION` did not; only the fleet list (and `board_digest`) does. Not
+  with in-lane battles, which fight fleet by fleet, so there a split stack is a
+  real move (`test_with_lane_battles_each_order_is_its_own_fleet`). A fleet from
+  an earlier turn is never topped up.
 - **In-lane battles** (`config.IN_LANE_BATTLES`, off by default) are the one
   exception to "fleets on lanes never interact": enemy fleets fight only when
   their paths touch or cross, **pairwise in crossing order**, and a winner is

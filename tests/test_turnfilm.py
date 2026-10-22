@@ -378,6 +378,21 @@ def test_a_pile_up_rides_in_the_landed_event():
     assert len(landed[0].steps) == 2      # three sides -> two engagements
 
 
+def test_a_topped_up_fleet_films_as_one():
+    """A second order down a lane launched this turn re-sends that fleet's
+    `Launched` with its new total, which the film applies in place."""
+    s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)], human=1)
+    before = turnfilm.copy_board(s)
+    events: list[turnfilm.Event] = []
+    engine.end_turn(s, human_orders=[engine.Order(1, 0, 1, 4), engine.Order(1, 0, 1, 3)],
+                    on_event=events.append)
+    launched = [e for e in events if isinstance(e, turnfilm.Launched)]
+    assert [(e.fleet, e.ships, e.source_ships) for e in launched] == [(0, 4, 6), (0, 7, 3)]
+    turnfilm.Reel(before, turnfilm.film(events)).run()
+    assert _digest(before) == _digest(s)
+
+
 def test_a_film_of_nothing_but_instants_does_not_play():
     """Production alone leaves nothing to watch: its lead has no movement to
     borrow from, so the whole turn is one instant and the board should jump as it
