@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import {
-  GAUNTLET_ID, LIMITS, buildBody, canonicalJson, checkBody, checkByName, fileName, gameLink,
+  GAUNTLET_ID, LIMITS, buildBody, canonicalJson, checkBody, checkByName, draftFromBody, draftProblem,
+  emptyDraft, emptyStage, fileName, gameLink, moveStage, readDraft,
   mintId, setupProblem, slugOf, stageSetup, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
@@ -181,4 +182,49 @@ test("links and file names", () => {
                "https://example.app/game/#g=hard-mode-0123456789ab");
   assert.equal(fileName({ name: "Hard Mode" }, "hard-mode-0123456789ab"), "hard-mode-0123456789ab.json");
   assert.equal(fileName({ name: "Hard Mode" }, ""), "hard-mode.json");
+});
+
+// -- the page's draft ---------------------------------------------------------
+
+test("a stored gauntlet opens as a draft that builds back to the same body", async () => {
+  const draft = await draftFromBody(fixture.body, async (s) => `link:${s.seed}`);
+  assert.equal(draft.name, fixture.body.name);
+  assert.deepEqual(draft.stages.map((s) => s.link), ["link:42", "link:99991", "link:2024"]);
+  assert.deepEqual(draft.stages[1].briefing, [""]);   // an empty briefing still offers a box
+  assert.deepEqual(checkBody(buildBody(draft)), checkBody(fixture.body));
+  assert.equal(draftProblem(draft), "");
+});
+
+test("a draft read back from storage is tolerant of anything", () => {
+  for (const junk of ["", "nope", "[]", "{}", '{"stages": 3}']) assert.equal(readDraft(junk), null);
+  const out = readDraft(JSON.stringify({ name: 5, wants_listing: "yes",
+    stages: [null, { link: 3, briefing: [], settings: [] }, { title: "t", briefing: ["a", 2] }] }));
+  assert.deepEqual(out, {
+    name: "", by_name: "", wants_listing: false,
+    stages: [
+      { link: "", settings: null, title: "", briefing: [""], hint: "" },
+      { link: "", settings: null, title: "t", briefing: ["a", ""], hint: "" },
+    ],
+  });
+  assert.deepEqual(readDraft('{"stages": []}').stages, [emptyStage()]);
+});
+
+test("a draft names its first problem, link problems first", () => {
+  const draft = emptyDraft();
+  assert.match(draftProblem(draft), /stage 1 needs a game link/);
+  draft.stages[0].link = "garbage";
+  assert.match(draftProblem(draft), /stage 1's link can't be used/);
+  draft.stages[0].settings = { ...SETUP };
+  assert.match(draftProblem(draft), /needs a name/);
+  draft.name = "Fine";
+  assert.equal(draftProblem(draft), "");
+  draft.by_name = "x".repeat(33);
+  assert.match(draftProblem(draft), /your name is over 32/);
+});
+
+test("moving a stage swaps it with its neighbour, and not past either end", () => {
+  assert.deepEqual(moveStage(["a", "b", "c"], 0, 1), ["b", "a", "c"]);
+  assert.deepEqual(moveStage(["a", "b", "c"], 2, -1), ["a", "c", "b"]);
+  assert.deepEqual(moveStage(["a", "b", "c"], 0, -1), ["a", "b", "c"]);
+  assert.deepEqual(moveStage(["a", "b", "c"], 2, 1), ["a", "b", "c"]);
 });

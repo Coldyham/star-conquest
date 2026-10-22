@@ -201,3 +201,103 @@ export function gameLink(gameUrl, gauntletId) {
 export function fileName(body, gauntletId) {
   return `${gauntletId || slugOf(body?.name)}.json`;
 }
+
+// -- the page's draft ---------------------------------------------------------
+// What the page edits and keeps in localStorage between visits: the form as
+// typed, each stage carrying the link it was pasted from beside the setup that
+// link decoded to. `buildBody` turns it into a gauntlet; `draftFromBody` turns a
+// stored gauntlet back into one, for "open, edit, save" (which saves a new id).
+
+/** A stage with nothing in it yet. */
+export function emptyStage() {
+  return { link: "", settings: null, title: "", briefing: [""], hint: "" };
+}
+
+/** A draft with one empty stage. */
+export function emptyDraft() {
+  return { name: "", by_name: "", wants_listing: false, stages: [emptyStage()] };
+}
+
+/**
+ * A stored gauntlet as a draft to edit, its stages in play order. Each stage's
+ * link is rebuilt from its setup, so it reads like the link it was pasted from.
+ *
+ * @param linkFor  async (settings) => a game link carrying that setup
+ */
+export async function draftFromBody(body, linkFor) {
+  const stages = [];
+  for (const stage of body?.stages || []) {
+    if (!isObject(stage) || !isObject(stage.settings)) continue;
+    const briefing = (stage.briefing || []).filter((p) => typeof p === "string");
+    stages.push({
+      link: await linkFor(stage.settings),
+      settings: stage.settings,
+      title: typeof stage.title === "string" ? stage.title : "",
+      briefing: briefing.length ? briefing : [""],
+      hint: typeof stage.hint === "string" ? stage.hint : "",
+    });
+  }
+  return {
+    name: typeof body?.name === "string" ? body.name : "",
+    by_name: "",
+    wants_listing: false,
+    stages: stages.length ? stages : [emptyStage()],
+  };
+}
+
+/**
+ * A draft read back from storage, or null. Tolerant: whatever is missing or of
+ * the wrong type comes back empty, so an old or hand-edited draft never breaks
+ * the page.
+ */
+export function readDraft(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isObject(data) || !Array.isArray(data.stages)) return null;
+  const str = (v) => (typeof v === "string" ? v : "");
+  const stages = data.stages.filter(isObject).slice(0, LIMITS.stages).map((s) => ({
+    link: str(s.link),
+    settings: isObject(s.settings) ? s.settings : null,
+    title: str(s.title),
+    briefing: Array.isArray(s.briefing) && s.briefing.length
+      ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
+    hint: str(s.hint),
+  }));
+  return {
+    name: str(data.name),
+    by_name: str(data.by_name),
+    wants_listing: data.wants_listing === true,
+    stages: stages.length ? stages : [emptyStage()],
+  };
+}
+
+/**
+ * The first thing stopping a draft from being saved, or "" when it can be:
+ * a stage with no link, or one whose link did not decode, is named before the
+ * body's own checks run.
+ */
+export function draftProblem(draft) {
+  for (const [i, stage] of (draft?.stages || []).entries()) {
+    if (!stage.settings) {
+      return stage.link.trim() ? `stage ${i + 1}'s link can't be used as a stage`
+                               : `stage ${i + 1} needs a game link`;
+    }
+  }
+  const body = checkBody(buildBody(draft));
+  if (typeof body === "string") return body;
+  if (checkByName(draft.by_name) === null) return `your name is over ${LIMITS.byName} characters`;
+  return "";
+}
+
+/** Move the stage at `from` by `step` places; out of range is a no-op. */
+export function moveStage(stages, from, step) {
+  const to = from + step;
+  if (from < 0 || from >= stages.length || to < 0 || to >= stages.length) return stages;
+  const out = [...stages];
+  [out[from], out[to]] = [out[to], out[from]];
+  return out;
+}

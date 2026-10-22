@@ -1168,3 +1168,61 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   .playstyle tbody th { width: 42%; }
   .playstyle td { white-space: normal; font-size: 0.85rem; }
 }
+
+/* -- the gauntlet builder (gauntlet.html) ----------------------------------- */
+/* Free text the author writes and a player reads: shown as typed, not in the
+ * form's shouting capitals. */
+.gauntlet-form input.plain, .gauntlet-form textarea.plain {
+  text-transform: none;
+  font-family: var(--mono);
+  letter-spacing: 0;
+  word-break: normal;
+}
+.gauntlet-form textarea.plain[id$="-link"] { word-break: break-all; }
+.gauntlet-form label.check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  text-transform: none;
+}
+.gauntlet-form .count {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-align: right;
+}
+.gauntlet-form .count.over { color: var(--bad); }
+.stages { display: flex; flex-direction: column; gap: 1.25rem; margin: 1.5rem 0 1rem; }
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.5rem 1rem 1rem;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%);
+}
+.stage legend {
+  padding: 0 0.5rem;
+  color: var(--gold);
+  font-family: var(--pixel);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+.gauntlet-form .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; }
+.stage-tools { justify-content: flex-end; margin-top: 0; }
+.stage-summary { margin: 0.25rem 0 0; color: var(--green); font-size: 0.85rem; }
+.stage-summary.bad { color: var(--bad); }
+.stage-summary .warn { color: var(--gold); }
+.stage-summary a { color: var(--magenta); }
+.gauntlet-form .result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  padding: 0 1rem 1rem;
+  border: 1px solid var(--green);
+}
+.gauntlet-form #problem { color: var(--gold); }
+.gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
