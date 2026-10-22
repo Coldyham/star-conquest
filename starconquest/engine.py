@@ -3,7 +3,7 @@
 Order issuing (``apply_order``) deducts ships from the source immediately and
 puts a fleet on a lane, so issuing order has no bearing on outcomes. Within one
 ``end_turn``, every launch by one owner from one system to one neighbour is a
-single fleet (unless in-lane battles are on; see ``end_turn``). ``end_turn``
+single fleet. ``end_turn``
 then resolves one turn deterministically, returning a ``TurnRecord`` of
 everything the turn consumed — and accepting one back in ``script`` to replay it:
 
@@ -230,11 +230,10 @@ def end_turn(
     orders = (list(script.orders) if script is not None
               else _collect_orders(state, human_orders, decide, seat_orders))
     # One owner's launches down one lane this turn fly as one fleet: they would
-    # land together and pool at the node anyway, so only the map's clutter differs.
-    # Not with in-lane battles, where a fleet fights pairwise and splitting a
-    # stack really is a different move (and merging would move stored games).
-    launched: dict[tuple[int, int, int], Fleet] | None = (
-        None if config.IN_LANE_BATTLES else {})
+    # land together and pool at the node anyway, so a stack sent as single ships
+    # no longer litters the lane. (With in-lane battles a split stack used to
+    # fight piece by piece; that was never a choice worth offering.)
+    launched: dict[tuple[int, int, int], Fleet] = {}
     for order in orders:  # order-independent: each system has a single owner
         watch.launched(state, apply_order(state, order, launched))
 

@@ -1055,7 +1055,7 @@ class _Ledger:
 def _merged(orders):
     """``orders`` with every launch down one lane summed into the first: the greedy
     commits a lane in pieces (half, then what is left), which are one fleet
-    either way and the engine would merge anyway, except with in-lane battles."""
+    either way (the engine merges them too, so this is for whoever reads the plan)."""
     out: dict[tuple[int, int], Order] = {}
     for o in orders:
         prev = out.get((o.source_id, o.dest_id))

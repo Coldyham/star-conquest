@@ -213,14 +213,13 @@ def test_a_lane_mate_from_an_earlier_turn_is_not_merged():
     assert _lane_fleets(s) == [(0, 1, 3), (0, 1, 4)]
 
 
-def test_with_lane_battles_each_order_is_its_own_fleet():
-    """In-lane battles fight fleet by fleet, so there a split stack is a real
-    choice, and merging would move games stored with the option on."""
+def test_with_lane_battles_too_one_lane_is_one_fleet():
+    """A stack split down a lane would fight an interceptor piece by piece."""
     s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
                    [(0, 1, 3), (1, 2, 5)], human=1)
     with in_lane_battles():
         engine.end_turn(s, human_orders=[Order(1, 0, 1, 4), Order(1, 0, 1, 3)])
-    assert _lane_fleets(s) == [(0, 1, 3), (0, 1, 4)]
+    assert _lane_fleets(s) == [(0, 1, 7)]
 
 
 def test_lane_battle_waits_until_the_paths_actually_cross():
