@@ -92,7 +92,7 @@ second line of its own (`test_a_stage_hint_fits_the_empty_panel`).
 | 3 | Caught in flight | travel time (ships at 4 ly/turn): ships in flight leave home open | rusherplus |
 | 4 | Defender's edge | defender advantage, the Combat tab preview | rusherplus |
 | 5 | Into the dark | the default fog (sight 1, scout 3), and the other settings worth trying | rusherplus |
-| 6 | Three's a crowd | three seats, pile-ups, letting rivals wear each other down | heuristic, rusherplus |
+| 6 | Three's a crowd | three seats, pile-ups, starting between two rivals: push one way, guard the other | heuristic, rusherplus |
 | 7 | Full house | five seats on 32 systems | heuristic and rusherplus, two each |
 | 8 | Thinker | a bot that prices its fights | thinker |
 | 9 | Marshal | one of the strongest bots | marshal |

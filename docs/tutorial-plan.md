@@ -156,8 +156,8 @@ implementation against `tools/gauntlet_check.py`:
    `FOG_ON_SIGHT` / `FOG_ON_SCOUT`. The briefing suggests trying sight 1 /
    scout 2 for a more claustrophobic game, or sight 1–2 / scout 4 for one that
    is more open but still hidden.
-6. **Three's a crowd**: 3 seats, pile-ups, and letting rivals wear each other
-   down.
+6. **Three's a crowd**: 3 seats, pile-ups, and starting between two rivals:
+   push one way and guard the other rather than fight on two fronts.
 7. **Full house**: a 5–6 seat game on a larger map.
 8. **thinker**, then 9. **marshal**, then 10. **actuary at Hunt**, its
    strongest stop, as the closing stages.
