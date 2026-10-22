@@ -5,6 +5,8 @@ Pure and pygame-free, like the rest of geometry.py.
 
 from __future__ import annotations
 
+import pytest
+
 from starconquest import config
 from starconquest.geometry import WorldView
 
@@ -215,3 +217,51 @@ def test_fit_to_keeps_the_full_map_reachable_by_zooming_out():
     assert (round(v.off_x, 6), round(v.off_y, 6)) == (
         round(fresh.off_x, 6), round(fresh.off_y, 6),
     )
+
+
+def _review_view():
+    # a 100x100 world fitted into a 400x400 viewport at the origin
+    return WorldView((0, 0, 100, 100), (0, 0, 400, 400), padding=0)
+
+
+def _map_on_screen(v):
+    (x0, y0), (x1, y1) = v.to_screen((0, 0)), v.to_screen((100, 100))
+    return x0, y0, x1, y1
+
+
+def test_review_zooms_out_to_leave_room_past_each_side():
+    """Out until REVIEW_ROOM of the map's size shows again past each side: the
+    map's box ends up ~37% of the view across, in the middle."""
+    v = _review_view()
+    v.zoom_at((200, 200), 0.01, loose=True)
+    assert v.zoom == pytest.approx(config.REVIEW_ZOOM_MIN)
+    x0, _y0, x1, _y1 = _map_on_screen(v)
+    assert (x1 - x0) / 400 == pytest.approx(1 / (1 + 2 * config.REVIEW_ROOM), abs=0.01)
+    v.zoom_at((200, 200), 0.01)      # live play's clamp still stops at the fit
+    assert v.zoom == config.ZOOM_MIN
+
+
+def test_review_pans_anywhere_that_keeps_some_of_the_map_on_screen():
+    v = _review_view()
+    v.zoom_at((200, 200), 0.5, loose=True)
+    v.pan(-10_000, -10_000, loose=True)
+    x0, y0, x1, y1 = _map_on_screen(v)
+    keep = config.REVIEW_KEEP * (x1 - x0)
+    assert x1 == pytest.approx(keep, abs=1) and y1 == pytest.approx(keep, abs=1)
+    v.pan(20_000, 20_000, loose=True)
+    x0, y0, _x1, _y1 = _map_on_screen(v)
+    assert x0 == pytest.approx(400 - keep, abs=1) and y0 == pytest.approx(400 - keep, abs=1)
+    # zoomed in, the keep is a share of the view, so an edge can still be reached
+    v.zoom_at((200, 200), 20, loose=True)
+    v.pan(10_000, 0, loose=True)
+    assert _map_on_screen(v)[0] == pytest.approx(400 - config.REVIEW_KEEP * 400, abs=1)
+    v.settle()                       # leaving review: back inside the live clamp
+    assert _map_on_screen(v)[0] <= 0
+
+
+def test_settle_returns_a_zoomed_out_review_to_the_fit():
+    v = _review_view()
+    v.zoom_at((200, 200), 0.01, loose=True)
+    v.pan(300, 0, loose=True)
+    v.settle()
+    assert v.zoom == config.ZOOM_MIN and _map_on_screen(v) == (0, 0, 400, 400)

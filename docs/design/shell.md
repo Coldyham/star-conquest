@@ -187,6 +187,17 @@ foot, lifted above the docked chart when it is open; full screen there is no
 map, so no cluster. A press on the reviewed map is always a pan, since there is
 nothing to select.
 
+Review's camera is also looser than live play's (`WorldView`'s ``loose``), so
+the part of the map under the docked chart can be brought into view without
+the default squashing the map into the space above it. It zooms out until
+`config.REVIEW_ROOM` (0.85) of the map's size shows past each side, leaving
+the map about 37% of the view across, and pans anywhere that keeps
+`config.REVIEW_KEEP` (15%) of the map on screen on each axis (of the view,
+once the zoomed map is the wider, so an edge stays reachable). The point is
+that a player can't easily end up looking at nothing. Reset still restores
+the ordinary framing, and leaving review calls `WorldView.settle` to bring the
+camera back inside live play's clamp.
+
 - **Read off the history boards, never the log.** `stats.chart` runs once in
   `main.open_history` over the boards `build_history` already reconstructed, so
   a curve can never disagree with the map at the same turn, and nothing decides
@@ -197,7 +208,8 @@ nothing to select.
 - **Open by default on a finished game**, where it is the summary review is
   for; closed in a mid-game review, where the board is the point.
 - **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
-- Not yet: the camera does not reframe into the space above the docked chart, and
+- Not yet: the default camera does not reframe into the space above the docked
+  chart (on purpose: it would squash the map; the loose camera covers it), and
   there is no per-turn losses or kills view (a fight's dead are recorded per
   owner, not per killer).
 

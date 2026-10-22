@@ -342,6 +342,13 @@ SLIDER_KNOB_R = 7           # px: radius of the knob
 # fit-to-viewport scale (zoom == 1.0), so they don't scale with apply_ui_scale.
 ZOOM_MIN = 1.0              # can't zoom out past the original fit-all view
 ZOOM_MAX = 6.0              # sane cap on zooming in
+# History review's looser camera (`WorldView`'s ``loose``): zoomed out until
+# REVIEW_ROOM of the fitted map's size shows past each side of it (0.85 leaves
+# the map ~37% of the view across), and panned anywhere that keeps REVIEW_KEEP
+# of the map (or of the view, once the map is the bigger) on screen per axis.
+REVIEW_ROOM = 0.85
+REVIEW_ZOOM_MIN = 1 / (1 + 2 * REVIEW_ROOM)
+REVIEW_KEEP = 0.15
 ZOOM_WHEEL_STEP = 1.15      # multiplicative zoom factor per wheel notch
 ZOOM_BUTTON_STEP = 1.25     # multiplicative zoom factor per on-map +/- tap
 MAP_ZOOM_BTN_SIZE = 44      # px: on-map zoom +/- / reset button side (touch-sized)

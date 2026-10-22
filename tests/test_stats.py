@@ -6,6 +6,7 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import config, fog, main, render, replay, stats
 from starconquest import input as game_input
@@ -236,6 +237,12 @@ def test_a_review_has_the_camera_cluster_above_the_docked_graphs(tmp_path, monke
         rx, ry, rw, rh = ui.reset_view_rect
         _press(board, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.view.zoom == zoom
+        mx, my, mw, mh = ui.zoom_minus_rect
+        for _ in range(12):          # review's camera zooms out past the fit...
+            _press(board, ui, (mx + mw // 2, my + mh // 2))
+        assert ui.view.zoom == pytest.approx(config.REVIEW_ZOOM_MIN)
+        _press(board, ui, (rx + rw // 2, ry + rh // 2))
+        assert ui.view.zoom == zoom  # ...and Reset brings it back
         ui.history_graph = False
         render.draw(screen, board, ui)
         assert ui.zoom_plus_rect[1] > y        # back down to the map's foot
