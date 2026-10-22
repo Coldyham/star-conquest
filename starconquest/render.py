@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, matchnames, model, paths, widgets
+from . import config, fog, matchnames, model, paths, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -76,6 +76,17 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.route_confirm_rect = (0, 0, 0, 0)
     # the stage hint and Next stage; the panel and the win overlay re-record them
     ui.stage_hint_rect = ui.next_stage_rect = (0, 0, 0, 0)
+    # the history graph's; _draw_history_graph re-records them while it is open
+    ui.graph_plot_rect = ui.graph_full_rect = ui.graph_all_rect = (0, 0, 0, 0)
+    ui.graph_tab_rects = []
+    ui.graph_trace_rects = []
+    if ui.history and ui.history_graph and ui.graph_full:
+        # the graphs fill everything between the bars: no map to draw under them
+        _draw_hud(surface, state, ui)
+        _draw_scrubber(surface, state, ui)
+        _draw_history_graph(surface, state, ui)
+        _draw_score_tooltip(surface, state, ui)
+        return
     # The map layer can now be panned/zoomed past config.play_rect()'s edges
     # (unlike the old fixed fit-to-bounds view, which always fit inside it by
     # construction), so clip it to the viewport here rather than let it bleed
@@ -112,6 +123,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         # the scrubber owns the bottom bar; suppress the win overlay so a finished
         # game's final-turn snapshot doesn't veil the board being reviewed
         _draw_scrubber(surface, state, ui)
+        if ui.history_graph:
+            _draw_history_graph(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
     elif ui.briefing_open and ui.in_stage:
@@ -122,6 +135,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_waiting_overlay(surface, state, ui)
     elif ui.in_pbp and ui.pbp_msg:
         _draw_pbp_notice(surface, ui)
+    _draw_score_tooltip(surface, state, ui)
 
 
 # --------------------------------------------------------------------------- #
@@ -1772,16 +1786,10 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
     cy = config.HUD_TOP_H // 2
     sw_size = config.s(12)  # colour swatch side
     gap, sw_w = config.s(22), sw_size + config.s(6)
+    ui.score_rects = []
 
     def vis(pid: int) -> str:
-        """live | frozen | out | hidden."""
-        p = state.players[pid]
-        live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
-        if not (live or pid in ui.player_intel):
-            return "hidden"  # never sighted — you don't know it exists
-        if not p.alive:
-            return "out"
-        return "live" if live else "frozen"
+        return _score_vis(state, ui, pid)
 
     seats = [pid for pid in sorted(state.players) if not state.players[pid].is_neutral and vis(pid) != "hidden"]
     if not seats:
@@ -1815,7 +1823,63 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         txt = label(pid, v, with_name)
         tcolor = config.COLOR_TEXT_DIM if v == "frozen" else color
         _text(surface, font, txt, tcolor, midleft=(x + sw_w, cy))
+        ui.score_rects.append((pid, (x, 0, sw_w + font.size(txt)[0], config.HUD_TOP_H)))
         x += sw_w + font.size(txt)[0] + gap
+
+
+def _score_vis(state: GameState, ui: Ui, pid: int) -> str:
+    """How much the scoreboard knows of ``pid``: live | frozen | out | hidden."""
+    p = state.players[pid]
+    live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
+    if not (live or pid in ui.player_intel):
+        return "hidden"  # never sighted — you don't know it exists
+    if not p.alive:
+        return "out"
+    return "live" if live else "frozen"
+
+
+def _seat_who(state: GameState, ui: Ui, pid: int) -> str:
+    """Who is playing ``pid``, for a tooltip or a key: its bot (`Ui.bot_label`),
+    "you", or "a person" for someone else's seat in a shared match."""
+    bot = ui.bot_label(state, pid)
+    if bot is not None:
+        return bot
+    if pid == ui.human_id:
+        return "you"
+    return "a person"
+
+
+def _draw_score_tooltip(surface, state: GameState, ui: Ui) -> None:
+    """The hovered scoreboard entry spelled out under the top bar: who plays the
+    seat, then its standings in words (or the last-known ones, or that it is out).
+    Drawn last of the frame, so nothing below the bar covers it."""
+    pid = ui.score_hover
+    rect = next((r for p, r in ui.score_rects if p == pid), None)
+    if pid is None or rect is None or pid not in state.players:
+        return
+    v = _score_vis(state, ui, pid)
+    if v == "hidden":
+        return
+    p = state.players[pid]
+    lines = [f"{p.name} · {_seat_who(state, ui, pid)}"]
+    if v == "out":
+        lines.append("Knocked out")
+    else:
+        systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
+        stats_line = f"{systems} systems · {ships} ships · {prod:.1f} ships/turn"
+        lines.append(stats_line if v == "live" else f"Last seen: {stats_line}")
+    font = _fonts()["small"]
+    pad = config.s(8)
+    w = max(font.size(line)[0] for line in lines) + 2 * pad
+    h = len(lines) * _row_h() + 2 * pad - (_row_h() - font.get_height())
+    x = max(config.HUD_PAD, min(rect[0], surface.get_width() - w - config.HUD_PAD))
+    box = pygame.Rect(x, config.HUD_TOP_H + config.s(4), w, h)
+    pygame.draw.rect(surface, (24, 26, 38), box, border_radius=config.s(6))
+    pygame.draw.rect(surface, config.player_color(pid), box, config.s(1), border_radius=config.s(6))
+    y = box.y + pad
+    for i, line in enumerate(lines):
+        _text(surface, font, line, config.COLOR_TEXT if i == 0 else config.COLOR_TEXT_DIM, topleft=(box.x + pad, y))
+        y += _row_h()
 
 
 def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
@@ -2101,6 +2165,7 @@ Drag to pan, wheel to zoom."""
 _LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
 Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
+Graphs charts every seat's systems, ships, income and losses.
 
 Rewind to here restarts play from the turn on screen. Exit returns to the live
 board."""
@@ -2110,7 +2175,8 @@ _LEGEND_HISTORY_KEYS = """Reviewing turns already played — nothing here change
 Drag the scrubber or press ←/→ to step a turn; Home/End jump to either end. P
 plays it back.
 
-Point at a system to see it as it was then.
+Point at a system to see it as it was then. G shows graphs of every seat's
+systems, ships, income and losses; Tab changes graph, F makes it full screen.
 
 Rewind to here restarts play from the turn on screen. Esc returns to the live
 board."""
@@ -2505,7 +2571,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     if state.winner == 0:
         msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
     else:
-        msg = f"{_winner_label(state)} wins!"
+        msg = f"{_winner_label(state, ui)} wins!"
         color = config.player_color(state.winner)
 
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
@@ -2593,8 +2659,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
-def _winner_label(state: GameState) -> str:
-    """"Verdant (Knower)" — the winning seat, and the bot that was driving it.
+def _winner_label(state: GameState, ui: Ui) -> str:
+    """"Verdant (Knower · Predict)" — the winning seat, and the bot that was
+    driving it, as the top bar's tooltip and the graph legend name it
+    (`Ui.seat_bots`). A seat left to random says so: "(Marshal, random)".
 
     Named only for a seat no person was playing: a human seat says who won and
     stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
@@ -2607,20 +2675,21 @@ def _winner_label(state: GameState) -> str:
     and it reaches here on the one path that can name it, a mutual annihilation,
     where "Neutral (Heuristic)" would credit a bot that never played.
 
-    Read straight off ``Player.ai_strategy``; ``render`` imports no ``ai`` and
-    needs none here. That field holds the *resolved* strategy, so a seat set to
-    ``settings.RANDOM_STRATEGY`` is revealed here — which is the point, and costs
-    nothing, since there is no turn left to play with the knowledge.
-
-    Capitalised rather than title-cased, so a drop-in keeps whatever shape its
-    author gave its filename (``claudeBot`` stays ``ClaudeBot``, not ``Claudebot``).
+    A random seat is revealed here — which is the point, and costs nothing, since
+    there is no turn left to play with the knowledge. A seat `Ui.seat_bots` has
+    no label for falls back to ``Player.ai_strategy`` itself, capitalised rather
+    than title-cased, so a drop-in keeps the shape its author gave its filename
+    (``claudeBot`` stays ``ClaudeBot``).
     """
     name = config.player_name(state.winner)
     player = state.players.get(state.winner)
     if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
         return name
-    bot = player.ai_strategy
-    return f"{name} ({bot[:1].upper()}{bot[1:]})"
+    raw = player.ai_strategy
+    bot = ui.seat_bots.get(state.winner) or f"{raw[:1].upper()}{raw[1:]}"
+    if state.winner in ui.random_seats:
+        bot += ", random"
+    return f"{name} ({bot})"
 
 
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:
@@ -2703,6 +2772,16 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     pp = pygame.Rect(ex.right + gap, y, max(_btn_w(font, _key_hint(s, "P")) for s in ("Play", "Pause")), bh)
     ui.play_pause_rect = _btn(surface, pp, play_label, *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), font)
 
+    # Graphs toggle, lit while the overlay is open.
+    graph_label = _key_hint("Graphs", "G")
+    gb = pygame.Rect(pp.right + gap, y, _btn_w(font, graph_label), bh)
+    if ui.history_chart is None:
+        gb.w = 0
+        ui.graph_button_rect = (0, 0, 0, 0)
+    else:
+        ui.graph_button_rect = _btn(surface, gb, graph_label,
+                                    *(_BTN_ACTIVE if ui.history_graph else _BTN_VIOLET), font)
+
     # Rewind button (far right). Its footprint is reserved even when hidden so the
     # track width and label position stay fixed as you scrub — the button only
     # appears for turns before the latest (when there is something to leave behind).
@@ -2730,7 +2809,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Step-one-turn buttons flank the track — the mouse/touch equivalent of the
     # Left/Right arrow keys, so picking an exact turn doesn't rely on a fiddly drag
     # once a match has run long. Square, sized to the bar's own button height.
-    prev = pygame.Rect(pp.right + gap, y, bh, bh)
+    prev = pygame.Rect((gb.right if gb.w else pp.right) + gap, y, bh, bh)
     next_ = pygame.Rect(label_x - config.HUD_PAD - bh, y, bh, bh)
     _draw_h_arrow_button(surface, prev, left=True, enabled=ui.history_turn > 0)
     _draw_h_arrow_button(surface, next_, left=False, enabled=ui.history_turn < ui.history_max)
@@ -2744,6 +2823,288 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     ui.scrubber_rect = (track.x, track.y, track.w, track.h)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
     _draw_slider(surface, track, t, _SCRUB_FILL, config.COLOR_TEXT)
+
+
+# The graph overlay's palette: a dark panel over the map, faint gridlines.
+_GRAPH_BG = (14, 16, 26)
+_GRAPH_EDGE = (60, 66, 90)
+_GRAPH_GRID = (40, 44, 60)
+_GRAPH_CURSOR = (200, 206, 220)
+
+
+def _nice_ceil(v: float) -> float:
+    """``v`` rounded up to 1, 2 or 5 times a power of ten — an axis top a reader
+    can divide by eye. Never below 1, so an all-zero series still has an axis."""
+    if v <= 1:
+        return 1.0
+    mag = 10 ** math.floor(math.log10(v))
+    for step in (1, 2, 5, 10):
+        if v <= step * mag:
+            return step * mag
+    return 10 * mag
+
+
+def _graph_value(metric: str, v: float) -> str:
+    if metric == "income":
+        return f"{v:.1f}"
+    if metric in stats.AREA:
+        return f"{v:.0f}%"
+    return str(int(round(v)))
+
+
+def _turn_ticks(turns: int, width: int, label_w: int) -> list[int]:
+    """Turn numbers to label along the plot's foot: a 1/2/5 step chosen so the
+    labels (each about ``label_w`` px) never touch, always including turn 0."""
+    if turns <= 0:
+        return [0]
+    room = max(1, width // max(1, label_w * 2))
+    step = max(1, int(_nice_ceil(turns / room)))
+    return list(range(0, turns + 1, step))
+
+
+def _draw_caret(surface, rect: pygame.Rect, up: bool) -> None:
+    """A ^ or v chevron button, drawn rather than typed like the scrubber's
+    arrows (`_draw_h_arrow_button`), so it reads the same in every font."""
+    pygame.draw.rect(surface, _BTN_BLUE[0], rect, border_radius=config.s(6))
+    pygame.draw.rect(surface, _BTN_BLUE[1], rect, config.s(2), border_radius=config.s(6))
+    cx, cy = rect.center
+    half = max(config.s(4), rect.w // 5)
+    rise = half // 2 if up else -(half // 2)
+    pts = [(cx - half, cy + rise), (cx, cy - rise), (cx + half, cy + rise)]
+    pygame.draw.lines(surface, config.COLOR_TEXT, False, pts, config.s(2))
+
+
+def _draw_stacked_area(surface, chart: stats.Chart, key: str, bands, plot: pygame.Rect,
+                       top: float, color_of) -> None:
+    """Bands stacked from the axis up in ``bands`` order, each the region between
+    the running total before and after it, drawn as one polygon a band. Filled
+    dimmed with a full-colour top edge, so neighbours stay distinct."""
+    if chart.turns <= 0 or top <= 0:
+        return
+
+    def x_at(t: int) -> int:
+        return plot.x + round(t / chart.turns * plot.w)
+
+    def y_at(v: float) -> int:
+        return plot.bottom - round(min(v, top) / top * plot.h)
+
+    base = [0.0] * (chart.turns + 1)
+    for pid in bands:
+        series = chart.series(key, pid)
+        if len(series) != len(base):
+            continue
+        upper = [b + v for b, v in zip(base, series)]
+        lower_pts = [(x_at(t), y_at(v)) for t, v in enumerate(base)]
+        upper_pts = [(x_at(t), y_at(v)) for t, v in enumerate(upper)]
+        color = color_of(pid)
+        pygame.draw.polygon(surface, tuple(c * 3 // 5 for c in color), upper_pts + lower_pts[::-1])
+        pygame.draw.lines(surface, color, False, upper_pts, config.s(1))
+        base = upper
+
+
+def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
+                       plot: pygame.Rect, top: float, color_of) -> None:
+    """A bar per turn, centred where the line charts put that turn, stacked from
+    the axis up in seat order. The viewed turn's bar is drawn at full colour and
+    the rest dimmed, so the cursor reads on a chart with no curves to dot."""
+    if chart.turns <= 0 or top <= 0:
+        return
+    step = plot.w / chart.turns
+    bar_w = max(1, int(step * 0.8))
+    for t in range(1, chart.turns + 1):
+        cx = plot.x + round(t / chart.turns * plot.w)
+        x0 = max(plot.x, cx - bar_w // 2)
+        x1 = min(plot.right, x0 + bar_w)
+        base = 0.0
+        for pid in traces:
+            v = chart.series(key, pid)[t]
+            if v <= 0:
+                continue
+            y0 = plot.bottom - round(min(base, top) / top * plot.h)
+            base += v
+            y1 = plot.bottom - round(min(base, top) / top * plot.h)
+            color = color_of(pid)
+            if t != turn:
+                color = tuple(c * 3 // 5 for c in color)
+            pygame.draw.rect(surface, color, (x0, y1, max(1, x1 - x0), max(1, y0 - y1)))
+
+
+def _draw_history_graph(surface, state: GameState, ui: Ui) -> None:
+    """The end-of-game graphs: one metric (`stats.METRICS`) per tab, a line per
+    seat across every recorded turn (a stacked bar per turn for
+    `stats.STACKED`, stacked 0-100% bands for `stats.AREA`), and a cursor on
+    the turn the map shows.
+
+    Docked over the lower part of the map, so the replay plays on above it — the
+    Civilization-style map-and-graphs pairing — or, with ``ui.graph_full`` (the
+    ^/v caret, F), filling everything between the bars. The scrubber stays
+    either way. The legend doubles as the trace selector: a click on a seat's
+    row shows or hides its line, and the y scale fits the lines shown. Records
+    every hit-rect on ``ui``; input maps a click or drag across the plot to a turn.
+    """
+    chart = ui.history_chart
+    if chart is None:
+        return
+    seats = ui.graph_seats()
+    traces = ui.graph_traces()
+    key, _title, unit = stats.METRICS[ui.graph_metric % len(stats.METRICS)]
+    font = _fonts()["small"]
+    pad = config.s(10)
+    w, h = surface.get_size()
+    if ui.graph_full:
+        box = pygame.Rect(0, config.HUD_TOP_H, w, h - config.HUD_TOP_H - config.HUD_BOTTOM_H)
+        pygame.draw.rect(surface, _GRAPH_BG, box)
+    else:
+        vx, vy, vw, vh = config.play_rect()
+        box_h = max(config.s(180), min(int(vh * 0.42), config.s(320)))
+        box = pygame.Rect(vx + pad, vy + vh - box_h - pad, vw - 2 * pad, box_h)
+        pygame.draw.rect(surface, _GRAPH_BG, box, border_radius=config.s(8))
+        pygame.draw.rect(surface, _GRAPH_EDGE, box, config.s(1), border_radius=config.s(8))
+
+    # Tabs along the top, the caret at the far right.
+    tab_h = _tap_size(font.get_height() + config.s(10))
+    tx, ty = box.x + pad, box.y + pad
+    rects = []
+    for i, (_k, label, _u) in enumerate(stats.METRICS):
+        r = pygame.Rect(tx, ty, _btn_w(font, label), tab_h)
+        on = i == ui.graph_metric % len(stats.METRICS)
+        rects.append(_btn(surface, r, label, *(_BTN_ACTIVE if on else _BTN_BLUE), font))
+        tx = r.right + config.s(6)
+    ui.graph_tab_rects = rects
+    caret = pygame.Rect(box.right - pad - tab_h, ty, tab_h, tab_h)
+    _draw_caret(surface, caret, up=not ui.graph_full)
+    ui.graph_full_rect = (caret.x, caret.y, caret.w, caret.h)
+    note = ("" if ui.history_reveal else "Your seat only until the game is decided")
+    if not note and not config.touch_ui:
+        note = "Tab: next graph  ·  1-9 or click a seat: show/hide  ·  F: " + (
+            "dock" if ui.graph_full else "full screen")
+    if note and tx + pad + font.size(note)[0] <= caret.x - pad:
+        _text(surface, font, note, config.COLOR_TEXT_DIM, midright=(caret.x - pad, ty + tab_h // 2))
+
+    body_top = ty + tab_h + pad
+    body_bottom = box.bottom - pad - font.get_height() - config.s(4)  # room for turn labels
+    turn = max(0, min(ui.history_turn, chart.turns))
+
+    def value_at(pid: int) -> float:
+        series = chart.series(key, pid)
+        return series[min(turn, len(series) - 1)] if series else 0.0
+
+    def color_of(pid: int):
+        return state.players[pid].color if pid in state.players else config.player_color(pid)
+
+    # Legend on the right — swatch, seat name, value at the viewed turn — and the
+    # trace selector: a hidden seat's row keeps its place, its swatch hollow.
+    rows = [(pid, state.players[pid].name if pid in state.players else config.player_name(pid),
+             _graph_value(key, value_at(pid)))
+            for pid in seats]
+    # who played each seat, dim after its name — where the row has room for it
+    who = {pid: f" · {_seat_who(state, ui, pid)}" for pid in seats}
+    sw = config.s(12)
+    # Sized for every tab's widest figure, so switching metric never moves the plot.
+    val_w = max([font.size(_graph_value(k, chart.peak(k, seats)))[0] for k, _t, _u in stats.METRICS]
+                + [font.size(u)[0] for _k, _t, u in stats.METRICS])
+    name_w = max([font.size(n + who[p])[0] for p, n, _v in rows] + [font.size("Unclaimed")[0]])
+    legend_w = min(int(box.w * 0.4), sw + config.s(6) + name_w + config.s(12) + val_w)
+    name_room = legend_w - sw - config.s(6) - config.s(12) - val_w
+    lx = box.right - pad - legend_w
+    ly = body_top
+    _text(surface, font, unit, config.COLOR_TEXT_DIM, topleft=(box.right - pad - font.size(unit)[0], ly))
+    ly += _row_h()
+    row_h = _tap_size(_row_h())
+    trace_rects = []
+    for pid, name, val in rows:
+        if ly + row_h > body_bottom + font.get_height():
+            break
+        shown = pid in traces
+        cy = ly + row_h // 2
+        swatch = pygame.Rect(lx, cy - sw // 2, sw, sw)
+        if shown:
+            pygame.draw.rect(surface, color_of(pid), swatch, border_radius=config.s(2))
+        else:
+            pygame.draw.rect(surface, color_of(pid), swatch, config.s(1), border_radius=config.s(2))
+        ink = config.COLOR_TEXT if shown else config.COLOR_TEXT_DIM
+        drawn = _text(surface, font, name, ink, midleft=(lx + sw + config.s(6), cy))
+        if font.size(name + who[pid])[0] <= name_room:
+            _text(surface, font, who[pid], config.COLOR_TEXT_DIM, midleft=(drawn.right, cy))
+        _text(surface, font, val, ink, midright=(box.right - pad, cy))
+        trace_rects.append((pid, (lx, ly, legend_w, row_h)))
+        ly += row_h
+    ui.graph_trace_rects = trace_rects
+    if key in stats.AREA and ui.history_reveal and ly + row_h <= body_bottom + font.get_height():
+        # the unclaimed band's row: always drawn, so not a trace to toggle
+        cy = ly + row_h // 2
+        pygame.draw.rect(surface, config.COLOR_NEUTRAL, (lx, cy - sw // 2, sw, sw), border_radius=config.s(2))
+        _text(surface, font, "Unclaimed", config.COLOR_TEXT_DIM, midleft=(lx + sw + config.s(6), cy))
+        val = _graph_value(key, value_at(stats.NEUTRAL))
+        _text(surface, font, val, config.COLOR_TEXT_DIM, midright=(box.right - pad, cy))
+        ly += row_h
+    ui.graph_all_rect = (0, 0, 0, 0)
+    if len(traces) < len(seats) and ly + row_h <= body_bottom + font.get_height():
+        r = pygame.Rect(lx, ly + config.s(4), _btn_w(font, "Show all"), _tap_size(font.get_height() + config.s(8)))
+        ui.graph_all_rect = _btn(surface, r, "Show all", *_BTN_BLUE, font)
+
+    # The plot, left of the legend, its scale fitted to the lines shown.
+    stacked = key in stats.STACKED
+    area = key in stats.AREA
+    peak = chart.stack_peak(key, traces) if stacked else chart.peak(key, traces)
+    # a whole-number metric never gets a fractional gridline: its axis starts at 5;
+    # a share always spans the whole map
+    top = 100.0 if area else _nice_ceil(peak if key == "income" else max(peak, 5))
+    # 1x and 5x tops split into fifths, 2x into quarters: every line a round figure
+    parts = 4 if f"{top:g}".lstrip("0.")[:1] == "2" else 5
+    labels = [_graph_value(key, top * i / parts) for i in range(parts + 1)]
+    axis_w = max(font.size(t)[0] for t in labels) + config.s(6)
+    plot = pygame.Rect(box.x + pad + axis_w, body_top + font.get_height() // 2,
+                       max(1, lx - config.s(16) - (box.x + pad + axis_w)),
+                       max(1, body_bottom - body_top - font.get_height() // 2))
+    ui.graph_plot_rect = (plot.x, plot.y, plot.w, plot.h)
+    for i, label in enumerate(labels):
+        gy = plot.bottom - round(plot.h * i / parts)
+        pygame.draw.line(surface, _GRAPH_GRID, (plot.x, gy), (plot.right, gy), config.s(1))
+        _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(plot.x - config.s(6), gy))
+
+    def at(t: int, v: float) -> tuple[int, int]:
+        fx = 0.0 if chart.turns <= 0 else t / chart.turns
+        return (plot.x + round(fx * plot.w), plot.bottom - round(min(v, top) / top * plot.h))
+
+    label_y = plot.bottom + config.s(4)
+    widest = font.size(f"Turn {chart.turns}")[0]
+    for t in _turn_ticks(chart.turns, plot.w, widest):
+        tick = "Turn 0" if t == 0 else str(t)
+        x = at(t, 0)[0]
+        pygame.draw.line(surface, _GRAPH_EDGE, (x, plot.bottom), (x, plot.bottom + config.s(3)), config.s(1))
+        tw = font.size(tick)[0]
+        _text(surface, font, tick, config.COLOR_TEXT_DIM,
+              topleft=(min(max(plot.x, x - tw // 2), plot.right - tw), label_y))
+
+    if area:
+        # the unclaimed band only once rivals are revealed: mid-game it would say
+        # how much the fog's other side holds
+        bands = list(traces) + ([stats.NEUTRAL] if ui.history_reveal else [])
+        _draw_stacked_area(surface, chart, key, bands, plot, top,
+                           lambda pid: config.COLOR_NEUTRAL if pid == stats.NEUTRAL else color_of(pid))
+    if stacked:
+        _draw_stacked_bars(surface, chart, key, traces, turn, plot, top, color_of)
+    if area or stacked:
+        cx = at(turn, 0)[0]
+        pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
+        return
+
+    # Ours last, and thicker, so it is never buried under a rival's curve.
+    order = sorted(traces, key=lambda pid: pid == ui.human_id)
+    for pid in order:
+        width = config.s(3) if pid == ui.human_id else config.s(2)
+        points = [at(t, v) for t, v in enumerate(chart.series(key, pid))]
+        if len(points) >= 2:
+            pygame.draw.lines(surface, color_of(pid), False, points, width)
+
+    # The cursor: the turn on the map, with a dot where each curve crosses it.
+    cx = at(turn, 0)[0]
+    pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
+    for pid in order:
+        series = chart.series(key, pid)
+        if turn < len(series):
+            pygame.draw.circle(surface, color_of(pid), at(turn, series[turn]), config.s(4))
 
 
 def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
