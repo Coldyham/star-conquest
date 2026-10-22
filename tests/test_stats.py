@@ -220,3 +220,74 @@ def test_the_stacked_tabs_draw_in_both_sizes(tmp_path, monkeypatch):
                     assert ui.graph_plot_rect[2] > 0
     finally:
         pygame.quit()
+
+
+def test_a_review_has_the_camera_cluster_above_the_docked_graphs(tmp_path, monkeypatch):
+    """Reset and −/+ sit on the map in history as in live play, lifted clear of
+    the docked graphs; full-screen graphs leave no map, so no cluster."""
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        render.draw(screen, board, ui)
+        x, y, w, h = ui.zoom_plus_rect
+        assert w > 0 and y + h <= ui.graph_tab_rects[0][1]
+        zoom = ui.view.zoom
+        _press(board, ui, (x + w // 2, y + h // 2))
+        assert ui.view.zoom > zoom
+        rx, ry, rw, rh = ui.reset_view_rect
+        _press(board, ui, (rx + rw // 2, ry + rh // 2))
+        assert ui.view.zoom == zoom
+        ui.history_graph = False
+        render.draw(screen, board, ui)
+        assert ui.zoom_plus_rect[1] > y        # back down to the map's foot
+        ui.history_graph = ui.graph_full = True
+        render.draw(screen, board, ui)
+        assert ui.zoom_plus_rect == ui.reset_view_rect == (0, 0, 0, 0)
+    finally:
+        pygame.quit()
+
+
+def test_a_drag_on_the_reviewed_map_pans_it(tmp_path, monkeypatch):
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        render.draw(screen, board, ui)
+        x, y, w, h = ui.zoom_plus_rect
+        _press(board, ui, (x + w // 2, y + h // 2))
+        _press(board, ui, (x + w // 2, y + h // 2))
+        before = ui.view.to_screen(board.systems[next(iter(board.systems))].pos)
+        start = (config.play_rect()[2] // 2, config.play_rect()[1] + config.s(80))
+        _press(board, ui, start)
+        assert ui.pan_active and not ui.dragging_graph
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=(start[0] + 30, start[1] + 20),
+                                                   rel=(30, 20), buttons=(1, 0, 0)), board, ui)
+        assert ui.view.to_screen(board.systems[next(iter(board.systems))].pos) != before
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=start, button=1), board, ui)
+        assert not ui.pan_active
+    finally:
+        pygame.quit()
+
+
+def test_a_portrait_legend_runs_under_a_full_width_plot(tmp_path, monkeypatch):
+    """A column beside the plot would halve it on a tall screen and still clip
+    the bot names; under the plot, the rows have the panel's width for them."""
+    try:
+        monkeypatch.setattr(config, "SCREEN_W", 900)
+        monkeypatch.setattr(config, "SCREEN_H", 1600)
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        screen = pygame.display.set_mode((900, 1600))
+        monkeypatch.setattr(render, "_seat_who", lambda s, u, pid: "thinker claudebot (random)")
+        drawn = []
+        real = render._text
+        monkeypatch.setattr(render, "_text", lambda surf, font, s, *a, **k: drawn.append(s) or real(surf, font, s, *a, **k))
+        for full in (False, True):
+            ui.graph_full = full
+            drawn.clear()
+            render.draw(screen, board, ui)
+            px, py, pw, ph = ui.graph_plot_rect
+            box_w = config.SCREEN_W if full else config.play_rect()[2]
+            assert pw > box_w * 0.75
+            assert all(r[1] > py + ph for _pid, r in ui.graph_trace_rects)
+            assert drawn.count(" · thinker claudebot (random)") == len(ui.graph_seats())
+            tab_bottom = max(t[1] + t[3] for t in ui.graph_tab_rects)
+            assert tab_bottom < py and all(t[0] + t[2] < ui.graph_full_rect[0] for t in ui.graph_tab_rects)
+    finally:
+        pygame.quit()
