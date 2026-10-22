@@ -74,6 +74,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.clear_dangerous_rect = (0, 0, 0, 0)
     # route mode's confirm; _draw_hud re-records it once the plan has something in it
     ui.route_confirm_rect = (0, 0, 0, 0)
+    # the stage hint and Next stage; the panel and the win overlay re-record them
+    ui.stage_hint_rect = ui.next_stage_rect = (0, 0, 0, 0)
     # the history graph's; _draw_history_graph re-records them while it is open
     ui.graph_plot_rect = ui.graph_full_rect = ui.graph_all_rect = (0, 0, 0, 0)
     ui.graph_tab_rects = []
@@ -125,6 +127,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
             _draw_history_graph(surface, state, ui)
     elif state.winner is not None:
         _draw_win_overlay(surface, state, ui)
+    elif ui.briefing_open and ui.in_stage:
+        _draw_briefing(surface, ui)
     elif ui.pbp_invite:
         _draw_invite_overlay(surface, ui)
     elif ui.awaiting_others(state):
@@ -1438,7 +1442,8 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
     turn = _draw_ships_lost(surface, state, ui, turn)
-    scoreboard_right = _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w))
+    scoreboard_right = _draw_stage_label(
+        surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
     _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
     # bottom bar
@@ -1612,7 +1617,9 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the N key exactly. (R is reset-view, and has no button here: the
     # on-map zoom cluster carries it.)
-    specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
+    # Not in a gauntlet stage: its seed is pinned, so a new map would leave it.
+    if not ui.in_stage:
+        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
     if ui.can_review(state):
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
@@ -1746,6 +1753,17 @@ def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
         return right
     edge = w - config.HUD_PAD if right >= w else right
     label = _text(surface, _fonts()["small"], ui.campaign_label, config.COLOR_CAMPAIGN,
+                  midright=(edge, config.HUD_TOP_H // 2))
+    return label.left - config.HUD_PAD
+
+
+def _draw_stage_label(surface, ui: Ui, w: int, right: int) -> int:
+    """Which gauntlet stage this is ("Tutorial 3/10 · Defender's edge"), left of
+    the campaign reminder, with the same measured handoff to the scoreboard."""
+    if not ui.stage_label:
+        return right
+    edge = w - config.HUD_PAD if right >= w else right
+    label = _text(surface, _fonts()["small"], ui.stage_label, _BTN_TEAL[1],
                   midright=(edge, config.HUD_TOP_H // 2))
     return label.left - config.HUD_PAD
 
@@ -1916,6 +1934,8 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
     if focus is None or focus not in state.systems:
+        if ui.stage_hint and not ui.history:
+            y = _panel_stage_hint(surface, ui, x, y, content_bottom)
         _panel_legend(surface, x, y, content_bottom, history=ui.history)
         return
 
@@ -2244,6 +2264,77 @@ def _panel_legend(surface, x, y, bottom: int, history: bool = False) -> int:
     return y
 
 
+def _stage_hint_lines(hint: str) -> list[str]:
+    """The stage hint reflowed to the panel, the one place it is measured, so the
+    test holding the panel's length counts what is drawn."""
+    return _wrap(_fonts()["small"], hint, config.HUD_RIGHT_W - config.PANEL_PAD * 2)
+
+
+def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
+    """A gauntlet stage's reminder, above the legend whenever nothing is in focus.
+
+    No line of its own saying it can be tapped: on the touch build the panel has
+    no row to spare once the legend is in (`test_a_stage_hint_fits_the_empty_panel`),
+    so the briefing card says so instead. The block is the tap target that
+    brings the card back (`ui.stage_hint_rect`; B does the same).
+    """
+    top = y
+    for line in _stage_hint_lines(ui.stage_hint or ""):
+        if y + _row_h() > bottom:
+            break
+        y = _row(surface, x, y, line, _BTN_TEAL[1])
+    ui.stage_hint_rect = (x, top, config.HUD_RIGHT_W - config.PANEL_PAD * 2, y - top)
+    return y + config.ROW_GAP * 2
+
+
+def _draw_briefing(surface, ui: Ui) -> None:
+    """A gauntlet stage's briefing card, over the board on turn 0 until any press.
+
+    The stage's title, which stage it is, then the briefing's paragraphs
+    reflowed to the card. Measured and centred on the map, like the other
+    overlays, so nothing is a fixed pixel size; a paragraph that would run off
+    the card's floor is cut rather than drawn under the HUD.
+    """
+    px, py, pw, ph = config.play_rect()
+    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
+    pad, gap = config.s(20), config.s(10)
+    width = min(pw - 2 * config.s(16), config.s(620))
+    inner = width - 2 * pad
+    paras = [_wrap(normal, text, inner) for text in ui.briefing]
+    close = ("Tap anywhere to begin · tap the hint at the right to read this again"
+             if config.touch_ui else "Press any key to begin · B shows this again")
+    foot = _wrap(small, close, inner)
+    foot_h = len(foot) * _row_h()
+    lines_h = sum(len(p) * _row_h("normal") for p in paras) + gap * max(0, len(paras) - 1)
+    height = min(ph - 2 * config.s(8),
+                 pad + _row_h("big") + _row_h() + gap + lines_h + gap + foot_h + pad)
+    card = pygame.Rect(px + (pw - width) // 2, py + (ph - height) // 2, width, height)
+
+    veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 150))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, (16, 18, 28), card, border_radius=config.s(10))
+    pygame.draw.rect(surface, _BTN_TEAL[1], card, config.s(2), border_radius=config.s(10))
+
+    x, y = card.x + pad, card.y + pad
+    _text(surface, big, ui.stage_title, config.COLOR_TEXT, topleft=(x, y))
+    y += _row_h("big")
+    _text(surface, small, ui.stage_label or "", _BTN_TEAL[1], topleft=(x, y))
+    y += _row_h() + gap
+    floor = card.bottom - pad - foot_h - gap
+    for para in paras:
+        for line in para:
+            if y + _row_h("normal") > floor:
+                break
+            _text(surface, normal, line, config.COLOR_TEXT, topleft=(x, y))
+            y += _row_h("normal")
+        y += gap
+    y = card.bottom - pad - foot_h
+    for line in foot:
+        _text(surface, small, line, config.COLOR_TEXT_DIM, center=(card.centerx, y + _row_h() // 2))
+        y += _row_h()
+
+
 def _panel_lane_target(state: GameState, ui: Ui, focus: int):
     """Neighbour whose lane stats to show: the chosen dest, a hovered neighbour, or
     — failing both — the destination of a standing rule on the focused system.
@@ -2486,7 +2577,11 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
     # the width of the widest label in the grid, so the rows stay square and no
     # label can spill into its neighbour once the font scales up.
-    labels = [_key_hint("Retry", "T"), _key_hint("New map", "N"), _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
+    # In a gauntlet stage New map's place is Next stage's, or empty after the
+    # last one: the stage's seed is pinned, so a new map would leave the stage.
+    nxt = ui.offers_next_stage(state)
+    second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
+    labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
     quit_label = _key_hint("Quit", "Esc")
     share_label = _key_hint("Challenge a friend", "C")
     board_label = _key_hint("Enter on leaderboard", "L")
@@ -2526,8 +2621,15 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Setup menu and Review history follow; Challenge a friend (when offered)
     # comes next; Quit is always last, opening the same confirm modal as Esc.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
-    ui.retry_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[0], *_BTN_AMBER)
-    ui.restart_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[1], *_BTN_GREEN)
+    ui.restart_button_rect = (0, 0, 0, 0)
+    if nxt:
+        ui.retry_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[0], *_BTN_AMBER)
+        ui.next_stage_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[1], *_BTN_TEAL)
+    elif ui.in_stage:
+        ui.retry_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), labels[0], *_BTN_AMBER)
+    else:
+        ui.retry_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[0], *_BTN_AMBER)
+        ui.restart_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[1], *_BTN_GREEN)
     y += bh + gap
     ui.menu_button_rect = _btn(surface, pygame.Rect(left, y, bw, bh), labels[2], *_BTN_BLUE)
     ui.history_button_rect = _btn(surface, pygame.Rect(right, y, bw, bh), labels[3], *_BTN_VIOLET)
@@ -2617,6 +2719,9 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     if ui.hand_turns < state.turn:
         line += f"  ·  {ui.hand_turns} played by hand"
     lines = [("normal", line, config.COLOR_TEXT)]
+    if ui.in_stage and ui.can_post(state):
+        cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+        lines.append(("small", cleared, _BTN_TEAL[1]))
 
     if ui.challenge_target is None:
         return note + lines

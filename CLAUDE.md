@@ -16,7 +16,7 @@ those files. Two companion pages are for **grepping, not reading whole**:
 **Grep `docs/decided-against.md` before proposing a mechanism, a bot tactic or a
 re-tune.** Read a design file only when touching that code, and prefer the
 section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
-`hand-maps`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `win-turns`, `bot-families`, `knower`,
+`hand-maps`, `gauntlet`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `win-turns`, `bot-families`, `knower`,
 `council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`, `marshal-cma`,
 `actuary`, `hunter`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
 each under ~1000 lines (split by topic and update the index and
@@ -57,6 +57,7 @@ uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --varia
 uv run python tools/candidate_bench.py --borrow actuary     # a bot as one more knower candidate, paired
 uv run python tools/pileup_bench.py --stop 2 --seeds 60     # knower's pile-up pricing on posted 4/5-seat maps, paired
 uv run python tools/fold_check.py               # a stop plays as the bot folded into it
+uv run python tools/gauntlet_check.py --quick   # the tutorial's stages rise in difficulty
 uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
                                                 # (--label NEW --base OLD pairs two trees game by game)
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
@@ -92,7 +93,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `stats` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `stats` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -317,3 +318,13 @@ concrete; never widen `WORLD_SIZE`; `CustomMap.from_dict` never raises,
 through `without_node`; the editor's model is the recipe, never a `GameState`;
 `problems()` is the one validator; `tools/bot_replay._OUTCOME_MODULES` includes
 `custommap`.
+
+### Gauntlets (gauntlet.py)
+
+Pinned setups played in order, each with a briefing card and a side-panel hint;
+the tutorial is one (`assets/gauntlets/tutorial.json`). Full rules:
+`docs/design/rules.md`, "Gauntlets". **A gauntlet is data, never `Settings`**: a
+stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
+(`webstore.best` on the stage's keys). A stage is active only while the setup
+matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
+`from_dict` never raises. Render never sees a `Gauntlet` (`main.stage_ui`).
