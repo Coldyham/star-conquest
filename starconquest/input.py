@@ -3,7 +3,8 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat') or None.
+'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
+None.
 """
 
 from __future__ import annotations
@@ -242,6 +243,15 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
         if not ui.history:
             return None
 
+    # A gauntlet stage's briefing card is up over the opening board: any press
+    # puts it away and is spent doing so, so the press that dismisses it can't
+    # also select a system or end the turn behind it.
+    if ui.briefing_open and ui.in_stage and not ui.history and state.winner is None:
+        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            ui.briefing_open = False
+        if event.type != pygame.MOUSEMOTION:
+            return None
+
     # History mode is a modal review scene (entered mid-game or after a win):
     # scrub / rewind / exit only, no board interaction. Checked first so it wins
     # over the game-over branch when reviewing a finished match.
@@ -255,6 +265,9 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
             if event.key == pygame.K_t:
                 return "retry"
             if event.key == pygame.K_n:
+                # In a stage N is Next stage, or nothing after the last one.
+                if ui.in_stage:
+                    return "next_stage" if ui.offers_next_stage(state) else None
                 return "restart"
             if event.key == pygame.K_m:
                 return "menu"
@@ -275,6 +288,8 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
                 return "retry"
             if ui.restart_button_rect[2] and _point_in_rect(event.pos, ui.restart_button_rect):
                 return "restart"
+            if ui.next_stage_rect[2] and _point_in_rect(event.pos, ui.next_stage_rect):
+                return "next_stage"
             if ui.menu_button_rect[2] and _point_in_rect(event.pos, ui.menu_button_rect):
                 return "menu"
             if ui.history_button_rect[2] and _point_in_rect(event.pos, ui.history_button_rect):
@@ -435,7 +450,11 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         _clear_selected(ui)
         return None
     if event.key == pygame.K_n:
-        return "restart"
+        # a stage's seed is pinned: a new map would leave it (Retry stays)
+        return None if ui.in_stage else "restart"
+    if event.key == pygame.K_b and ui.in_stage:
+        ui.briefing_open = True
+        return None
     if event.key == pygame.K_r:
         ui.reset_view(state)
         return None
@@ -573,7 +592,7 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     if event.key == pygame.K_m:
         return "menu"
     if event.key == pygame.K_n:
-        return "restart"
+        return None if ui.in_stage else "restart"
     if event.key == pygame.K_r:
         ui.reset_view(state)
         return None
@@ -604,6 +623,9 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, "quit"
     if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
         _clear_selected(ui)
+        return True, None
+    if ui.stage_hint_rect[2] and _point_in_rect(pos, ui.stage_hint_rect):
+        ui.briefing_open = True
         return True, None
     if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
         ui.reset_view(state)

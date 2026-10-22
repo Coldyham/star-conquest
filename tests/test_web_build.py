@@ -198,3 +198,13 @@ def test_an_app_launch_reopens_the_last_half():
     nav = (ROOT / "leaderboard" / "js" / "nav.mjs").read_text()
     assert 'setItem("sc_app_last", "game")' in inject
     assert 'setItem("sc_app_last", "board")' in nav
+
+
+def test_the_web_build_ships_the_gauntlets():
+    """The tutorial is a file beside the package code (`gauntlet._ASSETS`), so it
+    ships only because the build copies the package whole, fonts and all."""
+    from starconquest import gauntlet
+
+    assert 'cp -r "$ROOT/starconquest" "$STAGE/"' in BUILD
+    assert gauntlet._ASSETS.is_relative_to(ROOT / "starconquest")
+    assert (gauntlet._ASSETS / "tutorial.json").exists()
