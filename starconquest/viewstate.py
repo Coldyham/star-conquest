@@ -368,6 +368,22 @@ class Ui:
     # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.
     # Blank for a match nobody looked up, or one resumed from a save.
     campaign_start: str = ""
+    # A gauntlet stage (the tutorial's, say) this match is playing, as plain
+    # values `main` copies off the stage when the match starts, so render never
+    # sees a `Gauntlet`. `stage_label` ("Tutorial 3/10 · Defender's edge") is None
+    # for an ordinary match, and is what every other stage control is gated on.
+    # The briefing card is up over the board while `briefing_open`; any press
+    # closes it and the hint line in the side panel (`stage_hint_rect`) opens it
+    # again. `has_next_stage` puts Next stage where New map was on the win
+    # overlay: a stage's seed is pinned, so a new map would leave the stage.
+    stage_label: str | None = None
+    stage_title: str = ""
+    briefing: tuple[str, ...] = ()
+    briefing_open: bool = False
+    stage_hint: str | None = None
+    has_next_stage: bool = False
+    next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
@@ -641,6 +657,17 @@ class Ui:
         """
         return (state.winner == self.human_id and self.hand_turns > 0
                 and not self.watched and not self.in_pbp)
+
+    @property
+    def in_stage(self) -> bool:
+        return self.stage_label is not None
+
+    def offers_next_stage(self, state: GameState) -> bool:
+        """Is Next stage on the win overlay? Only for a win that cleared the stage
+        — `main.record_best` files it on the same `can_post` gate, and a stage is
+        cleared by exactly that best (`gauntlet.cleared`) — so the button never
+        leads to a stage the list would still show locked."""
+        return self.in_stage and self.has_next_stage and self.can_post(state)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

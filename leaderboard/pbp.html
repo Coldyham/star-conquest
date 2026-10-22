@@ -14,17 +14,19 @@
 <body>
 <header class="bar">
   <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <details class="menu">
-    <summary class="btn" aria-label="Menu">☰ Menu</summary>
-    <nav class="actions">
-      <a class="btn" href="../game/">▶ Play</a>
-      <a class="btn" href="index.html">All maps</a>
-      <a class="btn" href="campaign.html">Campaign</a>
-      <a class="btn" href="crowns.html">Crowns</a>
-      <a class="btn" href="pbp.html">Shared matches</a>
-      <a class="btn" href="submit.html">Enter score</a>
-    </nav>
-  </details>
+  <div class="bar-end">
+    <a class="btn play" href="../game/">▶ Play</a>
+    <details class="menu">
+      <summary class="btn" aria-label="Menu">☰ Menu</summary>
+      <nav class="actions">
+        <a class="btn" href="index.html">All maps</a>
+        <a class="btn" href="campaign.html">Campaign</a>
+        <a class="btn" href="crowns.html">Crowns</a>
+        <a class="btn" href="pbp.html">Shared matches</a>
+        <a class="btn" href="submit.html">Enter score</a>
+      </nav>
+    </details>
+  </div>
 </header>
 
 <!-- The list (?action=list on /api/pbp, plus ?action=list&ids= for the matches

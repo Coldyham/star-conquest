@@ -43,6 +43,7 @@ away"`), never with "above"/"below". Code comments do the same
 | [`design/shell.md`](design/shell.md) | Text sizing, touch targets, viewport margins, the send popup, forwarding rules, the menu's Combat page, spectating, ironman, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn (`turnfilm.py` and the shell side of playback) |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
+| [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: pinned setups with a briefing and a hint, progress read off local bests, the file format, the stages and how their seeds were picked, why nothing is shared with the weekly campaign's server, the branching run and carry-over (proposed) |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, replay versioning, playstyle readings |
 | [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board: pace on every card, and the "By family" view above By game and By config |
 | [`design/schema.md`](design/schema.md) | The board's database (`leaderboard/schema.sql`): the trust model, upgrading by re-pasting, each table and view's shape, the grant trap, the play-by-post tables |
@@ -74,3 +75,6 @@ are written for outside developers building their own bots, and
 published documents, not working notes. [`site-merge-plan.md`](site-merge-plan.md)
 is the planning brief for merging the game and board sites. That merge is
 implemented, and the brief is kept for its reasoning.
+[`tutorial-plan.md`](tutorial-plan.md) is the plan the tutorial was built
+from. It is implemented, and its reasoning now lives in
+[`design/gauntlet.md`](design/gauntlet.md).

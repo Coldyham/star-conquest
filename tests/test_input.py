@@ -2628,3 +2628,81 @@ def test_the_game_owns_the_canvas_box_it_measures(monkeypatch):
 
     canvas.getBoundingClientRect = lambda: types.SimpleNamespace(width=0, height=0)
     assert webstore.viewport() is None, "a canvas not laid out yet has no size to fit"
+
+
+def _stage(ui, next_stage=True):
+    ui.stage_label = "Tutorial 2/10 · Supply lines"
+    ui.stage_title = "Supply lines"
+    ui.briefing = ("Read me.",)
+    ui.briefing_open = True
+    ui.stage_hint = "A hint."
+    ui.has_next_stage = next_stage
+
+
+def test_any_press_puts_the_briefing_away_and_is_spent_doing_so():
+    state, ui = _setup()
+    _stage(ui)
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    assert _click(state, ui, home) is None
+    assert not ui.briefing_open
+    assert ui.selected is None, "the press that closed the card selected nothing"
+
+    ui.briefing_open = True
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, unicode="\r")
+    assert game_input.handle_event(ev, state, ui) is None, "Enter closes the card, not the turn"
+    assert not ui.briefing_open
+
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_b, unicode="b")
+    assert game_input.handle_event(ev, state, ui) is None
+    assert ui.briefing_open, "B brings it back"
+
+
+def test_the_stage_hint_brings_the_briefing_back():
+    state, ui = _setup()
+    _stage(ui)
+    ui.briefing_open = False
+    ui.stage_hint_rect = (10, 10, 100, 40)
+    assert _click_pos(state, ui, (50, 30)) is None
+    assert ui.briefing_open
+
+
+def test_n_is_next_stage_in_a_stage_and_never_a_new_map():
+    state, ui = _setup()
+    _stage(ui)
+    ui.briefing_open = False
+    n = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_n, unicode="n")
+    assert game_input.handle_event(n, state, ui) is None, "live: a stage's seed is pinned"
+
+    state.winner, ui.hand_turns = 1, 12
+    assert game_input.handle_event(n, state, ui) == "next_stage"
+    ui.next_stage_rect = (10, 10, 100, 40)
+    assert _click_pos(state, ui, (50, 30)) == "next_stage"
+
+    ui.has_next_stage = False          # the last stage: nowhere on to
+    assert game_input.handle_event(n, state, ui) is None
+    ui.has_next_stage, ui.hand_turns = True, 0   # an autoplayed win cleared nothing
+    assert game_input.handle_event(n, state, ui) is None
+
+    ui.stage_label = None              # an ordinary match keeps New map
+    assert game_input.handle_event(n, state, ui) == "restart"
+
+
+def test_start_game_copies_a_stage_onto_the_ui_as_plain_values(tmp_path, monkeypatch):
+    from starconquest import gauntlet
+
+    monkeypatch.setattr(main.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    g = gauntlet.builtin()[0]
+    first, last = g.stages[0], g.stages[-1]
+    cfg = gauntlet.stage_settings(first)
+    _state, ui, _log = main.start_game(cfg, cfg.seed, False, (g, first))
+    assert ui.stage_label == f"{g.name} 1/{len(g.stages)} · {first.title}"
+    assert ui.briefing == first.briefing and ui.briefing_open
+    assert ui.stage_hint == first.hint and ui.has_next_stage
+
+    main.stage_ui(ui, (g, last), briefing=False)    # a Retry: no card again
+    assert not ui.briefing_open and not ui.has_next_stage
+
+    _state, plain, _log = main.start_game(cfg, cfg.seed, False)
+    assert plain.stage_label is None and not plain.in_stage

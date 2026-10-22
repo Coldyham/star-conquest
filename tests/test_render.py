@@ -919,6 +919,99 @@ def test_help_text_fits_the_empty_panel_whole():
         pygame.quit()
 
 
+def test_a_stage_hint_fits_the_empty_panel():
+    """A gauntlet stage's hint sits above the legend, and the two together still
+    fit an empty panel whole — the longest hint `gauntlet.from_dict` lets
+    through, as well as every hint the tutorial ships. The touch build is the
+    binding case, which is why the hint carries no "tap to reread" line of its
+    own (the briefing card says so instead)."""
+    from starconquest import gauntlet
+
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    worst = ("abcd " * 40)[:gauntlet.HINT_MAX]
+    hints = [worst] + [s.hint for g in gauntlet.builtin() for s in g.stages]
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            ph = config.SCREEN_H - config.HUD_TOP_H - config.END_TURN_H
+            bottom = config.HUD_TOP_H + ph - config.s(8)
+            top = config.HUD_TOP_H + config.PANEL_PAD
+            font = render._fonts()["small"]
+            width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+            legend = len(render._wrap(font, render._legend_text(False), width))
+            for hint in hints:
+                used = len(render._stage_hint_lines(hint)) * render._row_h() + config.ROW_GAP * 2
+                room = (bottom - top - used - render._row_h("normal")) // render._row_h()
+                assert room >= legend, f"{hint!r}: legend needs {legend} rows, {room} left"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_stage_draws_its_briefing_hint_and_next_stage_on_screen():
+    """The briefing card over the opening board, the hint (a tap target) in the
+    empty panel, and on a won stage Next stage where New map was — every rect on
+    screen, at every shipping scale."""
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            bounds = screen.get_rect()
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            ui.stage_label = "Tutorial 3/10 · Defender's edge"
+            ui.stage_title = "Defender's edge"
+            ui.briefing = tuple("A paragraph long enough to wrap over several lines of the card. " * 3
+                                for _ in range(6))
+            ui.briefing_open = True
+            ui.stage_hint = "Defenders have the edge: attack with a margin. The menu's Combat tab shows the odds."
+            ui.has_next_stage = True
+            render.draw(screen, state, ui)
+            assert ui.stage_hint_rect[2] > 0
+            assert bounds.contains(pygame.Rect(*ui.stage_hint_rect))
+            assert ui.restart_live_button_rect == (0, 0, 0, 0), "no New map in a stage"
+
+            state.winner, ui.hand_turns, state.turn = 1, 30, 30
+            render.draw(screen, state, ui)
+            assert ui.next_stage_rect[2] > 0 and bounds.contains(pygame.Rect(*ui.next_stage_rect))
+            assert ui.restart_button_rect == (0, 0, 0, 0)
+            assert ui.retry_button_rect[2] > 0
+
+            ui.hand_turns = 0          # an autoplayed win clears nothing: no way on
+            render.draw(screen, state, ui)
+            assert ui.next_stage_rect == (0, 0, 0, 0)
+            assert ui.restart_button_rect == (0, 0, 0, 0)
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_the_briefing_card_stays_inside_the_map():
+    """Measured and centred on the play area, never a fixed pixel size: the
+    card's border is drawn wholly inside the map at every scale."""
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            ui = Ui(view=WorldView((0, 0, 10, 10), config.play_rect()), human_id=1)
+            ui.stage_label, ui.stage_title = "Tutorial 1/10 · First contact", "First contact"
+            ui.briefing = ("word " * 200,) * 6
+            screen.fill((0, 0, 0))
+            render._draw_briefing(screen, ui)
+            px, py, pw, ph = config.play_rect()
+            teal = pygame.Color(*render._BTN_TEAL[1])
+            hits = [(x, y) for x in range(0, screen.get_width(), 4) for y in range(0, screen.get_height(), 4)
+                    if screen.get_at((x, y)) == teal]
+            assert hits
+            assert all(px <= x < px + pw and py <= y < py + ph for x, y in hits)
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
 def test_the_pbp_you_are_line_does_not_land_under_clear_forwarding():
     """`_draw_clear_forward_button` used to be called with a hardcoded y near the
     panel top, ignoring however far `_panel_you_are`'s "You are ..." / title
