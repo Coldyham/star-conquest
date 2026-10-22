@@ -153,6 +153,76 @@ The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
 someone chasing a posted result would otherwise only learn it at the end.
 
+## End-of-game graphs (`stats`, `render._draw_history_graph`)
+
+History review can lay a chart over the lower part of the map, after the
+Civilization games' map-replay-plus-graphs end screen: tabs for systems, ships
+including in transit, income in ships/turn and cumulative ships lost, each a
+line per seat across every recorded turn, plus *Lost/turn*, a bar per turn
+stacked by seat (`stats.STACKED`) — as a line it is all spikes, while a
+stacked bar shows at once when the big fights were and who paid for them —
+and *Map share*, stacked bands that always fill 0-100% (`stats.AREA`): each
+seat's share of every system, with the unclaimed share as a grey band on top.
+A hidden seat leaves a gap rather than rescaling the rest, so a band always
+reads as a true share, and the unclaimed band waits for review to be revealed,
+since mid-game it would say how much lies behind the fog. A cursor marks the
+turn the map is showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
+and a click or drag across the plot seeks a turn as the track does. The ^
+caret (F) at its top right makes it full screen, filling everything between
+the bars with the scrubber kept, and the v caret docks it again. The legend is
+the trace selector: a click on a seat's row (or 1-9) shows or hides its line,
+and the y scale fits the lines shown, so hiding a runaway leader makes the
+rest readable.
+
+On a landscape screen the legend is a column right of the plot, as wide as its
+names (bot names included) up to 40% of the panel, past which the bot names
+drop and give their room back to the plot. On a portrait one it runs under the
+plot instead, full width, in as many columns as fit a whole row, and a docked
+panel grows to hold it: a column beside the plot there left it half the width
+and still clipped the bot names. The tabs wrap short of the caret.
+
+The camera is as free in review as in live play: drag the map to pan, wheel or
+−/+ to zoom, Reset (R) to re-frame. The Reset/−/+ cluster sits at the map's
+foot, lifted above the docked chart when it is open; full screen there is no
+map, so no cluster. A press on the reviewed map is always a pan, since there is
+nothing to select.
+
+- **Read off the history boards, never the log.** `stats.chart` runs once in
+  `main.open_history` over the boards `build_history` already reconstructed, so
+  a curve can never disagree with the map at the same turn, and nothing decides
+  or rolls again. `stats` is core (no pygame), drawing nothing from `state.rng`.
+- **Fog holds.** `Ui.graph_seats` draws every seat only once review is revealed
+  (a finished game); a mid-game review charts our seat alone, since a rival's
+  ship curve is exactly what the fog hides on the map beside it.
+- **Open by default on a finished game**, where it is the summary review is
+  for; closed in a mid-game review, where the board is the point.
+- **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
+- Not yet: the camera does not reframe into the space above the docked chart, and
+  there is no per-turn losses or kills view (a fight's dead are recorded per
+  owner, not per killer).
+
+## Naming each seat's bot (`Ui.bot_label`)
+
+Pointing at (or tapping) a scoreboard entry in the top bar opens a tooltip
+under it: the seat, who plays it, and its standings in words (or the last-known
+ones, or that it is out). The graph legend names the same after each seat,
+and the win line uses the same label (`render._winner_label`): "Verdant
+(Knower · Predict) wins!", or "(Marshal, random)" for a seat dealt at random.
+
+- **Labels are worked out once, in `main.new_ui`** (`seat_bot_labels`): the
+  family (`ai.canonical`, so a legacy name reads as its family) and the stop its
+  knob sits on (`ai.aux_stop_name`). Render imports no `ai`, so it reads them
+  off `Ui.seat_bots`.
+- **A random seat stays secret until the game is decided.** `Ui.random_seats`
+  comes from the `Settings` (`RANDOM_STRATEGY`), since `Player` only ever holds
+  the resolved bot. It reads "Random" until `Ui.bots_revealed`: a winner on the
+  board, or review of a finished game. A knocked-out spectator still waits,
+  because the bot is half of what the remaining seats are playing against.
+- **A person's seat is never a bot**: `Player.is_human` on the board being drawn,
+  so a seat claimed part-way through reads as its bot on the turns before.
+- The tooltip goes through the scoreboard's own fog (`_score_vis`): a rival
+  never sighted has no entry to hover.
+
 ## Route mode (`viewstate.ROUTING`)
 
 Everything else in the game commits on click; this doesn't. It writes a dozen

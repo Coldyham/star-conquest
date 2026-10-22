@@ -34,6 +34,7 @@ from starconquest import (
     replay,
     share,
     softkeyboard,
+    stats,
     turnfilm,
     viewstate,
     webstore,
@@ -43,7 +44,7 @@ from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
 from starconquest.replay import GameLog
-from starconquest.settings import Challenge, Settings, build_state, resolve_seed
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, build_state, resolve_seed
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -124,6 +125,10 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     """
     ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay,
             ironman=webstore.ironman())
+    ui.seat_bots = seat_bot_labels(state)
+    if settings is not None:
+        ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral
+                                    and settings.seat_strategy(pid) == RANDOM_STRATEGY)
     challenge = settings.challenge if settings is not None else None
     if challenge is not None and challenge.matches(settings):
         # Carry the target onto the Ui as plain numbers so the win overlay can say
@@ -135,6 +140,23 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     refresh_fog(state, ui)   # seed visibility from the opening position
     ui.reset_view(state)     # frame just what's seen so far, not the whole map
     return ui
+
+
+def seat_bot_labels(state: GameState) -> dict[int, str]:
+    """``{pid: "Knower · Search"}`` for every seat: the bot it is set to play
+    (a legacy name read as its family), and the stop its knob sits on when the
+    knob names stops and the stop is not just the family's own name. Capitalised rather than title-cased, as `render`'s win
+    line does, so a drop-in keeps the shape its author gave its filename."""
+    labels: dict[int, str] = {}
+    for p in state.non_neutral_players():
+        if not p.ai_strategy:
+            continue
+        family, aux = ai.canonical(p.ai_strategy, p.ai_params.aux)
+        name = family[:1].upper() + family[1:]
+        stop = ai.aux_stop_name(family, aux)
+        # a stop that only repeats the family ("Thinker · Thinker") says nothing
+        labels[p.id] = f"{name} · {stop}" if stop and stop.lower() != family.lower() else name
+    return labels
 
 
 def _accumulate_fog(state: GameState, human_id: int, seen: set[int],
@@ -942,6 +964,13 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # changes rather than as a position already arrived at.
     ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
+    # The end-of-game graphs: read once off the boards just built, and open by
+    # default on a finished game, where they are the summary the review is for.
+    ui.history_chart = stats.chart(history_states)
+    ui.history_graph = ui.history_reveal
+    ui.graph_full = False
+    ui.graph_hidden = set()
+    ui.dragging_graph = False
     return history_states, history_fog, history_events, live_fog
 
 
@@ -2091,6 +2120,9 @@ async def main() -> None:
                     # (the live board is untouched while reviewing, so no recompute).
                     ui.history = False
                     ui.dragging_scrubber = False
+                    ui.dragging_graph = False
+                    ui.history_chart = None
+                    ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended
                     history_states, history_fog, history_events = [], [], []

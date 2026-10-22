@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import config
+from . import config, stats
 from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -58,14 +58,59 @@ def _seek_scrubber(ui: Ui, pos) -> None:
     ui.history_turn = round(t * ui.history_max)
 
 
+def _over_graph(ui: Ui, pos) -> bool:
+    """Is ``pos`` on the docked graph panel? It spans the map's width from the
+    top of its tabs to the bottom bar, so the plot rect's foot and the first
+    tab's top bound it."""
+    if not ui.graph_tab_rects:
+        return False
+    _x, top, _w, _h = ui.graph_tab_rects[0]
+    return top <= pos[1] < config.SCREEN_H - config.HUD_BOTTOM_H and pos[0] < config.SCREEN_W - config.HUD_RIGHT_W
+
+
+def _seek_graph(ui: Ui, pos) -> None:
+    """Map a click/drag x across the graph's plot to the nearest turn. The plot
+    spans turn 0 at its left edge to ``history_max`` at its right, exactly as
+    `render._draw_history_graph` lays the curves out."""
+    x, _y, w, _h = ui.graph_plot_rect
+    ui.clear_fading_marks()   # a jump, as with the scrubber
+    if w <= 0 or ui.history_max <= 0:
+        ui.history_turn = 0
+        return
+    t = max(0.0, min(1.0, (pos[0] - x) / w))
+    ui.history_turn = round(t * ui.history_max)
+
+
 def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
-    """Modal history-review input: scrub the turn, rewind, or exit. Mutates only
-    the scrub position / drag flag; enter/exit and rewind are returned to main."""
+    """Modal history-review input: scrub the turn, rewind, or exit, and look
+    around the map as in live play (drag to pan, wheel or −/+ to zoom, R to
+    reset). Mutates only `Ui`; enter/exit and rewind are returned to main."""
     if event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_ESCAPE, pygame.K_h):
             return "toggle_history"
         if event.key == pygame.K_p:
             return "toggle_play"  # play/pause the replay at sim speed
+        if event.key == pygame.K_r:
+            ui.reset_view(state)  # as in live play: the camera is free here too
+            return None
+        if event.key == pygame.K_g and ui.history_chart is not None:
+            ui.history_graph = not ui.history_graph
+            ui.dragging_graph = False
+            return None
+        if event.key == pygame.K_TAB and ui.history_graph:
+            step = -1 if event.mod & pygame.KMOD_SHIFT else 1
+            ui.graph_metric = (ui.graph_metric + step) % len(stats.METRICS)
+            return None
+        if event.key == pygame.K_f and ui.history_graph:
+            ui.graph_full = not ui.graph_full
+            return None
+        if ui.history_graph and pygame.K_1 <= event.key <= pygame.K_9:
+            # the legend's rows, top to bottom
+            seats = ui.graph_seats()
+            n = event.key - pygame.K_1
+            if n < len(seats):
+                ui.toggle_trace(seats[n])
+            return None
         if event.key == pygame.K_LEFT:
             ui.history_turn = max(0, ui.history_turn - 1)
             ui.playing = False
@@ -84,13 +129,54 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             ui.clear_fading_marks()
         return None
     if event.type == pygame.MOUSEMOTION:
-        ui.hover = pick_node(state, ui, event.pos)  # hover still drives the detail panel
+        # hover still drives the detail panel, wherever the map is showing
+        if ui.history_graph and (ui.graph_full or _over_graph(ui, event.pos)):
+            ui.hover = None
+        else:
+            ui.hover = pick_node(state, ui, event.pos)
         if ui.dragging_scrubber:
             _seek_scrubber(ui, event.pos)
+        elif ui.dragging_graph:
+            _seek_graph(ui, event.pos)
+        elif ui.pan_active and event.buttons[0]:
+            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1])
+            ui.pan_last = event.pos
+        return None
+    if event.type == pygame.MOUSEWHEEL:
+        # the map's wheel zoom, wherever the map is what's under the pointer
+        pos = pygame.mouse.get_pos()
+        if not _over_side_panel(pos) and not (ui.history_graph and (ui.graph_full or _over_graph(ui, pos))):
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
         return None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         if ui.exit_history_rect[2] and _point_in_rect(event.pos, ui.exit_history_rect):
             return "toggle_history"
+        if _press_camera(state, ui, event.pos):
+            return None
+        if ui.graph_button_rect[2] and _point_in_rect(event.pos, ui.graph_button_rect):
+            ui.history_graph = not ui.history_graph
+            ui.dragging_graph = False
+            return None
+        if ui.history_graph:
+            if ui.graph_full_rect[2] and _point_in_rect(event.pos, ui.graph_full_rect):
+                ui.graph_full = not ui.graph_full
+                return None
+            for i, rect in enumerate(ui.graph_tab_rects):
+                if rect[2] and _point_in_rect(event.pos, rect):
+                    ui.graph_metric = i
+                    return None
+            for pid, rect in ui.graph_trace_rects:
+                if rect[2] and _point_in_rect(event.pos, rect):
+                    ui.toggle_trace(pid)
+                    return None
+            if ui.graph_all_rect[2] and _point_in_rect(event.pos, ui.graph_all_rect):
+                ui.graph_hidden.clear()
+                return None
+            if ui.graph_plot_rect[2] and _point_in_rect(event.pos, ui.graph_plot_rect):
+                ui.dragging_graph = True
+                ui.playing = False  # same as grabbing the scrubber
+                _seek_graph(ui, event.pos)
+                return None
         if ui.play_pause_rect[2] and _point_in_rect(event.pos, ui.play_pause_rect):
             return "toggle_play"
         if ui.rewind_button_rect[2] and _point_in_rect(event.pos, ui.rewind_button_rect):
@@ -109,10 +195,36 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             ui.dragging_scrubber = True
             ui.playing = False  # grabbing the scrubber pauses playback
             _seek_scrubber(ui, event.pos)
+            return None
+        if _over_map(event.pos) and not (ui.history_graph and (ui.graph_full or _over_graph(ui, event.pos))):
+            # nothing to select in a review, so every press on the map is a pan
+            _arm_pan(ui, event.pos)
         return None
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         ui.dragging_scrubber = False
+        ui.dragging_graph = False
+        ui.pan_active = False
     return None
+
+
+def _press_camera(state: GameState, ui: Ui, pos) -> bool:
+    """A press on the on-map camera cluster (Reset view, zoom −/+): moves the
+    camera and reports it handled. Each rect is guarded on its width, so a
+    scene that doesn't draw the cluster (render zeroes it) never matches."""
+    if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
+        ui.reset_view(state)
+    elif ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
+        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)
+    elif ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
+        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP)
+    else:
+        return False
+    return True
+
+
+def _over_map(pos) -> bool:
+    """Is ``pos`` inside the map viewport (`config.play_rect`)?"""
+    return _point_in_rect(pos, config.play_rect())
 
 
 def _point_in_rect(pos, rect) -> bool:
@@ -154,7 +266,7 @@ def _moves_camera(ui: Ui, event) -> bool:
     a running film, be spent skipping it, and leave the whole cluster looking
     dead — the next turn's film starts immediately, so the second press meets one
     too. Each rect test is guarded on its width, so the cluster is simply absent
-    (history mode zeroes all three) rather than matching a stale hit-box.
+    (full-screen graphs zero all three) rather than matching a stale hit-box.
     """
     if event.type == pygame.KEYDOWN:
         return event.key == pygame.K_r
@@ -215,7 +327,17 @@ def _handle_invite_event(event, ui: Ui) -> str | None:
     return None
 
 
+def _track_score_hover(event, ui: Ui) -> None:
+    """Note which scoreboard entry is under the pointer, for its tooltip. A
+    press counts too, so a tap reaches it where there is no hover; nothing is
+    consumed, whatever scene the event goes on to."""
+    if event.type not in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+        return
+    ui.score_hover = next((pid for pid, rect in ui.score_rects if _point_in_rect(event.pos, rect)), None)
+
+
 def handle_event(event, state: GameState, ui: Ui) -> str | None:
+    _track_score_hover(event, ui)
     # Play-by-post's invite overlay is modal too, and ahead of everything below:
     # a match this fresh (right after we created it) can be running no film and
     # holds no history or win to check first.
@@ -627,14 +749,7 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
     if ui.stage_hint_rect[2] and _point_in_rect(pos, ui.stage_hint_rect):
         ui.briefing_open = True
         return True, None
-    if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
-        ui.reset_view(state)
-        return True, None
-    if ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
-        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP)
-        return True, None
-    if ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
-        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP)
+    if _press_camera(state, ui, pos):
         return True, None
     if ui.route_button_rect[2] and _point_in_rect(pos, ui.route_button_rect):
         return True, "toggle_route"
