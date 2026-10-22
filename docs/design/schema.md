@@ -261,6 +261,23 @@ embargoes".
 equal by value, never through `sc_config_key`, whose digest of the text tells
 the worker's `0.0` from a browser's `0` and so misses nearly every node.
 
+## gauntlets
+
+Gauntlets built on the board's gauntlet page, one row each. The design is in
+[`gauntlet.md`](gauntlet.md), "Gauntlets made on the board".
+
+- **Function-only, like `game_logs`.** A row is up to 64 KiB of free text, so
+  `/api/gauntlet` holds the only insert, with a size limit, a rate limit and
+  `gauntlet-build.mjs`'s `checkBody` in front of it.
+- **Never updated but for `listed`.** The id is a hash of the body, so the same
+  gauntlet saved twice is one row (`ignore-duplicates`) and an edit is a new
+  row. `listed` is the one column `tools/admin.py` changes.
+- **Read by id through the function; `listed` rows also with the publishable
+  key.** Knowing an id is the permission to read it, as for a play-by-post
+  match, so the public read policy is `using (listed)` and nothing else.
+- **No progress and no identity.** `by_name` is self-declared display text, as a
+  score's is. Who cleared which stage stays in each player's own bests.
+
 ## public_replays and public_watchable_replays
 
 `public_replays` puts the consent boundary in SQL rather than in a function's

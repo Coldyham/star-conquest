@@ -3,7 +3,9 @@
 A gauntlet is an ordered string of pinned setups, each with a short briefing and
 a one-line hint, played in order. The tutorial is one
 (`starconquest/assets/gauntlets/tutorial.json`), read by the pure core module
-`starconquest/gauntlet.py`. The same file format is meant to carry a later
+`starconquest/gauntlet.py`. Players make their own on the board's gauntlet page
+(`leaderboard/gauntlet.html`), which stores them and hands out a short link; see
+"Gauntlets made on the board". The same file format is meant to carry a later
 single-player run with branching graph navigation and carry-over between stages;
 that part is proposed below and not built.
 
@@ -134,18 +136,73 @@ For authors. A gauntlet is one JSON file:
 - `Gauntlet.from_dict` never raises: it drops a stage with no int `id`, a
   duplicate `id` or no `settings` dict, drops a lane to a missing stage, and
   clamps text to the lengths above.
-- A player's own gauntlets live in `data_dir()/gauntlets/*.json` and are read
-  on desktop only (the web build's files are MEMFS and do not survive a
-  reload). One whose `id` is a built-in's is ignored. The Tutorial list shows a
-  picker once there is more than one.
+- A player's own gauntlets come from two places (`gauntlet.user`): the ones
+  opened from a link, kept in `webstore` under `paths.WEB_GAUNTLETS_KEY`
+  (`gauntlet.remembered`, newest first, the last eight), and on desktop the
+  files in `data_dir()/gauntlets/*.json`. The web build has no folder to read:
+  its files are MEMFS and do not survive a reload. One whose `id` is a
+  built-in's is ignored. The Tutorial list shows a picker once there is more
+  than one.
 
 `tools/gauntlet_check.py --gauntlet ID` checks that a gauntlet's stages rise in
 difficulty.
 
+## Gauntlets made on the board
+
+The board's gauntlet page builds a gauntlet from game links: one pasted link
+per stage (the menu's Get Link, or a challenge link with its score dropped),
+each with a title, briefing paragraphs and a hint. Saving stores it and gives
+the link `/game/#g=<id>`. A `.json` download of the same file is for desktop.
+
+- **Stored, not carried in the link.** A whole gauntlet fits in a fragment (the
+  ten-stage tutorial is about 3 KB deflated), but storing it keeps the link short,
+  keeps an author's work if a link is lost, and makes a public list of
+  gauntlets a flag rather than a redesign. Storage holds what an author wrote,
+  never progress: clears stay a read of local bests, as below.
+- **Its own table, never `campaigns`.** `campaign_games` and `game_embargoes`
+  read every `campaigns` row's nodes, so a gauntlet stored there would act as a
+  phantom campaign week and could embargo its stages' replays. Schema notes:
+  [`schema.md`](schema.md), "gauntlets".
+- **The id is `<slug>-<12 hex>`**: a slug of the name (at most 19 characters)
+  and a hash of the canonical file, minted by `/api/gauntlet`. 32 characters at
+  most, so it survives `from_dict`'s clamp of `id` intact. Saving the same
+  gauntlet twice is the same row; an edit is a new row, and its old link keeps
+  opening the old version.
+- **One check, run twice.** `leaderboard/js/gauntlet-build.mjs` `checkBody` is
+  what the page runs before it offers Save and what the function runs before it
+  stores. It refuses what `from_dict` would clamp (title 32, hint 90, six
+  briefing paragraphs of 240, 64 stages, 64 KiB), counting as the game counts:
+  whitespace collapsed, code points. A stage must carry an integer `seed`.
+- **Stages are stored pruned**, as the link carried them, not with every field
+  pinned as the tutorial's are: the board has no table of `Settings` defaults.
+  If a default moves, the stage becomes a new, uncleared stage, the answer the
+  module docstring calls honest. Pruned is also what `games.settings_json`
+  holds, so a later `gauntlet_games` view can match stages to scores by jsonb
+  equality, as `campaign_games` does.
+- **The game fetches once, then keeps the file.** `#g=<id>` asks
+  `/api/gauntlet?id=` through `pbp.request`, polled once a frame from `main`;
+  `gauntlet.remember` keeps the answer, and the menu opens the Tutorial list on
+  it. A kept gauntlet opens without asking again, offline included, and the
+  installed app (which relaunches without the fragment) still lists it. Rows
+  never change, so a kept copy never goes stale. Nothing is fetched when
+  `LEADERBOARD_ORIGIN` is blank.
+- **`#gauntlet=<payload>` carries the whole file** (deflated JSON, base64url,
+  as a settings token), read by `gauntlet.inline_data`. The page never offers
+  it; it is for a build with no board and for tests.
+- **Opening `gauntlet.html#<id>` loads a stored gauntlet as a draft.** Remixing
+  or fixing one is open, edit, save. A branching gauntlet loads as a linear
+  one: the page edits order only, and `lanes` waits for a page that draws them.
+- **Listing is an admin's decision at the author's request.** The author can tick
+  "Ask for it to be listed publicly" (`wants_listing`); `tools/admin.py
+  list-gauntlet` sets `listed`, and only a listed row is readable with the
+  publishable key. Nothing reads `listed` yet: it is there for a public
+  gauntlets page, so asking needs no migration then.
+
 ## Relation to the weekly campaign
 
-Nothing database-side is shared, deliberately. What is shared is the shape and
-the bordering rule.
+No campaign table or rule is shared, deliberately. What is shared is the shape
+and the bordering rule. (Stored gauntlets above keep only what an author wrote,
+in their own table: no progress, so the argument below still holds.)
 
 The campaign has server state because it is **contested**: other people take
 your nodes, so holding is a fold over everyone's verified scores (`fold` in

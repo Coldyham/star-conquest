@@ -21,6 +21,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+| [`gauntlet.html`](gauntlet.html) | make a gauntlet: one game link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Tutorial list. `gauntlet.html#<id>` opens a saved one to remix |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
@@ -555,11 +556,13 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
-   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
-   (`campaign.mjs`) needs no key: it reads the same public campaign rows
-   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
-   them.
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp`,
+   `/api/campaign` and `/api/gauntlet` on its own origin
+   (`paths.LEADERBOARD_*_PATH`). `campaign.mjs` needs no key: it reads the same
+   public campaign rows campaign.html does, with the publishable key, and runs
+   `js/campaign.mjs` on them. `gauntlet.mjs` is the only writer of the
+   `gauntlets` table and the way an unlisted one is read, by id; it checks a
+   gauntlet with `js/gauntlet-build.mjs`, as the page does before Save.
 
 ## Finding each other
 
@@ -662,6 +665,13 @@ from drifting apart.
 are exported rather than buried in the handler), and that `replay.mjs` reads
 through the `public_replays` view, refuses a malformed id before it reaches a
 query string, and answers "unpublished" and "missing" identically.
+
+`tests/gauntlet-build.test.mjs` covers what a gauntlet may be (`checkBody`, the
+limits, the id) and the page's draft, and `tests/gauntlet-handler.test.mjs` drives
+`gauntlet.mjs` over a stub PostgREST. `tests/fixtures/gauntlet.json` is a
+gauntlet built from three real links, which `tests/test_gauntlet.py` reads with
+the game's own `Gauntlet.from_dict`; regenerate it with
+`UPDATE_FIXTURES=1 node --test tests/gauntlet-build.test.mjs`.
 
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
