@@ -1009,6 +1009,39 @@ grant select, insert, update on public.pbp_matches to service_role;
 grant select, insert, update on public.pbp_orders to service_role;
 
 -- ---------------------------------------------------------------------------
+-- gauntlets: a gauntlet someone built on the board's gauntlet page
+-- (gauntlet.html), stored so the link that opens it is a short id rather than
+-- the whole file. body is the file starconquest/gauntlet.py reads
+-- (Gauntlet.from_dict), its `id` equal to gauntlet_id. The id is a name slug
+-- plus a hash of the body, minted by netlify/functions/gauntlet.mjs, the only
+-- writer: saving the same gauntlet twice is a no-op and an edited one is a new
+-- row, so a row never changes. Never progress: clears stay in each player's own
+-- bests. An unlisted row is read only through the function, by id (knowing the
+-- id is the permission, as with a play-by-post match); `listed` is set only by
+-- tools/admin.py, at the author's request (wants_listing), and only a listed
+-- row is readable with the publishable key.
+-- ---------------------------------------------------------------------------
+create table if not exists public.gauntlets (
+  gauntlet_id   text primary key check (gauntlet_id ~ '^[a-z0-9-]{1,19}-[0-9a-f]{12}$'),
+  -- The function holds a body to 64 KiB of compact JSON; jsonb's text form
+  -- spaces every ':' and ',', so this backstop is looser than that, not equal.
+  body          jsonb not null
+    check (jsonb_typeof(body) = 'object' and octet_length(body::text) <= 131072),
+  by_name       text not null default '' check (char_length(by_name) <= 32),
+  wants_listing boolean not null default false,
+  listed        boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+
+alter table public.gauntlets enable row level security;
+drop policy if exists "gauntlets listed read" on public.gauntlets;
+create policy "gauntlets listed read" on public.gauntlets for select using (listed);
+grant select on public.gauntlets to anon, authenticated;
+
+-- gauntlet.mjs's grants: it reads a row by id and inserts a new one.
+grant select, insert on public.gauntlets to service_role;
+
+-- ---------------------------------------------------------------------------
 -- Moderation: tools/admin.py, under the secret key. admin_actions logs each
 -- command before it runs, with the rows it is about to remove or overwrite.
 -- Closed like game_logs.
@@ -1033,6 +1066,8 @@ grant select, delete on public.config_tags to service_role;
 grant delete on public.scores, public.games, public.bot_scores to service_role;
 -- A seat's token rewritten or forgotten, or a whole match removed.
 grant delete on public.pbp_matches, public.pbp_orders to service_role;
+-- A gauntlet listed, unlisted or removed.
+grant update, delete on public.gauntlets to service_role;
 
 -- PostgREST does not see new relations until it reloads its schema cache.
 -- Supabase's DDL triggers usually do this already; idempotent either way.
