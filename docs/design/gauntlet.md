@@ -9,8 +9,8 @@ a one-line hint, played in order. The tutorial is one
 single-player run with branching graph navigation and carry-over between stages;
 that part is proposed below and not built.
 
-Built from `docs/tutorial-plan.md` (2026-10-21). The plan's decisions are
-recorded here with their reasons; the plan file is marked implemented.
+Planned on 2026-10-21; the plan's decisions are recorded here with their
+reasons.
 
 ## The tutorial ladder
 

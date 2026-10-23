@@ -72,9 +72,4 @@ away"`), never with "above"/"below". Code comments do the same
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)
 are written for outside developers building their own bots, and
 `tests/test_bot_brief.py` checks the brief against the code. Treat them as
-published documents, not working notes. [`site-merge-plan.md`](site-merge-plan.md)
-is the planning brief for merging the game and board sites. That merge is
-implemented, and the brief is kept for its reasoning.
-[`tutorial-plan.md`](tutorial-plan.md) is the plan the tutorial was built
-from. It is implemented, and its reasoning now lives in
-[`design/gauntlet.md`](design/gauntlet.md).
+published documents, not working notes.
