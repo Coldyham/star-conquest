@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "stages": 3,
+    "seed": 12,
+    "rules": {
+      "players": {
+        "range": [
+          2,
+          3
+        ]
+      },
+      "systems": {
+        "range": [
+          13,
+          18
+        ]
+      },
+      "mode": {
+        "fix": "symmetric"
+      },
+      "fog": {
+        "fix": false
+      }
+    },
+    "opponents": {
+      "in": [
+        "rusherplus",
+        "heuristic"
+      ]
+    },
+    "roll": false,
+    "candidates": 1,
+    "targets": true
+  },
+  "fragment": "gauntlet-spec=eNpVjjsKwzAQRO8y9Ta2m6CrmBTCWtsC_diVICbo7kEmBNIN85jHvKHVHqwwC0GZHcw0E6SF0b1Rgr1Y7ig2HQyzzrQ8O0EvrRz_yLTQ9BgsZscD7P4FA71i5Cp-Qyfs-fiR3Qbl3gm5lJw41dvmE8wKaXqylNAUhJObeK1-w7BLDuE7Jmw2Oe9sHXcnQrVy8PBUadw_4JJK-g"
+}

@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import json
 from pathlib import Path
 
 import pygame
@@ -25,6 +26,7 @@ from starconquest import (
     engine,
     fog,
     gauntlet,
+    gauntletgen,
     mapgen,
     mapmaker,
     menu,
@@ -44,7 +46,8 @@ from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
 from starconquest.replay import GameLog
-from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, build_state, resolve_seed
+from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
+                                   random_seed, resolve_seed)
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -512,6 +515,72 @@ def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: s
                     GAUNTLET_MISSING_MSG if state == pbp.MISSING
                     else GAUNTLET_UNREADABLE_MSG if state == pbp.OK
                     else GAUNTLET_UNREACHABLE_MSG, False)
+
+
+# A `#gauntlet-spec=` launch URL, built on the board's gauntlet page, generates a
+# gauntlet here (`gauntletgen`): every probe game played a slice per menu frame,
+# then the result kept and opened on the Tutorial list, as a `#g=` one is.
+GAUNTLET_GEN_MSG = "Generating a gauntlet: {pct:.0%} (games {done} of {total})"
+GAUNTLET_GEN_REFUSED_MSG = "Can't generate that gauntlet: {why}"
+GAUNTLET_GEN_EMPTY_MSG = "No generated map was won by any test bot: try a looser setup"
+# How long the generator may hold a menu frame. A probe turn is a few ms for
+# most bots, so this keeps the menu answering while it works.
+GAUNTLET_GEN_BUDGET_S = 0.03
+
+
+def spec_request(path: str) -> str:
+    """The launch's spec fragment: the address bar's on the web, or a
+    ``--gauntlet-spec`` file's contents on desktop."""
+    if not path:
+        return webstore.url_token()
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        print(f"--gauntlet-spec {path!r}: {err}")
+        return ""
+    return gauntletgen.spec_fragment(data) if isinstance(data, dict) else ""
+
+
+def start_generation(menu_state: MenuState, fragment: str) -> gauntletgen.Job | None:
+    """Start generating from a ``#gauntlet-spec=`` fragment, or None when the
+    fragment is not one (or the spec can never deal, which the status says)."""
+    data = gauntletgen.spec_from_fragment(fragment)
+    if data is None:
+        return None
+    ai.load_models()
+    try:
+        job = gauntletgen.job_from_link(data, random_seed())
+    except ValueError as err:
+        menu.set_status(menu_state, GAUNTLET_GEN_REFUSED_MSG.format(why=err), False)
+        return None
+    menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(pct=0.0, done=0, total=job.total), True)
+    return job
+
+
+def pump_generation(menu_state: MenuState, settings: Settings,
+                    job: gauntletgen.Job) -> gauntletgen.Job | None:
+    """Play the generator on for one frame's budget; once done, keep the
+    gauntlet and open the Tutorial list on it. Returns the job while it runs.
+
+    A probe game goes through ``build_state``, which pushes its setup's knobs
+    into ``config``; the menu's own setup is pushed back after every slice, so
+    nothing the menu draws reads a probe's balance."""
+    try:
+        job.step(GAUNTLET_GEN_BUDGET_S)
+    finally:
+        apply_globals(settings)
+    if not job.done:
+        menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(
+            pct=job.progress(), done=len(job.rows), total=job.total), True)
+        return job
+    data = job.result()
+    g = gauntlet.remember(data) if data is not None else None
+    if g is None:
+        menu.set_status(menu_state, GAUNTLET_GEN_EMPTY_MSG, False)
+        return None
+    menu.set_status(menu_state, f"Generated {g.name}: {len(g.stages)} stages", True)
+    menu.open_gauntlet(menu_state, settings, g.id)
+    return None
 
 
 def replay_request() -> str:
@@ -1432,6 +1501,9 @@ async def main() -> None:
     ap.add_argument("--match", default="", metavar="MATCH:TOKEN",
                     help="open a play-by-post seat (the desktop equivalent of a "
                          "#pbp=<match>:<token> link)")
+    ap.add_argument("--gauntlet-spec", default="", metavar="SPEC.json",
+                    help="generate a gauntlet from a spec file (the desktop equivalent "
+                         "of a #gauntlet-spec= link)")
     ap.add_argument("--no-menu", action="store_true",
                     help="skip the setup menu and start straight away with these args")
     # On Android the launcher may pass argv the parser doesn't recognise, and a
@@ -1586,6 +1658,11 @@ async def main() -> None:
         gid, inline = gauntlet_request()
         linked_gauntlet = gid is not None or inline is not None
         pending_gauntlet = open_linked_gauntlet(menu_state, settings, gid, inline)
+
+    gen_job: gauntletgen.Job | None = None
+    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
+        gen_job = start_generation(menu_state, spec_request(args.gauntlet_spec))
+        linked_gauntlet = gen_job is not None
 
     # If the last saved match was left unfinished, offer to resume it on the menu.
     resume_prompt: GameLog | None = None
@@ -2296,6 +2373,8 @@ async def main() -> None:
             # Soft-keyboard typing arrives outside the SDL event queue, so the
             # menu needs a per-frame poll as well as its event handler.
             menu.pump(menu_state, settings)
+            if gen_job is not None:
+                gen_job = pump_generation(menu_state, settings, gen_job)
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)

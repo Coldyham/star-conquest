@@ -268,9 +268,11 @@ toward it.
 
 Build order: (1) the spec and dealer in core, (2) an offline
 `tools/gauntlet_gen.py`, (3) time it in the web build, then generate in the
-game from a spec link, (4) a form on the board that builds the spec link. Steps
-1 and 2 are built (`starconquest/dealer.py`, `tools/gauntlet_gen.py`); 3 and 4
-are not.
+game from a spec link, (4) a form on the board that builds the spec link. All
+four are built (`starconquest/dealer.py`, `starconquest/gauntletgen.py`,
+`tools/gauntlet_gen.py`, the generate form on `gauntlet.html`), except that the
+web build was never timed before the game generated in it: the first deploy
+preview is that measurement ("In the game", below).
 
 ### Where it runs
 
@@ -387,6 +389,58 @@ CPU on the container (actuary sat in some of them).
   turns, or a filter on the probes' winning turns, belongs in the pick.
 - **No stage was won by every probe.** The first stage lost by one probe in
   four, so a "won by all" floor would have left the run without a first stage.
+
+### In the game
+
+- **`#gauntlet-spec=<payload>`** carries the spec as deflated JSON in base64url,
+  as a settings token does, with the run's options beside it (`candidates`,
+  `targets`, `slack`, `name`), which `Spec.from_dict` ignores
+  (`gauntletgen.spec_from_fragment`, `job_from_link`). A link with no `seed`
+  gets one rolled; the board's form always names one, so opening a link twice
+  makes the same gauntlet. On desktop, `--gauntlet-spec SPEC.json` does the
+  same.
+- **The work is spread over menu frames.** `gauntletgen.Job` plays one probe
+  game a turn at a time (`gauntletgen.play`, a generator), and `main.
+  pump_generation` gives it `GAUNTLET_GEN_BUDGET_S` (30 ms) a frame while the
+  menu is up, with the progress on the menu's status line ("Generating a
+  gauntlet: 40% (games 13 of 32)"). It pauses while a game is played. Done, the
+  file is kept (`gauntlet.remember`) and the Tutorial list opens on it, as a
+  `#g=` link does.
+- **A probe's balance never leaks into the menu.** A probe game goes through
+  `build_state`, which pushes its setup's knobs into `config`;
+  `pump_generation` pushes the menu's own setup back after every slice
+  (`settings.apply_globals`).
+- **Budgets are not lifted in the game**: `ai.set_budget_scale` is
+  process-wide and never set mid-session. A probe game with a time-budgeted bot
+  in it (actuary as an opponent) can therefore come out differently in the
+  browser than in the tool. The default probes carry no budget.
+- **One probe path.** The tool and the game both play `gauntletgen.play`,
+  which matches `tests.sim.play_settings` game for game (checked on 20 games
+  when it was written); `test_a_stepped_job_plays_the_same_games_as_playing_them_whole`
+  holds the stepped job to the whole one.
+- **Measured on desktop** (2026-10-23): a four-stage, two-candidate run, 32
+  games, took 617 menu frames, about 18 s. A phone is slower by a factor not
+  yet measured; the form defaults to six stages and three candidates (72 games)
+  and says how many games a spec will play.
+- **Copy link** on the Tutorial list (web only, for a gauntlet opened from a
+  link or generated here: `MenuState.kept_ids`) copies a `#gauntlet=` link
+  carrying the whole file (`gauntlet.kept`), so a generated gauntlet is shared
+  as it is, with no board involved.
+
+### On the board
+
+The generate form sits on `gauntlet.html`, folded under the builder's lede.
+`leaderboard/js/gauntlet-spec.mjs` turns it into a spec (`buildSpec`, pure,
+`leaderboard/tests/gauntlet-spec.test.mjs`) and `gauntlet-gen-page.mjs` is the
+DOM around it. Each choice becomes one dealer rule: map type (either, random,
+symmetric), players and systems as ranges, opponents as an `in` list over the
+ladder (knower unticked to start), speed gain off, home production fixed, fog
+off, on or either, and `roll` for the other Advanced sliders. "Either" is an
+`in` rule rather than no rule, since with `roll` off an unruled field stays at
+its default. The form says what it cannot deal before it offers a link, and
+how many probe games the link will cost. What it builds, the game reads
+unchanged (`test_the_boards_spec_link_is_a_run_the_game_reads_unchanged`, over
+`leaderboard/tests/fixtures/gauntlet-spec.json`).
 
 ### Sharing the result
 

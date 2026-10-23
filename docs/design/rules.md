@@ -15,7 +15,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`. `tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
@@ -571,7 +571,13 @@ Reasons: `docs/design/gauntlet.md`.
   of the spec and the rng. `Spec.from_dict` never raises; `dealer.problems`
   names a spec that can never deal. `tools/gauntlet_gen.py` picks among
   candidates by the share of probes that lose them and never picks one no probe
-  won (`tests/test_dealer.py`, `tests/test_gauntlet_gen.py`).
+  won (`tests/test_dealer.py`, `tests/test_gauntlet_gen.py`). The game
+  generates from a `#gauntlet-spec=` link a slice per menu frame
+  (`gauntletgen.Job`, `main.pump_generation`), pushes the menu's setup back
+  into `config` after every slice, and keeps the result like a linked
+  gauntlet; the board's form only builds the link (`gauntlet-spec.mjs`). One
+  probe path, `gauntletgen.play`, for the tool and the game
+  (`tests/test_gauntletgen.py`).
 - **`#g=<id>` is fetched once and kept**, `#gauntlet=<payload>` carries the file
   (`gauntlet.link_id`, `gauntlet.inline_data`); both open the Tutorial list on
   it (`main.open_linked_gauntlet`). A kept one opens without a fetch. What the

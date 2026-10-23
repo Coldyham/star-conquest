@@ -8,7 +8,7 @@
 
 Deals ``--candidates`` setups per stage from the spec (`starconquest/dealer.py`),
 each with opponents for its stage's depth, then plays every candidate with each
-probe bot in seat 1 (`tests.sim.play_settings`, budgets lifted, so a game is the
+probe bot in seat 1 (`gauntletgen.play`, the bot column's funnel; budgets lifted, so a game is the
 same on any machine). A candidate's difficulty is the share of probes that lose
 it, as `tools/gauntlet_check.py` measures a stage, with the probes' mean winning
 turns breaking ties. A candidate no probe won is never picked; the rest are
@@ -30,7 +30,6 @@ import argparse
 import json
 import math
 import os
-import random
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -40,15 +39,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from starconquest import ai, dealer, gauntlet  # noqa: E402
+from starconquest import gauntletgen as gg  # noqa: E402
+from starconquest.gauntletgen import candidates, measure, pick, target  # noqa: E402,F401
 from starconquest.settings import Settings, random_seed  # noqa: E402
-from tests import sim  # noqa: E402
 
 RESULTS = ROOT / "results" / "gauntlet_gen"
-PROBES = ("rusherplus", "heuristic", "thinker", "marshal")
+PROBES = gg.PROBES
 # Bots slow enough to make a probe game, or every turn of a game they sit in,
 # take minutes: worth saying before a run with them starts.
 SLOW = ("knower", "actuary")
-MAX_TURNS = 400
+MAX_TURNS = gg.MAX_TURNS
 
 
 def _shown(path: Path) -> str:
@@ -63,27 +63,7 @@ def play_one(key: str, stage: dict, bot: str) -> dict:
     if bot not in ai.STRATEGIES:
         ai.load_models()
     ai.set_budget_scale(math.inf)
-    cfg = Settings.from_dict(stage)
-    t0 = time.perf_counter()
-    res = sim.play_settings(cfg, cfg.seed, bot, max_turns=MAX_TURNS)
-    return {"key": key, "bot": bot, "won": res.won and not res.timed_out, "turns": res.turns,
-            "lost": res.lost, "timed_out": res.timed_out, "secs": round(time.perf_counter() - t0, 2)}
-
-
-def candidates(spec: dealer.Spec, seed: int, per_stage: int) -> list[dict]:
-    """Every candidate the run deals, in order: ``{key, depth, stage}``. A pure
-    function of the spec and the seed, so a rerun deals the same ones."""
-    rng = random.Random(f"{seed}:gauntlet")
-    out, seen = [], set()
-    for i in range(spec.stages):
-        depth = i / (spec.stages - 1) if spec.stages > 1 else 0.0
-        for _ in range(per_stage):
-            s = dealer.deal(spec, rng, depth)
-            key = s.challenge_key()
-            if key not in seen:
-                seen.add(key)
-                out.append({"key": key, "depth": round(depth, 4), "stage": dealer.stage_dict(s)})
-    return out
+    return gg.play_one(key, stage, bot, MAX_TURNS)
 
 
 def load(path: Path) -> tuple[dict | None, list[dict]]:
@@ -102,59 +82,6 @@ def load(path: Path) -> tuple[dict | None, list[dict]]:
         else:
             rows.append(row)
     return head, rows
-
-
-def measure(cands: list[dict], rows: list[dict], probes: list[str]) -> list[dict]:
-    """Each candidate with its probes' results: ``played``, ``wins`` (rows),
-    ``difficulty`` (share lost) and ``win_turns`` (mean, for ties)."""
-    by = {(r["key"], r["bot"]): r for r in rows}
-    out = []
-    for c in cands:
-        games = [by[(c["key"], b)] for b in probes if (c["key"], b) in by]
-        wins = [r for r in games if r["won"]]
-        out.append({**c, "played": len(games), "wins": wins,
-                    "difficulty": 1 - len(wins) / len(games) if games else None,
-                    "win_turns": sum(r["turns"] for r in wins) / len(wins) if wins else None})
-    return out
-
-
-def pick(measured: list[dict], stages: int) -> list[dict]:
-    """A rising sequence: the candidates some probe won, by difficulty then mean
-    winning turns, one at each of ``stages`` evenly spaced places. Fewer when
-    there are not that many to pick from."""
-    usable = sorted((m for m in measured if m["wins"]),
-                    key=lambda m: (m["difficulty"], m["win_turns"], m["key"]))
-    n = len(usable)
-    if n <= stages:
-        return usable
-    if stages == 1:
-        return [usable[0]]
-    return [usable[round(i * (n - 1) / (stages - 1))] for i in range(stages)]
-
-
-def target(m: dict, slack: int) -> dict:
-    """The slowest probe win, plus ``slack`` turns: shown possible by a bot."""
-    slowest = max(m["wins"], key=lambda r: (r["turns"], r["lost"]))
-    if slack:
-        return {"turns": slowest["turns"] + slack}
-    return {"turns": slowest["turns"], "lost": slowest["lost"]}
-
-
-def build(run: str, name: str, picked: list[dict], probes: list[str], targets: bool, slack: int) -> dict:
-    """The gauntlet file: linear, a stage per pick, its briefing the setup in a
-    line and how many probes won it."""
-    stages = []
-    for i, m in enumerate(picked):
-        cfg = Settings.from_dict(m["stage"])
-        won = len(m["wins"])
-        row = {"id": i, "title": f"Stage {i + 1}",
-               "briefing": [dealer.describe(cfg),
-                            f"Measured: {won} of {m['played']} test bots won this map."],
-               "hint": "", "settings": m["stage"]}
-        if targets:
-            row["target"] = target(m, slack)
-        stages.append(row)
-    return {"id": f"gen-{run}"[:gauntlet.NAME_MAX], "name": name[:gauntlet.NAME_MAX], "stages": stages}
 
 
 def report(measured: list[dict], picked: list[dict], probes: list[str]) -> None:
@@ -253,7 +180,7 @@ def main() -> None:
     if len(picked) < spec.stages:
         print(f"  note: only {len(picked)} candidates were won by any probe; "
               f"deal more with a new --run and a larger --candidates")
-    data = build(a.run, a.name or f"Generated {seed}", picked, a.probes, a.targets, a.target_slack)
+    data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack)
     g = gauntlet.Gauntlet.from_dict(data)
     if g is None or gauntlet.problems(g):
         sys.exit("the picked gauntlet does not read back: nothing written")

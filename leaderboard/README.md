@@ -21,7 +21,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
-| [`gauntlet.html`](gauntlet.html) | make a gauntlet: one game link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Tutorial list. `gauntlet.html#<id>` opens a saved one to remix |
+| [`gauntlet.html`](gauntlet.html) | make a gauntlet: one game link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Tutorial list. `gauntlet.html#<id>` opens a saved one to remix. Its generate form builds a `/game/#gauntlet-spec=` link instead: the game deals the maps, plays test bots on them and orders them by difficulty (`js/gauntlet-spec.mjs`) |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
@@ -672,6 +672,10 @@ limits, the id) and the page's draft, and `tests/gauntlet-handler.test.mjs` driv
 gauntlet built from three real links, which `tests/test_gauntlet.py` reads with
 the game's own `Gauntlet.from_dict`; regenerate it with
 `UPDATE_FIXTURES=1 node --test tests/gauntlet-build.test.mjs`.
+`tests/gauntlet-spec.test.mjs` covers the generate form's spec and link;
+`tests/fixtures/gauntlet-spec.json` is a link it built, which
+`tests/test_gauntletgen.py` decodes and deals from (regenerate with
+`UPDATE_FIXTURES=1 node --test tests/gauntlet-spec.test.mjs`).
 
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which

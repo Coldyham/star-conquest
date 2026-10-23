@@ -1783,6 +1783,54 @@ def test_no_board_means_the_gauntlet_link_says_so(_gauntlet_store, monkeypatch):
     assert ms.status == main.GAUNTLET_UNREACHABLE_MSG
 
 
+# --------------------------------------------------------------------------- #
+# Generating a gauntlet from a spec link (`#gauntlet-spec=`)
+# --------------------------------------------------------------------------- #
+_SPEC = {"stages": 2, "seed": 9, "candidates": 1, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 10]}},
+         "opponents": ["rusherplus", "heuristic"]}
+
+
+def test_a_spec_link_generates_a_frame_at_a_time_then_opens_the_list(_gauntlet_store, monkeypatch):
+    ms, settings = _gauntlet_store, Settings(home_production=5)
+    assert main.start_generation(ms, "g=hard-mode-0123456789ab") is None
+    job = main.start_generation(ms, main.gauntletgen.spec_fragment(_SPEC))
+    assert job is not None and ms.status.startswith("Generating a gauntlet: 0%")
+    monkeypatch.setattr(main, "GAUNTLET_GEN_BUDGET_S", 0.0)
+    frames = 0
+    while job is not None:
+        job = main.pump_generation(ms, settings, job)
+        frames += 1
+        # A probe's setup never leaks into what the menu draws.
+        assert main.config.HOME_PRODUCTION == 5
+    assert frames > 1 and ms.tutorial_open and ms.status_ok
+    picked = ms.gauntlets[ms.gauntlet_pick]
+    assert picked.id.startswith("gen-") and ms.status == f"Generated {picked.name}: {len(picked.stages)} stages"
+    assert [g.id for g in main.gauntlet.remembered()] == [picked.id]
+
+
+def test_a_spec_link_that_can_never_deal_says_why(_gauntlet_store):
+    ms = _gauntlet_store
+    frag = main.gauntletgen.spec_fragment({"opponents": []})
+    assert main.start_generation(ms, frag) is None
+    assert ms.status == "Can't generate that gauntlet: no opponents are allowed" and not ms.status_ok
+
+
+def test_copy_link_sends_a_kept_gauntlet_as_a_whole_file(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    copied = []
+    monkeypatch.setattr(main.menu, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "link_url", lambda token: f"https://x/game/#{token}")
+    monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    main.gauntlet.remember(_linked_gauntlet())
+    main.menu.open_gauntlet(ms, Settings(), "hard-mode-0123456789ab")
+    g = ms.gauntlets[ms.gauntlet_pick]
+    assert main.menu._shareable(ms, g)
+    assert not main.menu._shareable(ms, main.gauntlet.builtin()[0])
+    main.menu._copy_gauntlet(ms, g)
+    token = copied[0].split("#", 1)[1]
+    assert main.gauntlet.inline_data(token) == _linked_gauntlet() and ms.status_ok
+
+
 def _watchable_log(tmp_path, monkeypatch, turns=6):
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
     state, ui = _setup()

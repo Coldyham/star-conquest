@@ -1226,3 +1226,11 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 }
 .gauntlet-form #problem { color: var(--gold); }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
+
+/* -- the generate form (gauntlet.html) --------------------------------------- */
+.gen { margin: 1.5rem 0; }
+.gen summary { cursor: pointer; color: var(--gold); }
+.gen .row input[type="number"] { width: 6rem; }
+.gen-bots { border: 1px solid var(--line); padding: 0.5rem 1rem; margin: 0.5rem 0; }
+.gen-bots legend { padding: 0 0.5rem; color: var(--gold); }
+.gen-bots #gen-opponents { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }

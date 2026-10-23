@@ -458,6 +458,12 @@ def _kept() -> list[dict]:
     return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
 
 
+def kept(gid: str) -> dict | None:
+    """The file of gauntlet ``gid`` as it was kept (``remember``), or None: what
+    a Copy link sends on, the whole file in a ``#gauntlet=`` link."""
+    return next((d for d in _kept() if _text(d.get("id"), NAME_MAX) == gid), None)
+
+
 def remembered() -> list[Gauntlet]:
     """The gauntlets opened from links, newest first."""
     return [g for g in (Gauntlet.from_dict(d) for d in _kept()) if g is not None]
