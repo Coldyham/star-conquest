@@ -118,7 +118,8 @@ production (**before** combat) → arrivals+combat (per node, launch-order
 independent) → win check → `turn += 1`. A bot sizing an attack off
 `target.ships` can meet one more hull than it counted (`prod_progress`).
 
-- `apply_order` deducts ships at launch.
+- `apply_order` deducts ships at launch. One owner's launches down one lane in a
+  turn fly as **one fleet** (`end_turn`'s `launched`).
 - **In-lane battles** (`config.IN_LANE_BATTLES`, off by default): pairwise in
   crossing order, winner only thinned, no `DEFENDER_ADVANTAGE` in open space.
 - **A pile-up** pools per owner, folds attackers pairwise strongest-first, and

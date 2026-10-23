@@ -23,7 +23,7 @@ import sys
 import pytest
 
 from starconquest import ai, config, engine, mapgen
-from starconquest.model import AiParams, Fleet, GameState, Player, System
+from starconquest.model import AiParams, Fleet, GameState, Order, Player, System
 from tests import sim
 
 
@@ -140,6 +140,13 @@ def test_orders_are_legal(ac):
         for sid, total in per_source.items():
             assert total <= state.systems[sid].ships, f"over-committed {sid}"
         engine.end_turn(state, decide=ai.decide)
+
+
+def test_one_lane_gets_one_order(ac):
+    """The greedy commits a lane in pieces; the plan hands them over summed, in
+    the place the lane's first piece was committed."""
+    pieces = [Order(1, 4, 5, 3), Order(1, 4, 6, 2), Order(1, 4, 5, 1), Order(1, 7, 5, 2)]
+    assert ac._merged(pieces) == [Order(1, 4, 5, 4), Order(1, 4, 6, 2), Order(1, 7, 5, 2)]
 
 
 def test_actuary_does_not_mutate_state(ac):
