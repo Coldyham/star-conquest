@@ -1841,6 +1841,13 @@ def test_copy_link_sends_a_kept_gauntlet_as_a_whole_file(_gauntlet_store, monkey
     assert main.gauntlet.inline_data(token) == _linked_gauntlet() and ms.status_ok
 
 
+def test_the_list_button_says_tutorial_until_there_is_another_gauntlet(_gauntlet_store, monkeypatch):
+    monkeypatch.setattr(main.gauntlet, "user_dir", lambda: main.webstore._file_path().parent / "none")
+    assert main.menu._gauntlets_label(main.MenuState()) == "Tutorial"
+    main.gauntlet.remember(_linked_gauntlet())
+    assert main.menu._gauntlets_label(main.MenuState()) == "Gauntlets"
+
+
 def _watchable_log(tmp_path, monkeypatch, turns=6):
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
     state, ui = _setup()

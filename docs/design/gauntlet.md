@@ -163,7 +163,9 @@ For authors. A gauntlet is one JSON file:
   files in `data_dir()/gauntlets/*.json`. The web build has no folder to read:
   its files are MEMFS and do not survive a reload. One whose `id` is a
   built-in's is ignored. The Tutorial list shows a picker once there is more
-  than one.
+  than one, and the menu's button that opens it reads "Gauntlets" instead of
+  "Tutorial" (`menu._gauntlets_label`; `MenuState.gauntlets` starts as
+  `gauntlet.every()` so the button knows before the list is opened).
 
 `tools/gauntlet_check.py --gauntlet ID` checks that a gauntlet's stages rise in
 difficulty.

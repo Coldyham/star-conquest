@@ -336,7 +336,9 @@ class MenuState:
     stage_at: tuple[str, int] | None = None
     stash: dict | None = None
     tutorial_open: bool = False
-    gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.builtin)
+    # Every gauntlet, the player's own included, so the button can say whether
+    # there is more than the tutorial; read again each time the list opens.
+    gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.every)
     gauntlet_pick: int = 0
     # Each gauntlet's bests by stage, read when the list opens rather than once
     # a frame (a desktop `webstore.get` is a file read).
@@ -625,7 +627,7 @@ def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> No
         return
     if found is None:
         _text(surface, f["small"], f"{g.name.upper()} — settings changed", _WARN, center=(w // 2, 124))
-        _text(surface, f["small"], "this isn't the stage any more — open Tutorial to pick one, or leave",
+        _text(surface, f["small"], f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave",
               _WARN, center=(w // 2, 144))
         return
     _g, stage = found
@@ -661,6 +663,11 @@ def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:
     if not ms.gauntlets:
         return None
     return ms.gauntlets[max(0, min(len(ms.gauntlets) - 1, ms.gauntlet_pick))]
+
+
+def _gauntlets_label(ms: MenuState) -> str:
+    """The button that opens the list: "Tutorial" while that is all there is."""
+    return "Gauntlets" if len(ms.gauntlets) > 1 else "Tutorial"
 
 
 def _tutorial_labels() -> tuple[str, str]:
@@ -1792,8 +1799,9 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     lx, rx = w // 2 - 280, w // 2 + 280
     # The tutorial sits outside the row's left end, the same on every build.
     if ms.gauntlets:
-        tw = f["normal"].size("Tutorial")[0] + 36
-        _button(surface, ms, "tutorial", pygame.Rect(lx - 14 - tw, y, tw, _CH), "Tutorial",
+        label = _gauntlets_label(ms)
+        tw = f["normal"].size(label)[0] + 36
+        _button(surface, ms, "tutorial", pygame.Rect(lx - 14 - tw, y, tw, _CH), label,
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("tutorial", None)
