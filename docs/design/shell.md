@@ -164,8 +164,9 @@ stacked bar shows at once when the big fights were and who paid for them —
 and *Map share*, stacked bands that always fill 0-100% (`stats.AREA`): each
 seat's share of every system, with the unclaimed share as a grey band on top.
 A hidden seat leaves a gap rather than rescaling the rest, so a band always
-reads as a true share, and the unclaimed band waits for review to be revealed,
-since mid-game it would say how much lies behind the fog. A cursor marks the
+reads as a true share. Mid-game the unclaimed band is charted on the same terms
+as a rival (below): on the turns some unclaimed system was in sight. (Until
+2026-10-23 it waited for review to be revealed.) A cursor marks the
 turn the map is showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
 and a click or drag across the plot seeks a turn as the track does. The ^
 caret (F) at its top right makes it full screen, filling everything between
@@ -213,7 +214,8 @@ clamp (no ``room``).
   along each run of known turns and dotted straight across a gap, since what
   happened out of sight is a guess. Bars and bands skip the unknown turns, and
   the legend reads "–" on one. `Ui.graph_seats` offers our seat and each rival
-  sighted at least once. Losses are cumulative, so a running total is known
+  sighted at least once; Map share's unclaimed band follows the same rule.
+  Losses are cumulative, so a running total is known
   whenever the seat is. A turn's *Lost/turn* bar needs that turn and the one
   before it known; otherwise the first turn back in sight would carry the whole
   gap's losses as its own. (Until 2026-10-23 a mid-game review charted our seat

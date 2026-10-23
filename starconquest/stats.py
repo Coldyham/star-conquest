@@ -112,14 +112,17 @@ def sightings(states: list[GameState], visible: Iterable[set[int]], me: int) -> 
     """For each seat, which turns ``me`` knew its standings, as the top bar does
     (`render._score_vis`): our own always; a rival's while it holds a system in
     that turn's ``visible`` set (with fog off, every system), and once knocked
-    out, if it was ever sighted before. ``visible`` runs parallel to ``states``."""
+    out, if it was ever sighted before. The unclaimed (`NEUTRAL`) share of the
+    map is charted on the same terms: known while some of it is in sight.
+    ``visible`` runs parallel to ``states``."""
     if not states:
         return {}
     seats = tuple(sorted(p.id for p in states[0].non_neutral_players()))
-    known: dict[int, list[bool]] = {pid: [] for pid in seats}
+    known: dict[int, list[bool]] = {pid: [] for pid in (*seats, NEUTRAL)}
     ever: set[int] = set()
     for s, vis in zip(states, visible):
         owners = {s.systems[sid].owner_id for sid in vis if sid in s.systems}
+        known[NEUTRAL].append(NEUTRAL in owners)
         for pid in seats:
             player = s.players.get(pid)
             out = player is not None and not player.alive
@@ -133,8 +136,7 @@ def sightings(states: list[GameState], visible: Iterable[set[int]], me: int) -> 
 def masked(c: Chart, known: dict[int, tuple[bool, ...]]) -> Chart:
     """``c`` with every value its seat wasn't known on (`sightings`) made
     `UNKNOWN`. A turn's losses (``lost_turn``) need both it and the turn before
-    known, else a gap's losses would land on the turn after it. Map share's
-    unclaimed series is left whole: render only shows it once review is revealed."""
+    known, else a gap's losses would land on the turn after it."""
     values: dict[str, dict[int, tuple[float, ...]]] = {}
     for key, by_seat in c.values.items():
         values[key] = {}

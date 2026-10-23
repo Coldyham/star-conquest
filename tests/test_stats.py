@@ -92,8 +92,11 @@ def test_mid_game_graphs_chart_a_rival_only_while_in_sight(tmp_path, monkeypatch
         assert all(known[ui.human_id])
         assert any(not all(k) for k in known.values()), "fog should hide someone, some turn"
         for pid, seen in known.items():
-            for key in ("systems", "ships", "income", "losses", "share"):
+            keys = ("share",) if pid == stats.NEUTRAL else ("systems", "ships", "income", "losses", "share")
+            for key in keys:
                 assert [not math.isnan(v) for v in chart.series(key, pid)] == list(seen)
+        # unclaimed is a band like any seat's: known while some of it is in sight
+        assert any(known[stats.NEUTRAL])
         assert ui.graph_seats() == tuple(pid for pid in chart.seats if any(known[pid]))
     finally:
         pygame.quit()
@@ -369,5 +372,6 @@ def test_every_tab_draws_a_chart_with_gaps(tmp_path, monkeypatch):
             render.draw(screen, board, ui)
             assert ui.graph_plot_rect[2] > 0
         assert "–" in drawn and not any("nan" in s for s in drawn)
+        assert "Unclaimed" in drawn       # the Map share tab's band, mid-game too
     finally:
         pygame.quit()

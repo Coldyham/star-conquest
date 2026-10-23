@@ -3023,7 +3023,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     row_h = _tap_size(_row_h())
     col_gap = config.s(24)
     # the unclaimed band's row, always counted so a tab change never resizes the panel
-    items = len(rows) + (1 if ui.history_reveal else 0)
+    items = len(rows) + 1
 
     vx, vy, vw, vh = config.play_rect()
     tab_h = _tap_size(font.get_height() + config.s(10))
@@ -3129,7 +3129,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
         shown_rows += 1
     ui.graph_trace_rects = trace_rects
     spare = cells[shown_rows:]
-    if key in stats.AREA and ui.history_reveal and spare and spare[0].bottom <= floor:
+    if key in stats.AREA and spare and spare[0].bottom <= floor:
         # the unclaimed band's row: always drawn, so not a trace to toggle
         cell = spare.pop(0)
         cy = cell.centery
@@ -3179,9 +3179,9 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
               topleft=(min(max(plot.x, x - tw // 2), plot.right - tw), label_y))
 
     if area:
-        # the unclaimed band only once rivals are revealed: mid-game it would say
-        # how much the fog's other side holds
-        bands = list(traces) + ([stats.NEUTRAL] if ui.history_reveal else [])
+        # unclaimed on top, known on the turns some of it was in sight, as a
+        # rival is (`stats.sightings`)
+        bands = list(traces) + [stats.NEUTRAL]
         _draw_stacked_area(surface, chart, key, bands, plot, top,
                            lambda pid: config.COLOR_NEUTRAL if pid == stats.NEUTRAL else color_of(pid))
     if stacked:
