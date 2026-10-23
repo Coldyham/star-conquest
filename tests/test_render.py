@@ -1654,9 +1654,9 @@ def test_which_fights_get_a_mark_and_what_it_says():
             return out
 
         every = set(state.systems)
-        # the attacker brought 9 and kept 7, so the label is its own 2 — not the
-        # 8 that died between them, most of which is the beaten garrison
-        assert [(m.cost, m.victor, m.node_id) for m in marks((fold,), every)] == [(2, 2, node)]
+        # each side's own losses, never summed: the beaten garrison's 6, then
+        # the 2 the attacker paid for bringing 9 and keeping 7
+        assert [(m.losses, m.node_id) for m in marks((fold,), every)] == [(((1, 6), (2, 2)), node)]
         assert marks((), every) == []                  # a reinforcement is no fight
         assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
     finally:
@@ -1806,14 +1806,17 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
         placed = {text: center for center, text, _ in render._film_labels(state, ui)}
         ui.clear_fading_marks()
 
-        assert sorted(t for t, _ in out) == ["+1", "−2"]
-        assert placed["+1"][0] == placed["−2"][0], "same column"
-        assert placed["+1"][1] < placed["−2"][1], "resolution order, top down: the gain first"
-        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
-        # the hull is the defender's, in its colour; the fight is the attacker's —
-        # the two need not agree, since the hull was built before the system
+        assert sorted(t for t, _ in out) == ["+1", "−2", "−6"]
+        assert placed["+1"][0] == placed["−6"][0] == placed["−2"][0], "same column"
+        # resolution order, top down: the gain, the beaten garrison, the victor
+        row = render._row_h("small")
+        assert placed["−6"][1] - placed["+1"][1] == row
+        assert placed["−2"][1] - placed["−6"][1] == row
+        # the hull and the garrison's loss are the defender's, in its colour; the
+        # victor's cost is the attacker's — the hull was built before the system
         # changed hands
-        assert dict(out) == {"+1": config.player_color(1), "−2": config.player_color(2)}
+        assert dict(out) == {"+1": config.player_color(1), "−6": config.player_color(1),
+                             "−2": config.player_color(2)}
     finally:
         pygame.quit()
 
