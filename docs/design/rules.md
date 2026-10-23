@@ -278,7 +278,11 @@ already resolve simultaneously. The rationale for each rule is in
   `lost`, `hand`, `by`, `key`, `log`; `build_state` ignores it). Turns-to-win,
   ties on fewest ships lost. Clipboard only (`webstore.copy_link`), never the
   address bar or `localStorage`. Editing a challenge's setup asks first
-  (`menu._draw_unchallenge`, `Settings.without_challenge()`).
+  (`menu._draw_unchallenge`, `Settings.without_challenge()`). A link whose
+  `key` doesn't match the setup it decodes to is re-stamped on load
+  (`main._apply_shared_link`): it arrived with that setup, so the key is
+  outdated, not edited. A token trims a seat only when it is JSON-identical to
+  the default (`settings._trim_trailing`), so an int `aux` of 1 still travels.
 
 **The leaderboard** (reasons: `docs/design/leaderboard.md`; the site itself:
 `leaderboard/README.md`)

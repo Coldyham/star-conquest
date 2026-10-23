@@ -421,6 +421,16 @@ def test_challenge_key_survives_a_round_trip_of_an_int_aux():
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
 
 
+def test_an_int_aux_at_the_default_value_still_travels_in_the_link():
+    """An int `aux` of 1 is `==` the float default but hashes differently, so
+    trimming it as a default seat would leave a link that fails its own key."""
+    s = Settings(seed=5, players=3)
+    s.ai[2] = AiParams(aux=1)
+    s.ai_strategy[2] = "thinker"
+    assert s.token_dict()["ai"][2]["aux"] == 1
+    assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
+
+
 def _through_a_browser(value):
     """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
     one number type, so an integral float comes back an int."""
