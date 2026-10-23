@@ -37,7 +37,9 @@ from .model import Fleet, GameState
 
 @dataclass(frozen=True)
 class Launched:
-    """A fleet left its source, which paid for it at once."""
+    """A fleet left its source, which paid for it at once. A second order down a
+    lane already launched on this turn tops that fleet up: the same ``fleet``
+    again, carrying its new total."""
 
     fleet: int
     owner_id: int
@@ -463,6 +465,10 @@ class Reel:
     def _apply(self, event: Event) -> None:
         if isinstance(event, Launched):
             self.board.systems[event.source_id].ships = event.source_ships
+            topped = self._fleets.get(event.fleet)
+            if topped is not None:      # a later order down the same lane (engine.end_turn)
+                topped.ships = event.ships
+                return
             fleet = Fleet(
                 owner_id=event.owner_id,
                 source_id=event.source_id,

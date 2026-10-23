@@ -178,6 +178,8 @@ HUNT_SLOW_FRONT = 1.0       # ...and Greedy's front's share of the pull on slow 
                             # (Field 0.5; 1, the front alone, measured +6.9 pts over
                             # the field, 0.5 null and 0 -1.9: on slow boards the
                             # look-ahead wants the front)
+HUNT_SEND_SMALL = 0         # >0: Hunt also prices sending 1..this many ships down a lane,
+                            # a top-up the greedy's later passes can ask for (measuring)
 
 LOOKAHEAD = True            # roll each candidate plan forward and keep the best
 LOOK_PLIES = 6              # turns each candidate is played on before it is scored
@@ -391,7 +393,7 @@ class _Ledger:
             if best is None:
                 break
             self._commit(best)
-        return self.orders
+        return _merged(self.orders)
 
     def _reach(self, sid):
         """``sid``, its neighbours and theirs: what a launch touching ``sid`` reads
@@ -464,6 +466,8 @@ class _Ledger:
             return []
         spare = self._spare(src)
         amounts = {spare, max(1, spare // 2)}
+        if self.hunt:
+            amounts.update(range(1, min(spare, HUNT_SEND_SMALL) + 1))
         need = self._enough(dst, ((src, self.travel[src][dst]),), spare)
         if need is not None:
             amounts.add(need)
@@ -1050,6 +1054,18 @@ class _Ledger:
                     continue
             out.append((t0, ships))
         return out
+
+
+def _merged(orders):
+    """``orders`` with every launch down one lane summed into the first: the greedy
+    commits a lane in pieces (half, then what is left), which are one fleet
+    either way (the engine merges them too, so this is for whoever reads the plan)."""
+    out: dict[tuple[int, int], Order] = {}
+    for o in orders:
+        prev = out.get((o.source_id, o.dest_id))
+        out[(o.source_id, o.dest_id)] = o if prev is None else Order(
+            o.owner_id, o.source_id, o.dest_id, prev.ships + o.ships)
+    return list(out.values())
 
 
 def _with(arrivals, t, owner, ships):

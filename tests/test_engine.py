@@ -190,6 +190,38 @@ def _stage(state, owner, src, dst, ships, total, rem_after):
     return state.fleets[-1]
 
 
+def _lane_fleets(s):
+    return sorted((f.source_id, f.dest_id, f.ships) for f in s.fleets)
+
+
+def test_one_turns_launches_down_one_lane_fly_as_one_fleet():
+    """However the orders come, one owner's launches from one system to one
+    neighbour in a turn are one fleet. Each order is still clamped in sequence, so
+    what each lane gets is what it would have got as separate fleets."""
+    s = make_state([(0, 1, 12, 100), (1, 1, 0, 100), (2, 1, 0, 100), (3, 2, 5, 100)],
+                   [(0, 1, 3), (0, 2, 3), (2, 3, 5)], human=1)
+    engine.end_turn(s, human_orders=[Order(1, 0, 1, 5), Order(1, 0, 2, 5), Order(1, 0, 1, 5)])
+    assert _lane_fleets(s) == [(0, 1, 7), (0, 2, 5)]
+    assert s.systems[0].ships == 0
+
+
+def test_a_lane_mate_from_an_earlier_turn_is_not_merged():
+    s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)], human=1)
+    engine.end_turn(s, human_orders=[Order(1, 0, 1, 4)])
+    engine.end_turn(s, human_orders=[Order(1, 0, 1, 3)])
+    assert _lane_fleets(s) == [(0, 1, 3), (0, 1, 4)]
+
+
+def test_with_lane_battles_too_one_lane_is_one_fleet():
+    """A stack split down a lane would fight an interceptor piece by piece."""
+    s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)], human=1)
+    with in_lane_battles():
+        engine.end_turn(s, human_orders=[Order(1, 0, 1, 4), Order(1, 0, 1, 3)])
+    assert _lane_fleets(s) == [(0, 1, 7)]
+
+
 def test_lane_battle_waits_until_the_paths_actually_cross():
     """Sharing a lane is not enough. Head-on on a 3-turn lane, the fleets are
     still approaching after one turn and only meet in the middle of the second."""
