@@ -257,6 +257,149 @@ What would make a server worth it later is shared or verified gauntlet progress
 verified `scores` the way `campaign_games` does, matching setups by seed and
 jsonb equality.
 
+## Generated gauntlets
+
+Proposed on 2026-10-23: a linear gauntlet of rising difficulty dealt from a
+**spec** (how many stages, and which setups are allowed) rather than written by
+hand. Two parts: a dealer that turns a spec and a seed into setups, and a
+benchmark that plays bots on the candidates and picks a rising sequence. It is
+the run above, linear and with an author's constraints, and the first step
+toward it.
+
+Build order: (1) the spec and dealer in core, (2) an offline
+`tools/gauntlet_gen.py`, (3) time it in the web build, then generate in the
+game from a spec link, (4) a form on the board that builds the spec link. Steps
+1 and 2 are built (`starconquest/dealer.py`, `tools/gauntlet_gen.py`); 3 and 4
+are not.
+
+### Where it runs
+
+- **Dealing can run anywhere; measuring needs the engine.** The board has no
+  engine and cannot play a game, and its bot column (`bot_scores`) exists only
+  for setups someone has posted: a freshly dealt seed has none. A
+  `bot_replay`-style queue (store a request, wait for the hourly worker, store
+  the answer) would buy an hour's wait and new server state for what the game
+  can do itself.
+- **The game can measure.** It ships the engine and the roster. Measured on
+  2026-10-23 (3 players, default opponents, one bot in seat 1, budgets lifted
+  with `ai.set_budget_scale`), a game took 0.01-0.11 s for rusherplus,
+  heuristic, thinker and marshal at 13-36 systems, and 1-2.5 s for evolved.
+  knower and actuary are far slower and are never probes. Ten stages at four
+  candidates each and four probes is 160 games, 10-15 s natively.
+- **The web build is unmeasured.** Python in WASM is slower by a factor not
+  yet timed, and single-threaded, so in the game the work is spread across
+  frames behind a progress bar. Timing it decides how many candidates and
+  probes the web can afford, and is step 3's first job.
+- **The form belongs on the board.** Checkboxes and ranges are cheap in HTML
+  and costly on the menu's fixed pygame canvas. The page builds a spec link
+  (`/game/#gauntlet-spec=<token>`) and the game deals and measures.
+
+### The spec
+
+A dict, so it travels as a token like a setup does, read tolerantly
+(`dealer.Spec.from_dict` never raises; a bad rule is dropped, a range clamped
+to its slider):
+
+```json
+{"stages": 8, "seed": 41,
+ "rules": {"mode": {"fix": "symmetric"}, "systems": {"range": [13, 29]},
+           "ship_speed_growth_pct": {"fix": 0}, "home_production": {"fix": 2},
+           "fog": {"fix": false}},
+ "opponents": {"not": ["knower"]}}
+```
+
+- **A rule is `fix`, `range`, `in` or `not`**, on a `Settings` knob by its
+  attribute name (every Advanced and Combat slider, `neutral_produces`,
+  `in_lane_battles`) or on one of the dealer's own names: `mode`, `layout`,
+  `players`, `systems` (what `Settings.system_count` shows, never raw `nodes`)
+  and `fog` (`false` is both ranges at `FOG_MAX_HOPS`).
+- **`opponents`** is `in` or `not` over bot names; `name:stop` deals the stop,
+  as `RANDOM_POOLS` entries do. Default: `ai.LADDER_ORDER`. Every seat is a
+  named bot, never `random`: a stage pins its setup.
+- **`roll`** (default false): a knob no rule names is left at its default, or
+  with `roll` true rolled over its whole slider as `_mystery` rolls them (map,
+  travel, economy and fog; combat only when ruled), with mode, layout, players
+  and systems (up to `STANDARD_MAX_NODES`) rolled too. Off by default for the
+  reason "The first run" gives.
+- **No `Settings` field is added**, so no challenge key moves, and a dealt stage
+  is an ordinary setup that posts to the board as itself.
+- **`dealer.problems(spec)`** names a spec nothing can satisfy (an empty range,
+  `players` above what `systems` allows, no opponents left).
+
+### Dealing
+
+`dealer.deal(spec, rng, depth)` is a pure function of the spec, the rng and a
+depth from 0 (first stage) to 1 (last). It draws each ruled field, rolls the
+rest, sets `nodes` so `system_count` lands in range (rerolling a symmetric map
+that rounds out of it), seeds with `settings.roll_seed`, and rerolls a setup
+`setup_warnings` objects to. **Opponents follow depth**: the allowed bots are
+ordered weakest first by `LADDER_ORDER` and each seat draws near
+`depth * (n - 1)`, so difficulty rises by design and the benchmark checks it.
+That matters because a random map is decided by position as much as by play
+(the tutorial's seed hunt, above).
+
+### The benchmark
+
+1. **Deal more candidates than stages**: `--candidates` per stage (default 4),
+   each at its stage's depth.
+2. **Probe every candidate** with fixed bots in seat 1 (`tests.sim.
+   play_settings`, budgets lifted, so the result is the same on any machine):
+   rusherplus, heuristic, thinker and marshal by default. A candidate's
+   difficulty is the share of probes that lose it, `tools/gauntlet_check.py`'s
+   measure, with the probes' mean winning turns breaking ties.
+3. **Pick a rising sequence across the spread**, not the top of a sort: the
+   usable candidates (at least one probe won) ordered by difficulty, then one
+   at each of `stages` evenly spaced places. A candidate nobody won is never
+   picked, so every stage is known to be winnable. The tool reports a first
+   stage some probe lost or a last stage every probe won.
+4. **Targets come free** (`--targets`): the slowest probe win, plus
+   `--target-slack` turns, is the "roster bot's score plus slack" the dealt run
+   above asks for, measured in games already played.
+
+Every game is a line in `results/gauntlet_gen/<run>.jsonl` the moment it
+finishes, under a header line holding the spec, seed and candidate count; a
+rerun deals the same candidates, skips the games already there, refuses flags
+that would deal differently, and picks again (so `--targets` can be changed for
+free).
+
+### The first run
+
+2026-10-23, seed 41, eight stages, four candidates each, the four default
+probes, on the example constraints from the request: symmetric, 13-29 systems,
+no speed gain, home production 2, no knower. 128 games, about three minutes of
+CPU on the container (actuary sat in some of them).
+
+- **Rolling every slider made the probes measure the knobs.** With `roll` on,
+  a depth-0 candidate against rusherplus alone could deal one home ship against
+  garrison scale 38: 21 of 128 probe games were won, 17 ran out the 400-turn
+  cap, and only marshal won much. `roll` is now off by default.
+- **With it off, depth tracks difficulty.** Depth-0 candidates were lost by 25
+  to 50% of the probes, depth 1 by all of them; the picked eight rose from 25%
+  to 75%.
+- **Four probes are a coarse ruler.** They give five levels, so picks bunch at
+  one level and ties fall to mean winning turns, which measures length more
+  than difficulty. rusherplus and heuristic won 2 of 32 games each, so on
+  anything but the easiest maps they add nothing; thinker won 10 and marshal 12.
+  Better resolution is the next thing to try: more or graded probes, or
+  marshal's winning margin.
+- **Some maps run long.** Winning probes took up to 323 turns, and 22 games hit
+  the cap and count as losses. A player will not play 300 turns, so a cap on
+  turns, or a filter on the probes' winning turns, belongs in the pick.
+- **No stage was won by every probe.** The first stage lost by one probe in
+  four, so a "won by all" floor would have left the run without a first stage.
+
+### Sharing the result
+
+**Share the file, not the spec and seed.** Dealing is a pure function, but the
+benchmark depends on how the probes play, and bots are free to move
+([`leaderboard.md`](leaderboard.md), "Versioning"): the same spec and seed after
+a bot changes would pick a different gauntlet. The result is an ordinary
+gauntlet file, kept with `gauntlet.remember` and shared by the existing
+`#gauntlet=<payload>` link, or saved to the board through `/api/gauntlet`.
+Uploading from the game would be a new send path (the game sends only on *Post
+to leaderboard* or *Share replays*), so a copied `#gauntlet=` link, which needs
+no server, comes first.
+
 ## The gauntlet: proposed, not built
 
 A seeded single-player run on a graph, FTL / Slay-the-Spire style: you choose
