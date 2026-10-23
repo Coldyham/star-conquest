@@ -6,8 +6,9 @@ a one-line hint, played in order. The tutorial is one
 `starconquest/gauntlet.py`. Players make their own on the board's gauntlet page
 (`leaderboard/gauntlet.html`), which stores them and hands out a short link; see
 "Gauntlets made on the board". The same file format is meant to carry a later
-single-player run with branching graph navigation and carry-over between stages;
-that part is proposed below and not built.
+single-player run with branching graph navigation, carry-over between stages
+and score targets that gate the way on; that part is proposed below and not
+built.
 
 Planned on 2026-10-21; the plan's decisions are recorded here with their
 reasons.
@@ -283,4 +284,97 @@ ships on the home node, a second owned node, a different production. That keeps
 cost is that a boon-modified stage is a different setup on the board, so it
 scores separately from the same stage without the boon, and two players with
 different boons never compare. Whether that is acceptable is the decision to
-make before building the run.
+make before boons are built.
+
+It no longer blocks the run. Stage targets (below) give a run its pressure
+without carrying anything between stages, so the run can be built on them, and
+boons can follow later or never.
+
+## Stage targets (proposed, not built)
+
+Proposed on 2026-10-23. An author can give a stage a score to win within, and
+the stages beyond it open only once you have. This gives a gauntlet, and a later
+run, the pressure to play well rather than just win, and it leaves the setup
+alone: the stage stays the ordinary map it is, scores on it still compare on the
+board, and no key moves. Boons cannot do that.
+
+- **A target is gauntlet data, never `Settings`.** It is an optional field on a
+  stage, `"target": {"turns": 14}` or `{"turns": 14, "lost": 30}`, scored as a
+  best is: turns first, ships lost breaking a tie. It is called a target, not a
+  par, because [`par.md`](par.md)'s par is a computed number and this one is the
+  author's.
+- **Meeting it counts.** A best at or under the target clears the stage, so an
+  author can set their own score as the target. A stage with no target is
+  cleared by any by-hand win, as now.
+- **The target is what "cleared" means.** `gauntlet.cleared` would keep only
+  the stages whose best meets their target. `open_stages` already takes that
+  set, so the bordering rule does not change: the stages beyond open once the
+  target is met. A win short of it leaves the stage open and replayable, and
+  the list shows both numbers ("18 turns · target 14").
+- **Still derived, never stored.** A target added or tightened later is checked
+  against every best again: a 20-turn win on a stage that gains a 14-turn target
+  no longer opens the way on. This is the same honest answer as an edited stage.
+  A stored board gauntlet never changes, so this only happens to a desktop file
+  or a built-in.
+- **Next stage follows the target.** `Ui.offers_next_stage` asks only
+  `can_post` today. It would also need the stage cleared after this win (this
+  game, or an earlier best, meets the target). `main.stage_ui` copies the target
+  onto `Ui` as plain values, since render never sees a `Gauntlet`. The win
+  overlay says which it was: "14 turns: target met", or "18 turns, target 14:
+  not yet", with Retry where Next stage would be.
+- **The briefing card and the stage list show the target**, so it is never a
+  surprise on the win overlay. It is drawn beside the hint rather than written
+  into it, so `HINT_MAX` keeps its row budget.
+- **Set on the board from the author's own game.** `gauntlet-build.mjs` drops a
+  pasted challenge link's score today ("no score to beat"). Instead the page
+  would offer that score as the stage's target. An author plays their own
+  gauntlet, pastes the links, and gets targets they have shown can be met.
+  `checkBody` refuses a malformed target; `from_dict` drops one (the stage then
+  has none) and never raises. The id hashes the body, so adding a target is a
+  new row and the old link keeps opening the old gauntlet.
+- **Trusted, as clearing is.** It reads local bests, which nothing verifies. A
+  gauntlet is uncontested, so a player who edits their own store only cheats
+  themselves. The campaign is different: there, you can attempt a node only
+  next to one you hold, and holding means having the best *verified* score
+  among everyone. That rule is relative and contested, so it lives behind
+  `/api/campaign`. A target is a fixed number the author picks, so it stays on
+  the device, for the reasons "Relation to the weekly campaign" gives.
+- **Not in the tutorial.** A beginner should be held up by what they have not
+  learned yet, not by how fast they won.
+- **A dealt run has no author to set them.** The cheap answer is a roster bot's
+  score on the stage plus some slack, measured once when the run is dealt
+  (marshal is fast and draws nothing, so the target is reproducible from the run
+  seed). This is not the par that was kept off the board
+  ([`par.md`](par.md), "Not on the board"): that was a computed number shown on
+  every map. A run's target is local and only gates its own stages.
+
+### Later: targets on lanes
+
+A target on a stage gates every way out of it alike. A target on a lane gates
+one way out, and that is what branching wants: any win opens the main path, and
+a tighter score opens a shortcut that skips stages, a bonus stage off the path,
+or an alternate route to the end.
+
+- **The format grows, it does not change.** A lane's third element already
+  carries `two_way`; a target joins it, `[a, b, {"turns": 12}]`. A lane without
+  one opens on a clear, as now, so no existing file changes meaning, and
+  `from_dict` reads a bad target as none. `checkBody` refuses any key but
+  `two_way` today, so it learns `turns` and `lost` with this.
+- **A gated lane opens its second stage when the first's best meets its
+  target**, and a `two_way` gated lane the first from the second likewise.
+  `open_stages` becomes: the starts, every won stage, and each stage a lane
+  leads to whose condition the near end's best meets (the stage's own target
+  for an ungated lane).
+- **Depth is measured over ungated lanes only.** `Gauntlet.depths` walks every
+  lane the way it runs, so a shortcut from stage 2 to stage 5 would make 5 as
+  shallow as 4 and take Next stage away from 4. Measured over the ungated
+  lanes, the main path keeps its depths. A met gated lane out of a stage makes
+  it a fork, so Next stage sends the player to the list to choose.
+- **Reachability ignores targets.** `problems` asks whether a stage can be
+  reached at all, so a bonus stage behind a tight target passes. Whether the
+  target can be met is the author's to show, by playing it.
+- **The list names each locked way on and what it needs** ("Shortcut: win in
+  12"), so a player can see a route is there before they can take it.
+- **It waits for a page that draws lanes.** The board's gauntlet page edits
+  order only, so lanes and their targets would be written by hand or dealt
+  until it draws the graph.

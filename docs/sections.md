@@ -58,7 +58,9 @@ only for a fight; what is deliberately not animated.
 - **Gauntlets made on the board.** The gauntlet page and `/api/gauntlet`: stored not carried, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, pruned stages, fetched once and kept (`gauntlet.remember`), the inline `#gauntlet=` form, remixing by `#<id>`, listing by an admin at the author's request.
 - **Relation to the weekly campaign.** Uncontested, so no server; the graph shape and the bordering rule shared in spirit, except that a gauntlet lane runs one way (stage 6 won from a link opened 5).
 - **The gauntlet: proposed, not built.** A seeded run graph via `tools/campaign.py`'s `_layout`/`cut_nodes`, stages dealt like `_from_family`/`_mystery`, difficulty by depth through `LADDER_ORDER`.
-- **Carry-over.** The open problem: boons via `custommap.from_state`, and the cost on the board.
+- **Carry-over.** Boons via `custommap.from_state`, and the cost on the board; no longer blocks the run.
+- **Stage targets (proposed, not built).** An author-set score a stage must be won within before the stages beyond open: gauntlet data never `Settings`, meeting it counts, it is what `gauntlet.cleared` means, Next stage follows it, set on the board from a pasted challenge link's score, trusted like clearing, none in the tutorial, a roster bot's score for a dealt run.
+  - *Later: targets on lanes*: an optional third lane element for shortcuts, bonus stages and alternate routes; depth over ungated lanes only; reachability ignores targets.
 ## design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
   - *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`, the top of each bot's slider); *a loss is a result, not a score*; *a win stores its own replay*; *`engine_rev` hashes the simulation*; *the one table the public cannot write*; *estimated difficulty* (the share of bots that lose a map, as a sort and an Easy-to-Very-hard badge).
