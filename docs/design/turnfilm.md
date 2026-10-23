@@ -374,18 +374,22 @@ the film already showing plays out exactly as it would have, and control is simp
 back the instant it lands, since `main`'s chaining re-reads `ui.autoplay` fresh at
 that point rather than caching the value from when the film started.
 
-**The loss label is the victor's own, in the victor's colour.** Both sides'
+**The loss labels are each side's own, in that side's colour.** Both sides'
 losses together was the first cut and it was the wrong number: 9 ships taking a
-6-ship system read `−8`, which is almost entirely the defender's garrison — wiped
-out by definition, and visible anyway as the count on the node changing — while
+6-ship system read `−8`, which is almost entirely the defender's garrison, while
 burying the 2 the attacker actually paid, which is the figure the square law makes
-hard to guess. So `cost` is what the fight cost whoever came out of it holding the
-ground (or still flying), and it is drawn in that player's colour, since colour is
-the one language this map already uses for whose something is. Nobody's, on
-annihilation: matched forces leave no victor to charge, and the emptied board says
-it. A per-side pair of numbers was the other candidate; it doubles the label's width
-at a node for a second figure the board already shows, and a multi-owner pile-up
-would need three.
+hard to guess. So `cost` became what the fight cost whoever came out of it holding
+the ground (or still flying), drawn in that player's colour, since colour is the one
+language this map already uses for whose something is. The beaten side's figure was
+left off at first, on the grounds that the board shows it anyway: its garrison or
+triangle visibly goes. That holds while a film plays and stops holding once only the
+result is on screen. In history's held marks the loser's ships are simply absent, and
+the number that says what was there is the one a reader most wants. So a fight now
+writes one `−N` per side (`losses` on `Clashed` and `Landed`), stacked like the rest
+of a system's numbers in the order the fold beat them, the victor's cost last. They
+stack rather than sitting side by side, so the label never grows wider, and a pile-up
+gets one row per side. Annihilation now writes every side's loss instead of nothing.
+A side that lost nothing writes nothing.
 
 The accounting figure survives beside it as `destroyed`, because it is the test:
 what everyone brought less what the winner kept is `combat._record_losses` read from
@@ -627,7 +631,7 @@ Rules that hold it together:
   (everything, once revealed). `Ui.shown_marks` picks which set render draws:
   held in review with no film, fading otherwise. A system's numbers stack a
   row each in the order they resolved, read top down: the gain (production)
-  above the cost (combat).
+  above the losses (combat), each beaten side's before the victor's cost.
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the

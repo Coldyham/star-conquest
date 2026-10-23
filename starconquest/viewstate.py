@@ -44,8 +44,7 @@ class FadingFight:
     high_id: int | None
     at: float
     burst_color: tuple[int, int, int]
-    cost: int
-    victor: int | None
+    losses: tuple[tuple[int, int], ...]   # (owner, ships lost), in resolution order
 
 
 @dataclass(frozen=True)
@@ -61,7 +60,7 @@ class FadingHull:
 
 def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: float = 0.0
                ) -> tuple[list[FadingFight], list[FadingHull]]:
-    """The marks a turn's ``events`` earn, read once: a fight's cost and a
+    """The marks a turn's ``events`` earn, read once: a fight's losses and a
     finished hull, for whatever ``sees(sid)`` allows. ``board`` gives a hull's
     owner, so it should be one from before the turn's fights (production comes
     first). A second fight or hull at the same system supersedes the first, so
@@ -77,7 +76,7 @@ def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: flo
             fights.append(FadingFight(
                 age_ms=age_ms, node_id=None, low_id=event.low_id, high_id=event.high_id,
                 at=event.at, burst_color=config.COLOR_TEXT,
-                cost=event.cost, victor=event.victor))
+                losses=event.losses))
         elif isinstance(event, turnfilm.Landed):
             # `steps` is empty for a reinforcement or an unopposed landing —
             # neither is a fight, so neither earns a mark.
@@ -88,7 +87,7 @@ def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: flo
             fights = [f for f in fights if f.node_id != event.node_id]
             fights.append(FadingFight(
                 age_ms=age_ms, node_id=event.node_id, low_id=None, high_id=None,
-                at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
+                at=0.0, burst_color=color, losses=event.losses))
         elif isinstance(event, turnfilm.Produced):
             for sid, n in event.hulls:
                 if not sees(sid):   # a rival's yard is not ours to report

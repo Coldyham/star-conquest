@@ -81,6 +81,8 @@ class Clashed:
     b: int
     a_ships: int
     b_ships: int
+    a_owner: int
+    b_owner: int
     survivor: int | None  # the fleet that flew on; None on annihilation
     survivor_owner: int | None  # ...and whose it was, which `survivor` can't say
     survivors: int
@@ -113,6 +115,19 @@ class Clashed:
     def victor(self) -> int | None:
         """Whose ships flew on, for the colour of that label."""
         return self.survivor_owner
+
+    @property
+    def losses(self) -> tuple[tuple[int, int], ...]:
+        """Each side's losses as ``(owner, ships)``, the beaten side first and
+        the one that flew on last; a side that lost nothing is left out."""
+        a, b = (self.a_owner, self.a_ships), (self.b_owner, self.b_ships)
+        if self.survivor == self.a:
+            sides = (b, (self.a_owner, self.cost))
+        elif self.survivor == self.b:
+            sides = (a, (self.b_owner, self.cost))
+        else:
+            sides = (a, b)
+        return tuple(side for side in sides if side[1] > 0)
 
 
 @dataclass(frozen=True)
@@ -193,6 +208,27 @@ class Landed:
         if not self.steps or self.ships <= 0:
             return None
         return self.owner_id
+
+    @property
+    def losses(self) -> tuple[tuple[int, int], ...]:
+        """Each side's losses as ``(owner, ships)`` in the order the fold beat
+        them, whoever holds the system last (its `cost`); a side that lost
+        nothing is left out. A beaten side loses everything it brought."""
+        brought = dict(self.sides)
+        kept = self.victor
+        order: list[int] = []
+        for step in self.steps:
+            # An annihilation carries an empty side on, which is nobody's.
+            fought = ((step.attacker, step.attacker_ships), (step.defender, step.defender_ships))
+            for side, ships in fought:
+                beaten = step.survivors == 0 or side != step.winner
+                if ships > 0 and beaten and side != kept and side not in order:
+                    order.append(side)
+        if kept is not None:
+            order.append(kept)
+        lost = ((side, brought.get(side, 0) - (self.ships if side == kept else 0))
+                for side in order)
+        return tuple((side, n) for side, n in lost if n > 0)
 
 
 @dataclass(frozen=True)
@@ -588,6 +624,8 @@ class Watch:
             b=self._id(b),
             a_ships=a_ships,
             b_ships=b_ships,
+            a_owner=a.owner_id,
+            b_owner=b.owner_id,
             survivor=None if survivor is None else self._id(survivor),
             survivor_owner=None if survivor is None else survivor.owner_id,
             survivors=survivors,

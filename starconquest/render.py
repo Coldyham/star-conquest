@@ -1114,8 +1114,7 @@ class _Mark(NamedTuple):
     color: tuple[int, int, int]
     phase: float
     fade: float                 # 0 fresh, 1 dissolved into the background
-    cost: int                   # what it cost whoever came out of it
-    victor: int | None       # ...and who that was; None when nobody did
+    losses: tuple[tuple[int, int], ...]   # (owner, ships lost), in resolution order
     node_id: int | None      # the system it happened at, if it was not in open space
 
 
@@ -1155,21 +1154,22 @@ def _flash_marks(state: GameState, ui: Ui):
             a = state.systems[f.low_id].pos
             b = state.systems[f.high_id].pos
             center = ui.view.to_screen(lerp(a, b, f.at))
-            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, None)
+            yield _Mark(center, f.burst_color, phase, fade, f.losses, None)
         else:
             center = ui.view.to_screen(state.systems[f.node_id].pos)
-            yield _Mark(center, f.burst_color, phase, fade, f.cost, f.victor, f.node_id)
+            yield _Mark(center, f.burst_color, phase, fade, f.losses, f.node_id)
 
 
 def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, tuple[int, int, int]]]:
     """Every number a playback writes over the map this frame, already placed:
     ``(centre, text, colour)``.
 
-    Two kinds share that spot above a system. A fight's cost is the *victor's* own
-    losses, in the victor's colour — not both sides' together: the beaten side is
-    wiped out by definition and its garrison or triangle visibly goes, so a
-    combined figure mostly restates what the board already shows while burying the
-    one number the square law makes hard to guess. And a hull finished this turn is
+    Two kinds share that spot above a system. A fight writes each side's own
+    losses, one ``−N`` per side in its owner's colour — never summed, which would
+    bury the victor's cost (the figure the square law makes hard to guess) in the
+    beaten side's — stacked in the order the fold beat them, the victor's last.
+    The beaten side's figure matters most once its ships have gone from the board,
+    as in history, where only the result is on screen. And a hull finished this turn is
     ``+N`` in its owner's colour, which is what makes production visible at all
     without ever stopping the board to say it: `config.FILM_PRODUCE_MS` is a lead
     borrowed from the glide (`turnfilm.film`), not a dwell. Each fades toward the
@@ -1190,19 +1190,18 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     # A system's numbers stack in resolution order, read top down: production
     # comes before combat, so a gain sits above a cost, and the last to resolve
     # is on the mark's own row.
-    at_node: dict[int, list[tuple[str, tuple[int, int, int]]]] = {}
+    stacks: dict[int | tuple[float, float], list[tuple[str, tuple[int, int, int]]]] = {}
     for h in ui.shown_marks()[1]:
         color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
-        at_node.setdefault(h.node_id, []).append((f"+{h.hulls}", color))
+        stacks.setdefault(h.node_id, []).append((f"+{h.hulls}", color))
     for mark in _flash_marks(state, ui):
-        if mark.cost > 0 and mark.victor is not None:
-            color = _faded(config.player_color(mark.victor), mark.fade)
-            if mark.node_id is None:
-                labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
-            else:
-                at_node.setdefault(mark.node_id, []).append((f"−{mark.cost}", color))
-    for node_id, items in at_node.items():
-        x, y = _mark_center(ui.view.to_screen(state.systems[node_id].pos))
+        # A clash in open space has no system to share, so it stacks on its own.
+        stack = stacks.setdefault(mark.center if mark.node_id is None else mark.node_id, [])
+        for owner, lost in mark.losses:
+            stack.append((f"−{lost}", _faded(config.player_color(owner), mark.fade)))
+    for key, items in stacks.items():
+        at = ui.view.to_screen(state.systems[key].pos) if isinstance(key, int) else key
+        x, y = _mark_center(at)
         for above, (text, color) in enumerate(reversed(items)):
             labels.append(((x, y - above * _row_h("small")), text, color))
     return labels

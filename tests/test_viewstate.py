@@ -114,7 +114,7 @@ def _fold(survivors=7):
 
 def _fading_fight(age_ms=0.0):
     return FadingFight(age_ms=age_ms, node_id=0, low_id=None, high_id=None, at=0.0,
-                       burst_color=config.COLOR_TEXT, cost=2, victor=2)
+                       burst_color=config.COLOR_TEXT, losses=((1, 6), (2, 2)))
 
 
 def _fading_hull(age_ms=0.0):
@@ -132,7 +132,7 @@ def test_archive_marks_turns_a_fight_into_a_fading_fight():
 
     assert len(ui.fading_fights) == 1
     fight = ui.fading_fights[0]
-    assert (fight.age_ms, fight.node_id, fight.cost, fight.victor) == (0.0, 0, 2, 2)
+    assert (fight.age_ms, fight.node_id, fight.losses) == (0.0, 0, ((1, 6), (2, 2)))
 
 
 def test_archive_marks_skips_a_reinforcement():
