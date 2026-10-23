@@ -329,6 +329,13 @@ actuary in the same games: 7:6 0.5/2.2 ms (actuary 0.2/0.8), 40:6 3.1/20.2
   chase; weighting edge risk 4-8x once 2x ahead on ships (`ENDGAME_RATIO`)
   did not close it. 206 of 400 games changed, stalemates fell 57 to 49, and
   the pooled score moved -0.2 to +0.5 (4 cells, 50 seeds). Deleted.
+- **Small sends as candidates** (`HUNT_SEND_SMALL`, 2026-10-23). Once one
+  owner's launches down a lane merged into one fleet, a later greedy pass could
+  top a lane up, so Hunt also priced sending 1 ship (or 1, 2 and 3) beside all,
+  half and exactly enough. Against Field, 60 seeds over the five cells, paired
+  with stock Hunt (64.8%): send 1 -0.4 (z -0.29), 23% slower; sends 1-3 -0.2
+  (z -0.16), 49% slower, its cells pulling apart (24:3 +6.7, 18:18 -8.3, the
+  kind of spread five cells throw up by chance). Deleted.
 - **actuary's Style: Learning** is not carried over: its learned risk would have
   replaced edge risk rather than combined with it, and without it hunter keeps
   no memory between turns and is no seat an oracle has to model.

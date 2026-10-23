@@ -56,6 +56,8 @@ uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by ha
 uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --variant) vs Field, paired
 uv run python tools/candidate_bench.py --borrow actuary     # a bot as one more knower candidate, paired
 uv run python tools/pileup_bench.py --stop 2 --seeds 60     # knower's pile-up pricing on posted 4/5-seat maps, paired
+uv run python tools/mp_tactics.py --seeds 400   # marshal's multiplayer tactics vs stock, paired
+uv run python tools/bait_bench.py --seeds 200    # knower's Search offered bait openings, paired
 uv run python tools/fold_check.py               # a stop plays as the bot folded into it
 uv run python tools/gauntlet_check.py --quick   # the tutorial's stages rise in difficulty
 uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
