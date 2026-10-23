@@ -911,6 +911,10 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # The end-of-game graphs: read once off the boards just built, and open by
     # default on a finished game, where they are the summary the review is for.
     ui.history_chart = stats.chart(history_states)
+    if not ui.history_reveal:
+        # mid-game, a rival is charted only for the turns the top bar showed it
+        known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
+        ui.history_chart = stats.masked(ui.history_chart, known)
     ui.history_graph = ui.history_reveal
     ui.graph_full = False
     ui.graph_hidden = set()

@@ -550,14 +550,15 @@ class Ui:
 
     def graph_seats(self) -> tuple[int, ...]:
         """The seats the graphs' legend offers: every seat once review is
-        revealed (a finished game), else ours alone — a rival's curve mid-game
-        would show exactly what the fog hides on the map."""
+        revealed (a finished game), else ours and each rival the top bar has
+        shown at some turn — mid-game the chart is `stats.masked` to the turns
+        each was in sight, so a never-sighted rival has no curve to offer."""
         chart = self.history_chart
         if chart is None:
             return ()
         if self.history_reveal:
             return chart.seats
-        return tuple(pid for pid in chart.seats if pid == self.human_id)
+        return tuple(pid for pid in chart.seats if pid == self.human_id or chart.sighted(pid))
 
     def bots_revealed(self, state: GameState) -> bool:
         """May a random seat's bot be named? Only once the game is decided — on

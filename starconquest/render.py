@@ -2852,6 +2852,8 @@ def _nice_ceil(v: float) -> float:
 
 
 def _graph_value(metric: str, v: float) -> str:
+    if math.isnan(v):
+        return "–"   # a rival out of sight that turn (`stats.masked`)
     if metric == "income":
         return f"{v:.1f}"
     if metric in stats.AREA:
@@ -2900,7 +2902,7 @@ def _draw_stacked_area(surface, chart: stats.Chart, key: str, bands, plot: pygam
         series = chart.series(key, pid)
         if len(series) != len(base):
             continue
-        upper = [b + v for b, v in zip(base, series)]
+        upper = [b + stats.known_or_zero(v) for b, v in zip(base, series)]
         lower_pts = [(x_at(t), y_at(v)) for t, v in enumerate(base)]
         upper_pts = [(x_at(t), y_at(v)) for t, v in enumerate(upper)]
         color = color_of(pid)
@@ -2925,7 +2927,7 @@ def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
         base = 0.0
         for pid in traces:
             v = chart.series(key, pid)[t]
-            if v <= 0:
+            if math.isnan(v) or v <= 0:
                 continue
             y0 = plot.bottom - round(min(base, top) / top * plot.h)
             base += v
@@ -2934,6 +2936,40 @@ def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
             if t != turn:
                 color = tuple(c * 3 // 5 for c in color)
             pygame.draw.rect(surface, color, (x0, y1, max(1, x1 - x0), max(1, y0 - y1)))
+
+
+def _draw_known_line(surface, color, series, at, width: int) -> None:
+    """A seat's curve over the turns it was known (`stats.masked`): solid
+    along each run of known turns, dotted straight across a gap between two
+    (what it did out of sight is a guess, and looks like one), and a lone known
+    turn a dot."""
+    runs: list[list[tuple[int, int]]] = []
+    prev = None
+    for t, v in enumerate(series):
+        if math.isnan(v):
+            prev = None
+            continue
+        p = at(t, v)
+        if prev is None:
+            runs.append([])
+        runs[-1].append(p)
+        prev = p
+    for run in runs:
+        if len(run) >= 2:
+            pygame.draw.lines(surface, color, False, run, width)
+        else:
+            pygame.draw.circle(surface, color, run[0], width)
+    for before, after in zip(runs, runs[1:]):
+        _draw_dotted(surface, color, before[-1], after[0], max(1, width // 2))
+
+
+def _draw_dotted(surface, color, a, b, r: int) -> None:
+    """Dots of radius ``r`` from ``a`` to ``b``, spaced a few radii apart."""
+    gap = max(3, r * 4)
+    n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // gap))
+    for i in range(n + 1):
+        f = i / n
+        pygame.draw.circle(surface, color, (round(a[0] + (b[0] - a[0]) * f), round(a[1] + (b[1] - a[1]) * f)), r)
 
 
 def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None:
@@ -3033,7 +3069,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     caret = pygame.Rect(box.right - pad - tab_h, ty, tab_h, tab_h)
     _draw_caret(surface, caret, up=not ui.graph_full)
     ui.graph_full_rect = (caret.x, caret.y, caret.w, caret.h)
-    note = ("" if ui.history_reveal else "Your seat only until the game is decided")
+    note = ("" if ui.history_reveal else "Rivals only while in sight")
     if not note and not config.touch_ui:
         note = "Tab: next graph  ·  1-9 or click a seat: show/hide  ·  F: " + (
             "dock" if ui.graph_full else "full screen")
@@ -3159,16 +3195,14 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     order = sorted(traces, key=lambda pid: pid == ui.human_id)
     for pid in order:
         width = config.s(3) if pid == ui.human_id else config.s(2)
-        points = [at(t, v) for t, v in enumerate(chart.series(key, pid))]
-        if len(points) >= 2:
-            pygame.draw.lines(surface, color_of(pid), False, points, width)
+        _draw_known_line(surface, color_of(pid), chart.series(key, pid), at, width)
 
     # The cursor: the turn on the map, with a dot where each curve crosses it.
     cx = at(turn, 0)[0]
     pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
     for pid in order:
         series = chart.series(key, pid)
-        if turn < len(series):
+        if turn < len(series) and not math.isnan(series[turn]):
             pygame.draw.circle(surface, color_of(pid), at(turn, series[turn]), config.s(4))
     return box
 

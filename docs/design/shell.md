@@ -204,9 +204,20 @@ clamp (no ``room``).
   `main.open_history` over the boards `build_history` already reconstructed, so
   a curve can never disagree with the map at the same turn, and nothing decides
   or rolls again. `stats` is core (no pygame), drawing nothing from `state.rng`.
-- **Fog holds.** `Ui.graph_seats` draws every seat only once review is revealed
-  (a finished game); a mid-game review charts our seat alone, since a rival's
-  ship curve is exactly what the fog hides on the map beside it.
+- **The graphs know what the top bar knew.** A finished game charts every seat
+  on every turn. Mid-game, `main.open_history` masks the chart
+  (`stats.sightings`, `stats.masked`) so a rival is charted only on the turns
+  the top bar showed its standings: while it held a system in that turn's
+  sight (with fog off, always), and once knocked out if it was ever sighted.
+  Its other turns are NaN, a gap and never a zero. A line is drawn solid
+  along each run of known turns and dotted straight across a gap, since what
+  happened out of sight is a guess. Bars and bands skip the unknown turns, and
+  the legend reads "–" on one. `Ui.graph_seats` offers our seat and each rival
+  sighted at least once. Losses are cumulative, so a running total is known
+  whenever the seat is. A turn's *Lost/turn* bar needs that turn and the one
+  before it known; otherwise the first turn back in sight would carry the whole
+  gap's losses as its own. (Until 2026-10-23 a mid-game review charted our seat
+  alone, even with fog off.)
 - **Open by default on a finished game**, where it is the summary review is
   for; closed in a mid-game review, where the board is the point.
 - **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
