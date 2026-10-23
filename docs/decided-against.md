@@ -109,6 +109,7 @@ the measured result was indistinguishable from the baseline.
 - The field's slow-board line at 4-turn lanes: -1.0 against 5 (18:6 -4.5). *Same section.*
 - The planned opening, kept beside the field: -3.8 on 24:12 and 40:6 (z -1.13); retired as in actuary. *Same section.*
 - Three-ply rollouts (half the work, so the look-ahead reaches 80-system boards): null at 40:6, every seed unchanged at 80:6 for about 7x the time. *Look-ahead.*
+- Small sends (1, or 1-3 ships) as more candidate amounts, for a later pass to top a lane up: -0.4 and -0.2 pooled (z -0.29 / -0.16), 23% and 49% slower. Deleted. *Built, measured, removed.*
 - A look-ahead stopped by the wall clock: up to 0.99 s a decide with the guard live, and play that depends on the machine; bounded by work instead. *Look-ahead.*
 
 ## learner ([`design/learner.md`](design/learner.md))
