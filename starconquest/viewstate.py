@@ -59,6 +59,46 @@ class FadingHull:
     owner_id: int
 
 
+def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: float = 0.0
+               ) -> tuple[list[FadingFight], list[FadingHull]]:
+    """The marks a turn's ``events`` earn, read once: a fight's cost and a
+    finished hull, for whatever ``sees(sid)`` allows. ``board`` gives a hull's
+    owner, so it should be one from before the turn's fights (production comes
+    first). A second fight or hull at the same system supersedes the first, so
+    one place never carries two of a kind. Shared by the fading marks a film
+    leaves (`Ui.archive_marks`) and history's held ones (`Ui.hold_marks`).
+    """
+    fights: list[FadingFight] = []
+    hulls: list[FadingHull] = []
+    for event in events:
+        if isinstance(event, turnfilm.Clashed):
+            if not sees(event.low_id) and not sees(event.high_id):
+                continue
+            fights.append(FadingFight(
+                age_ms=age_ms, node_id=None, low_id=event.low_id, high_id=event.high_id,
+                at=event.at, burst_color=config.COLOR_TEXT,
+                cost=event.cost, victor=event.victor))
+        elif isinstance(event, turnfilm.Landed):
+            # `steps` is empty for a reinforcement or an unopposed landing —
+            # neither is a fight, so neither earns a mark.
+            if not event.steps or not sees(event.node_id):
+                continue
+            color = (config.COLOR_TEXT if event.owner_id == event.was_owner
+                     else config.player_color(event.owner_id))
+            fights = [f for f in fights if f.node_id != event.node_id]
+            fights.append(FadingFight(
+                age_ms=age_ms, node_id=event.node_id, low_id=None, high_id=None,
+                at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
+        elif isinstance(event, turnfilm.Produced):
+            for sid, n in event.hulls:
+                if not sees(sid):   # a rival's yard is not ours to report
+                    continue
+                hulls = [h for h in hulls if h.node_id != sid]
+                hulls.append(FadingHull(age_ms=age_ms, node_id=sid, hulls=n,
+                                        owner_id=board.systems[sid].owner_id))
+    return fights, hulls
+
+
 def _clip_to_play(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
     """Intersect a screen-space rect with the map viewport (empty if disjoint)."""
     rx, ry, rw, rh = rect
@@ -234,6 +274,11 @@ class Ui:
     # the moment that film is replaced.
     fading_fights: list[FadingFight] = field(default_factory=list)
     fading_hulls: list[FadingHull] = field(default_factory=list)
+    # History review's held marks: the turn on screen's, fixed rather than
+    # fading (`hold_marks`); `held_turn` is the turn they were read for.
+    held_fights: list[FadingFight] = field(default_factory=list)
+    held_hulls: list[FadingHull] = field(default_factory=list)
+    held_turn: int | None = None
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -471,41 +516,35 @@ class Ui:
         what fog does afterward, rather than blinking out mid-fade the moment the
         next turn's own `film_visible` happens to differ.
         """
-        for event in events:
-            if isinstance(event, turnfilm.Clashed):
-                if not self.sees(event.low_id) and not self.sees(event.high_id):
-                    continue
-                self.fading_fights.append(FadingFight(
-                    age_ms=0.0, node_id=None, low_id=event.low_id, high_id=event.high_id,
-                    at=event.at, burst_color=config.COLOR_TEXT,
-                    cost=event.cost, victor=event.victor))
-            elif isinstance(event, turnfilm.Landed):
-                # `steps` is empty for a reinforcement or an unopposed landing —
-                # neither is a fight, so neither earns a mark.
-                if not event.steps or not self.sees(event.node_id):
-                    continue
-                color = (config.COLOR_TEXT if event.owner_id == event.was_owner
-                         else config.player_color(event.owner_id))
-                # A second fight at the same system supersedes the first. Turns
-                # chain straight into each other, so the previous one's mark can
-                # still be fading here, and two bursts with two costs stacked on
-                # one node read as a garbled number rather than as two fights.
-                self.fading_fights = [f for f in self.fading_fights
-                                      if f.node_id != event.node_id]
-                self.fading_fights.append(FadingFight(
-                    age_ms=0.0, node_id=event.node_id, low_id=None, high_id=None,
-                    at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
-            elif isinstance(event, turnfilm.Produced):
-                for sid, hulls in event.hulls:
-                    if not self.sees(sid):   # a rival's yard is not ours to report
-                        continue
-                    # ...and the same for a yard finishing a hull two turns
-                    # running: one `+N`, not a pile of them.
-                    self.fading_hulls = [h for h in self.fading_hulls
-                                         if h.node_id != sid]
-                    self.fading_hulls.append(FadingHull(
-                        age_ms=0.0, node_id=sid, hulls=hulls,
-                        owner_id=board.systems[sid].owner_id))
+        fights, hulls = read_marks(board, events, self.sees)
+        # A second fight (or hull) at the same system supersedes the first.
+        # Turns chain straight into each other, so the previous one's mark can
+        # still be fading here, and two bursts with two costs stacked on one
+        # node read as a garbled number rather than as two fights.
+        taken = {f.node_id for f in fights if f.node_id is not None}
+        self.fading_fights = [f for f in self.fading_fights if f.node_id not in taken] + fights
+        built = {h.node_id for h in hulls}
+        self.fading_hulls = [h for h in self.fading_hulls if h.node_id not in built] + hulls
+
+    def hold_marks(self, turn: int, board: GameState, events: list[turnfilm.Event],
+                   visible: set[int]) -> None:
+        """History review: the marks of the turn on screen, held there rather
+        than fading, so a fight can be found without stepping back and forth.
+        ``board`` is the turn's starting board and ``visible`` what could be
+        seen across it (its start and end, as a film's `sees`). Read once per
+        turn (``turn`` keys it). Drawn while no film runs (`shown_marks`)."""
+        if self.held_turn == turn:
+            return
+        self.held_turn = turn
+        settled = float(config.FILM_FLASH_MS)   # a burst done popping in, not yet fading
+        self.held_fights, self.held_hulls = read_marks(board, events, visible.__contains__, settled)
+
+    def shown_marks(self) -> tuple[list[FadingFight], list[FadingHull]]:
+        """The marks the map draws: in history with no film running, the held
+        marks of the turn on screen; otherwise the fading ones a film left."""
+        if self.history and self.film is None:
+            return self.held_fights, self.held_hulls
+        return self.fading_fights, self.fading_hulls
 
     def age_fading_marks(self, dt: float) -> None:
         """Advance every fading mark's clock and drop whatever has fully

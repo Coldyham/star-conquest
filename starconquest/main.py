@@ -910,6 +910,7 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.history_reveal = state.winner is not None
     # The end-of-game graphs: read once off the boards just built, and open by
     # default on a finished game, where they are the summary the review is for.
+    ui.held_turn = None   # held marks are read afresh for this review
     ui.history_chart = stats.chart(history_states)
     if not ui.history_reveal:
         # mid-game, a rival is charted only for the turns the top bar showed it
@@ -1184,6 +1185,24 @@ def land_film(state: GameState, ui: Ui) -> None:
     if ui.deferred_view_snap:
         ui.deferred_view_snap = False
         ui.reset_view(state)
+
+
+def hold_history_marks(ui: Ui, history_states: list[GameState],
+                       history_fog: list, history_events: list) -> None:
+    """Hold the marks of the history turn on screen (`Ui.hold_marks`): its
+    fights' costs and finished hulls, read off the turn's events against the
+    board it started from, for what could be seen across it (everything, once
+    review is revealed)."""
+    i = ui.history_turn
+    if i <= 0 or i >= len(history_events) or i >= len(history_states):
+        ui.hold_marks(i, history_states[0], [], set())
+        return
+    board = history_states[i - 1]
+    if ui.history_reveal:
+        visible = set(board.systems)
+    else:
+        visible = set(history_fog[i - 1][0]) | set(history_fog[i][0])
+    ui.hold_marks(i, board, history_events[i], visible)
 
 
 def _next_history_film(ui: Ui, history_states: list[GameState],
@@ -2227,6 +2246,8 @@ async def main() -> None:
                     ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
                 else:
                     ui.visible, ui.seen, ui.player_intel = history_fog[i]
+                if reel is None:
+                    hold_history_marks(ui, history_states, history_fog, history_events)
                 render.draw(screen, view_state, ui)
             else:
                 # Live play, and the same substitution: `resolve_turn` has already

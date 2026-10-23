@@ -1142,13 +1142,14 @@ def _mark_fade(age_ms: float) -> float:
 def _flash_marks(state: GameState, ui: Ui):
     """Every fading fight, as `_Mark`s.
 
-    The one place `Ui.fading_fights` is turned into places on screen, so the
+    The one place `Ui.shown_marks` (a film's fading fights, or history's held
+    ones) is turned into places on screen, so the
     bursts, the labels over them and the star-name pass all agree about where
     they are. A fight is never dropped early, only faded toward invisible
     (`fade`) — pruning is `Ui.age_fading_marks`' job, not this one's, and it runs
     whether or not a playback is currently active.
     """
-    for f in ui.fading_fights:
+    for f in ui.shown_marks()[0]:
         phase, fade = _mark_phase(f.age_ms), _mark_fade(f.age_ms)
         if f.node_id is None:
             a = state.systems[f.low_id].pos
@@ -1180,26 +1181,28 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     credits whoever held the system going in — the defender, not whoever ends up
     with it. When the extra ship still isn't enough the system falls right after,
     and the two marks land moments apart rather than the same instant, but neither
-    expires early, so the gain reliably stacks a row above the cost whenever both
-    are still up. One list, because the star-name pass has to treat these as
+    expires early, so the two reliably stack whenever both are still up: a
+    system's numbers rise a row each from the mark's own, the largest on top. One list, because the star-name pass has to treat these as
     occupied space (the same rule that already keeps names off lane times and a
     rule's share) and must not have to re-derive where they went.
     """
     labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
-    charged: set[int] = set()
+    # a system's numbers stack upward from its mark's row, the largest on top
+    at_node: dict[int, list[tuple[int, str, tuple[int, int, int]]]] = {}
     for mark in _flash_marks(state, ui):
         if mark.cost > 0 and mark.victor is not None:
             color = _faded(config.player_color(mark.victor), mark.fade)
-            labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
-            if mark.node_id is not None:
-                charged.add(mark.node_id)
-    for h in ui.fading_hulls:
-        system = state.systems[h.node_id]
-        x, y = _mark_center(ui.view.to_screen(system.pos))
-        if h.node_id in charged:
-            y -= _row_h("small")
+            if mark.node_id is None:
+                labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
+            else:
+                at_node.setdefault(mark.node_id, []).append((mark.cost, f"−{mark.cost}", color))
+    for h in ui.shown_marks()[1]:
         color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
-        labels.append(((x, y), f"+{h.hulls}", color))
+        at_node.setdefault(h.node_id, []).append((h.hulls, f"+{h.hulls}", color))
+    for node_id, items in at_node.items():
+        x, y = _mark_center(ui.view.to_screen(state.systems[node_id].pos))
+        for row, (_size, text, color) in enumerate(sorted(items, key=lambda i: i[0])):
+            labels.append(((x, y - row * _row_h("small")), text, color))
     return labels
 
 

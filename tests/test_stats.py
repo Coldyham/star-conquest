@@ -375,3 +375,31 @@ def test_every_tab_draws_a_chart_with_gaps(tmp_path, monkeypatch):
         assert "Unclaimed" in drawn       # the Map share tab's band, mid-game too
     finally:
         pygame.quit()
+
+
+def test_a_reviewed_turn_holds_its_fight_and_hull_marks(tmp_path, monkeypatch):
+    """The turn on screen keeps its fights' bursts and costs, and its finished
+    hulls, fully up for as long as it's on screen: no stepping back and forth
+    to see where the fighting was. Another turn shows its own."""
+    from starconquest import turnfilm
+    try:
+        screen, state, ui, log = _finished_review(tmp_path, monkeypatch, turns=30)
+        states, fogs, events, _l = main.open_history(state, ui, log)
+        ui.stop_film()                # the last live turn's, still running headless
+        fight_turn = next(i for i, evs in enumerate(events)
+                          if any(isinstance(e, turnfilm.Landed) and e.steps for e in evs))
+        ui.history_turn = fight_turn
+        main.hold_history_marks(ui, states, fogs, events)
+        ui.visible, ui.seen, ui.player_intel = fogs[fight_turn]
+        marks = list(render._flash_marks(states[fight_turn], ui))
+        assert marks and all(m.fade == 0.0 and m.phase == 1.0 for m in marks)
+        ui.age_fading_marks(10 * (config.FILM_FLASH_MS + config.FILM_FADE_MS))
+        assert list(render._flash_marks(states[fight_turn], ui)) == marks   # held, not fading
+        assert any(t.startswith("+") for _c, t, _col in render._film_labels(states[fight_turn], ui))
+        render.draw(screen, states[fight_turn], ui)
+
+        ui.history_turn = 0           # the opening: nothing happened yet
+        main.hold_history_marks(ui, states, fogs, events)
+        assert list(render._flash_marks(states[0], ui)) == []
+    finally:
+        pygame.quit()
