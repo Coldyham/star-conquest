@@ -215,6 +215,10 @@ def _begin_game(settings: Settings, stage: tuple[gauntlet.Gauntlet, gauntlet.Sta
     return state, ui, log, seed
 
 
+def _briefing_again() -> str:
+    return "Tap here to read the briefing again" if config.touch_ui else "B: read the briefing again"
+
+
 def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
              briefing: bool = True) -> None:
     """Copy a gauntlet stage onto ``ui`` as plain values, so render never sees a
@@ -233,7 +237,10 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     ui.stage_title = s.title
     ui.briefing = s.briefing
     ui.briefing_open = briefing and bool(s.briefing)
-    ui.stage_hint = s.hint or None
+    # A stage with no hint of its own (a generated one, or one made on the board
+    # with the hint left blank) still needs a line in the panel to tap back to
+    # its briefing.
+    ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
     ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
 
 

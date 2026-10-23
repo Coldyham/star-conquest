@@ -2897,3 +2897,22 @@ def test_start_game_copies_a_stage_onto_the_ui_as_plain_values(tmp_path, monkeyp
 
     _state, plain, _log = main.start_game(cfg, cfg.seed, False)
     assert plain.stage_label is None and not plain.in_stage
+
+
+def test_a_stage_with_no_hint_still_has_a_line_back_to_its_briefing(monkeypatch):
+    # A generated stage has none of its own: the panel's line is the only way
+    # back to the card on a phone.
+    import dataclasses
+    from starconquest import gauntlet
+
+    g = gauntlet.builtin()[0]
+    bare = dataclasses.replace(g.stages[0], hint="")
+    ui = Ui(view=WorldView((0, 0, 100, 100), config.play_rect()))
+    monkeypatch.setattr(config, "touch_ui", True)
+    main.stage_ui(ui, (g, bare))
+    assert ui.stage_hint and "briefing" in ui.stage_hint and "B:" not in ui.stage_hint
+    monkeypatch.setattr(config, "touch_ui", False)
+    main.stage_ui(ui, (g, bare))
+    assert ui.stage_hint.startswith("B:")
+    main.stage_ui(ui, (g, dataclasses.replace(bare, briefing=())))
+    assert ui.stage_hint is None

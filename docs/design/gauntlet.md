@@ -84,7 +84,10 @@ on the touch build.
 **The hint** sits above the legend whenever nothing is in focus, at most
 `gauntlet.HINT_MAX` (90) characters. On the touch build an empty panel holds 23
 rows, the legend takes 18 and a 90-character hint four, so the hint carries no
-second line of its own (`test_a_stage_hint_fits_the_empty_panel`).
+second line of its own (`test_a_stage_hint_fits_the_empty_panel`). A stage
+with a briefing but no hint (every generated stage, or a board stage left
+blank) gets one from `main.stage_ui`, "Tap here to read the briefing again",
+so the card can always be brought back.
 
 ### The stages
 
