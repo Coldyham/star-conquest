@@ -526,7 +526,8 @@ board, and no key moves. Boons cannot do that.
   · Stage cleared", "…: not yet", or "…: not this time · your best clears it"),
   with Retry alone where Next stage would be when it is not cleared.
 - **The briefing card, the top bar and the stage list show the target**, so it
-  is never a surprise on the win overlay: a line under the card's stage label,
+  is never a surprise on the win overlay: a note at the card's foot ("Target:
+  Win in 14 turns or fewer", one of `render._draw_card`'s notes, which always show),
   " · target 14" after the top bar's stage label, and "18 turns / 3 lost ·
   target 14" on a won row short of it. It is kept out of the side panel's hint,
   so `HINT_MAX` keeps its row budget.

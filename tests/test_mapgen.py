@@ -6,7 +6,7 @@ import itertools
 import math
 import random
 
-from starconquest import config, mapgen, starnames
+from starconquest import config, mapgen, starlore, starnames
 from starconquest.geometry import point_segment_dist, segments_intersect
 
 SEEDS = list(range(60))
@@ -124,6 +124,12 @@ def test_naming_is_the_last_roll_of_generation(monkeypatch):
     assert [s.production for s in named.systems.values()] == [s.production for s in bare.systems.values()]
     assert set(named.lanes) == set(bare.lanes)
     assert not any(s.name for s in bare.systems.values())
+
+
+def test_every_star_name_has_its_lore():
+    """`tools/gen_starnames.py` writes both files from one CSV: a name with no
+    entry would get no info card, and an entry with no name is dead weight."""
+    assert set(starlore.LORE) == set(starnames.NAMES)
 
 
 def test_pick_names_numbers_the_surplus_when_asked_for_more_than_exist():

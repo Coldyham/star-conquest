@@ -27,6 +27,7 @@ from starconquest import (
     matchnames,
     model,
     render,
+    starlore,
     starnames,
     turnfilm,
 )
@@ -914,6 +915,54 @@ def test_help_text_fits_the_empty_panel_whole():
                     f"rows, panel holds {room}"
                 )
                 assert drawn <= bottom
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_every_star_card_fits_whole():
+    """Every catalogue entry's info card holds its whole origin, its source and
+    the close line on the map, at all three geometries: the card is cut silently
+    when it doesn't, so a cut entry would be lore nobody reads the end of."""
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            for name, lore in starlore.LORE.items():
+                assert render._card_layout(*render._lore_card(lore)).fits, f"{name} runs off its card"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_the_lore_button_sits_beside_a_selected_systems_name():
+    """Drawn for the selected system only, inside the panel, and the card it opens
+    stays on the map; a system the catalogue has no entry for gets no button."""
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+            ui.hover = home
+            render.draw(screen, state, ui)
+            assert ui.lore_button_rect == (0, 0, 0, 0), "a hover is not a selection"
+
+            ui.mode, ui.selected = SELECTED, home
+            render.draw(screen, state, ui)
+            panel = pygame.Rect(config.SCREEN_W - config.HUD_RIGHT_W, 0, config.HUD_RIGHT_W, config.SCREEN_H)
+            assert ui.lore_button_rect[2] > 0
+            assert panel.contains(pygame.Rect(*ui.lore_button_rect))
+
+            ui.lore_sid = home
+            render.draw(screen, state, ui)
+
+            state.systems[home].name = "Not In The Catalogue"
+            render.draw(screen, state, ui)
+            assert ui.lore_button_rect == (0, 0, 0, 0)
     finally:
         _desktop_scale()
         pygame.quit()
