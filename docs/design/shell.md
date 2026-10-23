@@ -131,7 +131,7 @@ the whole map once `state.winner` is set or the human is defeated, and frames
 just `Ui.seen` otherwise (game start, the reset button, a window resize).
 `WorldView.fit_to` gets there by layering a fresh zoom/pan on top of the
 existing full-map `_world_bounds`/`_fit_scale` rather than recomputing them,
-so `ZOOM_MIN` and the pan clamp stay keyed to the true full map regardless of
+so the zoom limit and the pan clamp stay keyed to the true full map regardless of
 what was last framed — manually zooming out always reaches it. `resolve_turn`
 compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
@@ -187,16 +187,18 @@ foot, lifted above the docked chart when it is open; full screen there is no
 map, so no cluster. A press on the reviewed map is always a pan, since there is
 nothing to select.
 
-Review's camera is also looser than live play's (`WorldView`'s ``loose``), so
-the part of the map under the docked chart can be brought into view without
-the default squashing the map into the space above it. It zooms out until
-`config.REVIEW_ROOM` (0.85) of the map's size shows past each side, leaving
-the map about 37% of the view across, and pans anywhere that keeps
-`config.REVIEW_KEEP` (15%) of the map on screen on each axis (of the view,
-once the zoomed map is the wider, so an edge stays reachable). The point is
-that a player can't easily end up looking at nothing. Reset still restores
-the ordinary framing, and leaving review calls `WorldView.settle` to bring the
-camera back inside live play's clamp.
+The game's camera is free past the fit, by a ``room`` (`WorldView.zoom_at`,
+`pan`): it zooms out until ``room`` of the map's size shows past each side, and
+pans anywhere that keeps ``1 - room`` of the map on screen on each axis (of the
+view, once the zoomed map is the wider, so an edge stays reachable), so a
+player can't easily end up looking at nothing. Live play gets
+`config.LIVE_ROOM` (0.5: the map half the view across at the most zoomed
+out); review gets more, `config.REVIEW_ROOM` (0.85: about 37%), so the part
+of the map under the docked chart can be brought into view without the
+default squashing the map into the space above it. Reset restores the
+ordinary framing either way, and leaving review calls `WorldView.settle` to
+bring the camera back inside live play's room. The map maker keeps the strict
+clamp (no ``room``).
 
 - **Read off the history boards, never the log.** `stats.chart` runs once in
   `main.open_history` over the boards `build_history` already reconstructed, so

@@ -2055,7 +2055,7 @@ async def main() -> None:
                     ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended
-                    ui.view.settle()   # review's freer camera, back inside live play's clamp
+                    ui.view.settle(config.LIVE_ROOM)   # back inside live play's (tighter) room
                     history_states, history_fog, history_events = [], [], []
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog

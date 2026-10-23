@@ -139,14 +139,14 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
         elif ui.dragging_graph:
             _seek_graph(ui, event.pos)
         elif ui.pan_active and event.buttons[0]:
-            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1], loose=True)
+            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1], room=config.REVIEW_ROOM)
             ui.pan_last = event.pos
         return None
     if event.type == pygame.MOUSEWHEEL:
         # the map's wheel zoom, wherever the map is what's under the pointer
         pos = pygame.mouse.get_pos()
         if not _over_side_panel(pos) and not (ui.history_graph and (ui.graph_full or _over_graph(ui, pos))):
-            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y, loose=True)
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y, room=config.REVIEW_ROOM)
         return None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         if ui.exit_history_rect[2] and _point_in_rect(event.pos, ui.exit_history_rect):
@@ -209,18 +209,24 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
 
 def _press_camera(state: GameState, ui: Ui, pos) -> bool:
     """A press on the on-map camera cluster (Reset view, zoom −/+): moves the
-    camera (review's freer one in history, `WorldView.zoom_at`) and reports it
-    handled. Each rect is guarded on its width, so a
-    scene that doesn't draw the cluster (render zeroes it) never matches."""
+    camera (as freely as the scene allows, `_room`) and reports it handled.
+    Each rect is guarded on its width, so a scene that doesn't draw the
+    cluster (render zeroes it) never matches."""
     if ui.reset_view_rect[2] and _point_in_rect(pos, ui.reset_view_rect):
         ui.reset_view(state)
     elif ui.zoom_minus_rect[2] and _point_in_rect(pos, ui.zoom_minus_rect):
-        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP, loose=ui.history)
+        ui.view.zoom_at(_play_rect_center(), 1 / config.ZOOM_BUTTON_STEP, room=_room(ui))
     elif ui.zoom_plus_rect[2] and _point_in_rect(pos, ui.zoom_plus_rect):
-        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP, loose=ui.history)
+        ui.view.zoom_at(_play_rect_center(), config.ZOOM_BUTTON_STEP, room=_room(ui))
     else:
         return False
     return True
+
+
+def _room(ui: Ui) -> float:
+    """How far the camera may stray (`WorldView.zoom_at`): more in history
+    review, whose docked graphs cover the map's foot, than in live play."""
+    return config.REVIEW_ROOM if ui.history else config.LIVE_ROOM
 
 
 def _over_map(pos) -> bool:
@@ -446,7 +452,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
             # a press on empty space is panning the camera
             dx = event.pos[0] - ui.pan_last[0]
             dy = event.pos[1] - ui.pan_last[1]
-            ui.view.pan(dx, dy)
+            ui.view.pan(dx, dy, room=config.LIVE_ROOM)
             ui.pan_last = event.pos
         else:
             ui.hover = pick_node(state, ui, event.pos)
@@ -462,7 +468,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
         if ui.count_adjust_active():
             ui.step_count(state, event.y)
         elif not _over_side_panel(pos):  # zooming the map from off-map is disorienting
-            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y, room=config.LIVE_ROOM)
         return None
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -614,7 +620,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
                 ui.route_box = True
             ui.drag_pos = event.pos
         elif ui.pan_active and event.buttons[0]:
-            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1])
+            ui.view.pan(event.pos[0] - ui.pan_last[0], event.pos[1] - ui.pan_last[1], room=config.LIVE_ROOM)
             ui.pan_last = event.pos
         ui.hover = pick_node(state, ui, event.pos)
         return None
@@ -625,7 +631,7 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
     if event.type == pygame.MOUSEWHEEL:
         pos = pygame.mouse.get_pos()
         if not _over_side_panel(pos):  # the panel holds the route summary, not the map
-            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y)
+            ui.view.zoom_at(pos, config.ZOOM_WHEEL_STEP**event.y, room=config.LIVE_ROOM)
         return None
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:

@@ -240,7 +240,7 @@ def test_a_review_has_the_camera_cluster_above_the_docked_graphs(tmp_path, monke
         mx, my, mw, mh = ui.zoom_minus_rect
         for _ in range(12):          # review's camera zooms out past the fit...
             _press(board, ui, (mx + mw // 2, my + mh // 2))
-        assert ui.view.zoom == pytest.approx(config.REVIEW_ZOOM_MIN)
+        assert ui.view.zoom == pytest.approx(1 / (1 + 2 * config.REVIEW_ROOM))
         _press(board, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.view.zoom == zoom  # ...and Reset brings it back
         ui.history_graph = False
