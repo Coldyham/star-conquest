@@ -626,7 +626,8 @@ Rules that hold it together:
   when it was built) and for what was in sight at either end of the turn
   (everything, once revealed). `Ui.shown_marks` picks which set render draws:
   held in review with no film, fading otherwise. A system's numbers stack a
-  row each, the largest on top (on a tie, the gain over the cost).
+  row each in the order they resolved, read top down: the gain (production)
+  above the cost (combat).
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the

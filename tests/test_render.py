@@ -1781,7 +1781,7 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
     to the fight rather than blurring into it — so this archives them one call
     apart, the way two separate `Reel.run_to` calls would. Neither expires
     quickly, so both are still up together and must not be drawn on top of each
-    other. They stack a row apart, the larger number on top (the gain, on a tie).
+    other. They stack a row apart in resolution order, read top down.
     """
     pygame.init()
     render._FONTS.clear()
@@ -1808,8 +1808,8 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
 
         assert sorted(t for t, _ in out) == ["+1", "−2"]
         assert placed["+1"][0] == placed["−2"][0], "same column"
-        assert placed["−2"][1] < placed["+1"][1], "the larger number stacks on top"
-        assert placed["+1"][1] - placed["−2"][1] == render._row_h("small")
+        assert placed["+1"][1] < placed["−2"][1], "resolution order, top down: the gain first"
+        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
         # the hull is the defender's, in its colour; the fight is the attacker's —
         # the two need not agree, since the hull was built before the system
         # changed hands
