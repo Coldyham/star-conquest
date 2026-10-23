@@ -131,7 +131,7 @@ the whole map once `state.winner` is set or the human is defeated, and frames
 just `Ui.seen` otherwise (game start, the reset button, a window resize).
 `WorldView.fit_to` gets there by layering a fresh zoom/pan on top of the
 existing full-map `_world_bounds`/`_fit_scale` rather than recomputing them,
-so `ZOOM_MIN` and the pan clamp stay keyed to the true full map regardless of
+so the zoom limit and the pan clamp stay keyed to the true full map regardless of
 what was last framed — manually zooming out always reaches it. `resolve_turn`
 compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
@@ -164,8 +164,9 @@ stacked bar shows at once when the big fights were and who paid for them —
 and *Map share*, stacked bands that always fill 0-100% (`stats.AREA`): each
 seat's share of every system, with the unclaimed share as a grey band on top.
 A hidden seat leaves a gap rather than rescaling the rest, so a band always
-reads as a true share, and the unclaimed band waits for review to be revealed,
-since mid-game it would say how much lies behind the fog. A cursor marks the
+reads as a true share. Mid-game the unclaimed band is charted on the same terms
+as a rival (below): on the turns some unclaimed system was in sight. (Until
+2026-10-23 it waited for review to be revealed.) A cursor marks the
 turn the map is showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
 and a click or drag across the plot seeks a turn as the track does. The ^
 caret (F) at its top right makes it full screen, filling everything between
@@ -187,17 +188,43 @@ foot, lifted above the docked chart when it is open; full screen there is no
 map, so no cluster. A press on the reviewed map is always a pan, since there is
 nothing to select.
 
+The game's camera is free past the fit, by a ``room`` (`WorldView.zoom_at`,
+`pan`): it zooms out until ``room`` of the map's size shows past each side, and
+pans anywhere that keeps ``1 - room`` of the map on screen on each axis (of the
+view, once the zoomed map is the wider, so an edge stays reachable), so a
+player can't easily end up looking at nothing. Live play gets
+`config.LIVE_ROOM` (0.5: the map half the view across at the most zoomed
+out); review gets more, `config.REVIEW_ROOM` (0.85: about 37%), so the part
+of the map under the docked chart can be brought into view without the
+default squashing the map into the space above it. Reset restores the
+ordinary framing either way, and leaving review calls `WorldView.settle` to
+bring the camera back inside live play's room. The map maker keeps the strict
+clamp (no ``room``).
+
 - **Read off the history boards, never the log.** `stats.chart` runs once in
   `main.open_history` over the boards `build_history` already reconstructed, so
   a curve can never disagree with the map at the same turn, and nothing decides
   or rolls again. `stats` is core (no pygame), drawing nothing from `state.rng`.
-- **Fog holds.** `Ui.graph_seats` draws every seat only once review is revealed
-  (a finished game); a mid-game review charts our seat alone, since a rival's
-  ship curve is exactly what the fog hides on the map beside it.
+- **The graphs know what the top bar knew.** A finished game charts every seat
+  on every turn. Mid-game, `main.open_history` masks the chart
+  (`stats.sightings`, `stats.masked`) so a rival is charted only on the turns
+  the top bar showed its standings: while it held a system in that turn's
+  sight (with fog off, always), and once knocked out if it was ever sighted.
+  Its other turns are NaN, a gap and never a zero. A line is drawn solid
+  along each run of known turns and dotted straight across a gap, since what
+  happened out of sight is a guess. Bars and bands skip the unknown turns, and
+  the legend reads "–" on one. `Ui.graph_seats` offers our seat and each rival
+  sighted at least once; Map share's unclaimed band follows the same rule.
+  Losses are cumulative, so a running total is known
+  whenever the seat is. A turn's *Lost/turn* bar needs that turn and the one
+  before it known; otherwise the first turn back in sight would carry the whole
+  gap's losses as its own. (Until 2026-10-23 a mid-game review charted our seat
+  alone, even with fog off.)
 - **Open by default on a finished game**, where it is the summary review is
   for; closed in a mid-game review, where the board is the point.
 - **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
-- Not yet: the camera does not reframe into the space above the docked chart, and
+- Not yet: the default camera does not reframe into the space above the docked
+  chart (on purpose: it would squash the map; the loose camera covers it), and
   there is no per-turn losses or kills view (a fight's dead are recorded per
   owner, not per killer).
 

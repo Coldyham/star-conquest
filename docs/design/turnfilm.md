@@ -617,6 +617,17 @@ Rules that hold it together:
   turns chain straight into each other, so the previous turn's is often still
   fading when this one fires, and two bursts with two numbers on one node read as
   a garbled figure rather than as two events.
+- **History holds the turn on screen's marks.** While no film runs, review
+  draws the marks of the turn being viewed, held settled and unfaded
+  (`Ui.hold_marks`, via `main.hold_history_marks`, read once per turn by the same
+  `viewstate.read_marks` a film's archive uses), so a fight can be found
+  without stepping back and forth for the before and after. They're read
+  against the turn's starting board (a hull's owner is whoever held the yard
+  when it was built) and for what was in sight at either end of the turn
+  (everything, once revealed). `Ui.shown_marks` picks which set render draws:
+  held in review with no film, fading otherwise. A system's numbers stack a
+  row each in the order they resolved, read top down: the gain (production)
+  above the cost (combat).
 - **Sub-turn position is one formula.** `Fleet.progress_at(t)`, which
   `engine._lane_span` measures a lane battle with and `render._draw_fleets` draws
   with, so a clash flashes exactly where the triangles are seen to touch — at the

@@ -1142,13 +1142,14 @@ def _mark_fade(age_ms: float) -> float:
 def _flash_marks(state: GameState, ui: Ui):
     """Every fading fight, as `_Mark`s.
 
-    The one place `Ui.fading_fights` is turned into places on screen, so the
+    The one place `Ui.shown_marks` (a film's fading fights, or history's held
+    ones) is turned into places on screen, so the
     bursts, the labels over them and the star-name pass all agree about where
     they are. A fight is never dropped early, only faded toward invisible
     (`fade`) — pruning is `Ui.age_fading_marks`' job, not this one's, and it runs
     whether or not a playback is currently active.
     """
-    for f in ui.fading_fights:
+    for f in ui.shown_marks()[0]:
         phase, fade = _mark_phase(f.age_ms), _mark_fade(f.age_ms)
         if f.node_id is None:
             a = state.systems[f.low_id].pos
@@ -1180,26 +1181,30 @@ def _film_labels(state: GameState, ui: Ui) -> list[tuple[tuple[int, int], str, t
     credits whoever held the system going in — the defender, not whoever ends up
     with it. When the extra ship still isn't enough the system falls right after,
     and the two marks land moments apart rather than the same instant, but neither
-    expires early, so the gain reliably stacks a row above the cost whenever both
-    are still up. One list, because the star-name pass has to treat these as
+    expires early, so the two reliably stack whenever both are still up, in the
+    order they resolved, read top down: the gain above the cost. One list, because the star-name pass has to treat these as
     occupied space (the same rule that already keeps names off lane times and a
     rule's share) and must not have to re-derive where they went.
     """
     labels: list[tuple[tuple[int, int], str, tuple[int, int, int]]] = []
-    charged: set[int] = set()
+    # A system's numbers stack in resolution order, read top down: production
+    # comes before combat, so a gain sits above a cost, and the last to resolve
+    # is on the mark's own row.
+    at_node: dict[int, list[tuple[str, tuple[int, int, int]]]] = {}
+    for h in ui.shown_marks()[1]:
+        color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
+        at_node.setdefault(h.node_id, []).append((f"+{h.hulls}", color))
     for mark in _flash_marks(state, ui):
         if mark.cost > 0 and mark.victor is not None:
             color = _faded(config.player_color(mark.victor), mark.fade)
-            labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
-            if mark.node_id is not None:
-                charged.add(mark.node_id)
-    for h in ui.fading_hulls:
-        system = state.systems[h.node_id]
-        x, y = _mark_center(ui.view.to_screen(system.pos))
-        if h.node_id in charged:
-            y -= _row_h("small")
-        color = _faded(config.player_color(h.owner_id), _mark_fade(h.age_ms))
-        labels.append(((x, y), f"+{h.hulls}", color))
+            if mark.node_id is None:
+                labels.append((_mark_center(mark.center), f"−{mark.cost}", color))
+            else:
+                at_node.setdefault(mark.node_id, []).append((f"−{mark.cost}", color))
+    for node_id, items in at_node.items():
+        x, y = _mark_center(ui.view.to_screen(state.systems[node_id].pos))
+        for above, (text, color) in enumerate(reversed(items)):
+            labels.append(((x, y - above * _row_h("small")), text, color))
     return labels
 
 
@@ -2852,6 +2857,8 @@ def _nice_ceil(v: float) -> float:
 
 
 def _graph_value(metric: str, v: float) -> str:
+    if math.isnan(v):
+        return "–"   # a rival out of sight that turn (`stats.masked`)
     if metric == "income":
         return f"{v:.1f}"
     if metric in stats.AREA:
@@ -2900,7 +2907,7 @@ def _draw_stacked_area(surface, chart: stats.Chart, key: str, bands, plot: pygam
         series = chart.series(key, pid)
         if len(series) != len(base):
             continue
-        upper = [b + v for b, v in zip(base, series)]
+        upper = [b + stats.known_or_zero(v) for b, v in zip(base, series)]
         lower_pts = [(x_at(t), y_at(v)) for t, v in enumerate(base)]
         upper_pts = [(x_at(t), y_at(v)) for t, v in enumerate(upper)]
         color = color_of(pid)
@@ -2925,7 +2932,7 @@ def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
         base = 0.0
         for pid in traces:
             v = chart.series(key, pid)[t]
-            if v <= 0:
+            if math.isnan(v) or v <= 0:
                 continue
             y0 = plot.bottom - round(min(base, top) / top * plot.h)
             base += v
@@ -2934,6 +2941,40 @@ def _draw_stacked_bars(surface, chart: stats.Chart, key: str, traces, turn: int,
             if t != turn:
                 color = tuple(c * 3 // 5 for c in color)
             pygame.draw.rect(surface, color, (x0, y1, max(1, x1 - x0), max(1, y0 - y1)))
+
+
+def _draw_known_line(surface, color, series, at, width: int) -> None:
+    """A seat's curve over the turns it was known (`stats.masked`): solid
+    along each run of known turns, dotted straight across a gap between two
+    (what it did out of sight is a guess, and looks like one), and a lone known
+    turn a dot."""
+    runs: list[list[tuple[int, int]]] = []
+    prev = None
+    for t, v in enumerate(series):
+        if math.isnan(v):
+            prev = None
+            continue
+        p = at(t, v)
+        if prev is None:
+            runs.append([])
+        runs[-1].append(p)
+        prev = p
+    for run in runs:
+        if len(run) >= 2:
+            pygame.draw.lines(surface, color, False, run, width)
+        else:
+            pygame.draw.circle(surface, color, run[0], width)
+    for before, after in zip(runs, runs[1:]):
+        _draw_dotted(surface, color, before[-1], after[0], max(1, width // 2))
+
+
+def _draw_dotted(surface, color, a, b, r: int) -> None:
+    """Dots of radius ``r`` from ``a`` to ``b``, spaced a few radii apart."""
+    gap = max(3, r * 4)
+    n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // gap))
+    for i in range(n + 1):
+        f = i / n
+        pygame.draw.circle(surface, color, (round(a[0] + (b[0] - a[0]) * f), round(a[1] + (b[1] - a[1]) * f)), r)
 
 
 def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None:
@@ -2987,7 +3028,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     row_h = _tap_size(_row_h())
     col_gap = config.s(24)
     # the unclaimed band's row, always counted so a tab change never resizes the panel
-    items = len(rows) + (1 if ui.history_reveal else 0)
+    items = len(rows) + 1
 
     vx, vy, vw, vh = config.play_rect()
     tab_h = _tap_size(font.get_height() + config.s(10))
@@ -3033,7 +3074,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     caret = pygame.Rect(box.right - pad - tab_h, ty, tab_h, tab_h)
     _draw_caret(surface, caret, up=not ui.graph_full)
     ui.graph_full_rect = (caret.x, caret.y, caret.w, caret.h)
-    note = ("" if ui.history_reveal else "Your seat only until the game is decided")
+    note = ("" if ui.history_reveal else "Rivals only while in sight")
     if not note and not config.touch_ui:
         note = "Tab: next graph  ·  1-9 or click a seat: show/hide  ·  F: " + (
             "dock" if ui.graph_full else "full screen")
@@ -3093,7 +3134,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
         shown_rows += 1
     ui.graph_trace_rects = trace_rects
     spare = cells[shown_rows:]
-    if key in stats.AREA and ui.history_reveal and spare and spare[0].bottom <= floor:
+    if key in stats.AREA and spare and spare[0].bottom <= floor:
         # the unclaimed band's row: always drawn, so not a trace to toggle
         cell = spare.pop(0)
         cy = cell.centery
@@ -3143,9 +3184,9 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
               topleft=(min(max(plot.x, x - tw // 2), plot.right - tw), label_y))
 
     if area:
-        # the unclaimed band only once rivals are revealed: mid-game it would say
-        # how much the fog's other side holds
-        bands = list(traces) + ([stats.NEUTRAL] if ui.history_reveal else [])
+        # unclaimed on top, known on the turns some of it was in sight, as a
+        # rival is (`stats.sightings`)
+        bands = list(traces) + [stats.NEUTRAL]
         _draw_stacked_area(surface, chart, key, bands, plot, top,
                            lambda pid: config.COLOR_NEUTRAL if pid == stats.NEUTRAL else color_of(pid))
     if stacked:
@@ -3159,16 +3200,14 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     order = sorted(traces, key=lambda pid: pid == ui.human_id)
     for pid in order:
         width = config.s(3) if pid == ui.human_id else config.s(2)
-        points = [at(t, v) for t, v in enumerate(chart.series(key, pid))]
-        if len(points) >= 2:
-            pygame.draw.lines(surface, color_of(pid), False, points, width)
+        _draw_known_line(surface, color_of(pid), chart.series(key, pid), at, width)
 
     # The cursor: the turn on the map, with a dot where each curve crosses it.
     cx = at(turn, 0)[0]
     pygame.draw.line(surface, _GRAPH_CURSOR, (cx, plot.y), (cx, plot.bottom), config.s(1))
     for pid in order:
         series = chart.series(key, pid)
-        if turn < len(series):
+        if turn < len(series) and not math.isnan(series[turn]):
             pygame.draw.circle(surface, color_of(pid), at(turn, series[turn]), config.s(4))
     return box
 

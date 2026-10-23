@@ -130,26 +130,47 @@ class WorldView:
             (screen_pos[1] - self.off_y) / self.scale,
         )
 
-    def zoom_at(self, screen_pos: Point, factor: float) -> None:
+    def zoom_at(self, screen_pos: Point, factor: float, room: float | None = None) -> None:
         """Multiply the current zoom by ``factor`` (>1 in, <1 out), keeping the
         world point currently under ``screen_pos`` fixed on screen. Clamped to
         ``config.ZOOM_MIN``/``ZOOM_MAX``, then re-clamped to keep the map on
         screen — at the zoomed-all-the-way-out extreme that pan-clamp
         intentionally wins over "keep the cursor point fixed" and recentres
-        instead, which is expected, not a bug."""
+        instead, which is expected, not a bug.
+
+        ``room`` is the game's freer camera (`config.LIVE_ROOM`,
+        `config.REVIEW_ROOM`): out until ``room`` of the fitted map's size
+        shows past each side, and clamped by `_clamp_room`, so the cursor point
+        stays put at every zoom."""
         old_world = self.to_world(screen_pos)
-        self.zoom = max(config.ZOOM_MIN, min(config.ZOOM_MAX, self.zoom * factor))
+        least = config.ZOOM_MIN if room is None else room_zoom_min(room)
+        self.zoom = max(least, min(config.ZOOM_MAX, self.zoom * factor))
         new_scale = self.scale
         self.off_x = screen_pos[0] - old_world[0] * new_scale
         self.off_y = screen_pos[1] - old_world[1] * new_scale
-        self._clamp()
+        self._clamp_for(room)
 
-    def pan(self, dx: float, dy: float) -> None:
+    def pan(self, dx: float, dy: float, room: float | None = None) -> None:
         """Translate the view by ``(dx, dy)`` screen pixels, then clamp so the
-        map can never be dragged fully off the viewport."""
+        map can never be dragged fully off the viewport (with ``room``, so
+        ``1 - room`` of it always stays on, `_clamp_room`)."""
         self.off_x += dx
         self.off_y += dy
-        self._clamp()
+        self._clamp_for(room)
+
+    def settle(self, room: float | None = None) -> None:
+        """Bring the camera inside a tighter clamp than it was moved under (a
+        review's room, back in live play), from where it is: zoomed out too far,
+        it zooms in to the limit."""
+        least = config.ZOOM_MIN if room is None else room_zoom_min(room)
+        self.zoom = max(least, self.zoom)
+        self._clamp_for(room)
+
+    def _clamp_for(self, room: float | None) -> None:
+        if room is None:
+            self._clamp()
+        else:
+            self._clamp_room(room)
 
     def reset(self) -> None:
         """Back to zoom == 1.0, centred exactly as at construction."""
@@ -228,6 +249,26 @@ class WorldView:
         else:
             lo, hi = sy + sh - pad - wy1 * scale, sy + pad - wy0 * scale
             self.off_y = max(lo, min(hi, self.off_y))
+
+
+    def _clamp_room(self, room: float) -> None:
+        """The freer clamp: any pan at all, so long as each axis keeps
+        ``1 - room`` of the map's span on screen — or of the viewport's, once
+        the zoomed map is the wider, else a big zoom could never pan near an
+        edge. The map can sit off-centre or small; it can't vanish."""
+        scale = self.scale
+        wx0, wy0, wx1, wy1 = self._world_bounds
+        sx, sy, sw, sh = self._screen_rect
+        keep = 1.0 - room
+        keep_x = keep * min(max(1e-6, wx1 - wx0) * scale, sw)
+        keep_y = keep * min(max(1e-6, wy1 - wy0) * scale, sh)
+        self.off_x = max(sx + keep_x - wx1 * scale, min(sx + sw - keep_x - wx0 * scale, self.off_x))
+        self.off_y = max(sy + keep_y - wy1 * scale, min(sy + sh - keep_y - wy0 * scale, self.off_y))
+
+
+def room_zoom_min(room: float) -> float:
+    """The zoom at which ``room`` of the fitted map's size shows past each side."""
+    return 1.0 / (1.0 + 2.0 * room)
 
 
 def bounds_of(points: list[Point]) -> tuple[float, float, float, float]:

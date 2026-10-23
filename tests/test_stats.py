@@ -1,23 +1,25 @@
 """The end-of-game graphs: `stats.chart` read off the history boards, and the
 overlay's controls in history review."""
 
+import math
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import config, fog, main, render, replay, stats
 from starconquest import input as game_input
 from starconquest.settings import Settings
 
 
-def _finished_review(tmp_path, monkeypatch, turns=8):
+def _finished_review(tmp_path, monkeypatch, turns=8, **setup):
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
     pygame.init()
     render._FONTS.clear()   # a font from an earlier test's pygame session is dead
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
-    settings = Settings(seed=1, nodes=18, players=3)
+    settings = Settings(seed=1, nodes=18, players=3, **setup)
     log = replay.new_log(settings, 1)
     log.path = tmp_path / "game.json"
     state, ui = main.resume_game(log, settings)
@@ -71,17 +73,66 @@ def test_an_empty_history_charts_nothing():
     assert chart.peak("ships", chart.seats) == 0.0
 
 
-def test_graphs_show_rivals_only_once_review_is_revealed(tmp_path, monkeypatch):
-    """Mid-game, a rival's curve would show what the fog hides on the map."""
+def _mid_game_review(tmp_path, monkeypatch, turns=12, **setup):
+    _screen, state, ui, log = _finished_review(tmp_path, monkeypatch, turns, **setup)
+    assert state.winner is None
+    states, fogs, _e, _l = main.open_history(state, ui, log)
+    assert not ui.history_reveal
+    known = stats.sightings(states, [f[0] for f in fogs], ui.human_id)
+    return ui, known
+
+
+def test_mid_game_graphs_chart_a_rival_only_while_in_sight(tmp_path, monkeypatch):
+    """As the top bar does: a rival's figures are known on the turns it holds
+    a system in sight, and only those; the rest are gaps, never zeros."""
     try:
-        _screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-        main.open_history(state, ui, log)
-        ui.history_reveal = False
-        assert ui.graph_seats() == (ui.human_id,)
-        ui.history_reveal = True
+        ui, known = _mid_game_review(tmp_path, monkeypatch, fog_sight=config.FOG_ON_SIGHT,
+                                     fog_scout=config.FOG_ON_SCOUT)
+        chart = ui.history_chart
+        assert all(known[ui.human_id])
+        assert any(not all(k) for k in known.values()), "fog should hide someone, some turn"
+        for pid, seen in known.items():
+            keys = ("share",) if pid == stats.NEUTRAL else ("systems", "ships", "income", "losses", "share")
+            for key in keys:
+                assert [not math.isnan(v) for v in chart.series(key, pid)] == list(seen)
+        # unclaimed is a band like any seat's: known while some of it is in sight
+        assert any(known[stats.NEUTRAL])
+        assert ui.graph_seats() == tuple(pid for pid in chart.seats if any(known[pid]))
+    finally:
+        pygame.quit()
+
+
+def test_with_fog_off_mid_game_graphs_chart_every_seat(tmp_path, monkeypatch):
+    try:
+        ui, known = _mid_game_review(tmp_path, monkeypatch)   # fog is off by default
+        assert all(all(k) for k in known.values())
         assert ui.graph_seats() == ui.history_chart.seats
     finally:
         pygame.quit()
+
+
+def test_a_turns_losses_need_it_and_the_turn_before_known():
+    """Losses are cumulative, so a turn after a gap would carry the whole gap's
+    losses as its own: it's left a gap too. The running total is still known."""
+    c = stats.Chart(3, (2,), {"losses": {2: (0.0, 4.0, 9.0, 10.0)},
+                              "lost_turn": {2: (0.0, 4.0, 5.0, 1.0)}})
+    m = stats.masked(c, {2: (True, False, True, True)})
+    assert [math.isnan(v) for v in m.series("losses", 2)] == [False, True, False, False]
+    assert [math.isnan(v) for v in m.series("lost_turn", 2)] == [False, True, True, False]
+    assert m.peak("losses", (2,)) == 10.0 and m.stack_peak("lost_turn", (2,)) == 1.0
+    assert m.sighted(2) is False   # no "systems" series at all: nothing to offer
+
+
+def test_a_knocked_out_rival_stays_known_once_sighted():
+    from starconquest import mapgen
+    board = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    rival_home = next(sid for sid, sys in board.systems.items() if sys.owner_id == 2)
+    import copy
+    gone = copy.deepcopy(board)
+    gone.players[2].alive = False
+    seen = stats.sightings([board, gone], [{rival_home}, set()], 1)
+    assert seen[2] == (True, True) and seen[3] == (False, False)
+    assert stats.sightings([gone], [set()], 1)[2] == (False,)   # never sighted: still unknown
 
 
 def test_g_toggles_the_graphs_and_tab_cycles_the_metric(tmp_path, monkeypatch):
@@ -193,13 +244,16 @@ def test_the_legend_shows_and_hides_each_trace(tmp_path, monkeypatch):
 
 
 def test_a_rival_cannot_be_toggled_mid_game(tmp_path, monkeypatch):
-    """Mid-game only our seat is offered; a rival can't be toggled into view."""
+    """Mid-game a rival never in sight isn't offered, so can't be toggled into view."""
     try:
         _screen, _board, ui = _open_graphs(tmp_path, monkeypatch)
         ui.history_reveal = False
-        rival = next(pid for pid in ui.history_chart.seats if pid != ui.human_id)
+        chart = ui.history_chart
+        rival = next(pid for pid in chart.seats if pid != ui.human_id)
+        ui.history_chart = stats.masked(chart, {pid: (pid != rival,) * (chart.turns + 1) for pid in chart.seats})
+        assert rival not in ui.graph_seats()
         ui.toggle_trace(rival)
-        assert ui.graph_hidden == set() and ui.graph_traces() == (ui.human_id,)
+        assert ui.graph_hidden == set() and rival not in ui.graph_traces()
     finally:
         pygame.quit()
 
@@ -236,6 +290,12 @@ def test_a_review_has_the_camera_cluster_above_the_docked_graphs(tmp_path, monke
         rx, ry, rw, rh = ui.reset_view_rect
         _press(board, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.view.zoom == zoom
+        mx, my, mw, mh = ui.zoom_minus_rect
+        for _ in range(12):          # review's camera zooms out past the fit...
+            _press(board, ui, (mx + mw // 2, my + mh // 2))
+        assert ui.view.zoom == pytest.approx(1 / (1 + 2 * config.REVIEW_ROOM))
+        _press(board, ui, (rx + rw // 2, ry + rh // 2))
+        assert ui.view.zoom == zoom  # ...and Reset brings it back
         ui.history_graph = False
         render.draw(screen, board, ui)
         assert ui.zoom_plus_rect[1] > y        # back down to the map's foot
@@ -289,5 +349,57 @@ def test_a_portrait_legend_runs_under_a_full_width_plot(tmp_path, monkeypatch):
             assert drawn.count(" · thinker claudebot (random)") == len(ui.graph_seats())
             tab_bottom = max(t[1] + t[3] for t in ui.graph_tab_rects)
             assert tab_bottom < py and all(t[0] + t[2] < ui.graph_full_rect[0] for t in ui.graph_tab_rects)
+    finally:
+        pygame.quit()
+
+
+def test_every_tab_draws_a_chart_with_gaps(tmp_path, monkeypatch):
+    """A rival in and out of sight: lines break and dot across the gaps, bars
+    and bands skip the unknown turns, and the legend reads a dash, never 'nan'."""
+    try:
+        screen, board, ui = _open_graphs(tmp_path, monkeypatch)
+        ui.history_reveal = False
+        chart = ui.history_chart
+        rival = next(pid for pid in chart.seats if pid != ui.human_id)
+        flicker = tuple(t % 3 != 1 for t in range(chart.turns + 1))
+        ui.history_chart = stats.masked(chart, {rival: flicker})
+        ui.history_turn = 1                # a turn the rival is out of sight
+        drawn = []
+        real = render._text
+        monkeypatch.setattr(render, "_text", lambda surf, font, s, *a, **k: drawn.append(s) or real(surf, font, s, *a, **k))
+        for metric in range(len(stats.METRICS)):
+            ui.graph_metric = metric
+            render.draw(screen, board, ui)
+            assert ui.graph_plot_rect[2] > 0
+        assert "–" in drawn and not any("nan" in s for s in drawn)
+        assert "Unclaimed" in drawn       # the Map share tab's band, mid-game too
+    finally:
+        pygame.quit()
+
+
+def test_a_reviewed_turn_holds_its_fight_and_hull_marks(tmp_path, monkeypatch):
+    """The turn on screen keeps its fights' bursts and costs, and its finished
+    hulls, fully up for as long as it's on screen: no stepping back and forth
+    to see where the fighting was. Another turn shows its own."""
+    from starconquest import turnfilm
+    try:
+        screen, state, ui, log = _finished_review(tmp_path, monkeypatch, turns=30)
+        states, fogs, events, _l = main.open_history(state, ui, log)
+        ui.stop_film()                # the last live turn's, still running headless
+        fight_turn = next(i for i, evs in enumerate(events)
+                          if any(isinstance(e, turnfilm.Landed) and e.steps for e in evs))
+        ui.history_turn = fight_turn
+        main.hold_history_marks(ui, states, fogs, events)
+        ui.visible, ui.seen, ui.player_intel = fogs[fight_turn]
+        marks = list(render._flash_marks(states[fight_turn], ui))
+        assert marks and all(m.fade == 0.0 and m.phase == 1.0 for m in marks)
+        ui.age_fading_marks(10 * (config.FILM_FLASH_MS + config.FILM_FADE_MS))
+        assert list(render._flash_marks(states[fight_turn], ui)) == marks   # held, not fading
+        assert any(t.startswith("+") for _c, t, _col in render._film_labels(states[fight_turn], ui))
+        render.draw(screen, states[fight_turn], ui)
+
+        ui.history_turn = 0           # the opening: nothing happened yet
+        main.hold_history_marks(ui, states, fogs, events)
+        assert list(render._flash_marks(states[0], ui)) == []
     finally:
         pygame.quit()
