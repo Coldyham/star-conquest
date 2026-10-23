@@ -54,7 +54,8 @@ only for a fight; what is deliberately not animated.
 ## design/gauntlet.md
 - **The tutorial ladder.** A gauntlet is data, never `Settings`; progress derived from `webstore.best`; a stage active only while the setup matches (`menu.active_stage`); every field pinned; the stash and Leave tutorial; no New map in a stage, Next stage by depth (`gauntlet.next_stage`); the briefing card and the hint's row budget (`HINT_MAX`).
   - *The stages*: the ten, and how their seeds were picked (`tools/gauntlet_check.py`, loss share 0 to 86%).
-- **The file format.** For authors: `stages`/`lanes`/`start`, the menu's Save as a stage's `settings`, the text limits, user gauntlets (desktop only).
+- **The file format.** For authors: `stages`/`lanes`/`start`, the menu's Save as a stage's `settings`, the text limits, user gauntlets (kept from links, plus the desktop folder).
+- **Gauntlets made on the board.** The gauntlet page and `/api/gauntlet`: stored not carried, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, pruned stages, fetched once and kept (`gauntlet.remember`), the inline `#gauntlet=` form, remixing by `#<id>`, listing by an admin at the author's request.
 - **Relation to the weekly campaign.** Uncontested, so no server; the graph shape and the bordering rule shared in spirit.
 - **The gauntlet: proposed, not built.** A seeded run graph via `tools/campaign.py`'s `_layout`/`cut_nodes`, stages dealt like `_from_family`/`_mystery`, difficulty by depth through `LADDER_ORDER`.
 - **Carry-over.** The open problem: boons via `custommap.from_state`, and the cost on the board.
@@ -73,7 +74,7 @@ only for a fight; what is deliberately not animated.
 
 ## design/schema.md
 - **The trust model** (append-only by the absence of policies; worker-only and closed tables) and **re-pasting upgrades a board** (added columns, drop/add checks, view columns go last, and the `public_replays.rules_version` incident).
-- Per relation: **games and its embargo** (first insert wins; the moves, never the score; why `game_embargoes` is derived); **scores**; **game_logs** (the size bound, claims stored as claims); **score_checks**; **playstyle_readings**; **sc_config_key and sc_bots** (the search_path lint); **configs and config_tags** (first name wins, distinct players, legacy tags at weight 1); **bot_scores**; **campaigns**; **public_replays and public_watchable_replays** (owner rights, joining the embargo through `scores.game_key`); **config_summary**; **counted_scores and the crowns**.
+- Per relation: **games and its embargo** (first insert wins; the moves, never the score; why `game_embargoes` is derived); **scores**; **game_logs** (the size bound, claims stored as claims); **score_checks**; **playstyle_readings**; **sc_config_key and sc_bots** (the search_path lint); **configs and config_tags** (first name wins, distinct players, legacy tags at weight 1); **bot_scores**; **campaigns**; **gauntlets** (function-only, never updated but `listed`, read by id); **public_replays and public_watchable_replays** (owner rights, joining the embargo through `scores.game_key`); **config_summary**; **counted_scores and the crowns**.
 - **The grant trap.** `service_role` skips policies, not grants; three incidents, the last through a `security_invoker` view chain; `tests/test_schema_grants.py`.
 - **Play-by-post tables.** Kept apart from the board; inputs, not a board; seat tokens; the deadline; `board_digest` as a tripwire.
 

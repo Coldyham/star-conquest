@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import fields
+from pathlib import Path
 
 import pytest
 
@@ -181,3 +182,127 @@ def test_a_user_gauntlet_is_read_on_desktop_only(monkeypatch, tmp_path):
     assert [g.id for g in gauntlet.every()][0] == "tutorial"
     monkeypatch.setattr(gauntlet.paths, "is_web", lambda: True)
     assert gauntlet.user() == []
+
+
+# --------------------------------------------------------------------------- #
+# Gauntlets from a link (`#g=<id>`, `#gauntlet=<payload>`)
+# --------------------------------------------------------------------------- #
+_FIXTURE = Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures" / "gauntlet.json"
+
+
+def _fixture() -> dict:
+    return json.loads(_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _file(gid: str, seed: int = 1) -> dict:
+    return {"id": gid, "name": gid, "stages": [{"id": 0, "settings": _setup(seed)}]}
+
+
+def test_the_board_builds_a_gauntlet_the_game_reads_unchanged():
+    """The JS builder's output (leaderboard/tests/fixtures/gauntlet.json, built
+    from three real game links) is a gauntlet here with nothing dropped."""
+    fx = _fixture()
+    g = gauntlet.Gauntlet.from_dict(fx["body"])
+    assert g is not None
+    assert g.id == fx["id"] and len(g.id) <= gauntlet.NAME_MAX
+    assert g.name == "Fixture run: three maps"
+    assert [s.title for s in g.stages] == ["Warm up", "Stage 2", "Hand-made — café"]
+    assert g.stages[0].briefing == ("Take every system.", "Neutrals first.")
+    assert g.stages[0].hint == "Neutrals first."
+    assert g.lanes == ((0, 1), (1, 2)) and g.start == (0,)
+    for stage in g.stages:
+        cfg = gauntlet.stage_settings(stage)
+        assert cfg.seed is not None and cfg.challenge is None and not cfg.autoplay
+        build_state(cfg, cfg.seed)
+    # The stage is the setup the link it was pasted from carried.
+    assert gauntlet.stage_settings(g.stages[0]).seed == 42
+    assert gauntlet.stage_settings(g.stages[2]).custom_map is not None
+
+
+def test_an_inline_link_decodes_to_the_same_file_and_round_trips():
+    fx = _fixture()
+    assert gauntlet.inline_data(gauntlet.INLINE_FRAGMENT + fx["inline"]) == fx["body"]
+    fragment = gauntlet.link_fragment(fx["body"])
+    assert gauntlet.inline_data(fragment) == fx["body"]
+
+
+@pytest.mark.parametrize("fragment", ["", "gauntlet=", "gauntlet=!!!", "gauntlet=eyJhIjoxfQ",
+                                      "log=0011223344556677", "g=hard-mode-0123456789ab"])
+def test_an_inline_fragment_that_is_not_a_gauntlet_is_ignored(fragment):
+    assert gauntlet.inline_data(fragment) is None
+
+
+@pytest.mark.parametrize("fragment,want", [
+    ("g=hard-mode-0123456789ab", "hard-mode-0123456789ab"),
+    ("g= hard-mode-0123456789ab ", "hard-mode-0123456789ab"),
+    ("g=Hard-Mode-0123456789ab", None),
+    ("g=hard-mode-0123", None),
+    ("g=a-0123456789ab&x", None),
+    ("gauntlet=abc", None),
+    ("pbp=x:y", None),
+    ("", None),
+])
+def test_a_link_id_must_be_the_stored_shape(fragment, want):
+    assert gauntlet.link_id(fragment) == want
+
+
+def test_a_remembered_gauntlet_is_listed_newest_first_and_capped(monkeypatch):
+    monkeypatch.setattr(gauntlet.paths, "is_web", lambda: True)
+    for i in range(gauntlet.REMEMBER_MAX + 2):
+        assert gauntlet.remember(_file(f"run-{i}-0123456789ab", i)) is not None
+    ids = [g.id for g in gauntlet.remembered()]
+    assert len(ids) == gauntlet.REMEMBER_MAX
+    assert ids[0] == f"run-{gauntlet.REMEMBER_MAX + 1}-0123456789ab"
+    # Opening one again moves it to the front without a duplicate.
+    gauntlet.remember(_file(ids[-1], 99))
+    again = [g.id for g in gauntlet.remembered()]
+    assert again[0] == ids[-1] and len(again) == len(set(again)) == gauntlet.REMEMBER_MAX
+    # The web build lists them after the built-ins.
+    assert [g.id for g in gauntlet.every()][:2] == ["tutorial", ids[-1]]
+
+
+def test_remember_refuses_what_is_not_a_gauntlet_and_never_shadows_a_builtin(monkeypatch):
+    monkeypatch.setattr(gauntlet.paths, "is_web", lambda: True)
+    assert gauntlet.remember({"stages": []}) is None
+    assert gauntlet.remembered() == []
+    gauntlet.remember(_file("tutorial"))
+    assert [g.id for g in gauntlet.user()] == []
+
+
+def test_a_corrupt_store_reads_as_nothing_kept():
+    webstore.set(gauntlet.paths.WEB_GAUNTLETS_KEY, "{not json")
+    assert gauntlet.remembered() == []
+    webstore.set(gauntlet.paths.WEB_GAUNTLETS_KEY, '{"a": 1}')
+    assert gauntlet.remembered() == []
+    webstore.set(gauntlet.paths.WEB_GAUNTLETS_KEY, '[1, "x", {"stages": "no"}]')
+    assert gauntlet.remembered() == []
+
+
+def test_desktop_lists_remembered_gauntlets_before_its_folder(monkeypatch, tmp_path):
+    folder = tmp_path / "gauntlets"
+    folder.mkdir()
+    (folder / "mine.json").write_text(json.dumps(_file("mine")))
+    (folder / "same.json").write_text(json.dumps(_file("kept-0123456789ab", 5)))
+    monkeypatch.setattr(gauntlet, "user_dir", lambda: folder)
+    monkeypatch.setattr(gauntlet.paths, "is_web", lambda: False)
+    gauntlet.remember(_file("kept-0123456789ab"))
+    assert [g.id for g in gauntlet.user()] == ["kept-0123456789ab", "mine"]
+
+
+def test_a_fetch_reply_yields_the_file_or_nothing():
+    fx = _fixture()
+    body = json.dumps({"id": fx["id"], "gauntlet": fx["body"], "by_name": ""})
+    assert gauntlet.from_reply(body) == fx["body"]
+    for junk in ("", "nope", "[]", '{"gauntlet": 3}', '{"gauntlet": {"stages": []}}', '{"error": "x"}'):
+        assert gauntlet.from_reply(junk) is None
+
+
+def test_a_fetch_needs_a_board_and_a_well_formed_id(monkeypatch):
+    asked = []
+    monkeypatch.setattr(gauntlet.pbp, "request", lambda url, body=None: asked.append(url) or "req")
+    monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: f"https://site.test{path}")
+    assert gauntlet.fetch("hard-mode-0123456789ab") == "req"
+    assert asked == ["https://site.test/api/gauntlet?id=hard-mode-0123456789ab"]
+    assert gauntlet.fetch("../etc") is None
+    monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: "")
+    assert gauntlet.fetch("hard-mode-0123456789ab") is None

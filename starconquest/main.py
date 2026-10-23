@@ -449,6 +449,62 @@ WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
 WATCH_OUTDATED_MSG = "That replay was recorded under older rules and can't be shown exactly anymore"
 
 
+# A `#g=<id>` launch URL opens a gauntlet built on the board's gauntlet page
+# (`gauntlet.LINK_FRAGMENT`); `#gauntlet=<payload>` carries the whole file. Both
+# end on the menu's Tutorial list with that gauntlet picked.
+GAUNTLET_OPENING_MSG = "Opening gauntlet..."
+GAUNTLET_UNREACHABLE_MSG = "Couldn't fetch that gauntlet from the leaderboard"
+GAUNTLET_MISSING_MSG = "That gauntlet isn't on the leaderboard any more"
+GAUNTLET_UNREADABLE_MSG = "That gauntlet downloaded but wouldn't open"
+
+
+def gauntlet_request() -> tuple[str | None, dict | None]:
+    """``(id, None)`` for a ``#g=<id>`` launch URL, ``(None, file)`` for an
+    inline ``#gauntlet=`` one, else ``(None, None)``. Web only, like every other
+    fragment read."""
+    fragment = webstore.url_token()
+    return gauntlet.link_id(fragment), gauntlet.inline_data(fragment)
+
+
+def open_linked_gauntlet(menu_state: MenuState, settings: Settings,
+                         gid: str | None, data: dict | None) -> pbp.Request | None:
+    """Act on a gauntlet link at launch: open one already in hand, or start the
+    fetch and answer it for the loop to poll. A stored gauntlet never changes,
+    so one kept from an earlier visit opens straight away, offline included."""
+    if data is not None:
+        g = gauntlet.remember(data)
+        if g is not None:
+            menu.open_gauntlet(menu_state, settings, g.id)
+        return None
+    if gid is None:
+        return None
+    if any(g.id == gid for g in gauntlet.remembered()):
+        menu.open_gauntlet(menu_state, settings, gid)
+        return None
+    pending = gauntlet.fetch(gid)
+    if pending is None:
+        print(f"cannot fetch gauntlet {gid!r}: no endpoint is configured")
+        menu.set_status(menu_state, GAUNTLET_UNREACHABLE_MSG, False)
+    else:
+        menu.set_status(menu_state, GAUNTLET_OPENING_MSG, True)
+    return pending
+
+
+def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: str) -> None:
+    """The gauntlet fetch answered: keep it and open the list, or say why not."""
+    data = gauntlet.from_reply(body) if state == pbp.OK else None
+    g = gauntlet.remember(data) if data is not None else None
+    if g is not None:
+        menu.set_status(menu_state, "", True)
+        menu.open_gauntlet(menu_state, settings, g.id)
+        return
+    print(f"gauntlet fetch ended in state {state!r}: {body[:120]!r}")
+    menu.set_status(menu_state,
+                    GAUNTLET_MISSING_MSG if state == pbp.MISSING
+                    else GAUNTLET_UNREADABLE_MSG if state == pbp.OK
+                    else GAUNTLET_UNREACHABLE_MSG, False)
+
+
 def replay_request() -> str:
     """The match id in a ``#log=<id>`` launch URL, or ``""``.
 
@@ -1513,9 +1569,18 @@ async def main() -> None:
         print(f"--match {args.match.strip()!r} is not a seat link")
         menu.set_status(menu_state, PBP_REFUSED_MSG, False)
 
+    # A `#g=<id>` or `#gauntlet=` link opens a gauntlet on the menu's Tutorial
+    # list. One fragment per launch, so it never meets the two above.
+    pending_gauntlet: pbp.Request | None = None
+    linked_gauntlet = False
+    if not args.no_menu and pending_replay is None and invite is None:
+        gid, inline = gauntlet_request()
+        linked_gauntlet = gid is not None or inline is not None
+        pending_gauntlet = open_linked_gauntlet(menu_state, settings, gid, inline)
+
     # If the last saved match was left unfinished, offer to resume it on the menu.
     resume_prompt: GameLog | None = None
-    if not args.no_menu and pending_replay is None and invite is None:
+    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         candidate = replay.latest_log()
         if candidate is not None and not candidate.finished and candidate.turn_count > 0:
             resume_prompt = candidate
@@ -1545,6 +1610,11 @@ async def main() -> None:
         # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
         pbp_idle += dt
+        if pending_gauntlet is not None:
+            gstate, gbody = pending_gauntlet.poll()
+            if gstate != pbp.PENDING:
+                pending_gauntlet = None
+                land_gauntlet(menu_state, settings, gstate, gbody)
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:

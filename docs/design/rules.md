@@ -535,6 +535,22 @@ Reasons: `docs/design/gauntlet.md`.
   as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`).
   A stage offers no New map (its seed is pinned); Next stage appears only for a
   win that cleared it (`Ui.offers_next_stage`).
-- **User gauntlets are desktop only** (`data_dir()/gauntlets`), read when the
-  Tutorial list opens. `tools/gauntlet_check.py` checks a gauntlet rises in
+- **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
+  the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
+  (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in
+  `data_dir()/gauntlets`. `tools/gauntlet_check.py` checks a gauntlet rises in
   difficulty.
+- **A gauntlet made on the board is stored, never its progress.** The page
+  (`leaderboard/gauntlet.html`) and `/api/gauntlet` both check with
+  `gauntlet-build.mjs`'s `checkBody`; the function is the only writer of the
+  `gauntlets` table, and a row never changes but for `listed`, set only by
+  `tools/admin.py`. The id is `<slug>-<12 hex>`, a hash of the body, at most 32
+  characters (`NAME_MAX`). Never store a gauntlet in `campaigns`: its views would
+  read it as a campaign week. `tests/test_admin.py`,
+  `leaderboard/tests/gauntlet-*.test.mjs`.
+- **`#g=<id>` is fetched once and kept**, `#gauntlet=<payload>` carries the file
+  (`gauntlet.link_id`, `gauntlet.inline_data`); both open the Tutorial list on
+  it (`main.open_linked_gauntlet`). A kept one opens without a fetch. What the
+  board writes, the game reads unchanged
+  (`test_the_board_builds_a_gauntlet_the_game_reads_unchanged`, over
+  `leaderboard/tests/fixtures/gauntlet.json`).

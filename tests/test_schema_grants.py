@@ -184,6 +184,8 @@ def test_the_scrape_actually_found_the_callers():
     assert ("pbp_orders", "insert") in uses         # ...and takes a submission
     assert ("admin_actions", "insert") in uses      # tools/admin.py's audit row
     assert ("pbp_matches", "update") in uses        # ...and a seat's token rewritten
+    assert ("gauntlets", "insert") in uses          # netlify/functions/gauntlet.mjs
+    assert ("gauntlets", "delete") in uses          # tools/admin.py's delete-gauntlet
     assert len(uses) >= 8
 
 

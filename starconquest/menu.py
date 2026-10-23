@@ -635,14 +635,22 @@ def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> No
     _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
 
 
-def _open_tutorial(ms: MenuState, settings: Settings) -> None:
+def _open_tutorial(ms: MenuState, settings: Settings, pick: str | None = None) -> None:
     ms.gauntlets = gauntlet.every()     # a user gauntlet dropped in since shows now
     ms.stage_bests = {}
     ids = [g.id for g in ms.gauntlets]
-    ms.gauntlet_pick = ids.index(ms.stage_at[0]) if ms.stage_at and ms.stage_at[0] in ids else 0
+    if pick is None and ms.stage_at:
+        pick = ms.stage_at[0]
+    ms.gauntlet_pick = ids.index(pick) if pick in ids else 0
     ms.tutorial_open = bool(ms.gauntlets)
     if not ms.gauntlets:
         set_status(ms, "No tutorial found in this build", False)
+
+
+def open_gauntlet(ms: MenuState, settings: Settings, gid: str) -> None:
+    """Open the Tutorial list on gauntlet ``gid``: what a ``#g=`` link does once
+    the gauntlet is in hand (``main``, after ``gauntlet.remember``)."""
+    _open_tutorial(ms, settings, pick=gid)
 
 
 def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:

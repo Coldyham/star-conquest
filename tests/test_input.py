@@ -7,12 +7,14 @@ actually resolves through the engine.
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import main
 from starconquest import config, engine, mapgen, replay, turnfilm
@@ -1695,6 +1697,74 @@ def test_a_log_fragment_is_read_as_a_replay_request(monkeypatch):
     assert main.replay_request() == ""
     monkeypatch.setattr(main.webstore, "url_token", lambda: "")
     assert main.replay_request() == ""
+
+
+# --------------------------------------------------------------------------- #
+# Opening a gauntlet link (`#g=<id>`, `#gauntlet=<payload>`)
+# --------------------------------------------------------------------------- #
+def _linked_gauntlet(gid="hard-mode-0123456789ab"):
+    return {"id": gid, "name": "Hard mode",
+            "stages": [{"id": 0, "title": "One", "settings": Settings(players=2, nodes=8, seed=3).to_dict()}]}
+
+
+@pytest.fixture
+def _gauntlet_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(main.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    return main.MenuState()
+
+
+def test_a_gauntlet_fragment_is_read_as_a_gauntlet_request(monkeypatch):
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "g=hard-mode-0123456789ab")
+    assert main.gauntlet_request() == ("hard-mode-0123456789ab", None)
+    monkeypatch.setattr(main.webstore, "url_token", lambda: main.gauntlet.link_fragment(_linked_gauntlet()))
+    assert main.gauntlet_request() == (None, _linked_gauntlet())
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "log=00112233445566ff")
+    assert main.gauntlet_request() == (None, None)
+
+
+def test_an_inline_gauntlet_opens_the_tutorial_list_on_it(_gauntlet_store):
+    ms = _gauntlet_store
+    assert main.open_linked_gauntlet(ms, Settings(), None, _linked_gauntlet()) is None
+    assert ms.tutorial_open
+    assert ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+
+
+def test_a_gauntlet_already_kept_opens_without_asking_the_board(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    main.gauntlet.remember(_linked_gauntlet())
+    monkeypatch.setattr(main.gauntlet, "fetch", lambda gid: pytest.fail("fetched a kept gauntlet"))
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) is None
+    assert ms.tutorial_open and ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+
+
+def test_a_fetched_gauntlet_is_kept_and_opened(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.gauntlet, "fetch", lambda gid: "pending")
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) == "pending"
+    assert ms.status == main.GAUNTLET_OPENING_MSG and not ms.tutorial_open
+    reply = json.dumps({"id": "hard-mode-0123456789ab", "gauntlet": _linked_gauntlet()})
+    main.land_gauntlet(ms, Settings(), main.pbp.OK, reply)
+    assert ms.tutorial_open and ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+    assert [g.id for g in main.gauntlet.remembered()] == ["hard-mode-0123456789ab"]
+
+
+@pytest.mark.parametrize("state,body,msg", [
+    ("missing", '{"error": "no such gauntlet"}', "GAUNTLET_MISSING_MSG"),
+    ("error", "", "GAUNTLET_UNREACHABLE_MSG"),
+    ("ok", "<html>", "GAUNTLET_UNREADABLE_MSG"),
+])
+def test_a_gauntlet_that_cannot_be_had_says_why(_gauntlet_store, state, body, msg):
+    ms = _gauntlet_store
+    main.land_gauntlet(ms, Settings(), state, body)
+    assert ms.status == getattr(main, msg) and not ms.status_ok
+    assert not ms.tutorial_open and main.gauntlet.remembered() == []
+
+
+def test_no_board_means_the_gauntlet_link_says_so(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.gauntlet.webstore, "leaderboard_url", lambda path: "")
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) is None
+    assert ms.status == main.GAUNTLET_UNREACHABLE_MSG
 
 
 def _watchable_log(tmp_path, monkeypatch, turns=6):

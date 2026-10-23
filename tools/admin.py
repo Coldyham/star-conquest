@@ -11,10 +11,12 @@ should not be there, and a play-by-post seat that needs a new holder.
     uv run python tools/admin.py scores --user NAME           # find things
     uv run python tools/admin.py tags
     uv run python tools/admin.py matches
+    uv run python tools/admin.py gauntlets
 
     uv run python tools/admin.py delete-score 123 --reason "fake"   # say what it would do
     uv run python tools/admin.py delete-score 123 --reason "fake" --yes   # ...and do it
     uv run python tools/admin.py delete-campaign 2026-10-05 --yes   # remake a week's
+    uv run python tools/admin.py list-gauntlet hard-mode-0123456789ab   # show one publicly
 
 Every command that writes is a dry run unless ``--yes`` is passed, and every one
 that is applied first writes an ``admin_actions`` row: what was done, to what,
@@ -44,6 +46,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import secrets
 import sys
 import urllib.parse
@@ -372,6 +375,50 @@ def plan_delete_config_name(api: Supabase, config_key: str) -> Plan:
         [lambda: api.delete("configs", f"config_key=eq.{q(config_key)}")])
 
 
+# `gauntlets.gauntlet_id`'s check in schema.sql (and gauntlet-build.mjs's GAUNTLET_ID).
+_GAUNTLET_ID_RE = re.compile(r"^[a-z0-9-]{1,19}-[0-9a-f]{12}$")
+
+
+def _gauntlet(api: Supabase, gauntlet_id: str) -> dict:
+    if not _GAUNTLET_ID_RE.match(gauntlet_id):
+        raise Refused(f"{gauntlet_id!r} is not a gauntlet id")
+    return _one(api.select("gauntlets", f"select=*&gauntlet_id=eq.{gauntlet_id}"
+                                        "&order=gauntlet_id.asc"), "gauntlet")
+
+
+def plan_list_gauntlet(api: Supabase, gauntlet_id: str, listed: bool) -> Plan:
+    """Show a stored gauntlet publicly, or stop showing it. Listing is the one
+    change a gauntlet row ever takes, and only from here: the author can ask
+    (``wants_listing``), never decide."""
+    row = _gauntlet(api, gauntlet_id)
+    name = (row.get("body") or {}).get("name", "")
+    if bool(row.get("listed")) == listed:
+        return Plan("list-gauntlet" if listed else "unlist-gauntlet", gauntlet_id,
+                    [f"{name!r} is already {'listed' if listed else 'unlisted'}"], {}, [])
+    asked = "" if row.get("wants_listing") else " (its author did not ask for this)"
+    return Plan(
+        "list-gauntlet" if listed else "unlist-gauntlet", gauntlet_id,
+        [f"{'list' if listed else 'unlist'} {name!r} by {row.get('by_name') or 'nobody'!r}{asked}"],
+        {"gauntlet": row},
+        [lambda: api.update("gauntlets", f"gauntlet_id=eq.{gauntlet_id}",
+                            {"listed": listed}) and None])
+
+
+def plan_delete_gauntlet(api: Supabase, gauntlet_id: str) -> Plan:
+    """Remove a stored gauntlet. Its link stops opening, but a game that already
+    opened it keeps its own copy, and the scores posted on its stages stay on
+    their maps: a stage is an ordinary setup."""
+    row = _gauntlet(api, gauntlet_id)
+    body = row.get("body") or {}
+    return Plan(
+        "delete-gauntlet", gauntlet_id,
+        [f"delete {body.get('name', '')!r} ({len(body.get('stages') or [])} stages) "
+         f"by {row.get('by_name') or 'nobody'!r}",
+         "its link stops opening; games that already opened it keep their copy"],
+        {"gauntlet": row},
+        [lambda: api.delete("gauntlets", f"gauntlet_id=eq.{gauntlet_id}")])
+
+
 # --------------------------------------------------------------------------- #
 # Looking things up
 # --------------------------------------------------------------------------- #
@@ -416,6 +463,16 @@ def show_matches(api: Supabase) -> None:
               f"moved {m['updated_at'][:16]}")
 
 
+def show_gauntlets(api: Supabase) -> None:
+    for g in api.select("gauntlets", "select=gauntlet_id,body,by_name,wants_listing,listed,"
+                                     "created_at&order=created_at.desc"):
+        body = g.get("body") or {}
+        state = "listed" if g["listed"] else ("asks to be listed" if g["wants_listing"] else "unlisted")
+        print(f"{g['gauntlet_id']:<32}  {body.get('name', '')!r:<34} "
+              f"{len(body.get('stages') or []):>2} stages  {state:<17} "
+              f"by {g['by_name']!r}  {g['created_at'][:16]}")
+
+
 # --------------------------------------------------------------------------- #
 # Command line
 # --------------------------------------------------------------------------- #
@@ -436,6 +493,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd = sub.add_parser("tags", help="every tag in use, and how widely")
     cmd.add_argument("--config", help="only this config_key")
     sub.add_parser("matches", help="every play-by-post match, private ones included")
+    sub.add_parser("gauntlets", help="every stored gauntlet, unlisted ones included")
 
     cmd = writes("delete-score", "delete scores and the tags posted with them")
     cmd.add_argument("ids", type=int, nargs="+")
@@ -462,6 +520,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd.add_argument("--publish", action="store_true", help="list a private match publicly too")
     cmd = writes("delete-match", "delete a play-by-post match and its orders")
     cmd.add_argument("match_id")
+
+    cmd = writes("list-gauntlet", "show a stored gauntlet publicly")
+    cmd.add_argument("gauntlet_id")
+    cmd = writes("unlist-gauntlet", "stop showing a stored gauntlet publicly")
+    cmd.add_argument("gauntlet_id")
+    cmd = writes("delete-gauntlet", "delete a stored gauntlet; its link stops opening")
+    cmd.add_argument("gauntlet_id")
     return parser.parse_args(argv)
 
 
@@ -485,6 +550,10 @@ def plan_for(api: Supabase, args: argparse.Namespace) -> Plan:
             return plan_open_seat(api, args.match_id, args.seat, args.publish)
         case "delete-match":
             return plan_delete_match(api, args.match_id)
+        case "list-gauntlet" | "unlist-gauntlet":
+            return plan_list_gauntlet(api, args.gauntlet_id, args.command == "list-gauntlet")
+        case "delete-gauntlet":
+            return plan_delete_gauntlet(api, args.gauntlet_id)
     raise AssertionError(args.command)
 
 
@@ -502,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
             show_tags(api, args.config)
         elif args.command == "matches":
             show_matches(api)
+        elif args.command == "gauntlets":
+            show_gauntlets(api)
         else:
             return apply(api, plan_for(api, args), yes=args.yes, reason=args.reason)
     except Refused as err:

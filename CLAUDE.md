@@ -329,3 +329,8 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
 matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. Render never sees a `Gauntlet` (`main.stage_ui`).
+**A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
+`/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
+page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but
+for `listed` (admin only). Never store one in `campaigns`. The game fetches
+`#g=<id>` once and keeps the file (`gauntlet.remember`).
