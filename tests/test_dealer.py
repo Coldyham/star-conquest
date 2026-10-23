@@ -90,9 +90,15 @@ def test_ranges_in_and_not_rules_hold():
 
 
 def test_fog_on_always_leaves_a_range_short_of_unlimited():
-    spec = dealer.Spec.from_dict({"rules": {"fog": {"fix": True}}, "roll": False})
+    spec = dealer.Spec.from_dict({"rules": {"fog": {"fix": True}}, "roll": True})
     for s in _deals(spec, 10):
         assert min(s.fog_sight, s.fog_scout) < config.FOG_MAX_HOPS
+
+
+def test_fog_on_with_nothing_else_said_is_the_menu_checkbox_preset():
+    spec = dealer.Spec.from_dict({"rules": {"fog": {"fix": True}}})
+    for s in _deals(spec, 5):
+        assert (s.fog_sight, s.fog_scout) == (config.FOG_ON_SIGHT, config.FOG_ON_SCOUT)
 
 
 @pytest.mark.parametrize("junk", [None, 3, "x", [], {"stages": "9", "rules": 4, "opponents": 5, "roll": "no"},

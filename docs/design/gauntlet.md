@@ -317,7 +317,9 @@ to its slider):
   attribute name (every Advanced and Combat slider, `neutral_produces`,
   `in_lane_battles`) or on one of the dealer's own names: `mode`, `layout`,
   `players`, `systems` (what `Settings.system_count` shows, never raw `nodes`)
-  and `fog` (`false` is both ranges at `FOG_MAX_HOPS`).
+  and `fog` (`false` is both ranges at `FOG_MAX_HOPS`; `true` is the Basic
+  menu checkbox's preset, `FOG_ON_SIGHT`/`FOG_ON_SCOUT`, unless the ranges
+  are ruled or `roll` is on, when one range is drawn short of unlimited).
 - **`opponents`** is `in` or `not` over bot names; `name:stop` deals the stop,
   as `RANDOM_POOLS` entries do. Default: `ai.LADDER_ORDER`. Every seat is a
   named bot, never `random`: a stage pins its setup.

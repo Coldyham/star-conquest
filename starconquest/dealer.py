@@ -359,7 +359,10 @@ def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> S
             setattr(settings, name, _draw_choice(name, rules[name], rng))
     if "fog" in rules:
         if _draw_choice("fog", rules["fog"], rng):
-            if settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS:
+            if not spec.roll and "fog_sight" not in rules and "fog_scout" not in rules:
+                # Fog with nothing else said about it is the Basic menu's "Fog of war".
+                settings.fog_sight, settings.fog_scout = config.FOG_ON_SIGHT, config.FOG_ON_SCOUT
+            elif settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS:
                 # Fog is on, so at least one range must be short of unlimited.
                 settings.fog_sight = _draw_number("fog_sight", rules.get("fog_sight"), rng,
                                                   hi=config.FOG_MAX_HOPS - 1)
