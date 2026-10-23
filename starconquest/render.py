@@ -1766,12 +1766,14 @@ def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
 
 
 def _draw_stage_label(surface, ui: Ui, w: int, right: int) -> int:
-    """Which gauntlet stage this is ("Tutorial 3/10 · Defender's edge"), left of
-    the campaign reminder, with the same measured handoff to the scoreboard."""
+    """Which gauntlet stage this is ("Tutorial 3/10 · Defender's edge"), and its
+    target if it has one (" · target 14"), left of the campaign reminder, with
+    the same measured handoff to the scoreboard."""
     if not ui.stage_label:
         return right
     edge = w - config.HUD_PAD if right >= w else right
-    label = _text(surface, _fonts()["small"], ui.stage_label, _BTN_TEAL[1],
+    text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
                   midright=(edge, config.HUD_TOP_H // 2))
     return label.left - config.HUD_PAD
 
@@ -2301,7 +2303,7 @@ def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
 def _draw_briefing(surface, ui: Ui) -> None:
     """A gauntlet stage's briefing card, over the board on turn 0 until any press.
 
-    The stage's title, which stage it is, then the briefing's paragraphs
+    The stage's title, which stage it is, its target if it has one, then the briefing's paragraphs
     reflowed to the card. Measured and centred on the map, like the other
     overlays, so nothing is a fixed pixel size; a paragraph that would run off
     the card's floor is cut rather than drawn under the HUD.
@@ -2312,13 +2314,14 @@ def _draw_briefing(surface, ui: Ui) -> None:
     width = min(pw - 2 * config.s(16), config.s(620))
     inner = width - 2 * pad
     paras = [_wrap(normal, text, inner) for text in ui.briefing]
+    aim = _wrap(small, ui.stage_target.text(), inner) if ui.stage_target is not None else []
     close = ("Tap anywhere to begin · tap the hint at the right to read this again"
              if config.touch_ui else "Press any key to begin · B shows this again")
     foot = _wrap(small, close, inner)
     foot_h = len(foot) * _row_h()
     lines_h = sum(len(p) * _row_h("normal") for p in paras) + gap * max(0, len(paras) - 1)
     height = min(ph - 2 * config.s(8),
-                 pad + _row_h("big") + _row_h() + gap + lines_h + gap + foot_h + pad)
+                 pad + _row_h("big") + _row_h() * (1 + len(aim)) + gap + lines_h + gap + foot_h + pad)
     card = pygame.Rect(px + (pw - width) // 2, py + (ph - height) // 2, width, height)
 
     veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
@@ -2331,7 +2334,11 @@ def _draw_briefing(surface, ui: Ui) -> None:
     _text(surface, big, ui.stage_title, config.COLOR_TEXT, topleft=(x, y))
     y += _row_h("big")
     _text(surface, small, ui.stage_label or "", _BTN_TEAL[1], topleft=(x, y))
-    y += _row_h() + gap
+    y += _row_h()
+    for line in aim:     # the target, so it is never a surprise on the win overlay
+        _text(surface, small, line, _VERDICT_TIE, topleft=(x, y))
+        y += _row_h()
+    y += gap
     floor = card.bottom - pad - foot_h - gap
     for para in paras:
         for line in para:
@@ -2731,8 +2738,7 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
         line += f"  ·  {ui.hand_turns} played by hand"
     lines = [("normal", line, config.COLOR_TEXT)]
     if ui.in_stage and ui.can_post(state):
-        cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
-        lines.append(("small", cleared, _BTN_TEAL[1]))
+        lines.append(_stage_verdict(state, ui))
 
     if ui.challenge_target is None:
         return note + lines
@@ -2750,6 +2756,21 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
         verdict, colour = f"Short of{who} {against}", _VERDICT_MISS
     lines.append(("small", verdict, colour))
     return note + lines
+
+
+def _stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, tuple[int, int, int]]:
+    """The win overlay's stage line: cleared, or which way the target went. A
+    win short of it says so, and says too when an earlier best already cleared
+    the stage, since Next stage is then still offered."""
+    cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+    target = ui.stage_target
+    if target is None:
+        return ("small", cleared, _BTN_TEAL[1])
+    if ui.met_target(state):
+        return ("small", f"{target.text()}: met  ·  {cleared}", _BTN_TEAL[1])
+    if ui.stage_met_before:
+        return ("small", f"{target.text()}: not this time  ·  your best clears it", _VERDICT_TIE)
+    return ("small", f"{target.text()}: not yet", _VERDICT_MISS)
 
 
 # Scrubber fill — a bright blue on the shared slider trough, echoing the play button.

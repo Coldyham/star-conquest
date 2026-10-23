@@ -524,9 +524,16 @@ Reasons: `docs/design/gauntlet.md`.
   stage posts to the leaderboard as an ordinary game.
 - **Progress is derived, never stored**: a stage is cleared when
   `webstore.best(*stage_settings.challenge_keys())` holds a by-hand win
-  (`gauntlet.cleared`). No progress key. `gauntlet.open_stages` is the
+  that meets the stage's `target`, if it has one (`gauntlet.cleared`,
+  `Target.met`). No progress key. `gauntlet.open_stages` is the
   bordering rule, mirrored from the campaign in spirit over local bests; the
   campaign's own rule stays behind `/api/campaign`.
+- **A stage target is gauntlet data, never `Settings`**: `{turns, lost?, bot?,
+  beat?}`, scored as a best is (turns, then lost). An author's is met (at or
+  under), a bot's (`beat`) is beaten (strictly under). A win short of it leaves
+  the stage open (`open_stages`' `won`) and opens nothing beyond. Fixed into the
+  file, never looked up live; none in the tutorial
+  (`test_no_builtin_stage_has_a_target`).
 - **A lane runs one way**, from its first stage to its second, unless the file
   marks it `two_way` (`Gauntlet.onward`), so clearing a stage never opens the
   one before it. **Every stage must be reachable from a start**
@@ -541,9 +548,11 @@ Reasons: `docs/design/gauntlet.md`.
   clamps text (`HINT_MAX` is what `test_a_stage_hint_fits_the_empty_panel`
   holds).
 - **Render never sees a `Gauntlet`**: `main.stage_ui` copies a stage onto `Ui`
-  as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`).
-  A stage offers no New map (its seed is pinned); Next stage appears only for a
-  win that cleared it (`Ui.offers_next_stage`).
+  as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`,
+  `stage_target`, `stage_met_before`). A stage offers no New map (its seed is
+  pinned); Next stage appears only for a win that leaves it cleared, this
+  game's or an earlier best meeting the target (`Ui.stage_cleared`,
+  `Ui.offers_next_stage`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in

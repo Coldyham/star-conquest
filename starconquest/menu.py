@@ -671,11 +671,14 @@ _PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets
 
 
 def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
-    """Modal: the gauntlet's stages in order, each with its best once cleared.
+    """Modal: the gauntlet's stages in order, each with its best once won and
+    its target if it has one.
 
-    A stage is open if it is a start, is cleared, or a lane leads to it from a
-    cleared one (`gauntlet.open_stages`); a locked one is greyed and is no hit target. A
-    picker row appears only when there is more than one gauntlet to choose.
+    A stage is open if it is a start, is won, or a lane leads to it from a
+    cleared one (`gauntlet.open_stages`): a win short of the stage's target
+    leaves it open but opens nothing beyond. A locked one is greyed and is no
+    hit target. A picker row appears only when there is more than one gauntlet
+    to choose.
     Measured rows, like `_draw_pbp_prompt`.
     """
     g = _picked(ms)
@@ -686,14 +689,15 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     if g.id not in ms.stage_bests:
         ms.stage_bests[g.id] = gauntlet.bests(g)
     bests = ms.stage_bests[g.id]
-    opened = gauntlet.open_stages(g, set(bests))
+    done = gauntlet.cleared(g, bests)
+    opened = gauntlet.open_stages(g, done, set(bests))
     found = active_stage(ms, settings)
     here = found[1].id if found is not None and found[0].id == g.id else None
 
     leave, close = _tutorial_labels()
     bw = max(f["normal"].size(s)[0] for s in (leave, close)) + 2 * 18
     bh = 40
-    status_w = f["small"].size("✓ 999 turns / 999 lost")[0]
+    status_w = f["small"].size("999 turns / 999 lost · beat 999/999")[0]
     title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(g.stages))
     pw = max(title_w + status_w + 3 * pad, 2 * bw + gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
     picker = len(ms.gauntlets) > 1
@@ -740,12 +744,15 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         _text(surface, f["normal"], f"{i + 1:>2}  {stage.title}", colour,
               midleft=(row.x + pad // 2, row.centery))
         mine = bests.get(stage.id)
-        if mine is not None:
+        aim = f" · {stage.target.short()}" if stage.target is not None else ""
+        if stage.id in done and mine is not None:
             status, scol = f"✓ {mine[0]} turns / {mine[1]} lost", _START_BORDER
+        elif mine is not None:     # won, short of the target: "18 turns · target 14"
+            status, scol = f"{mine[0]} turns / {mine[1]} lost{aim}", _HL_BORDER
         elif open_:
-            status, scol = "next" if bests else "start here", _HL_BORDER
+            status, scol = ("next" if bests else "start here") + aim, _HL_BORDER
         else:
-            status, scol = "locked", _DISABLED_TEXT
+            status, scol = "locked" + aim, _DISABLED_TEXT
         _text(surface, f["small"], status, scol, midright=(row.right - pad // 2, row.centery))
         y += _STAGE_ROW_H
 
@@ -786,7 +793,8 @@ def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
         ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
     elif hit is not None and hit.startswith("stage_") and g is not None:
         sid = int(hit[len("stage_"):])
-        if sid in gauntlet.open_stages(g, set(ms.stage_bests.get(g.id, {}))):
+        found = ms.stage_bests.get(g.id, {})
+        if sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found)):
             if _load_stage(ms, settings, g, sid) is not None:
                 ms.tutorial_open = False
                 return _start(ms, settings)

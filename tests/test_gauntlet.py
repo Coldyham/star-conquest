@@ -170,6 +170,86 @@ def test_a_lane_opens_only_its_second_stage_unless_two_way():
     assert gauntlet.open_stages(g) == {0, 2}
 
 
+def _targeted(target) -> gauntlet.Gauntlet:
+    g = gauntlet.Gauntlet.from_dict({
+        "stages": [{"id": 0, "settings": _setup(400), "target": target},
+                   {"id": 1, "settings": _setup(401)}, {"id": 2, "settings": _setup(402)}]})
+    assert g is not None
+    return g
+
+
+def _score(stage: gauntlet.Stage, turns: int, lost: int) -> None:
+    keys = gauntlet.stage_settings(stage).challenge_keys()
+    webstore.record_best(keys[0], turns, lost, *keys[1:])
+
+
+@pytest.mark.parametrize("raw", [5, "14", {}, {"turns": 0}, {"turns": "14"}, {"turns": True},
+                                 {"turns": 14, "lost": -1}, {"turns": 14, "lost": None},
+                                 {"turns": 14.0}])
+def test_a_malformed_target_is_dropped_and_the_stage_kept(raw):
+    g = _targeted(raw)
+    assert len(g.stages) == 3 and g.stages[0].target is None
+
+
+def test_a_target_is_read_with_its_bot_and_beat():
+    t = _targeted({"turns": 31, "lost": 12, "bot": "thinker", "beat": True, "x": 1}).stages[0].target
+    assert t == gauntlet.Target(turns=31, lost=12, bot="thinker", beat=True)
+    assert t.text() == "Beat thinker: 31 turns / 12 lost"
+    t = _targeted({"turns": 14, "beat": "yes"}).stages[0].target
+    assert t == gauntlet.Target(turns=14) and t.text() == "Win in 14 turns or fewer"
+
+
+@pytest.mark.parametrize("target, score, met", [
+    ({"turns": 14}, (14, 99), True),
+    ({"turns": 14}, (15, 0), False),
+    ({"turns": 14, "lost": 30}, (14, 30), True),           # meeting it counts
+    ({"turns": 14, "lost": 30}, (13, 90), True),           # turns first
+    ({"turns": 14, "lost": 30}, (14, 31), False),
+    ({"turns": 31, "lost": 12, "beat": True}, (31, 12), False),   # a bot's is beaten
+    ({"turns": 31, "lost": 12, "beat": True}, (31, 11), True),
+    ({"turns": 31, "beat": True}, (31, 0), False),
+])
+def test_a_target_is_met_as_a_best_is_scored(target, score, met):
+    stage = _targeted(target).stages[0]
+    assert gauntlet.met(stage, score) is met
+
+
+def test_a_win_short_of_the_target_leaves_the_stage_open_but_opens_nothing():
+    g = _targeted({"turns": 14})
+    _score(g.stages[0], 18, 3)
+    assert gauntlet.bests(g) == {0: (18, 3)}
+    assert gauntlet.cleared(g) == set()
+    assert gauntlet.open_stages(g) == {0}
+    _score(g.stages[0], 14, 9)
+    assert gauntlet.cleared(g) == {0}
+    assert gauntlet.open_stages(g) == {0, 1}
+
+
+def test_a_won_stage_short_of_its_target_stays_open_out_of_order():
+    """Won from a challenge link before it was reached: open to try again, and
+    still nothing beyond it."""
+    g = gauntlet.Gauntlet.from_dict({
+        "stages": [{"id": 0, "settings": _setup(410)},
+                   {"id": 1, "settings": _setup(411), "target": {"turns": 5}},
+                   {"id": 2, "settings": _setup(412)}]})
+    assert g is not None
+    _score(g.stages[1], 30, 0)
+    assert gauntlet.open_stages(g) == {0, 1}
+
+
+def test_a_target_added_later_is_checked_against_the_old_best():
+    plain = _targeted(None)
+    _score(plain.stages[0], 20, 0)
+    assert gauntlet.cleared(plain) == {0}
+    assert gauntlet.cleared(_targeted({"turns": 14})) == set()
+
+
+def test_no_builtin_stage_has_a_target():
+    """Not in the tutorial: a beginner is held up by what they have not learned
+    yet, not by how fast they won."""
+    assert all(s.target is None for g in gauntlet.builtin() for s in g.stages)
+
+
 def test_a_stage_no_start_reaches_is_a_problem():
     def gauntlet_with(lanes, start=None):
         data = {"stages": [{"id": i, "title": f"S{i}", "settings": _setup(300 + i)} for i in range(3)],
@@ -249,6 +329,10 @@ def test_the_board_builds_a_gauntlet_the_game_reads_unchanged():
     assert g.stages[0].briefing == ("Take every system.", "Neutrals first.")
     assert g.stages[0].hint == "Neutrals first."
     assert g.lanes == ((0, 1), (1, 2)) and g.start == (0,)
+    assert [s.target for s in g.stages] == [
+        gauntlet.Target(turns=14, lost=3),
+        gauntlet.Target(turns=31, lost=12, bot="thinker", beat=True),
+        None]
     for stage in g.stages:
         cfg = gauntlet.stage_settings(stage)
         assert cfg.seed is not None and cfg.challenge is None and not cfg.autoplay

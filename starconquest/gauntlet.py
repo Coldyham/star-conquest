@@ -18,8 +18,10 @@ game it is.
 
 **Progress is derived, never stored.** A stage is cleared when ``webstore.best``
 holds a by-hand win on its exact setup — the same gate as posting
-(``Ui.can_post``). There is no progress key: a stage whose setup is edited in a
-later release is a new, uncleared stage, which is the honest answer.
+(``Ui.can_post``) — that meets the stage's target, if it has one (``Target``).
+There is no progress key: a stage whose setup is edited in a later release is a
+new, uncleared stage, and a target added or tightened later is checked against
+every best again, which are the honest answers.
 
 **The graph is the campaign's shape.** ``stages`` + ``lanes`` + ``start``, as
 the weekly campaign's ``nodes`` + ``lanes`` are, so a branching gauntlet needs no
@@ -61,6 +63,46 @@ NAME_MAX = 32
 BRIEFING_MAX_LINES = 6
 BRIEFING_LINE_MAX = 240
 MAX_STAGES = 64
+BOT_MAX = 24
+
+
+@dataclass(frozen=True)
+class Target:
+    """A score a stage must be won within before the stages beyond it open:
+    gauntlet data, never `Settings`, so the stage stays the ordinary map it is.
+
+    Scored as a best is, turns first and ships lost breaking a tie; with no
+    ``lost`` only turns count. An author's target is met (at or under it); one
+    copied off the board's bot column is beaten (``beat``: strictly under it),
+    and ``bot`` names that bot, for showing only."""
+
+    turns: int
+    lost: int | None = None
+    bot: str = ""
+    beat: bool = False
+
+    def met(self, score: tuple[int, int]) -> bool:
+        mine = score if self.lost is not None else score[:1]
+        want = (self.turns, self.lost) if self.lost is not None else (self.turns,)
+        return mine < want if self.beat else mine <= want
+
+    def score_text(self) -> str:
+        """"14 turns", or "14 turns / 30 lost"."""
+        return f"{self.turns} turns" + (f" / {self.lost} lost" if self.lost is not None else "")
+
+    def text(self) -> str:
+        """The whole condition, for the briefing card and the win overlay:
+        "Win in 14 turns or fewer", "Beat thinker: 31 turns / 12 lost"."""
+        if self.beat:
+            return f"Beat {self.bot or 'the target'}: {self.score_text()}"
+        if self.lost is None:
+            return f"Win in {self.turns} turns or fewer"
+        return f"Win within {self.score_text()}"
+
+    def short(self) -> str:
+        """For a tight row (the stage list, the top bar): "target 14"."""
+        return ("beat " if self.beat else "target ") + (
+            f"{self.turns}/{self.lost}" if self.lost is not None else str(self.turns))
 
 
 @dataclass(frozen=True)
@@ -74,6 +116,7 @@ class Stage:
     briefing: tuple[str, ...]
     hint: str
     settings: dict = field(compare=False)
+    target: Target | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +139,8 @@ class Gauntlet:
         stages are joined in list order, so a hand-written linear gauntlet can
         leave them out; with no usable ``start`` the first stage is the start.
         A lane's optional third element is read only for ``two_way``; anything
-        else there leaves it one-way.
+        else there leaves it one-way. A malformed ``target`` is dropped, and the
+        stage then has none.
         """
         try:
             return _from_dict(data)
@@ -145,6 +189,18 @@ def _int(value) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _target(raw) -> Target | None:
+    """A stage's ``target`` field, or None for anything that is not one: turns a
+    positive int, lost (optional) an int from 0, beat only ``true``."""
+    if not isinstance(raw, dict):
+        return None
+    turns, lost = _int(raw.get("turns")), _int(raw.get("lost"))
+    if turns is None or turns < 1 or ("lost" in raw and (lost is None or lost < 0)):
+        return None
+    return Target(turns=turns, lost=lost, bot=_text(raw.get("bot"), BOT_MAX),
+                  beat=raw.get("beat") is True)
+
+
 def _from_dict(data) -> Gauntlet | None:
     if not isinstance(data, dict):
         return None
@@ -167,6 +223,7 @@ def _from_dict(data) -> Gauntlet | None:
             briefing=tuple(t for t in (_text(x, BRIEFING_LINE_MAX) for x in lines) if t)[:BRIEFING_MAX_LINES],
             hint=_text(row.get("hint"), HINT_MAX),
             settings=setup,
+            target=_target(row.get("target")),
         ))
     if not stages:
         return None
@@ -236,17 +293,31 @@ def bests(g: Gauntlet) -> dict[int, tuple[int, int]]:
     return out
 
 
-def cleared(g: Gauntlet) -> set[int]:
-    return set(bests(g))
+def met(stage: Stage, score: tuple[int, int] | None) -> bool:
+    """Does ``score`` clear ``stage``: any win when it has no target, else one
+    that meets the target."""
+    return score is not None and (stage.target is None or stage.target.met(score))
 
 
-def open_stages(g: Gauntlet, done: set[int] | None = None) -> set[int]:
-    """The starts, every cleared stage (cleared stays replayable) and every stage
-    a lane leads to from one. Everything else is locked. On a path this is "the
-    next one", and never the one before: clearing a later stage first (from a
-    challenge link of the same setup, say) does not open the earlier ones."""
-    done = cleared(g) if done is None else done
-    out = set(g.start) | done
+def cleared(g: Gauntlet, found: dict[int, tuple[int, int]] | None = None) -> set[int]:
+    """The stages whose best meets their target, from ``found`` (``bests``) when
+    it is in hand. A win short of a target leaves the stage open and replayable,
+    but not cleared, so nothing beyond it opens."""
+    found = bests(g) if found is None else found
+    return {s.id for s in g.stages if met(s, found.get(s.id))}
+
+
+def open_stages(g: Gauntlet, done: set[int] | None = None,
+                won: set[int] | None = None) -> set[int]:
+    """The starts, every cleared stage (cleared stays replayable), every ``won``
+    one short of its target (to try again) and every stage a lane leads to from
+    a cleared one. Everything else is locked. On a path this is "the next one",
+    and never the one before: clearing a later stage first (from a challenge
+    link of the same setup, say) does not open the earlier ones."""
+    if done is None:
+        found = bests(g)
+        done, won = cleared(g, found), set(found)
+    out = set(g.start) | done | (won or set())
     for sid in done:
         out |= g.onward(sid)
     return out

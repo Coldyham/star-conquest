@@ -7,13 +7,20 @@
 // gauntlet as a new draft: rows never change, so editing one and saving makes a
 // new id. Everything that decides anything is in gauntlet-build.mjs, which
 // /api/gauntlet runs too; this file is the DOM around it.
+//
+// A stage's target (docs/design/gauntlet.md, "Stage targets") is the pasted
+// challenge link's own score, or the best bot's win on the setup read off
+// `bot_scores`. The bot's is read when picked and again on Save, then fixed into
+// the file: the game never looks it up.
 
+import { configured, inList, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  GAUNTLET_ID, LIMITS, buildBody, checkBody, draftFromBody, draftProblem, emptyDraft, emptyStage,
-  fileName, gameLink, moveStage, readDraft, setupProblem, stageSetup, textLength, tidy,
+  GAUNTLET_ID, LIMITS, botTarget, buildBody, checkBody, draftFromBody, draftProblem, emptyDraft, emptyStage,
+  fileName, gameLink, linkTarget, moveStage, readDraft, setupProblem, stageSetup, targetScore, targetText,
+  textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { inflate } from "./inflate-browser.mjs";
 import { mountNav } from "./nav.mjs";
@@ -26,8 +33,11 @@ const DRAFT_KEY = "sc_gauntlet_draft";
 
 let draft = emptyDraft();
 // What each stage's link said, by stage object: the summary line or the reason
-// it could not be a stage. Rebuilt from the link on load, never stored.
+// it could not be a stage, and the link's score and game key for a target.
+// Rebuilt from the link on load, never stored.
 const readings = new WeakMap();
+// What the stage's target line says, by stage object, until the next choice.
+const aimNotes = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
 
 const $ = (id) => document.getElementById(id);
@@ -87,11 +97,63 @@ async function readLink(stage) {
     stage.settings = problem ? null : setup;
     readings.set(stage, problem
       ? { error: `This link ${problem}.` }
-      : { text: `${mapSummary({ ...decoded, settings_json: setup })} · ${configLabel(setup)}` });
+      : { text: `${mapSummary({ ...decoded, settings_json: setup })} · ${configLabel(setup)}`,
+          score: decoded.challenge, gameKey: decoded.gameKey });
   } catch {
     stage.settings = null;
     readings.set(stage, { error: "That doesn't read as a Star Conquest game link." });
   }
+}
+
+/**
+ * The setup's `bot_scores` rows. A challenge link carries the game's own key;
+ * a Get Link carries none, so the setup is also matched to its `games` row by
+ * jsonb equality (contains and is contained by), as `campaign_games` matches.
+ */
+async function botRows(stage) {
+  const keys = new Set([readings.get(stage)?.gameKey].filter(Boolean));
+  const json = encodeURIComponent(JSON.stringify(stage.settings));
+  const games = await select(`games?select=game_key&settings_json=cs.${json}&settings_json=cd.${json}`)
+    .catch(() => []);
+  for (const game of games) keys.add(game.game_key);
+  if (!keys.size) return [];
+  return select(`bot_scores?select=bot,won,turns,lost&game_key=${inList(keys)}`);
+}
+
+/**
+ * Set `stage.target` from how it is aimed, and say what that came to. For the
+ * best bot this asks the board; an answer that arrives after the stage was
+ * aimed elsewhere is dropped.
+ */
+async function applyAim(stage) {
+  const reading = readings.get(stage);
+  if (stage.aim === "link") {
+    stage.target = linkTarget(reading?.score);
+    aimNotes.set(stage, stage.target ? `${targetText(stage.target)}: a win at or under your score clears it.`
+                                     : "This link carries no score: paste a Challenge a friend link.");
+    return;
+  }
+  if (stage.aim !== "bot" || !stage.settings) {
+    stage.target = null;
+    aimNotes.set(stage, "");
+    return;
+  }
+  let rows;
+  try {
+    rows = await botRows(stage);
+  } catch {
+    aimNotes.set(stage, stage.target ? `Couldn't ask the board; keeping ${targetText(stage.target)}.`
+                                     : "Couldn't ask the board for its bot scores. Try again.");
+    return;
+  }
+  if (stage.aim !== "bot") return;
+  const found = botTarget(rows);
+  stage.target = found.target || null;
+  aimNotes.set(stage, found.target
+    ? `${targetText(found.target)}. Strictly better clears it. Read again when you save.`
+    : found.none === "no-win"
+      ? "No bot won this setup, so any win clears it."
+      : "No bot scores for this setup yet: post a game on it and they arrive within the hour.");
 }
 
 /** Stages that are the same setup as an earlier one: they would clear together. */
@@ -172,10 +234,38 @@ function renderStage(stage, i, dupes) {
     render();
   });
 
+  const aim = el("select", { id: id("aim"), class: "plain" }, [
+    el("option", { value: "none", text: "None: any win opens the way on" }),
+    el("option", { value: "link", text: "Your score from this link" }),
+    el("option", { value: "bot", text: "Beat the best bot on the board" }),
+  ]);
+  const aimNote = el("p", { class: "stage-summary" });
+  const showAim = () => {
+    const score = readings.get(stage)?.score;
+    aim.options[1].text = score ? `Your score from this link: ${targetScore(linkTarget(score))}`
+                                : "Your score from this link (paste a Challenge a friend link)";
+    aim.options[1].disabled = !score && stage.aim !== "link";
+    aim.options[2].disabled = !configured() && stage.aim !== "bot";
+    aim.value = stage.aim;
+    aimNote.textContent = aimNotes.get(stage) ?? (stage.target ? targetText(stage.target) : "");
+  };
+  showAim();
+  aim.addEventListener("change", async () => {
+    stage.aim = aim.value;
+    aimNotes.set(stage, stage.aim === "bot" ? "Asking the board…" : "");
+    showAim();
+    changed();
+    await applyAim(stage);
+    showAim();
+    changed();
+  });
+
   const [link] = textField(id("link"), stage.link, "https://…/game/#eNo…", 0, (v) => { stage.link = v; }, true);
   link.addEventListener("input", async () => {
     await readLink(stage);
     renderSummary(summary, stage, duplicates().has(draft.stages.indexOf(stage)));
+    if (stage.aim !== "none") await applyAim(stage);
+    showAim();
     showProblem();
     keep();
   });
@@ -214,6 +304,7 @@ function renderStage(stage, i, dupes) {
     ...paragraphs,
     el("div", { class: "row" }, [more, fewer]),
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
+    el("label", { for: id("aim"), text: "Target (to open the stages beyond)" }), aim, aimNote,
   ]);
 }
 
@@ -231,9 +322,18 @@ function render() {
 async function save(event) {
   event.preventDefault();
   if (draftProblem(draft)) return;
-  const gauntlet = buildBody(draft);
   $("save").disabled = true;
   say("Saving…");
+  // The best bot is read again now: the column moves, and the file fixes what
+  // it says at the moment of saving.
+  const aimed = draft.stages.filter((stage) => stage.aim === "bot");
+  await Promise.all(aimed.map(applyAim));
+  if (aimed.length) {
+    keep();
+    render();
+    $("save").disabled = true;
+  }
+  const gauntlet = buildBody(draft);
   try {
     const response = await fetch(ENDPOINT, {
       method: "POST",

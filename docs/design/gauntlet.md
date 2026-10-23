@@ -128,6 +128,11 @@ For authors. A gauntlet is one JSON file:
   (`Settings.save`): build the setup in the menu, save it, paste it in. Give it a
   fixed `seed`, or the stage changes every time it is played and can never be
   cleared twice.
+- A stage's optional `target` is a score to win within before the stages
+  beyond it open: `{"turns": 14}`, `{"turns": 14, "lost": 30}`, or a bot's to
+  beat, `{"turns": 31, "lost": 12, "bot": "thinker", "beat": true}` ("Stage
+  targets", below). `turns` is a positive int, `lost` an int from 0, `bot` at
+  most 24 characters.
 - `briefing` is a list of paragraphs, at most six of 240 characters each.
   `hint` is one line of at most 90. `title` is at most 32 characters.
 - `lanes` joins stages by `id`, as the weekly campaign's graph does. If `lanes`
@@ -147,8 +152,8 @@ For authors. A gauntlet is one JSON file:
   stranded stage just stays locked.
 - `Gauntlet.from_dict` never raises: it drops a stage with no int `id`, a
   duplicate `id` or no `settings` dict, drops a lane to a missing stage, reads a
-  lane's third element only for `two_way: true`, and clamps text to the lengths
-  above.
+  lane's third element only for `two_way: true`, drops a malformed `target`
+  (the stage then has none), and clamps text to the lengths above.
 - A player's own gauntlets come from two places (`gauntlet.user`): the ones
   opened from a link, kept in `webstore` under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remembered`, newest first, the last eight), and on desktop the
@@ -290,10 +295,11 @@ It no longer blocks the run. Stage targets (below) give a run its pressure
 without carrying anything between stages, so the run can be built on them, and
 boons can follow later or never.
 
-## Stage targets (proposed, not built)
+## Stage targets
 
-Proposed on 2026-10-23. An author can give a stage a score to win within, and
-the stages beyond it open only once you have. This gives a gauntlet, and a later
+Proposed and built on 2026-10-23, beat the best bot included; targets on lanes
+and a dealt run's targets are not built. An author can give a stage a score to
+win within, and the stages beyond it open only once you have. This gives a gauntlet, and a later
 run, the pressure to play well rather than just win, and it leaves the setup
 alone: the stage stays the ordinary map it is, scores on it still compare on the
 board, and no key moves. Boons cannot do that.
@@ -306,31 +312,36 @@ board, and no key moves. Boons cannot do that.
 - **Meeting it counts.** A best at or under the target clears the stage, so an
   author can set their own score as the target. A stage with no target is
   cleared by any by-hand win, as now.
-- **The target is what "cleared" means.** `gauntlet.cleared` would keep only
-  the stages whose best meets their target. `open_stages` already takes that
-  set, so the bordering rule does not change: the stages beyond open once the
-  target is met. A win short of it leaves the stage open and replayable, and
-  the list shows both numbers ("18 turns · target 14").
+- **The target is what "cleared" means.** `gauntlet.cleared` keeps only the
+  stages whose best meets their target (`gauntlet.met`). `open_stages` already
+  took that set, so the bordering rule does not change: the stages beyond open
+  once the target is met.
 - **Still derived, never stored.** A target added or tightened later is checked
   against every best again: a 20-turn win on a stage that gains a 14-turn target
   no longer opens the way on. This is the same honest answer as an edited stage.
   A stored board gauntlet never changes, so this only happens to a desktop file
   or a built-in.
-- **Next stage follows the target.** `Ui.offers_next_stage` asks only
-  `can_post` today. It would also need the stage cleared after this win (this
-  game, or an earlier best, meets the target). `main.stage_ui` copies the target
-  onto `Ui` as plain values, since render never sees a `Gauntlet`. The win
-  overlay says which it was: "14 turns: target met", or "18 turns, target 14:
-  not yet", with Retry where Next stage would be.
-- **The briefing card and the stage list show the target**, so it is never a
-  surprise on the win overlay. It is drawn beside the hint rather than written
-  into it, so `HINT_MAX` keeps its row budget.
-- **Set on the board from the author's own game.** `gauntlet-build.mjs` drops a
-  pasted challenge link's score today ("no score to beat"). Instead the page
-  would offer that score as the stage's target. An author plays their own
+- **Next stage follows the target.** `Ui.offers_next_stage` asks
+  `Ui.stage_cleared`: `can_post`, and this game or an earlier best meets the
+  target. `main.stage_ui` copies the `Target` (a plain value) onto `Ui` with
+  `stage_met_before`, read as the match starts, since render never sees a
+  `Gauntlet`. The win overlay says which it was ("Win in 14 turns or fewer: met
+  · Stage cleared", "…: not yet", or "…: not this time · your best clears it"),
+  with Retry alone where Next stage would be when it is not cleared.
+- **The briefing card, the top bar and the stage list show the target**, so it
+  is never a surprise on the win overlay: a line under the card's stage label,
+  " · target 14" after the top bar's stage label, and "18 turns / 3 lost ·
+  target 14" on a won row short of it. It is kept out of the side panel's hint,
+  so `HINT_MAX` keeps its row budget.
+- **A win short of the target leaves the stage open**: `open_stages` takes the
+  won stages as well as the cleared ones, so a stage won out of order from a
+  challenge link stays open to try again, but opens nothing beyond.
+- **Set on the board from the author's own game.** The page's per-stage Target
+  choice offers a pasted challenge link's score (`linkTarget`) as the stage's
+  target. An author plays their own
   gauntlet, pastes the links, and gets targets they have shown can be met.
-  `checkBody` refuses a malformed target; `from_dict` drops one (the stage then
-  has none) and never raises. The id hashes the body, so adding a target is a
+  `checkBody` refuses a malformed target (`checkTarget`); `from_dict` drops one
+  (the stage then has none) and never raises. The id hashes the body, so adding a target is a
   new row and the old link keeps opening the old gauntlet.
 - **Trusted, as clearing is.** It reads local bests, which nothing verifies. A
   gauntlet is uncontested, so a player who edits their own store only cheats
@@ -355,13 +366,17 @@ on the board managed on the same setup. It is the figure a map's page already
 heads its bot column with ("31 turns, by thinker", `standings.bestBot`), and it
 asks an author for no number of their own.
 
-- **Read on the board when the gauntlet is saved, then fixed.** The page finds
-  the stage's game key from its setup (`token-decode.gameKeyFor`), reads its
-  `bot_scores` rows, and writes the winner into the stage as an ordinary
-  target, marked with where it came from:
+- **Read on the board when the gauntlet is saved, then fixed.** The page reads
+  the setup's `bot_scores` rows when "Beat the best bot" is picked and again on
+  Save (`gauntlet-page.mjs` `botRows`), and writes the winner (`botTarget`) into
+  the stage as an ordinary target. The rows are found by the link's game key
+  (`token-decode.gameKeyFor`) and, since a Get Link carries no stamped key and
+  hashes to a `j:` key no bot row has, also by matching the setup to its `games`
+  row by jsonb equality (`cs` and `cd` together). The target is marked with
+  where it came from:
   `"target": {"turns": 31, "lost": 12, "bot": "thinker", "beat": true}`. The
   game reads it like any target. `bot` is only for showing ("Beat thinker:
-  31 turns, 12 lost"), and `beat` makes the comparison strict.
+  31 turns / 12 lost"), and `beat` makes the comparison strict.
 - **Not looked up live**, for three reasons. A stored gauntlet never changes
   and the game keeps the file after one fetch, so a target that needed asking
   again would break offline play and desktop files. The bot column moves (bots

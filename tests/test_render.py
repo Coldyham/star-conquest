@@ -988,9 +988,41 @@ def test_a_stage_draws_its_briefing_hint_and_next_stage_on_screen():
         pygame.quit()
 
 
+def test_a_win_short_of_the_stage_target_offers_retry_not_next_stage():
+    """Next stage follows the target: a win short of it leaves Retry alone and
+    says "not yet"; one that meets it, or an earlier best that did, goes on."""
+    from starconquest.gauntlet import Target
+
+    pygame.init()
+    try:
+        screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.stage_label, ui.stage_title, ui.has_next_stage = "Mine 1/3 · One", "One", True
+        ui.stage_target = Target(turns=14)
+        state.winner, ui.hand_turns, state.turn = 1, 18, 18
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect == (0, 0, 0, 0) and ui.retry_button_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1] == "Win in 14 turns or fewer: not yet"
+
+        ui.stage_met_before = True
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+
+        ui.stage_met_before, state.turn = False, 14
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1].endswith(": met  ·  Stage cleared")
+    finally:
+        pygame.quit()
+
+
 def test_the_briefing_card_stays_inside_the_map():
     """Measured and centred on the play area, never a fixed pixel size: the
-    card's border is drawn wholly inside the map at every scale."""
+    card's border is drawn wholly inside the map at every scale, a target's
+    line included."""
+    from starconquest.gauntlet import Target
+
     pygame.init()
     try:
         for scale in (_desktop_scale, _touch_scale):
@@ -999,6 +1031,7 @@ def test_the_briefing_card_stays_inside_the_map():
             ui = Ui(view=WorldView((0, 0, 10, 10), config.play_rect()), human_id=1)
             ui.stage_label, ui.stage_title = "Tutorial 1/10 · First contact", "First contact"
             ui.briefing = ("word " * 200,) * 6
+            ui.stage_target = Target(turns=31, lost=12, bot="x" * 24, beat=True)
             screen.fill((0, 0, 0))
             render._draw_briefing(screen, ui)
             px, py, pw, ph = config.play_rect()

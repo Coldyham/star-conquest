@@ -218,11 +218,15 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     `Gauntlet`. ``stage`` is what `menu.active_stage` found for the setup being
     played: None for an ordinary match, which leaves every stage field blank.
     A Retry or a rewind keeps the stage but not the briefing, which was read
-    the first time round (B or the hint brings it back)."""
+    the first time round (B or the hint brings it back). Whether an earlier best
+    already meets the target is read now, so the win overlay can tell this
+    game's result from the stage's."""
     if stage is None:
         return
     g, s = stage
     ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_target = s.target
+    ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
     ui.stage_title = s.title
     ui.briefing = s.briefing
     ui.briefing_open = briefing and bool(s.briefing)
