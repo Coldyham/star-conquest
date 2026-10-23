@@ -848,3 +848,52 @@ pt on each config against *rivals* (2 gained, none lost, each). *sole* and
   *after* a rival lands to take the remnant (marshal's `REMNANT`, gated to a
   duel), and a person's guessed launch folded as uncertain (no person in the
   bench).
+
+## Baiting in a free-for-all (2026-10-21)
+
+Baiting means leaving a system weak so that two rivals strike it together and
+fight each other first. A pile-up folds its attackers among themselves and the
+survivor meets the garrison last. Turns resolve simultaneously, so a rival sees
+a garrison thinned this turn only on the next one, and only a look-ahead can
+price the move. marshal's blind version, a wall between two rivals left thin
+with no forecast, measured nothing ([`marshal.md`](marshal.md), "Multiplayer
+tactics: four quick checks"). Search can price it properly, because its
+rollouts play every rival it can run with that rival's own code.
+
+**The arm.** `tools/bait_bench.py` adds openings to the Search of the seat
+under test (`_candidates`). A wall is a system of ours bordering two or more
+rivals. For each wall, up to two of them by the rival ships next door, the
+opening is the default plan with whatever garrison it leaves on the wall moved
+to the nearest friendly neighbour that is not a wall too. The search keeps the
+default unless a bait line's rollout scores better, so the arm is stock
+wherever no line wins.
+
+**How it was measured.** It used the two posted configs of `pileup_bench.py`:
+five seats at 31 systems and 3 ly/turn, and four at 23 and 8 ly/turn. There
+were two fields. *Spread* is rusherplus, heuristic, marshal and thinker.
+*Strong* is marshal, actuary at Field, knower at Predict and marshal. A
+four-seat game takes the first three. The seat under test turns with the seed,
+seeds 8,400,000-8,400,199 were played by both arms on the same seating, and
+guards were lifted. Pairing is `pileup_bench`'s.
+
+| config, field | stock won | bait won | beats | Δwon | Δturns (both won) | place | picked |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4 seats, spread | 91.0% | 90.5% | 51.7% (z +0.70) | -0.5 pt | +0.9% | -0.02 | 1.35% |
+| 4 seats, strong | 58.0% | 60.0% | 51.7% (z +0.68) | +2.0 pt (z +0.76) | -1.3% | +0.05 | 1.95% |
+| 5 seats, spread | 81.0% | 83.0% | 54.2% (z +1.42) | +2.0 pt (z +1.16) | -2.5% (z -2.16) | +0.10 | 1.78% |
+| 5 seats, strong | 32.5% | 38.0% | 53.2% (z +1.43) | +5.5 pt (z +1.93) | -1.9% | +0.19 (z +1.91) | 2.15% |
+| pooled, 800 pairs | | | 52.8% (z +2.12) | +2.25 pt (z +2.07) | | | |
+
+*Picked* is the share of the seat's searches that chose a bait line. One was
+offered in 12-17% of them, and none raised an error. Cost per game is
+unchanged.
+
+**What this says.** It is a lean, not yet a result. It grows where the idea
+says it should, with more seats and stronger rivals: the five-seat strong
+field gained 22 games and lost 11. But the seeds are the screening seeds and
+the pooled z is about 2. Before anything ships it needs a confirmation on
+fresh seeds, with the rule set before any of its games, aimed at five seats.
+It also needs Council read separately, since Council adds actuary and evolved
+openings and judges lines differently. Not built yet: thinning a wall rather
+than emptying it, and baiting at a system bordering one rival that a second
+can reach.

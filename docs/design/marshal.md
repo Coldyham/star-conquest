@@ -665,3 +665,73 @@ without `RELIEF_IN_FLIGHT` read the same (released relief 1.6%, 64.2%
 evacuated).
 
 `STICKY_GUARD`, `ISOLATED_GUARD` and the explicit pooled guard stay unbuilt.
+
+## Multiplayer tactics: four quick checks (2026-10-21)
+
+Three posted games in four are free-for-alls (`tools/config_census.py`, 158
+maps: 39 duels, 59 three-seat, 33 four-seat, 21 five-seat, 6 six-seat), and
+marshal was tuned on duels. Four tactics aimed at a crowded board were each
+tried on marshal as a quick check before building anything properly. A rival's
+standing is its income over the mean income of the players alive. The leader is
+the richest rival while it is at least as rich as us, and the weak rival is the
+poorest while it is under 0.6 of the mean.
+
+- **Knock down the leader** (`leader1`, `leader3`): +1 or +3 richness on a
+  target the leader holds, which moves both Phase 3's order and the front
+  Phase 4 feeds.
+- **Finish the weak player** (`weak1`, `weak3`): the same bonuses on the weak
+  rival's targets.
+- **Price a loss by who takes it** (`loss`, `loss_w`): in the guard, each
+  rival's stack next door counts at its standing, clamped to 0.5-1.5. `loss_w`
+  clamps it to 0.25-1.0, so a weak rival is guarded against less and nobody
+  more.
+- **A blind bait** (`cede5`, `cede0`): a front bordering two or more rivals,
+  with four or more players alive, keeps half its guard or none, so that they
+  meet there.
+
+**How it was measured.** `tools/mp_tactics.py` wraps `_richness` and
+`_max_adjacent_enemy` on a private import of marshal. Every arm plays exactly
+as stock in a duel (`tests/test_mp_tactics.py`). There are two cells from the
+posted setups: four seats at 18 systems and 8 ly/turn, and five seats at 31
+systems and 3 ly/turn. Each cell has two fields. *Spread* is rusherplus,
+heuristic and marshal, plus thinker at five seats. *Strong* is marshal, actuary
+at Field and knower at Predict, plus a second marshal at five seats. The seat
+under test turns with the seed, and every arm plays seeds 8,300,000-8,300,399
+on the same seating as stock, so a pair differs only in that seat. Guards were
+lifted. Stock won 48.5% of the spread four-seat field, 24.0% of the strong
+one, 39.8% and 18.0% at five seats (fair shares 25% and 20%).
+
+Paired Δwon in points against stock, and the share of the arm's decides whose
+orders differ from stock's on the same board:
+
+| arm | spread 4 | strong 4 | spread 5 | strong 5 | pooled (z) | orders changed |
+| --- | --- | --- | --- | --- | --- | --- |
+| `leader1` | -0.2 | +1.0 | +0.8 | -2.0 | -0.1 (-0.3) | 0.2-0.5% |
+| `leader3` | -1.2 | +0.8 | +0.8 | -1.5 | -0.3 (-0.6) | 0.4-0.8% |
+| `weak1` | -0.8 | -0.2 | -1.0 | -1.8 | -0.9 (-1.9) | 0.5-0.8% |
+| `weak3` | -0.2 | -0.2 | -2.5 | -2.2 | -1.3 (-2.2) | 1.2-1.7% |
+| `loss` | -4.5 | -2.0 | +0.5 | -2.5 | -2.1 (-2.3) | 12-14% |
+| `loss_w` | 0.0 | 0.0 | +0.5 | -1.0 | -0.1 (-0.1) | 6-8% |
+| `cede5` | -2.5 | +1.0 | -0.8 | -0.2 | -0.6 (-0.9) | 2-4% |
+| `cede0` | -1.8 | +0.5 | -0.2 | -1.8 | -0.8 (-1.0) | 3-6% |
+
+One group's standard error is 1.5-2.5 points. None of the eight leans better.
+
+- **Leader and weak player barely bind.** As bonuses on a target they change
+  under 2% of orders even at +3, which outweighs a system's whole production
+  term. This is "Rushing the enemy" (`marshal-pricing.md`) again: Phase 3
+  strikes every target it can afford, so an order only matters when the budget
+  forces a choice. Finishing the weak player leans worse in every group.
+- **Guarding harder against the leader is what costs.** `loss_w`, which only
+  relaxes the guard against weak rivals, is level. `loss`, which also raises it
+  against the leader, is the one clear loss. A bigger guard means ships held
+  back, which marshal's earlier sweeps also found does not pay.
+- **The blind bait gives nothing.** With no forecast of whether the rivals will
+  strike, a wall left thin is a system lost as often as a trap. Whether baiting
+  is worth anything with that forecast is a question for knower's Search,
+  whose rollouts run the rivals' own code.
+
+Not shipped. Each arm was tried at one or two strengths in one cell per seat
+count, and scored on games won only. With 32 comparisons a couple of |z| near
+2 are expected by chance, so the negatives are weak evidence. What the data
+do support is that none of the eight is positive.
