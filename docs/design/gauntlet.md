@@ -348,6 +348,49 @@ board, and no key moves. Boons cannot do that.
   ([`par.md`](par.md), "Not on the board"): that was a computed number shown on
   every map. A run's target is local and only gates its own stages.
 
+### Beat the best bot
+
+A second kind of target: the stage is cleared by a win better than the best bot
+on the board managed on the same setup. It is the figure a map's page already
+heads its bot column with ("31 turns, by thinker", `standings.bestBot`), and it
+asks an author for no number of their own.
+
+- **Read on the board when the gauntlet is saved, then fixed.** The page finds
+  the stage's game key from its setup (`token-decode.gameKeyFor`), reads its
+  `bot_scores` rows, and writes the winner into the stage as an ordinary
+  target, marked with where it came from:
+  `"target": {"turns": 31, "lost": 12, "bot": "thinker", "beat": true}`. The
+  game reads it like any target. `bot` is only for showing ("Beat thinker:
+  31 turns, 12 lost"), and `beat` makes the comparison strict.
+- **Not looked up live**, for three reasons. A stored gauntlet never changes
+  and the game keeps the file after one fetch, so a target that needed asking
+  again would break offline play and desktop files. The bot column moves (bots
+  are free to move, [`leaderboard.md`](leaderboard.md), "Versioning"; a new bot
+  joins the roster), so a live target would tighten under a player and quietly
+  un-clear a stage they had cleared. And the game reads no `bot_scores` today:
+  every read of it is the board's. Saving again picks up a better bot, as a new
+  row.
+- **Beat means strictly better**: fewer turns, or the same turns with fewer
+  ships lost. An author's own target is met; a bot's is beaten, as the option's
+  name says.
+- **Only a win counts as the bot's score.** A loss is listed but never ranked
+  (`standings.botOrder`). If no bot won the stage there is nothing to beat, and
+  the page says that any win will clear it, writing no target.
+- **No bot rows yet, no target.** The column exists only for maps on the board:
+  `tools/bot_replay.py` works through `games`, which gets a row when a score is
+  posted on the setup. A new stage has none until someone posts a game on it
+  and the hourly job has run. The page says so ("No bot scores for this setup
+  yet: post a game on it and they arrive within the hour") and does not offer
+  to save the target. The author posting their own win on the stage is enough.
+- **The best bot can be out of reach.** The column includes bots that read the
+  other seats (`knower`, at its top stop). The author sees the number before
+  saving. A later step would let them pick from the column ("Beat marshal")
+  rather than take the best; that needs no new shape, since `bot` already names
+  which one.
+- **A dealt run uses the same shape.** A dealt setup is on no board, so its
+  "roster bot's score plus slack" above is measured locally when the run is
+  dealt and written with `bot` and, with no slack, `beat`.
+
 ### Later: targets on lanes
 
 A target on a stage gates every way out of it alike. A target on a lane gates

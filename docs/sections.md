@@ -60,6 +60,7 @@ only for a fight; what is deliberately not animated.
 - **The gauntlet: proposed, not built.** A seeded run graph via `tools/campaign.py`'s `_layout`/`cut_nodes`, stages dealt like `_from_family`/`_mystery`, difficulty by depth through `LADDER_ORDER`.
 - **Carry-over.** Boons via `custommap.from_state`, and the cost on the board; no longer blocks the run.
 - **Stage targets (proposed, not built).** An author-set score a stage must be won within before the stages beyond open: gauntlet data never `Settings`, meeting it counts, it is what `gauntlet.cleared` means, Next stage follows it, set on the board from a pasted challenge link's score, trusted like clearing, none in the tutorial, a roster bot's score for a dealt run.
+  - *Beat the best bot*: the board's `standings.bestBot` on the stage's setup, read when the gauntlet is saved and fixed as `{turns, lost, bot, beat}`; not live, strict, wins only, no target until the setup has bot rows.
   - *Later: targets on lanes*: an optional third lane element for shortcuts, bonus stages and alternate routes; depth over ungated lanes only; reachability ignores targets.
 ## design/leaderboard.md
 - **Bot replays.** A scheduled job rather than a service.
