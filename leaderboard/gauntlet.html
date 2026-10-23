@@ -47,7 +47,7 @@
   </p>
   <p class="lede">
     Saving gives you a link that opens the gauntlet in the game's
-    <strong>Tutorial</strong> list. Each stage opens once the one before it is won,
+    <strong>Gauntlets</strong> list. Each stage opens once the one before it is won,
     or won within its target if you give it one: your own score from a
     <strong>Challenge a friend</strong> link, or the best bot's on the board.
   </p>
@@ -55,7 +55,7 @@
   <!-- Generate: the page builds a spec, the game deals the maps and plays test
        bots on them to order them by difficulty (gauntlet-spec.mjs; the board
        has no engine). The link opens the game, which makes the gauntlet in the
-       browser and opens it on its Tutorial list. -->
+       browser and opens it on its Gauntlets list. -->
   <details id="gen" class="gen">
     <summary>Or generate one: pick the rules, the game picks the maps</summary>
     <form id="gen-form" class="form gauntlet-form" autocomplete="off">
@@ -96,15 +96,6 @@
         <div id="gen-opponents"></div>
       </fieldset>
 
-      <label for="gen-speed">Ship speed gain</label>
-      <select id="gen-speed">
-        <option value="default">Game default</option>
-        <option value="off">Off: speed never grows</option>
-      </select>
-
-      <label for="gen-prod">Home production (blank: game default)</label>
-      <input id="gen-prod" type="number" min="1" max="8" placeholder="default">
-
       <label for="gen-fog">Fog of war</label>
       <select id="gen-fog">
         <option value="off">Off</option>
@@ -112,8 +103,14 @@
         <option value="either">Either</option>
       </select>
 
+      <p class="hint">
+        Each slider below has a pin for the least and the most a map may deal.
+        Left on the game's default, it stays at the default.
+      </p>
+      <div id="gen-knobs"></div>
+
       <label class="check"><input id="gen-roll" type="checkbox">
-        Vary the other advanced settings too (makes wilder maps)</label>
+        Vary the Advanced sliders left on their default too (makes wilder maps)</label>
       <label class="check"><input id="gen-targets" type="checkbox">
         Give each stage a target: the slowest test-bot win</label>
       <label for="gen-slack">Target slack (extra turns)</label>
@@ -137,7 +134,7 @@
           <a id="gen-open" class="btn" href="#" target="_blank" rel="noopener">Generate in the game</a>
         </div>
         <p class="hint">
-          Once it is made, the game's Tutorial list has a <strong>Copy link</strong>
+          Once it is made, the game's Gauntlets list has a <strong>Copy link</strong>
           button that shares the finished gauntlet itself.
         </p>
       </div>

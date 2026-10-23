@@ -103,3 +103,27 @@ def test_the_boards_spec_link_is_a_run_the_game_reads_unchanged():
     for c in job.cands:
         s = gg.Settings.from_dict(c["stage"])
         assert s.mode == "symmetric" and 2 <= s.players <= 3 and 13 <= s.system_count() <= 18
+        assert 6 <= s.garrison_k <= 10 and s.defender_advantage == 1.1
+
+
+def test_the_boards_sliders_are_the_games():
+    """The generate form's sliders (gauntlet-spec.mjs's KNOB_TABS, copied into
+    the fixture) are settings.py's ADV_* tables, tab for tab: the same knobs,
+    labels, ends and steps, so a pin can never ask for what the dealer clamps."""
+    import json
+    from pathlib import Path
+
+    from starconquest.settings import ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL
+
+    fx = json.loads((Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures"
+                     / "gauntlet-spec.json").read_text(encoding="utf-8"))
+    tabs = {t["tab"]: [k for g in t["groups"] for k in g["knobs"]] for t in fx["knobs"]}
+    board = {tab: [(k["attr"], k["label"], k["lo"], k["hi"], k["step"]) for k in knobs]
+             for tab, knobs in tabs.items()}
+    game = {"Advanced": ADV_MAP + ADV_TRAVEL + ADV_FOG + ADV_ECON, "Combat": ADV_COMBAT}
+    for tab, specs in game.items():
+        assert board[tab] == [(attr, label, lo, hi, step) for _k, label, attr, lo, hi, step, _i in specs], tab
+    assert {a for _t, ks in board.items() for a, *_ in ks} == set(dealer.KNOBS)
+    assert {a for a, *_ in board["Advanced"]} == set(dealer.ROLLED)
+    switches = {s["attr"] for t in fx["knobs"] for g in t["groups"] for s in g["switches"]}
+    assert switches == {"neutral_produces", "in_lane_battles"} <= set(dealer.CHOICES)

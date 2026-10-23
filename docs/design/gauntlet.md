@@ -441,8 +441,15 @@ The generate form sits on `gauntlet.html`, folded under the builder's lede.
 `leaderboard/tests/gauntlet-spec.test.mjs`) and `gauntlet-gen-page.mjs` is the
 DOM around it. Each choice becomes one dealer rule: map type (either, random,
 symmetric), players and systems as ranges, opponents as an `in` list over the
-ladder (knower unticked to start), speed gain off, home production fixed, fog
-off, on or either, and `roll` for the other Advanced sliders. "Either" is an
+ladder (knower unticked to start), fog off, on or either, and `roll` for the
+Advanced sliders left on their default. Every Advanced and Combat slider is a
+pair of pins, least and most (`KNOB_TABS`, folded by tab and by the menu's
+headings, each saying how many it sets): both on the game's default is no rule,
+together elsewhere a `fix`, apart a `range`. A pin dragged past the other
+pushes it along. The two switches (neutral produces, in-lane battles) are Off,
+On or Either. The Visibility pins count only when fog can be on. The table is
+settings.py's `ADV_*` tables copied by hand; the fixture carries it and
+`test_the_boards_sliders_are_the_games` holds the two together. "Either" is an
 `in` rule rather than no rule, since with `roll` off an unruled field stays at
 its default. The form says what it cannot deal before it offers a link, and
 how many probe games the link will cost. What it builds, the game reads
