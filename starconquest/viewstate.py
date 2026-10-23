@@ -112,7 +112,7 @@ class Ui:
     view: WorldView
     human_id: int = 1
     mode: str = IDLE
-    selected: int | None = None  # source system id
+    selected: int | None = None  # any system, to read about; a send's source when ours (`source`)
     hover: int | None = None  # system under the cursor
     dest: int | None = None  # chosen destination system id
     chosen: int = 0  # ships the active one-shot send commits
@@ -1341,6 +1341,13 @@ class Ui:
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
+    def source(self, state: GameState) -> int | None:
+        """The selected system when it is ours to send from, else None. Any system
+        can be selected, to read about it in the side panel; only ours sends."""
+        if self.selected in state.systems and state.systems[self.selected].owner_id == self.human_id:
+            return self.selected
+        return None
+
     def reset_selection(self) -> None:
         """Drop all selection/composition state. Committed orders/rules survive
         (they live in `pending`/`auto_forward`), so this only closes the popup."""

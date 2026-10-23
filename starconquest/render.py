@@ -189,6 +189,7 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
     # a fleet on the map shows the lane it travels, even where the far end was
     # never seen (sight at or past scout leaves no fogged ring to draw it to)
     carrying = {lane_key(f.source_id, f.dest_id) for f in state.fleets if _fleet_shown(ui, f)}
+    source = ui.source(state)
     for key, lane in state.lanes.items():
         sa, sb = _fog_state(ui, lane.a), _fog_state(ui, lane.b)
         # a lane to a never-seen system is itself unknown — don't draw it
@@ -206,7 +207,7 @@ def _draw_lanes(surface, state: GameState, ui: Ui) -> None:
             color = config.COLOR_FOG
         # brighten the lanes touching the selected source system (or, in route
         # mode, any of the selected group)
-        if (ui.selected is not None and ui.selected in (lane.a, lane.b)) or (
+        if (source is not None and source in (lane.a, lane.b)) or (
                 ui.route_sel & {lane.a, lane.b}):
             color = config.COLOR_LANE_HILITE
             width = max(width, config.s(3))
@@ -1240,9 +1241,8 @@ def _draw_film_caption(surface, ui: Ui) -> None:
 
 
 def _draw_systems(surface, state: GameState, ui: Ui) -> None:
-    valid_dests = set()
-    if ui.selected is not None:
-        valid_dests = set(state.systems[ui.selected].neighbors)
+    source = ui.source(state)
+    valid_dests = set(state.systems[source].neighbors) if source is not None else set()
 
     for sys in state.systems.values():
         state_fog = _fog_state(ui, sys.id)

@@ -892,33 +892,27 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
 
     ui.sel_order = None  # selecting a system is composing, not editing an order/rule
     ui.sel_forward = None
-    sys = state.systems[node]
     if ui.selected is not None and ui.mode in (SELECTED, CHOOSING):
         if node == ui.selected:
             ui.reset_selection()  # deselect the source
         elif ui.mode == CHOOSING and node == ui.dest:
             return None  # already targeting it; adjust via popup
-        elif state.are_adjacent(ui.selected, node):
+        elif ui.source(state) is not None and state.are_adjacent(ui.selected, node):
             # commit a send-all to this neighbour and open the popup. Arm it as a
             # forward rule when Shift is held (desktop) or when the source has no
             # ships to send right now — forwarding future production is then the
             # only useful action, and it's the mobile-friendly default (no Shift).
             forward = shift or ui.available(state, ui.selected) == 0
             ui.begin_send(state, node, forward=forward)
-        elif sys.owner_id == ui.human_id:
-            # reselect a different owned system — even with zero ships right
-            # now, it may still be worth viewing.
+        else:
             ui.reset_selection()
             ui.selected = node
             ui.mode = SELECTED
-        else:
-            ui.reset_selection()
         return None
 
     # IDLE
-    if sys.owner_id == ui.human_id:
-        ui.mode = SELECTED
-        ui.selected = node
+    ui.mode = SELECTED
+    ui.selected = node
     return None
 
 

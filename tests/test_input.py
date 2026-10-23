@@ -499,12 +499,22 @@ def test_drag_from_empty_source_arms_forward():
 # --------------------------------------------------------------------------- #
 # Selection edge cases and top-level keys
 # --------------------------------------------------------------------------- #
-def test_cannot_select_foreign_system():
+def test_a_foreign_system_is_selected_to_read_about_but_sends_nothing():
     state, ui = _setup()
     try:
         enemy = next(s.id for s in state.systems.values() if s.owner_id not in (0, 1))
         _click(state, ui, enemy)
-        assert ui.mode == IDLE and ui.selected is None
+        assert ui.mode == SELECTED and ui.selected == enemy
+        assert ui.source(state) is None
+
+        nbr = state.systems[enemy].neighbors[0]
+        _click(state, ui, nbr)
+        assert ui.mode == SELECTED and ui.selected == nbr, "a neighbour is selected, not sent to"
+        assert not ui.pending and not ui.auto_forward
+
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        _click(state, ui, home)
+        assert ui.selected == home and ui.source(state) == home
     finally:
         pygame.quit()
 

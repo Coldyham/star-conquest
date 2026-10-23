@@ -562,7 +562,10 @@ export.
 The same run writes `starlore.py`: each name's language, origin and reference
 from the catalogue, shown on the star's info card. It is a separate module so
 `starnames`, which mapgen imports, stays small; only `render` and `input` import
-`starlore`. The ⓘ button beside a selected system's name in the side panel
+`starlore`. Any system can be selected, to read about it: the panel shows no
+more than a hover already does, and only `Ui.source` (the selection when it is
+ours) sends, rings destinations or lights lanes. The ⓘ button beside a selected
+system's name in the side panel
 (`render._draw_lore_button`) and the I key (selected system, else the hovered
 one) open the card (`Ui.lore_sid`), and any press closes it and is spent, like
 the briefing card's. The card is `render._draw_card`, shared with the briefing:
