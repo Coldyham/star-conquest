@@ -358,12 +358,25 @@ That matters because a random map is decided by position as much as by play
    measure, with the probes' mean winning turns breaking ties.
 3. **Pick a rising sequence across the spread**, not the top of a sort: the
    usable candidates (at least one probe won) ordered by difficulty, then one
-   at each of `stages` evenly spaced places. A candidate nobody won is never
-   picked, so every stage is known to be winnable. The tool reports a first
-   stage some probe lost or a last stage every probe won.
-4. **Targets come free** (`--targets`): the slowest probe win, plus
+   at each of `stages` evenly spaced places. The tool reports a first stage
+   some probe lost or a last stage every probe won.
+   **The last stage may be one no probe won** (`unwon_last`, on by default;
+   `--no-unwon-last`, or the form's checkbox, turns it off). On the board in
+   October 2026, of 163 maps with a posted win (scores are wins) and bot
+   replays, 82 were won by none of rusherplus, heuristic, thinker, evolved and
+   marshal; actuary won 35 of those and actuary or knower 46. So a top stage
+   past marshal is ordinary for people, not a broken map. It is taken from the
+   unwon candidates whose probe games all finished (a timeout may mean nobody
+   can finish the map), the one dealt deepest, so it is the last stage by its
+   opponents too. The shallowest was tried first and, on a smoke run, put a
+   map lost to heuristic and rusherplus (by position) after two against
+   knower. Every stage before it still has a probe win.
+4. **Targets come free** (`--targets`): the slowest probe win, or with
+   `--targets fastest` (the form's "Stage targets") the fastest, plus
    `--target-slack` turns, is the "roster bot's score plus slack" the dealt run
-   above asks for, measured in games already played.
+   above asks for, measured in games already played. The slowest is a bar
+   every probe that won cleared; the fastest is the best any did. A stage no
+   probe won has no target, there being no bot score to set it.
 
 Every game is a line in `results/gauntlet_gen/<run>.jsonl` the moment it
 finishes, under a header line holding the spec, seed and candidate count; a

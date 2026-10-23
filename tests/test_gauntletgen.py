@@ -43,7 +43,13 @@ def test_a_finished_job_is_a_gauntlet_the_game_reads():
     g = gauntlet.Gauntlet.from_dict(data)
     assert g is not None and gauntlet.problems(g) == []
     assert g.name == "My run" and g.id == job.gid and g.id.startswith("gen-")
-    assert all(s.target is not None and s.target.lost is None for s in g.stages)
+    assert all(s.target.lost is None for s in g.stages if s.target is not None)
+
+
+def test_the_last_stage_may_be_unwon_unless_the_link_says_not():
+    assert gg.job_from_link(SMALL, seed=0).unwon_last
+    off = gg.job_from_link({**SMALL, "unwon_last": False}, seed=0)
+    assert not off.unwon_last and off.gid != gg.job_from_link(SMALL, seed=0).gid
 
 
 def test_the_id_follows_the_spec_and_seed():
@@ -55,9 +61,10 @@ def test_the_id_follows_the_spec_and_seed():
 
 
 @pytest.mark.parametrize("opts, per, targets, slack", [
-    ({}, gg.LINK_CANDIDATES, False, 0),
-    ({"candidates": 99, "targets": "yes", "slack": -1}, gg.MAX_CANDIDATES, False, 0),
-    ({"candidates": True, "targets": True, "slack": 5}, gg.LINK_CANDIDATES, True, 5),
+    ({}, gg.LINK_CANDIDATES, None, 0),
+    ({"candidates": 99, "targets": "yes", "slack": -1}, gg.MAX_CANDIDATES, None, 0),
+    ({"candidates": True, "targets": True, "slack": 5}, gg.LINK_CANDIDATES, "slowest", 5),
+    ({"targets": "fastest"}, gg.LINK_CANDIDATES, "fastest", 0),
 ])
 def test_link_options_fall_back_when_unreadable(opts, per, targets, slack):
     job = gg.job_from_link({**SMALL, "stages": 1, **opts}, seed=0)

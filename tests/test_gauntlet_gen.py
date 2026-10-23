@@ -20,10 +20,10 @@ def _roster():
     ai.load_models()
 
 
-def _m(key, lost, played=4, turns=50):
+def _m(key, lost, played=4, turns=50, depth=0.5, timeouts=0):
     wins = [{"bot": f"b{i}", "won": True, "turns": turns + i, "lost": i} for i in range(played - lost)]
-    return {"key": key, "played": played, "wins": wins, "difficulty": lost / played,
-            "win_turns": turns if wins else None, "stage": {}}
+    return {"key": key, "played": played, "wins": wins, "difficulty": lost / played, "depth": depth,
+            "timeouts": timeouts, "win_turns": turns if wins else None, "stage": {}}
 
 
 def test_candidates_are_a_pure_function_of_the_spec_and_seed():
@@ -43,18 +43,40 @@ def test_measure_counts_losses_and_skips_unplayed():
     assert b["difficulty"] is None and b["played"] == 0
 
 
-def test_pick_rises_across_the_spread_and_never_takes_an_unwon_map():
-    measured = [_m("hard", 4), _m("e1", 0), _m("m1", 2), _m("e2", 1), _m("m2", 3, turns=90), _m("m3", 3)]
-    picked = gen.pick(measured, 3)
-    assert [p["key"] for p in picked] == ["e1", "m1", "m2"]
-    assert gen.pick(measured, 9) == sorted(gen.pick(measured, 9), key=lambda m: (m["difficulty"], m["win_turns"]))
-    assert all(p["key"] != "hard" for p in gen.pick(measured, 9))
+def test_pick_rises_across_the_spread_and_takes_an_unwon_map_only_last():
+    won = [_m("e1", 0), _m("m1", 2), _m("e2", 1), _m("m2", 3, turns=90), _m("m3", 3)]
+    measured = [_m("hard", 4), *won]
+    assert [p["key"] for p in gen.pick(measured, 3, unwon_last=False)] == ["e1", "m1", "m2"]
+    assert [p["key"] for p in gen.pick(measured, 3)] == ["e1", "m2", "hard"]
+    spread = gen.pick(measured, 9)[:-1]
+    assert spread == sorted(spread, key=lambda m: (m["difficulty"], m["win_turns"]))
+    assert all(p["key"] != "hard" for p in gen.pick(measured, 9, unwon_last=False))
+    # Of the unwon maps, never one a probe ran out of turns on; the deepest first.
+    measured = [_m("slow", 4, timeouts=1, depth=1.0), _m("deep", 4, depth=0.8), _m("shallow", 4, depth=0.2), *won]
+    assert gen.pick(measured, 3)[-1]["key"] == "deep"
+    assert gen.pick([_m("slow", 4, timeouts=1), *won], 3)[-1]["key"] == "m2"
 
 
-def test_a_target_is_the_slowest_probe_win_plus_slack():
+def test_a_target_is_the_slowest_or_fastest_probe_win_plus_slack():
     m = _m("a", 1, turns=30)       # wins in 30, 31, 32 turns
     assert gen.target(m, 0) == {"turns": 32, "lost": 2}
     assert gen.target(m, 3) == {"turns": 35}
+    assert gen.target(m, 0, "fastest") == {"turns": 30, "lost": 0}
+    assert gen.target(m, 2, "fastest") == {"turns": 32}
+
+
+def test_a_stage_no_probe_won_has_no_target():
+    data = gg_build([_m("a", 0, turns=30), _m("b", 4)])
+    first, last = data["stages"]
+    assert first["target"] == {"turns": 30, "lost": 0} and "target" not in last
+    assert "none of 4" in last["briefing"][1]
+
+
+def gg_build(picked):
+    from starconquest import gauntletgen
+    for m in picked:
+        m["stage"] = {"players": 2, "nodes": 8, "seed": 1}
+    return gauntletgen.build("gen-x", "X", picked, "fastest", 0)
 
 
 def test_a_run_writes_a_gauntlet_the_game_reads_and_resumes(tmp_path, monkeypatch, capsys):
@@ -68,7 +90,7 @@ def test_a_run_writes_a_gauntlet_the_game_reads_and_resumes(tmp_path, monkeypatc
     data = json.loads((tmp_path / "t.json").read_text())
     g = gauntlet.Gauntlet.from_dict(data)
     assert g is not None and gauntlet.problems(g) == [] and 1 <= len(g.stages) <= 2
-    assert all(s.target is not None for s in g.stages)
+    assert g.stages[0].target is not None
 
     # A rerun plays nothing more, and refuses flags that would deal differently.
     monkeypatch.setattr(sys, "argv", argv[:5] + ["--workers", "1", "--probes", "heuristic", "marshal"])

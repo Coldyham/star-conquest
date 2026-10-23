@@ -38,6 +38,9 @@ CANDIDATES = 4
 LINK_CANDIDATES = 3
 MAX_CANDIDATES = 8
 SPEC_FRAGMENT = "gauntlet-spec="
+# Which probe win a stage's target is: the slowest (a bar every probe that won
+# cleared) or the fastest (the best a probe managed).
+TARGETS = ("slowest", "fastest")
 
 
 # --------------------------------------------------------------------------- #
@@ -95,22 +98,40 @@ def play_one(key: str, stage: dict, bot: str, max_turns: int = MAX_TURNS) -> dic
 
 def measure(cands: list[dict], rows: list[dict], probes) -> list[dict]:
     """Each candidate with its probes' results: ``played``, ``wins`` (rows),
-    ``difficulty`` (share lost) and ``win_turns`` (mean, for ties)."""
+    ``timeouts`` (games that ran out of turns), ``difficulty`` (share lost) and
+    ``win_turns`` (mean, for ties)."""
     by = {(r["key"], r["bot"]): r for r in rows}
     out = []
     for c in cands:
         games = [by[(c["key"], b)] for b in probes if (c["key"], b) in by]
         wins = [r for r in games if r["won"]]
         out.append({**c, "played": len(games), "wins": wins,
+                    "timeouts": sum(1 for r in games if r.get("timed_out")),
                     "difficulty": 1 - len(wins) / len(games) if games else None,
                     "win_turns": sum(r["turns"] for r in wins) / len(wins) if wins else None})
     return out
 
 
-def pick(measured: list[dict], stages: int) -> list[dict]:
+def pick(measured: list[dict], stages: int, unwon_last: bool = True) -> list[dict]:
     """A rising sequence: the candidates some probe won, by difficulty then mean
     winning turns, one at each of ``stages`` evenly spaced places. Fewer when
-    there are not that many to pick from."""
+    there are not that many to pick from.
+
+    With ``unwon_last`` the last stage may be a map no probe won, as half the
+    maps people post wins on are for the bots up to marshal: one where every
+    probe game finished (a timeout may mean nobody can finish it), dealt at the
+    deepest depth, so it is the last stage by its opponents too, not a weak
+    field on a map the probes lost by position."""
+    unwon = sorted((m for m in measured if m["played"] and not m["wins"] and not m.get("timeouts")),
+                   key=lambda m: (-m["depth"], m["key"]))
+    if unwon_last and unwon:
+        return _spread(measured, stages - 1) + [unwon[0]]
+    return _spread(measured, stages)
+
+
+def _spread(measured: list[dict], stages: int) -> list[dict]:
+    if stages < 1:
+        return []
     usable = sorted((m for m in measured if m["wins"]),
                     key=lambda m: (m["difficulty"], m["win_turns"], m["key"]))
     n = len(usable)
@@ -121,26 +142,29 @@ def pick(measured: list[dict], stages: int) -> list[dict]:
     return [usable[round(i * (n - 1) / (stages - 1))] for i in range(stages)]
 
 
-def target(m: dict, slack: int) -> dict:
-    """The slowest probe win, plus ``slack`` turns: shown possible by a bot."""
-    slowest = max(m["wins"], key=lambda r: (r["turns"], r["lost"]))
+def target(m: dict, slack: int, which: str = "slowest") -> dict:
+    """The slowest or the fastest probe win (``which``), plus ``slack`` turns:
+    shown possible by a bot."""
+    score = lambda r: (r["turns"], r["lost"])       # noqa: E731
+    win = max(m["wins"], key=score) if which == "slowest" else min(m["wins"], key=score)
     if slack:
-        return {"turns": slowest["turns"] + slack}
-    return {"turns": slowest["turns"], "lost": slowest["lost"]}
+        return {"turns": win["turns"] + slack}
+    return {"turns": win["turns"], "lost": win["lost"]}
 
 
-def build(gid: str, name: str, picked: list[dict], targets: bool, slack: int) -> dict:
+def build(gid: str, name: str, picked: list[dict], targets: str | None, slack: int) -> dict:
     """The gauntlet file: linear, a stage per pick, its briefing the setup in a
-    line and how many probes won it."""
+    line and how many probes won it. ``targets`` is one of ``TARGETS`` or None;
+    a stage no probe won has no target, there being no bot score to set it."""
     stages = []
     for i, m in enumerate(picked):
         cfg = Settings.from_dict(m["stage"])
-        row = {"id": i, "title": f"Stage {i + 1}",
-               "briefing": [dealer.describe(cfg),
-                            f"Measured: {len(m['wins'])} of {m['played']} test bots won this map."],
+        measured = (f"Measured: {len(m['wins'])} of {m['played']} test bots won this map." if m["wins"]
+                    else f"Measured: none of {m['played']} test bots won this map. People can.")
+        row = {"id": i, "title": f"Stage {i + 1}", "briefing": [dealer.describe(cfg), measured],
                "hint": "", "settings": m["stage"]}
-        if targets:
-            row["target"] = target(m, slack)
+        if targets and m["wins"]:
+            row["target"] = target(m, slack, targets)
         stages.append(row)
     return {"id": gid[:gauntlet.NAME_MAX], "name": name[:gauntlet.NAME_MAX], "stages": stages}
 
@@ -154,10 +178,12 @@ class Job:
     gauntlet file once every probe game is done (None if no candidate was won)."""
 
     def __init__(self, spec: dealer.Spec, seed: int, per_stage: int = CANDIDATES,
-                 probes=PROBES, targets: bool = False, slack: int = 0, name: str = ""):
+                 probes=PROBES, targets: str | None = None, slack: int = 0, name: str = "",
+                 unwon_last: bool = True):
         self.spec, self.seed = spec, seed
         self.probes = tuple(probes)
         self.targets, self.slack = targets, slack
+        self.unwon_last = unwon_last
         self.name = name or f"Generated {seed}"
         self.cands = candidates(spec, seed, per_stage)
         self.queue = [(c["key"], c["stage"], b) for c in self.cands for b in self.probes]
@@ -169,7 +195,8 @@ class Job:
     def gid(self) -> str:
         """``gen-<hash>`` of the spec and seed: two runs of one link are one
         gauntlet in the store, two different links never collide."""
-        raw = json.dumps([self.spec.to_dict(), self.seed, self.probes, self.targets, self.slack],
+        raw = json.dumps([self.spec.to_dict(), self.seed, self.probes, self.targets, self.slack,
+                          self.unwon_last],
                          sort_keys=True).encode("utf-8")
         return "gen-" + hashlib.blake2s(raw, digest_size=6).hexdigest()
 
@@ -201,7 +228,7 @@ class Job:
     def result(self) -> dict | None:
         if not self.done:
             return None
-        picked = pick(measure(self.cands, self.rows, self.probes), self.spec.stages)
+        picked = pick(measure(self.cands, self.rows, self.probes), self.spec.stages, self.unwon_last)
         return build(self.gid, self.name, picked, self.targets, self.slack) if picked else None
 
 
@@ -210,7 +237,7 @@ class Job:
 # --------------------------------------------------------------------------- #
 # The board's gauntlet page builds `#gauntlet-spec=<payload>`: the spec as
 # deflated JSON in base64url, as a settings token is, with the run's own options
-# beside it (`candidates`, `targets`, `slack`, `name`), which `Spec.from_dict`
+# beside it (`candidates`, `targets`, `slack`, `name`, `unwon_last`), which `Spec.from_dict`
 # ignores. A spec is a recipe, not a result: it is never kept or shared on, the
 # gauntlet it makes is (`gauntlet.remember`).
 def spec_from_fragment(fragment: str) -> dict | None:
@@ -246,7 +273,10 @@ def job_from_link(data: dict, seed: int) -> Job:
     slack = data.get("slack")
     slack = slack if isinstance(slack, int) and not isinstance(slack, bool) and 0 <= slack <= 99 else 0
     name = data.get("name")
+    targets = data.get("targets")
+    targets = "slowest" if targets is True else targets if targets in TARGETS else None
     return Job(spec, spec.seed if spec.seed is not None else seed,
                per_stage=max(1, min(MAX_CANDIDATES, per)),
-               targets=data.get("targets") is True, slack=slack,
-               name=" ".join(name.split()) if isinstance(name, str) else "")
+               targets=targets, slack=slack,
+               name=" ".join(name.split()) if isinstance(name, str) else "",
+               unwon_last=data.get("unwon_last") is not False)

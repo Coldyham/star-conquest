@@ -20,7 +20,7 @@ const FIELDS = {
   playersMin: ["gen-players-min", "text"], playersMax: ["gen-players-max", "text"],
   systemsMin: ["gen-systems-min", "text"], systemsMax: ["gen-systems-max", "text"],
   fog: ["gen-fog", "text"],
-  roll: ["gen-roll", "check"], targets: ["gen-targets", "check"], slack: ["gen-slack", "text"],
+  roll: ["gen-roll", "check"], targets: ["gen-targets", "text"], unwonLast: ["gen-unwon-last", "check"], slack: ["gen-slack", "text"],
   candidates: ["gen-candidates", "text"], seed: ["gen-seed", "text"],
 };
 
@@ -41,7 +41,7 @@ function write(form) {
   for (const [key, [id, kind]] of Object.entries(FIELDS)) {
     if (form[key] === undefined) continue;
     if (kind === "check") $(id).checked = form[key] === true;
-    else $(id).value = String(form[key]);
+    else $(id).value = key === "targets" && form[key] === true ? "slowest" : String(form[key]);
   }
   for (const bot of OPPONENTS) $(`gen-bot-${bot}`).checked = (form.opponents || []).includes(bot);
   for (const attr of Object.keys(KNOBS)) {
@@ -174,7 +174,7 @@ function check() {
   $("gen-cost").textContent = bad ? ""
     : `The game will play ${gameCount(spec)} test games: about a minute on a computer, longer on a phone.`;
   $("gen-make").disabled = bad;
-  $("gen-slack").disabled = !form.targets;
+  $("gen-slack").disabled = form.targets === "none";
 }
 
 async function make(event) {

@@ -33,7 +33,7 @@ test("the starting form builds a spec a phone can afford", () => {
 test("each choice becomes the dealer's rule", () => {
   const spec = buildSpec({ ...emptyForm(), mode: "symmetric",
     knobs: { ship_speed_growth_pct: [0.5, 0.5], home_production: [2, 2] },
-    fog: "either", roll: true, targets: true, slack: 3, seed: "41", name: "  Sym   eight ",
+    fog: "either", roll: true, targets: "fastest", slack: 3, unwonLast: false, seed: "41", name: "  Sym   eight ",
     opponents: ["marshal", "rusherplus"] }, seven);
   assert.deepEqual(spec.rules.mode, { fix: "symmetric" });
   assert.deepEqual(spec.rules.ship_speed_growth_pct, { fix: 0.5 });
@@ -42,7 +42,10 @@ test("each choice becomes the dealer's rule", () => {
   assert.deepEqual(spec.opponents, { in: ["rusherplus", "marshal"] });   // weakest first
   assert.equal(spec.seed, 41);
   assert.equal(spec.roll, true);
-  assert.equal(spec.targets, true);
+  assert.equal(spec.targets, "fastest");
+  assert.equal(spec.unwon_last, false);
+  assert.equal(buildSpec({ ...emptyForm(), targets: true }, seven).targets, "slowest");   // a form kept from before
+  assert.equal(buildSpec(emptyForm(), seven).unwon_last, undefined);
   assert.equal(spec.slack, 3);
   assert.equal(spec.name, "Sym eight");
 });
@@ -95,7 +98,7 @@ test("the offered opponents are the ladder, weakest first", () => {
 });
 
 test("the link carries the spec to the game, and the fixture is what it builds today", async () => {
-  const spec = buildSpec({ ...emptyForm(), mode: "symmetric", stages: 3, candidates: 1, targets: true,
+  const spec = buildSpec({ ...emptyForm(), mode: "symmetric", stages: 3, candidates: 1, targets: "fastest",
     seed: "12", playersMax: 3, systemsMax: 18, opponents: ["rusherplus", "heuristic"],
     knobs: { garrison_k: [6, 10], defender_advantage: [1.1, 1.1] } }, seven);
   const link = await specLink("https://example.app/game/", spec, deflate);

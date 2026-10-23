@@ -111,8 +111,15 @@
 
       <label class="check"><input id="gen-roll" type="checkbox">
         Vary the Advanced sliders left on their default too (makes wilder maps)</label>
-      <label class="check"><input id="gen-targets" type="checkbox">
-        Give each stage a target: the slowest test-bot win</label>
+      <label class="check"><input id="gen-unwon-last" type="checkbox" checked>
+        The last stage may be a map no test bot won (people win about half the
+        maps the bots up to marshal lose)</label>
+      <label for="gen-targets">Stage targets</label>
+      <select id="gen-targets">
+        <option value="none">None: any win clears a stage</option>
+        <option value="slowest">The slowest test-bot win</option>
+        <option value="fastest">The fastest test-bot win</option>
+      </select>
       <label for="gen-slack">Target slack (extra turns)</label>
       <input id="gen-slack" type="number" min="0" max="99" value="0">
 

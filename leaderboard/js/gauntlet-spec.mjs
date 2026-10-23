@@ -12,7 +12,7 @@
 // switch Off, On or Either (`form.switches`). What the form leaves alone (both
 // pins on the game's default, a switch Off) is left out, so the game keeps that
 // field at its default (`roll` false) or rolls it (`roll` true). The run's own options
-// (`candidates`, `targets`, `slack`, `name`) ride beside it, read by
+// (`candidates`, `targets`, `slack`, `name`, `unwon_last`) ride beside it, read by
 // `gauntletgen.job_from_link`.
 
 import { SETUP_DEFAULTS } from "./config.mjs";
@@ -132,8 +132,9 @@ export function emptyForm() {
     knobs: {},                // attr -> [min, max]; missing is the default
     switches: {},             // attr -> off | on | either
     roll: false,
-    targets: false,
+    targets: "none",          // none | slowest | fastest (gauntletgen.TARGETS)
     slack: 0,
+    unwonLast: true,
     candidates: 3,
     seed: "",                 // "" rolls one when the link is made
   };
@@ -196,12 +197,15 @@ export function buildSpec(form, rollSeed = () => Math.floor(Math.random() * LIMI
     if (seed === null) return `the seed must be a whole number up to ${LIMITS.seed}`;
   }
   const spec = { stages, seed, rules, opponents: { in: opponents }, roll: form.roll === true, candidates };
-  if (form.targets === true) {
-    spec.targets = true;
+  // `true` is a form kept from before there was a choice: the slowest.
+  const targets = form.targets === true ? "slowest" : form.targets;
+  if (targets === "slowest" || targets === "fastest") {
+    spec.targets = targets;
     const slack = wholeIn(form.slack ?? 0, LIMITS.slack);
     if (slack === null) return `slack must be ${LIMITS.slack[0]} to ${LIMITS.slack[1]} turns`;
     if (slack) spec.slack = slack;
   }
+  if (form.unwonLast === false) spec.unwon_last = false;
   const name = String(form.name ?? "").split(/\s+/).filter(Boolean).join(" ");
   if ([...name].length > LIMITS.name) return `the name is over ${LIMITS.name} characters`;
   if (name) spec.name = name;

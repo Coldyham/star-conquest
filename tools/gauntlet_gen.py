@@ -11,12 +11,13 @@ each with opponents for its stage's depth, then plays every candidate with each
 probe bot in seat 1 (`gauntletgen.play`, the bot column's funnel; budgets lifted, so a game is the
 same on any machine). A candidate's difficulty is the share of probes that lose
 it, as `tools/gauntlet_check.py` measures a stage, with the probes' mean winning
-turns breaking ties. A candidate no probe won is never picked; the rest are
-ordered by difficulty and one is taken at each of ``stages`` evenly spaced
-places, so the gauntlet rises across the whole spread.
+turns breaking ties. The candidates some probe won are ordered by difficulty and
+one is taken at each of ``stages`` evenly spaced places, so the gauntlet rises
+across the whole spread. The last stage may be a map no probe won (but every
+probe game finished), unless ``--no-unwon-last``.
 
-With ``--targets`` each stage gets a target: the slowest probe win plus
-``--target-slack`` turns. Design: docs/design/gauntlet.md, "Generated gauntlets".
+With ``--targets`` (or ``--targets fastest``) each stage some probe won gets a
+target: the slowest (or the fastest) probe win plus ``--target-slack`` turns. Design: docs/design/gauntlet.md, "Generated gauntlets".
 
 Every game is a line in ``results/gauntlet_gen/<run>.jsonl`` the moment it
 finishes; the run's spec, seed and candidates head the file, and a rerun plays
@@ -96,12 +97,15 @@ def report(measured: list[dict], picked: list[dict], probes: list[str]) -> None:
               f"{dealer.describe(Settings.from_dict(m['stage']))}")
     print(f"\nPicked {len(picked)}:")
     for i, m in enumerate(picked):
-        print(f"  {i + 1:>2}  {m['difficulty']:4.0%} lost  {m['win_turns']:.0f}t  "
+        turns = f"{m['win_turns']:.0f}t" if m["win_turns"] is not None else "-"
+        print(f"  {i + 1:>2}  {m['difficulty']:4.0%} lost  {turns:>5}  "
               f"{dealer.describe(Settings.from_dict(m['stage']))}")
     if picked and picked[0]["difficulty"] > 0:
         print("  note: some probe lost the first stage")
     if picked and picked[-1]["difficulty"] == 0:
         print("  note: every probe won the last stage")
+    if picked and not picked[-1]["wins"]:
+        print("  note: no probe won the last stage, so it has no target")
 
 
 def read_spec(a) -> dict:
@@ -122,7 +126,10 @@ def main() -> None:
     ap.add_argument("--candidates", type=int, default=4, help="candidates dealt per stage (default 4)")
     ap.add_argument("--probes", nargs="*", default=list(PROBES), help="bots that measure difficulty")
     ap.add_argument("--name", help="the gauntlet's name (default: Generated <seed>)")
-    ap.add_argument("--targets", action="store_true", help="give each stage the slowest probe win as a target")
+    ap.add_argument("--targets", nargs="?", const="slowest", choices=gg.TARGETS,
+                    help="give each stage the slowest (or the fastest) probe win as a target")
+    ap.add_argument("--no-unwon-last", action="store_true",
+                    help="never make the last stage a map no probe won")
     ap.add_argument("--target-slack", type=int, default=0, help="turns added to each target")
     ap.add_argument("--out", help="also write the gauntlet file here")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
@@ -175,10 +182,10 @@ def main() -> None:
                       f"in {row['turns']}t ({time.time() - t0:.0f}s)", flush=True)
 
     measured = measure(cands, rows, a.probes)
-    picked = pick(measured, spec.stages)
+    picked = pick(measured, spec.stages, not a.no_unwon_last)
     report(measured, picked, a.probes)
     if len(picked) < spec.stages:
-        print(f"  note: only {len(picked)} candidates were won by any probe; "
+        print(f"  note: only {len(picked)} candidates could be picked; "
               f"deal more with a new --run and a larger --candidates")
     data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack)
     g = gauntlet.Gauntlet.from_dict(data)

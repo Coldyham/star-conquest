@@ -39,9 +39,9 @@
     },
     "roll": false,
     "candidates": 1,
-    "targets": true
+    "targets": "fastest"
   },
-  "fragment": "gauntlet-spec=eNpVj1FqAzEMRO8y36LEWSjBVwkliLXWMfXai-QtXYLvXhxKaP8GPXiaecAaRzH4iWAiAd6dCbrncXtgy3yIPqNyiQJ_PdP00Ql2WJP1H3ETuctgaw0ywJK-4WHHukrTNKMTlhpfZOFs0gmRVZPVcvv8a3sndxqyIIuUIHrj8MVltH0J3JvrnVC3rRYp7VkmFfgrdLe76JZ3A-EuuyZracbwac359zdh5hJS4DbWOkJjjTI8TXfpP5IpYA8",
+  "fragment": "gauntlet-spec=eNpVj1FqAzEMRO8y36LEWSjBVwkliLW8MfXai-QtXYLvXhxKaP8GPXiaecAaL2LwE8FEArw7E3TP4_bAlvkQfUblsgj89UzTRyfYYU3Wf8RN5C6DrTXIADF9w8OOdZWmaUYnxLq8SORs0gkLqyar5fb51_ZO7jRkQaKUIHrj8MVltH0J3JvrnVC3rRYp7VkmFfgrdLe76JZ3A-EuuyZracbwac359zdh5hJS4DbWOkJjXWR4ENmaWEP_AXRgYY0",
   "knobs": [
     {
       "tab": "Advanced",
