@@ -596,9 +596,14 @@ def _trim_trailing(items: list, default) -> list:
 
     Only the tail can go: these lists are positional (indexed by seat-1), and
     `from_dict` pads a short one back out with defaults.
+
+    Default-valued means JSON-identical, not ``==``: a seat whose int ``aux`` of
+    1 equals the float default is a different setup to ``challenge_key``, and
+    `from_dict` would pad it back as the float.
     """
+    blank = json.dumps(default, sort_keys=True)
     end = len(items)
-    while end > 0 and items[end - 1] == default:
+    while end > 0 and json.dumps(items[end - 1], sort_keys=True) == blank:
         end -= 1
     return items[:end]
 

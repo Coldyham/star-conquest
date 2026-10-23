@@ -108,6 +108,11 @@ def _apply_shared_link(settings: Settings) -> None:
         settings.copy_from(Settings.from_token(token))
     except ValueError:
         return          # stale or hand-edited link: keep the CLI/default config
+    if settings.challenge is not None and not settings.challenge.matches(settings):
+        # The setup and its score arrived together, so a key that no longer
+        # matches is an outdated checksum, not an edit: re-stamp it, or the menu
+        # asks to "change the challenge setup" on the very first click.
+        settings.challenge.key = settings.challenge_key()
     # Remember the *setup* only. Storing a challenge would make its score-to-beat
     # banner reappear on every later launch, long after the link was opened — the
     # target belongs to the session you opened it in.

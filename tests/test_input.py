@@ -1071,6 +1071,22 @@ def test_shared_link_is_remembered_without_its_challenge(monkeypatch):
     assert remembered.seed == 4821 and remembered.nodes == 18
 
 
+def test_shared_link_with_an_outdated_key_opens_as_its_challenge(monkeypatch):
+    """A key no build recomputes for the setup it came with is re-stamped on
+    load, so the menu doesn't read the untouched setup as edited."""
+    challenged = Settings(seed=4821, nodes=18, players=3)
+    challenged.challenge = Challenge(turns=137, lost=412, key="0123456789abcdef")
+    monkeypatch.setattr(main.paths, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "url_token", lambda: challenged.to_token())
+    monkeypatch.setattr(main.webstore, "get", lambda key: "")
+    monkeypatch.setattr(main.webstore, "set", lambda key, value: True)
+
+    settings = Settings.defaults()
+    main._apply_shared_link(settings)
+    assert settings.challenge is not None and settings.challenge.matches(settings)
+    assert (settings.challenge.turns, settings.challenge.lost) == (137, 412)
+
+
 def test_share_challenge_prefers_the_clipboard_and_stores_nothing(monkeypatch):
     """In an installed PWA there is no address bar to read a link out of, so the
     clipboard is the channel — and nothing may be persisted."""
