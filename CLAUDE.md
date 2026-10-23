@@ -206,8 +206,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   `pbp.reseed`, `replay.reseed`, `engine._Dice`.
 - **Everything is keyed by integer id.** Lanes use `model.lane_key`. Neutral is
   player `id == 0`. Star names are flavour, stamped **last**
-  (`mapgen._name_systems`), never a key; `starnames.py` is generated
-  (`tools/gen_starnames.py`) — regenerate, don't hand-edit.
+  (`mapgen._name_systems`), never a key; `starnames.py` and `starlore.py` are
+  generated (`tools/gen_starnames.py`) — regenerate, don't hand-edit.
 - **Travel time is a query**: `state.travel_turns(a, b)`, never
   `Lane.travel_turns`.
 - **A fleet's lane track is stored, never ranked** (`Fleet.lane_slot`).

@@ -2752,6 +2752,53 @@ def test_the_stage_hint_brings_the_briefing_back():
     assert ui.briefing_open
 
 
+def test_the_lore_button_opens_the_selected_systems_star_card():
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.mode, ui.selected = SELECTED, home
+    ui.lore_button_rect = (10, 10, 30, 30)
+    assert _click_pos(state, ui, (20, 20)) is None
+    assert ui.lore_sid == home
+    assert ui.selected == home, "opening the card keeps the selection"
+
+
+def test_any_press_puts_the_star_card_away_and_is_spent_doing_so():
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.lore_sid = home
+    assert _click(state, ui, home) is None
+    assert ui.lore_sid is None
+    assert ui.selected is None, "the press that closed the card selected nothing"
+
+    ui.lore_sid = home
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, unicode="\r")
+    assert game_input.handle_event(ev, state, ui) is None, "Enter closes the card, not the turn"
+    assert ui.lore_sid is None
+
+
+def test_i_opens_the_star_card_for_the_selected_or_hovered_system():
+    state, ui = _setup()
+    i = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_i, unicode="i")
+    assert game_input.handle_event(i, state, ui) is None
+    assert ui.lore_sid is None, "nothing in focus"
+
+    enemy = next(s.id for s in state.systems.values() if s.owner_id == 2)
+    ui.hover = enemy
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid == enemy
+    ui.lore_sid = None
+
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.mode, ui.selected = SELECTED, home
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid == home, "the selection wins over a hover"
+    ui.lore_sid = None
+
+    state.systems[home].name = "Not In The Catalogue"
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid is None
+
+
 def test_n_is_next_stage_in_a_stage_and_never_a_new_map():
     state, ui = _setup()
     _stage(ui)

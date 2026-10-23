@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, matchnames, model, paths, stats, widgets
+from . import config, fog, matchnames, model, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, ROUTING, Ui
@@ -76,6 +76,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.route_confirm_rect = (0, 0, 0, 0)
     # the stage hint and Next stage; the panel and the win overlay re-record them
     ui.stage_hint_rect = ui.next_stage_rect = (0, 0, 0, 0)
+    # the star info card's button; the panel re-records it beside a selected system
+    ui.lore_button_rect = (0, 0, 0, 0)
     # the history graph's; _draw_history_graph re-records them while it is open
     ui.graph_plot_rect = ui.graph_full_rect = ui.graph_all_rect = (0, 0, 0, 0)
     ui.graph_tab_rects = []
@@ -130,6 +132,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_win_overlay(surface, state, ui)
     elif ui.briefing_open and ui.in_stage:
         _draw_briefing(surface, ui)
+    elif ui.lore_sid in state.systems:
+        _draw_lore(surface, state, ui)
     elif ui.pbp_invite:
         _draw_invite_overlay(surface, ui)
     elif ui.awaiting_others(state):
@@ -2033,11 +2037,12 @@ def _panel_w() -> int:
     return config.HUD_RIGHT_W - config.PANEL_PAD * 2
 
 
-def _head_named(surface, x, y, text, color) -> int:
+def _head_named(surface, x, y, text, color, width: int | None = None) -> int:
     """A heading whose length we don't control, because a star name is in it: the
-    normal font where it fits the panel, the small one where it doesn't (every
-    catalogue name fits at that size, so nothing is ever cut)."""
-    kind = "normal" if _fonts()["normal"].size(text)[0] <= _panel_w() else "small"
+    normal font where it fits ``width`` (the panel's, by default), the small one
+    where it doesn't (every catalogue name fits at that size, so nothing is ever
+    cut)."""
+    kind = "normal" if _fonts()["normal"].size(text)[0] <= (width or _panel_w()) else "small"
     _text(surface, _fonts()[kind], text, color, topleft=(x, y))
     return y + _row_h(kind)
 
@@ -2051,14 +2056,17 @@ def _rows_named(surface, x, y, text, color) -> int:
 
 
 def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
+    width = _panel_w()
+    if sys.id == ui.selected and sys.name in starlore.LORE and not ui.history:
+        width -= _draw_lore_button(surface, ui, x + _panel_w(), y)
     if sys.id not in ui.visible:
         # fogged system: we know where it is, not who holds it or how strong it is
-        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM)
+        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM, width)
         y = _row(surface, x, y, "Owner: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "Ships: ?", config.COLOR_TEXT_DIM)
         y = _row(surface, x, y, "(out of sight)", config.COLOR_TEXT_DIM)
         return y
-    y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id))
+    y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id), width)
     y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}", config.player_color(sys.owner_id))
     if sys.owner_id == ui.human_id:
         y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total", config.COLOR_TEXT)
@@ -2075,6 +2083,19 @@ def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
         y = _row(surface, x, y, f"Inbound: +{fin}f / {ein}e", config.COLOR_TEXT_DIM)
     y = _row(surface, x, y, f"Neighbours: {len(sys.neighbors)}", config.COLOR_TEXT_DIM)
     return y
+
+
+def _draw_lore_button(surface, ui: Ui, right: int, y: int) -> int:
+    """The i at the right end of a selected system's heading that opens its star
+    info card; records its hit-rect on ``ui``. Returns the heading width it takes."""
+    d = _fonts()["normal"].get_height()
+    r = pygame.Rect(right - d, y, d, d)
+    pygame.draw.circle(surface, config.COLOR_TEXT_DIM, r.center, d // 2, config.s(1))
+    _text(surface, _fonts()["small"], "i", config.COLOR_TEXT_DIM, center=r.center)
+    grow = _tap_size(d) - d
+    hit = r.inflate(grow, grow)
+    ui.lore_button_rect = (hit.x, hit.y, hit.w, hit.h)
+    return d + config.s(6)
 
 
 def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
@@ -2299,49 +2320,115 @@ def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
 
 
 def _draw_briefing(surface, ui: Ui) -> None:
-    """A gauntlet stage's briefing card, over the board on turn 0 until any press.
-
-    The stage's title, which stage it is, then the briefing's paragraphs
-    reflowed to the card. Measured and centred on the map, like the other
-    overlays, so nothing is a fixed pixel size; a paragraph that would run off
-    the card's floor is cut rather than drawn under the HUD.
-    """
-    px, py, pw, ph = config.play_rect()
-    big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
-    pad, gap = config.s(20), config.s(10)
-    width = min(pw - 2 * config.s(16), config.s(620))
-    inner = width - 2 * pad
-    paras = [_wrap(normal, text, inner) for text in ui.briefing]
+    """A gauntlet stage's briefing card, over the board on turn 0 until any press:
+    the stage's title, which stage it is, then the briefing's paragraphs."""
     close = ("Tap anywhere to begin · tap the hint at the right to read this again"
              if config.touch_ui else "Press any key to begin · B shows this again")
+    _draw_card(surface, ui.stage_title, ui.stage_label or "", _BTN_TEAL[1], ui.briefing, close)
+
+
+def _draw_lore(surface, state: GameState, ui: Ui) -> None:
+    """A star's info card, over the board until any press: its name, the language
+    the name comes from, where it comes from, and the catalogue's source for that."""
+    name = state.systems[ui.lore_sid].name
+    lore = starlore.LORE.get(name)
+    if lore is None:
+        return
+    _draw_card(surface, name, lore.language, _BTN_BLUE[1], *_lore_card(lore))
+
+
+def _lore_card(lore: starlore.Lore) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    """A star info card's paragraphs, close line and notes, as `_draw_card` takes them."""
+    origin = lore.origin or "The IAU catalogue gives no origin for this name."
+    notes = (f"Source: {lore.reference}",) if lore.reference else ()
+    close = "Tap anywhere to close" if config.touch_ui else "Press any key to close"
+    return (origin,), close, notes
+
+
+class _CardLayout(NamedTuple):
+    """How `_draw_card` sets out a card: the paragraphs' font and lines, the
+    notes' and close line's lines, the card's size, and whether every paragraph
+    line fits it."""
+    kind: str
+    lines: list[list[str]]
+    tail: list[str]
+    foot: list[str]
+    width: int
+    height: int
+    fits: bool
+
+
+def _card_layout(paras, close: str, notes=()) -> _CardLayout:
+    """Lay a card out on the map. Where the paragraphs would run off it the card
+    widens to the map's width, then drops them to the small font; ``fits`` is
+    False only if even that doesn't hold them."""
+    widest = config.play_rect()[2] - 2 * config.s(16)
+    lay = _card_at(paras, close, notes, "normal", min(widest, config.s(620)))
+    for kind in ("normal", "small"):
+        if lay.fits:
+            break
+        lay = _card_at(paras, close, notes, kind, widest)
+    return lay
+
+
+def _card_at(paras, close: str, notes, kind: str, width: int) -> _CardLayout:
+    """`_card_layout` with the paragraphs in font ``kind`` on a card ``width`` wide."""
+    small = _fonts()["small"]
+    pad, gap = config.s(20), config.s(10)
+    inner = width - 2 * pad
     foot = _wrap(small, close, inner)
-    foot_h = len(foot) * _row_h()
-    lines_h = sum(len(p) * _row_h("normal") for p in paras) + gap * max(0, len(paras) - 1)
-    height = min(ph - 2 * config.s(8),
-                 pad + _row_h("big") + _row_h() + gap + lines_h + gap + foot_h + pad)
-    card = pygame.Rect(px + (pw - width) // 2, py + (ph - height) // 2, width, height)
+    tail = [line for note in notes for line in _wrap(small, note, inner)]
+    tail_h = len(tail) * _row_h() + gap if tail else 0
+    lines = [_wrap(_fonts()[kind], text, inner) for text in paras]
+    body_h = sum(len(p) * _row_h(kind) for p in lines) + gap * max(0, len(lines) - 1)
+    need = pad + _row_h("big") + _row_h() + gap + body_h + gap + tail_h + len(foot) * _row_h() + pad
+    most = config.play_rect()[3] - 2 * config.s(8)
+    return _CardLayout(kind, lines, tail, foot, width, min(need, most), need <= most)
+
+
+def _draw_card(surface, title: str, label: str, accent, paras, close: str, notes=()) -> None:
+    """A card centred on the map over a veil: ``title`` with ``label`` under it in
+    ``accent``, then ``paras`` reflowed to the card (`_card_layout`), then
+    ``notes`` small and dim, and the ``close`` line at its foot.
+
+    Measured, like the other overlays, so nothing is a fixed pixel size. A
+    paragraph that would still run off the card's floor is cut there rather than
+    drawn under the HUD; the notes and the close line always show.
+    """
+    px, py, pw, ph = config.play_rect()
+    big, small = _fonts()["big"], _fonts()["small"]
+    pad, gap = config.s(20), config.s(10)
+    lay = _card_layout(paras, close, notes)
+    card = pygame.Rect(px + (pw - lay.width) // 2, py + (ph - lay.height) // 2, lay.width, lay.height)
+    foot_h = len(lay.foot) * _row_h()
+    tail_h = len(lay.tail) * _row_h() + gap if lay.tail else 0
 
     veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 150))
     surface.blit(veil, (0, 0))
     pygame.draw.rect(surface, (16, 18, 28), card, border_radius=config.s(10))
-    pygame.draw.rect(surface, _BTN_TEAL[1], card, config.s(2), border_radius=config.s(10))
+    pygame.draw.rect(surface, accent, card, config.s(2), border_radius=config.s(10))
 
     x, y = card.x + pad, card.y + pad
-    _text(surface, big, ui.stage_title, config.COLOR_TEXT, topleft=(x, y))
+    _text(surface, big, title, config.COLOR_TEXT, topleft=(x, y))
     y += _row_h("big")
-    _text(surface, small, ui.stage_label or "", _BTN_TEAL[1], topleft=(x, y))
+    _text(surface, small, label, accent, topleft=(x, y))
     y += _row_h() + gap
-    floor = card.bottom - pad - foot_h - gap
-    for para in paras:
+    font = _fonts()[lay.kind]
+    floor = card.bottom - pad - foot_h - tail_h - gap
+    for para in lay.lines:
         for line in para:
-            if y + _row_h("normal") > floor:
+            if y + _row_h(lay.kind) > floor:
                 break
-            _text(surface, normal, line, config.COLOR_TEXT, topleft=(x, y))
-            y += _row_h("normal")
+            _text(surface, font, line, config.COLOR_TEXT, topleft=(x, y))
+            y += _row_h(lay.kind)
         y += gap
+    y = card.bottom - pad - foot_h - tail_h
+    for line in lay.tail:
+        _text(surface, small, line, config.COLOR_TEXT_DIM, topleft=(x, y))
+        y += _row_h()
     y = card.bottom - pad - foot_h
-    for line in foot:
+    for line in lay.foot:
         _text(surface, small, line, config.COLOR_TEXT_DIM, center=(card.centerx, y + _row_h() // 2))
         y += _row_h()
 

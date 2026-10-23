@@ -428,6 +428,11 @@ class Ui:
     has_next_stage: bool = False
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The system whose star info card (`starlore`) is up over the board, or None.
+    # The i button beside a selected system's name in the side panel
+    # (`lore_button_rect`) and the I key open it; any press closes it.
+    lore_sid: int | None = None
+    lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when

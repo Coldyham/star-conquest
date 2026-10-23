@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import config, stats
+from . import config, starlore, stats
 from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -351,6 +351,14 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
     if ui.pbp_invite:
         return _handle_invite_event(event, ui)
 
+    # A star's info card is up over the board: any press puts it away and is spent
+    # doing so, like the briefing card's below.
+    if ui.lore_sid is not None and not ui.history and state.winner is None:
+        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            ui.lore_sid = None
+        if event.type != pygame.MOUSEMOTION:
+            return None
+
     # A turn playback is running: any press skips it — except Play/Pause, which
     # must freeze it in place rather than lose it (`main` does the freezing; this
     # is only about not discarding the film here), the camera controls, which
@@ -584,6 +592,9 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
     if event.key == pygame.K_b and ui.in_stage:
         ui.briefing_open = True
         return None
+    if event.key == pygame.K_i:
+        _open_lore(state, ui, ui.selected if ui.selected is not None else ui.hover)
+        return None
     if event.key == pygame.K_r:
         ui.reset_view(state)
         return None
@@ -728,6 +739,12 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     return None
 
 
+def _open_lore(state: GameState, ui: Ui, sid: int | None) -> None:
+    """Put up the star info card for system ``sid``, if the catalogue has its name."""
+    if sid in state.systems and state.systems[sid].name in starlore.LORE:
+        ui.lore_sid = sid
+
+
 def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
     """The bar/on-map buttons that mean the same thing in every interaction scene.
 
@@ -755,6 +772,9 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, None
     if ui.stage_hint_rect[2] and _point_in_rect(pos, ui.stage_hint_rect):
         ui.briefing_open = True
+        return True, None
+    if ui.lore_button_rect[2] and _point_in_rect(pos, ui.lore_button_rect):
+        _open_lore(state, ui, ui.selected)
         return True, None
     if _press_camera(state, ui, pos):
         return True, None
